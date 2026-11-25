@@ -30,6 +30,10 @@ export async function executeMedia(alpha: Alpha, operation: DeviceOperation, cal
     const [{ default: files }, { fileAction }] = await Promise.all([import("../files/index.tsx"), import("../files/agent.vibe")]);
     return files.runtime(alpha).runPromise(fileAction(operation, call));
   }
+  if (operation.type === "browser_navigate" || operation.type === "browser_tabs_show") {
+    const [{ default: browser }, { browserAction }] = await Promise.all([import("../browser/index.tsx"), import("../browser/agent.vibe")]);
+    return browser.runtime(alpha).runPromise(browserAction(operation, authority.current));
+  }
   if (operation.type.startsWith("notes_")) {
     const { executeNotes, notesOperation } = await import("../notes/device-actions.vibe");
     const notes = notesOperation(operation);

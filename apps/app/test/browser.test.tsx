@@ -6,7 +6,9 @@ import { afterEach, describe, expect, it } from "vitest";
 import { Machine as Tabs } from "../gen/app__browser.effect.vibe";
 import { Machine as Page } from "../gen/app__browser__address.effect.vibe";
 import { Machine as Library } from "../gen/app__browser__library.effect.vibe";
-import { type Browsing, propose } from "../src/browser/agent.vibe";
+import type { ExecutorCall } from "@elizaos/agent/client";
+import { executeMedia } from "../src/assistant/media-executors.ts";
+import { type MediaCard, direct } from "../src/assistant/media-review.vibe";
 import { Pages } from "../src/browser/browser.vibe";
 import browser from "../src/browser/index.tsx";
 import { button, closeAll, drawn, fill, hardware, open, press, underAct, until } from "./alpha.tsx";
@@ -129,34 +131,36 @@ describe("The Browser on a phone", () => {
     expect(button("Open in browser")).toBeUndefined();
   });
 
-  it("Let the agent open a page (spec/app/browser/index.md, \"Story: Let the agent open a page\")", async () => {
+  it("Let the agent open a page (spec/app/browser/index.md, \"Story: Let the agent open a page\"; spec/app/approvals/direct.md, \"Story: Let Alpha show me things without asking each time\")", async () => {
     const { alpha, runtime, world } = await onBrowser();
     await until(alpha, runtime, Tabs, (s) => s.hydrated);
-    const ask = (operation: unknown, current = true) => act(async () => { await runtime.runPromise(propose(operation as Browsing, current)); });
+    // What Ask Alpha's approval runs once the owner approved the card: the operation, routed by executeMedia to the Browser.
+    const approved = (operation: unknown, current = true) => act(async () => executeMedia(alpha, operation as DeviceOperation, {} as ExecutorCall, { current: async () => current }));
     const owner = runtime.runSync(Tabs.use((m) => m.get())).selected;
 
     // spec/app/browser/index.md, "The agent opens only an HTTPS address with no user name or password in it, in a new normal tab, one at a time"
-    await ask({ type: "browser_navigate", url: "http://news.example/on-device-agents" } satisfies Partial<DeviceOperation>);
-    expect(document.querySelector("[data-alpha-review]")).toBeNull();
-    await ask({ type: "browser_navigate", url: "https://news.example/on-device-agents" }, false);
-    expect(document.querySelector("[data-alpha-review]")).toBeNull();
-    await ask({ type: "browser_navigate", url: "https://news.example/on-device-agents" });
-    expect(document.querySelector("[data-alpha-review]")?.textContent).toContain("https://news.example/on-device-agents");
-    await press("Open");
+    expect(await approved({ type: "browser_navigate", url: "http://news.example/on-device-agents" })).toMatchObject({ kind: "refused" });
+    expect(await approved({ type: "browser_navigate", url: "https://me:secret@news.example/on-device-agents" })).toMatchObject({ kind: "refused" });
+    expect(await approved({ type: "browser_navigate", url: "https://news.example/on-device-agents" }, false)).toMatchObject({ kind: "refused" });
+    expect(runtime.runSync(Tabs.use((m) => m.get())).agent).toBe(0);
+    expect(await approved({ type: "browser_navigate", url: "https://news.example/on-device-agents" })).toEqual({ kind: "applied" });
     await until(alpha, runtime, Tabs, (s) => s.agent !== 0 && s.selected === owner && s.native.includes(s.agent));
     const agentTab = runtime.runSync(Tabs.use((m) => m.get())).agent;
     const page = runtime.runSync(Effect.flatMap(Pages, (pages) => pages.of(agentTab)));
     await until(alpha, page, Page, (p) => p.phase === "Shown");
     expect(world.browser.tabs.get(`tab${agentTab}`)?.history).toEqual(["https://news.example/on-device-agents"]);
+    expect(await approved({ type: "browser_navigate", url: "https://enclave.example/keys-in-hardware" })).toMatchObject({ kind: "refused" });
 
     // spec/app/browser/index.md, "\"Stop and take over\" stops the agent and gives its tab to the owner"
     await press("Stop and take over");
     await until(alpha, runtime, Tabs, (s) => s.agent === 0);
 
     // spec/app/browser/index.md, "One layer at a time covers the page, and Back uncovers it": the tabs open with no card for the owner's current message only
-    await ask({ type: "browser_tabs_show" }, false);
+    expect(direct({ operation: { type: "browser_tabs_show" } } as MediaCard)).toBe(true);
+    expect(direct({ operation: { type: "browser_navigate", url: "https://news.example/" } } as MediaCard)).toBe(false);
+    expect(await approved({ type: "browser_tabs_show" }, false)).toMatchObject({ kind: "refused" });
     await until(alpha, runtime, Tabs, (s) => s.layer === "Uncovered");
-    await ask({ type: "browser_tabs_show" });
+    expect(await approved({ type: "browser_tabs_show" })).toEqual({ kind: "applied" });
     await until(alpha, runtime, Tabs, (s) => s.layer === "Switcher");
     await hardware("back");
     await until(alpha, runtime, Tabs, (s) => s.layer === "Uncovered");
@@ -180,10 +184,70 @@ describe("The Browser on a phone", () => {
     await until(alpha, runtime, Library, (s) => s.marks === 2 && s.job === "Idle");
     expect(world.browser.bookmarks.map((one) => one.url)).toEqual(["https://news.example/on-device-agents", "https://enclave.example/keys-in-hardware"]);
 
+    // spec/app/browser/share.md, "Choosing where to send the page sends it once, if it is still the page the panel opened on, and closes the panel": Copy link, as v121.
+    await press("Menu");
+    await press("Share");
+    await press("Copy link");
+    await until(alpha, runtime, Library, () => document.body.textContent?.includes("Link copied") === true);
+    expect(world.settings.copied).toEqual(["https://news.example/on-device-agents"]);
+
     // spec/app/browser/library.md, "Clearing all browsing data empties history at once"
     await press("Menu");
     await press("Clear all browsing data");
     await press("Clear");
     await until(alpha, runtime, Library, (s) => s.history === 0);
+  });
+
+  it("Let my agent read the page I have open in Browser (spec/app/assistant/context.md, \"Story: Let my agent read the page I have open in Browser\")", async () => {
+    const { alpha, runtime, world } = await onBrowser();
+    await until(alpha, runtime, Tabs, (s) => s.hydrated);
+    await go("news.example/on-device-agents");
+    const tab = runtime.runSync(Effect.map(Tabs.use((m) => m.get()), (s) => s.selected));
+    const page = runtime.runSync(Effect.flatMap(Pages, (pages) => pages.of(tab)));
+    await until(alpha, page, Page, (p) => p.phase === "Shown");
+    const ask = async (text: string) => {
+      world.ask.metadata = [];
+      act(() => {
+        const box = document.querySelector<HTMLTextAreaElement>("textarea[aria-label='Message Alpha']");
+        if (!box) throw new Error("no composer");
+        Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")?.set?.call(box, text);
+        box.dispatchEvent(new Event("input", { bubbles: true }));
+      });
+      await press("Send");
+      await until(alpha, runtime, Tabs, () => (world.ask.metadata?.length ?? 0) > 0);
+      return world.ask.metadata?.[0] as { observation?: { view?: string }; browserPage?: { url?: string; text?: string; tabId?: string } } | undefined;
+    };
+
+    // spec/app/assistant/context.md, "A turn carries the page Browser hands it for the tab in front, beside the observation, only to a peer that declares it"
+    const shown = await ask("Summarize this page");
+    expect(shown?.observation?.view).toBe("browser");
+    expect(shown?.browserPage).toMatchObject({ url: "https://news.example/on-device-agents", tabId: `tab${tab}` });
+    expect(shown?.browserPage?.text).toContain("agent");
+
+    // A private tab is never read.
+    await press("Menu");
+    await press("New private tab");
+    await until(alpha, runtime, Tabs, (s) => s.privates.includes(s.selected));
+    await go("news.example/on-device-agents");
+    const secret = runtime.runSync(Effect.map(Tabs.use((m) => m.get()), (s) => s.selected));
+    await until(alpha, runtime.runSync(Effect.flatMap(Pages, (pages) => pages.of(secret))), Page, (p) => p.phase === "Shown");
+    expect((await ask("Summarize this page"))?.browserPage).toBeUndefined();
+  });
+
+  it("History is kept through a restart (spec/app/browser/library.md, \"Story: Look back through history\"; spec/app/browser/index.md, \"Story: Save the session\")", async () => {
+    const first = await onBrowser();
+    await until(first.alpha, first.runtime, Library, (s) => s.read.status === "Loaded" && s.history === 3);
+    await until(first.alpha, first.runtime, Tabs, (s) => s.hydrated);
+    await go("news.example/on-device-agents");
+    const tab = first.runtime.runSync(Effect.map(Tabs.use((m) => m.get()), (s) => s.selected));
+    const page = first.runtime.runSync(Effect.flatMap(Pages, (pages) => pages.of(tab)));
+    await until(first.alpha, page, Page, (p) => p.phase === "Shown");
+    // spec/app/browser/index.md, "A stale session is written once it has been read, one write at a time, and never while browsing data is being cleared": the session written keeps history.
+    await until(first.alpha, first.runtime, Tabs, () => first.world.browser.saved.history.length === 4);
+    expect(first.world.browser.saved.history.at(-1)).toBe("https://news.example/on-device-agents");
+
+    await closeAll();
+    const again = await onBrowser(first.world);
+    await until(again.alpha, again.runtime, Library, (s) => s.read.status === "Loaded" && s.history === 4);
   });
 });

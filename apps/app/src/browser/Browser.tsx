@@ -1,5 +1,5 @@
 // spec/app/browser/index.md, "Story: Open, pick and close tabs"; spec/app/browser/index.md, "Story: Let the agent open a page"; spec/app/browser/share.md, "Story: Share the page"; spec/app/browser/share.md, "Story: Open the page in another browser"; spec/app/browser/library.md, "Story: Keep bookmarks"; spec/app/browser/library.md, "Story: Look back through history"; spec/app/browser/address.md, "Story: Go where I typed"; spec/app/browser/address.md, "Story: Watch a page load"; spec/app/browser/address.md, "Story: Browse privately"
-import { Alert, Banner, Button, BrowserAddressBar, Card, ListRow, Sheet, SheetContent, BrowserFindBar, BrowserBar, type BrowserMenuItem, BrowserMenu, BrowserNewTab, BrowserTabs, ConfirmDialog, PrivateMark } from "@repo/ui";
+import { Alert, Banner, Button, BrowserAddressBar, ListRow, Sheet, SheetContent, BrowserFindBar, BrowserBar, type BrowserMenuItem, BrowserMenu, BrowserNewTab, BrowserTabs, ConfirmDialog, PrivateMark } from "@repo/ui";
 import { Bookmark, BookmarkMinus, ChevronLeft, ExternalLink, History, Plus, RotateCw, Search, Share2, Square, Trash2 } from "lucide-react";
 import { Effect } from "effect";
 import { useState, useSyncExternalStore } from "react";
@@ -12,19 +12,32 @@ import { useMachine as usePage } from "../../gen/app__browser__address.react.ts"
 import type { Machine as LibraryMachine } from "../../gen/app__browser__library.effect.vibe";
 import { useMachine as useLibrary } from "../../gen/app__browser__library.react.ts";
 import { useMachine as useShare } from "../../gen/app__browser__share.react.ts";
+import type { Share as ShareState } from "../../gen/app__browser__share.ts";
+import { canConfirm } from "../../gen/kit__review.ts";
 import type { Machine as Shell } from "../../gen/app__shell.effect.vibe";
 import { TabHost } from "../platform/browser.vibe";
+import { Device } from "../platform/device.vibe";
 import type { Alpha, Resident } from "../runtime/area.tsx";
 import { AppBack } from "../shell/AppBack.tsx";
 import type { ManagedRuntime } from "effect";
-import { Proposed, approve } from "./agent.vibe";
-import { Pages, type PageRuntime, addressOf, idOf, inputOf, placed } from "./browser.vibe";
+import { Pages, type PageRuntime, addressOf, idOf, inputOf, mailTarget, placed } from "./browser.vibe";
 import { Library } from "./Library.tsx";
-import { aimMark, listsNow, onLists } from "./library.vibe";
+import { Kept } from "./library.vibe";
+
+/** What the Browser tells the owner about sharing and leaving, drawn under its bar and never near Ask Alpha. */
+const notices: Partial<Record<ShareState["notice"], { text: string; warn: boolean }>> = {
+  NoPage: { text: "Load the page before sharing it", warn: true },
+  Changed: { text: "The page changed, so nothing was shared", warn: false },
+  Copied: { text: "Link copied", warn: false },
+  ClipboardRefused: { text: "The link could not be copied", warn: true },
+  Passkeys: { text: "This page needs another browser for its passkey", warn: false },
+  NoBrowser: { text: "No other browser on this phone can open this page", warn: true },
+  NotOpened: { text: "The other browser did not open. The page is still here.", warn: true },
+};
 
 export interface BrowserProps {
   /** Provides the Browser's tabs and each tab's page, `browser` of browser.vibe, over the resident machines and the phone's tab host. */
-  runtime: ManagedRuntime.ManagedRuntime<Machine | Pages | TabHost | LibraryMachine | Proposed | Shell | Resident, unknown>;
+  runtime: ManagedRuntime.ManagedRuntime<Machine | Pages | TabHost | LibraryMachine | Kept | Shell | Resident, unknown>;
   alpha: Alpha;
 }
 
@@ -54,7 +67,8 @@ function Tab({ runtime, alpha, tabs, page }: BrowserProps & { tabs: State; page:
   const { state, can, send } = usePage(page);
   const share = useShare(page);
   const library = useLibrary(runtime);
-  const lists = useSyncExternalStore(onLists, listsNow, listsNow);
+  const kept = runtime.runSync(Effect.map(Kept, (held) => held));
+  const lists = useSyncExternalStore(kept.subscribe, kept.now, kept.now);
   const [typed, setTyped] = useState("");
   const [finding, setFinding] = useState("");
   if (!state || !share.state || !library.state) return null;
@@ -80,8 +94,16 @@ function Tab({ runtime, alpha, tabs, page }: BrowserProps & { tabs: State; page:
   const ready = state.phase === "Shown";
   const elsewhere = { type: "openExternally", kind: state.kind, secure: state.secure } as const;
   const choose = { type: "choose", dest: "System", ok: true } as const;
+  const mailable = runtime.runSync(mailTarget) !== undefined;
+  // spec/app/browser/share.md, "Choosing where to send the page sends it once, if it is still the page the panel opened on, and closes the panel": the clipboard answers at once, and a page that changed is not copied.
+  const copyLink = () => {
+    const url = runtime.runSync(Effect.map(TabHost, (held) => held.session.info(idOf(tab))?.url ?? ""));
+    if (!canConfirm(share.state!.review) || url !== committed) { void share.send({ type: "choose", dest: "Copy", ok: false }); return; }
+    void runtime.runPromise(Effect.flatMap(Device, (device) => device.copyText(url))).then((ok) => share.send({ type: "choose", dest: "Copy", ok }), () => share.send({ type: "choose", dest: "Copy", ok: false }));
+  };
+  const said = notices[share.state.notice];
   const marking = (event: { type: "mark"; secure: boolean; userInfo: boolean } | { type: "unmark" }) => () => {
-    aimMark({ url: committed, title: shown?.title ?? "" });
+    kept.aim({ url: committed, title: shown?.title ?? "" });
     void browser.send({ type: "uncover" }).then(() => library.send(event));
   };
   const offered: (BrowserMenuItem | false)[] = [
@@ -132,22 +154,22 @@ function Tab({ runtime, alpha, tabs, page }: BrowserProps & { tabs: State; page:
             onMenu={cover("Menu")}
           />}
       {state.phase === "Loading" && <div role="progressbar" aria-label="Loading website" className="h-0.75 shrink-0 overflow-hidden bg-secondary"><div className="h-full w-1/3 bg-primary" /></div>}
+      {said !== undefined && <Alert variant={said.warn ? "warn" : "info"} className="mx-4 my-2 shrink-0">{said.text}</Alert>}
+      {share.can(elsewhere) && (
+        <div className="flex shrink-0 justify-center px-4 py-2">
+          <Button variant="outline" onClick={() => void share.send(elsewhere)}>Open in browser<ExternalLink aria-hidden className="size-4" /></Button>
+        </div>
+      )}
       <div inert={tabs.layer !== "Uncovered"} className="relative flex min-h-0 flex-1 flex-col overflow-y-auto">
         {state.phase === "Blank"
           ? <BrowserNewTab private={state.kind === "Private"} onSearch={cover("Address") && (() => { setTyped(""); void browser.send({ type: "cover", layer: "Address" }); })} />
           : <div data-alpha-browser-page="" aria-hidden ref={(place) => { if (place) void runtime.runPromise(placed); }} className="absolute inset-0" />}
       </div>
-      {share.can(elsewhere) && (
-        <div className="flex justify-center px-4 py-2">
-          <Button variant="outline" onClick={() => void share.send(elsewhere)}>Open in browser<ExternalLink aria-hidden className="size-4" /></Button>
-        </div>
-      )}
-      {share.state.notice === "NoBrowser" && <Alert variant="warn" className="mx-4">No other browser on this phone can open this page</Alert>}
-      {share.state.notice === "NotOpened" && <Alert variant="warn" className="mx-4">The other browser did not open. The page is still here.</Alert>}
-      {share.state.notice === "Changed" && <Alert variant="info" className="mx-4">The page changed, so nothing was shared</Alert>}
       <Sheet open={share.state.review.showing} onOpenChange={(next) => { if (!next && share.can({ type: "closePanel" })) void share.send({ type: "closePanel" }); }}>
         <SheetContent title="Share this page">
           {share.can(choose) && <ListRow title="Share to an app" onClick={() => void share.send(choose)} />}
+          {share.can(choose) && committed !== "" && <ListRow title="Copy link" onClick={copyLink} />}
+          {share.can(choose) && mailable && <ListRow title="Email" onClick={() => void share.send({ type: "choose", dest: "Email", ok: true })} />}
         </SheetContent>
       </Sheet>
       <Library
@@ -160,7 +182,6 @@ function Tab({ runtime, alpha, tabs, page }: BrowserProps & { tabs: State; page:
           void runtime.runPromise(Effect.flatMap(Pages, (pages) => pages.aim(tab, addressOf(url, verdict(input) === "Search")))).then(() => send({ type: "submit", i: input }));
         }}
       />
-      <Proposal runtime={runtime} />
       {state.finding && tabs.layer === "Uncovered" && (
         <BrowserFindBar value={finding} onValueChange={seek} status={findStatus}
           onPrevious={can({ type: "findNext", forward: false }) ? () => void send({ type: "findNext", forward: false }) : undefined}
@@ -184,28 +205,5 @@ function Tab({ runtime, alpha, tabs, page }: BrowserProps & { tabs: State; page:
         Clears history, cookies and tabs.
       </ConfirmDialog>
     </div>
-  );
-}
-
-/**
- * The page the agent asked to open, shown as it will open, for the owner to open in a tab of the agent's or decline.
- * Nothing opens without the owner.
- * @model spec/app/browser/index.md
- */
-function Proposal({ runtime }: { runtime: BrowserProps["runtime"] }) {
-  const proposed = runtime.runSync(Effect.map(Proposed, (held) => held));
-  const held = useSyncExternalStore(proposed.subscribe, proposed.snapshot, proposed.snapshot);
-  const browser = useMachine(runtime);
-  if (held === undefined || !browser.state) return null;
-  const open = { type: "agentOpen", secure: held.secure, userInfo: held.userInfo } as const;
-  return (
-    <Card role="dialog" data-alpha-review="" aria-label="Open a page" className="fixed inset-x-4 bottom-24 z-40 flex flex-col gap-3 p-4">
-      <h2 className="font-semibold">Open this page?</h2>
-      <p className="break-all text-sm">{held.url}</p>
-      <div className="flex justify-end gap-2">
-        <Button variant="outline" onClick={() => proposed.set(undefined)}>Not now</Button>
-        {browser.can(open) && <Button onClick={() => void runtime.runPromise(approve())}>Open</Button>}
-      </div>
-    </Card>
   );
 }

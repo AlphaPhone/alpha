@@ -1,5 +1,5 @@
 // spec/app/assistant/index.md, "Story: Ask Alpha something"; spec/app/assistant/index.md, "Story: Stop a reply"
-import { ConversationRecord, TurnController, encodeTurnContext, learnPeer, notLearned, sendsOptionalFields, statusRead, type LocationObservation, type TurnReply, type TurnResult } from "@elizaos/agent/client"
+import { BrowserPage, ConversationRecord, TurnController, encodeTurnContext, learnPeer, notLearned, sendsOptionalFields, statusRead, type LocationObservation, type TurnReply, type TurnResult } from "@elizaos/agent/client"
 import * as KeyValueStore from "effect/persistence/KeyValueStore"
 import * as Conversation from "../../gen/app__assistant.effect.vibe"
 import * as Attachments from "../../gen/app__assistant__attachments.effect.vibe"
@@ -33,7 +33,7 @@ import { CommsPrompts, type CommsPrompt, commsViewOf } from "../phone/comms.vibe
 import { MailQuestions, withMail } from "../inbox/mail-context.vibe"
 import { type Job, answer, contained, following, reacting, run, started, stream, tell, together, untimed } from "../runtime/reactor.vibe"
 import { Time } from "../runtime/time.vibe"
-import { MediaReview, mediaReview } from "./media-review.vibe"
+import { MediaReview, ShownPage, direct, mediaReview } from "./media-review.vibe"
 import { type Board, type Line, Talk, talk } from "./talk.vibe"
 import { dropFiles, readFiles, rememberFiles, sameBinding, stageFiles } from "./attachments.vibe"
 import { readMessage } from "./read-aloud.vibe"
@@ -134,16 +134,19 @@ function viewOf(showing: Conversation.Showing): string {
 }
 
 // spec/app/assistant/index.md, "The agent is told the view, the time zone, the day only from Calendar, and whether something is selected"; spec/app/assistant/context.md, "The day and the location go only to a peer that takes them, and a sensitive screen sends no optional field"; spec/app/assistant/context.md, "The time zone told is the one the phone's interface shows, else the one the screen reported, else the one the agent was launched with, else the host's"
-function observed(told: boolean, context: Conversation.Context, location: LocationObservation | undefined, selectedNote?: RendererNote) {
+function observed(told: boolean, context: Conversation.Context, location: LocationObservation | undefined, selectedNote?: RendererNote, page?: unknown) {
   if (!told) return undefined
   const section = Pages.selectionOf(context.section)
   const selectedObject = context.sensitive ? undefined : section === "" ? selectedNote : { kind: "settings", id: section }
+  // spec/app/assistant/context.md, "A turn carries the page Browser hands it for the tab in front, beside the observation, only to a peer that declares it": sent as Browser handed it, or not at all.
+  const browserPage = page === undefined || context.sensitive ? undefined : Option.getOrUndefined(Schema.decodeUnknownOption(BrowserPage)(page))
   return encodeTurnContext({
     observation: {
       view: viewOf(context.showing), revision: context.revision, sensitive: context.sensitive, timeZone: Locator.zoneOf(context.zone, "", "", zone()),
       ...(selectedObject === undefined ? {} : { selectedObject }),
       ...(location === undefined ? {} : { location }),
     },
+    ...(browserPage === undefined ? {} : { browserPage }),
   }, { optionalFields: true })
 }
 
@@ -232,6 +235,7 @@ function posted(ticket: number, told: boolean, context: Conversation.Context): S
     const location = try whereabouts(context.sensitive, told)
     const seen = told && !context.sensitive && viewOf(context.showing) === "notes" ? try notesSelection() : undefined
     const selection = seen?.kind === "canonical-note" && !context.selected ? undefined : seen
+    const shownPage = told && !context.sensitive && viewOf(context.showing) === "browser" && Prefs.allows(try (try Prefs.Machine).get(), "BrowserPage") ? try (try ShownPage).read() : undefined
     const current = try conversation.get()
     if (!Conversation.canFinish(current, ticket) || current.turn.stopping || current.context.revision !== context.revision || (try history.get()).chosen !== chats.chosen) {
       if (Conversation.canRefuse(current, ticket)) Queue.offerUnsafe(queue, { type: "refuse", ticket })
@@ -269,7 +273,7 @@ function posted(ticket: number, told: boolean, context: Conversation.Context): S
       },
     }
     board.change({ media: [], mediaNote: "" })
-    const metadata = { ...observed(told, context, location, selection), ...(quoted === undefined ? {} : { replyToMessageId: quoted.id }) }
+    const metadata = { ...observed(told, context, location, selection, shownPage), ...(quoted === undefined ? {} : { replyToMessageId: quoted.id }) }
     const images = files.map(({ data, mimeType, name }) => ({ data, mimeType, name }))
     const result = tryPromise(() => controller.send({ text: outgoing, ...(images.length === 0 ? {} : { images }), ...(Object.keys(metadata).length === 0 ? {} : { metadata }) }, { stream: hooks, ...(enrolled === undefined ? {} : { headers: enrolled.headers }) })) catch () => undefined
     const event = ended(ticket, heard, result)
@@ -301,7 +305,12 @@ function posted(ticket: number, told: boolean, context: Conversation.Context): S
       try syncAlphaApps()
       if (enrolled !== undefined && result.reply.userMessageId !== undefined) {
         const media = try review.pending(enrolled, result.reply.userMessageId, chats.chosen, context.revision, messageTarget)
-        if ((try conversation.get()).context.revision === context.revision && (try history.get()).chosen === chats.chosen) board.change({ media })
+        if ((try conversation.get()).context.revision === context.revision && (try history.get()).chosen === chats.chosen) {
+          // spec/app/approvals/direct.md, "Review first, an unreadable choice, a protected screen, a fifth run and a request for another message each refuse a direct run"
+          const directly = (try (try Prefs.Machine).get()).askFirst ? [] : media.filter(direct).slice(0, 4)
+          board.change({ media: media.filter((card) => !directly.includes(card)) })
+          for (const card of directly) try review.decide(card, true, true)
+        }
       }
     }
     if (event.type === "refuse") board.drop(pageTicket, mine)

@@ -2,7 +2,7 @@ import { Effect, Layer } from "effect";
 import { type ReactElement, Suspense, lazy } from "react";
 import { MediaHandoff, stageAttachment } from "./assistant/attachments.vibe";
 import { executeMedia } from "./assistant/media-executors.ts";
-import { MediaExecutors } from "./assistant/media-review.vibe";
+import { MediaExecutors, ShownPage } from "./assistant/media-review.vibe";
 import { type Mount, type Place, mounts as every } from "./areas.ts";
 import type { Platform } from "./platform/platform.vibe";
 import { resident } from "./resident.vibe";
@@ -22,7 +22,13 @@ export function boot(platform: Layer.Layer<Platform>, mounts: readonly Mount[] =
   const executors = Layer.succeed(MediaExecutors, {
     execute: (operation, call, authority) => Effect.tryPromise(() => executeMedia(alpha, operation, call, authority)).pipe(Effect.orElseSucceed(() => undefined)),
   });
-  const root = rooted(Layer.provideMerge(resident, Layer.mergeAll(platform, media, executors)));
+  const page = Layer.succeed(ShownPage, {
+    read: () => Effect.tryPromise(async () => {
+      const [{ default: browser }, { pageFor }] = await Promise.all([import("./browser/index.tsx"), import("./browser/browser.vibe")]);
+      return browser.runtime(alpha).runPromise(pageFor());
+    }).pipe(Effect.orElseSucceed(() => undefined)),
+  });
+  const root = rooted(Layer.provideMerge(resident, Layer.mergeAll(platform, media, executors, page)));
   const placed = new Map<Place, ReactElement[]>();
   const alpha: Alpha = {
     runtime: root.runtime,

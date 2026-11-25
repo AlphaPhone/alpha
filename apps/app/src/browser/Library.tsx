@@ -1,13 +1,13 @@
 // spec/app/browser/library.md, "Story: Keep bookmarks"; spec/app/browser/library.md, "Story: Look back through history"
 import { Alert, Button, ConfirmDialog, EmptyState, ListGroup, ListRow, Sheet, SheetContent } from "@repo/ui";
-import type { ManagedRuntime } from "effect";
+import { Effect, type ManagedRuntime } from "effect";
 import { useSyncExternalStore } from "react";
 import type { Machine } from "../../gen/app__browser__library.effect.vibe";
 import { useMachine } from "../../gen/app__browser__library.react.ts";
-import { listsNow, onLists } from "./library.vibe";
+import { Kept } from "./library.vibe";
 
 export interface LibraryProps {
-  runtime: ManagedRuntime.ManagedRuntime<Machine, unknown>;
+  runtime: ManagedRuntime.ManagedRuntime<Machine | Kept, unknown>;
   open: boolean;
   onClose: () => void;
   /** Open `url` in the shown tab. */
@@ -28,7 +28,8 @@ const notices = {
  */
 export function Library({ runtime, open, onClose, onOpen }: LibraryProps) {
   const { state, can, send } = useMachine(runtime);
-  const lists = useSyncExternalStore(onLists, listsNow, listsNow);
+  const kept = runtime.runSync(Effect.map(Kept, (held) => held));
+  const lists = useSyncExternalStore(kept.subscribe, kept.now, kept.now);
   if (!state) return null;
   const read = state.read.status === "Loaded";
   const history = [...lists.history].reverse();

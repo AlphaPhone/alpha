@@ -154,7 +154,7 @@ const surface = "data-fake-browser-page";
  * over the place the Browser marks, as Android lays the web view there; here it draws develop's reference pages.
  */
 export function alphaBrowser(world: BrowserScene): Faked {
-  return plugin<BrowserTabHostPlugin & { openFailedPage(options: BrowserPageGuard): Promise<void> }, TabEvents>((emit) => {
+  return plugin<BrowserTabHostPlugin & { openFailedPage(options: BrowserPageGuard): Promise<void>; pageContext(options: BrowserPageGuard): Promise<Record<string, unknown>> }, TabEvents>((emit) => {
     let session = "";
     const stateOf = (tab: Held): BrowserTabState => {
       const url = tab.history[tab.at];
@@ -315,6 +315,14 @@ export function alphaBrowser(world: BrowserScene): Faked {
       cancelReading: () => Promise.resolve(),
       share: (options) => Promise.resolve(stateOf(held(options))),
       openExternalBrowser: () => Promise.resolve(),
+      // `pageContext`: the shown normal tab's committed page as its web view reads it, never a private tab's.
+      pageContext: (options) => {
+        const tab = held(options);
+        const url = tab.history[tab.at] ?? "";
+        if (tab.private) return Promise.reject(rejection("Private tabs are never shared"));
+        if (url !== options.url || String(tab.navigation) !== options.navigation) return Promise.reject(rejection("Browser page changed"));
+        return Promise.resolve({ url, title: sites[url]?.title ?? "", text: textOf(drawn(url)).replace(/\s+/g, " ").trim().slice(0, 6000), truncated: false });
+      },
       openFailedPage: (options) => {
         const tab = held(options);
         if (tab.elsewhere === "" || tab.elsewhere !== options.url || String(tab.navigation) !== options.navigation) return Promise.reject(rejection("The page changed. Try again from the page."));

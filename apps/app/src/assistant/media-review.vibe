@@ -18,6 +18,13 @@ export service MediaExecutors {
   static readonly defaultValue = () => ({ execute: () => succeed({ kind: "refused", code: NOT_DISPATCHED }) })
 }
 
+// spec/app/assistant/context.md, "A turn carries the page Browser hands it for the tab in front, beside the observation, only to a peer that declares it"
+/** The page the Browser hands a turn for its tab in front, read by the Browser itself; none where it handed none. */
+export service ShownPage {
+  read(): unknown!!
+  static readonly defaultValue = () => ({ read: () => succeed(undefined) })
+}
+
 export interface ReviewAuthority {
   readonly current: () => Promise<boolean>
   readonly target?: MessageDraftTarget
@@ -101,6 +108,7 @@ const outcomes: Readonly<Partial<Record<string, string>>> = {
 const cameraCapabilities = ["camera.capture-photo.v1", "camera.capture-lens.v1", "camera.capture-library-id.v1"]
 const photosCapabilities = ["photos.library.v1", "photos.view.v1"]
 const filesCapabilities = ["files.browser.v1"]
+const browserCapabilities = ["browser.open-new-tab.v1", "browser.tabs.show.v1"]
 const phoneCapabilities = ["phone.keypad.v1", "phone.dial.v1", "phone.call.v1", "views.telephony.v1", "sms.compose.v1", "sms.compose.v2"]
 
 export interface MediaCard {
@@ -150,6 +158,8 @@ function operation(raw: unknown) {
       return value.from === undefined && value.to === undefined && value.kind !== "pdf" ? value : undefined
     case "files_open":
     case "files_folder_create":
+    case "browser_navigate":
+    case "browser_tabs_show":
       return value
     case "photos_album_create":
     case "photos_share":
@@ -189,6 +199,8 @@ function words(value: NonNullable<ReturnType<typeof operation>>): { title: strin
     case "files_share": return { title: "Share a file", detail: "paths" in value ? value.paths.join(", ") : "Open Android sharing" }
     case "files_move": return { title: "Move a file", detail: `${value.paths.join(", ")} → ${value.dest}` }
     case "files_trash": return { title: "Move a file to Trash", detail: "paths" in value ? value.paths.join(", ") : "Review the file in the current list" }
+    case "browser_navigate": return { title: "Open a page in Browser", detail: value.url }
+    case "browser_tabs_show": return { title: "Show your Browser tabs", detail: "Open the tab list" }
   }
 }
 
@@ -197,7 +209,8 @@ export service MediaReview {
   session(): (Session | undefined)!!
   messageTarget(): (MessageDraftTarget | undefined)!!
   pending(session: Session, message: string, conversation: number, revision: number, target: MessageDraftTarget | undefined): readonly MediaCard[]!!
-  decide(card: MediaCard, approve: boolean): void!!(Talk | Conversation | Chats)
+  /** The owner's answer on the card; `directly` runs an allow-listed card with no review, for the message being answered. */
+  decide(card: MediaCard, approve: boolean, directly?: boolean): void!!(Talk | Conversation | Chats)
   /** Same enrollment and custody as the cards, without exposing its tokens or action payloads. */
   history(): (readonly ActivityProposal[] | undefined)!!
   /** Acts only against the exact current proposal and the local receipt the SDK can verify. */
@@ -236,6 +249,7 @@ effect function enrolled(epoch: number, owner: string, image: boolean, runtime: 
     ...(registered("AlphaPhotoLibrary") ? photosCapabilities : []),
     ...(registered("ElizaFiles") ? filesCapabilities : []),
     ...(registered("AlphaNotes") ? ["notes.organize.v1"] : []),
+    ...(registered("AlphaBrowser") ? browserCapabilities : []),
     ...(image && registered("ElizaTelephony") ? phoneCapabilities : []),
   ].filter((name) => offer.deviceActions.capabilities.includes(name))
   if (capabilities.length === 0) throw new EnrollmentRefused({ reason: "Media operations are unavailable" })
@@ -267,6 +281,10 @@ function completion(op: DeviceOperation, synced: boolean): string {
     default: return synced ? "Done" : "Done. Agent receipt pending."
   }
 }
+
+// spec/app/approvals/direct.md, "The agent runs directly only what is on the allow-list, for the message being answered, at most four times, by the owner's choice and on a screen that is not protected"
+/** A proposal the agent may run without a card for the message being answered: showing the Browser's own tab list, which changes nothing. */
+export const direct = (card: MediaCard): boolean => card.operation.type === "browser_tabs_show"
 
 const notStarted = "Alpha couldn’t start that action."
 const sameTarget = (one: MessageDraftTarget | undefined, other: MessageDraftTarget | undefined): boolean =>
@@ -375,7 +393,7 @@ export const mediaReview = Layer.effect(MediaReview, effect {
         return [{ id: proposal.id, digest: proposal.digest, operation: op, expiresAt, message, conversation, revision, enrollmentId: opened.identity.enrollmentId, ...words(op), ...(op.type === "sms_reply_selected" && bound !== undefined ? { target: bound } : {}) }]
       })
     },
-    effect decide(card: MediaCard, approve: boolean) {
+    effect decide(card: MediaCard, approve: boolean, directly = false) {
       const { board } = try Talk
       const conversation = try Conversation
       const chats = try Chats
@@ -393,18 +411,21 @@ export const mediaReview = Layer.effect(MediaReview, effect {
         const held = try session()
         const live = held !== undefined && (try current(held))
         board.change({ media: board.snapshot().media.filter((one) => one !== card) })
-        if (!live || held === undefined) { board.change({ mediaNote: "That review expired. Ask again from the current screen." }); return }
+        const unasked = directly && direct(card)
+        const told = (mediaNote: string) => { if (!unasked) board.change({ mediaNote }) }
+        if (!live || held === undefined) { told("That review expired. Ask again from the current screen."); return }
         if (!approve) {
           const declined = tryPromise(() => held.decide(card.id, { digest: card.digest, approved: false })) catch () => undefined
-          board.change({ mediaNote: declined === undefined ? "Alpha couldn’t confirm the decline." : "Declined" })
+          told(declined === undefined ? "Alpha couldn’t confirm the decline." : "Declined")
           return
         }
         scopes.set(card.id, { active: current(held), ...(card.target === undefined ? {} : { target: card.target }) })
-        const result = (tryPromise(() => held.execute.approve(card, { live: true, nonsensitive: true, exact: true, forceReview: true, requestEligible: true, reviewed: true }))
+        const screen = unasked ? { forceReview: false, reviewed: false } : { forceReview: true, reviewed: true }
+        const result = (tryPromise(() => held.execute.approve(card, { live: true, nonsensitive: true, exact: true, requestEligible: true, ...screen }))
           |> ensuring(%, sync(() => { scopes.delete(card.id) }))) catch () => undefined
         const note = result?.kind !== "settled" ? notStarted : result.result.tag === "Applied" ? completion(card.operation, result.synced)
           : result.result.tag === "Unknown" ? "The result could not be confirmed. Check before trying again." : "Nothing changed."
-        board.change({ mediaNote: note })
+        told(note)
       })
     },
   }
