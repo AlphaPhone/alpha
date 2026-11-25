@@ -73,6 +73,15 @@ async function opened(browser: Browser, origin: string, spoken: boolean) {
   }
   await page.goto(origin);
   await page.getByRole("button", { name: "Settings", exact: true }).waitFor();
+  if (spoken) {
+    const talk = page.getByRole("button", { name: "Talk", exact: true });
+    const skip = page.getByRole("button", { name: "Skip", exact: true });
+    for (let step = 0; step < 12 && !(await talk.isVisible()); step += 1) {
+      if (await skip.isVisible()) await skip.click();
+      else await page.waitForTimeout(250);
+    }
+    await talk.waitFor();
+  }
   return page;
 }
 
