@@ -56,6 +56,7 @@ const config: CapacitorConfig = {
   webDir: androidPaths.web,
   loggingBehavior: "none",
   plugins: {
+    ElizaSecureStore: { nativeOnly: ["device", "device-execution", "action-journal"] },
     ElizaSignIn: {
       clientId: identity.appId,
       googleMode: "browser",

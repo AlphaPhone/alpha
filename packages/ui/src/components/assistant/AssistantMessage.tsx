@@ -1,5 +1,5 @@
 import type { ComponentProps, ReactNode } from "react";
-import { CornerUpLeft, GitBranch, Pencil, Volume2 } from "lucide-react";
+import { CornerUpLeft, GitBranch, Mail, Pencil, Volume2 } from "lucide-react";
 import { cn, focusRing } from "../../lib/cn.ts";
 import { Mark } from "../Mark.tsx";
 import { Menu, MenuContent, MenuItem, MenuTrigger } from "../Menu.tsx";
@@ -26,6 +26,8 @@ export type AssistantMessageProps = Omit<ComponentProps<"article">, "children"> 
   onFork?: () => void;
   /** Has Alpha's message read aloud; the voice area reads it. */
   onReadAloud?: () => void;
+  /** Opens Inbox's review of the settled reply before it can enter a draft. */
+  onUseInEmail?: () => void;
 };
 
 /**
@@ -33,31 +35,32 @@ export type AssistantMessageProps = Omit<ComponentProps<"article">, "children"> 
  * with the cards of its reply. Pressing the text opens what can be done with it, each action only where it is offered.
  * @model spec/app/assistant/chats.md
  */
-export function AssistantMessage({ author, text, quote, attachments = [], children, onPreview, onQuote, onEditAgain, onFork, onReadAloud, className, ...props }: AssistantMessageProps) {
+export function AssistantMessage({ author, text, quote, attachments = [], children, onPreview, onQuote, onEditAgain, onFork, onReadAloud, onUseInEmail, className, ...props }: AssistantMessageProps) {
   const owner = author === "owner";
   const body = <span className="break-words whitespace-pre-line">{text}</span>;
-  const bubble = cn("max-w-full text-left text-base", owner && "rounded-tile bg-secondary px-4 py-2.5 text-secondary-foreground");
-  const actions = onQuote || onEditAgain || onFork || onReadAloud;
+  const bubble = cn("max-w-full text-left text-base", owner ? "rounded-tile rounded-br-box bg-alpha px-4 py-2.75 text-alpha-foreground" : "text-body leading-chat");
+  const actions = onQuote || onEditAgain || onFork || onReadAloud || onUseInEmail;
   return (
-    <article aria-label={owner ? "You" : "Alpha"} className={cn("flex flex-col gap-2", owner ? "items-end pl-10" : "items-start", className)} {...props}>
+    <article aria-label={owner ? "You" : "Alpha"} className={cn("flex flex-col gap-2", owner ? "ml-auto max-w-4/5 items-end" : "items-start", className)} {...props}>
       {attachments.length ? (
         <div className={cn("flex flex-wrap gap-2", owner && "justify-end")}>
           {attachments.map((attachment) => <AssistantAttachmentChip key={attachment.id} attachment={attachment} onPreview={onPreview && (() => onPreview(attachment.id))} />)}
         </div>
       ) : null}
       {quote ? <p className="line-clamp-2 border-l-2 border-border pl-3 text-sm break-words text-muted-foreground">{quote}</p> : null}
-      <div className="flex max-w-full items-start gap-2">
-        {owner ? null : <Mark aria-hidden className="mt-1 size-4.5 shrink-0 text-alpha" />}
+      <div className="flex max-w-full items-start gap-2.5">
+        {owner ? null : <span aria-hidden className="mt-0.75 flex size-4.5 shrink-0 items-center justify-center overflow-hidden rounded-full bg-alpha text-alpha-foreground"><Mark className="size-[118%] shrink-0" /></span>}
         {actions ? (
           <Menu>
             <MenuTrigger asChild>
-              <button type="button" className={cn(focusRing, bubble, "min-h-11 py-2.5")}>{body}</button>
+              <button type="button" className={cn(focusRing, bubble, "relative before:absolute before:inset-0 before:min-h-11")}>{body}</button>
             </MenuTrigger>
             <MenuContent align={owner ? "end" : "start"}>
               {onQuote ? <MenuItem onSelect={onQuote}><CornerUpLeft aria-hidden />Reply</MenuItem> : null}
               {onEditAgain ? <MenuItem onSelect={onEditAgain}><Pencil aria-hidden />Edit and resend</MenuItem> : null}
               {onFork ? <MenuItem onSelect={onFork}><GitBranch aria-hidden />New chat from here</MenuItem> : null}
               {onReadAloud ? <MenuItem onSelect={onReadAloud}><Volume2 aria-hidden />Read aloud</MenuItem> : null}
+              {onUseInEmail ? <MenuItem onSelect={onUseInEmail}><Mail aria-hidden />Use in email</MenuItem> : null}
             </MenuContent>
           </Menu>
         ) : (

@@ -1,0 +1,367 @@
+// spec/app/camera/index.md, "Story: Open the camera"; spec/app/camera/index.md, "Story: Frame the shot"; spec/app/camera/index.md, "Story: Take photos and videos"
+import type { Grant } from "../../gen/kit__permission.ts"
+import type { Lens, Mode } from "../../gen/app__camera.ts"
+import type { CameraDevice, CameraPreviewResult } from "@elizaos/os/bridges/camera"
+import { registered } from "./device.vibe"
+
+module native {
+  import { Capacitor, registerPlugin } from "@capacitor/core"
+  import { type CameraClient, cameraClient, cameraPlugin } from "@elizaos/os/bridges/camera"
+
+  let plugin: ReturnType<typeof cameraPlugin> | undefined
+  let client: CameraClient | undefined
+  /** @throws {never} */
+  export function camera(): CameraClient {
+    return (client ??= cameraClient(events()))
+  }
+  /** @throws {never} */
+  export function events(): ReturnType<typeof cameraPlugin> {
+    return (plugin ??= cameraPlugin())
+  }
+  type Hardware = { setVolumeShutter(input: { enabled: boolean }): Promise<void> }
+  let device: Hardware | undefined
+  /** @throws {never} */
+  export function volume(enabled: boolean): Promise<void> {
+    return (device ??= registerPlugin<Hardware>("AlphaDevice")).setVolumeShutter({ enabled })
+  }
+  /** @throws {never} */
+  export function playable(path: string): string {
+    return Capacitor.convertFileSrc(path)
+  }
+  /** @throws {never} */
+  export function keys(): EventTarget {
+    return window
+  }
+}
+import { camera, events, keys, playable, volume } from native
+export { playable }
+
+module web {
+  /** @throws {never} */
+  export const media = (): MediaDevices | undefined => navigator.mediaDevices
+  /** @throws {never} */
+  export async function permission(name: "camera" | "microphone"): Promise<PermissionState> {
+    try {
+      return (await navigator.permissions.query({ name: name as PermissionName })).state
+    } catch {
+      return "prompt"
+    }
+  }
+  /** @throws {never} */
+  export function release(stream: MediaStream | undefined): void {
+    for (const track of stream?.getTracks() ?? []) track.stop()
+  }
+  /** @throws {never} */
+  export function image(video: HTMLVideoElement): Promise<Blob> {
+    if (video.videoWidth === 0 || video.videoHeight === 0) return Promise.reject(new Error("No camera frame"))
+    const canvas = document.createElement("canvas")
+    canvas.width = video.videoWidth
+    canvas.height = video.videoHeight
+    const context = canvas.getContext("2d")
+    if (!context) return Promise.reject(new Error("Camera frame is unavailable"))
+    context.drawImage(video, 0, 0)
+    return new Promise((resolve, reject) => canvas.toBlob((blob) => blob ? resolve(blob) : reject(new Error("Camera frame could not be encoded")), "image/jpeg", .92))
+  }
+  /** @throws {never} */
+  export const urlOf = (blob: Blob): string => URL.createObjectURL(blob)
+  /** @throws {never} */
+  export const revoke = (url: string): void => URL.revokeObjectURL(url)
+  /** @throws {never} */
+  export function recorder(video: MediaStream, audio: MediaStream | undefined): MediaRecorder {
+    return new MediaRecorder(new MediaStream([...video.getVideoTracks(), ...(audio?.getAudioTracks() ?? [])]))
+  }
+  /** @throws {never} */
+  export function permissionFailure(cause: unknown): boolean {
+    return cause instanceof DOMException && ["NotAllowedError", "PermissionDeniedError", "SecurityError"].includes(cause.name)
+  }
+}
+import { image, media, permission, permissionFailure, recorder, release, revoke, urlOf } from web
+
+export type Aspect = "4:3" | "16:9"
+export type Flash = "off" | "auto" | "on" | "torch"
+export interface Point { readonly x: number; readonly y: number; readonly viewportX?: number; readonly viewportY?: number }
+export interface LensFacts {
+  readonly minimum: number
+  readonly maximum: number
+  readonly flash: boolean
+  readonly aspects: ReadonlyArray<Aspect>
+}
+export interface CameraMedia {
+  readonly path: string
+  readonly libraryId?: string
+  readonly source: string
+  readonly mime: string
+  readonly width: number
+  readonly height: number
+  readonly blob?: Blob
+  readonly duration?: number
+  readonly size?: number
+  readonly thumbnail?: string
+}
+export type CameraSignal =
+  | { readonly ticket: number; readonly kind: "preview-lost" }
+  | { readonly ticket: number; readonly kind: "recording-progress" | "recording-finished"; readonly size: number }
+
+/** The one viewfinder, recording and shutter on the device. A ticket may release its own preview only. */
+export service CameraPort {
+  readonly nativePreview: boolean
+  readonly present: boolean
+  readonly volumeKeys: Stream.Stream<void>
+  readonly signals: Stream.Stream<CameraSignal>
+  bind(element: HTMLVideoElement | null): void!!
+  access(): { readonly camera: Grant; readonly microphone: Grant }!!
+  ask(kind: "camera" | "microphone"): Grant!!
+  start(ticket: number, lens: Lens, aspect: Aspect): (LensFacts | undefined)!!
+  stop(ticket: number): void!!
+  mode(mode: Mode): boolean!!
+  flash(mode: Flash): boolean!!
+  volume(enabled: boolean): void!!
+  zoom(level: number): boolean!!
+  focus(point: Point): boolean!!
+  capture(save: boolean): (CameraMedia | undefined)!!
+  record(sound: boolean): boolean!!
+  finish(): (CameraMedia | undefined)!!
+  release(media: CameraMedia): void!!
+}
+
+const recordingOptions = { quality: "highest", maxDuration: 300, maxFileSize: 100 * 1024 * 1024 } as const
+const oneTimes: LensFacts = { minimum: 10, maximum: 10, flash: false, aspects: [] }
+const grantOf = (value: string): Grant => value === "granted" ? "Granted" : value === "denied" ? "Denied" : "Unasked"
+const directionOf = (lens: Lens) => lens === "Front" ? "front" as const : "back" as const
+const dataImage = (value: string | undefined) => value ? `data:image/jpeg;base64,${value}` : ""
+
+function libraryId(path: string, kind: "i" | "v"): string | undefined {
+  const table = kind === "i" ? "images" : "video"
+  const matched = /^content:\/\/media\/([A-Za-z0-9_-]{1,80})\/(images|video)\/media\/([1-9][0-9]*)$/.exec(path)
+  const volume = matched?.[1]
+  return volume === undefined || volume === "external" || volume === "internal" || matched?.[2] !== table
+    ? undefined : `m:${volume}:${kind}:${matched[3]}`
+}
+
+function lensFacts(bound: CameraPreviewResult, devices: ReadonlyArray<CameraDevice>): LensFacts {
+  return {
+    minimum: Math.round(bound.minZoom * 10),
+    maximum: Math.round(bound.maxZoom * 10),
+    flash: bound.hasFlash,
+    aspects: devices.find((item) => item.deviceId === bound.deviceId)?.supportedCaptureAspectRatios ?? [],
+  }
+}
+
+effect function tried(task: () => Promise<unknown>): boolean!! {
+  return try isSuccess(tryPromise(task))
+}
+
+/** Android's CameraX viewfinder and recording through the pinned SDK bridge. */
+export const phoneCamera = Layer.effect(CameraPort, effect {
+  const turn = try Semaphore.make(1)
+  let owner = 0
+  let lenses: ReadonlyArray<CameraDevice> = []
+  return {
+    nativePreview: true,
+    present: registered("ElizaCamera"),
+    volumeKeys: Stream.suspend(() => Stream.as(Stream.fromEventListener(keys(), "alpha:volume-shutter"), undefined)),
+    signals: Stream.callback<CameraSignal>((queue) => effect {
+      const listening = try option(tryPromise(() => events().addListener("error", (notice) => {
+        if (owner > 0 && notice.code === "PREVIEW_STOPPED") Queue.offerUnsafe(queue, { ticket: owner, kind: "preview-lost" })
+      })))
+      const recording = try option(tryPromise(() => events().addListener("recordingState", (notice) => {
+        if (owner > 0 && (notice.isRecording || notice.duration > 0 || notice.fileSize > 0)) {
+          Queue.offerUnsafe(queue, { ticket: owner, kind: notice.isRecording ? "recording-progress" : "recording-finished", size: notice.fileSize })
+        }
+      })))
+      try acquireRelease(succeed([listening, recording]), effect (handles) => {
+        for (const handle of handles) if (Option.isSome(handle)) try ignore(tryPromise(() => handle.value.remove()))
+      })
+    }),
+    bind: () => Effect.void,
+    effect access() {
+      const reply = tryPromise(() => camera().checkPermissions()) catch () => undefined
+      return { camera: grantOf(reply?.camera ?? ""), microphone: grantOf(reply?.microphone ?? "") }
+    },
+    effect ask(kind: "camera" | "microphone"): Grant!! {
+      if (kind === "camera") {
+        const reply = tryPromise(() => camera().requestCameraPermission()) catch () => undefined
+        return grantOf(reply?.camera ?? "")
+      }
+      const reply = tryPromise(() => camera().requestPermissions()) catch () => undefined
+      return grantOf(reply?.microphone ?? "")
+    },
+    start: (ticket: number, lens: Lens, aspect: Aspect) => Semaphore.withPermit(turn, effect {
+      if (owner > ticket) return undefined
+      if (lenses.length === 0) {
+        const listed = tryPromise(() => camera().getDevices()) catch () => undefined
+        lenses = listed?.devices ?? []
+      }
+      const direction = directionOf(lens)
+      const device = lenses.find((item) => item.direction === direction)
+      const bound = tryPromise(() => camera().startPreview({
+        direction, mirror: direction === "front", resolution: { width: 1280, height: 720 },
+        captureAspectRatio: device?.supportedCaptureAspectRatios?.includes(aspect) ? aspect : undefined,
+      })) catch () => undefined
+      owner = bound === undefined ? 0 : ticket
+      return bound === undefined ? undefined : lensFacts(bound, lenses)
+    }),
+    stop: (ticket: number) => Semaphore.withPermit(turn, effect {
+      if (owner !== ticket) return
+      owner = 0
+      try ignore(tryPromise(() => camera().stopPreview()))
+    }),
+    mode: (mode: Mode) => tried(() => camera().setCaptureMode({ mode: mode === "Photo" ? "photo" : "video", quality: recordingOptions.quality })),
+    flash: (mode: Flash) => tried(() => camera().setSettings({ settings: { flash: mode } })),
+    volume: (enabled: boolean) => registered("AlphaDevice") ? ignore(tryPromise(() => volume(enabled))) : Effect.void,
+    zoom: (level: number) => tried(() => camera().setZoom({ zoom: level / 10 })),
+    focus: ({ x, y, viewportX, viewportY }: Point) => tried(() => camera().setFocusPoint({ x: viewportX ?? x, y: viewportY ?? y })),
+    effect capture(save: boolean): (CameraMedia | undefined)!! {
+      const reply = tryPromise(() => camera().capturePhoto({ format: "jpeg", quality: .92, saveToGallery: save, thumbnailOnly: save, ...(save ? {} : { width: 1280 }) })) catch () => undefined
+      if (reply === undefined || (save && !reply.path)) return undefined
+      const path = reply.path ?? ""
+      const source = dataImage(reply.thumbnail ?? reply.base64) || (path === "" ? "" : playable(path))
+      return source ? { path, source, libraryId: reply.libraryId ?? libraryId(path, "i"), mime: "image/jpeg", width: reply.width, height: reply.height } : undefined
+    },
+    record: (sound: boolean) => tried(() => camera().startRecording({ ...recordingOptions, saveToGallery: true, audio: sound })),
+    effect finish(): (CameraMedia | undefined)!! {
+      const reply = tryPromise(() => camera().stopRecording()) catch () => undefined
+      if (!reply?.path || reply.fileSize <= 0 || reply.duration <= 0) return undefined
+      return { path: reply.path, libraryId: libraryId(reply.path, "v"), source: playable(reply.path), mime: reply.mimeType, width: reply.width, height: reply.height, duration: reply.duration, size: reply.fileSize }
+    },
+    release: () => Effect.void,
+  }
+})
+
+interface BrowserFilm {
+  readonly recording: MediaRecorder
+  readonly answer: Deferred.Deferred<Blob | undefined>
+  readonly audio: MediaStream | undefined
+}
+
+/** A real browser camera, using the same single preview and capture lifetime as Android. */
+export const browserCamera = Layer.effect(CameraPort, effect {
+  const turn = try Semaphore.make(1)
+  const signals = try PubSub.sliding<CameraSignal>(4)
+  let owner = 0
+  let opened: MediaStream | undefined
+  let preflight: MediaStream | undefined
+  let view: HTMLVideoElement | null = null
+  let film: BrowserFilm | undefined
+
+  function bound() {
+    if (view !== null) view.srcObject = opened ?? null
+  }
+  function videoFor(lens: Lens, aspect: Aspect): MediaTrackConstraints {
+    return { facingMode: { ideal: lens === "Back" ? "environment" : "user" }, width: { ideal: 1280 }, aspectRatio: { ideal: aspect === "4:3" ? 4 / 3 : 16 / 9 } }
+  }
+  function get(constraints: MediaStreamConstraints): Promise<MediaStream> {
+    return media()?.getUserMedia(constraints) ?? Promise.reject(new Error("Camera unavailable"))
+  }
+  function kept(blob: Blob, width: number, height: number): CameraMedia {
+    const source = urlOf(blob)
+    return { path: source, source, mime: blob.type, width, height, size: blob.size, blob }
+  }
+
+  try addFinalizer(() => sync(() => {
+    if (film?.recording.state === "recording") film.recording.stop()
+    release(film?.audio)
+    release(preflight)
+    release(opened)
+  }))
+
+  return {
+    nativePreview: false,
+    present: media() !== undefined,
+    signals: Stream.fromPubSub(signals),
+    volumeKeys: Stream.empty,
+    bind: (element: HTMLVideoElement | null) => sync(() => { view = element; bound() }),
+    effect access() {
+      const camera = opened !== undefined || preflight !== undefined ? "Granted" : grantOf(try promise(() => permission("camera")))
+      const mic = grantOf(try promise(() => permission("microphone")))
+      return { camera: camera as Grant, microphone: mic as Grant }
+    },
+    effect ask(kind: "camera" | "microphone"): Grant!! {
+      return effect {
+        const stream = try tryPromise(() => get(kind === "camera" ? { video: videoFor("Back", "4:3") } : { audio: true }))
+        if (kind === "camera") { release(preflight); preflight = stream }
+        else { release(stream) }
+        return "Granted" as Grant
+      } catch (cause) => permissionFailure(cause.error) ? "Denied" as Grant : "Unasked" as Grant
+    },
+    start: (ticket: number, lens: Lens, aspect: Aspect) => Semaphore.withPermit(turn, effect {
+      if (owner > ticket) return undefined
+      release(opened)
+      opened = undefined
+      const prepared = preflight
+      preflight = undefined
+      if (lens !== "Back" || aspect !== "4:3") release(prepared)
+      const stream = lens === "Back" && aspect === "4:3" && prepared !== undefined ? prepared : (tryPromise(() => get({ video: videoFor(lens, aspect) })) catch () => undefined)
+      if (stream === undefined || view === null) { release(stream); bound(); return undefined }
+      opened = stream
+      owner = ticket
+      bound()
+      const played = try tried(() => view?.play() ?? Promise.reject(new Error("Camera view is closed")))
+      if (!played) { release(stream); opened = undefined; owner = 0; bound(); return undefined }
+      const track = stream.getVideoTracks()[0]
+      if (track !== undefined) {
+        track.onended = () => { PubSub.publishUnsafe(signals, { ticket, kind: "preview-lost" }) }
+      }
+      return oneTimes
+    }),
+    stop: (ticket: number) => Semaphore.withPermit(turn, sync(() => {
+      if (owner !== ticket) return
+      owner = 0
+      release(opened)
+      opened = undefined
+      bound()
+    })),
+    mode: () => succeed(true),
+    flash: () => succeed(false),
+    volume: () => Effect.void,
+    zoom: () => succeed(false),
+    focus: () => succeed(false),
+    effect capture(): (CameraMedia | undefined)!! {
+      const video = view
+      if (video === null || opened === undefined) return undefined
+      const blob = tryPromise(() => image(video)) catch () => undefined
+      return blob === undefined ? undefined : kept(blob, video.videoWidth, video.videoHeight)
+    },
+    effect record(sound: boolean): boolean!! {
+      const stream = opened
+      if (stream === undefined || film !== undefined) return false
+      const audio = sound ? (tryPromise(() => get({ audio: true })) catch () => undefined) : undefined
+      if (sound && audio === undefined) return false
+      const answer = Deferred.makeUnsafe<Blob | undefined>()
+      const session = effect {
+        const recording = try Effect.try(() => recorder(stream, audio))
+        const chunks: Blob[] = []
+        let size = 0
+        recording.ondataavailable = ({ data }) => {
+          if (data.size > 0 && size + data.size <= recordingOptions.maxFileSize) {
+            chunks.push(data)
+            size += data.size
+            PubSub.publishUnsafe(signals, { ticket: owner, kind: "recording-progress", size })
+          } else if (data.size > 0 && recording.state === "recording") {
+            PubSub.publishUnsafe(signals, { ticket: owner, kind: "recording-finished", size })
+            recording.stop()
+          }
+        }
+        recording.onerror = () => { Deferred.doneUnsafe(answer, succeed(undefined)) }
+        recording.onstop = () => {
+          release(audio)
+          Deferred.doneUnsafe(answer, succeed(chunks.length > 0 ? new Blob(chunks, { type: recording.mimeType }) : undefined))
+        }
+        try Effect.try(() => recording.start(1000))
+        return recording
+      } catch () => undefined
+      if (session === undefined) { release(audio); return false }
+      film = { recording: session, answer, audio }
+      return true
+    },
+    effect finish(): (CameraMedia | undefined)!! {
+      const running = film
+      if (running === undefined) return undefined
+      if (running.recording.state !== "inactive") try ignore(Effect.try(() => running.recording.stop()))
+      const blob = try Deferred.await(running.answer)
+      film = undefined
+      return blob === undefined ? undefined : kept(blob, view?.videoWidth ?? 0, view?.videoHeight ?? 0)
+    },
+    release: (asset: CameraMedia) => asset.blob === undefined ? Effect.void : sync(() => revoke(asset.source)),
+  }
+})

@@ -48,6 +48,7 @@ export interface FilesScene {
   readonly forgotten: string[];
   /** What a text file says, by path, where it is not its default words. */
   readonly texts: Record<string, string>;
+  selectedByPicker: string | undefined;
 }
 
 const file = (volume: string, path: string, mimeType: string, size = 100, modified = 1): Stored => ({ volume, path, directory: false, mimeType, size, modified });
@@ -66,7 +67,7 @@ export function filesScene(): FilesScene {
       folder("primary", "Documents/Old"),
       file("card", "song.mp3", "audio/mpeg", 4_000, 2),
     ],
-    trash: [], shared: [], opened: [], calls: [], gate: Promise.resolve(), now: 10, listMost: 5_000, queryMost: 500, changed: () => {}, watching: undefined, refusing: [], forgotten: [], texts: {},
+    trash: [], shared: [], opened: [], calls: [], gate: Promise.resolve(), now: 10, listMost: 5_000, queryMost: 500, changed: () => {}, watching: undefined, refusing: [], forgotten: [], texts: {}, selectedByPicker: undefined,
   };
 }
 
@@ -133,7 +134,7 @@ export function elizaFiles(scene: FilesScene): Faked {
       storageQuery({ text, mimePrefix, documents, folder }) {
         called("storageQuery");
         if (denied()) return Promise.resolve(refused());
-        const entries = scene.stored.filter((one) => !one.directory
+        const entries = scene.stored.filter((one) => one.volume === "primary" && !one.directory
           && (folder === undefined || parent(one.path) === folder)
           && (text === undefined || leaf(one.path).toLowerCase().includes(text.toLowerCase()))
           && (mimePrefix === undefined || one.mimeType.startsWith(mimePrefix))
@@ -233,10 +234,23 @@ export function elizaFiles(scene: FilesScene): Faked {
 
 /** The documents the fake phone holds for Alpha, as eliza's `SelectedDocuments` host answers: a text's words, a picture's address, a PDF's pages. */
 export function selectedDocuments(scene: FilesScene): Faked {
-  return plugin<SelectedDocumentsPlugin, Record<string, never>>(() => {
+  return plugin<SelectedDocumentsPlugin & {
+    pickSelected(): Promise<unknown>;
+    attachmentSelected(options: { selectionId: string }): Promise<unknown>;
+  }, Record<string, never>>(() => {
     const held = (selectionId: string) => scene.stored.find((one) => `selection:${one.path}` === selectionId && !scene.forgotten.includes(selectionId));
     return {
       restoreSelected: () => Promise.resolve({ status: "unavailable", message: "" }),
+      pickSelected() {
+        const path = scene.selectedByPicker;
+        scene.selectedByPicker = undefined;
+        return Promise.resolve({ selectionId: path ? `selection:${path}` : "" });
+      },
+      attachmentSelected({ selectionId }) {
+        const found = held(selectionId);
+        if (!found) return Promise.reject(new Error("Access ended"));
+        return Promise.resolve({ name: leaf(found.path), mimeType: found.mimeType, dataBase64: btoa(scene.texts[found.path] ?? `The words of ${leaf(found.path)}`) });
+      },
       describeSelected({ selectionId }) {
         const found = held(selectionId);
         return Promise.resolve(found ? { status: "selected", selectionId, name: leaf(found.path), mimeType: found.mimeType, uri: `content://${found.path}`, size: found.size, modified: found.modified } : { status: "renamed-reselect", message: "" });

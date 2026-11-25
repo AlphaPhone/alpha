@@ -1,14 +1,14 @@
 // spec/app/inbox/suggestion.md, "Story: Review what is offered into my email"
-import * as Inbox from "../../gen/app__inbox.effect.vibe"
 import * as Suggestion from "../../gen/app__inbox__suggestion.effect.vibe"
 import type { Effect as Out, Event, Target } from "../../gen/app__inbox__suggestion.effect.vibe"
 import * as Drafts from "../../gen/app__inbox__drafts.effect.vibe"
 import type { Actor } from "../../gen/app__inbox__access.ts"
 import { held } from "../../gen/app__inbox__shelf.effect.vibe"
-import { Machine as Shell } from "../../gen/app__shell.effect.vibe"
-import { type Job, contained, reacting, run, started, together, untimed } from "../runtime/reactor.vibe"
-import { Letters } from "./composer.vibe"
+import { Machine as Shell, showing } from "../../gen/app__shell.effect.vibe"
+import { type Job, contained, hearing, reacting, run, started, together, untimed } from "../runtime/reactor.vibe"
+import { Letters, policy } from "./composer.vibe"
 import { Mail } from "./gmail.vibe"
+import { ownerChanges } from "./mailbox.vibe"
 
 /** The longest text a draft takes, in characters: Gmail's own limit on a message, with room to spare. */
 export const longest = 100_000
@@ -62,7 +62,7 @@ effect function startedWith(target: Target, account: number, message: number, te
   const card = message === 0 ? undefined : ledger.card(message)
   const sender = card === undefined ? "" : /<([^>]+)>/u.exec(card.from)?.[1] ?? card.from.trim()
   const replying = target === "NewReply"
-  const event: Drafts.Event = { type: "startedWith", kind: replying ? "Reply" : "Fresh", account, replyTo: false, addressable: !replying || sender !== "", policy: ledger.limits(account).policy }
+  const event: Drafts.Event = { type: "startedWith", kind: replying ? "Reply" : "Fresh", account, replyTo: false, addressable: !replying || sender !== "", policy }
   const sent = try exit(composer.send(event, "Owner"))
   if (!Exit.isSuccess(sent) || !sent.value.state.open) return
   const subject = card === undefined ? "" : card.subject.toLowerCase().startsWith("re:") ? card.subject : `Re: ${card.subject}`
@@ -93,13 +93,7 @@ const gone = started(effect {
   })
 }, "a draft gone")
 
-const sessions = started(effect {
-  const list = try Inbox.Machine
-  const offer = try Suggestion.Machine
-  try Stream.runForEach(Stream.drop(Stream.changes(Stream.map(list.changes, (mailbox) => mailbox.signedIn)), 1), effect () => {
-    try contained(offer.send({ type: "sessionChanged" }, "World"), "a new cloud session")
-  })
-}, "a new cloud session")
+const sessions = hearing(ownerChanges, Suggestion.Machine, (): Event => ({ type: "sessionChanged" }), "World")
 
 /** Where text handed over from elsewhere in Alpha goes: the draft open, else a reply to the message `message` of `account`, else a new email. */
 export interface Aim {
@@ -120,7 +114,9 @@ export effect function useInEmail(text: string, source: string, aim: Aim): boole
   }
   const sent = try exit((try Suggestion.Machine).send(event, "Owner"))
   if (!Exit.isSuccess(sent)) return false
-  try ignore((try Shell).send({ type: "openView", view: "Inbox" }))
+  const shell = try Shell
+  if (!(showing(try shell.get(), "Inbox"))) try ignore(shell.send({ type: "openView", view: "Inbox" }))
+  try ignore(shell.send({ type: "raise", detent: "Bar" }))
   return true
 }
 

@@ -68,6 +68,8 @@ export type InboxComposerProps = Pick<InboxDraftStatusProps, "keeping" | "gmail"
     onSend?: () => void;
     /** Reviews saving it to Gmail's Drafts, or over its copy there. */
     onSaveToGmail?: () => void;
+    /** Reads a copy in Gmail before it can be reviewed for replacement. */
+    onCheckCopy?: () => void;
     /** Reviews deleting its copy in Gmail's Drafts, which cannot be undone. */
     onDeleteGmailCopy?: () => void;
     /** Sets it aside, whole as it is, and leaves the composer. */
@@ -85,11 +87,11 @@ export type InboxComposerProps = Pick<InboxDraftStatusProps, "keeping" | "gmail"
  */
 export function InboxComposer({
   kind, accounts, from, onFromChange, to, cc, bcc, subject, onSubjectChange, text, onTextChange, attachments, onRemoveAttachment, onAttach, clash = false,
-  onRestoreMine, onUseSaved, notice, onNoticeAction, outcome, storage, onReloadStorage, keeping, gmail, sent, onKeepAgain, onSend, onSaveToGmail, onDeleteGmailCopy, onSetAside, onDiscard,
+  onRestoreMine, onUseSaved, notice, onNoticeAction, outcome, storage, onReloadStorage, keeping, gmail, sent, onKeepAgain, onSend, onSaveToGmail, onCheckCopy, onDeleteGmailCopy, onSetAside, onDiscard,
 }: InboxComposerProps) {
   const [more, setMore] = useState(false);
   const showMore = more || cc.recipients.length > 0 || bcc.recipients.length > 0 || cc.value !== "" || bcc.value !== "";
-  const menu = onSaveToGmail || onDeleteGmailCopy || onDiscard;
+  const menu = onSaveToGmail || onCheckCopy || onDeleteGmailCopy || onDiscard;
   return (
     <Screen
       title={titles[kind]}
@@ -102,6 +104,7 @@ export function InboxComposer({
               <MenuTrigger asChild><Button variant="ghost" size="icon" aria-label="More actions"><Ellipsis /></Button></MenuTrigger>
               <MenuContent>
                 {onSaveToGmail ? <MenuItem onSelect={onSaveToGmail}><Cloud />Save to Gmail</MenuItem> : null}
+                {onCheckCopy ? <MenuItem onSelect={onCheckCopy}><Cloud />Check Gmail copy</MenuItem> : null}
                 {onDeleteGmailCopy ? <MenuItem destructive onSelect={onDeleteGmailCopy}><CloudOff />Delete Gmail copy</MenuItem> : null}
                 {onDiscard ? <MenuItem destructive onSelect={onDiscard}><Trash2 />Discard</MenuItem> : null}
               </MenuContent>
@@ -118,7 +121,7 @@ export function InboxComposer({
         <>
           {notice ? <InboxNotice kind={notice} onAction={onNoticeAction} /> : null}
           {outcome ? <InboxSendOutcome {...outcome} /> : null}
-          {clash && onRestoreMine && onUseSaved ? <InboxDraftClash onRestoreMine={onRestoreMine} onUseSaved={onUseSaved} /> : null}
+          {clash && onRestoreMine ? <InboxDraftClash onRestoreMine={onRestoreMine} onUseSaved={onUseSaved} /> : null}
           <div className="flex flex-col">
             <InboxFromField accounts={accounts} value={from} onChange={onFromChange} />
             <InboxRecipientField label="To" {...to} />

@@ -21,21 +21,25 @@ type Kind = Reminder | Prompt | Routine | Schedule
 type KindFilter = AllKinds | Reminders | Prompts | Routines | Schedules
 type StatusFilter = AnyStatus | Active | Inactive | Removed
 type Badge = On | Off | WaitingForYou | HistoryKept
+type Place = ListingRows | ListingDetail({ row: int }) | ListingAdd
 type Effect = ReadList({ ticket: int, owner: int })
 type Listing = {
   owner: int, list: R::Read, count: int, kind: KindFilter, status: StatusFilter,
   sheet: bool, pickedKind: KindFilter, pickedStatus: StatusFilter,
+  place: Place, complete: bool,
 }
 type Moved = { state: Listing, out: List[Effect] }
 
 pure val initial: Listing = {
   owner: 0, list: R::unread, count: 0, kind: AllKinds, status: AnyStatus,
   sheet: false, pickedKind: AllKinds, pickedStatus: AnyStatus,
+  place: ListingRows, complete: false,
 }
 
 pure val ticketValues = Set(1, 2, 3)
 pure val countValues = Set(-1, 0, 3)
 pure val ownerValues = Set(0, 1, 2)
+pure val rowValues = Set(0, 1, 2)
 ```
 
 ### The list is read from the agent for the owner signed in, one reading at a time
@@ -49,8 +53,26 @@ pure def readList(l: Listing): Moved =
 
 pure def canListRead(l: Listing, ticket: int, count: int): bool = R::canAnswer(l.list, ticket) and count >= 0
 
-pure def listRead(l: Listing, ticket: int, ok: bool, count: int): Listing =
-  { ...l, list: R::answer(l.list, ok), count: if (ok) count else l.count }
+pure def listRead(l: Listing, ticket: int, ok: bool, count: int, complete: bool): Listing =
+  { ...l, list: R::answer(l.list, ok), count: if (ok) count else l.count, complete: ok and complete }
+```
+
+### From the list the owner can open one row or Add to Workflows, and Back returns to the same filters
+
+```quint
+pure def canOpenRow(l: Listing, row: int): bool = l.place == ListingRows and not(l.sheet) and l.owner >= 1 and l.count >= 1 and row >= 1
+
+pure def openRow(l: Listing, row: int): Listing = { ...l, place: ListingDetail({ row: row }) }
+
+pure def canOpenAdd(l: Listing): bool = l.place == ListingRows and not(l.sheet) and l.owner >= 1
+
+pure def openAdd(l: Listing): Listing = { ...l, place: ListingAdd }
+
+pure def canClosePlace(l: Listing): bool = l.place != ListingRows
+
+pure def closePlace(l: Listing): Listing = { ...l, place: ListingRows }
+
+pure def alwaysOnlyTheListShowsFilters(l: Listing): bool = l.sheet implies l.place == ListingRows
 ```
 
 ### A row says it waits for the owner whenever one of its runs waits for an approval, whether or not notifications are on; a removed row says its history is kept
@@ -94,7 +116,7 @@ pure def lawFiltersPartitionTheRows(kind: Kind, active: bool, removed: bool): bo
 Closing the sheet any other way leaves the list as it was.
 
 ```quint
-pure def canOpenFilters(l: Listing): bool = not(l.sheet)
+pure def canOpenFilters(l: Listing): bool = l.place == ListingRows and not(l.sheet)
 
 pure def openFilters(l: Listing): Listing = { ...l, sheet: true, pickedKind: l.kind, pickedStatus: l.status }
 

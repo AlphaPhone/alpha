@@ -20,6 +20,10 @@ import com.getcapacitor.annotation.Permission;
 public final class AlphaTelephonyPlugin extends TelephonyPlugin {
  @Override protected SmsTelephonyConfiguration configuration() { return AlphaTelephony.CONFIGURATION; }
 
+ @Override protected DeletionWindow deletionWindow() {
+  return (kind, target) -> AlphaTelephonyDeletions.stage(getContext(), kind, target);
+ }
+
  @Override protected void handleOnResume() {
   super.handleOnResume();
   if (admitted() && unlockedForeground() && SmsNoticeOpenRequest.current() != null) {

@@ -6,8 +6,8 @@ import * as Drafts from "../../gen/app__inbox__drafts.effect.vibe"
 import { canAttach } from "../../gen/app__inbox__letter.effect.vibe"
 import { Machine as Shell } from "../../gen/app__shell.effect.vibe"
 import { type Job, answer, contained, reacting, run, started, together, untimed } from "../runtime/reactor.vibe"
-import { type Attached, Letters } from "./composer.vibe"
-import { Mail } from "./gmail.vibe"
+import { type Attached, Letters, policy } from "./composer.vibe"
+import { ownerChanges } from "./mailbox.vibe"
 
 module web {
   /** Ask the owner for one file through the page's own picker: the file chosen, or none where the picker was put away. @throws {never} */
@@ -70,9 +70,7 @@ export const incoming = Layer.sync(Incoming, () => {
 
 // spec/app/inbox/adding.md, "A file is attached to the draft open only once the picker gives one that fits within the room its account leaves; one too large, unreadable or without room is refused and said so"
 /** The picker's answer under `ticket`: what the owner chose, how many MiB it counts for, and whether the draft has room for it. */
-effect function picked(ticket: number): Event!!(Incoming | Drafts.Machine | Mail) {
-  const composer = try (try Drafts.Machine).get()
-  const { policy } = (try Mail).limits(composer.letter.account)
+effect function picked(ticket: number): Event!!(Incoming | Drafts.Machine) {
   const file = tryPromise({ try: () => chooseFile(), catch: () => undefined }) catch () => undefined
   if (file === undefined || file === null) return { type: "picked", ticket, result: "Cancelled", mib: 1, room: false }
   const mib = mibOf(file.size)
@@ -81,17 +79,17 @@ effect function picked(ticket: number): Event!!(Incoming | Drafts.Machine | Mail
   if (data === undefined) return { type: "picked", ticket, result: "Unreadable", mib, room: false }
   const holder = try Incoming
   holder.hold({ name: file.name, mimeType: file.type || "application/octet-stream", size: file.size, data }, "Picker")
+  const composer = try (try Drafts.Machine).get()
   const result: Picked = "Fits"
   return { type: "picked", ticket, result, mib, room: composer.open && canAttach(composer.letter, policy, mib) }
 }
 
 // spec/app/inbox/adding.md, "Nothing joins a draft but a file that fit, a file the owner saw, or a contact picked for it"
 /** The file on its way joins `draft`, or starts a new message from `account` where no draft is named. */
-effect function joined(draft: number, account: number, mib: number): void!!(Incoming | Drafts.Machine | Letters | Mail) {
+effect function joined(draft: number, account: number, mib: number): void!!(Incoming | Drafts.Machine | Letters) {
   const file = (try Incoming).take()
   if (file === undefined) return
   const composer = try Drafts.Machine
-  const { policy } = (try Mail).limits(draft !== 0 ? (try composer.get()).letter.account : account)
   const words = try Letters
   const event: Drafts.Event = draft !== 0 ? { type: "attached", now: untimed, draft, mib, policy } : { type: "startedWithFile", account, mib, policy }
   const sent = try exit(composer.send(event, "Owner"))
@@ -101,7 +99,7 @@ effect function joined(draft: number, account: number, mib: number): void!!(Inco
   words.set(into, { ...before, files: [...before.files, file] })
 }
 
-function carry(fx: Out): Job<Event, Incoming | Drafts.Machine | Letters | Mail | Shell, []> {
+function carry(fx: Out): Job<Event, Incoming | Drafts.Machine | Letters | Shell, []> {
   return match (fx) {
     when { tag: "PickFile", let ticket }: answer("pick", picked(ticket), { type: "picked", ticket, result: "Cancelled", mib: 1, room: false });
     when { tag: "Attach", let draft, let account, let mib }: run("attach", joined(draft, account, mib));
@@ -125,9 +123,10 @@ const closing = started(effect {
 }, "a draft closed")
 
 const sessions = started(effect {
-  const list = try Inbox.Machine
   const adding = try Adding.Machine
-  try Stream.runForEach(Stream.drop(Stream.changes(Stream.map(list.changes, (mailbox) => mailbox.signedIn)), 1), effect () => {
+  const incoming = try Incoming
+  try Stream.runForEach(ownerChanges, effect () => {
+    incoming.take()
     try contained(adding.send({ type: "sessionChanged" }), "a new cloud session")
   })
 }, "a new cloud session")

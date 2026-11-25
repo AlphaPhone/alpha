@@ -1,5 +1,5 @@
 // spec/app/inbox/index.md, "Story: See my mail"
-import type { GoogleStatus, MailCapabilities, MailCard, MailMessage, MailOperation, MailSearch } from "@elizaos/cloud/client";
+import type { GoogleStatus, MailCard, MailMessage, MailOperation, MailSearch } from "@elizaos/cloud/client";
 import type { Route } from "./routes.ts";
 
 /** A message of the fake mailbox: eliza's card of it, and what reading it whole gives. */
@@ -10,11 +10,28 @@ export interface Stored {
   files: MailMessage["attachments"];
 }
 
+type DraftFixture = {
+  readonly id: string;
+  readonly messageId: string;
+  readonly providerDigest: string;
+  readonly content: {
+    readonly to: readonly string[];
+    readonly cc: readonly string[];
+    readonly bcc: readonly string[];
+    readonly subject: string;
+    readonly bodyText: string;
+    readonly plainText: boolean;
+    readonly threaded: boolean;
+    readonly attachmentCount: number;
+  };
+};
+
 /** What the fake cloud holds of the owner's Gmail, and how it behaves; a journey changes it between steps. */
 export interface InboxScene {
   /** The owner's Google connection, by its address, with what Google consented to; none where it is undefined. */
   google: { email: string; connection: string; capabilities: GoogleStatus["grantedCapabilities"] } | undefined;
   readonly mail: Stored[];
+  readonly drafts: Map<string, DraftFixture>;
   /** Gmail's history: it moves with every change to the mailbox. */
   history: number;
   /** Every request is lost on the way, as when the phone is offline. */
@@ -25,12 +42,6 @@ export interface InboxScene {
   readonly changes: string[];
   /** The name of every file a dispatched send carried. */
   readonly attached: string[];
-  /** The largest total of attachments, in bytes, the cloud reports Gmail takes on one email of the account. */
-  limit: number;
-  /** Whether the cloud reads a message's attachments for the account, so that a forward can carry them. */
-  forwards: boolean;
-  /** Each part of an original a dispatched send carried, as `<message>/<part>`. */
-  readonly forwarded: string[];
   /** The answer to a send's dispatch is lost on the way: after Gmail sent it, or before it reached Gmail. */
   lost?: "sent" | "unsent";
   /** Google's answer about the owner's access never comes, as on a network that hangs. */
@@ -60,8 +71,7 @@ export function inboxScene(): InboxScene {
       letter(3, "Win a prize", ["SPAM"]),
       letter(4, "Notes from me", ["SENT"]),
     ],
-    history: 500, offline: false, revoked: false, changes: [], attached: [],
-    limit: 25 * 1_048_576, forwards: true, forwarded: [],
+    history: 500, offline: false, revoked: false, changes: [], attached: [], drafts: new Map(),
   };
 }
 
@@ -118,23 +128,15 @@ export function inboxRoutes(scene: InboxScene): Route[] {
       if (!url.pathname.startsWith(`${google}/`)) return;
       if (scene.offline) return lost();
       if (!scene.revoked) revokedSeen = false;
-      if (scene.revoked && (url.pathname !== `${google}/status` || revokedSeen)) {
+      if (scene.revoked && (![`${google}/status`, `${google}/accounts`].includes(url.pathname) || revokedSeen)) {
         revokedSeen = true;
         return refused(403, "google_reauth_required");
       }
       return undefined;
     },
-    (request, url) => (scene.stalled && url.pathname === `${google}/status` ? new Promise<Response>(() => undefined) : undefined),
+    (request, url) => (scene.stalled && [`${google}/status`, `${google}/accounts`].includes(url.pathname) ? new Promise<Response>(() => undefined) : undefined),
     (request, url) => (request.method === "GET" && url.pathname === `${google}/status` ? Response.json(status(scene)) : undefined),
-    (request, url) => {
-      if (request.method !== "GET" || url.pathname !== `${google}/gmail/inbox-v1/capabilities`) return;
-      const capabilities: MailCapabilities = {
-        version: 1, from: scene.google?.email ?? "", reads: scene.forwards ? ["search", "read", "attachment"] : ["search", "read"],
-        kinds: ["send", "draft-create", "draft-replace", "draft-delete", "archive", "unarchive", "trash", "untrash", "mark-read", "mark-unread"],
-        attachmentPolicy: { mimeTypes: [], maxBytes: scene.limit },
-      };
-      return Response.json(capabilities);
-    },
+    (request, url) => (request.method === "GET" && url.pathname === `${google}/accounts` ? Response.json(scene.google === undefined ? [] : [status(scene)]) : undefined),
     (request, url) => {
       const [, to, subject] = /^in:sent to:(\S*) subject:"(.*)"$/u.exec(url.searchParams.get("query") ?? "") ?? [];
       if (request.method !== "GET" || url.pathname !== `${google}/gmail/search` || to === undefined || subject === undefined) return;
@@ -161,6 +163,36 @@ export function inboxRoutes(scene: InboxScene): Route[] {
       return Response.json(read);
     },
     (request, url) => {
+      if (request.method !== "GET" || url.pathname !== `${google}/gmail/inbox-v1/thread`) return;
+      const threadId = url.searchParams.get("threadId");
+      const historyId = String(scene.history);
+      const expected = url.searchParams.get("historyId");
+      const offset = Number(url.searchParams.get("offset") ?? "0");
+      const thread = scene.mail.filter(({ card }) => card.threadId === threadId)
+        .toSorted((left, right) => left.card.receivedAt.localeCompare(right.card.receivedAt));
+      if (!thread.length) return refused(404, "not_found");
+      if (expected !== null && expected !== historyId) return refused(409, "stale_revision");
+      const messages = thread.slice(offset, offset + 25).map((stored) => ({
+        message: stored.card, bodyText: stored.body, bodyHtml: stored.html,
+        bodyHtmlStatus: stored.html === null ? "none" : "available", attachments: stored.files,
+        historyId: stored.card.metadata.historyId,
+      }));
+      const next = offset + messages.length;
+      return Response.json({ version: 1, threadId, historyId, total: thread.length, offset, nextOffset: next < thread.length ? next : null, messages });
+    },
+    (request, url) => {
+      if (request.method !== "GET") return;
+      if (url.pathname === `${google}/gmail/inbox-v1/drafts`) {
+        const drafts = [...scene.drafts.values()].map(({ id, messageId, content }) => ({
+          draftId: id, messageId, subject: content.subject, to: content.to, snippet: content.bodyText, updatedAt: null,
+        }));
+        return Response.json({ version: 1, drafts, nextPageToken: null });
+      }
+      if (url.pathname !== `${google}/gmail/inbox-v1/draft`) return;
+      const draft = scene.drafts.get(url.searchParams.get("draftId") ?? "");
+      return draft ? Response.json({ ...draft, version: 1 }) : refused(404, "not_found");
+    },
+    (request, url) => {
       if (request.method !== "POST" || url.pathname !== operations) return;
       return request.json().then(({ requestId, proposal }: { requestId: string; proposal: { kind: MailOperation["receipt"]["kind"]; messageId: string } }) => {
         asked.set(requestId, proposal);
@@ -180,10 +212,9 @@ export function inboxRoutes(scene: InboxScene): Route[] {
     (request, url) => {
       const requestId = new RegExp(`^${operations}/([^/]+)/dispatch$`, "u").exec(url.pathname)?.[1];
       if (request.method !== "POST" || requestId === undefined || asked.get(requestId)?.kind !== "send") return;
-      return request.json().then(({ proposal }: { proposal: { to: string[]; subject: string; bodyText: string; attachments?: { name: string }[]; forwardAttachments?: { messageId: string; partIds: string[] } } }) => {
+      return request.json().then(({ proposal }: { proposal: { to: string[]; subject: string; bodyText: string; attachments?: { name: string }[] } }) => {
         scene.changes.push(`send ${proposal.to.join(",")} ${proposal.subject}`);
         scene.attached.push(...(proposal.attachments ?? []).map((file) => file.name));
-        scene.forwarded.push(...(proposal.forwardAttachments?.partIds ?? []).map((part) => `${proposal.forwardAttachments?.messageId}/${part}`));
         scene.mail.push({ ...letter(scene.mail.length + 100, proposal.subject, ["SENT"], proposal.bodyText), card: { ...letter(scene.mail.length + 100, proposal.subject, ["SENT"]).card, to: proposal.to } });
         return Response.json(operation(requestId, "send", "succeeded"));
       });
@@ -192,11 +223,21 @@ export function inboxRoutes(scene: InboxScene): Route[] {
       const requestId = new RegExp(`^${operations}/([^/]+)/dispatch$`, "u").exec(url.pathname)?.[1];
       const kind = requestId === undefined ? undefined : asked.get(requestId)?.kind;
       if (request.method !== "POST" || requestId === undefined || (kind !== "draft-create" && kind !== "draft-replace" && kind !== "draft-delete")) return;
-      return request.json().then(({ proposal }: { proposal: { subject?: string; draftId?: string } }) => {
+      return request.json().then(({ proposal }: { proposal: { to?: string[]; cc?: string[]; bcc?: string[]; subject?: string; bodyText?: string; mode?: string; draftId?: string; attachments?: unknown[] } }) => {
         scene.changes.push(`${kind} ${proposal.subject ?? proposal.draftId ?? ""}`);
         const done = operation(requestId, kind, "succeeded");
         const draftId = proposal.draftId ?? `d${scene.changes.length}`;
-        return Response.json(kind === "draft-delete" ? done : { ...done, receipt: { ...done.receipt, providerResult: { draftId, messageId: `m${draftId}`, providerDigest: "b".repeat(64) } } });
+        if (kind === "draft-delete") {
+          scene.drafts.delete(draftId);
+          return Response.json(done);
+        }
+        const messageId = `m${draftId}`;
+        const providerDigest = (kind === "draft-create" ? "b" : "c").repeat(64);
+        scene.drafts.set(draftId, {
+          id: draftId, messageId, providerDigest,
+          content: { to: proposal.to ?? [], cc: proposal.cc ?? [], bcc: proposal.bcc ?? [], subject: proposal.subject ?? "", bodyText: proposal.bodyText ?? "", plainText: true, threaded: proposal.mode !== "compose", attachmentCount: proposal.attachments?.length ?? 0 },
+        });
+        return Response.json({ ...done, receipt: { ...done.receipt, providerResult: { draftId, messageId, providerDigest } } });
       });
     },
     (request, url) => {
