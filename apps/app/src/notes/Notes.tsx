@@ -53,6 +53,9 @@ function TransferNotice({ runtime }: { readonly runtime: Runtime }) {
   </Alert>;
 }
 
+/** A row of a note's actions menu, as develop's: 48px, 18px icons, a 10px corner. */
+const noteAction = "min-h-12 rounded-option px-3 [&_svg:not([class*='size-'])]:size-4.5";
+
 function EditorScreen({ runtime, saved }: { readonly runtime: Runtime; readonly saved: DraftWords }) {
   const writing = useEditor(runtime);
   const actions = useActions(runtime);
@@ -85,13 +88,14 @@ function EditorScreen({ runtime, saved }: { readonly runtime: Runtime; readonly 
     if (!open && actions.can({ type: "closeMenu" }, "Owner")) void actions.send({ type: "closeMenu" }, "Owner");
   }}>
     <MenuTrigger asChild><Button aria-label="Note actions" size="icon" variant="ghost"><Ellipsis /></Button></MenuTrigger>
-    <MenuContent align="end">
+    <MenuContent align="end" alignOffset={-60} sideOffset={6} className="rounded-lg bg-card p-1.5 shadow-lg">
       {shared && actions.state?.open && <>
-        <MenuItem onSelect={() => void actions.send({ type: "share", channel: "Email", mark: 0 }, "Owner")}><Mail /> Share by email</MenuItem>
-        <MenuItem onSelect={() => void actions.send({ type: "share", channel: "Messages", mark: 0 }, "Owner")}><MessageSquare /> Share in Messages</MenuItem>
+        <MenuItem className={noteAction} onSelect={() => void actions.send({ type: "share", channel: "Email", mark: 0 }, "Owner")}><Mail /> Share by email</MenuItem>
+        <MenuItem className={noteAction} onSelect={() => void actions.send({ type: "share", channel: "Messages", mark: 0 }, "Owner")}><MessageSquare /> Share in Messages</MenuItem>
       </>}
-      {exportable && <MenuItem onSelect={() => void transfer.send(exporting, "Owner")}><FileDown /> Save as text</MenuItem>}
-      {deletable && <MenuItem destructive onSelect={() => send(deletion)}><Trash2 /> Delete</MenuItem>}
+      {exportable && <MenuItem className={noteAction} onSelect={() => void transfer.send(exporting, "Owner")}><FileDown /> Save as text</MenuItem>}
+      {deletable && (shared && actions.state?.open || exportable) && <div role="separator" className="my-1 border-t border-border" />}
+      {deletable && <MenuItem className={noteAction} onSelect={() => send(deletion)}><Trash2 /> Delete</MenuItem>}
     </MenuContent>
   </Menu>;
   return (
