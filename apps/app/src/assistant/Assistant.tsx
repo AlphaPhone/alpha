@@ -405,7 +405,8 @@ export function Assistant({ runtime, messageActions, speech, canReadAloud = fals
   const searchRoute = shell.state?.route;
   const beginSearch = searchRoute === undefined ? undefined : () => void runtime.runPromiseExit(openChatSearch(searchRoute));
   const history = useHistorySheets(chats, search, layers, seen, free, beginSearch, () => focusChatActions(composerRef.current));
-  const lines = !shown || (shown.page.status === "Idle" && shown.chosen === 0) ? emptyLines : seen.pages.get(shown.page.ticket)?.lines ?? emptyLines;
+  const page = shown === undefined || (shown.page.status === "Idle" && shown.chosen === 0) ? undefined : seen.pages.get(shown.page.ticket);
+  const lines = page?.lines ?? emptyLines;
   const canPreview = attachments.can({ type: "preview", attachment: 1 });
   const preview = useCallback((file: Attached) => void runtime.runPromise(previewFile(file)), [runtime]);
   const onSettingsPage = shell.state && showing(shell.state, "Settings") && shell.state.assistant !== "Bar" && shell.can(back);
@@ -502,8 +503,10 @@ export function Assistant({ runtime, messageActions, speech, canReadAloud = fals
     void composer.send(hold);
   };
   // spec/app/assistant/chats.md, "Older or newer messages are read around a message of the conversation showing"
-  const earlier = { type: "scroll", around: board.numbered(lines[0]?.id ?? "") } as const;
-  const later = { type: "scroll", around: board.numbered(lines.at(-1)?.id ?? "") } as const;
+  const earlier = page?.bounds?.earlier;
+  const later = page?.bounds?.later;
+  const readEarlier = { type: "scroll", around: board.numbered(earlier ?? "") } as const;
+  const readLater = { type: "scroll", around: board.numbered(later ?? "") } as const;
   const replyWords = replyBlocks(seen.reply, true).words;
   const onOpenLink = messageActions?.openLink;
   const writingReply = replyWords !== "" ? [{ id: "reply", author: "alpha", text: replyWords, streaming: true, onOpenLink } as const] : [];
@@ -576,13 +579,13 @@ export function Assistant({ runtime, messageActions, speech, canReadAloud = fals
           holdMessage: open ? holdMessage : undefined,
           liveMessages: [...(brief === "" ? [] : [{ id: `briefing:${subject}`, author: "alpha" as const, text: brief, onOpenLink }]), ...writingReply, ...failed, ...mediaCards, ...mediaNote, ...recordingSummary],
           interim: open && shown.around === 0 && !talking.context.sensitive ? interim : undefined,
-          position: { page: `${shown.chosen}/${shown.page.ticket}`, around: board.messageId(shown.around) },
+          position: { page: `${shown.chosen}/${shown.page.ticket}`, around: board.messageId(shown.around), earlier, later },
           visible: open,
           status: shown.page.status === "Loading" ? "loading" : shown.page.status === "Failed" ? "failed" : "loaded",
           turn: status === undefined ? undefined : { status, label: seen.label === "" ? undefined : seen.label, onCheck: checkable ? () => void conversation.send(check) : undefined },
           onRetry: chats.can({ type: "reread" }) ? () => void chats.send({ type: "reread" }) : undefined,
-          onEarlier: earlier.around > 1 && chats.can(earlier) ? () => void chats.send(earlier) : undefined,
-          onLater: later.around < shown.messages && chats.can(later) ? () => void chats.send(later) : undefined,
+          onEarlier: earlier !== undefined && chats.can(readEarlier) ? () => void chats.send(readEarlier) : undefined,
+          onLater: later !== undefined && chats.can(readLater) ? () => void chats.send(readLater) : undefined,
           onReturnToOriginal: chats.can({ type: "returnToOriginal", ...free }) ? () => void chats.send({ type: "returnToOriginal", ...free }) : undefined,
         }}
         composer={{
