@@ -1,10 +1,11 @@
 // spec/app/account/billing.md, "The plans and their prices are read from Cloud, and only the newest reading is taken"; spec/app/account/plan.md, "Story: Know my plan"; spec/app/settings/index.md, "Each page links to what another area owns there"; spec/app/shell/layers.md, "Story: Keep a sheet or a dialog above the phone"; spec/kit/read.md, "Story: Read from outside"
-import { Button, cn, Sheet, SheetContent, Spinner, StatusDot } from "@repo/ui";
-import { ChevronDown, X } from "lucide-react";
+import { AuthMark, Button, cn, Dialog, DialogContent, DialogTitle, Sheet, SheetContent, Spinner, StatusDot } from "@repo/ui";
+import { ChevronDown, RotateCw, X } from "lucide-react";
 import { Layer } from "effect";
-import { useSyncExternalStore } from "react";
+import { useCallback, useRef, useState, useSyncExternalStore } from "react";
 import * as Billing from "../../gen/app__account__billing.effect.vibe";
 import { useMachine as useBilling } from "../../gen/app__account__billing.react.ts";
+import { useMachine as useSettings } from "../../gen/app__settings.react.ts";
 import { useMachine } from "../../gen/app__shell__layers.react.ts";
 import { listed, top } from "../../gen/app__shell__layers.ts";
 import { area, type Alpha, type Area, type Resident, type Shown } from "../runtime/area.tsx";
@@ -153,7 +154,44 @@ export function AccountStatus({ alpha }: { alpha: Alpha }) {
   const label = current.tag === "Read" ? current.contact || "Signed in"
     : current.tag === "SignInRequired" ? "Signed out" : "Account unavailable";
   return <StatusDot status={current.tag === "Read" ? "ok" : "off"} label={label} showLabel
-    className={cn("flex gap-1.5 text-caption leading-normal text-muted-foreground [&_circle]:fill-current [&_svg]:size-2.5", current.tag === "Read" && "[&_svg]:text-status-ok")} />;
+    className={cn("flex gap-3 text-caption leading-normal text-[#6b6b6b] dark:text-[#8f8f8f] [&_circle]:r-[6px] [&_circle]:fill-current [&_circle]:stroke-none [&_svg]:size-2 [&_svg]:text-current", current.tag === "Read" && "[&_svg]:text-status-ok")} />;
+}
+
+/** The browser's account recovery page is contained in Alpha's phone canvas. */
+function BrowserAccount({ open, reading, retry, close }: { open: boolean; reading: boolean; retry: () => void; close: () => void }) {
+  const [host, setHost] = useState<HTMLDivElement | null>(null);
+  const openerRef = useRef<Element | null>(null);
+  const panelRef = useRef<HTMLDivElement>(null);
+  const connect = useCallback((node: HTMLDivElement | null) => {
+    if (node) openerRef.current = node.ownerDocument.querySelector('[data-alpha-shell-page] button[aria-label="Account"]');
+    setHost(node);
+  }, []);
+  return (
+    <div ref={connect} className="pointer-events-none absolute inset-0 z-sheet">
+      {host && <Dialog open={open} onOpenChange={(shown) => { if (!shown) close(); }}>
+        <DialogContent ref={panelRef} container={host} overlayClassName="absolute bg-black/24 dark:bg-black/24"
+          aria-describedby={undefined}
+          onOpenAutoFocus={(event) => { event.preventDefault(); panelRef.current?.focus({ preventScroll: true }); }}
+          onCloseAutoFocus={(event) => {
+            event.preventDefault();
+            const opener = openerRef.current;
+            if (opener instanceof HTMLElement && opener.isConnected && opener.ownerDocument.activeElement === opener.ownerDocument.body && !opener.closest("[inert], [hidden]")) {
+              opener.focus({ preventScroll: true });
+            }
+          }}
+          className="absolute inset-x-0 top-auto bottom-0 max-h-full max-w-120 translate-y-0 gap-0 overflow-auto rounded-t-sheet rounded-b-none bg-background px-5.5 pt-5 pb-7 text-foreground">
+          <AuthMark className="mb-6" />
+          <DialogTitle className="mb-7 font-sans text-[1.375rem]/[1.2] font-semibold">Alpha</DialogTitle>
+          {reading
+            ? <Spinner label="Reading account" className="mb-3 text-muted-foreground" />
+            : <p role="alert" className="mb-3 rounded-[12px] bg-[color-mix(in_srgb,#e03131_12%,var(--color-background))] p-3 text-sm leading-[1.45] text-[color-mix(in_srgb,#e03131_72%,var(--color-foreground))]">Unavailable</p>}
+          <Button variant="ghost" className="h-11.5 w-full gap-3 rounded-lg px-3 py-2.5 text-base leading-[1.25] font-medium text-primary hover:bg-transparent"
+            onClick={retry} disabled={reading}><RotateCw aria-hidden className="size-5.5" />Try again</Button>
+          <Button variant="ghost" className="mt-5 h-11 w-full rounded-full text-base leading-[1.25] font-medium text-muted-foreground hover:bg-transparent" onClick={close}>Back</Button>
+        </DialogContent>
+      </Dialog>}
+    </div>
+  );
 }
 
 /** The account sheet above Settings, drawing only the details the authenticated account read returned. */
@@ -162,12 +200,17 @@ export default {
     const profile = profileFor(alpha);
     function AccountSheet({ runtime }: Shown<Resident | CheckoutRuntime>) {
       const { state, can, send } = useMachine(runtime);
+      const { state: settings } = useSettings(runtime);
       const shown = useSyncExternalStore(profile.subscribe, profile.snapshot, profile.snapshot);
       if (!state || !listed(state, accountLayer)) return null;
       const close = { type: "closeLayer", id: accountLayer } as const;
       const onClose = () => { if (can(close)) void send(close); };
+      const open = top(state).id === accountLayer;
+      if (settings?.told && !settings.phone && shown.tag !== "Read") {
+        return <BrowserAccount open={open} reading={shown.tag === "Reading"} retry={profile.refresh} close={onClose} />;
+      }
       return (
-        <Sheet open={top(state).id === accountLayer} onOpenChange={(open) => { if (!open) onClose(); }}>
+        <Sheet open={open} onOpenChange={(open) => { if (!open) onClose(); }}>
           <SheetContent
             title="Account"
             className="max-h-dvh max-w-105 gap-2.5 before:hidden bg-background px-6.5 pt-9 pb-[max(--spacing(7),env(safe-area-inset-bottom))] text-foreground [&_h2]:flex [&_h2]:min-h-12 [&_h2]:items-center [&_h2]:text-title"

@@ -1,5 +1,6 @@
 // spec/app/inbox/message.md, "Story: Read a message"; spec/app/inbox/marking.md, "Story: Mark mail read or unread"
 import * as Inbox from "../../gen/app__inbox.effect.vibe"
+import * as KeyValueStore from "effect/persistence/KeyValueStore"
 import { accessOf } from "../../gen/app__inbox.effect.vibe"
 import * as Message from "../../gen/app__inbox__message.effect.vibe"
 import type { Effect as Out, Event } from "../../gen/app__inbox__message.effect.vibe"
@@ -24,7 +25,7 @@ import { backFromDraft } from "./composer.vibe"
 import { ownerChanges } from "./mailbox.vibe"
 import { prepareMessage } from "./mail-html.ts"
 import { ThreadPages, locateThread, threadFault, threadMessage, threadPages } from "./thread.vibe"
-import { type AttachmentPreviews, attachmentPreviews, forgetPreview, handleAttachment } from "./attachment.vibe"
+import { type AttachmentPreviews, attachmentPreviews, drawAttachmentPage, forgetPreview, handleAttachment } from "./attachment.vibe"
 
 module web {
   /** Open `url` away from Alpha's page, with nothing of the page handed to it. @throws {never} */
@@ -152,7 +153,10 @@ function carry(fx: Out): Job<Event, Cloud | Agent | MailQuestions | Mail | Inbox
     when { tag: "OpenLink", let message, let link }: run("link", opened(message, link));
     // spec/app/inbox/message.md, "An attachment use ends as its own answer says, or unknown"
     when { tag: "HandleAttachment", let attempt, let account, let message, let attachment, let handling }:
-      answer(`attachment ${attempt}`, handleAttachment({ tag: "HandleAttachment", attempt, account, message, attachment, handling }), { type: "attachmentHandled", attempt, done: false, known: false });
+      answer(`attachment ${attempt}`, handleAttachment({ tag: "HandleAttachment", attempt, account, message, attachment, handling }), { type: "attachmentHandled", attempt, done: false, known: false, pages: 0 });
+    // spec/app/inbox/message.md, "A reviewed PDF turns one page at a time under a new draw ticket, and shows only the page drawn for that review"
+    when { tag: "DrawPdf", let attempt, let ticket, let page }:
+      answer("pdf page", drawAttachmentPage({ tag: "DrawPdf", attempt, ticket, page }), { type: "pdfDrawn", attempt, ticket, page, ok: false });
     // spec/app/inbox/message.md, "Ask Alpha is handed the message on screen, once it has loaded, named by its account, number and history revision"
     when { tag: "AskAlpha", let account, let message, let revision }: run("ask", questionAbout(account, message, revision));
   }
@@ -239,7 +243,26 @@ const threadPosition = started(effect {
   })))
 }, "finding the message in its thread")
 
-const viewing = reacting(Message, { keep: 1, open: [{ type: "restart" }], carry })
+effect function readerRecord(raw: string | undefined): (string | undefined)!! {
+  if (raw === undefined) return undefined
+  const fields = Schema.decodeUnknownEffect(Schema.fromJsonString(Schema.Record(Schema.String, Schema.Unknown)))(raw) catch () => undefined
+  if (fields === undefined || "pdf" in fields) return raw
+  const migrated = Message.decodeState({ ...fields, pdf: Message.emptyPdf }) catch () => undefined
+  return migrated === undefined ? raw : JSON.stringify(migrated)
+}
+
+function stored(key: string, start = Message.initial) {
+  return Layer.unwrap(effect {
+    const store = try KeyValueStore.KeyValueStore
+    const compatible = KeyValueStore.make({
+      ...store,
+      get: (name: string) => name === key ? Effect.flatMap(store.get(name), readerRecord) : store.get(name),
+    })
+    return Layer.provide(Message.stored(key, start), Layer.succeed(KeyValueStore.KeyValueStore, compatible))
+  })
+}
+
+const viewing = reacting({ ...Message, stored }, { keep: 1, open: [{ type: "restart" }], carry })
 const marking = reacting(Marking, { keep: 1, open: [{ type: "restart" }, "World"], carry: carryMark })
 
 /** A message opened from the list, and its marks: kept across restarts, read through the owner's cloud, and told what the list knows of access. */

@@ -21,7 +21,7 @@ function Position({ runtime, length, enabled }: Pick<Props, "runtime"> & { lengt
   const position = useSyncExternalStore(player.subscribe, player.position, () => 0);
   return (
     <>
-      <Slider aria-label="Position" aria-valuetext={clockLength(position)} className="min-w-0 flex-1"
+      <Slider variant="playback" aria-label="Position" aria-valuetext={clockLength(position)} className="min-w-0 flex-1"
         min={0} max={Math.max(1, length)} value={Math.min(position, length)} disabled={!enabled || length === 0} onValueChange={player.seek} />
       <span className="shrink-0 text-sm text-muted-foreground tabular-nums">{clockLength(position)} / {clockLength(length)}</span>
     </>
