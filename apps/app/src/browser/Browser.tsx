@@ -1,5 +1,5 @@
 // spec/app/browser/index.md, "Story: Open, pick and close tabs"; spec/app/browser/address.md, "Story: Go where I typed"; spec/app/browser/address.md, "Story: Watch a page load"; spec/app/browser/address.md, "Story: Browse privately"
-import { Button, BrowserAddressBar, type BrowserAddressChoice, BrowserAddressChoices, BrowserFindBar, BrowserBar, BrowserLibrary, type BrowserMenuItem, BrowserMenu, BrowserNewTab, BrowserTabs, ConfirmDialog, PrivateMark } from "@repo/ui";
+import { Button, BrowserAddressBar, type BrowserAddressChoice, BrowserAddressChoices, BrowserFindBar, BrowserBar, BrowserLibrary, type BrowserMenuItem, BrowserMenu, BrowserNewTab, BrowserReview, BrowserTabs, ConfirmDialog, PrivateMark } from "@repo/ui";
 import { ChevronLeft, Download, History, Link, Plus, RotateCw, Search, Share2, Square, Star, Trash2 } from "lucide-react";
 import { Effect, Option } from "effect";
 import { useState, useSyncExternalStore } from "react";
@@ -40,7 +40,7 @@ function addressParts(href: string | undefined): { host: string; path: string } 
   if (href === undefined || href === "") return { host: "", path: "" };
   const url = URL.parse(href);
   if (url === null) return { host: href, path: "" };
-  const path = url.pathname === "/" ? url.search : url.pathname + url.search;
+  const path = url.pathname + url.search;
   return { host: url.host, path };
 }
 
@@ -203,11 +203,11 @@ function Tab({ runtime, alpha, tabs, page }: BrowserProps & { tabs: State; page:
         onCancel={() => void runtime.runPromise(cancelPrivateFrame())}>
         Your browser will receive this private page.
       </ConfirmDialog>
-      <ConfirmDialog open={tabs.erasing === "Asked"} title="Clear browsing data?" confirmLabel="Clear" destructive
+      <BrowserReview open={tabs.erasing === "Asked"} title="Clear browsing data?" confirmLabel="Clear data" destructive
         onConfirm={() => { if (canConfirmErase(tabs)) void browser.send({ type: "confirmErase" }); }}
         onCancel={() => { if (canCancelErase(tabs)) void browser.send({ type: "cancelErase" }); }}>
         {native ? "Clears history, cookies and tabs." : "Clears Alpha's history and tabs. Your browser manages website cookies."}
-      </ConfirmDialog>
+      </BrowserReview>
     </div>
   );
 }

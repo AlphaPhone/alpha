@@ -212,3 +212,4 @@ export * from "./components/photos/PhotoTrashRow.tsx";
 export * from "./components/browser/BrowserMenu.tsx";
 export * from "./components/browser/BrowserTabs.tsx";
 export * from "./components/browser/BrowserFindBar.tsx";
+export * from "./components/browser/BrowserReview.tsx";

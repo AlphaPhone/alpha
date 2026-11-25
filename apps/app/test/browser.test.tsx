@@ -219,7 +219,7 @@ describe("The Browser on a phone", () => {
     await press("Menu");
     await press("Clear all browsing data");
     await until(alpha, runtime, Tabs, (s) => s.erasing === "Asked");
-    await press("Clear");
+    await press("Clear data");
     await until(alpha, runtime, Tabs, (s) => s.erasing === "Kept" && s.privates.length === 1 && s.kept.length === 0);
   });
 });
