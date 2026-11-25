@@ -318,11 +318,13 @@ pure def recognized(s: Scan, ticket: int, ok: bool, blank: bool, links: int, by:
 
 ### The owner corrects the text read from a page, which stays that page's text, with the links found in it as corrected
 
+Discovered by the proof: a correction uses the addressed image's read text, and never edits an unread page.
+
 ```quint
 pure def canEditText(s: Scan, image: int, by: Actor): bool = by == Owner and editable(s) and s.pages.some(p => p.image == image and p.text != 0)
 
 pure def editText(s: Scan, image: int, links: int, by: Actor): Scan =
-  edited(s.pages.listMap(p => if (p.image == image) { ...p, blank: false, edits: p.edits + 1, links: clamp(links) } else p), s)
+  edited(s.pages.listMap(p => if (p.image == image and p.text != 0) { ...p, blank: false, edits: p.edits + 1, links: clamp(links) } else p), s)
 ```
 
 ### Text read from a page stays with that page through every reorder and correction, and leaves with its image
