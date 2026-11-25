@@ -88,9 +88,11 @@ describe("Ask Alpha dock", () => {
     const finger = (type: string, target: Element | null | undefined, clientY: number) =>
       target?.dispatchEvent(new PointerEvent(type, { bubbles: true, clientY, pointerId: 3, pointerType: "touch", isPrimary: true }));
 
-    // A drag that starts on the bar's field, not on the handle, carries Ask Alpha up to the full screen.
+    // A drag that starts on the bar's field, not on the handle, carries Ask Alpha up to the full screen, though the field lets go of the touch it held as the bar takes it.
     finger("pointerdown", field, 800);
-    for (const y of [790, 600, 300, 60]) finger("pointermove", field, y);
+    finger("pointermove", field, 790);
+    finger("lostpointercapture", field, 790);
+    for (const y of [600, 300, 60]) finger("pointermove", field, y);
     finger("pointerup", field, 60);
     await runtime.runPromise(Effect.flatMap(Shell, (m) => Stream.runHead(Stream.filter(m.changes, (s) => s.assistant === "Full"))));
 

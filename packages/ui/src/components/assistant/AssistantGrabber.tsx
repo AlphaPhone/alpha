@@ -54,11 +54,13 @@ export type AssistantBarDrag = {
 /**
  * Pointer handlers that let the whole resting bar be dragged like its handle, as v121's bar was. Nothing is taken until
  * the finger moves past a few pixels, so a tap on the bar, its buttons or its field stays a tap; a press on the handle
- * itself is left to the handle.
+ * itself is left to the handle. A touch is held by the field it lands on until the bar takes it, and that hand-over is
+ * not a loss.
  */
 export function useAssistantBarDrag({ onStart, onDrag, onRelease, onCancel }: AssistantBarDrag) {
   const trackRef = useRef<(Track & { pointer: number }) | undefined>(undefined);
   const lost = (event: PointerEvent<HTMLElement>) => {
+    if (event.type === "lostpointercapture" && event.target !== event.currentTarget) return;
     const t = trackRef.current;
     if (!t || t.pointer !== event.pointerId) return;
     trackRef.current = undefined;
