@@ -6,6 +6,7 @@ import { Machine as Marks } from "../gen/app__inbox__marking.effect.vibe";
 import { Machine as Shown } from "../gen/app__inbox__message.effect.vibe";
 import { Machine as Changes } from "../gen/app__inbox__sending.effect.vibe";
 import { Machine as Writing } from "../gen/app__inbox__drafts.effect.vibe";
+import { Machine as Adding } from "../gen/app__inbox__adding.effect.vibe";
 import { Machine as Offering } from "../gen/app__inbox__suggestion.effect.vibe";
 import { Machine as Shell, showing } from "../gen/app__shell.effect.vibe";
 import home from "../src/home/index.tsx";
@@ -115,6 +116,33 @@ it("Open or ask about the exact Android mail notice (spec/app/inbox/notices.md, 
   await drawn(() => vi.waitFor(() => expect(notices.spent).toEqual(["ordinary", "reviewed"])));
   expect(world.ask.said).toEqual([]);
 }, 30_000);
+
+it("Choose a phone contact for the email I’m writing (spec/app/inbox/adding.md, \"Story: Add files and people to my draft\"; spec/app/inbox/adding.md, \"The people shown are for the draft and the newest Contacts read, and choosing one adds only its displayed address\")", async () => {
+  const world = { ...scene(), phone: true, image: true };
+  world.telephony.contacts = false;
+  const maya = world.telephony.people[0];
+  if (!maya) throw new Error("Missing Android contact fixture");
+  const email = "maya@example.test";
+  maya.emailAddresses = [{ address: email, type: "home" }];
+  const { alpha } = await openInbox(world);
+  const runtime = inbox.runtime(alpha);
+  await until(alpha, alpha.runtime, Shell, (state) => state.contacts);
+  await tile("Inbox");
+  await until(alpha, runtime, List, (state) => state.list.status === "Loaded");
+  await press("Compose");
+  await until(alpha, runtime, Writing, (state) => state.open && state.letter.kind === "Fresh");
+  await press("Choose contacts");
+  await until(alpha, runtime, Adding, (state) => state.people.status === "Loaded" && state.addresses === 1);
+  await drawn(() => vi.waitFor(() => {
+    const choice = document.querySelector<HTMLButtonElement>('[aria-label="Contact addresses"] button');
+    expect(choice?.textContent).toContain(email);
+    choice?.click();
+  }));
+  await until(alpha, runtime, Writing, (state) => state.letter.recipients === 1);
+  const added = await runtime.runPromise(Effect.flatMap(Writing, (writing) => Effect.flatMap(writing.get(), (state) =>
+    Effect.map(Letters, (letters) => letters.words(state.letter.id).to))));
+  expect([world.telephony.contacts, added, world.inbox.changes]).toEqual([true, [email], []]);
+});
 
 describe.each([["a browser", false], ["a phone", true]])("in %s", (_where, phone) => {
   it("See my mail (spec/app/inbox/index.md, \"Story: See my mail\"; spec/app/inbox/message.md, \"Story: Ask Alpha about a message\")", async () => {
