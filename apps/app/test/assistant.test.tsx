@@ -65,8 +65,14 @@ function chatAction(item: string) {
   });
 }
 
+const chatsSheet = () => [...document.querySelectorAll("[role='dialog']")].find((dialog) =>
+  document.getElementById(dialog.getAttribute("aria-labelledby") ?? "")?.textContent === "Chats");
+
 /** Open the list of conversations, from the chat actions. */
-const chatsList = () => chatAction("Chat history");
+async function chatsList() {
+  chatAction("Chat history");
+  await drawn(() => vi.waitFor(() => expect(chatsSheet()).toBeDefined()));
+}
 
 /** Click the row of the list named `list` whose text starts with `text`. */
 function row(list: string, text: string) {
@@ -107,7 +113,7 @@ it("Keeps my phone draft through restart and leaves it with my account (spec/app
   world.ask.kept.set("c1", { roomId: "r1", title: "Shared fixture ID", messages: [] });
 
   const selectConversation = async (alpha: Awaited<ReturnType<typeof open>>["alpha"], runtime: ReturnType<typeof assistant.runtime>) => {
-    chatsList();
+    await chatsList();
     await until(alpha, runtime, Chats, (state) => state.list.status === "Loaded");
     row("Chats", "Shared fixture ID");
     await until(alpha, runtime, Composer, (state) => state.binding.conversation > 0 && state.slot === "Open");
@@ -235,7 +241,7 @@ describe.each([["a browser", false], ["a phone", true]])("in %s", (_where, phone
     expect(lines()).toEqual(["Hello", "You said: Hello", "Again", "You said: Again"]);
 
     // spec/app/assistant/chats.md, "The newest list says which conversations there are, and a conversation no longer listed stops showing"
-    chatsList();
+    await chatsList();
     await until(alpha, runtime, Chats, (s) => s.list.status === "Loaded");
     expect(rows("Chats")).toBe(2);
     await drawn(() => document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true })));
@@ -343,6 +349,22 @@ describe.each([["a browser", false], ["a phone", true]])("in %s", (_where, phone
       await vi.waitFor(() => onMessage("You said: Limes tonight?Ask Ana <b>now</b>one", "Copy"));
       await vi.waitFor(() => expect(world.settings.copied.at(-1)).toBe("You said: Limes tonight?\n\nAsk Ana (https://ana.example/) <b>now</b>\n\n• one"));
     }
+
+    // spec/app/assistant/reply.md, "The agent's turn tag is never drawn, copied, quoted, emailed or spoken, and a reply still being written holds back what may become one": the owner's own words keep it, and a link's words stay.
+    const tagged = [[["Sure.\n[answer] Paris"], "Sure.Paris", "Sure.\nParis"], [["Paris. [answer]"], "Paris.", "Paris."], [["<promise> One sec."], "One sec.", "One sec."], [["[ans", "wer] Paris"], "Paris", "Paris"], [["[answer", "](https://example.com)"], "answer", "answer (https://example.com/)"]] as const;
+    for (const [said, drawn, plain] of tagged) {
+      const { turn } = await runtime.runPromise(Effect.flatMap(Conversation, (machine) => machine.get()));
+      world.ask.nextReplyChunks = said;
+      write("Capital of France? [answer]");
+      await press("Send");
+      await until(alpha, runtime, Conversation, (s) => s.turn.send.id === turn.send.id + 1 && s.turn.reply === "Complete");
+      await until(alpha, runtime, Reply, (s) => s.status === "Settled");
+      await vi.waitFor(() => expect(lines().slice(-2)).toEqual(["Capital of France? [answer]", drawn]));
+      if (phone) {
+        await vi.waitFor(() => onMessage(drawn, "Copy"));
+        await vi.waitFor(() => expect(world.settings.copied.at(-1)).toBe(plain));
+      }
+    }
   });
 
   // spec/app/assistant/search.md, "Story: Search my conversations"; spec/app/assistant/chats.md, "Story: Open a message that search found"
@@ -404,18 +426,31 @@ describe.each([["a browser", false], ["a phone", true]])("in %s", (_where, phone
       { id: "m3", role: "assistant", text: "", failureKind: "limit_reached" },
       { id: "m4", role: "assistant", text: "", failureKind: "insufficient_credits" },
       { id: "m5", role: "assistant", text: "", failureKind: "insufficient_credits", cloudCode: "allowance_exhausted" },
+      { id: "m6", role: "assistant", text: "<promise> Friday is free." },
+      { id: "m7", role: "user", text: "Friday [answer] again?" },
     ] });
     const { alpha, runtime } = await openAssistant(world, false);
 
-    // spec/app/assistant/search.md, "Words are searched from the first hit, and empty words are not searched"
-    await chatAction("Search chat");
+    await press("Open conversation");
+    await until(alpha, runtime, Shell, (s) => s.assistant === "Sheet");
+
+    // spec/app/assistant/search.md, "Story: Search my conversations": a hit returns to the full conversation.
+    const openSearch = async () => {
+      chatAction("Search chat");
+      await drawn(() => vi.waitFor(() => expect(document.querySelector("input[aria-label='Search chats']")).not.toBeNull()));
+    };
+    await openSearch();
     await fill("Search chats", "friday");
     await until(alpha, runtime, Search, (s) => s.hits.status === "Loaded" && s.words === "friday");
-    expect(rows("Results")).toBe(2);
+    expect(rows("Results")).toBe(4);
+    // spec/app/assistant/reply.md, "The agent's turn tag is never drawn, copied, quoted, emailed or spoken, and a reply still being written holds back what may become one": a hit of the agent's loses the tag, the owner's keeps it.
+    const results = document.querySelector("section[aria-label='Results']")?.textContent ?? "";
+    expect([results.includes("Friday is free."), results.includes("<promise>"), results.includes("Friday [answer] again?")]).toEqual([true, false, true]);
     // spec/app/assistant/search.md, "Opening a hit closes search and opens its conversation around its message, and another conversation only while the turn and the composer are free"
     row("Results", "Friday at noon");
     await until(alpha, runtime, Chats, (s) => s.chosen > 0 && s.around > 0 && s.page.status === "Loaded");
-    expect([lines().slice(0, 2), document.querySelector("section[aria-label='Results']")]).toEqual([["Lunch on Friday?", "Friday at noon works."], null]);
+    const askDetent = () => document.querySelector("section[aria-label='Ask Alpha']")?.getAttribute("data-alpha-detent");
+    expect([lines().slice(0, 2), document.querySelector("section[aria-label='Results']"), askDetent()]).toEqual([["Lunch on Friday?", "Friday at noon works."], null, "full"]);
     // spec/app/assistant/reply.md, "A failed reply offers the fix the agent named, and a limit reached shows its live wait, never sending the message again": a reply read again from history says why it did not finish, and to wait a moment.
     expect(document.querySelector("[role=log]")?.textContent).toContain("Too many requests. Wait a moment, then try again");
     // spec/app/assistant/reply.md, "Out of funds is refused before any output, is never spoken, and offers only Manage plan"; spec/app/assistant/reply.md, "A failure refused before any output replaces the streamed text; any other failure is added after it": spent credits stored without Cloud's code keep their own words, and only the reply stored with it reads as the one out-of-funds line.
@@ -424,13 +459,14 @@ describe.each([["a browser", false], ["a phone", true]])("in %s", (_where, phone
 
     // spec/app/assistant/search.md, "Only the newest asking's hits are shown, a page at a time, after those already shown": a search that fails says so.
     world.ask.searchDown = true;
-    await chatAction("Search chat");
+    await openSearch();
     await fill("Search chats", "noon");
     await until(alpha, runtime, Search, (s) => s.hits.status === "Failed");
     expect(document.body.textContent).toContain("Search did not finish");
     // spec/app/assistant/index.md, "Back closes a review, then search, then a quote or an edit, one at a time; with none of them open Back is the shell's"
     await hardware("back");
     await until(alpha, runtime, Search, (s) => !s.open);
+    expect(askDetent()).toBe("full");
   });
 
   // spec/app/assistant/chats.md, "Story: Find my conversations"
@@ -481,6 +517,16 @@ describe.each([["a browser", false], ["a phone", true]])("in %s", (_where, phone
     runtime = assistant.runtime(third.alpha);
     await until(third.alpha, runtime, Chats, (s) => s.chosen > 1 && s.ids.length === 2 && s.page.status === "Loaded");
     expect([document.body.textContent?.includes("Messages did not load"), button("Try again"), lines()]).toEqual([false, undefined, ["Dinner at eight?"]]);
+
+    // spec/app/assistant/chats.md, "The list of conversations is read whenever it is shown": Back closes the list and keeps the current conversation and draft.
+    write("Ideas for dinner");
+    const shellState = () => runtime.runPromise(Effect.flatMap(Shell, (machine) => machine.get()));
+    const detent = (await shellState()).assistant;
+    await chatsList();
+    await hardware("back");
+    await drawn(() => vi.waitFor(() => expect(chatsSheet()).toBeUndefined()));
+    expect([(await shellState()).assistant, composerText(), lines()]).toEqual([detent, "Ideas for dinner", ["Dinner at eight?"]]);
+    write("");
     await third.close();
 
     world.ask.kept.clear();
@@ -505,14 +551,16 @@ describe.each([["a browser", false], ["a phone", true]])("in %s", (_where, phone
     runtime = assistant.runtime(fifth.alpha);
     await vi.waitFor(() => expect(world.ask.heldLists.length).toBe(1));
     world.ask.holdLists = false;
-    chatsList();
+    await chatsList();
     await until(fifth.alpha, runtime, Chats, (s) => s.chosen === 0 && s.list.status === "Loaded" && s.page.status === "Idle");
     expect([document.querySelector("[role=log] [aria-busy]"), document.body.textContent?.includes("Messages did not load")]).toEqual([null, false]);
     for (const release of world.ask.heldLists.splice(0)) release();
+    await hardware("back");
+    await drawn(() => vi.waitFor(() => expect(chatsSheet()).toBeUndefined()));
 
     // spec/app/assistant/chats.md, "A list asked before a conversation was made is left behind, so its answer never takes that conversation away": the list read asked before New chat answers after the conversation was made.
     world.ask.holdLists = true;
-    chatsList();
+    await chatsList();
     await vi.waitFor(() => expect(world.ask.heldLists.length).toBe(1));
     await pressOnTop("New chat");
     await until(fifth.alpha, runtime, Chats, (s) => s.chosen > 0 && s.make.outcome === "Confirmed" && s.page.status === "Loaded");
@@ -531,19 +579,20 @@ describe.each([["a browser", false], ["a phone", true]])("in %s", (_where, phone
     world.ask.kept.set("c1", { roomId: "r1", title: "Ask Alpha", messages: [] });
     world.ask.opened = 1;
     const { alpha, runtime } = await openAssistant(world);
-    chatsList();
+    await chatsList();
     await until(alpha, runtime, Chats, (s) => s.list.status === "Loaded");
     row("Chats", "Ask Alpha");
     await until(alpha, runtime, Composer, (s) => s.binding.conversation === 1 && s.slot === "Open");
 
     // spec/app/assistant/index.md, "Stop reply ends a streaming reply, and takes back a message nothing was heard of"
     world.ask.stalled = true;
-    world.ask.nextReplyChunks = ["Read [Octopus](https://en.wikipedia.org/wiki/Octopus) and **Lim"];
+    world.ask.nextReplyChunks = ["Read [Octopus](https://en.wikipedia.org/wiki/Octopus) and **Lim", " [ans"];
     write("Take your time");
     await press("Send");
     await until(alpha, runtime, Conversation, (s) => s.turn.reply === "Streaming");
     expect(button("Send")).toBe(undefined);
     // spec/app/assistant/reply.md, "Prose is drawn with its Markdown: bold, italics, code, headings, lists and quotes; a link is a link only to an https address, and HTML reads as text": the reply still being written holds back its open mark, and its link opens through the phone's link path.
+    // spec/app/assistant/reply.md, "The agent's turn tag is never drawn, copied, quoted, emailed or spoken, and a reply still being written holds back what may become one": the "[ans" it ends in is held back too.
     const writing = await vi.waitFor(() => {
       const found = document.querySelector("[data-alpha-message-id='reply'] a");
       if (!found) throw new Error("no link in the reply being written");

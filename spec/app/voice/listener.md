@@ -18,21 +18,21 @@ press asks for one. On stock Android there is no listener.
 
 The listener reports whether it is on, holds the microphone, has the
 owner's consent, has a fresh indicator lease, lost its indicator, or is
-paused.
+paused. Alpha shows the corresponding reason beside the Listening switch.
 
 ```quint
 import read as Rd from "../../kit/read"
 
-type Report = { on: bool, mic: bool, consent: bool, fresh: bool, lost: bool, paused: bool }
+type Report = { on: bool, mic: bool, consent: bool, fresh: bool, lost: bool, paused: bool, reason: str }
 type Act = NoAct | Pausing | TurningOff
-type Listener = { image: bool, reads: Rd::Read, report: Report, known: bool, acting: Act, lost: bool, mayBeOn: bool, invoked: bool, turns: int }
+type Listener = { image: bool, reads: Rd::Read, consentScreen: Rd::Read, report: Report, known: bool, acting: Act, lost: bool, mayBeOn: bool, invoked: bool, turns: int }
 
-pure val quietReport: Report = { on: false, mic: false, consent: false, fresh: false, lost: false, paused: false }
+pure val quietReport: Report = { on: false, mic: false, consent: false, fresh: false, lost: false, paused: false, reason: "" }
 
 pure val initial: Listener =
-  { image: false, reads: Rd::unread, report: quietReport, known: false, acting: NoAct, lost: false, mayBeOn: false, invoked: false, turns: 0 }
+  { image: false, reads: Rd::unread, consentScreen: Rd::unread, report: quietReport, known: false, acting: NoAct, lost: false, mayBeOn: false, invoked: false, turns: 0 }
 
-type Effect = ReadStatus({ ticket: int }) | Pause({ pausing: int }) | TurnOff({ stopping: int }) | StartVoice
+type Effect = ReadStatus({ ticket: int }) | Pause({ pausing: int }) | TurnOff({ stopping: int }) | OpenConsent({ opening: int }) | StartVoice
 
 type Asked = { state: Listener, out: List[Effect] }
 
@@ -44,6 +44,7 @@ pure val reportValues: Set[Report] =
     .union(Set({ ...quietReport, on: true, mic: true, consent: true }))
     .union(Set({ ...quietReport, on: true, consent: true }))
 pure val ticketValues = Set(1, 2, 3, 4)
+pure val openingValues = ticketValues
 pure val lValues = Set(initial, { ...initial, image: true, invoked: true })
 ```
 
@@ -57,9 +58,11 @@ without them is shown as possibly on.
 type Shown = Unavailable | Unknown | Off | Listening | Waiting | Paused | IndicatorLost | MayBeOn
 
 pure def shown(l: Listener): Shown =
-  if (not(l.image)) Unavailable
-  else if (l.mayBeOn) MayBeOn
+  if (l.mayBeOn) MayBeOn
+  else if (not(l.image)) Unavailable
+  else if (l.known and l.report.mic and not(l.report.consent and l.report.fresh and not(l.report.paused))) MayBeOn
   else if (l.lost) IndicatorLost
+  else if (l.reads.status == Rd::Failed) Unavailable
   else if (not(l.known)) Unknown
   else if (not(l.report.on)) Off
   else if (l.report.paused) Paused
@@ -79,14 +82,24 @@ pure def canAdmit(l: Listener, image: bool): bool = l.image != image
 pure def admit(l: Listener, image: bool): Listener = { ...l, image: image, invoked: l.invoked and image }
 ```
 
-### Alpha reads the status, never while it is pausing or turning the listener off, and shows only the newest answer
+### Alpha reads the status when Privacy is opened or returns to the foreground, never during a stop, and shows only the newest answer
+
+When Privacy leaves the foreground, Alpha retires its status read. An
+explicit stop in flight still settles, and its warning is available on
+Settings' first page. The warning opens Android settings.
 
 ```quint
-pure def canRefresh(l: Listener): bool = l.image and l.acting == NoAct
+pure def canRefresh(l: Listener): bool = l.image and l.acting == NoAct and l.reads.status != Rd::Loading
 
 pure def refresh(l: Listener): Asked =
   val reads = Rd::ask(l.reads)
-  { state: { ...l, reads: reads }, out: List(ReadStatus({ ticket: reads.ticket })) }
+  { state: { ...l, reads: reads, known: false }, out: List(ReadStatus({ ticket: reads.ticket })) }
+
+pure def canLeave(l: Listener): bool =
+  l.acting == NoAct and (l.known or l.reads.status != Rd::Idle)
+
+pure def leave(l: Listener): Listener =
+  { ...l, known: false, reads: { ...l.reads, status: Rd::Idle } }
 
 pure def canAnswered(l: Listener, ticket: int, report: Report): bool = Rd::canAnswer(l.reads, ticket)
 
@@ -97,7 +110,7 @@ pure def answered(l: Listener, ticket: int, report: Report): Listener =
 pure def canFailed(l: Listener, ticket: int): bool = Rd::canAnswer(l.reads, ticket)
 
 pure def failed(l: Listener, ticket: int): Listener =
-  { ...l, reads: Rd::answer(l.reads, false), mayBeOn: l.mayBeOn or l.acting != NoAct, acting: NoAct }
+  { ...l, reads: Rd::answer(l.reads, false), known: l.acting != NoAct and l.known, mayBeOn: l.mayBeOn or l.acting != NoAct, acting: NoAct }
 
 pure def alwaysAnActionAwaitsItsOwnAnswer(l: Listener): bool =
   l.acting != NoAct implies l.reads.status == Rd::Loading
@@ -106,20 +119,35 @@ pure def alwaysAnActionAwaitsItsOwnAnswer(l: Listener): bool =
 ### Alpha can pause the listener or turn it off, and never turns it on
 
 Turning it back on, or resuming it, happens only in the listener's own
-screen. What Alpha shows of it changes only with what the listener reports.
+screen. Choosing the off switch's on position or opening Listening
+settings asks Android to open that screen. Only the newest handoff's
+answer says whether it opened. What Alpha shows of listening changes
+only with what the listener reports.
 
 ```quint
-pure def canPause(l: Listener): bool = l.image and l.acting == NoAct and l.known and l.report.on and not(l.report.paused)
+pure def canPause(l: Listener): bool = l.image and l.acting == NoAct and l.consentScreen.status != Rd::Loading and l.known and l.report.mic
 
 pure def pause(l: Listener): Asked =
   val reads = Rd::ask(l.reads)
   { state: { ...l, reads: reads, acting: Pausing }, out: List(Pause({ pausing: reads.ticket })) }
 
-pure def canTurnOff(l: Listener): bool = l.image and l.acting == NoAct and l.known and l.report.on
+pure def canTurnOff(l: Listener): bool = l.image and l.acting == NoAct and l.consentScreen.status != Rd::Loading and (l.mayBeOn or (l.known and l.report.on))
 
 pure def turnOff(l: Listener): Asked =
   val reads = Rd::ask(l.reads)
   { state: { ...l, reads: reads, acting: TurningOff }, out: List(TurnOff({ stopping: reads.ticket })) }
+
+pure def canOpenConsent(l: Listener): bool =
+  l.image and l.acting == NoAct and l.consentScreen.status != Rd::Loading
+
+pure def openConsent(l: Listener): Asked =
+  val consentScreen = Rd::ask(l.consentScreen)
+  { state: { ...l, consentScreen: consentScreen }, out: List(OpenConsent({ opening: consentScreen.ticket })) }
+
+pure def canConsentAnswer(l: Listener, opening: int, opened: bool): bool = Rd::canAnswer(l.consentScreen, opening)
+
+pure def consentAnswer(l: Listener, opening: int, opened: bool): Listener =
+  { ...l, consentScreen: Rd::answer(l.consentScreen, opened) }
 
 pure def stepOnlyTheListenerSaysWhatItIsDoing(before: Listener, via: str, after: Listener): bool =
   after.report != before.report implies via == "answered"

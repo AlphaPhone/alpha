@@ -40,10 +40,11 @@ import { type Letter, Mail, revisionOf } from "./gmail.vibe";
 import { MailSignIn } from "./mailbox.vibe";
 import { connectMailFrame, frameDocument, prepareMessage } from "./mail-html.ts";
 import { AttachmentPreviews, canPreviewAttachment, canSaveAttachment } from "./attachment.vibe";
+import { InboxAttachmentFiles } from "../platform/inboxAttachments.vibe";
 
 export interface InboxProps {
   /** Provides the list, the message open and its marks, the changes, the shell, Mail, which holds what Gmail said, and the phone's sign-in for mail. */
-  runtime: ManagedRuntime.ManagedRuntime<List | Shown | Marks | Changes | Writing | Adding | Incoming | Offering | Offers | Letters | Shell | Mail | Time | Preferences | Cloud | AttachmentPreviews | MailSignIn, unknown>;
+  runtime: ManagedRuntime.ManagedRuntime<List | Shown | Marks | Changes | Writing | Adding | Incoming | Offering | Offers | Letters | Shell | Mail | Time | Preferences | Cloud | AttachmentPreviews | InboxAttachmentFiles | MailSignIn, unknown>;
 }
 
 type Runtime = InboxProps["runtime"];
@@ -198,7 +199,7 @@ function Opened({ runtime, list, onRefresh, onBegin }: { runtime: Runtime; list:
   const unread = card?.isUnread ?? false;
   const mark = { type: "mark", access, account: state.account, message: state.message, unread: !unread } as const;
   const retry = { type: "retry", access, remote } as const;
-  const reopen = { type: "reopen", access, thread: state.thread, remote } as const;
+  const reopen = { type: "reopen", access, remote } as const;
   const earlier = { type: "earlier", access, remote } as const;
   const newer = { type: "newer", access, remote } as const;
   const history = revisionOf(card);
@@ -212,6 +213,7 @@ function Opened({ runtime, list, onRefresh, onBegin }: { runtime: Runtime; list:
   const told = marking.state?.told;
   const notice = told !== undefined && told in markNotices ? markNotices[told as keyof typeof markNotices] : undefined;
   const files = loaded ? read.attachments : [];
+  const destination = runtime.runSync(InboxAttachmentFiles.use(({ destination }) => Effect.succeed(destination)));
   const unsure = (attachment: number) => state.unsure.some((held) => held.account === state.account && held.message === state.message && held.attachment === attachment);
   const reviewing = (attachment: number, handling: "Opening" | "Saving") => {
     const event = { type: "reviewAttachment", attachment, handling } as const;
@@ -224,7 +226,11 @@ function Opened({ runtime, list, onRefresh, onBegin }: { runtime: Runtime; list:
     : undefined;
   const contents = loaded ? prepareMessage(read) : undefined;
   const link = state.link > 0 ? contents?.links.at(state.link - 1) : undefined;
-  const answered = card === undefined ? undefined : { id: card.id, from: card.from, others: [...card.to, ...card.cc], subject: card.subject, body: read?.bodyText, files: files.length };
+  const original = read?.message;
+  const answered = original === undefined || read === undefined ? undefined : {
+    id: original.id, from: original.from, others: [...original.to, ...original.cc], subject: original.subject,
+    body: read.bodyText, historyId: original.metadata.historyId, files,
+  };
   return (
     <>
       <InboxMessageScreen
@@ -251,9 +257,9 @@ function Opened({ runtime, list, onRefresh, onBegin }: { runtime: Runtime; list:
         attachments={files.map((one, at) => ({
           id: `${one.partId}:${at}`, name: one.name, size: sizeOf(one.size),
           onOpen: state.revision > 0 && canPreviewAttachment(one) ? reviewing(at + 1, "Opening") : undefined,
-          onSave: state.revision > 0 && canSaveAttachment(one) ? reviewing(at + 1, "Saving") : undefined,
+          onSave: state.revision > 0 && destination !== "unavailable" && canSaveAttachment(one) ? reviewing(at + 1, "Saving") : undefined,
           saveUnconfirmed: unsure(at + 1),
-          browserDownload: true,
+          browserDownload: destination === "download",
         }))}
         unread={unread}
         onToggleRead={loaded && marking.can(mark, "Owner") ? () => void marking.send(mark, "Owner") : undefined}
@@ -277,7 +283,7 @@ function Opened({ runtime, list, onRefresh, onBegin }: { runtime: Runtime; list:
         handling={state.handling === "Saving" ? "save" : "open"}
         outcome={outcome === "Planned" ? "review" : outcome === "Recorded" || outcome === "Sent" ? "working" : outcome === "Confirmed" ? "done" : outcome === "Refused" ? "refused" : "unknown"}
         preview={preview}
-        browserDownload
+        browserDownload={destination === "download"}
         onConfirm={can({ type: "confirmAttachment", access }) ? () => void send({ type: "confirmAttachment", access }) : undefined}
         onClose={() => void send({ type: "closeAttachment" })}
       />
@@ -333,8 +339,8 @@ export function Inbox({ runtime, alpha }: InboxProps & { alpha: Alpha }) {
   const today = runtime.runSync(Time.use((time) => time.latest()));
   const checking = state.accounts.status === "Loading";
   const row = ({ message: number, card, draftId }: Letter): InboxListRow => {
-    const open = { type: "open", access, account, message: number, thread: 1, remote } as const;
-    const saved = { type: "openSaved", account, message: number, thread: 1, checking, kept: state.saved } as const;
+    const open = { type: "open", access, account, message: number, remote } as const;
+    const saved = { type: "openSaved", account, message: number, checking, kept: state.saved } as const;
     const opening = draftsFolder ? undefined : message.can(open) ? open : message.can(saved) ? saved : undefined;
     const editing = draftsFolder && draftId !== undefined && !state.saved && readable(state) ? () => {
       setUnopenedDraft(undefined);

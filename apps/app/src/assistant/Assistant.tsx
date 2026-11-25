@@ -1,10 +1,11 @@
 // spec/app/assistant/index.md, "Story: Ask Alpha something"; spec/app/assistant/index.md, "Story: Stop a reply"; spec/app/assistant/chats.md, "Story: Find my conversations"; spec/app/assistant/composer.md, "Story: Send what I wrote"; spec/app/assistant/dock.md, "Focusing or tapping the composer on the bar opens Ask Alpha as a sheet"; spec/app/assistant/search.md, "Story: Search my conversations"; spec/app/assistant/reply.md, "Story: Hear a brief acknowledgment and still get the whole answer"
 import {
-  Alert, AssistantCard, Button, AssistantConversation, AssistantGrabber, AssistantPhotoPreview, ConfirmDialog,
+  Alert, AssistantCard, AssistantCardFrame, Button, AssistantConversation, AssistantGrabber, AssistantPhotoPreview, ConfirmDialog, Sheet, SheetContent, Textarea,
   type AssistantAttachment, type AssistantComposerProps, type AssistantDraftNoticeProps, type AssistantTurnNoteProps,
 } from "@repo/ui";
 import { Effect, type ManagedRuntime } from "effect";
-import { type ReactNode, type RefObject, useCallback, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import { ClipboardCheck, FileText } from "lucide-react";
+import { type FormEvent, type ReactNode, type RefObject, useCallback, useId, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { type Conversation as Talking, Machine as ConversationMachine } from "../../gen/app__assistant.effect.vibe";
 import { askable, inFlight, pending } from "../../gen/app__assistant.ts";
 import { useMachine as useConversation } from "../../gen/app__assistant.react.ts";
@@ -12,12 +13,13 @@ import type { Machine as AttachmentMachine } from "../../gen/app__assistant__att
 import { useMachine as useAttachments } from "../../gen/app__assistant__attachments.react.ts";
 import type { Machine as ChatsMachine } from "../../gen/app__assistant__chats.effect.vibe";
 import { making } from "../../gen/app__assistant__chats.ts";
+import { useMachine as useCards } from "../../gen/app__assistant__cards.react.ts";
 import { useMachine as useChats } from "../../gen/app__assistant__chats.react.ts";
 import { type Composer as Writing, Machine as ComposerMachine } from "../../gen/app__assistant__composer.effect.vibe";
 import { attachments as attachmentCount, content, maxFiles, textLimit } from "../../gen/app__assistant__composer.ts";
 import { useMachine as useComposer } from "../../gen/app__assistant__composer.react.ts";
 import type { Machine as DockMachine } from "../../gen/app__assistant__dock.effect.vibe";
-import { focused as dockFocused, isOpen as dockOpen } from "../../gen/app__assistant__dock.ts";
+import { browserFieldPull, focused as dockFocused, isOpen as dockOpen } from "../../gen/app__assistant__dock.ts";
 import { useMachine as useDock } from "../../gen/app__assistant__dock.react.ts";
 import type { Machine as ReplyMachine } from "../../gen/app__assistant__reply.effect.vibe";
 import { liveAddsToHistory } from "../../gen/app__assistant__reply.ts";
@@ -28,19 +30,27 @@ import { Machine as CommsMachine } from "../../gen/app__phone__comms.effect.vibe
 import { useMachine as useComms } from "../../gen/app__phone__comms.react.ts";
 import { Machine as ShellMachine, showing } from "../../gen/app__shell.effect.vibe";
 import type { Machine as LayersMachine } from "../../gen/app__shell__layers.effect.vibe";
+import { useMachine as useLayers } from "../../gen/app__shell__layers.react.ts";
 import { useMachine as useShell } from "../../gen/app__shell.react.ts";
 import { untimed } from "../runtime/reactor.vibe";
 import { MailQuestions } from "../inbox/mail-context.vibe";
 import { home } from "../shell/shell.vibe";
 import { isCommsView } from "../shell/views.tsx";
-import { type MediaCard, MediaReview, namedReviewQuery } from "./media-review.vibe";
+import { type MediaCard, MediaReview, namedReviewQuery, spokenText } from "./media-review.vibe";
 import type { Agent } from "../platform/agent.vibe";
+import type { Device } from "../platform/device.vibe";
+import type { NoteStore } from "../platform/notes.vibe";
+import type { Machine as NotesMachine } from "../../gen/app__notes.effect.vibe";
 import { Documents } from "../platform/documents.vibe";
 import { AttachmentSources } from "./AttachmentSources.tsx";
-import { askComms, freedom } from "./assistant.vibe";
+import { askComms, freedom, openChatSearch } from "./assistant.vibe";
 import { acceptedFiles, acceptedPhotos, attachmentAuthority, chooseDocument, type FileTarget, insertFiles, previewFile, readChosenDocument, removeFile, retireTranscript, sameBinding } from "./attachments.vibe";
 import { chip, type MessageActions, useHistorySheets, useMessageRows } from "./history.tsx";
+import { holdMessagePress } from "./message-actions.vibe";
 import { ReplyFailure } from "./ReplyFailure.tsx";
+import {
+  actionsOf, actionUnits, type RecordingSummary, reviewRecordingSummary, saveRecordingSummary, summaryActions, summaryUnits,
+} from "./recording-summary.vibe";
 import { type Attached, type Line, Talk } from "./talk.vibe";
 import { CommsTarget, type CommsTargetServices } from "../phone/CommsTarget.tsx";
 import { CommsBriefing } from "../phone/comms.vibe";
@@ -48,13 +58,14 @@ import { displayNumber } from "../phone/words.ts";
 import { replyBlocks, wordsOf } from "./words.ts";
 import { handToMaps } from "../maps/handoff.ts";
 import type { MapsCard } from "@elizaos/plugin-maps-client";
-import { type TalkStopReceipt, type VoiceKeyboard, useTalkKeyboard } from "../voice/useTalkKeyboard.ts";
+import { type DictationKeyboard, type TalkStopReceipt, type VoiceKeyboard, useTalkKeyboard } from "../voice/useTalkKeyboard.ts";
 
 export interface AssistantProps {
-  runtime: ManagedRuntime.ManagedRuntime<ConversationMachine | AttachmentMachine | ChatsMachine | ComposerMachine | SearchMachine | ReplyMachine | DockMachine | ShellMachine | CommsMachine | CommsTargetServices | CommsBriefing | Talk | MailQuestions | LayersMachine | MediaReview | Documents | Agent, unknown>;
+  runtime: ManagedRuntime.ManagedRuntime<ConversationMachine | AttachmentMachine | ChatsMachine | ComposerMachine | SearchMachine | ReplyMachine | DockMachine | ShellMachine | CommsMachine | CommsTargetServices | CommsBriefing | Talk | MailQuestions | LayersMachine | MediaReview | Documents | Agent | Device | NoteStore | NotesMachine, unknown>;
   messageActions?: MessageActions;
   speech?: Pick<AssistantComposerProps, "onTalk" | "onDictate" | "showUnavailableTalk" | "voiceNotice"> & {
-    voicePanel?: ReactNode;
+    voicePanel?: (onKeyboard: DictationKeyboard) => ReactNode;
+    interim?: ReactNode;
     keyboard?: TalkStopReceipt;
     voice?: (presentation: { compactDock: boolean; atBar: boolean; onKeyboard: VoiceKeyboard }) => ReactNode;
   };
@@ -107,15 +118,28 @@ const settings = { type: "openView", view: "Settings" } as const;
 const maps = { type: "openView", view: "Maps" } as const;
 const back = { type: "goBack" } as const;
 
+function focusChatActions(field: HTMLTextAreaElement | null) {
+  const trigger = field?.parentElement?.querySelector<HTMLButtonElement>('button[aria-label="Chat actions"]');
+  if (trigger && !trigger.disabled && !trigger.closest("[inert], [hidden]")) trigger.focus({ preventScroll: true });
+}
+
 function DeviceReview({ runtime, card }: { runtime: AssistantProps["runtime"]; card: MediaCard }) {
-  const decide = (approve: boolean) => void runtime.runPromise(Effect.flatMap(MediaReview, (review) => review.decide(card, approve)));
+  const decide = (approve: boolean, confirmation?: "Tap") => void runtime.runPromise(Effect.flatMap(MediaReview, (review) => review.decide(card, approve, confirmation)));
+  const deciding = card.decision === "Deciding";
+  const unavailable = card.decision === "Unconfirmed";
+  const text = card.operation.type === "sms_send" ? { body: card.operation.body, recipients: card.operation.recipients }
+    : card.operation.type === "sms_compose" && card.composeLine !== undefined
+      ? { body: card.operation.body, recipients: card.phone?.tag === "Exact" ? [card.phone.selected.number]
+        : "target" in card.operation && card.operation.target.kind === "number" ? [card.operation.target.number] : [] }
+      : undefined;
+  const line = card.sms?.subscription ?? card.composeLine?.subscription;
   return (
-    <div className="grid gap-2">
+    <div className="grid gap-2" aria-busy={deciding}>
       {card.phone?.tag === "Choices" ? (
         <div role="group" aria-label="Choose a phone number" className="grid gap-2 rounded-sheet bg-secondary p-3">
           <p className="font-semibold">Choose a number for {namedReviewQuery(card.operation)}</p>
           {card.phone.options.map((choice, index) => (
-            <Button key={`${choice.contact}\n${choice.number}`} variant="ghost" className="h-auto min-h-11 justify-start text-left whitespace-normal"
+            <Button key={`${choice.contact}\n${choice.number}`} variant="ghost" className="h-auto min-h-11 justify-start text-left whitespace-normal" disabled={card.decision !== undefined}
               onClick={() => void runtime.runPromise(Effect.flatMap(MediaReview, (review) => review.choosePhone(card, index)))}>
               {choice.name} · {displayNumber(choice.number)}
             </Button>
@@ -126,11 +150,21 @@ function DeviceReview({ runtime, card }: { runtime: AssistantProps["runtime"]; c
         <Alert role="status">{card.phone.reason}</Alert>
       ) : card.notice !== undefined ? (
         <Alert role="status">{`${card.title}: ${card.detail}. ${card.notice}`}</Alert>
+      ) : text !== undefined ? (
+        <AssistantCardFrame icon={<ClipboardCheck />} title={card.title} data-alpha-review={card.id}
+          detail={line === undefined ? undefined : `SIM ${line.slot + 1} · ${line.displayName}`}
+          actions={<Button data-alpha-review-send="" disabled={deciding || unavailable} onClick={(event) => decide(true, event.nativeEvent.isTrusted ? "Tap" : undefined)}>Approve</Button>}>
+          <p className="font-semibold wrap-anywhere">{card.phone?.tag === "Exact" ? `${card.phone.selected.name} · ` : ""}{text.recipients.map(displayNumber).join(", ")}</p>
+          <p className="whitespace-pre-wrap wrap-anywhere">{text.body}</p>
+          {spokenText(card) !== undefined && <p className="text-meta text-muted-foreground">Say “Send this text”</p>}
+        </AssistantCardFrame>
       ) : (
-        <AssistantCard card={{ kind: "decision", variant: "proposal", title: card.title, detail: card.detail, action: card.operation.type === "sms_compose" ? "Open draft" : "Approve" }}
-          onHandOn={() => decide(true)} />
+        <AssistantCard card={{ kind: "decision", variant: "proposal", title: card.title, detail: card.detail, waiting: deciding, action: card.operation.type === "sms_compose" ? "Open draft" : card.operation.type === "browser_navigate" ? "Open" : "Approve" }}
+          onHandOn={unavailable ? undefined : () => decide(true)} />
       )}
-      <Button className="justify-self-end" variant="ghost" onClick={() => decide(false)}>Decline</Button>
+      {unavailable
+        ? <Alert role="status">Alpha couldn’t confirm the decision. Check Activity before trying again.</Alert>
+        : <Button className="justify-self-end" variant="ghost" disabled={deciding} onClick={() => decide(false)}>Decline</Button>}
     </div>
   );
 }
@@ -164,7 +198,7 @@ function AssistantAttachments({ runtime, attachments, preview, targetRef, compos
           targetRef.current = undefined;
           void attachments.send({ type: "cancel" });
         }}
-        onReturnFocus={() => composerRef.current?.parentElement?.querySelector<HTMLButtonElement>('button[aria-label="Chat actions"]')?.focus()}
+        onReturnFocus={() => focusChatActions(composerRef.current)}
         onTab={(tab) => void attachments.send({ type: "switchTab", tab })}
         onAttach={async (selected) => {
           const held = targetRef.current;
@@ -206,6 +240,74 @@ function MailReviewDialogs({ open, review, attach, dismiss }: MailReviewDialogsP
   );
 }
 
+// spec/app/assistant/cards.md, "The owner reviews the summary before it can be saved"
+function RecordingSummaryReview({ runtime, offer }: { runtime: AssistantProps["runtime"]; offer: RecordingSummary }) {
+  const card = useCards(offer.runtime);
+  const form = useId();
+  const heading = useId();
+  const actionItems = useId();
+  const dismiss = { type: "dismissSummary" } as const;
+  const dismissReview = () => { if (card.can(dismiss)) void card.send(dismiss); };
+  const outcome = card.state?.save.outcome;
+  const message = card.state?.settled ? "Recording is unavailable. Ask about its current transcript again."
+    : outcome === "Confirmed" ? "Recording summary saved. No reminders scheduled."
+    : outcome === "Unknown" ? "Save is unconfirmed. Check Notes before trying again."
+    : outcome === "Sent" ? "Saving recording summary…"
+    : outcome === "Refused" ? "Recording summary could not be saved." : undefined;
+  const submit = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (!card.can({ type: "saveToNotes" })) return;
+    const values = new FormData(event.currentTarget);
+    const summary = values.get("summary");
+    const actions = values.get("actions");
+    if (typeof summary !== "string" || typeof actions !== "string") return;
+    if (summary.trim() === "") {
+      const field = event.currentTarget.elements.namedItem("summary");
+      if (field instanceof HTMLTextAreaElement) {
+        field.setCustomValidity("Enter a summary.");
+        field.reportValidity();
+      }
+      return;
+    }
+    const field = event.currentTarget.elements.namedItem("actions");
+    const items = actionsOf(actions);
+    if (items.length > summaryActions || items.some((item) => item.length > actionUnits)) {
+      if (field instanceof HTMLTextAreaElement) {
+        field.setCustomValidity(`Use up to ${summaryActions} lines of ${actionUnits} characters each.`);
+        field.reportValidity();
+      }
+      return;
+    }
+    void runtime.runPromise(saveRecordingSummary(offer, summary, actions));
+  };
+  return <>
+    {card.state && <AssistantCardFrame icon={<FileText />} title="Review summary note" detail={offer.source.title}
+      settled={card.state.settled || outcome === "Confirmed" || outcome === "Unknown"}
+      onOpen={card.can({ type: "reviewSummary" }) ? () => void runtime.runPromise(reviewRecordingSummary(offer)) : undefined}>
+      {message && <p role="status" className="text-sm text-muted-foreground">{message}</p>}
+    </AssistantCardFrame>}
+    <Sheet open={card.state?.reviewing === true} onOpenChange={(open) => { if (!open) dismissReview(); }}>
+      <SheetContent title="Review recording summary" description={offer.source.title} actions={<>
+        <Button variant="secondary" onClick={dismissReview}>Cancel</Button>
+        <Button type="submit" form={form} disabled={!card.can({ type: "saveToNotes" })}>Save recording summary</Button>
+      </>}>
+        <form id={form} onSubmit={submit} className="grid gap-3">
+          <label htmlFor={heading} className="grid gap-1.5 text-sm font-medium">
+            Summary
+            <Textarea id={heading} aria-label="Summary" name="summary" defaultValue={offer.words} maxLength={summaryUnits} required
+              onInput={(event) => event.currentTarget.setCustomValidity("")} />
+          </label>
+          <label htmlFor={actionItems} className="grid gap-1.5 text-sm font-medium">
+            Action items
+            <Textarea id={actionItems} aria-label="Action items" name="actions" placeholder="One action per line" maxLength={summaryActions * (actionUnits + 1)}
+              onInput={(event) => event.currentTarget.setCustomValidity("")} />
+          </label>
+        </form>
+      </SheetContent>
+    </Sheet>
+  </>;
+}
+
 interface DockHandleProps {
   dock: ReturnType<typeof useDock>;
   detent: Parameters<typeof dockOpen>[0];
@@ -214,22 +316,28 @@ interface DockHandleProps {
   field: RefObject<HTMLTextAreaElement | null>;
 }
 
+function dockPull(dock: DockHandleProps["dock"], detent: DockHandleProps["detent"]): NonNullable<AssistantComposerProps["fieldPull"]> {
+  return {
+    onPress: () => { void dock.send({ type: "press", detent, now: untimed }); },
+    onDrag: () => { void dock.send({ type: "drag" }); },
+    onRelease: ({ direction, flick, y }) => {
+      const height = Math.max(0, Math.round(window.innerHeight - y));
+      void dock.send({ type: "release", direction: direction === "up" ? "Up" : "Down", flick, height, floor: barHeight, full: window.innerHeight, now: untimed });
+    },
+    onCancel: () => { void dock.send({ type: "shift", now: untimed }); },
+  };
+}
+
 function DockHandle({ dock, detent, compact, focusOnPointerOpen, field }: DockHandleProps) {
   const open = dockOpen(detent);
   return (
     <AssistantGrabber
       variant={open ? "handle" : "mark"}
-      onPress={() => { void dock.send({ type: "press", detent, now: untimed }); }}
-      onDrag={() => { void dock.send({ type: "drag" }); }}
-      onRelease={({ direction, flick, y }) => {
-        const height = Math.max(0, Math.round(window.innerHeight - y));
-        void dock.send({ type: "release", direction: direction === "up" ? "Up" : "Down", flick, height, floor: barHeight, full: window.innerHeight, now: untimed });
-      }}
+      {...dockPull(dock, detent)}
       onLift={() => {
         void dock.send({ type: "lift", now: untimed });
         if (!open && focusOnPointerOpen) field.current?.focus();
       }}
-      onCancel={() => { void dock.send({ type: "shift", now: untimed }); }}
       onTap={({ keyboard }) => {
         void dock.send({ type: "click", now: untimed });
         if (!open && keyboard && !compact) field.current?.focus();
@@ -259,6 +367,7 @@ export function Assistant({ runtime, messageActions, speech, canReadAloud = fals
   const search = useSearch(runtime);
   const reply = useReply(runtime);
   const shell = useShell(runtime);
+  const layers = useLayers(runtime);
   const dock = useDock(runtime);
   const comms = useComms(runtime);
   const board = useMemo(() => runtime.runSync(Effect.map(Talk, (talk) => talk.board)), [runtime]);
@@ -269,9 +378,10 @@ export function Assistant({ runtime, messageActions, speech, canReadAloud = fals
   const reviewed = useSyncExternalStore(mailStore.subscribe, mailStore.snapshot);
   const composerRef = useRef<HTMLTextAreaElement>(null);
   const focusOnRevealRef = useRef(false);
-  const { voice: renderVoice, voicePanel, keyboard, ...speechProps } = speech ?? {};
+  const { voice: renderVoice, voicePanel: renderDictation, interim, keyboard, ...speechProps } = speech ?? {};
   const keyboardOwner = useCallback(() => keyboardScope(runtime), [runtime]);
-  const { onKeyboard, takeFocus } = useTalkKeyboard(composerRef, keyboardOwner, keyboard);
+  const { onKeyboard, onDictationKeyboard, takeFocus } = useTalkKeyboard(composerRef, keyboardOwner, keyboard);
+  const voicePanel = renderDictation?.(onDictationKeyboard);
   const currentView = shell.state?.trail.at(-1);
   const onComms = isCommsView(currentView);
   const assistantDetent = shell.state?.assistant ?? "Bar";
@@ -286,9 +396,15 @@ export function Assistant({ runtime, messageActions, speech, canReadAloud = fals
     takeFocus(element);
   }, [assistantDetent, compact, takeFocus]);
   const fileTargetRef = useRef<FileTarget | undefined>(undefined);
+  const holdMessage = useCallback((held: () => void) => {
+    const fiber = runtime.runFork(holdMessagePress(held));
+    return () => fiber.interruptUnsafe();
+  }, [runtime]);
   const [talking, shown, writing, finding] = [conversation.state, chats.state, composer.state, search.state];
   const free = talking && shown && writing ? freedom(talking, writing, shown.chosen) : { replying: true, holding: true };
-  const history = useHistorySheets(chats, search, seen, free);
+  const searchRoute = shell.state?.route;
+  const beginSearch = searchRoute === undefined ? undefined : () => void runtime.runPromiseExit(openChatSearch(searchRoute));
+  const history = useHistorySheets(chats, search, layers, seen, free, beginSearch, () => focusChatActions(composerRef.current));
   const lines = !shown || (shown.page.status === "Idle" && shown.chosen === 0) ? emptyLines : seen.pages.get(shown.page.ticket)?.lines ?? emptyLines;
   const canPreview = attachments.can({ type: "preview", attachment: 1 });
   const preview = useCallback((file: Attached) => void runtime.runPromise(previewFile(file)), [runtime]);
@@ -395,6 +511,11 @@ export function Assistant({ runtime, messageActions, speech, canReadAloud = fals
   const mediaCards = seen.media.filter((card) => !talking.context.sensitive && card.conversation === shown.chosen && card.revision === talking.context.revision).map((card) => ({
     id: `media ${card.id}`, author: "alpha" as const, text: "", children: <DeviceReview runtime={runtime} card={card} />,
   }));
+  const offer = seen.recordingSummary;
+  const recordingSummary = offer !== undefined && !talking.context.sensitive && offer.conversation === shown.chosen
+    && lines.some((line) => !line.mine && line.id === offer.message)
+    ? [{ id: `recording summary ${offer.message}`, author: "alpha" as const, text: "",
+      children: <RecordingSummaryReview runtime={runtime} offer={offer} /> }] : [];
   const mediaNote = talking.context.sensitive || seen.mediaNote?.conversation !== shown.chosen
     ? [] : [{ id: "media result", author: "alpha" as const, text: seen.mediaNote.text, onOpenLink }];
   const failure = seen.failure;
@@ -421,6 +542,8 @@ export function Assistant({ runtime, messageActions, speech, canReadAloud = fals
       if (sent._tag === "Failure") focusOnRevealRef.current = false;
     });
   };
+  const draftEditable = composer.can({ type: "edit", blank: false, long: false });
+  const pullFromField = shell.state && browserFieldPull(shell.state, seen.typed === "", draftEditable);
   const grabber = shell.state ? <DockHandle dock={dock} detent={assistantDetent} compact={compact}
     focusOnPointerOpen={currentView !== undefined && !compact} field={composerRef} /> : undefined;
 
@@ -450,7 +573,9 @@ export function Assistant({ runtime, messageActions, speech, canReadAloud = fals
         attachmentNotice={onComms ? undefined : seen.attachmentNotice}
         transcript={{
           messages,
-          liveMessages: [...(brief === "" ? [] : [{ id: `briefing:${subject}`, author: "alpha" as const, text: brief, onOpenLink }]), ...writingReply, ...failed, ...mediaCards, ...mediaNote],
+          holdMessage: open ? holdMessage : undefined,
+          liveMessages: [...(brief === "" ? [] : [{ id: `briefing:${subject}`, author: "alpha" as const, text: brief, onOpenLink }]), ...writingReply, ...failed, ...mediaCards, ...mediaNote, ...recordingSummary],
+          interim: open && shown.around === 0 && !talking.context.sensitive ? interim : undefined,
           position: { page: `${shown.chosen}/${shown.page.ticket}`, around: board.messageId(shown.around) },
           visible: open,
           status: shown.page.status === "Loading" ? "loading" : shown.page.status === "Failed" ? "failed" : "loaded",
@@ -462,17 +587,21 @@ export function Assistant({ runtime, messageActions, speech, canReadAloud = fals
         }}
         composer={{
           ...speechProps,
-          voice: renderVoice?.({ compactDock: compact, atBar: assistantDetent === "Bar", onKeyboard }),
+          voice: voicePanel ?? renderVoice?.({ compactDock: compact, atBar: assistantDetent === "Bar", onKeyboard }),
           onDictate: onComms || inFlight(talking.turn) || !speech?.onDictate ? undefined : () => {
             openWithFocus(false);
             speech.onDictate?.();
           },
           fieldRef: composerField,
+          fieldPull: pullFromField ? {
+            ...dockPull(dock, assistantDetent),
+            onLift: () => { void dock.send({ type: "fieldLift", now: untimed }); },
+          } : undefined,
           value: subject === undefined ? seen.typed : request,
           onValueChange: type,
           placeholder: onComms ? "Ask Alpha" : assistantDetent === "Bar" && currentView === "Browser" ? "Ask about this page" : undefined,
           leading: onComms ? <CommsTarget runtime={runtime} placement="composer" /> : undefined,
-          closed: subject === undefined && !composer.can({ type: "edit", blank: false, long: false }),
+          closed: subject === undefined && !draftEditable,
           notice: notice === undefined || onComms ? undefined : {
             status: notice,
             saved: seen.saved,
