@@ -436,6 +436,8 @@ describe(`Secrets stay private and fit their environment (spec/cloud/rollout.md,
     try holds(() => assert.strictEqual(base64Bytes(first.values.CLOUD_SEALING_KEY ?? ""), 32))
     try holds(() => assert.ok(secretProblems({ ...first.values, GOOGLE_CONNECT_TOKEN_KEY: "not-a-64-hex-token-key-even-if-32-bytes-base64url-abcdef" }, "staging").some((p) => p.includes("GOOGLE_CONNECT_TOKEN_KEY"))))
     try holds(() => assert.ok(secretProblems({ ...first.values, CLOUD_SEALING_KEY: oversizedKey() }, "staging").some((p) => p.includes("CLOUD_SEALING_KEY"))))
+    const base64urlSealing = `${(first.values.CLOUD_SEALING_KEY ?? "").slice(0, 40)}-_${(first.values.CLOUD_SEALING_KEY ?? "").slice(40)}`
+    try holds(() => assert.ok(secretProblems({ ...first.values, CLOUD_SEALING_KEY: base64urlSealing }, "staging").some((p) => p.includes("CLOUD_SEALING_KEY"))))
     try holds(() => assert.ok(secretProblems({ ...first.values, CLOUD_ENTITLEMENT_KEY: p384Key() }, "staging").some((p) => p.includes("CLOUD_ENTITLEMENT_KEY"))))
     const badKeyFile = path.join(directory, "bad-entitlement.env")
     try files.writeFileString(badKeyFile, Object.entries({ ...first.values, CLOUD_ENTITLEMENT_KEY: "not-a-key" }).map(([name, value]) => `${name}=${value}`).join("\n"), { mode: 0o600 })

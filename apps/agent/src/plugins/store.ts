@@ -241,35 +241,108 @@ function isPlainRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-function isValidAlarmRecord(value: unknown): value is ClockAlarmRecord {
-  if (!isPlainRecord(value)) return false;
-  return typeof value.id === "string" && value.id.trim() !== ""
-    && typeof value.hour === "number" && Number.isFinite(value.hour)
-    && typeof value.minute === "number" && Number.isFinite(value.minute)
-    && typeof value.revision === "number" && Number.isFinite(value.revision)
-    && typeof value.updatedAtMs === "number" && Number.isFinite(value.updatedAtMs);
+function finiteOrNull(value: unknown): number | null {
+  return typeof value === "number" && Number.isFinite(value) ? value : null;
 }
 
-function isValidTimerRecord(value: unknown): value is ClockTimerRecord {
-  if (!isPlainRecord(value)) return false;
-  return typeof value.id === "string" && value.id.trim() !== ""
-    && typeof value.durationMs === "number" && Number.isFinite(value.durationMs)
-    && typeof value.revision === "number" && Number.isFinite(value.revision)
-    && typeof value.updatedAtMs === "number" && Number.isFinite(value.updatedAtMs);
+function parseAlarmRecord(value: unknown): ClockAlarmRecord | undefined {
+  if (!isPlainRecord(value)) return undefined;
+  if (typeof value.id !== "string" || value.id.trim() === "") return undefined;
+  if (typeof value.hour !== "number" || !Number.isFinite(value.hour)) return undefined;
+  if (typeof value.minute !== "number" || !Number.isFinite(value.minute)) return undefined;
+  if (typeof value.revision !== "number" || !Number.isFinite(value.revision)) return undefined;
+  if (typeof value.updatedAtMs !== "number" || !Number.isFinite(value.updatedAtMs)) return undefined;
+  return {
+    id: value.id.trim(),
+    hour: clampInt(value.hour, 0, 23),
+    minute: clampInt(value.minute, 0, 59),
+    daysMask: typeof value.daysMask === "number" && Number.isFinite(value.daysMask) ? clampInt(value.daysMask, 0, 127) : 0,
+    label: typeof value.label === "string" ? value.label.trim().slice(0, 200) : "",
+    sound: normalizeSound(value.sound),
+    vibrate: typeof value.vibrate === "boolean" ? value.vibrate : true,
+    enabled: typeof value.enabled === "boolean" ? value.enabled : true,
+    snoozeMinutes: typeof value.snoozeMinutes === "number" && Number.isFinite(value.snoozeMinutes) ? clampInt(value.snoozeMinutes, 1, 60) : 9,
+    phase: normalizeAlarmPhase(value.phase),
+    fireAtMs: finiteOrNull(value.fireAtMs),
+    snoozeUntilMs: finiteOrNull(value.snoozeUntilMs),
+    missed: typeof value.missed === "boolean" ? value.missed : false,
+    revision: value.revision,
+    updatedAtMs: value.updatedAtMs,
+  };
 }
 
-function isValidWorldCityRecord(value: unknown): value is WorldCityRecord {
-  if (!isPlainRecord(value)) return false;
-  return typeof value.id === "string" && value.id.trim() !== ""
-    && typeof value.city === "string" && value.city.trim() !== ""
-    && typeof value.timeZone === "string" && value.timeZone.trim() !== "";
+function parseTimerRecord(value: unknown): ClockTimerRecord | undefined {
+  if (!isPlainRecord(value)) return undefined;
+  if (typeof value.id !== "string" || value.id.trim() === "") return undefined;
+  if (typeof value.durationMs !== "number" || !Number.isFinite(value.durationMs)) return undefined;
+  if (typeof value.revision !== "number" || !Number.isFinite(value.revision)) return undefined;
+  if (typeof value.updatedAtMs !== "number" || !Number.isFinite(value.updatedAtMs)) return undefined;
+  const durationMs = clampInt(value.durationMs, 1000, 86_400_000);
+  return {
+    id: value.id.trim(),
+    label: typeof value.label === "string" ? value.label.trim().slice(0, 200) : "",
+    durationMs,
+    remainingMs: typeof value.remainingMs === "number" && Number.isFinite(value.remainingMs) ? clampInt(value.remainingMs, 0, 86_400_000) : durationMs,
+    status: normalizeTimerStatus(value.status),
+    startedAtMs: finiteOrNull(value.startedAtMs),
+    endAtMs: finiteOrNull(value.endAtMs),
+    ringStartedAtMs: finiteOrNull(value.ringStartedAtMs),
+    revision: value.revision,
+    updatedAtMs: value.updatedAtMs,
+  };
 }
 
-function isValidReminderFallback(id: string, value: unknown): value is ReminderItemRecord {
-  if (!isPlainRecord(value)) return false;
-  if (typeof value.id === "string" && value.id !== id) return false;
-  return typeof value.title === "string" && value.title.trim() !== ""
-    && typeof value.revision === "number" && Number.isFinite(value.revision);
+function parseWorldCityRecord(value: unknown, order: number): WorldCityRecord | undefined {
+  if (!isPlainRecord(value)) return undefined;
+  if (typeof value.id !== "string" || value.id.trim() === "") return undefined;
+  if (typeof value.city !== "string" || value.city.trim() === "") return undefined;
+  if (typeof value.timeZone !== "string" || value.timeZone.trim() === "") return undefined;
+  return {
+    id: value.id.trim(),
+    city: value.city.trim(),
+    region: typeof value.region === "string" ? value.region.trim() : "",
+    timeZone: value.timeZone.trim(),
+    order,
+  };
+}
+
+function parseReminderFallback(id: string, value: unknown, lists: readonly ReminderListRecord[], nowMs: number): ReminderItemRecord | undefined {
+  if (!isPlainRecord(value)) return undefined;
+  if (typeof value.id === "string" && value.id !== id) return undefined;
+  if (typeof value.title !== "string" || value.title.trim() === "") return undefined;
+  if (typeof value.revision !== "number" || !Number.isFinite(value.revision)) return undefined;
+  const requestedList = typeof value.listId === "string" ? value.listId : DEFAULT_LIST_ID;
+  const listId = lists.some((list) => list.id === requestedList) ? requestedList : DEFAULT_LIST_ID;
+  const dueDate = typeof value.dueDate === "string" && parseCivilDate(value.dueDate) !== undefined ? value.dueDate.trim() : null;
+  const dueMinute = dueDate === null || typeof value.dueMinute !== "number" || !Number.isFinite(value.dueMinute) ? null : clampInt(value.dueMinute, 0, 1439);
+  const alertMinutes = dueDate === null || typeof value.alertMinutes !== "number" || !Number.isFinite(value.alertMinutes) ? null : clampInt(value.alertMinutes, 0, 1440);
+  const subtasks: ReminderSubtaskRecord[] = Array.isArray(value.subtasks)
+    ? value.subtasks.flatMap((entry, idx) =>
+      isPlainRecord(entry) && typeof entry.title === "string" && entry.title.trim() !== ""
+        ? [{ id: typeof entry.id === "string" && entry.id.trim() !== "" ? entry.id.trim() : `sub-${idx + 1}`, title: entry.title.trim(), done: Boolean(entry.done) }]
+        : [])
+    : [];
+  return {
+    id,
+    listId,
+    title: value.title.trim().slice(0, 240),
+    notes: typeof value.notes === "string" ? value.notes.trim().slice(0, 2000) : "",
+    dueDate,
+    dueMinute,
+    alertMinutes,
+    recurrence: dueDate === null ? "none" : normalizeRecurrence(value.recurrence),
+    priority: normalizePriority(value.priority),
+    flagged: typeof value.flagged === "boolean" ? value.flagged : false,
+    subtasks,
+    completed: typeof value.completed === "boolean" ? value.completed : false,
+    completedAtMs: finiteOrNull(value.completedAtMs),
+    snoozedUntilMs: finiteOrNull(value.snoozedUntilMs),
+    notifiedAtMs: finiteOrNull(value.notifiedAtMs),
+    agentTaskId: typeof value.agentTaskId === "string" && value.agentTaskId.trim() !== "" ? value.agentTaskId : null,
+    revision: value.revision,
+    createdAtMs: typeof value.createdAtMs === "number" && Number.isFinite(value.createdAtMs) ? value.createdAtMs : nowMs,
+    updatedAtMs: nowMs,
+  };
 }
 
 function writeAtomic(file: string, data: unknown): void {
@@ -381,8 +454,9 @@ export class AlphaAppsStore {
     const deletedTimers = new Set([...this.clock.deletedTimerIds, ...incomingDeletedTimers]);
     const alarmsById = new Map<string, ClockAlarmRecord>();
     for (const alarm of this.clock.alarms) if (!deletedAlarms.has(alarm.id)) alarmsById.set(alarm.id, alarm);
-    for (const alarm of incoming.alarms ?? []) {
-      if (!isValidAlarmRecord(alarm) || deletedAlarms.has(alarm.id)) continue;
+    for (const entry of incoming.alarms ?? []) {
+      const alarm = parseAlarmRecord(entry);
+      if (alarm === undefined || deletedAlarms.has(alarm.id)) continue;
       const current = alarmsById.get(alarm.id);
       if (current === undefined || alarm.revision > current.revision || (alarm.revision === current.revision && alarm.updatedAtMs >= current.updatedAtMs)) {
         alarmsById.set(alarm.id, alarm);
@@ -390,15 +464,21 @@ export class AlphaAppsStore {
     }
     const timersById = new Map<string, ClockTimerRecord>();
     for (const timer of this.clock.timers) if (!deletedTimers.has(timer.id)) timersById.set(timer.id, timer);
-    for (const timer of incoming.timers ?? []) {
-      if (!isValidTimerRecord(timer) || deletedTimers.has(timer.id)) continue;
+    for (const entry of incoming.timers ?? []) {
+      const timer = parseTimerRecord(entry);
+      if (timer === undefined || deletedTimers.has(timer.id)) continue;
       const current = timersById.get(timer.id);
       if (current === undefined || timer.revision > current.revision || (timer.revision === current.revision && timer.updatedAtMs >= current.updatedAtMs)) {
         timersById.set(timer.id, timer);
       }
     }
     const world = incoming.world !== undefined
-      ? incoming.world.filter(isValidWorldCityRecord).slice(0, MAX_WORLD_CITIES).map((c, idx) => ({ ...c, order: idx }))
+      ? incoming.world.reduce<WorldCityRecord[]>((acc, entry) => {
+        if (acc.length >= MAX_WORLD_CITIES) return acc;
+        const parsed = parseWorldCityRecord(entry, acc.length);
+        if (parsed !== undefined) acc.push(parsed);
+        return acc;
+      }, [])
       : this.clock.world;
     const incomingVersion = typeof incoming.version === "number" && Number.isFinite(incoming.version) ? incoming.version : 0;
     return this.saveClock({
@@ -868,10 +948,10 @@ export class AlphaAppsStore {
   }
 
   restoreItem(id: string, fallback?: unknown): ReminderItemRecord | undefined {
-    const stashed = this.deletedItems.get(id);
-    const prior = stashed ?? (isValidReminderFallback(id, fallback) ? fallback : undefined);
-    if (prior === undefined) return undefined;
     const nowMs = this.now();
+    const stashed = this.deletedItems.get(id);
+    const prior = stashed ?? parseReminderFallback(id, fallback, this.reminders.lists, nowMs);
+    if (prior === undefined) return undefined;
     this.deletedItems.delete(id);
     const listId = this.reminders.lists.some((list) => list.id === prior.listId) ? prior.listId : DEFAULT_LIST_ID;
     const restored: ReminderItemRecord = { ...prior, id, listId, revision: prior.revision + 1, updatedAtMs: nowMs };

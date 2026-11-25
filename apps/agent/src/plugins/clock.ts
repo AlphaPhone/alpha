@@ -120,7 +120,11 @@ const dayBits: Readonly<Record<string, number>> = {
 /** The repeat days the model named, as a mask; any day it named that is not a weekday is returned for it to correct. */
 function parseDaysMask(input: unknown): { readonly mask: number } | { readonly unknown: readonly string[] } {
   if (typeof input === "number" && Number.isFinite(input)) return { mask: Math.max(0, Math.min(127, Math.trunc(input))) };
-  const text = (value: unknown) => (typeof value === "string" ? value : JSON.stringify(value));
+  const text = (value: unknown): string => {
+    if (typeof value === "string") return value;
+    if (typeof value === "number" || typeof value === "boolean" || value === null || value === undefined) return String(value);
+    return JSON.stringify(value) ?? "unknown";
+  };
   const days = Array.isArray(input) ? input.map(text) : input === undefined || input === null ? [] : [text(input)];
   const unknown = days.filter((day) => dayBits[day.trim().toLowerCase()] === undefined);
   return unknown.length > 0 ? { unknown } : { mask: days.reduce((mask, day) => mask | (dayBits[day.trim().toLowerCase()] ?? 0), 0) };

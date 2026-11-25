@@ -71,7 +71,7 @@ export function base64urlBytes(value: string): number {
  * @throws {never}
  */
 export function sealingKeyBytes(value: string): number {
-  if (!/^[A-Za-z0-9+/_-]+={0,2}$/.test(value)) return -1;
+  if (!/^[A-Za-z0-9+/]+={0,2}$/.test(value)) return -1;
   return Buffer.from(value, "base64").length;
 }
 

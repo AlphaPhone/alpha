@@ -694,8 +694,31 @@ describe("Alpha product plugin: Reminders actions, provider, recurrence, and rou
     const patchedBadSound = await callRoute(routes, "PATCH", "/api/alpha/clock/alarms/{id}", { params: { id: alarmId }, body: { sound: "invalid_sound" } });
     expect((patchedBadSound.body.alarm as { sound: string }).sound).toBe("chime");
 
-    const malformedSync = await callRoute(routes, "PUT", "/api/alpha/clock", { body: { alarms: [null, {}], timers: [null], world: [null] } });
+    const clockAction = plugin.actions!.find((a) => a.name === "CLOCK_ALARM")!;
+    const badDaysOptions = { parameters: { action: "create", hour: 7, minute: 0, days: [undefined] } } as unknown as Parameters<typeof clockAction.handler>[3];
+    const badDays = await clockAction.handler(runtime, emptyMessage("Bad days"), emptyState, badDaysOptions);
+    expect(badDays?.success).toBe(false);
+
+    const partialRestore = await callRoute(routes, "POST", "/api/alpha/reminders/items/{id}/restore", { params: { id: "partial-rem" }, body: { item: { title: "Partial", revision: 1 } } });
+    expect(partialRestore.status).toBe(200);
+    const queriedPartial = await action.handler(runtime, emptyMessage("Search partial"), emptyState, { parameters: { op: "list", query: "Partial" } });
+    expect(queriedPartial?.success).toBe(true);
+    const completedPartial = await action.handler(runtime, emptyMessage("Complete partial"), emptyState, { parameters: { op: "complete", id: "partial-rem" } });
+    expect(completedPartial?.success).toBe(true);
+
+    const malformedSync = await callRoute(routes, "PUT", "/api/alpha/clock", {
+      body: {
+        alarms: [null, {}, { id: "partial-alarm", hour: 6, minute: 30, revision: 1, updatedAtMs: 1000 }],
+        timers: [null, { id: "partial-timer", durationMs: 60_000, revision: 1, updatedAtMs: 1000 }],
+        world: [null],
+      },
+    });
     expect(malformedSync.status).toBe(200);
+    const syncedSnapshot = malformedSync.body as unknown as ClockSnapshot;
+    const syncedAlarm = syncedSnapshot.alarms.find((entry) => entry.id === "partial-alarm");
+    const syncedTimer = syncedSnapshot.timers.find((entry) => entry.id === "partial-timer");
+    expect({ sound: syncedAlarm?.sound, label: syncedAlarm?.label, status: syncedTimer?.status, remainingMs: syncedTimer?.remainingMs })
+      .toEqual({ sound: "radar", label: "", status: "ready", remainingMs: 60_000 });
   });
 });
 
