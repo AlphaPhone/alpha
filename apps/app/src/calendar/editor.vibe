@@ -14,8 +14,8 @@ import type { AndroidCalendarDeletionScope, AndroidCalendarEditorFields, Calenda
 import { PhoneCalendar, type Written } from "../platform/calendar.vibe"
 import { Attempts, fresh } from "../runtime/attempts.vibe"
 import { civilDateAt, formatCivilDate } from "../reminders/recurrence.ts"
-import { createReminderItem } from "../reminders/reminders.vibe"
-import { DEFAULT_LIST_ID, remindersStore } from "../reminders/store.ts"
+import { type DatedReminderFields, createReminderItem, editDatedReminder } from "../reminders/reminders.vibe"
+import { DEFAULT_LIST_ID, type ReminderItemRecord, remindersStore } from "../reminders/store.ts"
 import { answer, contained, hearing, reacting, run, started, together } from "../runtime/reactor.vibe"
 import { Time } from "../runtime/time.vibe"
 import { type Row, androidWindowOf, shown } from "./shown.ts"
@@ -35,7 +35,10 @@ export schema Fields {
   readonly repeat?: "NoRepeat" | "Daily" | "Weekdays" | "Weekly" | "Monthly" | "Yearly"
   readonly calendar?: "Agent" | "Phone" | "Reminders"
   readonly reminderId?: string
-  readonly reminderRepeat?: "none" | "daily" | "weekdays" | "weekly"
+  readonly reminderSpecId?: number
+  readonly reminderRevision?: number
+  readonly reminderDateOnly?: boolean
+  readonly reminderRepeat?: "none" | "daily" | "weekdays" | "weekly" | "monthly" | "yearly"
   readonly reminderAlert?: number | null
 }
 
@@ -97,6 +100,24 @@ export effect function startForm(edit: Event, day: number, row?: Row) {
   try contained(editor.send(edit), "opening the form")
 }
 
+/** Open Calendar's form for the exact reminder the owner is looking at. */
+export effect function startReminderEdit(selected: number, item: ReminderItemRecord, begin: number) {
+  const editor = try Editor.Machine
+  const state = try editor.get()
+  if (!Editor.canEditReminder(state, selected, item.revision)) return
+  const view = try View.Machine
+  const shown = try view.get()
+  const cached = remindersStore.snapshot()
+  if (!shown.front || shown.reminder !== selected || cached.hiddenIds.has(item.id) || remindersStore.findItem(item.id)?.revision !== item.revision) return
+  const fields: Fields = {
+    title: item.title, notes: item.notes, begin, end: begin + 900_000, place: "", allDay: false, people: "",
+    calendar: "Reminders", reminderId: item.id, reminderSpecId: selected, reminderRevision: item.revision, reminderDateOnly: item.dueMinute === null,
+    reminderRepeat: item.recurrence, reminderAlert: item.alertMinutes,
+  }
+  if (!(try keep(fields, state.owner))) return
+  try contained(editor.send({ type: "editReminder", id: selected, revision: item.revision, day: civilDay(begin) }), "opening Calendar's reminder form")
+}
+
 // spec/app/calendar/editor.md, "A note or a scan opens a new event already filled in, as edits to review, only when no other draft is kept"
 /** Notes or Scan hand Calendar what they read as an event for `day`: kept as the form's draft, for the owner to review and save. */
 export effect function fromNote(fields: Fields, day: number) {
@@ -120,27 +141,39 @@ function fieldsOf(fields: Fields): AndroidCalendarEditorFields {
 
 const refused: Written = { confirmed: false, known: true }
 
+/** The same dated fields Calendar uses for additions and edits. */
+function reminderFields(fields: Fields): DatedReminderFields {
+  const instant = new Date(fields.begin)
+  return {
+    title: fields.title.trim(), notes: fields.notes.trim(), dueDate: formatCivilDate(civilDateAt(fields.begin)),
+    dueMinute: fields.reminderDateOnly === true ? null : instant.getHours() * 60 + instant.getMinutes(),
+    recurrence: fields.reminderRepeat ?? "none",
+    alertMinutes: fields.reminderAlert === undefined ? 0 : fields.reminderAlert,
+  }
+}
+
 /** One retained Calendar form creates at most one reminder with these reviewed fields. */
 effect function createCalendarReminder(fields: Fields, owning: number) {
   if (fields.calendar !== "Reminders" || fields.title.trim() === "") return refused
   const id = fields.reminderId ?? `rem_${fresh()}`
-  const dueDate = formatCivilDate(civilDateAt(fields.begin))
-  const instant = new Date(fields.begin)
-  const dueMinute = instant.getHours() * 60 + instant.getMinutes()
-  const recurrence = fields.reminderRepeat ?? "none"
-  const alertMinutes = fields.reminderAlert === undefined ? 0 : fields.reminderAlert
-  const title = fields.title.trim()
-  const notes = fields.notes.trim()
+  const input = reminderFields(fields)
   const alreadySaved = remindersStore.findItem(id)
   if (alreadySaved !== undefined) {
-    if (alreadySaved.title !== title || alreadySaved.notes !== notes || alreadySaved.dueDate !== dueDate
-      || alreadySaved.dueMinute !== dueMinute || alreadySaved.recurrence !== recurrence || alreadySaved.alertMinutes !== alertMinutes) return refused
+    if (alreadySaved.title !== input.title || alreadySaved.notes !== input.notes || alreadySaved.dueDate !== input.dueDate
+      || alreadySaved.dueMinute !== input.dueMinute || alreadySaved.recurrence !== input.recurrence || alreadySaved.alertMinutes !== input.alertMinutes) return refused
     return { confirmed: true, known: true }
   }
   if (fields.reminderId === undefined && !(try keep({ ...fields, reminderId: id }, owning))) return refused
   if ((try owner()) !== owning) return refused
-  const saved = try createReminderItem({ id, listId: DEFAULT_LIST_ID, title, notes, dueDate, dueMinute, recurrence, alertMinutes })
+  const saved = try createReminderItem({ id, listId: DEFAULT_LIST_ID, ...input })
   return saved === undefined ? refused : { confirmed: true, known: true }
+}
+
+effect function updateCalendarReminder(fields: Fields, owning: number, id: number, attempt: number) {
+  if (fields.calendar !== "Reminders" || fields.reminderId === undefined || fields.reminderRevision === undefined
+    || fields.reminderSpecId !== id || (try owner()) !== owning) return refused
+  const saved = try editDatedReminder(fields.reminderId, fields.reminderRevision, reminderFields(fields), attempt)
+  return { confirmed: saved, known: true }
 }
 
 /** Which occurrences eliza's deletion review takes; it has no "this and following". */
@@ -253,15 +286,15 @@ effect function sendAgent(attempt: number, kind: "Update" | "Remove" | "Reply", 
 // spec/app/calendar/editor.md, "Saving sends the form once, as a new numbered write built on the revision its edits began from"; spec/app/calendar/editor.md, "No create is sent while an earlier one is in doubt, unless the owner asked for a separate event"
 // spec/app/calendar/writing.md, "Guests, alerts and video rooms go to Android Calendar; zones, all-day and repeats use the direct save for a new event"; "The agent's own calendar holds no repeats, alerts or video rooms"
 /** Carry out write `attempt`: a create under its own creation identity, a change or a deletion through the phone's review. */
-effect function send(attempt: number, kind: Exclude<Write, "CreateReminder">, id: number, scope: Scope, going: boolean): Written!!(PhoneCalendar | Agent | KeyValueStore.KeyValueStore | Attempts | Time | Editor.Machine | View.Machine) {
+effect function send(attempt: number, kind: Exclude<Write, "CreateReminder" | "UpdateReminder">, id: number, scope: Scope, going: boolean): Written!!(PhoneCalendar | Agent | KeyValueStore.KeyValueStore | Attempts | Time | Editor.Machine | View.Machine) {
   const phone = try PhoneCalendar
   const fields = try kept(0, try owner())
+  if ((kind === "Create" || kind === "Update") && fields.calendar === "Reminders") return refused
   const rrule = rules[fields.repeat ?? "NoRepeat"]
   const hasAlert = fields.alert !== undefined
   const hasVideo = fields.video === true
   const agentAccepts = agentCalendarAccepts(true, rrule !== "", hasAlert, hasVideo)
   if (kind === "Create") {
-    if (fields.calendar === "Reminders") return refused
     const view = try (try View.Machine).get()
     if (newEventTarget(view.connected, fields.calendar === "Phone") === "AgentOwnCalendar") return agentAccepts ? try createAgent(attempt, fields) : refused
     const route = deviceRoute(false, fields.people.trim() !== "", hasAlert, hasVideo, fields.allDay, false, rrule !== "")
@@ -322,9 +355,11 @@ effect function handOff() {
 effect function written(attempt: number, kind: Write, id: number, scope: Scope, going: boolean) {
   const owning = try owner()
   const fields = try kept(0, owning)
-  const outcome: Written = kind === "CreateReminder" ? try createCalendarReminder(fields, owning) : try send(attempt, kind, id, scope, going)
+  const outcome: Written = kind === "CreateReminder" ? try createCalendarReminder(fields, owning)
+    : kind === "UpdateReminder" ? try updateCalendarReminder(fields, owning, id, attempt)
+    : try send(attempt, kind, id, scope, going)
   const view = try View.Machine
-  if (kind !== "CreateReminder") try contained(view.send({ type: "changeCommitted" }), "reading the day again after a write")
+  if (kind !== "CreateReminder" && kind !== "UpdateReminder") try contained(view.send({ type: "changeCommitted" }), "reading the day again after a write")
   if ((kind === "Create" || kind === "CreateReminder" || kind === "Update") && outcome.confirmed && !("filed" in outcome)) try contained(view.send({ type: "pickDay", day: civilDay(fields.begin) }), "showing the saved day")
   if (kind === "Remove") try contained((try Held.Machine).send({ type: "ended", id, done: outcome.confirmed && !("filed" in outcome) }), "telling the deletions how one ended")
   return { type: "written", attempt, confirmed: outcome.confirmed, known: outcome.known, filed: "filed" in outcome && outcome.filed === true } satisfies Event
@@ -355,7 +390,7 @@ const reread = started(effect {
   try Stream.runForEach(Stream.changesWith(loaded, (a, b) => a.phone.ticket === b.phone.ticket && a.google.ticket === b.google.ticket), effect () => {
     const form = try editor.get()
     const state = try view.get()
-    for (const id of new Set([form.target, ...form.latched])) {
+    for (const id of new Set([...(form.form === "EditReminder" ? [] : [form.target]), ...form.latched])) {
       if (id === 0) continue
       const row = shown.find(id) ?? shown.lastSeen(id)
       const source = row?.source === "Phone" ? state.phone : state.google

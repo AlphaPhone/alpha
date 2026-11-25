@@ -3,13 +3,12 @@ import { Button, CalendarEventMenu, CalendarEventPage, CalendarEventRow, Calenda
 import { Effect } from "effect";
 import { Bell, Repeat } from "lucide-react";
 import { Machine as Calendar } from "../../gen/app__calendar.effect.vibe";
-import * as Shell from "../../gen/app__shell.effect.vibe";
 import { snoozeSelectedReminder } from "../reminders/alerts.vibe";
-import { beginEditReminder } from "../reminders/editor.vibe";
 import { deleteReminderItem, toggleReminderComplete } from "../reminders/reminders.vibe";
 import { remindersStore, type ReminderItemRecord } from "../reminders/store.ts";
 import type { Alpha } from "../runtime/area.tsx";
 import type { CalendarProps } from "./Calendar.tsx";
+import { startReminderEdit } from "./editor.vibe";
 import type { DatedReminder } from "./reminders.ts";
 
 const hour = new Intl.DateTimeFormat(undefined, { hour: "numeric", minute: "2-digit" });
@@ -38,15 +37,7 @@ export function ReminderPage({ alpha, runtime, row, onBack }: { alpha: Alpha; ru
     if (!view.front || view.reminder !== row.id || still.hiddenIds.has(record.id) || item?.revision !== record.revision) return;
     change(item);
   };
-  const edit = doCurrent((item) => {
-    void alpha.runtime.runPromise(Effect.gen(function* () {
-      const shell = yield* Shell.Machine;
-      const state = yield* shell.get();
-      if (!Shell.canOpenView(state, "Reminders")) return;
-      yield* beginEditReminder(item);
-      yield* Effect.ignore(shell.send({ type: "openView", view: "Reminders" }));
-    }));
-  });
+  const edit = doCurrent((item) => { void runtime.runPromise(startReminderEdit(row.id, item, begin)); });
   const remove = doCurrent((item) => { void alpha.runtime.runPromise(deleteReminderItem(item.id, item.revision)); });
   const toggle = doCurrent((item) => { void alpha.runtime.runPromise(toggleReminderComplete(item.id, item.revision)); });
   const snooze = doCurrent((item) => { void alpha.runtime.runPromise(snoozeSelectedReminder(item.id, item.revision)); });

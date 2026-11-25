@@ -9,8 +9,8 @@ import * as Toasts from "../../gen/app__notices__toasts.effect.vibe"
 import { Said, offer, say, withdraw } from "../notices/toasts.vibe"
 import { Agent } from "../platform/agent.vibe"
 import { PhoneReminders } from "../platform/reminders.vibe"
-import { ask, attempted, attemptedWith } from "../platform/remote.vibe"
-import { type Attempts, fresh } from "../runtime/attempts.vibe"
+import { ask, attempted, attemptedWith, outcomeOf } from "../platform/remote.vibe"
+import { Attempts, fresh } from "../runtime/attempts.vibe"
 import { type Job, answer, applying, contained, due, hearing, reacting, started, stop, together, untimed } from "../runtime/reactor.vibe"
 import { Time } from "../runtime/time.vibe"
 import { alertBannerStore, reminderAlerts, syncAlertsWithSnapshot } from "./alerts.vibe"
@@ -112,6 +112,16 @@ interface ActiveUndo {
   readonly prior: ReminderItemRecord
   readonly about: number
   readonly until: number
+}
+
+/** The fields Calendar can edit on an existing dated reminder. */
+export interface DatedReminderFields {
+  readonly title: string
+  readonly notes: string
+  readonly dueDate: string
+  readonly dueMinute: number | null
+  readonly alertMinutes: number | null
+  readonly recurrence: ReminderRecurrence
 }
 
 const pendingWrites = new Map<number, PendingRequest>()
@@ -431,6 +441,44 @@ function replaceItemInSnapshot(current: RemindersSnapshot, updated: ReminderItem
     updatedAtMs: now,
     items: current.items.map((item) => (item.id === updated.id ? updated : item)),
   }
+}
+
+function sameDatedFields(item: ReminderItemRecord, fields: DatedReminderFields): boolean {
+  return item.title === fields.title && item.notes === fields.notes && item.dueDate === fields.dueDate
+    && item.dueMinute === fields.dueMinute && item.alertMinutes === fields.alertMinutes && item.recurrence === fields.recurrence
+}
+
+/** Save Calendar's edits to the selected resident reminder without taking over the standalone reminder editor. */
+export effect function editDatedReminder(id: string, revision: number, fields: DatedReminderFields, attempt: number): boolean!!(Agent | Attempts | Alerts.Machine | KeyValueStore.KeyValueStore | PhoneReminders | Time) {
+  const seen = remindersStore.snapshot()
+  const item = seen.snapshot.items.find((row) => row.id === id)
+  if (fields.title === "" || item === undefined || item.dueDate === null || seen.hiddenIds.has(id)) return false
+  if (item.revision !== revision) return false
+  if (sameDatedFields(item, fields)) return true
+  const changedTiming = item.dueDate !== fields.dueDate || item.dueMinute !== fields.dueMinute || item.alertMinutes !== fields.alertMinutes || item.recurrence !== fields.recurrence
+  const timing = changedTiming ? { snoozedUntilMs: null, notifiedAtMs: null } : {}
+  const key = try (try Attempts).key(attempt)
+  const agent = try Agent
+  const outcome = effect {
+    const body = try agent.call(HttpClientRequest.bodyJsonUnsafe(
+      HttpClientRequest.patch(`/api/alpha/reminders/items/${encodeURIComponent(id)}`),
+      { ...fields, ...timing, expectedRevision: revision, idempotencyKey: key },
+    ))
+    const decoded = Schema.decodeUnknownOption(ItemReplySchema)(body)
+    return { kept: true, item: Option.isSome(decoded) ? decoded.value.item : undefined }
+  } catch (failure) => {
+    const status = outcomeOf(failure)
+    return { kept: status.confirmed || !status.known || failure._tag === "Unsent", item: undefined }
+  }
+  const now = try (try Time).now()
+  const view = remindersStore.snapshot()
+  const latest = view.snapshot.items.find((row) => row.id === id)
+  if (!outcome.kept || latest?.revision !== revision || view.hiddenIds.has(id)) return false
+  const saved = outcome.item
+  const updated = saved?.id === id && saved.revision > revision && sameDatedFields(saved, fields)
+    ? saved : { ...latest, ...fields, ...timing, revision: revision + 1, updatedAtMs: now }
+  try persistAndBroadcast(replaceItemInSnapshot(view.snapshot, updated, now), now)
+  return true
 }
 
 effect function prepareItemEdit(id: string, expectedRevision?: number): ({ readonly current: RemindersSnapshot; readonly existing: ReminderItemRecord; readonly now: number } | undefined)!!(Reminders.Machine | KeyValueStore.KeyValueStore | Alerts.Machine | Time | Toasts.Machine | Said | PhoneReminders) {

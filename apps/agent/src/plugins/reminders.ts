@@ -585,8 +585,17 @@ export function remindersRoutes(store: AlphaAppsStore, runtime: AgentRuntimeLike
       path: "/api/alpha/reminders/items/{id}",
       handler: async (input) => {
         const body = asRecord(input.body);
-        const before = itemNamed(store, input.parameters.get("id"));
-        const updated = store.updateItem(input.parameters.get("id") ?? "", {
+        const id = input.parameters.get("id") ?? "";
+        const before = itemNamed(store, id);
+        const expectedRevision = readNumber(body, "expectedRevision");
+        if (body.expectedRevision !== undefined && (expectedRevision === undefined || !Number.isSafeInteger(expectedRevision) || expectedRevision < 1)) {
+          return { status: 400, body: { error: "invalid_reminder_revision" } };
+        }
+        if (expectedRevision !== undefined) {
+          if (before === undefined) return { status: 404, body: { error: "reminder_not_found" } };
+          if (before.revision !== expectedRevision) return { status: 409, body: { error: "reminder_revision_changed" } };
+        }
+        const updated = store.updateItem(id, {
           listId: readString(body, "listId"),
           title: readString(body, "title"),
           notes: readRawString(body, "notes"),

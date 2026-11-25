@@ -236,6 +236,37 @@ describe("Calendar without a connected account", () => {
     await until(alpha, runtime, Editor, (state) => state.form === "NewEvent" && state.shown);
     expect(document.querySelector<HTMLInputElement>('input[aria-label="Title"]')?.value).toBe("");
   });
+
+  it("Edits a dated reminder in Calendar without changing another reminder with the same title (spec/app/calendar/editor.md, \"Story: Write an event\")", async () => {
+    const world = morning(false);
+    const { alpha } = await open(world, only("view:Calendar"));
+    const runtime = calendar.runtime(alpha);
+    await openCalendar(alpha);
+    await until(alpha, runtime, View, (state) => state.front && state.anchor === world.today);
+    await until(alpha, alpha.runtime, Reminders, (state) => state.sync.status === "Loaded");
+    const input = { listId: DEFAULT_LIST_ID, title: "Bring the blue notebook", dueMinute: 570, alertMinutes: null };
+    const selected = await alpha.runtime.runPromise(createReminderItem({ ...input, notes: "The first draft is inside.", dueDate: "2026-11-24" }));
+    await until(alpha, alpha.runtime, Reminders, (state) => state.write.outcome === "Confirmed");
+    const other = await alpha.runtime.runPromise(createReminderItem({ ...input, notes: "A different notebook.", dueDate: "2026-11-25" }));
+    await until(alpha, alpha.runtime, Reminders, (state) => state.write.outcome === "Confirmed");
+    if (!selected || !other) throw new Error("Expected two saved reminders");
+
+    await until(alpha, runtime, View, (state) => state.reminders === 1);
+    await press(/^Bring the blue notebook,/);
+    await until(alpha, runtime, View, (state) => state.reminder > 0);
+    await press("Event actions");
+    await press("Edit event");
+    await until(alpha, runtime, Editor, (state) => state.form === "EditReminder" && state.shown);
+    expect(document.querySelector<HTMLInputElement>('input[aria-label="Title"]')?.value).toBe(selected.title);
+    expect(document.querySelector<HTMLInputElement>('input[aria-label="Reminder time"]')?.value).toBe("09:30");
+    await fill("Notes", "Take the earlier draft.");
+    await fill("Reminder time", "10:15");
+    await press("Save event");
+    await until(alpha, runtime, Editor, (state) => !state.shown && state.write.outcome === "Confirmed");
+    expect(remindersStore.findItem(selected.id)).toMatchObject({ notes: "Take the earlier draft.", dueMinute: 615, revision: selected.revision + 1 });
+    expect(world.reminders.items.find((item) => item.id === selected.id)).toMatchObject({ notes: "Take the earlier draft.", dueMinute: 615 });
+    expect(remindersStore.findItem(other.id)).toMatchObject({ notes: "A different notebook.", dueMinute: 570, revision: other.revision });
+  });
 });
 
 it("Shows the newly verified Google grant when Calendar Settings reopens (spec/app/settings/index.md, \"Each page links to what another area owns there\")", async () => {

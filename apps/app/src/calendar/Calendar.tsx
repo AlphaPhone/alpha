@@ -695,7 +695,7 @@ function Drafts({ runtime, day }: CalendarProps & { day: number }) {
       {editor.can({ type: "discard" }) ? <CalendarNoticeAction onClick={() => void editor.send({ type: "discard" })}>Discard it</CalendarNoticeAction> : null}
       {editor.can({ type: "callOff" }) ? <CalendarNoticeAction onClick={() => void editor.send({ type: "callOff" })}>Keep it</CalendarNoticeAction> : null}
     </>}>
-      {`Unsaved event${e.form === "EditEvent" ? " change" : ""} from ${shortDate.format(dateOf(e.day || day))}`}
+      {`Unsaved ${e.form === "EditReminder" ? "reminder change" : e.form === "EditEvent" ? "event change" : "event"} from ${shortDate.format(dateOf(e.day || day))}`}
     </CalendarNotice>
   );
 }
@@ -719,7 +719,10 @@ function Form({ runtime, day, today, connected }: CalendarProps & { day: number;
   };
   const timing = (begin: number, end: number): Editor.Event => ({ type: "setTiming", start: begin, end });
   const retime = (begin: number, end: number) => {
-    if (Number.isFinite(begin) && Number.isFinite(end) && end > begin && editor.can(timing(begin, end))) change({ ...fields, begin, end }, timing(begin, end));
+    if (Number.isFinite(begin) && Number.isFinite(end) && end > begin && editor.can(timing(begin, end))) {
+      const changedTime = fields.reminderDateOnly === true && timeValue(begin) !== timeValue(fields.begin);
+      change({ ...fields, begin, end, ...(changedTime ? { reminderDateOnly: false } : {}) }, timing(begin, end));
+    }
   };
   const retimer = (begin: number, end: number) => (end > begin && editor.can(timing(begin, end)) ? () => retime(begin, end) : undefined);
   const length = fields.end - fields.begin;
@@ -758,13 +761,13 @@ function Form({ runtime, day, today, connected }: CalendarProps & { day: number;
     { scope: "ThisOne", label: "This event" }, { scope: "ThisAndFollowing", label: "This and following" }, { scope: "WholeSeries", label: "All events" },
   ];
   const off_ = !reminder && !e.extras && !editor.can(save) ? saveOff[saveBlock(e.form === "NewEvent" && e.receipts.status === "Loading", saving, false, Editor.canKeepMyChanges(e), !e.titled)] : "";
-  const choosesCalendar = e.form === "NewEvent";
-  const choosesRepeat = e.form === "NewEvent" && (reminder || (shown.present() && (!connected || fields.calendar === "Phone")));
+  const choosesCalendar = reminder || e.form === "NewEvent";
+  const choosesRepeat = reminder || (e.form === "NewEvent" && shown.present() && (!connected || fields.calendar === "Phone"));
   const choosesOptions = !reminder && (choosesRepeat || (e.form === "NewEvent" && shown.present() && (fields.video === true || fields.alert !== undefined)));
   const editingPhone = e.form === "EditEvent" && shown.find(e.target)?.source === "Phone";
   const destinations: { name: string; value: NonNullable<Fields["calendar"]> }[] = [{ name: "Reminders", value: "Reminders" }];
-  if (connected) destinations.push({ name: "Your agent's calendar", value: "Agent" });
-  if (shown.present()) destinations.push({ name: "This phone's calendar", value: "Phone" });
+  if (e.form === "NewEvent" && connected) destinations.push({ name: "Your agent's calendar", value: "Agent" });
+  if (e.form === "NewEvent" && shown.present()) destinations.push({ name: "This phone's calendar", value: "Phone" });
   const destination = fields.calendar ?? (connected ? "Agent" : "Phone");
   const close = () => (editor.can({ type: "close" }) ? void editor.send({ type: "close" }) : undefined);
   return (
@@ -817,7 +820,7 @@ function Form({ runtime, day, today, connected }: CalendarProps & { day: number;
       ) : null}
       <CalendarFormTitle value={fields.title} disabled={!editor.can({ type: "editTitle", blank: false })}
         onChange={(input) => change({ ...fields, title: input.target.value }, { type: "editTitle", blank: input.target.value.trim() === "" })} />
-      {reminder ? <div aria-label="Selected event date" aria-live="polite" className="px-6 pt-2 text-sm text-muted-foreground">{fullDate.format(dateOf(startDay))}</div> : null}
+      {reminder && e.form === "NewEvent" ? <div aria-label="Selected event date" aria-live="polite" className="px-6 pt-2 text-sm text-muted-foreground">{fullDate.format(dateOf(startDay))}</div> : null}
       <CalendarFormDate label="Date" aria-label="Calendar date" value={dateValue(fields.begin)} onChange={(input) => {
         const shift = (toDay(input.target.value) - startDay) * 86_400_000;
         retime(fields.begin + shift, fields.end + shift);
