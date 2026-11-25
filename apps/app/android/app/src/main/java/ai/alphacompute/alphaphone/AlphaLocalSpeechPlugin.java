@@ -28,11 +28,26 @@ public final class AlphaLocalSpeechPlugin extends LocalSpeechBridgePlugin {
  private static final String READ_VOICEMAIL = "com.android.voicemail.permission.READ_VOICEMAIL";
  private static final int WINDOW_SAMPLES = VoicemailPcm.SAMPLE_RATE * 60;
  private static final int TRANSCRIPT_LIMIT = 8_000;
+ private final PasswordSurfaces.Listener secretSurface = visible -> {
+  if (visible) {
+   stopVoicemailRead();
+   retireSpeechAuthority();
+  }
+ };
  private final Object voicemailLock = new Object();
  private VoicemailRead activeVoicemail, nextVoicemail;
 
  public AlphaLocalSpeechPlugin() {
   super("alpha-cloud-voice-", "alpha-cloud-tts-");
+ }
+
+ @Override public void load() {
+  super.load();
+  PasswordSurfaces.addListener(secretSurface);
+ }
+
+ @Override protected boolean sensitiveSurfaceActive() {
+  return PasswordSurfaces.visible();
  }
 
  @PluginMethod public void transcribeVoicemail(PluginCall call) {
@@ -87,6 +102,7 @@ public final class AlphaLocalSpeechPlugin extends LocalSpeechBridgePlugin {
  }
 
  @Override protected void handleOnDestroy() {
+  PasswordSurfaces.removeListener(secretSurface);
   stopVoicemailRead();
   super.handleOnDestroy();
  }
