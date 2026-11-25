@@ -52,7 +52,7 @@ export const meta: ComponentMeta<HomeTileGridProps> = {
     },
     "With Apps drawer": async ({ canvasElement }: { canvasElement: HTMLElement }) => {
       onOpenDrawer.mockClear();
-      const apps = within(canvasElement).getByRole("button", { name: "Apps", exact: true });
+      const apps = within(canvasElement).getByRole("button", { name: /^Apps$/ });
       await expect(apps).toHaveAttribute("aria-haspopup", "dialog");
       await userEvent.click(apps);
       await expect(onOpenDrawer).toHaveBeenCalledTimes(1);

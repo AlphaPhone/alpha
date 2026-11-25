@@ -18,7 +18,7 @@ do next.
   and a chosen box or radio, is `alpha` with `alpha-foreground`, Alpha blue in both themes. `destructive`, `ok`, `warn` and `info` are states,
   `call` a live or answerable call (the same green in both themes, behind white text), `call-ended` the moment after one ends,
   `dial` the button that places one, `hangup` the red behind or inside a control that ends a call or removes a recording,
-  never text, `record` a running recording and `record-shutter` the Video shutter. `map` marks pins, the phone and the route on a map, and `alpha-deep` the tab under Maps guidance's banner, both the same in both themes. Camera's access notice is `camera-panel`, its focus target `camera-focus`, and `camera-focused` once the camera confirms it. A state color always sits beside a
+  never text, `record` a running recording and `record-shutter` the Video shutter. `map` marks pins, the phone and the route on a map, and `alpha-deep` the tab under Maps guidance's banner, both the same in both themes. Camera's access notice is `camera-panel` and its focus target `camera-focus`, which stays that color: a target is not a claim that the camera focused. A state color always sits beside a
   word or an accessible name, never alone.
 - **Type.** `font-sans` is Public Sans, for everything read or pressed. `font-display` is Denton, with
   Fraunces behind it, at weight `light`: a screen's display title on the launcher, the date on Home, a large figure. The sizes
@@ -51,13 +51,14 @@ do next.
   `rounded-drawer-icon` rounds an installed app icon; `rounded-option` is a row of a floating menu and
   `rounded-box` the box of a list row's selection check; `rounded-chip` is a choice chip and an invitation
   row, `rounded-action` a labelled action button; `rounded-segment` is a segmented control and
-  `rounded-segment-option` the option chosen in it; `rounded-camera-stop` is Camera's stop square and focus target. `rounded-tile` is an app tile, a menu and a dialog;
+  `rounded-segment-option` the option chosen in it; `rounded-camera-stop` is Camera's stop square and focus target; `rounded-list-icon` the icon box at the start of a list row. `rounded-tile` is an app tile, a menu and a dialog;
   `rounded-sheet` the top of a bottom sheet, `rounded-chat` the top of the Ask Alpha sheet; `rounded-full` a
   button and a chip, `rounded-dock` the Ask Alpha bar and `rounded-dock-compact` its compact controls; `rounded-bar` is the foot bar of Maps guidance.
   Everything pressed is at least 44px in both directions.
 - **Elevation.** `shadow-sm` lifts a control, `shadow-menu` a menu, `shadow-md` a dialog or a notice, `shadow-lg` a raised card,
   `shadow-dock` the floating Ask Alpha bar, `shadow-dock-compact` its compact controls, `shadow-bar` the ongoing-call bar over a view,
-  `shadow-sheet` a map's resting sheet and `shadow-lift` a modal sheet or card rising over the page. The menu, dialog, sheet, lift,
+  `shadow-sheet` a map's resting sheet, `shadow-lift` a modal sheet or card rising over the page and `shadow-popup` a panel
+  ringed by a 1px line, such as Files options. The menu, dialog, sheet, lift, popup,
   dock and bar shadows have a `-dark` variant for black surfaces, as develop deepens its shadow color in dark. Over the map,
   `shadow-float` lifts the search bar, a round control and the directions card, `shadow-chip` a saved-place chip and
   `shadow-credit` the credit links, each with a `-dark` variant; `shadow-banner` is Maps guidance's turn banner.
@@ -131,7 +132,6 @@ this prose into tokens. To change the design, describe it, and have the change w
 | `camera-panel` | oklch(0.2264 0 0) | — |
 | `record-shutter` | oklch(0.6083 0.209 27.03) | — |
 | `camera-focus` | oklch(0.8819 0.1534 90.23) | — |
-| `camera-focused` | oklch(0.8086 0.1479 154.1) | — |
 | `map` | oklch(0.414 0.266 266.5) | — |
 | `alpha-deep` | oklch(0.354 0.245 264.1) | — |
 
@@ -156,6 +156,7 @@ this prose into tokens. To change the design, describe it, and have the change w
 | `rounded.segment-option` | 0.6875rem |
 | `rounded.camera-stop` | 0.5rem |
 | `rounded.bar` | 2rem |
+| `rounded.list-icon` | 0.875rem |
 | `font.sans` | "Public Sans", system-ui, -apple-system, "Segoe UI", sans-serif |
 | `font.display` | Denton, Fraunces, Georgia, serif |
 | `font.mono` | ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas, monospace |
@@ -306,6 +307,8 @@ this prose into tokens. To change the design, describe it, and have the change w
 | `shadow.bar` | 0 2px 8px oklch(0 0 0 / 0.12) |
 | `shadow.bar-dark` | 0 2px 8px oklch(0 0 0 / 0.45) |
 | `shadow.focus-target` | 0 0 2px oklch(0 0 0) |
+| `shadow.popup` | 0 16px 40px oklch(0 0 0 / 0.12) |
+| `shadow.popup-dark` | 0 16px 40px oklch(0 0 0 / 0.45) |
 | `keyframes.rise` | from{opacity:0;transform:translateY(1.75rem)}to{opacity:1;transform:none} |
 | `keyframes.drop` | from{opacity:0;transform:translateY(-2.25rem)}to{opacity:1;transform:none} |
 | `keyframes.fade` | from{opacity:0}to{opacity:1} |

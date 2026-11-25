@@ -86,7 +86,7 @@ export function elizaCamera(world: CameraScene): Faked {
         throw rejection("Incompatible thumbnail options", "INVALID_OPTIONS");
       }
       world.photos.push(options);
-      if (!options.saveToGallery) return { base64: "YQ==", format: "jpeg", width: options.width ?? 3000, height: options.height ?? 4000 };
+      if (!options.saveToGallery) return { base64: boardingPass, format: "jpeg", width: options.width ?? 3000, height: options.height ?? 4000 };
       const id = `image-${world.photos.length}`;
       return {
         thumbnail: boardingPass, format: "jpeg", width: 1280, height: 720,

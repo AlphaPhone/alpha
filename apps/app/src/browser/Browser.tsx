@@ -1,6 +1,6 @@
 // spec/app/browser/index.md, "Story: Open, pick and close tabs"; spec/app/browser/address.md, "Story: Go where I typed"; spec/app/browser/address.md, "Story: Watch a page load"; spec/app/browser/address.md, "Story: Browse privately"
-import { Button, BrowserAddressBar, type BrowserAddressChoice, BrowserAddressChoices, BrowserFindBar, BrowserBar, BrowserLibrary, type BrowserMenuItem, BrowserMenu, BrowserNewTab, BrowserTabs, ConfirmDialog, PrivateMark } from "@repo/ui";
-import { ChevronLeft, Download, History, Link, Plus, RotateCw, Search, Share2, Square, Star, Trash2 } from "lucide-react";
+import { Button, BrowserAddressBar, type BrowserAddressChoice, BrowserAddressChoices, BrowserFindBar, BrowserBar, BrowserLibrary, type BrowserMenuItem, BrowserMenu, BrowserNewTab, BrowserReview, BrowserTabs, ConfirmDialog, PrivateMark } from "@repo/ui";
+import { ChevronLeft, Download, History, Link, ListFilter, Plus, RotateCw, Search, Share2, Square, Star, Trash2 } from "lucide-react";
 import { Effect, Option } from "effect";
 import { useState, useSyncExternalStore } from "react";
 import { canAskErase, canCancelErase, canConfirmErase, canOpenTab } from "../../gen/app__browser.ts";
@@ -12,6 +12,7 @@ import { useMachine as usePage } from "../../gen/app__browser__address.react.ts"
 import { Machine as LibraryMachine } from "../../gen/app__browser__library.effect.vibe";
 import { useMachine as useLibrary } from "../../gen/app__browser__library.react.ts";
 import type { Machine as ShareMachine } from "../../gen/app__browser__share.effect.vibe";
+import type { Machine as SiteMachine } from "../../gen/app__browser__site.effect.vibe";
 import { useMachine as useShare } from "../../gen/app__browser__share.react.ts";
 import type { Machine as Shell } from "../../gen/app__shell.effect.vibe";
 import { TabHost } from "../platform/browser.vibe";
@@ -24,10 +25,11 @@ import type { ManagedRuntime } from "effect";
 import { Pages, type PageRuntime, addressOf, idOf, inputOf, openDownloads, placed } from "./browser.vibe";
 import { LibraryRows, editHistory, markPage, setMark } from "./library.vibe";
 import { type SharePages, cancelPrivateFrame, confirmPrivateFrame, offerShare } from "./share.vibe";
+import { type SiteRows, clearSiteShown, siteShown } from "./site.vibe";
 
 export interface BrowserProps {
   /** Provides the Browser's tabs and each tab's page, `browser` of browser.vibe, over the resident machines and the phone's tab host. */
-  runtime: ManagedRuntime.ManagedRuntime<Machine | Pages | LibraryMachine | LibraryRows | ShareMachine | SharePages | TabHost | Shell | Resident, unknown>;
+  runtime: ManagedRuntime.ManagedRuntime<Machine | Pages | LibraryMachine | LibraryRows | ShareMachine | SharePages | SiteMachine | SiteRows | TabHost | Shell | Resident, unknown>;
   alpha: Alpha;
 }
 
@@ -40,7 +42,7 @@ function addressParts(href: string | undefined): { host: string; path: string } 
   if (href === undefined || href === "") return { host: "", path: "" };
   const url = URL.parse(href);
   if (url === null) return { host: href, path: "" };
-  const path = url.pathname === "/" ? url.search : url.pathname + url.search;
+  const path = url.pathname + url.search;
   return { host: url.host, path };
 }
 
@@ -70,6 +72,7 @@ function Tab({ runtime, alpha, tabs, page }: BrowserProps & { tabs: State; page:
   const [typed, setTyped] = useState("");
   const [refusal, setRefusal] = useState<string>();
   const [finding, setFinding] = useState("");
+  const [clearingSite, setClearingSite] = useState<string>();
   if (!state) return null;
   const tab = tabs.selected;
   const tabHost = runtime.runSync(TabHost);
@@ -127,6 +130,7 @@ function Tab({ runtime, alpha, tabs, page }: BrowserProps & { tabs: State; page:
     : library.state?.notice === "Full" ? "The bookmark list is full."
       : library.state?.notice === "Failed" ? "Could not change the bookmark."
         : library.state?.notice === "HistoryFailed" ? "Could not change Browser history." : undefined;
+  const clearable = native && tabs.layer === "Menu" ? runtime.runSync(siteShown()) : undefined;
   const offered: (BrowserMenuItem | false)[] = [
     (native || can({ type: "reload" })) && { label: "Reload", name: "Reload page", icon: <RotateCw />, onSelect: () => { void browser.send({ type: "uncover" }).then(() => can({ type: "reload" }) ? send({ type: "reload" }) : undefined); } },
     can({ type: "stop" }) && { label: "Stop", name: "Stop loading", icon: <Square />, onSelect: () => { void browser.send({ type: "uncover" }).then(() => send({ type: "stop" })); } },
@@ -138,6 +142,7 @@ function Tab({ runtime, alpha, tabs, page }: BrowserProps & { tabs: State; page:
     native && canShare && { label: "Share", icon: <Share2 />, onSelect: () => void runtime.runPromise(offerShare("System")) },
     canShare && binding !== undefined && { label: "Copy link", icon: <Link />, onSelect: () => void runtime.runPromise(offerShare("Copy")) },
     native && can({ type: "openFind" }) && { label: "Find", name: "Find in page", icon: <Search />, onSelect: () => { setFinding(""); void browser.send({ type: "uncover" }).then(() => send({ type: "openFind" })); } },
+    clearable !== undefined && { label: "Clear site", name: "Clear site data", icon: <ListFilter />, onSelect: () => { setClearingSite(clearable.host); void browser.send({ type: "uncover" }); } },
     canAskErase(tabs) && { label: "Clear all", name: "Clear all browsing data", icon: <Trash2 />, onSelect: () => void browser.send({ type: "askErase" }) },
   ];
   const stood = runtime.runSync(Effect.flatMap(Pages, (pages) => pages.sought(tab)));
@@ -203,11 +208,16 @@ function Tab({ runtime, alpha, tabs, page }: BrowserProps & { tabs: State; page:
         onCancel={() => void runtime.runPromise(cancelPrivateFrame())}>
         Your browser will receive this private page.
       </ConfirmDialog>
-      <ConfirmDialog open={tabs.erasing === "Asked"} title="Clear browsing data?" confirmLabel="Clear" destructive
+      <BrowserReview open={clearingSite !== undefined} title={`Clear data for ${clearingSite ?? ""}?`} confirmLabel="Clear data" destructive
+        onConfirm={() => { setClearingSite(undefined); void runtime.runPromise(clearSiteShown()); }}
+        onCancel={() => setClearingSite(undefined)}>
+        {`Signs you out of ${clearingSite ?? ""}.`}
+      </BrowserReview>
+      <BrowserReview open={tabs.erasing === "Asked"} title="Clear browsing data?" confirmLabel="Clear data" destructive
         onConfirm={() => { if (canConfirmErase(tabs)) void browser.send({ type: "confirmErase" }); }}
         onCancel={() => { if (canCancelErase(tabs)) void browser.send({ type: "cancelErase" }); }}>
         {native ? "Clears history, cookies and tabs." : "Clears Alpha's history and tabs. Your browser manages website cookies."}
-      </ConfirmDialog>
+      </BrowserReview>
     </div>
   );
 }

@@ -22,6 +22,9 @@ import { changedOn, folderLocation, parentPath, sized } from "./entries.vibe";
 import { Handles } from "./handles.vibe";
 import { Opened, emailAccount, pictureFits } from "./preview.vibe";
 
+/** Develop's File actions: a 220px panel under the header, ringed, with 44px rows and 20px icons. */
+const actionsPanel = "w-55 min-w-0 rounded-tile p-1.5 ring-1 ring-border shadow-popup dark:shadow-popup-dark";
+const actionRow = "min-h-11 rounded-lg px-3.5 py-2 [&_svg]:size-5";
 export interface PreviewProps {
   /** Provides the preview and Recent machines, and what the viewer read, of preview.vibe. */
   runtime: ManagedRuntime.ManagedRuntime<Machine | Browser | RecentMachine | Opened | Handles | Shell | Inbox | Drafts, unknown>;
@@ -106,17 +109,17 @@ export function Preview({ runtime, today }: PreviewProps) {
           {(askAlpha || openElsewhere || forget || email || owner(picture) || share || showDetails || showRename || owner(move) || owner(trash)) && (
             <Menu>
               <MenuTrigger asChild><Button variant="ghost" size="icon" aria-label="File actions"><Ellipsis /></Button></MenuTrigger>
-              <MenuContent>
-                {askAlpha && <MenuItem onSelect={() => tell({ type: "askAlpha" })}><Sparkles />Ask Alpha</MenuItem>}
-                {email && <MenuItem onSelect={() => tell(offer)}><Mail />Use in email</MenuItem>}
-                {owner(picture) && <MenuItem onSelect={() => tell(picture)}><MessageCircle />Use in Messages</MenuItem>}
-                {share && <MenuItem onSelect={() => tell({ type: "shareFile" })}><Share2 />Share</MenuItem>}
-                {openElsewhere && <MenuItem onSelect={() => tell({ type: "openElsewhere" })}><ExternalLink />Open elsewhere</MenuItem>}
-                {showDetails && <MenuItem onSelect={() => setDetails({ viewer: state.viewer, revision: state.revision })}><Info />Details</MenuItem>}
-                {showRename && <MenuItem onSelect={() => setRename({ viewer: state.viewer, revision: state.revision, name })}><Pencil />Rename</MenuItem>}
-                {owner(move) && <MenuItem onSelect={() => tell(move)}><FolderInput />Move to</MenuItem>}
-                {owner(trash) && <MenuItem onSelect={() => tell(trash)}><Trash2 />Move to Trash</MenuItem>}
-                {forget && <MenuItem onSelect={() => tell({ type: "forget" })}><X />Forget</MenuItem>}
+              <MenuContent sideOffset={44} alignOffset={4} className={actionsPanel}>
+                {share && <MenuItem className={actionRow} onSelect={() => tell({ type: "shareFile" })}><Share2 />Share</MenuItem>}
+                {owner(move) && <MenuItem className={actionRow} onSelect={() => tell(move)}><FolderInput />Add to folder</MenuItem>}
+                {email && <MenuItem aria-label="Use in email" className={actionRow} onSelect={() => tell(offer)}><Mail />Email</MenuItem>}
+                {askAlpha && <MenuItem className={actionRow} onSelect={() => tell({ type: "askAlpha" })}><Sparkles />Ask Alpha</MenuItem>}
+                {owner(picture) && <MenuItem className={actionRow} onSelect={() => tell(picture)}><MessageCircle />Use in Messages</MenuItem>}
+                {openElsewhere && <MenuItem className={actionRow} onSelect={() => tell({ type: "openElsewhere" })}><ExternalLink />Open elsewhere</MenuItem>}
+                {showRename && <MenuItem className={actionRow} onSelect={() => setRename({ viewer: state.viewer, revision: state.revision, name })}><Pencil />Rename</MenuItem>}
+                {forget && <MenuItem className={actionRow} onSelect={() => tell({ type: "forget" })}><X />Forget</MenuItem>}
+                {showDetails && <MenuItem className={actionRow} onSelect={() => setDetails({ viewer: state.viewer, revision: state.revision })}><Info />Details</MenuItem>}
+                {owner(trash) && <MenuItem className={actionRow} onSelect={() => tell(trash)}><Trash2 />Delete</MenuItem>}
               </MenuContent>
             </Menu>
           )}
@@ -133,12 +136,12 @@ export function Preview({ runtime, today }: PreviewProps) {
           {mine && state.kind === "Photo" && content.uri !== undefined && <img alt={name} src={content.uri} decoding="async" className="mx-auto w-full max-h-[55dvh] object-contain" />}
           {mine && state.kind === "Media" && content.uri !== undefined && (file?.mimeType.startsWith("audio/") ? <audio {...mediaProps} src={content.uri} className="w-full" /> : <video {...mediaProps} src={content.uri} className="mx-auto w-full max-h-[55dvh]" />)}
           {owner({ type: "play" }) && <Button variant="ghost" size="icon" aria-label={state.playing ? "Pause" : "Play"} className="mx-auto mt-2 flex" onClick={() => tell({ type: "play" })}>{state.playing ? <Pause /> : <Play />}</Button>}
-          {mine && state.kind === "Pdf" && state.drawing.status === "Loaded" && content.page !== undefined && <img alt={`Page ${state.page} of ${state.pages}`} src={content.page} decoding="async" className="w-full rounded-option shadow-md ring-1 ring-border" />}
+          {mine && state.kind === "Pdf" && state.drawing.status === "Loaded" && content.page !== undefined && <div className="overflow-hidden rounded-lg bg-alpha-foreground shadow-md ring-1 ring-border"><img alt={`Page ${state.page} of ${state.pages}`} src={content.page} decoding="async" className="block h-auto w-full" /></div>}
           {state.kind === "Pdf" && state.pages > 1 && (
             <div className="mt-3 flex items-center justify-between gap-2 text-muted-foreground">
-              {owner({ type: "turnTo", page: state.page - 1 }) ? <Button variant="ghost" size="icon" aria-label="Previous page" onClick={() => tell({ type: "turnTo", page: state.page - 1 })}><ChevronLeft /></Button> : <span className="size-11" />}
-              <span>{`Page ${state.page} of ${state.pages}`}</span>
-              {owner({ type: "turnTo", page: state.page + 1 }) ? <Button variant="ghost" size="icon" aria-label="Next page" onClick={() => tell({ type: "turnTo", page: state.page + 1 })}><ChevronRight /></Button> : <span className="size-11" />}
+              {owner({ type: "turnTo", page: state.page - 1 }) && <Button variant="ghost" size="icon" aria-label="Previous page" onClick={() => tell({ type: "turnTo", page: state.page - 1 })}><ChevronLeft /></Button>}
+              <span className="text-base">{`Page ${state.page} of ${state.pages}`}</span>
+              {owner({ type: "turnTo", page: state.page + 1 }) && <Button variant="ghost" size="icon" aria-label="Next page" onClick={() => tell({ type: "turnTo", page: state.page + 1 })}><ChevronRight /></Button>}
             </div>
           )}
           {owner({ type: "selectAgain" }) && <Button size="sm" className="mt-3" onClick={() => tell({ type: "selectAgain" })}>Select again</Button>}
