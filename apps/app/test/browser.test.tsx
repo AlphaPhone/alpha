@@ -28,7 +28,7 @@ const go = (text: string) => drawn(async () => {
 });
 
 describe("The Browser on a phone", () => {
-  it("Open a page and watch it load (spec/app/browser/address.md, \"Story: Go where I typed\"; spec/app/browser/address.md, \"Story: Watch a page load\")", async () => {
+  it("Open a page and watch it load (spec/app/browser/address.md, \"Story: Go where I typed\"; spec/app/browser/address.md, \"Story: Watch a page load\"; spec/app/browser/address.md, \"Story: Find in page\")", async () => {
     const { alpha, runtime, world } = await onBrowser();
     // spec/app/browser/index.md, "A launch reads the saved session, and may ask again after a failed read"
     await until(alpha, runtime, Tabs, (s) => s.hydrated);
@@ -42,6 +42,17 @@ describe("The Browser on a phone", () => {
     await until(alpha, page, Page, (p) => p.phase === "Shown" && p.secure);
     expect([...world.browser.tabs.values()].map((one) => one.history)).toEqual([["https://news.example/on-device-agents"]]);
     expect(Boolean(document.querySelector("[aria-label='Secure connection']"))).toBe(true);
+
+    // spec/app/browser/address.md, "Typing searches the page, and clearing the text clears the search"; spec/app/browser/address.md, "Only the answer to the latest search counts"
+    await press("Menu");
+    await press("Find in page");
+    await until(alpha, page, Page, (p) => p.finding);
+    await fill("Find in page", "agent");
+    await until(alpha, page, Page, (p) => p.find.status === "Loaded" && p.matches > 1);
+    await press("Next match");
+    // spec/app/browser/address.md, "Closing the find bar clears the search"
+    await press("Close find in page");
+    await until(alpha, page, Page, (p) => !p.finding && p.matches === 0);
 
     // spec/app/browser/address.md, "Back and forward move through the tab's own pages"
     await go("enclave.example/keys-in-hardware");

@@ -1,4 +1,4 @@
-// spec/app/browser/index.md, "Story: Open, pick and close tabs"; spec/app/browser/index.md, "Story: Keep my tabs through a restart"; spec/app/browser/index.md, "Story: Save the session"; spec/app/browser/address.md, "Story: Go where I typed"; spec/app/browser/address.md, "Story: Watch a page load"
+// spec/app/browser/address.md, "Story: Find in page"; spec/app/browser/index.md, "Story: Open, pick and close tabs"; spec/app/browser/index.md, "Story: Keep my tabs through a restart"; spec/app/browser/index.md, "Story: Save the session"; spec/app/browser/address.md, "Story: Go where I typed"; spec/app/browser/address.md, "Story: Watch a page load"
 import type * as KeyValueStore from "effect/persistence/KeyValueStore"
 import { browsingSnapshot, restoreBrowsing } from "@elizaos/os/bridges/browsing-session"
 import * as Tabs from "../../gen/app__browser.effect.vibe"
@@ -76,6 +76,10 @@ export service Pages {
   /** Where the next load of `tab` that opens an address goes. */
   aim(tab: number, address: string): void!!
   aimed(tab: number): Option.Option<string>!!
+  /** What the owner is finding in `tab`'s page, and where among its matches the tab host last stood. */
+  seek(tab: number, text: string): void!!
+  sought(tab: number): { readonly text: string; readonly index: number }!!
+  stood(tab: number, index: number): void!!
   end(tab: number): void!!
 }
 
@@ -174,9 +178,12 @@ function carryPage(tab: number) {
     when { tag: "Go", let load, let way }: stream(`go ${tab}`, Stream.fromEffect(went(tab, load, way)) |> Stream.filter(%, (event) => event.type === "failed"), { type: "failed", load });
     when { tag: "Halt" }: run(`halt ${tab}`, ignore(hosted("command", (plugin, session) => plugin.command({ session, id: idOf(tab), command: "stop" }))));
     when { tag: "Visit" }: run(`visit ${tab}`, tellTabs({ type: "touch", tab }));
-    when { tag: "Find" }: run(`find ${tab}`, Effect.void);
-    when { tag: "FindNext" }: run(`find ${tab}`, Effect.void);
-    when { tag: "ClearFind" }: run(`find ${tab}`, Effect.void);
+    when { tag: "Find" }: run(`find ${tab}`, ignore(effect {
+      const { text } = try (try Pages).sought(tab)
+      try hosted("find", (plugin, session) => plugin.find({ session, id: idOf(tab), query: text }))
+    }));
+    when { tag: "FindNext", let forward }: run(`find next ${tab}`, ignore(hosted("findNext", (plugin, session) => plugin.findNext({ session, id: idOf(tab), forward }))));
+    when { tag: "ClearFind" }: run(`find ${tab}`, ignore(hosted("clearFind", (plugin, session) => plugin.clearFind({ session, id: idOf(tab) }))));
   }
 }
 
@@ -185,6 +192,7 @@ const pages = Layer.effect(Pages, effect {
   const area = try Whole
   const made = new Map<number, PageRuntime>()
   const aims = new Map<number, string>()
+  const finds = new Map<number, { text: string; index: number }>()
   return {
     effect of(tab: number): PageRuntime!! {
       const known = made.get(tab)
@@ -199,10 +207,14 @@ const pages = Layer.effect(Pages, effect {
     },
     aim: (tab: number, address: string) => sync(() => { aims.set(tab, address) }),
     aimed: (tab: number) => sync(() => Option.fromNullishOr(aims.get(tab))),
+    seek: (tab: number, text: string) => sync(() => { finds.set(tab, { text, index: 0 }) }),
+    sought: (tab: number) => sync(() => finds.get(tab) ?? { text: "", index: 0 }),
+    stood: (tab: number, index: number) => sync(() => { finds.set(tab, { text: finds.get(tab)?.text ?? "", index }) }),
     effect end(tab: number): void!! {
       const runtime = made.get(tab)
       made.delete(tab)
       aims.delete(tab)
+      finds.delete(tab)
       if (runtime !== undefined) try promise(() => runtime.dispose())
     },
   }
@@ -223,6 +235,15 @@ const told = started(effect {
     if (said.kind === "closed") {
       const id = host.session.applyClosed(said.raw)
       if (id !== undefined) try tellTabs({ type: "nativeLost", tab: tabOf(id) })
+      return
+    }
+    if (said.kind === "found") {
+      const s = try (try Tabs.Machine).get()
+      const outcome = host.session.findResult(said.raw, idOf(s.selected))
+      if (outcome === undefined || outcome.cleared) return
+      try (try Pages).stood(s.selected, outcome.index)
+      const p = try pageOf(s.selected)
+      if (outcome.done && p.find.status === "Loading") try tellPage(s.selected, { type: "found", ticket: p.find.ticket, count: outcome.count })
       return
     }
     if (said.kind !== "state") return
