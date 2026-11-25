@@ -104,6 +104,7 @@ function about(waitMs: number): string {
 }
 
 function actionOf(kind: Failure, fix: Fix): "signIn" | "funding" | "retry" | undefined {
+  if (kind === "OutOfFunds") return "funding";
   if (fix === "SignInFix") return "signIn";
   if (fix === "FundingFix" || (fix === "NoFix" && managesPlan(kind))) return "funding";
   if (fix === "RetryFix") return "retry";
@@ -126,7 +127,7 @@ export function Assistant({ runtime }: AssistantProps) {
   const inbox = useInboxList(runtime);
   const email = useInboxWriting(runtime);
   const comms = useComms(runtime);
-  const board = runtime.runSync(Effect.map(Talk, (talk) => talk.board));
+  const [board] = useState(() => runtime.runSync(Effect.flatMap(Talk, (talk) => Effect.succeed(talk.board))));
   const seen = useSyncExternalStore((listener) => board.subscribe(listener), () => board.snapshot());
   const mail = runtime.runSync(MailQuestions);
   const reviewed = useSyncExternalStore(mail.subscribe, mail.snapshot);
@@ -177,14 +178,13 @@ export function Assistant({ runtime }: AssistantProps) {
       void runtime.runPromise(askComms({ about: subject, text: request }));
       return;
     }
-    const talk = runtime.runSync(Effect.map(Talk, (t) => t.board));
     if (newChat) {
-      talk.sendWhenMade = true;
+      board.queueSend();
       void chats.send(start);
       return;
     }
-    talk.outgoing = seen.typed;
-    talk.type("");
+    board.hold(seen.typed);
+    board.type("");
     void composer.send(hold);
   };
   // spec/app/assistant/reply.md, "A failed reply offers the fix the agent named, and a limit reached shows its live wait, never sending the message again"
