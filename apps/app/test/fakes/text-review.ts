@@ -7,9 +7,12 @@ const key = "a".repeat(64);
 const attemptId = "device-attempt-1";
 
 type Sms = Extract<DeviceOperation, { type: "sms_send" }>;
+type ReviewOperation = Extract<DeviceOperation, { type: "sms_send" | "sms_compose" | "sms_latest_sender" | "messages_read_selected" | "voicemail_read_selected" | "files_filter" | "files_open" }>;
+interface ReadOrigin { readonly version: 1; readonly requestId: string; readonly conversationId: string; readonly inReplyTo: string }
+
 type Confirmation = Pick<Sms, "recipients" | "body" | "subscriptionId"> & { operationId: string; confirm(): void };
 
-export function textReview(agentId: string, id: string, operation: Extract<DeviceOperation, { type: "sms_send" | "sms_compose" | "files_filter" | "files_open" }>, requestMessageId?: string) {
+export function textReview(agentId: string, id: string, operation: ReviewOperation, requestMessageId?: string) {
   return {
     agentId,
     proposal: {
@@ -17,6 +20,9 @@ export function textReview(agentId: string, id: string, operation: Extract<Devic
       payload: { installationId: agentId, enrollmentId, operation, requestMessageId },
     },
     pendingReads: 0,
+    readOrigin: undefined as ReadOrigin | undefined,
+    senderReads: [] as boolean[],
+    completions: [] as unknown[],
     journal: new Map<string, JournalEntry>(),
     confirmations: [] as Confirmation[],
     decisions: [] as string[],
@@ -35,9 +41,17 @@ export const textReviewEnrollment: Faked = plugin<{
 /** The resident lists and settles only this enrolled phone's exact proposal. */
 export function textReviewRoute(review: TextReviewScene, subjectUserId: string): Route {
   const { agentId, proposal } = review;
-  const type = proposal.payload.operation.type;
-  const capabilities = type === "sms_send" ? ["sms.send.v1"]
-    : type === "sms_compose" ? ["sms.compose.v1", "sms.compose.v2"] : ["files.browser.v1", "files.shown-target.v1"];
+  const operation = proposal.payload.operation;
+  const files = ["files.browser.v1", "files.shown-target.v1"];
+  const capabilities = {
+    sms_send: ["sms.send.v1"],
+    sms_compose: ["sms.compose.v1", "sms.compose.v2"],
+    sms_latest_sender: ["includeAddress" in operation ? "sms.latest-sender.v2" : "sms.latest-sender.v1"],
+    messages_read_selected: ["messages.read.v1"],
+    voicemail_read_selected: ["voicemail.read.v1"],
+    files_filter: files,
+    files_open: files,
+  }[operation.type];
   const prefix = "/api/client-devices/";
   const reject = (status: number) => Response.json({ error: "review refused" }, { status });
   return (request, url) => {
@@ -54,7 +68,7 @@ export function textReviewRoute(review: TextReviewScene, subjectUserId: string):
     }
     if (request.method === "GET" && resource === "proposals") {
       review.pendingReads += 1;
-      return Response.json({ proposals: [proposal] });
+      return Response.json({ proposals: [{ ...proposal, ...(review.readOrigin === undefined ? {} : { readReplyOrigin: review.readOrigin }) }] });
     }
     if (request.method !== "POST" || !resource.startsWith(`proposals/${proposal.id}/`)) return reject(404);
     const step = resource.split("/").at(-1);
@@ -74,6 +88,14 @@ export function textReviewRoute(review: TextReviewScene, subjectUserId: string):
         review.receipts.push(body.receipt);
         proposal.state = "done";
         return Response.json({ digest: proposal.digest, proposal });
+      }
+      const origin = review.readOrigin;
+      if (step === "read-completion" && proposal.state === "done" && origin !== undefined && body.version === origin.version
+        && body.proposalId === proposal.id && body.attemptId === attemptId && body.requestId === origin.requestId
+        && body.conversationId === origin.conversationId && body.inReplyTo === origin.inReplyTo
+        && review.journal.get(proposal.id)?.acknowledged === true) {
+        review.completions.push(body);
+        return Response.json({ reply: { ...origin, messageId: `${proposal.id}-answer`, text: "The reviewed read answered the original request." } });
       }
       return reject(409);
     });

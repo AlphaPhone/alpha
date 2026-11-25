@@ -10,7 +10,8 @@ import type { Page } from "../../gen/app__files__scanDraft.ts";
 import type { Event } from "../../gen/app__files__scan.ts";
 import type { Resident, Shown } from "../runtime/area.tsx";
 import { ScanCorrection } from "./ScanCorrection.tsx";
-import { ScanAssets, addScanImage, editScanLine, exportScan, noteContent, reviewCalendarEvent, type scan } from "./scan.vibe";
+import { ScanSearchable } from "./ScanSearchable.tsx";
+import { ScanAssets, addScanImage, editScanLine, noteContent, reviewCalendarEvent, type scan } from "./scan.vibe";
 
 type Runtime = Layer.Success<typeof scan> | Resident;
 const pageAction = "rounded-option [&_svg]:size-5";
@@ -76,7 +77,7 @@ export function Scan({ runtime }: Shown<Runtime>) {
   const canSaveDraft = allowed({ type: "saveDraft" });
   const canLoadDraft = allowed({ type: "askToResume" });
   const canDeleteDraft = allowed({ type: "discardDraft" });
-  const searchable = state.pages.every((page) => page.text !== 0) && state.pages.some((page) => !page.blank);
+  const searchable = allowed({ type: "startSearch" });
   const links = state.text.links.showing
     ? runtime.runSync(Effect.flatMap(ScanAssets, (assets) => assets.words(state.text.linksOf.image, state.text.linksOf.edits)))?.links ?? []
     : [];
@@ -203,13 +204,14 @@ export function Scan({ runtime }: Shown<Runtime>) {
         </div>
         {(canExport || busy) && (
           <div className="flex shrink-0 flex-wrap gap-2 border-t border-border pt-3">
-            <Button className="min-h-11 flex-1 basis-36 justify-start" loading={busy} onClick={() => void runtime.runPromiseExit(exportScan(false))}>{selectedImage ? "Save photo PDF" : "Save PDF"}</Button>
-            {canExport && searchable && <Button variant="ghost" className="min-h-11 flex-1 basis-36 justify-start" onClick={() => void runtime.runPromiseExit(exportScan(true))}>Searchable PDF</Button>}
+            <Button className="min-h-11 flex-1 basis-36 justify-start" loading={busy} onClick={() => fire({ type: "exportPdf" })}>{selectedImage ? "Save photo PDF" : "Save PDF"}</Button>
+            {searchable && <Button variant="ghost" className="min-h-11 flex-1 basis-36 justify-start" onClick={() => fire({ type: "startSearch" })}>Searchable PDF</Button>}
           </div>
         )}
       </DialogContent>
     </Dialog>
     <ScanCorrection runtime={runtime} />
+    {state.search.stage !== "SearchClosed" && <ScanSearchable key={state.search.ticket} runtime={runtime} state={state} close={() => fire({ type: "cancelSearch" })} />}
     <Dialog open={state.text.links.showing} onOpenChange={(open) => { if (!open) fire({ type: "closeLinks" }); }}>
       <DialogContent aria-describedby={undefined} closeLabel="Close links">
         <DialogTitle>Scanned links</DialogTitle>
