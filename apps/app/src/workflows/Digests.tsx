@@ -3,7 +3,7 @@ import { Effect, Exit } from "effect";
 import { useState, useSyncExternalStore } from "react";
 import { digestSourceState, digestStatusLabel, digestSummaryText, digestTemplateName } from "@elizaos/plugin-workflow-client";
 import { Alert, Button, ConfirmDialog, EmptyState, Input, ListRow, Spinner, Switch } from "@repo/ui";
-import { CalendarDays, ChevronRight, Plus, Repeat, Sun } from "lucide-react";
+import { CalendarDays, ChevronRight, Plus, RefreshCw, Sun } from "lucide-react";
 import { useMachine as useDigestDelivery } from "../../gen/app__digests.react.ts";
 import { useMachine } from "../../gen/app__digests__schedules.react.ts";
 import type { Machine } from "../../gen/app__digests__schedules.effect.vibe";
@@ -79,7 +79,7 @@ export function Digests({ runtime, owner, result, notice, onResult }: DigestsPro
   const review = (wanted: Change): Event => ({ type: "reviewChange", wanted });
   const titles: Record<Change, string> = { Create: "Schedule digest", Pause: "Pause", Resume: "Resume", Remove: "Remove" };
   return <section className="flex flex-col gap-4">
-    {model.can(refresh) && <Button className="self-end" variant="ghost" size="icon" aria-label="Refresh digests" onClick={() => void model.send(refresh)}><Repeat aria-hidden /></Button>}
+    {model.can(refresh) && <Button className="self-end" variant="ghost" size="icon" aria-label="Refresh digests" onClick={() => void model.send(refresh)}><RefreshCw aria-hidden /></Button>}
     {state.schedules.status === "Loading" && <Spinner aria-label="Reading scheduled digests" />}
     {unavailable && <Alert variant="warn" role="status">Scheduled digests couldn’t be read.</Alert>}
     {home.partial && <Alert variant="warn" role="status">Some digest information couldn’t be read.</Alert>}

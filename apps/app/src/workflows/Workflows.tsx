@@ -38,6 +38,15 @@ import { Rows, type WorkflowRow, refresh } from "./list.vibe";
 
 const labels = { On: "On", Off: "Off", WaitingForYou: "Waiting for you", HistoryKept: "History kept" };
 
+/** A row's state in v121's words (automationStatusLabel, workflow-adapter's statusLabel): Removed, Active, and Paused for a workflow or Inactive for the rest. */
+function stateWord(row: WorkflowRow) {
+  const shown = badge(row.on, row.removed, false);
+  if (shown === "HistoryKept") return "Removed";
+  if (shown === "On") return "Active";
+  if (shown === "Off") return row.kind === "Routine" ? "Paused" : "Inactive";
+  return labels[shown];
+}
+
 function listLabel(kind: keyof typeof kinds, status: keyof typeof statuses) {
   const type = kind === "AllKinds" ? "All workflows" : kinds[kind];
   return status === "AnyStatus" ? type : `${type} · ${statuses[status]}`;
@@ -58,7 +67,7 @@ function WorkflowListRow({ row, open }: { row: WorkflowRow; open: () => void }) 
         <span className="flex min-w-0 flex-1 flex-col gap-1">
           <span className="text-lg leading-snug break-words">{row.title}</span>
           {row.summary !== "" && <span className="line-clamp-2 text-sm leading-normal break-words text-muted-foreground">{row.summary}</span>}
-          <span className="text-xs leading-normal text-muted-foreground">{labels[badge(row.on, row.removed, false)]}</span>
+          <span className="text-xs leading-normal text-muted-foreground">{stateWord(row)}</span>
         </span>
         <ChevronRight aria-hidden className="ml-auto size-5.5 shrink-0 text-muted-foreground" />
       </button>
