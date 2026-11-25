@@ -36,7 +36,7 @@ type Effect =
   | ReadRunRecord({ ticket: int, id: int })
   | StopRun({ id: int, runId: int })
 type Runs = {
-  owner: int, latest: Run, skipped: int, reading: R::Read,
+  owner: int, workflow: int, latest: Run, skipped: int, reading: R::Read,
   review: V::Review, reviewed: int, request: Q::Request, named: int, asker: int,
   stop: A::Attempt, target: int,
 }
@@ -45,7 +45,7 @@ type Moved = { state: Runs, out: List[Effect] }
 pure val noRun: Run = { id: 0, status: NoRun, version: 0, request: 0, owner: 0 }
 
 pure val initial: Runs = {
-  owner: 0, latest: noRun, skipped: 0, reading: R::unread,
+  owner: 0, workflow: 0, latest: noRun, skipped: 0, reading: R::unread,
   review: V::unreviewed, reviewed: 0, request: Q::unasked, named: 0, asker: 0,
   stop: A::plan(0), target: 0,
 }
@@ -55,6 +55,7 @@ pure val idValues = Set(1, 2)
 pure val runIdValues = Set(0, 1, 2, 3)
 pure val versionValues = Set(0, 1, 2)
 pure val ownerValues = Set(0, 1, 2)
+pure val workflowValues = Set(1, 2)
 pure val statusValues = Set(Running, Done, Failed, Stopped, Missed, Skipped, Interrupted, NoRun)
 pure val weight_reviewRun = 4
 pure val weight_confirmRun = 4
@@ -65,6 +66,17 @@ pure val weight_runChecked = 10
 pure val weight_reviewResend = 6
 pure val weight_confirmResend = 6
 pure val weight_runAnswered = 10
+```
+
+### Opening a different workflow selects its own runs; a kept Run now still names the workflow reviewed
+
+```quint
+pure def canSelectRuns(r: Runs, workflow: int): bool =
+  r.owner >= 1 and workflow >= 1 and workflow != r.workflow and Q::canFile(r.request) and r.stop.outcome != A::Sent
+
+pure def selectRuns(r: Runs, workflow: int): Runs = {
+  ...r, workflow: workflow, latest: noRun, skipped: 0, reading: { ...r.reading, status: R::Idle }, review: V::dismiss(r.review),
+}
 ```
 
 ### A run has ended once it is done, failed, stopped, missed, skipped or interrupted, and only an interrupted run's outcome is unknown
@@ -148,7 +160,7 @@ pure def stepAnEndedRunStaysEnded(before: Runs, via: str, after: Runs): bool =
 
 ```quint
 pure def stepRunsOnlyMoveForward(before: Runs, via: str, after: Runs): bool =
-  after.owner == before.owner implies (after.latest.id >= before.latest.id and after.skipped >= before.skipped)
+  (after.owner == before.owner and after.workflow == before.workflow) implies (after.latest.id >= before.latest.id and after.skipped >= before.skipped)
 ```
 
 ### The run shown always belongs to the owner signed in
@@ -427,7 +439,7 @@ pure def canOwnerChanged(r: Runs, owner: int): bool = owner != r.owner and owner
 pure def ownerChanged(r: Runs, owner: int): Moved =
   val stops = running(r) and r.stop.outcome != A::Sent and not(stopTaken(r))
   val asked = A::dispatch(A::record(A::plan(r.stop.id + 1)))
-  val cleared = { ...r, owner: owner, latest: noRun, skipped: 0, reading: { ...r.reading, status: R::Idle },
+  val cleared = { ...r, owner: owner, workflow: 0, latest: noRun, skipped: 0, reading: { ...r.reading, status: R::Idle },
     review: V::dismiss(r.review), request: Q::abandon(r.request) }
   if (stops) { state: { ...cleared, stop: asked, target: r.latest.id }, out: List(StopRun({ id: asked.id, runId: r.latest.id })) }
   else { state: cleared, out: List() }

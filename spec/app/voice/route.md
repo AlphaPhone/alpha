@@ -63,8 +63,10 @@ pure def lawWithoutAnAccountSpeechStaysOnThePhone(r: Route, now: int): bool =
 ### Speech leaves the phone only after the owner has agreed to the disclosure for that account
 
 The disclosure says what is sent, and to whom. Declining keeps speech on the
-phone and is not asked again for that account; a new account or key asks
-afresh.
+phone and is not asked again for that account; a new account or key starts
+unanswered. Signing in to Alpha Cloud is itself the answer for that account,
+as in the existing app ([Voice](./index.md)), so only a new key of the
+owner's own asks afresh.
 
 ```quint
 pure def way(r: Route, now: int): Way = if (r.consent) wanted(r, now) else OnPhone

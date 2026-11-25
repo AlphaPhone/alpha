@@ -1,5 +1,5 @@
 // spec/app/maps/connection.md, "Story: Serve Maps through my cloud account"
-import type { LocationErrorEvent, LocationPlugin, LocationResult } from "@elizaos/os/bridges/definitions/location";
+import type { LocationErrorEvent, LocationPlugin, LocationResult } from "@elizaos/os-bridges";
 import type { CloudClient } from "../../src/platform/cloud.vibe";
 import { type Faked, plugin, rejection } from "./phone.ts";
 import type { Route } from "./routes.ts";

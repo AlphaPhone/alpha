@@ -1,6 +1,6 @@
 // spec/app/maps/index.md, "Story: Move between the screen's modes"; spec/app/maps/index.md, "Story: Search for a place"; spec/app/maps/index.md, "Story: Look at a place"; spec/app/maps/index.md, "Story: Get directions"; spec/app/maps/index.md, "Story: Navigate"; spec/app/maps/index.md, "Story: Use my location"; spec/app/maps/index.md, "Story: Let the agent help with Maps"; spec/app/maps/credits.md, "Story: See the map for what I am looking at"
 import { Alert, Banner, Button, cn, Input, type MapCamera, MapsChip, MapsPillButton, MapsPlaceRow, MapsRoundButton, MapsSearchBar, MapsSheet, MapsStatusCard, type MapStyle, MapView, Spinner } from "@repo/ui";
-import { ArrowUpDown, Bike, Bus, Car, Check, ChevronLeft, Clock, ExternalLink, Footprints, Globe, Info, LocateFixed, type LucideIcon, MapPin, Navigation, Phone, Search, Share2, Star, X } from "lucide-react";
+import { ArrowUpDown, Bike, Bus, Car, Check, ChevronLeft, Clock, Coffee, Dumbbell, ExternalLink, Footprints, Fuel, Globe, Info, LocateFixed, type LucideIcon, MapPin, Navigation, Phone, RotateCw, Search, Share2, ShoppingCart, SquarePlus, Star, Utensils, X } from "lucide-react";
 import { useState, useSyncExternalStore } from "react";
 import type { Resident, Shown } from "../runtime/area.tsx";
 import { untimed } from "../runtime/reactor.vibe";
@@ -25,9 +25,21 @@ const ways: ReadonlyArray<{ travel: Travel; label: string; icon: LucideIcon }> =
   { travel: "Drive", label: "Drive", icon: Car }, { travel: "Transit", label: "Transit", icon: Bus }, { travel: "Walk", label: "Walk", icon: Footprints }, { travel: "Bicycle", label: "Bike", icon: Bike },
 ];
 
+/** The kinds of place the search sheet offers before anything is typed, each searched for by its words. */
+const kindsOfPlace: ReadonlyArray<{ label: string; query: string; icon: LucideIcon }> = [
+  { label: "Coffee", query: "coffee", icon: Coffee }, { label: "Food", query: "food", icon: Utensils }, { label: "Gas", query: "gas station", icon: Fuel },
+  { label: "Pharmacy", query: "pharmacy", icon: SquarePlus }, { label: "Groceries", query: "groceries", icon: ShoppingCart }, { label: "Gym", query: "gym", icon: Dumbbell },
+];
+
 /** How tall the search sheet stands at each of its heights: raised, it stops under the search field. */
 const sheetHeights: Record<Sheet, number | string> = { Peek: 250, Half: 520, Full: "calc(100% - 104px)" };
 const sheetOrder: readonly Sheet[] = ["Peek", "Half", "Full"];
+const recoveryPositions = {
+  Browse: "top-32.5 in-data-[alpha-launcher]:top-43.5",
+  Search: "top-21.5 in-data-[alpha-launcher]:top-32.5",
+  Place: "top-21 in-data-[alpha-launcher]:top-32",
+  Directions: "top-47 in-data-[alpha-launcher]:top-58",
+} satisfies Record<Exclude<ReturnType<typeof mode>, "Navigating">, string>;
 
 /** The open map drawn where no provider is working, and outside the provider's coverage. */
 const worldStyle = "https://tiles.openfreemap.org/styles/bright";
@@ -131,6 +143,10 @@ export function Maps({ runtime, alpha }: Shown<ScreenMachine | CreditsMachine | 
   const floatBottom = (now === "Search" ? (state.sheet === "Peek" ? 250 : 520) : cardHeight || 110) + 14;
   const back = offer(screen, { type: "goBack" });
   const openSearch = offer(screen, { type: "openSearch" });
+  const retryMap = offer(screen, { type: "retryMap" });
+  const myLocation = offer(screen, { type: "useMyLocation" });
+  const locationDisclosure = can({ type: "continueDisclosure" }) && myLocation === undefined && (now === "Browse" || now === "Directions");
+  const showRecovery = retryMap !== undefined && !locationDisclosure && now !== "Navigating";
   return (
     <section aria-label="Maps" className="relative isolate flex flex-1 flex-col overflow-hidden">
       <MapView
@@ -158,8 +174,8 @@ export function Maps({ runtime, alpha }: Shown<ScreenMachine | CreditsMachine | 
 
       {(now === "Browse" || now === "Search" || now === "Place") && (
         <MapsSearchBar
-          data-host-chrome=""
           className="absolute inset-x-3 top-2 z-10 in-data-[alpha-launcher]:top-13"
+          leading={now === "Browse" && <AppBack alpha={alpha} />}
           lead={now === "Browse" ? "search" : "back"}
           onLead={now === "Browse" ? openSearch : back}
           aria-label="Search Maps"
@@ -196,8 +212,8 @@ export function Maps({ runtime, alpha }: Shown<ScreenMachine | CreditsMachine | 
         )}
         {holding(state.link) && <Alert variant="warn">{`Maps request limit reached. Try again in ${Math.max(1, Math.ceil(state.link.held / 60))} minutes.`}</Alert>}
         {state.link.known && state.link.account === 0 && <Alert variant="info">Sign in to Alpha Cloud to use Maps.</Alert>}
-        {can({ type: "retryMap" }) && (
-          <Banner variant="warn" action={<Button size="sm" variant="outline" onClick={() => void send({ type: "retryMap" })}>Retry</Button>}>The map could not be drawn.</Banner>
+        {retryMap && !showRecovery && (
+          <Banner variant="warn" action={<Button size="sm" variant="outline" onClick={retryMap}>Retry</Button>}>The map could not be drawn.</Banner>
         )}
         {!state.keepable && <Alert variant="warn">Saved places could not be read. Existing data has not been replaced.</Alert>}
         {state.guideNotice !== "Quiet" && <Alert variant="info">{told[state.guideNotice]}</Alert>}
@@ -213,14 +229,26 @@ export function Maps({ runtime, alpha }: Shown<ScreenMachine | CreditsMachine | 
         )}
       </div>
 
-      {can({ type: "continueDisclosure" }) && !can({ type: "useMyLocation" }) && (now === "Browse" || now === "Directions") && (
+      {showRecovery && (
+        <MapsStatusCard data-alpha-maps-status="" data-map-state="error"
+          className={cn("absolute inset-x-5 z-10 max-h-[calc(100%-15rem)] overflow-y-auto leading-chat", recoveryPositions[now])}
+          text={<span role="status">Map rendering is unavailable. Retry the map or open a saved place.</span>}
+          actions={(
+            <>
+              {myLocation && <MapsPillButton size="lg" className="text-sm font-normal" onClick={myLocation}>My location</MapsPillButton>}
+              <MapsPillButton size="lg" tone="fill" aria-label="Retry map" className="gap-1.5 px-3 text-sm font-normal" onClick={retryMap}><RotateCw aria-hidden className="size-4.5" />Retry</MapsPillButton>
+            </>
+          )} />
+      )}
+
+      {locationDisclosure && (
         <MapsStatusCard role="dialog" aria-label="Location" className={cn("absolute inset-x-5 z-10", now === "Directions" ? "top-58 in-data-[alpha-launcher]:top-69" : "top-43.5 in-data-[alpha-launcher]:top-54.5")}
           text="Maps uses your location to show where you are and to plan routes from it. Searches and route points go to the Maps provider; your agent is never told where you are."
           actions={<MapsPillButton size="lg" onClick={() => void send({ type: "continueDisclosure" })}>Continue</MapsPillButton>} />
       )}
 
-      {now !== "Navigating" && can({ type: "useMyLocation" }) && !(now === "Search" && state.sheet === "Full") && (
-        <MapsRoundButton tone="float" size="md" aria-label="My location" className="absolute right-4 z-10 transition-[bottom] duration-slow ease-standard" style={{ bottom: floatBottom }} onClick={() => void send({ type: "useMyLocation" })}><LocateFixed /></MapsRoundButton>
+      {now !== "Navigating" && myLocation && !(now === "Search" && state.sheet === "Full") && (
+        <MapsRoundButton tone="float" size="md" aria-label="My location" className="absolute right-4 z-10 transition-[bottom] duration-slow ease-standard" style={{ bottom: floatBottom }} onClick={myLocation}><LocateFixed /></MapsRoundButton>
       )}
       {now === "Navigating" && can({ type: "recenter" }) && (
         <MapsRoundButton tone="night" size="xl" aria-label="Recenter" className="absolute right-4 bottom-34 z-10" onClick={() => void send({ type: "recenter" })}><LocateFixed /></MapsRoundButton>
@@ -267,6 +295,14 @@ function SearchSheet({ screen, state, seen, saved, height, onRecent }: { screen:
       <div className="min-h-0 flex-1 touch-pan-y overflow-y-auto pb-30">
         {state.search.status === "Loading" && <Spinner className="mx-5 my-2" label="Searching" />}
         {state.search.status === "Failed" && !holding(state.link) && <p role="status" className="px-5 py-2 text-sm text-muted-foreground">The search failed.</p>}
+        {state.query === "" && (
+          <nav aria-label="Kinds of place" className="flex touch-pan-x gap-2 overflow-x-auto px-5 pt-1 pb-3.5 [scrollbar-width:none]">
+            {kindsOfPlace.map(({ label, query, icon: Icon }) => (
+              <MapsChip key={query} tone="fill" label={label} icon={<Icon />} disabled={!can({ type: "search", query, chars: query.length })}
+                onClick={() => { onRecent(query); void send({ type: "search", query, chars: query.length }); }} />
+            ))}
+          </nav>
+        )}
         {state.query === "" && state.recent.length > 0 && (
           <div>
             <div className="flex items-center justify-between pr-3 pl-5">
@@ -486,7 +522,7 @@ function Guidance({ screen, state, seen, spot, kept, way }: { screen: Screen; st
         </div>
       )}
       {/* eslint-disable-next-line better-tailwindcss/no-unknown-classes -- Guidance stays dark in both themes, as on develop; `dark` is the design system's theme class. */}
-      <div data-host-chrome="" className="dark absolute inset-x-3 bottom-6.5 z-50 grid grid-cols-[56px_minmax(0,1fr)_56px] items-center gap-3 rounded-home-card bg-secondary p-2.5 text-secondary-foreground motion-safe:animate-rise">
+      <div data-host-chrome="bottom" className="dark absolute inset-x-3 bottom-6.5 z-50 grid grid-cols-[56px_minmax(0,1fr)_56px] items-center gap-3 rounded-home-card bg-secondary p-2.5 text-secondary-foreground motion-safe:animate-rise">
         <MapsRoundButton tone="nightFill" size="2xl" aria-label="End navigation" disabled={!can({ type: "endGuidance" })} onClick={() => void send({ type: "endGuidance" })}><X /></MapsRoundButton>
         <div className="min-w-0 text-center">
           <div className="font-display text-figure-sm font-light">{arrived ? "Arrived" : way === undefined ? "" : minutes(way.seconds)}</div>

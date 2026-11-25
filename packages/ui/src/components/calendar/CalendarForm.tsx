@@ -3,6 +3,8 @@ import { ChevronLeft, Clock, Minus, Plus, Search, X } from "lucide-react";
 import { cn, focusRing } from "../../lib/cn.ts";
 import { CalendarHeaderAction } from "./CalendarHeader.tsx";
 
+type InputProps = Omit<ComponentProps<"input">, "children" | "dangerouslySetInnerHTML">;
+
 export type CalendarFormPageProps = ComponentProps<"div"> & {
   /** Leaves the form: Back. */
   onBack: () => void;
@@ -35,7 +37,7 @@ export function CalendarFormPage({ onBack, onSave, actions, saving = false, clas
 }
 
 /** The form's title, in the display face. */
-export function CalendarFormTitle({ className, ...props }: ComponentProps<"input">) {
+export function CalendarFormTitle({ className, ...props }: InputProps) {
   return (
     <div className="px-6">
       <input aria-label="Title" placeholder="Title" className={cn("w-full border-0 bg-transparent py-1.5 font-display text-display-sm font-light text-foreground outline-none placeholder:text-muted-foreground", className)} {...props} />
@@ -43,7 +45,7 @@ export function CalendarFormTitle({ className, ...props }: ComponentProps<"input
   );
 }
 
-export type CalendarFormDateProps = Omit<ComponentProps<"input">, "type"> & {
+export type CalendarFormDateProps = Omit<InputProps, "type"> & {
   /** The words before the field, such as "Date" or "Ends on". */
   label: string;
   /** Inside a group of fields: smaller words, and the field on the page's own color. */
@@ -84,10 +86,10 @@ export function CalendarDayChips({ days, className, ...props }: Omit<ComponentPr
   return (
     <div className={cn("flex touch-pan-x gap-2 overflow-x-auto px-5 pt-3.5 pb-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden", className)} {...props}>
       {days.map((day) => (
-        <button key={day.key} type="button" aria-label={day.label} aria-pressed={day.chosen} disabled={!day.onPick} onClick={day.onPick}
+        <button key={day.key} type="button" aria-label={`${day.top} ${day.date}`} aria-description={day.label} aria-pressed={day.chosen} disabled={!day.onPick} onClick={day.onPick}
           className={cn(focusRing, "box-border flex min-h-13 min-w-14 shrink-0 flex-col items-center justify-center gap-0.5 rounded-xl px-1.5",
             day.chosen ? "bg-alpha text-alpha-foreground" : "bg-secondary")}>
-          <span className="text-2xs leading-plain font-medium opacity-75">{day.top}</span>
+          <span className="text-2xs leading-plain font-medium opacity-75">{day.top}</span>{" "}
           <span className="text-date font-semibold">{day.date}</span>
         </button>
       ))}
@@ -146,20 +148,21 @@ export function CalendarFormRow({ icon, className, children, ...props }: Calenda
   );
 }
 
-export type CalendarChipProps = ComponentProps<"button"> & {
+export type CalendarChipProps = Omit<ComponentProps<"button">, "children"> & {
+  label: string;
   chosen?: boolean;
   /** A calendar's dot before the words. */
   dot?: "primary" | "foreground";
 };
 
 /** One choice of the form, such as a calendar or how often it repeats: filled with the text color once chosen. */
-export function CalendarChip({ chosen = false, dot, className, children, ...props }: CalendarChipProps) {
+export function CalendarChip({ label, chosen = false, dot, className, ...props }: CalendarChipProps) {
   return (
     <button type="button" aria-pressed={chosen}
       className={cn(focusRing, "box-border flex min-h-13 max-w-full items-center gap-2 rounded-chip px-3 py-1.5 text-left text-snippet leading-plain font-semibold wrap-anywhere disabled:opacity-50",
         dot && "px-3.5", chosen ? "bg-foreground text-background" : "bg-background", className)} {...props}>
       {dot ? <span aria-hidden className={cn("size-2 shrink-0 rounded-full", dot === "primary" ? "bg-primary" : "bg-foreground")} /> : null}
-      <span className="min-w-0">{children}</span>
+      <span className="min-w-0">{label}</span>
     </button>
   );
 }
@@ -185,7 +188,8 @@ export function CalendarSwitch({ checked, onCheckedChange, className, ...props }
 
 const bare = "min-w-0 grow border-0 bg-transparent text-body text-foreground outline-0 placeholder:text-muted-foreground disabled:opacity-50";
 
-export type CalendarFieldRowProps = ComponentProps<"input"> & {
+export type CalendarFieldRowProps = InputProps & {
+  "aria-label": string;
   /** The field's icon, muted, before it. */
   icon: ReactNode;
 };
@@ -200,7 +204,8 @@ export function CalendarFieldRow({ icon, className, ...props }: CalendarFieldRow
   );
 }
 
-export type CalendarNotesFieldProps = ComponentProps<"textarea"> & {
+export type CalendarNotesFieldProps = Omit<ComponentProps<"textarea">, "children" | "dangerouslySetInnerHTML"> & {
+  "aria-label": string;
   icon: ReactNode;
 };
 
@@ -214,7 +219,8 @@ export function CalendarNotesField({ icon, className, ...props }: CalendarNotesF
   );
 }
 
-export type CalendarPickerFieldProps = ComponentProps<"input"> & {
+export type CalendarPickerFieldProps = InputProps & {
+  "aria-label": string;
   /** Closes the field. */
   onDone: () => void;
   /** Read aloud for the close button. */
@@ -232,7 +238,7 @@ export function CalendarPickerField({ onDone, doneLabel, className, ...props }: 
   );
 }
 
-export type CalendarSearchBarProps = ComponentProps<"input"> & {
+export type CalendarSearchBarProps = InputProps & {
   /** Closes search. */
   onClose: () => void;
 };
@@ -242,7 +248,7 @@ export function CalendarSearchBar({ onClose, className, ...props }: CalendarSear
   return (
     <div role="search" className={cn("mx-4 mb-2 flex shrink-0 items-center gap-1 rounded-tile bg-secondary pr-1 pl-3.5", className)}>
       <Search aria-hidden className="size-4.5 shrink-0 text-muted-foreground" />
-      <input type="search" enterKeyHint="search" autoComplete="off" className={cn(bare, "h-11 p-0")} {...props} />
+      <input type="search" aria-label="Search events" enterKeyHint="search" autoComplete="off" className={cn(bare, "h-11 p-0 [&::-webkit-search-cancel-button]:appearance-none")} {...props} />
       <button type="button" aria-label="Close search" onClick={onClose} className={cn(focusRing, "inline-flex size-11 shrink-0 items-center justify-center rounded-tile active:bg-accent [&_svg]:size-5.5")}><X aria-hidden /></button>
     </div>
   );

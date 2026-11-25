@@ -39,7 +39,7 @@ export function SettingsTextSizePicker({ size, busy = false, onChoose }: Setting
             disabled={busy || !onChoose}
             className={cn(
               focusRing,
-              "flex min-h-14 min-w-11 flex-auto items-center justify-center rounded-drawer-icon px-1.5 leading-tight text-foreground disabled:pointer-events-none aria-pressed:bg-primary aria-pressed:text-primary-foreground",
+              "flex min-h-14 min-w-11 flex-auto items-center justify-center rounded-drawer-icon px-1.5 leading-tight text-foreground disabled:pointer-events-none aria-pressed:bg-alpha aria-pressed:text-alpha-foreground",
               busy && "opacity-50",
             )}
             onClick={() => onChoose?.(percent)}

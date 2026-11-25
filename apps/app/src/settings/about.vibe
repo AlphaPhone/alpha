@@ -39,7 +39,7 @@ import { shared, shipped } from web
 import { development, versions } from "./build.ts"
 
 /** One licence as the notices file holds it. */
-export schema Notice { name: string; version: string; license: string; text: string; flags?: ReadonlyArray<string> }
+export schema Notice { name: string; version: string; license: string; text: string; source?: string; flags?: ReadonlyArray<string> }
 
 /** The licences loaded, kept beside the machine that counts them: the list the Licences page searches and shows. */
 export service Notices {

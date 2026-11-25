@@ -56,7 +56,13 @@ const config: CapacitorConfig = {
   webDir: androidPaths.web,
   loggingBehavior: "none",
   plugins: {
-    ElizaSecureStore: { nativeOnly: ["device", "device-execution", "action-journal"] },
+    ElizaSecureStore: {
+      nativeOnly: ["device", "device-execution", "action-journal"],
+      slots: [
+        { pattern: "notes-draft:[1-9][0-9]*", access: "writable", limit: 256 * 1024 },
+        { pattern: "notes-folders:[1-9][0-9]*", access: "writable", limit: 64 * 1024 },
+      ],
+    },
     ElizaSignIn: {
       clientId: identity.appId,
       googleMode: "browser",

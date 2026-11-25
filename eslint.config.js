@@ -20,6 +20,7 @@ const imports = {
   patterns: [
     // A package, its subpaths and its family: zustand/middleware, redux-saga, @angular/core.
     { regex: `^(?:@(?:${scopes.join("|")})/|(?:${banned.join("|")})(?:[/-]|$))`, message: `Not part of the stack: ${stack}.` },
+    { regex: String.raw`^@elizaos/(?!os/(?:android|aosp|browser/(?:runtime|protection|chromium/component))/|core/(?:catalog/[\w-]+|restart-exit-code)\.json$)[^/]+/`, message: "Import an eliza package from its root barrel: only its declared asset exports take a subpath." },
   ],
 }
 // AGENTS.md, "Hard rules": an interface keeps its state in the spec's Machine and leaves effects and time to the shell.

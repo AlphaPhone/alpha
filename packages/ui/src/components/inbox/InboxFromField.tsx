@@ -1,4 +1,4 @@
-import { Select, SelectContent, SelectItem, SelectTrigger } from "../Select.tsx";
+import { cn, focusRing } from "../../lib/cn.ts";
 import type { InboxAccount } from "./InboxAccountList.tsx";
 
 export type InboxFromFieldProps = {
@@ -12,20 +12,27 @@ export type InboxFromFieldProps = {
 
 /**
  * The account a message is sent from, changed only where nothing is left behind: a reply, a forward and a draft saved
- * in Gmail keep the account they came from.
+ * in Gmail keep the account they came from. With one account it is only shown.
  *
  * @model spec/app/inbox/drafts.md
  */
 export function InboxFromField({ accounts, value, onChange }: InboxFromFieldProps) {
+  const chosen = accounts.find((account) => account.id === value);
+  if (accounts.length <= 1) {
+    return <div className="flex min-h-11 items-center border-b border-border text-sm break-all text-muted-foreground">{chosen?.email ?? ""}</div>;
+  }
   return (
-    <div className="flex items-center gap-2">
-      <span aria-hidden className="w-9 shrink-0 text-sm text-muted-foreground">From</span>
-      <Select value={value} onValueChange={onChange} disabled={!onChange}>
-        <SelectTrigger aria-label="From" className="border-0 px-1" />
-        <SelectContent>
-          {accounts.map(({ id, email }) => <SelectItem key={id} value={id}>{email}</SelectItem>)}
-        </SelectContent>
-      </Select>
-    </div>
+    <label className="flex min-h-12 flex-wrap items-center gap-2 border-b border-border text-muted-foreground">
+      From
+      <select
+        aria-label="From account"
+        disabled={!onChange}
+        value={value}
+        onChange={(event) => onChange?.(event.target.value)}
+        className={cn(focusRing, "min-h-11 max-w-full min-w-0 flex-1 bg-background p-1.5 text-foreground")}
+      >
+        {accounts.map(({ id, email }) => <option key={id} value={id}>{email}</option>)}
+      </select>
+    </label>
   );
 }

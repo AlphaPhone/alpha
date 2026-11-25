@@ -38,9 +38,9 @@ export const meta: ComponentMeta<InboxComposerProps> = {
       onDiscard.mockClear();
       const canvas = within(canvasElement);
       await expect(canvas.getAllByRole("heading").length).toBe(1);
-      await userEvent.click(canvas.getByRole("button", { name: "Send" }));
-      await userEvent.click(canvas.getByRole("button", { name: "Set aside" }));
-      await userEvent.click(canvas.getByRole("button", { name: "More actions" }));
+      await userEvent.click(canvas.getByRole("button", { name: "Send email" }));
+      await userEvent.click(canvas.getByRole("button", { name: "Back from draft" }));
+      await userEvent.click(canvas.getByRole("button", { name: "Draft actions" }));
       await userEvent.click(await screen.findByRole("menuitem", { name: "Discard" }));
       await waitFor(() => expect([onSend.mock.calls.length, onSetAside.mock.calls.length, onDiscard.mock.calls.length, screen.queryByRole("menu")]).toEqual([1, 1, 1, null]));
     },

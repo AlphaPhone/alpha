@@ -42,7 +42,7 @@ type Effect =
   | RunDigest({ id: int, occurrence: int })
   | ReadRunRecord({ ticket: int, id: int })
 type Schedules = {
-  owner: int, open: bool, schedules: R::Read, count: int, evening: bool,
+  owner: int, open: bool, row: int, schedules: R::Read, count: int, evening: bool,
   standing: Standing, template: Template, when: S::When, source: int,
   editing: bool, draft: Asked,
   review: V::Review, proposed: Change, change: Q::Request, changing: Change, asked: Asked, discarded: bool,
@@ -53,7 +53,7 @@ type Moved = { state: Schedules, out: List[Effect] }
 pure val blankAsk: Asked = { template: Morning, when: S::daily(0), source: 0 }
 
 pure val initial: Schedules = {
-  owner: 0, open: false, schedules: R::unread, count: 0, evening: false,
+  owner: 0, open: false, row: 0, schedules: R::unread, count: 0, evening: false,
   standing: NoSchedule, template: Morning, when: S::daily(0), source: 0,
   editing: false, draft: blankAsk,
   review: V::unreviewed, proposed: Create, change: Q::unasked, changing: Create, asked: blankAsk, discarded: false,
@@ -69,6 +69,7 @@ pure val minuteValues = Set(0, 60)
 pure val zoneValues = Set(0, 1)
 pure val sourceValues = Set(0, 1)
 pure val ownerValues = Set(0, 1, 2)
+pure val rowValues = Set(0, 1, 2)
 ```
 
 ### The panel opens and closes, and opening it reads the schedules for the owner signed in
@@ -90,6 +91,17 @@ pure def canRefresh(d: Schedules): bool = d.open and d.schedules.status != R::Lo
 pure def refresh(d: Schedules): Moved =
   val asked = R::ask(d.schedules)
   { state: { ...d, schedules: asked }, out: List(ReadSchedules({ ticket: asked.ticket, owner: d.owner })) }
+```
+
+### Selecting a schedule reads the one selected and closes any editor on the old schedule
+
+```quint
+pure def canFocusSchedule(d: Schedules, row: int): bool = free(d) and row >= 0 and row != d.row
+
+pure def focusSchedule(d: Schedules, row: int): Moved =
+  val asked = R::ask(d.schedules)
+  { state: { ...d, row: row, editing: false, standing: NoSchedule, schedules: asked },
+    out: List(ReadSchedules({ ticket: asked.ticket, owner: d.owner })) }
 ```
 
 ### Only the newest reading is taken: the schedule in focus with its time, zone, source and standing, the newest missed occurrence, and whether evening briefs are offered

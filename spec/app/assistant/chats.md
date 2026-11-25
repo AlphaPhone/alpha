@@ -41,13 +41,15 @@ pure def listedHas(conversation: int, c: Chats): bool = c.ids.includes(conversat
 
 ### What chats need done outside comes back as an answer naming its ticket
 
-The list of conversations read, a page of a conversation's messages read
-(around a message, or its latest), a conversation created, a fork made
-from a message, and a message read aloud by the voice area.
+The list of conversations read, to show or to learn whether one whose
+page answered 404 is still there; a page of a conversation's messages read (around a message, or its latest), a
+conversation created, a fork made from a message, and a message read aloud
+by the voice area.
 
 ```quint
 type Effect =
   | ReadList({ ticket: int })
+  | ReadLatest({ page: int, conversation: int })
   | ReadPage({ conversation: int, around: int, ticket: int })
   | Create({ ticket: int })
   | Fork({ conversation: int, message: int, ticket: int })
@@ -100,15 +102,26 @@ pure def browse(c: Chats): Moved =
 
 ### The newest list says which conversations there are, and a conversation no longer listed stops showing
 
+Its page is left behind with it, so a read of it still loading, or waiting
+on the list after a 404, never keeps the new chat loading.
+
 ```quint
 pure def canListed(c: Chats, ticket: int, ids: List[int]): bool = R::canAnswer(c.list, ticket) and ids.every(i => i > 0)
 
 pure def listed(c: Chats, ticket: int, ok: bool, ids: List[int]): Chats =
   val listing = if (ok) ids else c.ids
   val chosen = if (listing.includes(c.chosen)) c.chosen else 0
+  val stays = chosen == c.chosen
   { ...c, list: R::answer(c.list, ok), ids: listing, chosen: chosen,
     origin: if (chosen > 0 and listing.includes(c.origin) and c.origin != chosen) c.origin else 0,
-    messages: if (chosen == c.chosen) c.messages else 0 }
+    page: if (stays) c.page else X::dropped(c.page), around: if (stays) c.around else 0,
+    messages: if (stays) c.messages else 0 }
+```
+
+### A new chat holds no conversation's page
+
+```quint
+pure def alwaysANewChatHoldsNoPage(c: Chats): bool = c.chosen == 0 implies c.page.status == R::Idle
 ```
 
 ### Another conversation is chosen only while the turn and the composer are free
@@ -171,23 +184,58 @@ pure def restart(c: Chats): Moved =
   if (c.chosen > 0) { state: paging.state, out: listing.out.concat(paging.out) } else listing
 ```
 
-### A conversation the agent says it does not have is forgotten, and a new chat shows in its place
+### A read of the latest messages answered 404 asks the agent's list whether the conversation is still there
 
-The agent answers a read of a conversation's latest messages with 404 when
-it has no such conversation, as after its store was reset or the phone
-paired with another agent. That is not a read that failed, and nothing is
-said about it: the conversation leaves the list and none shows, so the next
-message starts a new one. A draft written in it stays in its slot on the
-phone. A 404 to a read around a message says only that the message is
-unknown, and like any other failed read keeps the conversation showing, to
-be read again.
+The agent answers 404 when it has no such conversation, as after its store
+was reset or the phone paired with another agent; but a 404 can also come
+from a route or a proxy, so the answer alone never drops a conversation. As
+in v121, the agent's list decides: it is read once, under the page's own
+ticket and naming the conversation, while the page stays loading and
+nothing is said. A newer asking of the page, or a restart, which reads the
+page again, leaves that answer behind. A 404 to a read around a message
+says only that the message is unknown, and like any other failed read
+keeps the conversation showing, to be read again.
 
 ```quint
-pure def canGone(c: Chats, ticket: int): bool = R::canAnswer(c.page, ticket) and c.around == 0
+pure def canNotFound(c: Chats, ticket: int): bool = R::canAnswer(c.page, ticket) and c.around == 0 and c.chosen > 0
 
-pure def gone(c: Chats, ticket: int): Chats =
-  { ...c, ids: c.ids.select(i => i != c.chosen), chosen: 0, origin: 0,
-    page: X::dropped(c.page), around: 0, messages: 0 }
+pure def notFound(c: Chats, ticket: int): Moved =
+  { state: c, out: List(ReadLatest({ page: ticket, conversation: c.chosen })) }
+```
+
+### A conversation the list no longer has is forgotten, and the first it lists, the most recently used, shows in its place, or a new chat when there is none
+
+The agent lists the conversation used most recently first, and its list
+is taken as any newest list is. Only a list that does not have the
+conversation forgets it, so the one that shows next is never the one that
+went, and a conversation shows in its place at most once for each such
+answer. A conversation the list still has, or a list that could not be
+read, is a page that failed, to be read again on the owner's word: nothing
+reads it again by itself. The shell passes, as `replying` and `holding`,
+whether the turn and the composer are free, as when a conversation is
+chosen; while either is not, or a conversation is being made, a new chat
+shows instead. A draft written in the one that went stays in its slot on
+the phone.
+
+```quint
+pure def canLatest(c: Chats, page: int, ids: List[int], conversation: int): bool =
+  R::canAnswer(c.page, page) and c.chosen == conversation and conversation > 0 and ids.every(i => i > 0)
+
+pure def latest(c: Chats, page: int, ok: bool, ids: List[int], conversation: int, replying: bool, holding: bool): Moved =
+  val read = { ...listed(c, c.list.ticket, ok, ids), list: c.list }
+  val left = { ...read, page: X::dropped(c.page), around: 0, messages: 0 }
+  if (not(ok) or ids.includes(conversation)) { state: { ...read, page: R::answer(c.page, false) }, out: List() }
+  else if (ids.length() > 0 and not(making(c)) and not(replying) and not(holding)) shown(ids.head(), 0, 0, left)
+  else { state: left, out: List() }
+
+pure def stepAConversationThatWentIsNeverShownAgainAtOnce(before: Chats, via: str, after: Chats): bool =
+  (via == "latest" and after.chosen != before.chosen) implies not(listedHas(before.chosen, after))
+
+pure def stepAConversationThatAnswered404IsNotReadAgainByItself(before: Chats, via: str, after: Chats, out: List[Effect]): bool =
+  (via == "notFound" or via == "latest") implies out.every(e => match e {
+    | ReadPage(p) => p.conversation != before.chosen
+    | _ => true
+  })
 ```
 
 ### Another owner or agent session leaves every conversation behind
@@ -279,16 +327,33 @@ pure def fork(c: Chats, message: int, replying: bool, holding: bool): Moved =
 
 ### What was made shows under the agent's number for it, a fork with the way back to its original; when nobody knows, the list is read again
 
+A list still being read when a conversation is made is read again, as
+the next rule says.
+
 ```quint
 pure def canMade(c: Chats, ticket: int, conversation: int): bool =
   A::canConclude(c.make, ticket) and conversation > 0 and conversation != c.chosen
 
 pure def made(c: Chats, ticket: int, confirmed: bool, known: bool, conversation: int): Moved =
   val ended = { ...c, make: A::conclude(c.make, confirmed, known) }
+  val added = shown(conversation, 0, if (c.forkAt > 0) c.chosen else 0, { ...ended, ids: c.ids.append(conversation) })
+  val again = browse(added.state)
   if (confirmed and known)
-    shown(conversation, 0, if (c.forkAt > 0) c.chosen else 0, { ...ended, ids: c.ids.append(conversation) })
+    if (c.list.status == R::Loading) { state: again.state, out: added.out.concat(again.out) } else added
   else if (not(known)) browse(ended)
   else { state: ended, out: List() }
+```
+
+### A list asked before a conversation was made is left behind, so its answer never takes that conversation away
+
+The agent's answer to a list read asked before the conversation existed
+cannot have it, so that read is left behind and the list is read again
+from what the agent now has.
+
+```quint
+pure def stepAListAskedBeforeAConversationWasMadeIsLeftBehind(before: Chats, via: str, after: Chats): bool =
+  (via == "made" and after.chosen != before.chosen and before.list.status == R::Loading)
+    implies after.list.ticket > before.list.ticket
 ```
 
 ### Back to the original leaves the fork for the conversation it came from

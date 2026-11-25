@@ -1,5 +1,5 @@
 // spec/app/phone/index.md, "Story: See my recent calls"; spec/app/phone/index.md, "Story: Give Alpha the call log"; spec/app/phone/index.md, "Story: Type a number"; spec/app/phone/index.md, "Story: Call a number"; spec/app/phone/voicemail.md, "Story: Listen to a voicemail"; spec/app/phone/voicemail.md, "Story: Delete a voicemail"
-import type { TelephonyCallLogEntry } from "@elizaos/os/bridges/phone";
+import type { TelephonyCallLogEntry } from "@elizaos/os-bridges";
 import { Alert, Button, Chip, Input, Spinner, Tabs, TabsContent, cn, focusRing } from "@repo/ui";
 import { Effect, type ManagedRuntime } from "effect";
 import { ArrowDownLeft, ArrowUpRight, Delete, Phone as Call } from "lucide-react";
@@ -143,7 +143,9 @@ export function Phone({ runtime, alpha }: PhoneProps) {
                   <span className="truncate">{dialer.matched}</span><span className="shrink-0 text-muted-foreground tabular-nums">{displayNumber(dialer.matchedNumber)}</span>
                 </Button>
               )}
-              {state.typed === "Dialable" && !state.carrier && <p role="status" className="text-center text-sm text-muted-foreground">Only emergency calls are available.</p>}
+              {state.carrier === "CarrierUnavailable" && state.numberKind === "OrdinaryNumber" && (
+                <p role="status" className="text-center text-sm text-muted-foreground">Only emergency calls are available.</p>
+              )}
             </div>
             <div role="group" aria-label="Keypad" className="grid shrink-0 grid-cols-3 justify-items-center gap-x-[min(5.825vw,1.5rem)] gap-y-[calc(var(--dial-key)*.15)] px-[min(10.68vw,2.75rem)]">
               {keys.map(([key, letters]) => (
@@ -169,7 +171,7 @@ export function Phone({ runtime, alpha }: PhoneProps) {
               ))}
             </div>
             <div className="grid shrink-0 grid-cols-3 items-center justify-items-center gap-x-[min(5.825vw,1.5rem)] px-[min(10.68vw,2.75rem)] pt-[min(3.88vw,1rem)]">
-              <Button className="col-start-2 size-(--dial-key) bg-call text-alpha-foreground hover:bg-call/90 active:bg-call/80 disabled:opacity-100"
+              <Button className="col-start-2 size-(--dial-key) bg-dial text-dial-foreground hover:bg-dial/90 active:bg-dial/80 disabled:opacity-100"
                 size="icon" data-alpha-phone-call="" aria-label="Call" disabled={!can({ type: "dialTyped" }) || !dialable(state)}
                 onClick={() => void send({ type: "dialTyped" })}><Call className="size-7.5" /></Button>
               {dialer.digits !== "" && <Button variant="ghost" size="icon" aria-label="Delete digit" className="col-start-3 size-14"

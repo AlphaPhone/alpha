@@ -10,6 +10,8 @@ export type LinkNoteViewProps = Omit<ComponentProps<"section">, "title"> & {
   clips?: string[];
   /** The note's actions: a `NoteMenu`. */
   menu?: ReactNode;
+  /** A status or confirmation concerning this note. */
+  feedback?: ReactNode;
   /** Opens the page; offered only with it. */
   onVisit?: () => void;
   /** Leaves the note for the list. */
@@ -17,7 +19,7 @@ export type LinkNoteViewProps = Omit<ComponentProps<"section">, "title"> & {
 };
 
 /** An open link note: the page's title, its site to visit, and the passages kept from it. */
-export function LinkNoteView({ title, domain, clips = [], menu, onVisit, onBack, className, ...props }: LinkNoteViewProps) {
+export function LinkNoteView({ title, domain, clips = [], menu, feedback, onVisit, onBack, className, ...props }: LinkNoteViewProps) {
   return (
     <section aria-label={title} className={cn("absolute inset-0 z-10 flex flex-col bg-background", className)} {...props}>
       <div className="flex h-14 shrink-0 items-center gap-0.5 px-2">
@@ -31,6 +33,7 @@ export function LinkNoteView({ title, domain, clips = [], menu, onVisit, onBack,
           <Link aria-hidden className="size-4" />
           {domain}
         </button>
+        {feedback}
         <div className="mt-7 flex flex-col gap-5">
           {clips.map((clip) => (
             <div key={clip} className="flex gap-3.5">

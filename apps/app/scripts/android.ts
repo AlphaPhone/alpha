@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// spec/app/image/index.md, "Story: Stage Alpha into an image"; spec/agent/index.md, "Story: Build the pack only from the pinned eliza"
+// spec/app/image/index.md, "Story: Stage Alpha into an image"; spec/agent/index.md, "Story: Build the pack only from the pinned eliza"; spec/agent/index.md, "The launch names the pack's pinned workflow worker"
 import { createHash } from "node:crypto";
 import { execFileSync, spawnSync } from "node:child_process";
 import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
@@ -7,11 +7,12 @@ import { tmpdir } from "node:os";
 import { dirname, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import * as NodeServices from "@effect/platform-node/NodeServices";
-import { generateAndroidHost, stageRuntimePayload } from "@elizaos/os/build";
-import { prepared } from "@repo/eliza-harness";
+import { generateAndroidHost, stageRuntimePayload } from "@elizaos/os";
+import { packPrepared, prepared } from "@repo/eliza-harness";
 import { Effect, Layer } from "effect";
 import { FetchHttpClient } from "effect/http";
 import { androidPaths, identity, production, signInCallbackPath } from "../capacitor.config.ts";
+import { localOcrAssets } from "./ocr-assets.ts";
 
 export const app = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const root = resolve(app, "../..");
@@ -139,11 +140,7 @@ function stageVoice(env: NodeJS.ProcessEnv) {
     ], { env: { ...env, ELIZA_INFERENCE_ENGINE_DIR: engine } });
   }
   voiceRecord(directory);
-  return [
-    "-PelizaSpeechBridgeCapacitor=true",
-    `-PelizaInferenceEngineDir=${engine}`,
-    `-PelizaParadeeNativeDir=${directory}`,
-  ];
+  return { engine, directory };
 }
 
 /** Alpha's agent pack (apps/agent), built from the pinned eliza for the production cloud. */
@@ -153,6 +150,17 @@ export function buildPack() {
 
 const packBundle = () => join(agentPack, "dist/bundle");
 const packHost = () => join(agentPack, "dist/host");
+
+/** The exact workflow worker emitted by the pack's pinned Eliza checkout. */
+function workflowWorker() {
+  const name = "@elizaos/plugin-workflow";
+  const plugin = packPrepared([name]).packages.get(name);
+  if (plugin === undefined) throw new Error(`The reviewed agent pack has no ${name}`);
+  const dir = join(plugin, "dist");
+  const { executable } = record(readJson(join(dir, "workflow-worker.json")));
+  if (typeof executable !== "string" || executable === "") throw new Error("The reviewed workflow worker manifest has no executable");
+  return { dir, executable };
+}
 
 /** The staged runtime payload: libeliza_node.so per ABI, agent.mjs, its manifest and inventory, for the bundle the pack built. */
 export async function stageRuntime(): Promise<string> {
@@ -164,7 +172,14 @@ export async function stageRuntime(): Promise<string> {
   const output = join(runtimes, digest);
   if (!existsSync(join(output, "android/app/src/main/assets/agent/inventory.json"))) {
     rmSync(output, { recursive: true, force: true });
-    await runEffect(stageRuntimePayload({ abi: [...abis], bundleDir: bundle, output }));
+    try {
+      await runEffect(stageRuntimePayload({ abi: [...abis], bundleDir: bundle, workflowWorker: workflowWorker(), output }));
+    } catch (cause) {
+      const failure = record(cause);
+      if (failure._tag !== "PayloadRefused" || typeof failure.reason !== "string") throw cause;
+      const subject = typeof failure.subject === "string" && failure.subject !== "" ? ` (${failure.subject})` : "";
+      throw new Error(`Android runtime payload refused: ${failure.reason}${subject}`, { cause });
+    }
   }
   if (existsSync(runtimes)) for (const other of readdirSync(runtimes)) if (other !== digest) rmSync(join(runtimes, other), { recursive: true, force: true });
   const data = join(android, "agent");
@@ -202,6 +217,16 @@ export function auditBundle(directory: string): string[] {
   else {
     for (const directive of REQUIRED_POLICY) if (!policy.includes(directive)) findings.push(`the Content-Security-Policy lacks ${directive}`);
     if (policy.includes("'unsafe-eval'")) findings.push("the Content-Security-Policy allows 'unsafe-eval'");
+  }
+  for (const [name, expected] of localOcrAssets()) {
+    const location = join(directory, "ocr", name);
+    if (!existsSync(location) || !statSync(location).isFile() || !readFileSync(location).equals(expected.bytes)) {
+      findings.push(`ocr/${name}: missing or differs from the locked OCR dependency`);
+    }
+  }
+  const terms = join(directory, "ocr/tessdata-LICENSE.txt");
+  if (!existsSync(terms) || !statSync(terms).isFile() || !readFileSync(terms).equals(readFileSync(join(app, "public/ocr/tessdata-LICENSE.txt")))) {
+    findings.push("ocr/tessdata-LICENSE.txt: missing or differs from the packaged training data license");
   }
   for (const file of regularFiles(directory)) {
     if (file.endsWith(".map")) findings.push(`${file}: source map`);
@@ -253,7 +278,7 @@ const consumerModule: string = "@elizaos/os/android/build-consumer.mjs";
 export async function build(release: boolean) {
   const env = environment();
   refuseOn(inputProblems(env));
-  const voiceGradle = stageVoice(env);
+  const voice = stageVoice(env);
   buildPack();
   const runtime = await stageRuntime();
   buildWeb();
@@ -264,7 +289,11 @@ export async function build(release: boolean) {
   const { buildAndroidConsumer } = (await import(consumerModule)) as BuildConsumer;
   buildAndroidConsumer({
     root: app,
-    environment: env,
+    environment: {
+      ...env,
+      ORG_GRADLE_PROJECT_elizaInferenceEngineDir: voice.engine,
+      ORG_GRADLE_PROJECT_elizaParadeeNativeDir: voice.directory,
+    },
     variants: [variant],
     release,
     lint: false,
@@ -275,7 +304,7 @@ export async function build(release: boolean) {
     androidTestOutput: "instrumentation",
     mappings: release,
     signing: { environment: signingNames },
-    gradleArguments: voiceGradle,
+    gradleArguments: ["-PelizaSpeechBridgeCapacitor=true"],
     prepare: [{ command: join(app, "node_modules/.bin/cap"), args: ["copy", "android"] }],
     record: {
       name: "build-config.json",
@@ -300,8 +329,16 @@ function buildTool(name: string, env: NodeJS.ProcessEnv): string {
 }
 
 const INFERENCE_ENTRY = /\.(gguf|onnx|ort|tflite|safetensors|pte|task)$|(^|\/)lib[^/]*(llama|ggml|mtmd|onnxruntime|sherpa|whisper|piper|executorch|elizainference|omnivoice)[^/]*\.so|(^|\/)llama(-omnivoice)?-server$|^assets\/([^/]+\/)*models?\//i;
-const REQUIRED_CLASSES = ["AlphaDevicePlugin", "AlphaCloudSpeechPlugin", "AlphaLocalSpeechPlugin", "AlphaBrowserPlugin", "AlphaCarrierSetupPlugin", "AlphaCallStatePlugin", "AlphaOngoingCallPlugin", "AlphaAgentService", "AlphaCalendarPlugin", "AlphaTelephonyPlugin", "AlphaResetPlugin", "AlphaActionJournalPlugin"]
-  .map((name) => `Lai/alphacompute/alphaphone/${name};`);
+const REQUIRED_CLASSES = [
+  ...["AlphaDevicePlugin", "AlphaCloudSpeechPlugin", "AlphaLocalSpeechPlugin", "AlphaBrowserPlugin", "AlphaCarrierSetupPlugin", "AlphaCallStatePlugin",
+    "AlphaOngoingCallPlugin", "AlphaAgentService", "AlphaCalendarPlugin", "AlphaTelephonyPlugin", "AlphaContactsPlugin", "AlphaResetPlugin", "AlphaActionJournalPlugin",
+    "AlphaFilesPlugin", "AlphaSelectedDocumentsPlugin", "AlphaPhotoLibraryPlugin", "AlphaPhotosPlugin", "AlphaPhotosPermissionsPlugin",
+    "AlphaMediaEnrollmentPlugin", "AlphaScanPlugin"].map((name) => `Lai/alphacompute/alphaphone/${name};`),
+  "Lai/eliza/plugins/camera/CameraPlugin;",
+  "Lai/eliza/plugins/filesystem/FilesPlugin;",
+  ...["PermittedPhotosPlugin", "PermittedMediaCatalog", "OwnedPhotoEdits", "OwnedVideoPlayback", "OwnedCaptures",
+    "SelectedDocuments", "DocumentDestinations"].map((name) => `Lai/eliza/plugins/media/${name};`),
+];
 
 interface Row {
   readonly mode: "debug" | "release";

@@ -8,12 +8,13 @@ import { type PhoneCalendar, browserCalendar, phoneCalendar } from "./calendar.v
 import { type PhoneReminders, browserReminders, phoneReminders } from "./reminders.vibe"
 import { type CameraPort, browserCamera, phoneCamera } from "./camera.vibe"
 import { type PhotosPort, browserPhotos, phonePhotos } from "./photos.vibe"
-import { type Files, browserFiles, phoneFiles } from "./files.vibe"
+import { type Files, phoneFiles } from "./files.vibe"
 import { type Location, browserLocation, phoneLocation } from "./location.vibe"
 import { type Calls, browserCalls, phoneCalls } from "./calls.vibe"
 import { type Telephony, browserTelephony, phoneTelephony } from "./telephony.vibe"
 import { type VoiceBridge, browserVoiceBridge, phoneVoiceBridge } from "./voice.vibe"
-import { type Documents, browserDocuments, phoneDocuments } from "./documents.vibe"
+import { type Documents, phoneDocuments } from "./documents.vibe"
+import { browserLibrary } from "./library.vibe"
 import { type Navigation, browserNavigation, phoneNavigation } from "./navigation.vibe"
 import { type TabHost, browserTabHost, phoneTabHost } from "./browser.vibe"
 
@@ -67,14 +68,13 @@ export const browserPlugins = Layer.mergeAll(
   browserLauncherUpdates,
   browserCalendar,
   browserReminders,
-  browserFiles,
+  browserLibrary,
   browserCamera,
   browserPhotos,
   browserLocation,
   browserTelephony,
   browserCalls,
   browserVoiceBridge,
-  browserDocuments,
   browserNavigation,
   browserTabHost,
 )

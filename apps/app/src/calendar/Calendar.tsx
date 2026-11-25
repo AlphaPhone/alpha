@@ -33,7 +33,7 @@ import { type Deletions, type Reach, rowHidden } from "../../gen/app__calendar__
 import { type RequestStatus, requestStatus } from "../../gen/app__calendar__agent.ts";
 import { type Request, requests } from "./requests.ts";
 import type { Calendared } from "./calendar.vibe";
-import { type Fields, kept, typed } from "./editor.vibe";
+import { type Fields, kept, startForm, typed } from "./editor.vibe";
 import { type Row, onDay, shown } from "./shown.ts";
 import { allows } from "../../gen/kit__permission.ts";
 import { civilDay, dateOf, dayStart, monthStart, readWindow, weekStart } from "./time.ts";
@@ -235,6 +235,8 @@ export function Calendar({ runtime, alpha }: CalendarProps) {
   const open = s.open === 0 ? undefined : shown.find(s.open);
   const cut = s.connected && shown.partial("Google");
   const free = dayEmptiness(!cut, allows(s.access) && s.phoneLimited, View.empty(s)) === "DayFree";
+  const disconnected = s.owner === 0 && !shown.present() && statusAction(s.connected, false) === "OfferSettings"
+    && visible.length === 0 && s.reminders === 0;
   const searching = s.overlay === "Search";
   const listing = searching || s.layout === "Agenda";
   const month = s.overlay === "MonthDialog" || s.overlay === "LayoutMenu";
@@ -251,11 +253,11 @@ export function Calendar({ runtime, alpha }: CalendarProps) {
     key: row.id, title: row.title || "Untitled event", sub: row.place || (row.video ? "Video call" : ""), time: clock(Math.max(row.begin, dayStart(day))),
     label: `${row.title || "Untitled event"}, ${clock(row.begin)}`, ...placed, tone: row.answer === "AnswerAwaited" ? "invite" : "plain", stripe: stripe(row), onOpen: openRow(row),
   });
-  const dayEmpty = (text: string) => (
+  const dayEmpty = (text: string, offerSettings = false) => (
     <>
       <CalendarIcon aria-hidden className="size-7" />
       {text}
-      {statusAction(s.connected, false) === "OfferSettings" && view.can({ type: "openAccountSettings" }) ? (
+      {offerSettings && view.can({ type: "openAccountSettings" }) ? (
         <button type="button" aria-label="Open Calendar settings" onClick={send({ type: "openAccountSettings" })}
           className="mt-1.5 flex min-h-11 items-center gap-1.5 rounded-full bg-secondary px-4 text-sm leading-plain font-semibold text-foreground">
           <Settings aria-hidden className="size-4.5" />Settings
@@ -277,7 +279,7 @@ export function Calendar({ runtime, alpha }: CalendarProps) {
           className="pr-2 pl-2" leading={alpha ? <AppBack alpha={alpha} className="size-13 [&_svg]:size-5.5" /> : null}>
           {month ? null : view.can({ type: "goToday" }) ? <CalendarHeaderAction aria-label="Today" onClick={send({ type: "goToday" })}><CalendarDays aria-hidden /></CalendarHeaderAction> : null}
           {!month && view.can({ type: "openSearch" }) ? <CalendarHeaderAction aria-label="Search events" onClick={send({ type: "openSearch" })}><Search aria-hidden /></CalendarHeaderAction> : null}
-          {!month && editor.can(newEvent) ? <CalendarHeaderAction aria-label="New event" onClick={() => void editor.send(newEvent)}><Plus aria-hidden /></CalendarHeaderAction> : null}
+          {!month && editor.can(newEvent) ? <CalendarHeaderAction aria-label="New event" onClick={() => void runtime.runPromise(startForm(newEvent, s.anchor))}><Plus aria-hidden /></CalendarHeaderAction> : null}
         </CalendarHeader>
         {searching ? <Searching runtime={runtime} /> : null}
         <Access runtime={runtime} />
@@ -318,7 +320,8 @@ export function Calendar({ runtime, alpha }: CalendarProps) {
             <CalendarTimeline hours={hours}
               blocks={columns.length > 0 ? [] : lanes(rows, s.anchor).map((placed) => block(placed.row, s.anchor, placed))}
               now={s.anchor === s.today && columns.length === 0 ? now : undefined}
-              empty={columns.length > 0 ? (columns.every((day) => dayRows(day).length === 0) && free ? dayEmpty("Free on these days") : undefined)
+              empty={disconnected ? dayEmpty("Not connected", true)
+                : columns.length > 0 ? (columns.every((day) => dayRows(day).length === 0) && free ? dayEmpty("Free on these days") : undefined)
                 : free && s.reminders === 0 ? dayEmpty(s.anchor === s.today ? "Nothing scheduled today" : "Free all day") : undefined}
               columns={columns.length > 0 ? (
                 <div data-alpha-calendar-days="" className="absolute inset-y-0 right-4 left-15 grid" style={{ gridTemplateColumns: `repeat(${columns.length}, minmax(0, 1fr))` }}>
@@ -495,7 +498,7 @@ function EventPage({ runtime, row, today }: CalendarProps & { row: Row; today: n
     const confirmed = { type: "confirm", id: row.id, reach, revision: row.revision, now: untimed } as const;
     const scope: Editor.Scope = reach === "WholeSeries" ? "WholeSeries" : reach === "FromThisOn" ? "ThisAndFollowing" : "ThisOne";
     return deletable && held.can(confirmed) && editor.can({ type: "deleteEvent", id: row.id, revision: row.revision, scope, repeating: row.recurring })
-      ? () => void held.send(confirmed) : undefined;
+      ? () => void held.send(confirmed).then(() => view.send({ type: "closeEvent" })) : undefined;
   };
   const respond = (going: boolean, offered: boolean): Editor.Event => ({ type: "respond", id: row.id, revision: row.revision, going, offered });
   const going = respond(true, goingOffered(row.answer, row.answerable));
@@ -523,7 +526,7 @@ function EventPage({ runtime, row, today }: CalendarProps & { row: Row; today: n
       source={row.source === "Phone" ? "Phone calendar" : "Your agent's calendar"} dot={stripe(row)} notes={row.notes}
       actions={menu ? (
         <CalendarEventMenu items={[
-          ...(editing ? [{ label: "Edit", name: "Edit event", onSelect: () => void editor.send(edit) }] : []),
+          ...(editing ? [{ label: "Edit", name: "Edit event", onSelect: () => void runtime.runPromise(startForm(edit, civilDay(row.begin), row)) }] : []),
           ...deletes.flatMap(({ label, act }) => (act ? [{ label, onSelect: act }] : [])),
         ]} />
       ) : null}>
@@ -561,7 +564,7 @@ function Undo({ runtime }: CalendarProps) {
   const d = held.state;
   if (!d) return null;
   const titled = (id: number) => shown.lastSeen(id)?.title || "the event";
-  const region = (toast: ReactNode) => <div role="status" aria-live="polite" className="pointer-events-none absolute inset-x-4 top-3 z-toast flex flex-col items-center">{toast}</div>;
+  const region = (toast: ReactNode) => <div role="status" aria-live="polite" className="pointer-events-none absolute inset-x-4 top-15 z-toast flex flex-col items-center">{toast}</div>;
   if (d.waiting === 0 || !d.notice) {
     if (d.dropped !== 0) return region(<Toast>{`${titled(d.dropped)} was not deleted: you signed in to another account.`}</Toast>);
     if (d.failed !== 0) return region(<Toast>{`Couldn't delete ${titled(d.failed)}. It may have changed; it's shown again.`}</Toast>);
@@ -681,8 +684,8 @@ function Form({ runtime, day, today, connected }: CalendarProps & { day: number;
         <div role="group" aria-label="Save changes to" className="mx-6 my-1 flex flex-wrap items-center gap-2">
           <span className="text-meta text-muted-foreground">Save changes to</span>
           {scopes.map(({ scope, label }) => (
-            <CalendarChip key={scope} chosen={e.scope === scope} disabled={!editor.can({ type: "chooseScope", scope }) && e.scope !== scope}
-              className={e.scope === scope ? undefined : "bg-secondary"} onClick={() => void editor.send({ type: "chooseScope", scope })}>{label}</CalendarChip>
+            <CalendarChip key={scope} label={label} chosen={e.scope === scope} disabled={!editor.can({ type: "chooseScope", scope }) && e.scope !== scope}
+              className={e.scope === scope ? undefined : "bg-secondary"} onClick={() => void editor.send({ type: "chooseScope", scope })} />
           ))}
         </div>
       ) : null}
@@ -773,8 +776,9 @@ function Form({ runtime, day, today, connected }: CalendarProps & { day: number;
               <CalendarFormRow icon={<CalendarIcon />}>
                 <div className="flex min-w-0 flex-[1_1_0] flex-wrap gap-2">
                   {(["Agent", "Phone"] as const).map((target) => (
-                    <CalendarChip key={target} chosen={(fields.calendar ?? "Agent") === target} dot={target === "Agent" ? "primary" : "foreground"}
-                      onClick={() => change({ ...fields, calendar: target }, plain)}>{target === "Agent" ? "Your agent's calendar" : "This phone's calendar"}</CalendarChip>
+                    <CalendarChip key={target} label={target === "Agent" ? "Your agent's calendar" : "This phone's calendar"}
+                      chosen={(fields.calendar ?? "Agent") === target} dot={target === "Agent" ? "primary" : "foreground"}
+                      onClick={() => change({ ...fields, calendar: target }, plain)} />
                   ))}
                 </div>
               </CalendarFormRow>
@@ -783,10 +787,10 @@ function Form({ runtime, day, today, connected }: CalendarProps & { day: number;
               <CalendarFormRow icon={<Repeat />}>
                 <div className="flex min-w-0 flex-[1_1_0] flex-wrap gap-1.5">
                   {repeats.map(({ repeat, label }) => (
-                    <CalendarChip key={repeat} chosen={(fields.repeat ?? "NoRepeat") === repeat} onClick={() => {
+                    <CalendarChip key={repeat} label={label} chosen={(fields.repeat ?? "NoRepeat") === repeat} onClick={() => {
                       const extras = repeat !== "NoRepeat" || fields.people.trim() !== "";
                       change({ ...fields, repeat }, extras === e.extras ? plain : { type: "setExtras", extras });
-                    }}>{label}</CalendarChip>
+                    }} />
                   ))}
                 </div>
               </CalendarFormRow>

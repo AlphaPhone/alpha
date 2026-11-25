@@ -14,9 +14,11 @@ import androidx.core.splashscreen.SplashScreen;
 import androidx.core.view.ViewCompat;
 import androidx.core.view.WindowInsetsCompat;
 import com.getcapacitor.BridgeActivity;
+import com.getcapacitor.CapConfig;
 import com.getcapacitor.WebViewListener;
 import java.lang.ref.WeakReference;
 import java.util.UUID;
+import java.util.concurrent.atomic.AtomicLong;
 
 public class MainActivity extends BridgeActivity {
  private static final String BACK = "window.dispatchEvent(new Event('alpha-back'))";
@@ -31,6 +33,8 @@ public class MainActivity extends BridgeActivity {
  private static int unansweredFrontStarts;
  private boolean homeTask;
  private boolean handingOff;
+ private boolean telephonyAdmitted;
+ private final AtomicLong composerVisit = new AtomicLong();
  private InsetsState insets;
 
  private record InsetsState(int top, int bottom, boolean keyboard) {
@@ -62,9 +66,12 @@ public class MainActivity extends BridgeActivity {
   registerPlugin(ai.eliza.plugins.signin.ElizaSignInPlugin.class);
   registerPlugin(ai.eliza.plugins.signin.ElizaCloudPlugin.class);
   registerPlugin(ai.eliza.plugins.securestore.SecureStorePlugin.class);
-  registerPlugin(ai.eliza.plugins.system.SystemPlugin.class);
+  registerPlugin(AlphaSystemPlugin.class);
   registerPlugin(AlphaFilesPlugin.class);
   registerPlugin(AlphaSelectedDocumentsPlugin.class);
+  registerPlugin(AlphaNotesPlugin.class);
+  registerPlugin(AlphaNoteDocumentsPlugin.class);
+  AlphaNoteRecordingService.offerFromIntent(this, getIntent());
   registerPlugin(ai.eliza.plugins.camera.CameraPlugin.class);
   registerPlugin(AlphaPhotosPlugin.class);
   registerPlugin(AlphaPhotoLibraryPlugin.class);
@@ -75,6 +82,8 @@ public class MainActivity extends BridgeActivity {
   registerPlugin(ai.eliza.plugins.passwords.PasswordsPlugin.class);
   registerPlugin(AlphaBrowserPlugin.class);
   registerPlugin(AlphaCalendarPlugin.class);
+  registerPlugin(AlphaNotificationsPlugin.class);
+  registerPlugin(AlphaPhotosPermissionsPlugin.class);
   registerPlugin(AlphaResetPlugin.class);
   registerPlugin(AlphaActionJournalPlugin.class);
   registerPlugin(AlphaDevicePlugin.class);
@@ -83,8 +92,11 @@ public class MainActivity extends BridgeActivity {
   registerPlugin(AlphaLocalSpeechPlugin.class);
   registerPlugin(AlphaCloudSpeechPlugin.class);
   boolean image = AlphaImageCapability.verified(this);
-  if (image) registerPlugin(AlphaTelephonyPlugin.class);
-  if (AlphaImageCapabilities.aospImage(this)) registerPlugin(ai.eliza.plugins.contacts.ContactsPlugin.class);
+  telephonyAdmitted = image;
+  if (image) {
+   registerPlugin(AlphaTelephonyPlugin.class);
+   registerPlugin(AlphaContactsPlugin.class);
+  }
   AlphaLauncher.register(this, image);
   super.onCreate(state);
   if (getBridge() == null) return;
@@ -107,6 +119,8 @@ public class MainActivity extends BridgeActivity {
 
  private void followWindowInsets() {
   getBridge().addWebViewListener(new WebViewListener() {
+   @Override public void onPageStarted(WebView page) { composerVisit.incrementAndGet(); }
+
    @Override public void onPageLoaded(WebView page) {
     if (insets != null) insets.publish(page);
    }
@@ -127,7 +141,16 @@ public class MainActivity extends BridgeActivity {
  }
 
  @Override protected void load() {
-  if (!handingOff) super.load();
+  if (handingOff) return;
+  if (telephonyAdmitted && !isAssistantSurface()) {
+   if (config == null) config = CapConfig.loadDefault(this);
+   WebView page = findViewById(com.getcapacitor.android.R.id.webview);
+   if (page != null && config.getServerUrl() == null) {
+    page.setFilterTouchesWhenObscured(true);
+    AlphaMessagesComposerPort.install(this, page);
+   }
+  }
+  super.load();
  }
 
  @Override public void onSaveInstanceState(Bundle state) {
@@ -136,16 +159,24 @@ public class MainActivity extends BridgeActivity {
  }
 
  @Override public void onResume() {
+  composerVisit.incrementAndGet();
   super.onResume();
   if (livePage.get() == this) unansweredFrontStarts = 0;
  }
 
+ @Override public void onPause() {
+  composerVisit.incrementAndGet();
+  super.onPause();
+ }
+
  @Override public void onDestroy() {
+  composerVisit.incrementAndGet();
   if (livePage.get() == this) livePage.clear();
   super.onDestroy();
  }
 
  @Override public void onWindowFocusChanged(boolean focused) {
+  composerVisit.incrementAndGet();
   super.onWindowFocusChanged(focused);
   if (focused && getBridge() != null) {
    getBridge().getWebView().evaluateJavascript("window.dispatchEvent(new Event('focus'))", null);
@@ -155,6 +186,7 @@ public class MainActivity extends BridgeActivity {
  private boolean volumeShutter;
 
  boolean isAssistantSurface() { return false; }
+ long composerVisit() { return composerVisit.get(); }
 
  void setVolumeShutter(boolean enabled) { volumeShutter = enabled; }
 
@@ -179,7 +211,10 @@ public class MainActivity extends BridgeActivity {
    return;
   }
   boolean home = isHome(intent);
-  if (home) SmsNoticeOpenRequest.clear();
+  if (home) {
+   composerVisit.incrementAndGet();
+   SmsNoticeOpenRequest.clear();
+  }
   super.onNewIntent(intent);
   if (getBridge() != null && home) getBridge().getWebView().evaluateJavascript(HOME, null);
  }

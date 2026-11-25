@@ -10,7 +10,7 @@ export type SettingsAndroidRowProps = SettingsAndroidProps &
     /** The page of Android's settings the row opens. */
     target: AndroidTarget;
     /** For a channel's page, the channel it names. */
-    channel?: number;
+    channel?: string;
     /** What the row is, in a few words. */
     title: string;
     /** An icon for the row; decorative. */
@@ -19,7 +19,7 @@ export type SettingsAndroidRowProps = SettingsAndroidProps &
     reading?: Reading;
   };
 
-const same = (start: AndroidStart | undefined, target: AndroidTarget, channel: number | undefined) => start?.target === target && start.channel === channel;
+const same = (start: AndroidStart | undefined, target: AndroidTarget, channel: string | undefined) => start?.target === target && start.channel === channel;
 
 /**
  * A row that opens a page of Android's own settings, for what Alpha cannot change itself. One start is in flight at a

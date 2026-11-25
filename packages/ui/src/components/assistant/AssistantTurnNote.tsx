@@ -36,26 +36,25 @@ const notes: Record<AssistantTurnStatus, { status: StatusDotProps["status"]; lab
 const busy: Partial<Record<AssistantTurnStatus, string>> = { sending: "Sending", replying: "Replying", stopping: "Stopping", checking: "Checking" };
 
 /**
- * The state of the turn at the foot of the conversation: while Alpha is at work, three pulsing dots, or what it says it
- * is doing as shimmering words; otherwise a shape and a few words, with Check for reply where one read can say more.
+ * The state of the turn at the foot of the conversation: three pulsing dots while Alpha is at work, then a shape
+ * whose status is its accessible name. The agent's own label stays visible, as does Check for reply when offered.
  * @model spec/app/assistant/index.md
  */
 export function AssistantTurnNote({ status, label, onCheck, className, ...props }: AssistantTurnNoteProps) {
   const working = busy[status];
   if (working !== undefined) {
-    const words = label ?? (status === "stopping" || status === "checking" ? working : undefined);
-    return words === undefined ? (
+    return label === undefined ? (
       <div role="status" aria-label={working} className={cn("flex gap-1.25 py-1.5", className)} {...props}>
         {["", "[animation-delay:200ms]", "[animation-delay:400ms]"].map((delay) => <span key={delay} aria-hidden className={cn("size-1.75 rounded-full bg-primary motion-safe:animate-blink", delay)} />)}
       </div>
     ) : (
-      <div role="status" className={cn("self-start bg-linear-to-r from-muted-foreground from-40% via-foreground via-50% to-muted-foreground to-60% bg-size-[300%_100%] bg-clip-text py-1.5 text-base text-transparent motion-safe:animate-shimmer motion-reduce:text-muted-foreground", className)} {...props}>{words}</div>
+      <div role="status" className={cn("self-start bg-linear-to-r from-muted-foreground from-40% via-foreground via-50% to-muted-foreground to-60% bg-size-[300%_100%] bg-clip-text py-1.5 text-base text-transparent motion-safe:animate-shimmer motion-reduce:text-muted-foreground", className)} {...props}>{label}</div>
     );
   }
   const note = notes[status];
   return (
     <div role="status" className={cn("flex min-h-11 items-center gap-3", className)} {...props}>
-      <StatusDot status={note.status} label={label ?? note.label} showLabel />
+      <StatusDot status={note.status} label={label ?? note.label} showLabel={label !== undefined} />
       {onCheck ? <Button variant="secondary" size="sm" onClick={onCheck}>Check for reply</Button> : null}
     </div>
   );

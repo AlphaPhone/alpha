@@ -1,14 +1,14 @@
 // spec/app/workflows/list.md, "Story: Find a workflow"; spec/app/workflows/list.md, "Story: Keep the list to its owner"
-import type { RemoteWorkflow } from "@elizaos/plugin-workflow/client"
+import type { RemoteWorkflow } from "@elizaos/plugin-workflow-client"
 import type { Freshness } from "../../gen/app__home__cards.effect.vibe"
 import * as List from "../../gen/app__workflows__list.effect.vibe"
 import type { Effect as Out, Event } from "../../gen/app__workflows__list.effect.vibe"
 import { Machine as Shell, showing } from "../../gen/app__shell.effect.vibe"
 import { fromAreas } from "../home/cards.vibe"
 import type { Shell as ShellState } from "../../gen/app__shell.effect.vibe"
-import { Agent } from "../platform/agent.vibe"
+import type { Agent } from "../platform/agent.vibe"
 import { Device } from "../platform/device.vibe"
-import { ownerAt } from "../platform/owner.vibe"
+import { type ResidentOwner, launchOwnerOf, ownerAt, residentOwnerKey } from "../platform/owner.vibe"
 import { type Job, answer, applying, reacting, started, together } from "../runtime/reactor.vibe"
 import { WorkflowsApi, type Prompt, type ScheduledTask, readPrompts, readSchedules, workflowsApi } from "./api.vibe"
 
@@ -34,9 +34,11 @@ export service Rows {
   /** The last payload the list machine read for this owner. */
   view(owner: number): Snapshot!!
   /** The next number for this signed-in owner, or the number already assigned to it. */
-  owner(id: string): number!!
-  /** Whether `id` names the same owner as the request. */
+  owner(id: string, proof: ResidentOwner | undefined): number!!
+  /** Whether `id` names the same resident agent as the request. */
   sameOwner(id: string, number: number): boolean!!
+  /** Whether this request still belongs to the verified launch owner. */
+  sameDigestOwner(proof: ResidentOwner, number: number): boolean!!
   /** The last payload's visible record, as the row's already assigned number names it. */
   row(owner: number, number: number): (WorkflowRow | undefined)!!
   /** Keep the words read under this ticket; row numbers are stable for a refresh by the same owner. */
@@ -47,14 +49,17 @@ export service Rows {
 const rows = Layer.sync(Rows, () => {
   let shown = blank
   let currentOwner = ""
+  let currentDigestOwner = ""
   let owner = 0
   let nextRow = 0
   const numbers = new Map<string, number>()
   return {
     view: (wanted: number) => succeed(shown.owner === wanted ? shown : blank),
-    owner: (id: string) => sync(() => {
-      if (currentOwner !== id) {
+    owner: (id: string, proof: ResidentOwner | undefined) => sync(() => {
+      const verified = proof === undefined ? "" : residentOwnerKey(proof)
+      if (currentOwner !== id || currentDigestOwner !== verified) {
         currentOwner = id
+        currentDigestOwner = verified
         shown = blank
         numbers.clear()
         owner += 1
@@ -62,6 +67,7 @@ const rows = Layer.sync(Rows, () => {
       return owner
     }),
     sameOwner: (id: string, number: number) => succeed(id === currentOwner && number === owner),
+    sameDigestOwner: (proof: ResidentOwner, number: number) => succeed(residentOwnerKey(proof) === currentDigestOwner && number === owner),
     row: (wanted: number, number: number) => succeed(shown.owner === wanted ? shown.rows.find((row) => row.number === number) : undefined),
     store: (wanted: number, received: readonly UnnumberedRow[], problems: readonly Source[]) => sync(() => {
       if (wanted !== owner) return
@@ -73,7 +79,7 @@ const rows = Layer.sync(Rows, () => {
       })
       shown = { owner, rows: numbered, problems }
     }),
-    clear: () => sync(() => { currentOwner = ""; shown = blank; numbers.clear() }),
+    clear: () => sync(() => { currentOwner = ""; currentDigestOwner = ""; shown = blank; numbers.clear() }),
   }
 })
 
@@ -141,7 +147,8 @@ export effect function refresh(): void!!(Agent | Rows | List.Machine) {
   const store = try Rows
   const list = try List.Machine
   const current = try list.get()
-  const owner = key === "" ? 0 : try store.owner(key)
+  const proof = key === "" ? undefined : (launchOwnerOf(key) catch () => undefined)
+  const owner = key === "" ? 0 : try store.owner(key, proof)
   if (key === "") try store.clear()
   if (owner !== current.owner) try ignore(list.send({ type: "ownerChanged", owner }))
   try ignore(list.send({ type: "readList" }))
@@ -162,13 +169,19 @@ export effect function backList(): boolean!!List.Machine {
 // spec/app/home/cards.md, "The Workflows card shows the first two enabled rows and how many more, marked when they are not current, stale or partly unavailable, and is not drawn without a row"
 const place = (current: ShellState) => showing(current, "Workflows") ? "Workflows" : current.trail.length === 0 ? "Home" : "Away"
 
-const followPage = applying(Shell, place, effect (at) => {
+const followPage = applying(Shell, (current) => {
+  const at = place(current)
+  return { at, assistant: at === "Workflows" && current.assistant !== "Bar" }
+}, effect ({ at, assistant }) => {
   if (at !== "Workflows") {
     const list = try List.Machine
     try ignore(list.send({ type: "dismissFilters" }))
-    try ignore(list.send({ type: "closePlace" }))
+    while (List.canClosePlace(try list.get())) {
+      const closed = (map(list.send({ type: "closePlace" }), () => true) catch () => false)
+      if (!closed) break
+    }
   }
-  if (at !== "Away") try refresh()
+  if (at === "Home" || (at === "Workflows" && !assistant)) try refresh()
 })
 
 const followForeground = started(effect {

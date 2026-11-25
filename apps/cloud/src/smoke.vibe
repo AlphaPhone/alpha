@@ -1,5 +1,5 @@
 // spec/cloud/rollout.md, "Story: Tell whether a deployed environment is ready"; spec/cloud/rollout.md, "Alpha's own cloud is ready only when each public gate passes: the provisioning smoke reads, then the entitlement keys, Alpha's sign-in configuration, the plans and the sign-in return page on the App Link host"
-import type { CloudEnvironment } from "@elizaos/cloud/profile"
+import type { CloudEnvironment } from "@elizaos/cloud"
 import { alphaPackage, assetLinksNameAlpha, type Environment } from "../gen/cloud.effect.vibe"
 import { smokeGates, type Gate } from "../gen/cloud__rollout.effect.vibe"
 import { entryOf, registrationAt, statementsIn } from "./alpha.vibe"

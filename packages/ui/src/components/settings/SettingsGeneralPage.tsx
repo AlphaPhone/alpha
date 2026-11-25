@@ -44,6 +44,8 @@ export type SettingsGeneralPageProps = SettingsAndroidProps &
     said?: SettingsResetNoticeProps["said"];
     /** Update rows owned by the update area. */
     updates?: ReactNode;
+    /** Commands in the General header. */
+    actions?: ReactNode;
   };
 
 const themes = { system: "System", light: "Light", dark: "Dark" } as const;
@@ -53,21 +55,21 @@ const themes = { system: "System", light: "Light", dark: "Dark" } as const;
  * and default apps, and Erase all data at the foot. Rows are numbered by slot, as on the first page.
  * @model spec/app/settings/index.md
  */
-export function SettingsGeneralPage({ wifi, bluetooth, mobileData, theme, alerts, image = false, told, onBack, onOpen, onPhone = false, reviewing, onErase, requestingHome, onRequestHome, said, updates, starting, onAndroid, place, onPlace }: SettingsGeneralPageProps) {
+export function SettingsGeneralPage({ wifi, bluetooth, mobileData, theme, alerts, image = false, told, onBack, onOpen, onPhone = false, reviewing, onErase, requestingHome, onRequestHome, said, updates, starting, onAndroid, place, onPlace, actions }: SettingsGeneralPageProps) {
   const at = (row: number) => placed({ place, onPlace }, row);
   const android = { starting, onAndroid };
   return (
-    <SettingsPage title="General" told={told} onBack={onBack}>
+    <SettingsPage title="General" told={told} onBack={onBack} backLabel="Back to Settings" actions={actions}>
       {said ? <SettingsResetNotice said={said} /> : null}
       {onPhone ? (
         <ListGroup>
-          <SettingsNavRow title="Carrier & SIM setup" aria-label="Carrier & SIM setup" detail="IMEI, SIM status and activation" icon={<Smartphone />} onOpen={onOpen && (() => onOpen("carrier"))} {...at(13)} />
+          <SettingsNavRow title="Carrier & SIM setup" detail="IMEI, SIM status and activation" icon={<Smartphone />} onOpen={onOpen && (() => onOpen("carrier"))} {...at(13)} />
           <SettingsNavRow title="Network" icon={<WifiCog />} onOpen={onOpen && (() => onOpen("network"))} {...at(12)} />
         </ListGroup>
       ) : null}
       <ListGroup>
-        <SettingsNavRow title="Display" aria-label="Display" icon={<Sun />} value={theme ? themes[theme] : undefined} onOpen={onOpen && (() => onOpen("display"))} {...at(0)} />
-        <SettingsNavRow title="Notifications" aria-label="Notifications" icon={<Bell />} detail={alerts ? <SettingsReading reading={alerts} /> : undefined} onOpen={onOpen && (() => onOpen("notifications"))} {...at(2)} />
+        <SettingsNavRow title="Display" icon={<Sun />} value={theme ? themes[theme] : undefined} onOpen={onOpen && (() => onOpen("display"))} {...at(0)} />
+        <SettingsNavRow title="Notifications" icon={<Bell />} detail={alerts ? <SettingsReading reading={alerts} /> : undefined} onOpen={onOpen && (() => onOpen("notifications"))} {...at(2)} />
         <SettingsNavRow title="Sound" icon={<Volume2 />} onOpen={onOpen && (() => onOpen("sound"))} {...at(1)} />
         <SettingsNavRow title="Battery" icon={<Battery />} onOpen={onOpen && (() => onOpen("battery"))} {...at(3)} />
         {image ? <SettingsNavRow title="Phone" icon={<Phone />} onOpen={onOpen && (() => onOpen("phone"))} {...at(4)} /> : null}

@@ -23,7 +23,7 @@ export const meta: ComponentMeta<InboxListProps> = {
       await expect(onLoadMore.mock.calls.length).toBe(1);
     },
     "Loading more": async ({ canvasElement }: { canvasElement: HTMLElement }) => {
-      await expect(within(canvasElement).getByRole("button", { name: "Load more" })).toHaveAttribute("aria-busy", "true");
+      await expect(within(canvasElement).getByRole("button", { name: "Loading more…" })).toHaveAttribute("aria-busy", "true");
     },
   },
 };

@@ -1,4 +1,5 @@
-import { Button } from "../Button.tsx";
+import { RotateCw } from "lucide-react";
+import { cn, focusRing } from "../../lib/cn.ts";
 import { StatusDot, type StatusDotProps } from "../StatusDot.tsx";
 
 type Mark = { status: StatusDotProps["status"]; label: string };
@@ -37,17 +38,20 @@ export type InboxDraftStatusProps = {
 };
 
 /**
- * What is known of the draft: kept on the phone, saved in Gmail, sent. Each is a shape and a word, so none is told by
- * color alone.
+ * What is news about the draft: not kept on the phone, saved in Gmail, sent. Each is a shape and a word, so none is
+ * told by color alone; a draft kept as it is typed says nothing.
  *
  * @model spec/app/inbox/drafts.md
  */
 export function InboxDraftStatus({ keeping: kept, gmail: copy, sent: went, onRetry }: InboxDraftStatusProps) {
-  const marks = [keeping[kept], gmail[copy], sent[went]].filter((mark): mark is Mark => mark !== undefined);
+  const routine = kept === "kept" || kept === "writing";
+  const marks = [routine ? undefined : keeping[kept], gmail[copy], sent[went]].filter((mark): mark is Mark => mark !== undefined);
+  const retry = onRetry && (kept === "notKept" || kept === "full");
+  if (marks.length === 0 && !retry) return null;
   return (
-    <ul aria-label="Draft status" className="flex flex-wrap items-center gap-x-4 gap-y-1 text-sm text-muted-foreground">
-      {marks.map(({ status, label }) => <li key={label}><StatusDot status={status} label={label} showLabel /></li>)}
-      {onRetry && (kept === "notKept" || kept === "full") ? <li><Button variant="ghost" size="sm" onClick={onRetry}>Try again</Button></li> : null}
-    </ul>
+    <div role="status" aria-label="Draft status" className="flex flex-wrap items-center gap-x-3 gap-y-1 py-2 text-xs text-muted-foreground">
+      {marks.map(({ status, label }) => <StatusDot key={label} status={status} label={label} showLabel />)}
+      {retry ? <button type="button" onClick={onRetry} className={cn(focusRing, "inline-flex min-h-11 items-center gap-1.5 rounded-sm px-3 text-foreground")}><RotateCw aria-hidden className="size-4" />Retry</button> : null}
+    </div>
   );
 }
