@@ -4,7 +4,7 @@ import * as Link from "../../gen/app__notes__linkNote.effect.vibe"
 import * as Voice from "../../gen/app__notes__voice.effect.vibe"
 import type { Actor } from "../../gen/app__notes__note.effect.vibe"
 import { Machine as Notes } from "../../gen/app__notes.effect.vibe"
-import { Machine as Shell, canRaise, showing } from "../../gen/app__shell.effect.vibe"
+import { MediaHandoff } from "../assistant/attachments.vibe"
 import type { Agent } from "../platform/agent.vibe"
 import { NoteDevice, transcriptWindowMs } from "../platform/noteDevice.vibe"
 import { NoteStore } from "../platform/notes.vibe"
@@ -174,21 +174,24 @@ effect function played(fx: Extract<Voice.Effect, { readonly tag: "Plays" }>): Vo
 }
 
 // spec/app/notes/voice.md, "Ask Alpha about this transcript hands Ask Alpha the transcript the note holds"
-effect function askAbout(fx: Extract<Voice.Effect, { readonly tag: "AsksAlpha" }>): void!!NotesSelection {
+effect function askAbout(fx: Extract<Voice.Effect, { readonly tag: "AsksAlpha" }>): void!!(NotesSelection | MediaHandoff) {
   const selected = try notesSelection()
   if (selected?.kind !== "canonical-note") return
   const detail = try Voice.Machine
   const voice = try detail.get()
   const collection = try (try NoteContent).collection()
   const note = collection.noteByNumber.get(fx.note)
-  if (!Voice.canAskAlpha(voice, "Owner") || voice.note !== fx.note || voice.added !== fx.upTo ||
-    voice.revision !== collection.version || note?.id !== selected.id || selected.revision !== String(collection.version - 1) ||
+  if (!Voice.canAskAlpha(voice, "Owner") || voice.owner !== fx.owner || voice.note !== fx.note || voice.opened !== fx.opened ||
+    voice.added !== fx.upTo || voice.revision !== fx.revision || voice.revision !== collection.version || note?.id !== selected.id || selected.revision !== String(collection.version - 1) ||
     (savedVoice(note)?.lines.length ?? 0) === 0) return
-  const shell = try Shell
-  const current = try shell.get()
-  if (!showing(current, "Notes") || !canRaise(current, "Sheet")) return
   if (Voice.canStopPlaying(voice, "Owner")) try ignore(detail.send({ type: "stopPlaying" }, "Owner"))
-  try ignore(shell.send({ type: "raise", detent: "Sheet" }))
+  try ignore((try MediaHandoff).offerTranscript({
+    owner: voice.owner,
+    number: voice.note,
+    opened: voice.opened,
+    record: { kind: "canonical-note", id: selected.id, revision: selected.revision },
+    title: note.title.trim() || "Voice note",
+  }))
 }
 
 /** The owner's request starts recognition for the exact recording still open. */
@@ -207,7 +210,7 @@ export effect function generateTranscript(note: number, revision: number, retry:
   }
 }
 
-function voiceOut(fx: Voice.Effect): Job<Voice.Event, NotesSelection | NoteDevice | NoteStore | VoiceReview, [Actor]> {
+function voiceOut(fx: Voice.Effect): Job<Voice.Event, NotesSelection | MediaHandoff | NoteDevice | NoteStore | VoiceReview, [Actor]> {
   if (fx.tag === "Plays") return answer("play", played(fx), { type: "played", ticket: fx.ticket, ok: false }, phone)
   if (fx.tag === "Halts") return answer("stop", effect { return { type: "halted", ticket: fx.ticket, ok: try (try NoteDevice).halt() } satisfies Voice.Event }, { type: "halted", ticket: fx.ticket, ok: false }, phone)
   if (fx.tag === "AsksAlpha") return run("ask about this transcript", askAbout(fx), phone)
