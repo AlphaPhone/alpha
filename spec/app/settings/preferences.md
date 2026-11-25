@@ -29,7 +29,7 @@ type Theme = System | Light | Dark
 type Look = LightLook | DarkLook
 type SizeOutcome = Applied | NotConfirmed | NoTextSize
 type Notice = Quiet | NotSaved | SizeNotConfirmed | SizeUnavailable | NotRecovered
-type Share = AgentLocation | BrowserPage | GmailChanges | CalendarEdits
+type Share = AgentLocation | BrowserPage | GmailChanges | CalendarEdits | TelegramContext | SlackContext
 
 type Preferences = {
   theme: Theme, kept: Theme, legible: bool, keptLegible: bool, keeping: T::Timed, phoneLook: Look,
@@ -327,7 +327,7 @@ pure def stepTheDocumentIsReadOnlyWhenDue(before: Preferences, via: str, after: 
     (via == "start" or ((via == "opened" or via == "resumed" or via == "recovered" or via == "giveUpOnRecovery") and not(T::busy(before.saving))))
 ```
 
-### A new phone lets Alpha act without asking first, load images in Inbox, use its location and the Browser page open, and change Gmail and Calendar
+### A new phone lets Alpha act without asking first, load images in Inbox, use its location, the Browser page open, and Telegram or Slack screen context, and change Gmail and Calendar
 
 Location is on because the launcher already holds the location grant on an
 Alpha image; the owner turns any of these off here, or revokes the grant in
@@ -337,7 +337,10 @@ starts as one of these.
 ```quint
 type Chosen = { askFirst: bool, images: bool, shares: List[Share] }
 
-pure val newPhone: Chosen = { askFirst: false, images: true, shares: List(AgentLocation, BrowserPage, GmailChanges, CalendarEdits) }
+pure val newPhone: Chosen = {
+  askFirst: false, images: true,
+  shares: List(AgentLocation, BrowserPage, GmailChanges, CalendarEdits, TelegramContext, SlackContext),
+}
 
 pure def lawANewPhoneAllowsEveryShare(share: Share): bool = newPhone.shares.includes(share) and not(newPhone.askFirst) and newPhone.images
 ```
@@ -348,8 +351,11 @@ The phone reports the document readable, with its values, or not.
 
 ```quint
 pure val docReadValues = Set(1, 2, 3)
-pure val sharesValues = Set(List(), List(AgentLocation, BrowserPage), List(AgentLocation, BrowserPage, GmailChanges, CalendarEdits))
-pure val shareValues = Set(AgentLocation, BrowserPage, GmailChanges)
+pure val sharesValues = Set(
+  List(),
+  List(AgentLocation, BrowserPage, TelegramContext),
+  List(AgentLocation, BrowserPage, GmailChanges, CalendarEdits, TelegramContext, SlackContext))
+pure val shareValues = Set(AgentLocation, BrowserPage, GmailChanges, TelegramContext, SlackContext)
 
 pure def safe(document: T::Timed, s: Preferences): Preferences = { ...s, document: document, askFirst: true, images: false, shares: List() }
 
@@ -389,11 +395,11 @@ pure def asksBeforeActing(s: Preferences, act: Act): bool =
 pure def loadsImages(s: Preferences): bool = s.document.read.status == R::Loaded and s.images
 ```
 
-### Alpha shares the phone's location or the Browser page open with a chat turn, and changes Gmail or Calendar, only when the phone read that the owner allowed it
+### Alpha shares the phone's location, the Browser page open, or Telegram or Slack screen context with a chat turn, and changes Gmail or Calendar, only when the phone read that the owner allowed it
 
 Each turn reads this just before it is sent, so the first turn after a
-start reads what the phone kept. A private tab or a sign-in page is never
-shared.
+start reads what the phone kept. A private tab, a sign-in page, or any
+Telegram or Slack authentication or OAuth consent screen is never shared.
 
 ```quint
 pure def allows(s: Preferences, share: Share): bool = s.document.read.status == R::Loaded and s.shares.includes(share)
