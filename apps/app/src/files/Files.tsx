@@ -3,7 +3,7 @@ import { Alert, AppHeader, Button, Checkbox, Chip, Dialog, DialogContent, Dialog
 import { Effect, Option, type Layer, type ManagedRuntime } from "effect";
 import { ArrowDown, ArrowDownWideNarrow, ArrowUp, AudioLines, ScanLine, ChevronRight, Download, Ellipsis, File, FileText, Folder, FolderInput, FolderOpen, HardDrive, Image, Info, LayoutGrid, List, Pencil, Plus, RefreshCw, Search, Share2, Trash2, Video, X, type LucideIcon } from "lucide-react";
 import { Fragment, useMemo, useState, type MouseEvent } from "react";
-import type { Machine, Order } from "../../gen/app__files.effect.vibe";
+import type { Event as FilesEvent, Files as FilesState, Machine, Order } from "../../gen/app__files.effect.vibe";
 import { ahead, browse, chosen, detailed, empty, filled } from "../../gen/app__files.ts";
 import { useMachine } from "../../gen/app__files.react.ts";
 import type { Dest, Work } from "../../gen/app__files__change.ts";
@@ -47,6 +47,7 @@ function sized(bytes: number): string {
   while (value >= 1024 && at < units.length - 1) { value /= 1024; at += 1; }
   return `${at === 0 || value >= 100 ? Math.round(value) : Math.round(value * 10) / 10} ${units[at]}`;
 }
+type Naming = { work: Work; name: string };
 const changeWords: Record<Work, string> = { NewFolder: "make the folder", Rename: "rename it", MoveTo: "move them", CopyTo: "copy them" };
 
 /** The name the phone's storage gives a number: its volume's name at a volume's root, else the last step of its path. */
@@ -63,7 +64,7 @@ export function Files({ runtime, alpha }: FilesProps) {
   const { state, cause, can, send } = useMachine(runtime);
   const recent = useRecent(runtime);
   const [text, setText] = useState("");
-  const [naming, setNaming] = useState<{ work: Work; name: string } | undefined>(undefined);
+  const [naming, setNaming] = useState<Naming | undefined>(undefined);
   const [kind, setKind] = useState<Kind | undefined>(undefined);
   const [filtering, setFiltering] = useState(false);
   const items = state?.items;
@@ -108,7 +109,6 @@ export function Files({ runtime, alpha }: FilesProps) {
   const place = state.inCategory ? category : label(state.trail.at(-1) ?? 0);
   const title = selecting ? `${marks.size} selected` : atTop ? "Files" : (place ?? "Files");
   const wanted: Filter = { text: text.trim(), kind: kind ?? "Other", anyKind: kind === undefined };
-  const [details] = detailed(state);
   const primary = state.volumes[0];
   const iconBox = "flex size-11 shrink-0 items-center justify-center rounded-lg bg-muted text-foreground";
   const rowClass = "min-h-15 gap-3.5 rounded-xl px-2";
@@ -294,6 +294,36 @@ export function Files({ runtime, alpha }: FilesProps) {
           </div>
         )}
       </div>
+      <FileLayers state={state} picked={picked} naming={naming} setNaming={setNaming} owner={owner} tell={tell} label={label} />
+      <Preview runtime={runtime} />
+      {scanner}
+      <Sheet open={change.panel !== 0} onOpenChange={(open) => { if (!open && owner({ type: "closeShare" })) tell({ type: "closeShare" }); }}>
+        <SheetContent title="Share">
+          <ListGroup surface="plain">
+            {shares.map(([channel, name]) => owner({ type: "shareTo", channel }) && <ListRow key={channel} title={name} onClick={() => tell({ type: "shareTo", channel })} />)}
+          </ListGroup>
+        </SheetContent>
+      </Sheet>
+    </section>
+  );
+}
+
+
+type FileLayersProps = {
+  readonly state: FilesState;
+  readonly picked: readonly Item[];
+  readonly naming: Naming | undefined;
+  readonly setNaming: (draft: Naming | undefined) => void;
+  readonly owner: (event: FilesEvent) => boolean;
+  readonly tell: (event: FilesEvent) => void;
+  readonly label: (handle: number) => string;
+};
+
+function FileLayers({ state, picked, naming, setNaming, owner, tell, label }: FileLayersProps) {
+  const [details] = detailed(state);
+  const { change } = state;
+  return (
+    <>
       <Dialog open={state.deleting.showing} onOpenChange={(open) => { if (!open && owner({ type: "keepFiles" })) tell({ type: "keepFiles" }); }}>
         <DialogContent>
           <DialogTitle>{`Move ${picked.length === 1 ? `“${picked[0]?.name}”` : `${picked.length} items`} to the Trash?`}</DialogTitle>
@@ -307,7 +337,7 @@ export function Files({ runtime, alpha }: FilesProps) {
       <Dialog open={details !== undefined} onOpenChange={(open) => { if (!open && owner({ type: "closeDetails" })) tell({ type: "closeDetails" }); }}>
         <DialogContent closeLabel="Close">
           <DialogTitle>{details?.name}</DialogTitle>
-          {details && (
+          {details !== undefined && (
             <dl aria-label="Details" className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1">
               <dt>Kind</dt><dd>{kindNames[details.kind]}</dd>
               {details.kind !== "Folder" && <><dt>Size</dt><dd>{sized(details.bytes)}</dd></>}
@@ -366,15 +396,6 @@ export function Files({ runtime, alpha }: FilesProps) {
           </ListGroup>
         </SheetContent>
       </Sheet>
-      <Preview runtime={runtime} />
-      {scanner}
-      <Sheet open={change.panel !== 0} onOpenChange={(open) => { if (!open && owner({ type: "closeShare" })) tell({ type: "closeShare" }); }}>
-        <SheetContent title="Share">
-          <ListGroup surface="plain">
-            {shares.map(([channel, name]) => owner({ type: "shareTo", channel }) && <ListRow key={channel} title={name} onClick={() => tell({ type: "shareTo", channel })} />)}
-          </ListGroup>
-        </SheetContent>
-      </Sheet>
-    </section>
+    </>
   );
 }

@@ -1,6 +1,6 @@
 // spec/app/browser/index.md, "Story: Open, pick and close tabs"; spec/app/browser/address.md, "Story: Go where I typed"; spec/app/browser/address.md, "Story: Watch a page load"; spec/app/browser/address.md, "Story: Browse privately"
-import { Button, BrowserAddressBar, BrowserBar, type BrowserMenuItem, BrowserMenu, BrowserNewTab, BrowserTabs, ConfirmDialog, PrivateMark } from "@repo/ui";
-import { ChevronLeft, Plus, RotateCw, Square, Trash2 } from "lucide-react";
+import { Button, BrowserAddressBar, BrowserFindBar, BrowserBar, type BrowserMenuItem, BrowserMenu, BrowserNewTab, BrowserTabs, ConfirmDialog, PrivateMark } from "@repo/ui";
+import { ChevronLeft, Plus, RotateCw, Search, Square, Trash2 } from "lucide-react";
 import { Effect } from "effect";
 import { useState } from "react";
 import { canAskErase, canCancelErase, canConfirmErase, canOpenTab } from "../../gen/app__browser.ts";
@@ -47,6 +47,7 @@ function Tab({ runtime, alpha, tabs, page }: BrowserProps & { tabs: State; page:
   const browser = useMachine(runtime);
   const { state, can, send } = usePage(page);
   const [typed, setTyped] = useState("");
+  const [finding, setFinding] = useState("");
   if (!state) return null;
   const tab = tabs.selected;
   const shown = runtime.runSync(Effect.map(TabHost, (host) => host.session.info(idOf(tab))));
@@ -69,8 +70,15 @@ function Tab({ runtime, alpha, tabs, page }: BrowserProps & { tabs: State; page:
     can({ type: "stop" }) && { label: "Stop", name: "Stop loading", icon: <Square />, onSelect: () => { void browser.send({ type: "uncover" }).then(() => send({ type: "stop" })); } },
     canOpenTab(tabs, "Normal") && { label: "New tab", icon: <Plus />, onSelect: () => opening("Normal")?.() },
     canOpenTab(tabs, "Private") && { label: "Private tab", name: "New private tab", icon: <PrivateMark aria-hidden />, onSelect: () => opening("Private")?.() },
+    can({ type: "openFind" }) && { label: "Find", name: "Find in page", icon: <Search />, onSelect: () => { setFinding(""); void browser.send({ type: "uncover" }).then(() => send({ type: "openFind" })); } },
     canAskErase(tabs) && { label: "Clear all", name: "Clear all browsing data", icon: <Trash2 />, onSelect: () => void browser.send({ type: "askErase" }) },
   ];
+  const stood = runtime.runSync(Effect.flatMap(Pages, (pages) => pages.sought(tab)));
+  const seek = (text: string) => {
+    setFinding(text);
+    void runtime.runPromise(Effect.flatMap(Pages, (pages) => pages.seek(tab, text))).then(() => send({ type: "typeFind", empty: text === "" }));
+  };
+  const findStatus = finding === "" ? "" : state.find.status === "Loading" ? "Searching…" : state.matches > 0 ? `${Math.max(1, stood.index)} of ${state.matches}` : "No matches";
   const cards = tabs.open.map((one) => {
     const known = runtime.runSync(Effect.map(TabHost, (host) => host.session.info(idOf(one))));
     const privateTab = tabs.privates.includes(one);
@@ -88,7 +96,7 @@ function Tab({ runtime, alpha, tabs, page }: BrowserProps & { tabs: State; page:
             secure={state.secure}
             private={state.kind === "Private"}
             tabs={tabs.open.length}
-            onEdit={cover("Address") && (() => { setTyped(shown?.url ?? ""); void browser.send({ type: "cover", layer: "Address" }); })}
+            onEdit={cover("Address") && (() => { setTyped(`${host}${path}`); void browser.send({ type: "cover", layer: "Address" }); })}
             onStop={can({ type: "stop" }) ? () => void send({ type: "stop" }) : undefined}
             onBack={can({ type: "goBack" }) ? () => void send({ type: "goBack" }) : undefined}
             onForward={can({ type: "goForward" }) ? () => void send({ type: "goForward" }) : undefined}
@@ -101,6 +109,12 @@ function Tab({ runtime, alpha, tabs, page }: BrowserProps & { tabs: State; page:
           ? <BrowserNewTab private={state.kind === "Private"} onSearch={cover("Address") && (() => { setTyped(""); void browser.send({ type: "cover", layer: "Address" }); })} />
           : <div data-alpha-browser-page="" aria-hidden ref={(place) => { if (place) void runtime.runPromise(placed); }} className="absolute inset-0" />}
       </div>
+      {state.finding && tabs.layer === "Uncovered" && (
+        <BrowserFindBar value={finding} onValueChange={seek} status={findStatus}
+          onPrevious={can({ type: "findNext", forward: false }) ? () => void send({ type: "findNext", forward: false }) : undefined}
+          onNext={can({ type: "findNext", forward: true }) ? () => void send({ type: "findNext", forward: true }) : undefined}
+          onClose={() => void send({ type: "closeFind" })} />
+      )}
       {tabs.layer === "Menu" && <BrowserMenu items={offered.filter((item) => item !== false)} onClose={() => void browser.send({ type: "uncover" })} />}
       {tabs.layer === "Switcher" && (
         <BrowserTabs

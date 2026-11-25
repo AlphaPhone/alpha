@@ -1,6 +1,6 @@
 // spec/app/files/trash.md, "Story: See what is in the Trash"; spec/app/files/trash.md, "Story: Bring something back"; spec/app/files/trash.md, "Story: Erase for good"; spec/app/files/trash.md, "The owner restores everything listed that is still kept, together, from a list read since the last job"; spec/app/files/trash.md, "The owner marks listed entries, one by one or every one, and a mark lasts while its entry is listed and no job has started"; spec/app/files/trash.md, "The phone keeps an item thirty days from when it went in; its days left count down from thirty and never go below zero"
 import { Alert, AppHeader, Button, Checkbox, Dialog, DialogContent, DialogTitle, EmptyState, ListGroup, ListRow, Spinner } from "@repo/ui";
-import type { ManagedRuntime } from "effect";
+import { Effect, type ManagedRuntime } from "effect";
 import { ChevronLeft, Trash2 } from "lucide-react";
 import type { Machine } from "../../gen/app__files__trash.effect.vibe";
 import { daysLeft, view } from "../../gen/app__files__trash.ts";
@@ -28,7 +28,7 @@ export function Trash({ runtime, onBack }: TrashProps) {
   const tell = <E extends Parameters<typeof send>[0]>(event: E) => void send(event, "Owner");
   const shown = view(state);
   const ended = state.attempt.outcome;
-  const now = runtime.runSync(Time.use((time) => time.latest()));
+  const now = runtime.runSync(Effect.flatMap(Time, (time) => time.latest()));
   const left = (days: number) => (days === 1 ? "1 day left" : `${days} days left`);
   return (
     <section aria-label="Trash" className="flex min-h-0 flex-1 flex-col">

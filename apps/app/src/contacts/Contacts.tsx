@@ -2,7 +2,7 @@
 import { Alert, AppHeader, Avatar, Banner, Button, Chip, ConfirmDialog, Input, ListGroup, ListRow, SearchField, Spinner, Tabs, TabsContent, Textarea } from "@repo/ui";
 import { Effect, type ManagedRuntime } from "effect";
 import { CONTACT_MAX_ADDRESS, CONTACT_MAX_NAME, CONTACT_MAX_NOTES, CONTACT_MAX_NUMBER } from "@elizaos/os/bridges/contacts";
-import { ArrowLeft, Check, ChevronDown, Mail, MessageSquare, Minus, Pencil, Phone as Call, Plus, Search, Trash2, X } from "lucide-react";
+import { ArrowLeft, Check, ChevronDown, ChevronLeft, Mail, MessageSquare, Minus, NotebookText, Pencil, Phone as Call, Plus, Search, Trash2, X } from "lucide-react";
 import { useMemo } from "react";
 import type { Machine as ContactsMachine } from "../../gen/app__contacts.effect.vibe";
 import { accessNeeded, listFailed, listedEmpty, maxEach, noMatches, pending, refused, shown, uncertain } from "../../gen/app__contacts.ts";
@@ -14,6 +14,7 @@ import type { Machine as VoicemailMachine } from "../../gen/app__phone__voicemai
 import { useMachine as useVoicemail } from "../../gen/app__phone__voicemail.react.ts";
 import { useMachine as useShell } from "../../gen/app__shell.react.ts";
 import { PhoneTabs } from "../phone/PhoneTabs.tsx";
+import { callerInitials, displayNumber } from "../phone/words.ts";
 import { type Book, type Form, Rows, blankForm, sheetOf } from "./contacts.vibe";
 import { CommsBar, type CommsServices } from "../phone/CommsBar.tsx";
 import type { Alpha } from "../runtime/area.tsx";
@@ -148,10 +149,11 @@ function Card({ runtime, safe }: ContactsProps & { safe: boolean }) {
     runtime.runSync(Effect.flatMap(Rows, (rows) => rows.set({ reach: number })));
     void send({ type: "reach", how });
   };
+  const field = "flex min-h-13.5 items-center gap-4 px-5 py-2";
   return (
-    <div className="flex flex-1 flex-col gap-2">
-      <div data-host-chrome="" className="flex items-center gap-2 px-2">
-        {can({ type: "closeContact" }) && <Button variant="ghost" size="icon" aria-label="Back" onClick={() => void send({ type: "closeContact" })}><ArrowLeft /></Button>}
+    <div className="flex flex-1 flex-col">
+      <div data-host-chrome="" className="mt-11 flex min-h-14 items-center gap-1 px-2">
+        {can({ type: "closeContact" }) && <Button variant="ghost" size="icon" aria-label="Back" onClick={() => void send({ type: "closeContact" })}><ChevronLeft /></Button>}
         <span className="flex-1" />
         {card && can({ type: "amend" }) && <Button variant="ghost" size="icon" aria-label="Edit" onClick={() => {
           runtime.runSync(Effect.flatMap(Rows, (rows) => rows.set({
@@ -165,33 +167,32 @@ function Card({ runtime, safe }: ContactsProps & { safe: boolean }) {
           void send({ type: "amend" });
         }}><Pencil /></Button>}
         {can({ type: "amendElsewhere" }) && <Button variant="ghost" size="icon" aria-label="Edit" onClick={() => void send({ type: "amendElsewhere" })}><Pencil /></Button>}
-        {can({ type: "askDelete" }) && <Button variant="ghost" size="icon" className="text-destructive" aria-label="Delete" onClick={() => void send({ type: "askDelete" })}><Trash2 /></Button>}
+        {can({ type: "askDelete" }) && <Button variant="ghost" size="icon" className="text-record" aria-label="Delete" onClick={() => void send({ type: "askDelete" })}><Trash2 /></Button>}
       </div>
       {state.card.status === "Loading" && <Spinner label="Reading the contact" />}
       {state.card.status === "Failed" && <Banner variant="destructive">The contact could not be read</Banner>}
       {shown(state) && card && (
         <>
-          <Avatar name={card.displayName} aria-hidden className="size-22 self-center font-display text-contact-initials font-light" />
-          <h1 className="px-4 text-center font-display text-contact-name font-light break-words">{card.displayName}</h1>
-          {card.phoneNumbers.length > 0 && <div className="flex flex-wrap justify-center gap-2 px-4 pt-2" role="group" aria-label="Contact actions">
+          <span aria-hidden className="mt-2 flex size-28 items-center justify-center self-center rounded-full bg-secondary font-display text-contact-initials font-light">{callerInitials(card.displayName)}</span>
+          <h1 className="mt-4 px-4 text-center font-display text-contact-name font-light wrap-anywhere">{card.displayName}</h1>
+          {card.phoneNumbers.length > 0 && <div className="flex flex-wrap justify-center gap-3.5 px-4 pt-5.5 pb-1" role="group" aria-label="Contact actions">
             {[...new Set(card.phoneNumbers.map(({ number }) => number))].flatMap((number) => [
-              can({ type: "reach", how: "Call" }) && <Button key={`call ${number}`} variant="secondary" size="icon" className="size-14" aria-label={`Call ${number}`} onClick={() => reach("Call", number)}><Call /></Button>,
-              can({ type: "reach", how: "Message" }) && <Button key={`message ${number}`} variant="secondary" size="icon" className="size-14" aria-label={`Message ${number}`} onClick={() => reach("Message", number)}><MessageSquare /></Button>,
+              can({ type: "reach", how: "Call" }) && <Button key={`call ${number}`} variant="secondary" size="icon" className="size-15" aria-label={`Call ${number}`} onClick={() => reach("Call", number)}><Call /></Button>,
+              can({ type: "reach", how: "Message" }) && <Button key={`message ${number}`} variant="secondary" size="icon" className="size-15" aria-label={`Message ${number}`} onClick={() => reach("Message", number)}><MessageSquare /></Button>,
             ])}
           </div>}
-          <ListGroup surface="plain" aria-label="Contact details" className="mx-4 mt-5 rounded-sheet bg-secondary">
+          <div aria-label="Contact details" role="group" className="mx-4 mt-9 rounded-sheet bg-secondary py-1.5 select-text">
             {card.phoneNumbers.map((phone, at) => (
               // eslint-disable-next-line @eslint-react/no-array-index-key -- The phone can return a duplicated number at distinct positions.
-              <ListRow key={`${phone.number}-${at}`} title={<span className="wrap-anywhere whitespace-normal">{phone.number}</span>} detail={contactLabel(phone.type)}
-                leading={<Call className="size-5" />} className="min-h-13.5 px-5 select-text" />
+              <div key={`${phone.number}-${at}`} className={field}><Call aria-hidden className="size-5 shrink-0 text-muted-foreground" /><span className="min-w-0 flex-1 text-body leading-field wrap-anywhere">{displayNumber(phone.number)}</span><span className="shrink-0 text-sm text-muted-foreground">{contactLabel(phone.type)}</span></div>
             ))}
             {card.emailAddresses.map((email, at) => (
               // eslint-disable-next-line @eslint-react/no-array-index-key -- The phone can return a duplicated address at distinct positions.
-              <ListRow key={`${email.address}-${at}`} title={<span className="wrap-anywhere whitespace-normal">{email.address}</span>} detail={contactLabel(email.type)} leading={<Mail className="size-5" />} className="min-h-13.5 px-5 select-text" />
+              <div key={`${email.address}-${at}`} className={field}><Mail aria-hidden className="size-5 shrink-0 text-muted-foreground" /><span className="min-w-0 flex-1 text-body leading-field wrap-anywhere">{email.address}</span><span className="shrink-0 text-sm text-muted-foreground">{contactLabel(email.type)}</span></div>
             ))}
-            {card.notes && <ListRow title={<span className="wrap-anywhere whitespace-pre-wrap">{card.notes}</span>} detail="Notes" className="min-h-13.5 px-5 select-text" />}
-          </ListGroup>
-          {card.notes === undefined && <p className="mx-4 text-sm text-muted-foreground">Notes are not available here</p>}
+            {card.notes && <div className={field}><NotebookText aria-hidden className="size-5 shrink-0 text-muted-foreground" /><span className="min-w-0 flex-1 text-body leading-field whitespace-pre-wrap wrap-anywhere">{card.notes}</span></div>}
+          </div>
+          {card.notes === undefined && <p className="mx-4 mt-3 text-sm text-muted-foreground">Notes are not available here</p>}
         </>
       )}
       <ConfirmDialog open={state.confirming} title="Delete this contact?" confirmLabel="Delete" destructive
