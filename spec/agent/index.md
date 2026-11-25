@@ -64,19 +64,22 @@ agent's fixed storage, which no launch lists. What the old phone loaded
 and the pack does not: vision, whose `sharp` eliza never ships on a device;
 the agent orchestrator's view and the mobile remote target, which the
 pinned eliza does not have; the OpenAI and Eliza Cloud provider plugins,
-because the model is the launch's own cloud model; local inference, which
-waits on the owner's choice of model and embeddings; and `basic-actions`,
-whose only action is the calculator the old agent never had.
+because the model is the launch's own cloud model; and `basic-actions`,
+whose only action is the calculator the old agent never had. The pack includes
+Eliza's hosted local inference module for speech. On Android it uses the
+bundled speech models through the app's peer-checked local socket. Browser
+and pack smoke launches with no socket load no speech model. Text replies
+still use the launch's Cloud text backend and embeddings remain off.
 
 ```quint
-pure val corePlugins: List[str] = List("@elizaos/plugin-personal-assistant", "@elizaos/plugin-calendar", "@elizaos/plugin-inbox", "@elizaos/plugin-notes", "@elizaos/plugin-files", "@elizaos/plugin-workflow")
+pure val corePlugins: List[str] = List("@elizaos/plugin-personal-assistant", "@elizaos/plugin-calendar", "@elizaos/plugin-inbox", "@elizaos/plugin-notes", "@elizaos/plugin-files", "@elizaos/plugin-workflow", "@elizaos/plugin-local-inference")
 pure val viewPlugins: List[str] = List("@elizaos/plugin-maps", "@elizaos/plugin-browser")
-pure val hostedPlugins: List[str] = List("@elizaos/plugin-notes")
+pure val hostedPlugins: List[str] = List("@elizaos/plugin-notes", "@elizaos/plugin-local-inference")
 pure val notesTrashDays = 3
-pure val packedPlugins: List[str] = List("@elizaos/plugin-personal-assistant", "@elizaos/plugin-calendar", "@elizaos/plugin-inbox", "@elizaos/plugin-notes", "@elizaos/plugin-files", "@elizaos/plugin-workflow", "@elizaos/plugin-maps", "@elizaos/plugin-browser")
+pure val packedPlugins: List[str] = List("@elizaos/plugin-personal-assistant", "@elizaos/plugin-calendar", "@elizaos/plugin-inbox", "@elizaos/plugin-notes", "@elizaos/plugin-files", "@elizaos/plugin-workflow", "@elizaos/plugin-maps", "@elizaos/plugin-browser", "@elizaos/plugin-local-inference")
 pure val bundledPlugins: List[str] = List("@elizaos/plugin-personal-assistant", "@elizaos/plugin-calendar", "@elizaos/plugin-inbox", "@elizaos/plugin-files", "@elizaos/plugin-workflow", "@elizaos/plugin-maps", "@elizaos/plugin-browser")
 pure val agentModules: List[str] = List("@elizaos/agent/device-actions", "@elizaos/agent/reply-draft", "@elizaos/agent/approvals", "@elizaos/agent/notifications", "@elizaos/agent/views", "@elizaos/agent/scheduled-tasks", "@elizaos/agent/tasks", "@elizaos/agent/triggers", "@elizaos/agent/surface")
-pure val loadList: List[str] = List("@elizaos/plugin-personal-assistant", "@elizaos/plugin-calendar", "@elizaos/plugin-inbox", "@elizaos/plugin-notes", "@elizaos/plugin-files", "@elizaos/plugin-workflow", "@elizaos/plugin-maps", "@elizaos/plugin-browser", "@elizaos/agent/device-actions", "@elizaos/agent/reply-draft", "@elizaos/agent/approvals", "@elizaos/agent/notifications", "@elizaos/agent/views", "@elizaos/agent/scheduled-tasks", "@elizaos/agent/tasks", "@elizaos/agent/triggers", "@elizaos/agent/surface")
+pure val loadList: List[str] = List("@elizaos/plugin-personal-assistant", "@elizaos/plugin-calendar", "@elizaos/plugin-inbox", "@elizaos/plugin-notes", "@elizaos/plugin-files", "@elizaos/plugin-workflow", "@elizaos/plugin-maps", "@elizaos/plugin-browser", "@elizaos/plugin-local-inference", "@elizaos/agent/device-actions", "@elizaos/agent/reply-draft", "@elizaos/agent/approvals", "@elizaos/agent/notifications", "@elizaos/agent/views", "@elizaos/agent/scheduled-tasks", "@elizaos/agent/tasks", "@elizaos/agent/triggers", "@elizaos/agent/surface")
 pure def lawPackListsAreConsistent(p: str): bool =
   (packedPlugins.includes(p) iff (corePlugins.includes(p) or viewPlugins.includes(p)))
     and (bundledPlugins.includes(p) iff (packedPlugins.includes(p) and not(hostedPlugins.includes(p))))
@@ -278,6 +281,27 @@ pure def routeListAdmitted(listed: List[Route]): bool =
   listed.length() == pageRoutes.length() and listed.every(r => pageRoutes.includes(r)) and pageRoutes.every(r => listed.includes(r))
 ```
 
+### Only Android's native speech transport can call the resident recognizer
+
+The page's route table has neither the speech scope nor the live capture
+route. The phone admits exactly these two calls to its root-only native
+channel. The scope answers the running resident's launch epoch and owner
+only when the pinned native engine can transcribe. Alpha checks the native
+sign-in account against that scope before capture and never sends frames
+to another epoch.
+
+```quint
+pure val nativeSpeechRoutes: List[Route] = List(
+  { method: Get, path: "/api/alpha-speech/scope", stream: false },
+  { method: Post, path: "/api/asr/local-inference/live", stream: false },
+)
+pure def nativeSpeechRoutesAdmitted(listed: List[Route]): bool =
+  listed.length() == nativeSpeechRoutes.length() and listed.every(route => nativeSpeechRoutes.includes(route))
+    and nativeSpeechRoutes.every(route => listed.includes(route))
+pure def lawSpeechRoutesAreAbsentFromThePage(route: Route): bool =
+  nativeSpeechRoutes.includes(route) implies not(pageRoutes.includes(route))
+```
+
 ### The agent keeps its memory across restarts, without embeddings
 
 The old agent kept its history when it restarted, so the launch asks the
@@ -342,11 +366,11 @@ pure def packedFor(e: Environment): bool = e != Local
 ## Story: Build the pack only from the pinned eliza
 
 > As the maker of Alpha, I want the pack on the phone to be exactly the
-> pinned eliza's agent with the plugins I chose, for Node 26, with no local
-> inference, carrying the workflow worker it pins and every action Alpha
+> pinned eliza's agent with the plugins I chose, for Node 26, with on-device
+> speech, carrying the workflow worker it pins and every action Alpha
 > allows, so that what ships is what was reviewed.
 
-### A pack is admitted only when its manifest names the pinned commit, Node 26, no local inference, the plugins it carries, the Alpha product plugin, a pinned workflow worker and every allowed action
+### A pack is admitted only when its manifest names the pinned commit, Node 26, the local speech module, the plugins it carries, the Alpha product plugin, a pinned workflow worker and every allowed action
 
 The manifest is the one `readBundleManifest` reads back for the bundle's own
 bytes (eliza's "A manifest is read only for its own bundle bytes and only when
@@ -357,7 +381,7 @@ bundle carries the workflow plugin.
 ```quint
 type Manifest = { sourceCommit: str, node: str, localInference: bool, plugins: List[str], productPlugin: str, workerPinned: bool, actions: List[str] }
 pure def packAdmitted(m: Manifest, pin: str): bool =
-  m.sourceCommit == pin and m.node == "26" and not(m.localInference) and sameNames(m.plugins, packedPlugins)
+  m.sourceCommit == pin and m.node == "26" and m.localInference and sameNames(m.plugins, packedPlugins)
     and m.productPlugin == productPluginName and m.workerPinned and allowedActions.every(a => m.actions.includes(a))
 ```
 
