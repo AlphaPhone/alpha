@@ -126,7 +126,7 @@ describe("Ask Alpha dock", () => {
     const control = [...(section?.querySelectorAll("button") ?? [])].find((button) => !button.closest("[data-alpha-grabber],[data-alpha-input-drag-alpha]"));
     expect(control).toBeDefined();
     drag(control);
-    await new Promise((resolve) => setTimeout(resolve, 50));
+    await Effect.runPromise(Effect.sleep("50 millis"));
     expect(await detent()).toBe("Bar");
 
     // spec/app/assistant/dock.md, "A press does one thing: a tap is never also a drag, and a late click never taps"
@@ -137,7 +137,7 @@ describe("Ask Alpha dock", () => {
       field.dispatchEvent(new Event("input", { bubbles: true }));
       await expect.poll(() => getComputedStyle(field).touchAction).toBe("pan-y");
       drag(field);
-      await new Promise((resolve) => setTimeout(resolve, 50));
+      await Effect.runPromise(Effect.sleep("50 millis"));
       expect(["Sheet", "Full"]).not.toContain(await detent());
     }
   });
