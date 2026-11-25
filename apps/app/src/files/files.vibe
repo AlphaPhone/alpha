@@ -587,7 +587,7 @@ effect function binned(number: number, items: ReadonlyArray<number>): Bin.Event!
       const at = try spotOf(entry.mark)
       if (Option.isSome(at) && ids.has(`${at.value.volume}\u0000${at.value.path.slice(trashPath("").length)}`)) results.push(entry)
     }
-    return jobDone(number, results, answered === items.length)
+    return jobDone(number, results, answered === items.length && results.length === ids.size)
   } catch () => jobDone(number, [], false)
 }
 

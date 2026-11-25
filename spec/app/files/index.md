@@ -1001,7 +1001,7 @@ pure val shareMost = 100
 pure def shareable(items: List[F::Item]): bool = items.length() > 0 and items.length() <= shareMost and not(items.some(i => i.kind == F::Folder))
 
 pure def canOpenShare(s: Files, mail: bool, by: Actor): bool =
-  by == Owner and browse(s) == Showing and shareable(chosen(s)) and s.change.panel == 0
+  by == Owner and browse(s) == Showing and shareable(chosen(s)) and s.change.panel == 0 and s.change.sending.outcome != A::Sent
 
 pure def openShare(s: Files, mail: bool, by: Actor): Files = { ...s, change: C::openShare(s.change, chosen(s), mail, 0) }
 
@@ -1039,7 +1039,7 @@ pure def workOf(act: Action): C::Work =
 pure def runnable(s: Files, act: Action, file: F::Item, folder: int, name: str, dest: C::Place, guarded: bool): bool =
   browse(s) == Showing and not(guarded) and not(s.inCategory) and here(s) == folder
     and (act == Making or s.items.includes(file))
-    and (act != Sharing or shareable(List(file)))
+    and (act != Sharing or (shareable(List(file)) and s.change.panel == 0 and s.change.sending.outcome != A::Sent))
     and (act == Deleting or act == Sharing
       or C::canBegin(s.change, workOf(act), if (act == Making) List() else List(file), names(s), folder, name, dest, 7))
 
