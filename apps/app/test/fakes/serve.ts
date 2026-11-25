@@ -49,7 +49,7 @@ export function fakes(real?: string, phone = false): Plugin {
   return {
     name: "alpha-fakes",
     apply: "serve",
-    transformIndexHtml: () => (phone ? phoned : []),
+    transformIndexHtml: () => (phone ? [{ tag: "script", attrs: { type: "module", src: "/test/fakes/page.ts" }, injectTo: "head-prepend" }] : []),
     configureServer(server) {
       if (real === undefined) server.middlewares.use("/agent", (incoming, outgoing) => void relay(agent, incoming, outgoing));
       server.middlewares.use("/cloud", (incoming, outgoing) => void relay(cloud, incoming, outgoing));

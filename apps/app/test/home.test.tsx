@@ -33,6 +33,7 @@ const pulled = (startY = 68, dx = 0) => drawn(() => {
   zone?.dispatchEvent(pointer("pointerup", 100 + dx, startY + 80));
 });
 const alphaApps = ["view:Inbox", "view:Calendar", "view:Browser", "view:Camera", "view:Photos", "view:Maps", "view:Notes", "view:Files", "view:Workflows", "view:Settings"];
+const homeOrder = ["view:Phone", "view:Messages", "view:Inbox", "view:Calendar", "view:Browser", "view:Camera", "view:Photos", "view:Maps", "view:Notes", "view:Contacts", "view:Files", "view:Workflows", "view:Settings"];
 const holdingHome = (world: Scene) => {
   world.settings.roles = world.settings.roles.map((role) => role.role === "home" ? { ...role, held: true, holders: ["ai.alphacompute.alphaphone"] } : role);
   return world;
@@ -108,7 +109,7 @@ describe("Home on a phone", () => {
     await second.close();
     const third = await open({ ...world, image: true });
     await until(third.alpha, home.runtime(third.alpha), Home.Machine, (h) => h.tiles.load.status === "Loaded" && h.tiles.load.ticket === 3);
-    expect(tiles()).toEqual(["view:Phone", "view:Messages", "view:Inbox", "view:Calendar", "view:Clock", "view:Reminders", "view:Browser", "view:Camera", "view:Photos", "view:Maps", "view:Contacts", "view:Files", "view:Workflows", "view:Settings", "view:Notes"]);
+    expect(tiles()).toEqual([...homeOrder.filter((tile) => tile !== "view:Notes"), "view:Notes"]);
 
     // spec/app/home/tiles.md, "What was saved comes back as it was saved, an empty Home included; with no record Home shows its defaults"
     await third.close();
@@ -283,12 +284,14 @@ describe("Home on a phone", () => {
         await until(opened.alpha, home.runtime(opened.alpha), Cards.Machine, (c) => c.calendar.source === "Ready" && c.calendar.items.length === 1);
         await drawn(() => undefined);
         const utcMidnight = new Date(Math.floor(at / 86_400_000) * 86_400_000).toLocaleDateString([], { weekday: "long", day: "numeric" });
-        seenThere.push({ card: agenda()?.textContent ?? undefined, utcDay: (document.body.textContent ?? "").includes(utcMidnight) });
+        const localDay = new Date(at).toLocaleDateString([], { weekday: "long", day: "numeric" });
+        seenThere.push({ card: agenda()?.textContent ?? undefined, utcDay: utcMidnight !== localDay && (document.body.textContent ?? "").includes(utcMidnight) });
         wanted.push(new Date(at + 2 * hour).toLocaleTimeString([], { hour: "numeric", minute: "2-digit", timeZone: where }));
         await opened.close();
       }
     } finally {
-      process.env.TZ = zone;
+      if (zone === undefined) delete process.env.TZ;
+      else process.env.TZ = zone;
     }
     expect(seenThere.map(({ card, utcDay }, at) => [card?.includes(`Standup${wanted[at]}`) ?? false, utcDay])).toEqual(seenThere.map(() => [true, false]));
   });
