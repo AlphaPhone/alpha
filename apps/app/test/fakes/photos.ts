@@ -78,7 +78,8 @@ export function alphaPhotos(scene: PhotosScene): Faked {
       },
       read({ id }) {
         scene.readCount++;
-        return Promise.resolve(available().find((item) => item.id === id));
+        const candidates = /^(?:v:)?[1-9][0-9]*$/.test(id) ? owned() : scene.access.scope === "denied" ? [] : scene.rows;
+        return Promise.resolve(candidates.find((item) => item.id === id));
       },
       beginEdit: ({ id, revision }) => scene.rows.some((item) => item.id === id && item.revision === revision)
         ? Promise.resolve(preview) : Promise.reject(new Error("This item changed")),

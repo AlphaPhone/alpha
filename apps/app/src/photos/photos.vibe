@@ -150,20 +150,27 @@ function failedList(ticket: number): Extract<Library.Event, { type: "listed" }> 
   return { type: "listed", ticket, ok: false, rows: [], owned: [], starred: [], cameraItem: 0, revision: 0, more: false }
 }
 
-function cameraLookup(capture: PhotoHandoff, page: MediaPage, own: boolean): string | undefined {
-  if (own) {
-    const id = capture.ownedId ?? capture.libraryId
-    return page.access === undefined && id !== undefined && /^(?:v:)?[1-9][0-9]*$/.test(id) ? id : undefined
-  }
-  const id = capture.libraryId
-  return page.access !== undefined && page.access.scope !== "denied" && id !== undefined &&
-    /^m:(?!external:|internal:)[A-Za-z0-9_-]{1,80}:[iv]:[1-9][0-9]*$/.test(id) ? id : undefined
+interface CameraLookup {
+  readonly id: string
+  readonly source: "owned" | "permitted"
 }
 
-effect function verifiedCameraItem(phone: PhotosClient, id: string, own: boolean): (Extract<Row, { kind: "phone" }> | undefined)!! {
-  const item = tryPromise(() => own ? phone.read({ id }) : phone.readPermitted({ id, pixels: false })) catch () => undefined
+function cameraLookup(capture: PhotoHandoff, page: MediaPage, own: boolean): CameraLookup | undefined {
+  const libraryId = capture.libraryId
+  const canonical = libraryId !== undefined && /^m:(?!external:|internal:)[A-Za-z0-9_-]{1,80}:[iv]:[1-9][0-9]*$/.test(libraryId)
+  if (!own && canonical) {
+    return page.access !== undefined && page.access.scope !== "denied" ? { id: libraryId, source: "permitted" } : undefined
+  }
+  const ownedScope = own ? page.access === undefined : page.access?.scope === "full"
+  const ownedId = capture.ownedId ?? libraryId
+  return ownedScope && ownedId !== undefined && /^(?:v:)?[1-9][0-9]*$/.test(ownedId) ? { id: ownedId, source: "owned" } : undefined
+}
+
+effect function verifiedCameraItem(phone: PhotosClient, lookup: CameraLookup): (Extract<Row, { kind: "phone" }> | undefined)!! {
+  const { id, source } = lookup
+  const item = tryPromise(() => source === "owned" ? phone.read({ id }) : phone.readPermitted({ id, pixels: false })) catch () => undefined
   if (item === undefined || item.id !== id || item.trashed === true) return undefined
-  return { kind: "phone", item: own ? { ...item, owned: true } : item }
+  return { kind: "phone", item: source === "owned" ? { ...item, owned: true } : item }
 }
 
 /** Read the requested page and keep its payload only when the matching ticket can still answer. */
@@ -220,9 +227,9 @@ effect function fetched(request: Fetch): Library.Event!!(PhotosPort | Catalog | 
   const capture = try peekHandoff()
   let cameraRow: Extract<Row, { kind: "phone" }> | undefined
   if (capture !== undefined && listed !== undefined && Option.isSome(phone) && request.only.length === 0 && Library.cameraScope(state)) {
-    const id = cameraLookup(capture, listed, request.own)
-    if (id !== undefined && !rows.some((row) => row.item.id === id)) {
-      const verified = try verifiedCameraItem(phone.value, id, request.own)
+    const lookup = cameraLookup(capture, listed, request.own)
+    if (lookup !== undefined && !rows.some((row) => row.item.id === lookup.id)) {
+      const verified = try verifiedCameraItem(phone.value, lookup)
       if (!Library.canListed(try machine.get(), request.ticket, "Phone") || (try cache.revision()) !== revision) return fail
       if ((try peekHandoff()) === capture) cameraRow = verified
     }
@@ -503,7 +510,8 @@ const handoff = started(effect {
     const { rows } = try cache.displayed()
     const admitted = state.cameraItem === 0 ? state.rows : [...state.rows, state.cameraItem]
     const exact = capture.libraryId === undefined ? undefined : admitted.find((number) => rows.get(number)?.item.id === capture.libraryId)
-    const owned = exact !== undefined || capture.ownedId === undefined || allows(state.access) ? undefined : admitted.find((number) => {
+    const owned = exact !== undefined || capture.ownedId === undefined ? undefined : admitted.find((number) => {
+      if (allows(state.access) && number !== state.cameraItem) return false
       const row = rows.get(number)
       return row?.kind === "phone" && row.item.owned === true && row.item.id === capture.ownedId
     })
