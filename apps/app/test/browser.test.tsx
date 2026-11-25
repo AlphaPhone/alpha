@@ -240,8 +240,14 @@ describe("The Browser on a phone", () => {
     await press("Find in page");
     await until(alpha, page, Page, (p) => p.finding);
     await fill("Find in page", "agent");
-    await until(alpha, page, Page, (p) => p.find.status === "Loaded" && p.matches > 1);
+    const status = () => document.querySelector('[role="search"][aria-label="Find in page"] [role="status"]')?.textContent;
+    await drawn(() => vi.waitFor(() => expect(status()).toBe("1 of 4")));
     await press("Next match");
+    await drawn(() => vi.waitFor(() => expect(status()).toBe("2 of 4")));
+    await press("Previous match");
+    await drawn(() => vi.waitFor(() => expect(status()).toBe("1 of 4")));
+    await fill("Find in page", "absent");
+    await drawn(() => vi.waitFor(() => expect(status()).toBe("No matches")));
     // spec/app/browser/address.md, "Closing the find bar clears the search"
     await press("Close find in page");
     await until(alpha, page, Page, (p) => !p.finding && p.matches === 0);

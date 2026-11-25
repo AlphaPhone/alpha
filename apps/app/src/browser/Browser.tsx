@@ -178,12 +178,11 @@ function Tab({ runtime, alpha, tabs, page }: BrowserProps & { tabs: State; page:
     clearable !== undefined && { label: "Clear site", name: "Clear site data", icon: <ListFilter />, onSelect: () => { setClearingSite(clearable); void browser.send({ type: "uncover" }); } },
     canAskErase(tabs) && { label: "Clear all", name: "Clear all browsing data", icon: <Trash2 />, onSelect: () => void browser.send({ type: "askErase" }) },
   ];
-  const stood = runtime.runSync(Effect.flatMap(Pages, (pages) => pages.sought(tab)));
   const seek = (text: string) => {
     setFinding(text);
     void runtime.runPromise(Effect.flatMap(Pages, (pages) => pages.seek(tab, text))).then(() => send({ type: "typeFind", empty: text === "" }));
   };
-  const findStatus = finding === "" ? "" : state.find.status === "Loading" ? "Searching…" : state.matches > 0 ? `${Math.max(1, stood.index)} of ${state.matches}` : "No matches";
+  const findStatus = finding === "" ? "" : state.find.status === "Loading" ? "Searching…" : state.matches > 0 ? `${state.position} of ${state.matches}` : "No matches";
   const cards = tabs.open.map((one) => {
     const known = tabHost.web === undefined ? tabHost.session.info(idOf(one)) : tabHost.web.info(idOf(one));
     const address = known?.url;

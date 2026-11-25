@@ -102,10 +102,9 @@ export service Pages {
   /** Where the next load of `tab` that opens an address goes. */
   aim(tab: number, address: string): void!!
   aimed(tab: number): Option.Option<string>!!
-  /** What the owner is finding in `tab`'s page, and where among its matches the tab host last stood. */
+  /** What the owner is finding in `tab`'s page. */
   seek(tab: number, text: string): void!!
-  sought(tab: number): { readonly text: string; readonly index: number }!!
-  stood(tab: number, index: number): void!!
+  sought(tab: number): string!!
   /** Whether the native tab currently requests the desktop version of pages. */
   desktop(tab: number): boolean!!
   setDesktop(tab: number, enabled: boolean): void!!
@@ -325,7 +324,7 @@ function carryPage(tab: number) {
     });
     when { tag: "Visit", let load }: run(`visit ${tab}`, visited(tab, load));
     when { tag: "Find" }: run(`find ${tab}`, ignore(effect {
-      const { text } = try (try Pages).sought(tab)
+      const text = try (try Pages).sought(tab)
       try hosted("find", (plugin, session) => plugin.find({ session, id: idOf(tab), query: text }))
     }));
     when { tag: "FindNext", let forward }: run(`find next ${tab}`, ignore(hosted("findNext", (plugin, session) => plugin.findNext({ session, id: idOf(tab), forward }))));
@@ -338,7 +337,7 @@ const pages = Layer.effect(Pages, effect {
   const area = try Whole
   const made = new Map<number, PageRuntime>()
   const aims = new Map<number, string>()
-  const finds = new Map<number, { text: string; index: number }>()
+  const finds = new Map<number, string>()
   const desktops = new Set<number>()
   let history: readonly HistoryRow[] = []
   let stamp = 0
@@ -361,9 +360,8 @@ const pages = Layer.effect(Pages, effect {
     },
     aim: (tab: number, address: string) => sync(() => { aims.set(tab, address) }),
     aimed: (tab: number) => sync(() => Option.fromNullishOr(aims.get(tab))),
-    seek: (tab: number, text: string) => sync(() => { finds.set(tab, { text, index: 0 }) }),
-    sought: (tab: number) => sync(() => finds.get(tab) ?? { text: "", index: 0 }),
-    stood: (tab: number, index: number) => sync(() => { finds.set(tab, { text: finds.get(tab)?.text ?? "", index }) }),
+    seek: (tab: number, text: string) => sync(() => { finds.set(tab, text) }),
+    sought: (tab: number) => sync(() => finds.get(tab) ?? ""),
     desktop: (tab: number) => sync(() => desktops.has(tab)),
     setDesktop: (tab: number, enabled: boolean) => sync(() => {
       if (enabled) desktops.add(tab)
@@ -450,11 +448,17 @@ const told = started(effect {
     }
     if (said.kind === "found") {
       const s = try (try Tabs.Machine).get()
-      const outcome = host.session.findResult(said.raw, idOf(s.selected))
-      if (outcome === undefined || outcome.cleared) return
-      try (try Pages).stood(s.selected, outcome.index)
+      const id = idOf(s.selected)
+      const raw = said.raw
+      const outcome = host.session.findResult(raw, id)
+      if (outcome === undefined || outcome.cleared || !outcome.done || !Number.isInteger(outcome.count) || !Number.isInteger(outcome.index)) return
+      const navigation = host.session.info(id)?.navigation
+      if (navigation === undefined || typeof raw !== "object" || raw === null || !("navigation" in raw) || raw.navigation !== navigation) return
       const p = try pageOf(s.selected)
-      if (outcome.done && p.find.status === "Loading") try tellPage(s.selected, { type: "found", ticket: p.find.ticket, count: outcome.count })
+      const { count } = outcome
+      const position = count > 0 ? Math.max(1, outcome.index) : 0
+      if (p.find.status === "Loading") try tellPage(s.selected, { type: "found", ticket: p.find.ticket, count, position })
+      else if (p.find.status === "Loaded") try tellPage(s.selected, { type: "matchSelected", ticket: p.find.ticket, count, position })
       return
     }
     if (said.kind !== "state") return
