@@ -6,14 +6,23 @@ import * as Cards from "../../gen/app__home__cards.ts";
 import type { Machine } from "../../gen/app__home__cards.effect.vibe";
 import { useMachine } from "../../gen/app__home__cards.react.ts";
 import { openCalls, openUnread } from "../phone/reports.vibe";
+import { shortWhen } from "../phone/words.ts";
 import type { Resident } from "../runtime/area.tsx";
 import { useTimed } from "../runtime/react.ts";
 import { untimed } from "../runtime/reactor.vibe";
-import { fromAreas, named, others } from "./cards.vibe";
+import { type MailRead, type Waiting, fromAreas, named, others } from "./cards.vibe";
 
 const where: Readonly<Record<Cards.Origin, string>> = { PhoneCalendar: "Calendar", AgentCalendar: "Alpha", Reminder: "Reminder" };
 
 const clock = (at: number) => new Date(at).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+
+/** The mail card's foot, as v121's: "Recent email" for a page that did not see every message, else the account, and when it was read. */
+const mailFoot = (read: MailRead | undefined, now: number) =>
+  read && [read.more ? "Recent email" : read.account, read.at > 0 ? `Updated ${shortWhen(read.at, now)}` : ""].filter(Boolean).join(" · ");
+
+/** A Messages or Phone card's count and the time of its newest row, as v121's, and its name with what waits. */
+const waitingOf = (app: "Messages" | "Phone", waiting: Waiting | undefined, now: number) =>
+  waiting && { summary: String(waiting.count), status: shortWhen(waiting.at, now), "aria-label": `${app}, ${waiting.what}` };
 
 function shown(item: Cards.Item): HomeAgendaItem {
   return {
@@ -47,9 +56,9 @@ export function useDayCards(runtime: ManagedRuntime.ManagedRuntime<Machine | Res
       const next = first.overdue ? Cards.following(items, now)[0] : undefined;
       return <HomeAgendaCard key="agenda" aria-label={first.overdue ? `Open overdue reminder: ${lead.title}` : `Open calendar event: ${lead.title}`} item={lead} overdue={first.overdue} next={next && shown(next)} notCurrent={Cards.agendaCard(state, now, told) === "NotUpdated"} {...open("AgendaCard")} />;
     },
-    MessagesCard: () => <HomeCallsCard key="messages" app="Messages" lines={told.messages} {...open("MessagesCard")} onClick={() => void runtime.runPromise(openUnread())} />,
-    PhoneCard: () => <HomeCallsCard key="phone" app="Phone" lines={told.phone} {...open("PhoneCard")} onClick={() => void runtime.runPromise(openCalls())} />,
-    MailCard: () => <HomeMailCard key="mail" unread={told.mail.unread} lines={told.mail.rows} notCurrent={Cards.mailCard(told.mail) === "NotUpdated"} {...open("MailCard")} />,
+    MessagesCard: () => <HomeCallsCard key="messages" app="Messages" lines={told.messages} {...waitingOf("Messages", given.messagesWaiting, Date.now())} {...open("MessagesCard")} onClick={() => void runtime.runPromise(openUnread())} />,
+    PhoneCard: () => <HomeCallsCard key="phone" app="Phone" lines={told.phone} {...waitingOf("Phone", given.phoneWaiting, Date.now())} {...open("PhoneCard")} onClick={() => void runtime.runPromise(openCalls())} />,
+    MailCard: () => <HomeMailCard key="mail" unread={told.mail.unread} more={given.mailRead?.more} status={mailFoot(given.mailRead, Date.now())} lines={told.mail.rows} notCurrent={Cards.mailCard(told.mail) === "NotUpdated"} {...open("MailCard")} />,
     BriefOfToday: () => given.brief && (
       <HomeBriefCard key="brief" outcome={given.brief.outcome} summary={given.brief.outcome === "Finished" ? given.brief.summary : undefined} when={clock(given.brief.at)} {...open("BriefOfToday")} />
     ),

@@ -13,6 +13,8 @@ export type HomeCardProps = Omit<ComponentProps<"button">, "title"> & {
   icon: ReactNode;
   /** Why what it shows is not up to date, in a few words; left out when it is current. */
   notCurrent?: string;
+  /** The card's foot, as v121's cards closed: where what it shows was read and when, such as "Recent email · Updated 1:32 PM". */
+  status?: string;
   /** The agenda casts its light heading and icon against Alpha's blue. */
   variant?: "agenda" | "row";
 };
@@ -23,7 +25,7 @@ export type HomeCardLinesProps = {
 };
 
 /** A card in Home's row: one press opens the app it comes from. A card that is not current says so beside a warning mark. */
-export function HomeCard({ title, icon, notCurrent, variant = "row", className, children, ...props }: HomeCardProps) {
+export function HomeCard({ title, icon, notCurrent, status, variant = "row", className, children, ...props }: HomeCardProps) {
   const agenda = variant === "agenda";
   return (
     <Card
@@ -41,6 +43,7 @@ export function HomeCard({ title, icon, notCurrent, variant = "row", className, 
           <span aria-hidden className={cn("text-primary [&_svg:not([class*='size-'])]:size-6", agenda && "text-alpha-foreground")}>{icon}</span>
         </span>
         <span className={cn("flex w-full min-w-0 flex-1 flex-col justify-center gap-3", !agenda && "max-w-65")}>{children}</span>
+        {status ? <span className={cn("min-h-4 truncate text-xs leading-snug text-muted-foreground", agenda && "text-alpha-foreground/85")}>{status}</span> : null}
         {notCurrent ? <StatusDot status="warn" label={notCurrent} showLabel className={cn("text-muted-foreground", agenda && "text-alpha-foreground/85")} /> : null}
       </button>
     </Card>

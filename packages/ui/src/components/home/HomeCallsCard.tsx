@@ -9,14 +9,16 @@ export type HomeCallsCardProps = Omit<ComponentProps<"button">, "children" | "ti
   lines: readonly HomeCardLine[];
   /** What waits in the app, as a count. */
   summary?: string;
+  /** When the newest row came in, such as "6:30 PM" or "Fri". */
+  status?: string;
 };
 
 const icons = { Messages: <MessageSquare />, Phone: <Phone /> };
 
 /** The Messages or Phone card, on an Alpha image: what waits there; a press opens the app. */
-export function HomeCallsCard({ app, lines, summary, ...props }: HomeCallsCardProps) {
+export function HomeCallsCard({ app, lines, summary, status, ...props }: HomeCallsCardProps) {
   return (
-    <HomeCard title={summary ?? app} icon={icons[app]} {...props}>
+    <HomeCard title={summary ?? app} status={status} icon={icons[app]} {...props}>
       <HomeCardLines lines={lines} />
     </HomeCard>
   );

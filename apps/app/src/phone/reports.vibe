@@ -11,11 +11,28 @@ import { fromAreas } from "../home/cards.vibe"
 import { waiting } from "../home/waiting.vibe"
 import { applying, contained, started, together } from "../runtime/reactor.vibe"
 import { recentsLimit } from "./phone.vibe"
+import { callerTitle, clockLength } from "./words.ts"
 
-const called = (row: { readonly cachedName: string | null; readonly number: string; readonly date: number }): Row => ({
-  title: row.cachedName || row.number || "Unknown caller",
-  detail: new Date(row.date).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }),
-})
+type Dated = Row & { readonly at: number }
+
+/** The Phone card's rows as v121 drew them, newest first: each number's new missed calls as one row, then each unheard voicemail. */
+function callRows(
+  missed: ReadonlyArray<{ readonly cachedName: string | null; readonly number: string; readonly date: number }>,
+  unheard: ReadonlyArray<{ readonly cachedName: string | null; readonly number: string; readonly date: number; readonly durationSeconds: number }>,
+): ReadonlyArray<Dated> {
+  const groups = new Map<string, { title: string; count: number; at: number }>()
+  for (const call of missed) {
+    const group = groups.get(call.number)
+    if (group) groups.set(call.number, { ...group, count: group.count + 1, at: Math.max(group.at, call.date) })
+    else groups.set(call.number, { title: callerTitle(call.number, call.cachedName), count: 1, at: call.date })
+  }
+  return [
+    ...[...groups.values()].map((group) => ({ title: group.title, detail: group.count > 1 ? `Missed · ${group.count}` : "Missed", at: group.at })),
+    ...unheard.map((one) => ({ title: callerTitle(one.number, one.cachedName), detail: `Voicemail · ${clockLength(one.durationSeconds)}`, at: one.date })),
+  ].sort((a, b) => b.at - a.at)
+}
+
+const plain = (rows: ReadonlyArray<Dated>): ReadonlyArray<Row> => rows.slice(0, 2).map(({ title, detail }) => ({ title, detail }))
 
 // spec/app/home/cards.md, "The Messages and Phone cards show their waiting rows, only on an Alpha image, and are not drawn without a row"
 /** The phone's existing native reports are the source of both the counts and the Home card rows. */
@@ -26,8 +43,19 @@ effect function report(): void!!(Telephony | Phone | Messages | Voicemail) {
   const unread = threads?.rows.flatMap((row) => "incomplete" in row || !row.unread ? [] : [row])
   const listing = telephony("refreshVoicemail", (c) => c.phone.refreshVoicemail("AutomaticRead")) catch () => undefined
   const unheard = listing?.carrier === "CarrierReady" ? listing.voicemails.filter((one) => !one.heard) : undefined
-  if (unread !== undefined) fromAreas.messages(unread.slice(0, 2).map((row) => ({ title: row.addresses.join(", ") || "Unknown sender", detail: row.snippet })))
-  if (missed !== undefined || unheard !== undefined) fromAreas.phone((missed?.length ? missed : unheard ?? []).slice(0, 2).map(called))
+  if (unread !== undefined) {
+    const newest = [...unread].sort((a, b) => b.date - a.date)
+    fromAreas.messages(
+      newest.slice(0, 2).map((row) => ({ title: row.addresses.map((address) => callerTitle(address, null)).join(", ") || "Unknown sender", detail: row.snippet })),
+      newest[0] === undefined ? undefined : { count: newest.length, what: `${newest.length} unread`, at: newest[0].date },
+    )
+  }
+  if (missed !== undefined || unheard !== undefined) {
+    const rows = callRows(missed ?? [], unheard ?? [])
+    const [calls, voicemails] = [missed?.length ?? 0, unheard?.length ?? 0]
+    const what = [calls > 0 ? `${calls} missed` : "", voicemails > 0 ? `${voicemails} ${voicemails === 1 ? "voicemail" : "voicemails"}` : ""].filter(Boolean).join(", ")
+    fromAreas.phone(plain(rows), rows[0] === undefined ? undefined : { count: calls + voicemails, what, at: rows[0].at })
+  }
   if (missed !== undefined) try contained((try Phone).send({ type: "missedReported", count: missed.length }), "missed calls")
   if (unread !== undefined) try contained((try Messages).send({ type: "unreadReported", count: unread.length }), "unread conversations")
   if (listing !== undefined) try contained((try Phone).send({ type: "voicemailReported", ready: listing.carrier === "CarrierReady" }), "visual voicemail")
