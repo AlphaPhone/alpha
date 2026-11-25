@@ -294,6 +294,8 @@ this prose into tokens. To change the design, describe it, and have the change w
 | `shadow.lift-dark` | 0 -20px 60px oklch(0 0 0 / 0.45) |
 | `shadow.menu` | 0 4px 20px oklch(0 0 0 / 0.12) |
 | `shadow.menu-dark` | 0 4px 20px oklch(0 0 0 / 0.45) |
+| `shadow.panel` | 0 20px 50px oklch(0 0 0 / 0.12) |
+| `shadow.panel-dark` | 0 20px 50px oklch(0 0 0 / 0.45) |
 | `shadow.dock` | 0 14px 40px oklch(0 0 0 / 0.12) |
 | `shadow.dock-dark` | 0 14px 40px oklch(0 0 0 / 0.45) |
 | `shadow.dock-compact` | 0 12px 34px oklch(0 0 0 / 0.12) |
