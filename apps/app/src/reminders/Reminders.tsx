@@ -335,7 +335,7 @@ function RemindersOverview({
               <span className={cn("flex size-8 items-center justify-center rounded-full", tile.badgeClass)}>
                 <SmartGlyph view={tile.view} />
               </span>
-              <span className="font-display text-3xl font-light tabular-nums text-foreground">{counts[tile.view]}</span>
+              <span className="text-2xl font-bold tabular-nums text-foreground">{counts[tile.view]}</span>
             </div>
             <span className="text-sm font-medium text-muted-foreground">{tile.label}</span>
           </button>
@@ -738,7 +738,7 @@ export function Reminders({ runtime }: Shown<Resident | RemindersMachines>) {
             variant="warn"
             action={(
               <Button type="button" variant="secondary" size="sm" onClick={() => void runtime.runPromise(refreshRemindersList())}>
-                <Undo2 aria-hidden className="size-3.5" />
+                <Undo2 aria-hidden className="size-4.5" />
                 Retry
               </Button>
             )}
