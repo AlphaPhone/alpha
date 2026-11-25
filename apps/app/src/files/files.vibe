@@ -14,11 +14,12 @@ import { scan, scanBack } from "./scan.vibe"
 import type { Machine as ScanMachine } from "../../gen/app__files__scan.effect.vibe"
 import type { Machine as CorrectionMachine } from "../../gen/app__files__correction.effect.vibe"
 import { Handles, type Spot, handles } from "./handles.vibe"
+import { kindOf } from "./entries.vibe"
 import * as Shown from "../../gen/app__files__preview.effect.vibe"
 import * as Recent from "../../gen/app__files__recent.effect.vibe"
 import type { Documents } from "../platform/documents.vibe"
 import { type Opened, preview, taken, view } from "./preview.vibe"
-import { Answers, type ReviewedItem, answers } from "./agent.vibe"
+import { Answers, type ReviewedBatch, answers } from "./agent.vibe"
 
 module names {
   /** Whether `name` contains `text`, as the owner reads it: letters compared without their case. @throws {never} */
@@ -60,18 +61,6 @@ export { parentOf }
 Browser.opaque.containsText = containsText
 // spec/app/files/index.md, "Folders come before files in every sort: by name in the phone's order of names, by date the newest first, by size the largest first; choosing the sort again turns the order within the folders and within the files"
 Browser.opaque.nameBefore = (first: string, second: string) => first.localeCompare(second) < 0
-
-/** What a file is, from what the phone says of it. */
-export function kindOf(entry: { readonly directory: boolean; readonly mimeType: string }): Kind {
-  if (entry.directory) return "Folder"
-  const { mimeType } = entry
-  if (mimeType.startsWith("image/")) return "Image"
-  if (mimeType.startsWith("video/")) return "Video"
-  if (mimeType.startsWith("audio/")) return "Audio"
-  if (mimeType === "application/pdf") return "Pdf"
-  if (mimeType.startsWith("text/") || mimeType.includes("document") || mimeType.includes("msword")) return "Document"
-  return "Other"
-}
 
 /** The phone's category for a kind Files lists as one. */
 const categories: Partial<Record<Kind, FilesCategory>> = { Download: "downloads", Image: "images", Video: "videos", Audio: "audio", Document: "documents" }
@@ -280,12 +269,22 @@ effect function batched(method: string, paths: ReadonlyArray<string>, call: (plu
 
 /** What each row of the phone's answer says of the item it names: done only where it is the change's own result. */
 function sorted(rows: ReadonlyArray<FileOutcomeRow>, paths: Map<string, number>, done: number[], failed: number[], result: "moved" | "copied") {
-  for (const row of rows) {
-    const id = paths.get(row.path)
-    if (id === undefined) continue
+  for (const [path, id] of paths) {
+    const replies = rows.filter((row) => row.path === path)
+    const [row] = replies
+    if (replies.length !== 1 || row === undefined) continue
     if (row.status === result && row.to !== undefined) done.push(id)
-    else failed.push(id)
+    else if (row.status !== result) failed.push(id)
   }
+}
+
+effect function reviewCurrent(binding: ReviewedBatch): boolean!!(Browser.Machine | Shell | Device) {
+  if (!(try promise(binding.current)) || !(try (try Device).showing()) || !showing(try (try Shell).get(), "Files")) return false
+  const state = try (try Browser.Machine).get()
+  const there = Browser.where(state)
+  return state.open && Browser.allowed(state) && !state.trash && there.inCategory === binding.where.inCategory
+    && there.category === binding.where.category && there.trail.length === binding.where.trail.length
+    && there.trail.every((id, at) => binding.where.trail[at] === id)
 }
 
 // spec/app/files/index.md, "An approved request runs only in Files on screen, in the folder the owner approved, on a screen that is not protected, and on the item as it was shown; otherwise the agent is told it did not run"
@@ -293,7 +292,21 @@ function sorted(rows: ReadonlyArray<FileOutcomeRow>, paths: Map<string, number>,
  * Which of `paths` in `folder` the phone still holds as `items` were shown, at the same revision and size, with the
  * identity the phone gives each so that its own write refuses one that changed after; the rest changed and are not sent.
  */
-effect function asShown(volume: string, folder: string, paths: ReadonlyMap<string, number>, items: ReadonlyArray<Item>, binding?: ReviewedItem): { kept: string[]; reviewed: string[]; changed: number[] }!!Files {
+effect function asShown(volume: string, folder: string, paths: ReadonlyMap<string, number>, items: ReadonlyArray<Item>, binding?: ReviewedBatch): { kept: string[]; reviewed: string[]; changed: number[] }!!Files {
+  if (binding !== undefined) {
+    const identities = new Map(binding.targets.map((entry) => [entry.path, entry]))
+    const kept: string[] = []
+    const reviewed: string[] = []
+    const changed: number[] = []
+    for (const [path, id] of paths) {
+      const bound = identities.get(path)
+      if (volume === primary && bound !== undefined && bound.item.id === id) {
+        kept.push(path)
+        reviewed.push(bound.token)
+      } else changed.push(id)
+    }
+    return { kept, reviewed, changed }
+  }
   const there = called("storageList", (plugin) => plugin.storageList({ volume, path: folder })) catch () => undefined
   const now = new Map((there?.status === "ready" ? there.entries ?? [] : []).map((entry) => [entry.path, entry]))
   const kept: string[] = []
@@ -302,11 +315,10 @@ effect function asShown(volume: string, folder: string, paths: ReadonlyMap<strin
     const item = items.find((one) => one.id === id)
     const entry = now.get(path)
     const same = item !== undefined && entry !== undefined && Math.trunc(entry.modified) === item.revision && (entry.directory || Math.trunc(entry.size) === item.bytes)
-    if (same && (binding === undefined || (volume === "primary" && path === binding.path))) kept.push(path)
+    if (same) kept.push(path)
     else changed.push(id)
   }
   if (kept.length === 0) return { kept, reviewed: [], changed }
-  if (binding !== undefined) return { kept, reviewed: [binding.token], changed }
   const reply = called("storageReviewedIdentities", (plugin) => plugin.storageReviewedIdentities({ volume, paths: kept })) catch () => undefined
   if (reply?.status !== "ready" || reply.reviewed?.length !== kept.length) return { kept: [], reviewed: [], changed: [...changed, ...kept.map((path) => paths.get(path) ?? 0)] }
   return { kept, reviewed: [...reply.reviewed], changed }
@@ -333,7 +345,7 @@ effect function cleared(volume: string, folder: string, paths: ReadonlyMap<strin
 }
 
 // spec/app/files/index.md, "A change ends as its answer says, what a move took away is told, and the place is read again"
-effect function performed(ticket: number, work: string, items: ReadonlyArray<Item>, name: string, folder: number, dest: number, replace: boolean): Event!!(Files | Handles | Answers | Browser.Machine) {
+effect function performed(ticket: number, work: string, items: ReadonlyArray<Item>, name: string, folder: number, dest: number, replace: boolean): Event!!(Files | Handles | Answers | Browser.Machine | Shell | Device) {
   const unknown: Event = { type: "finished", ticket, done: [], failed: [] }
   return effect {
     const done: number[] = []
@@ -359,7 +371,7 @@ effect function performed(ticket: number, work: string, items: ReadonlyArray<Ite
     const change = (try (try Browser.Machine).get()).change
     if (change.attempt.id !== ticket) return unknown
     const binding = try (try Answers).reviewed(change.approval)
-    if (change.approval !== 0 && binding === undefined) return { type: "finished", ticket, done, failed: items.map((item) => item.id) }
+    if (change.approval !== 0 && (binding === undefined || !(try reviewCurrent(binding)))) return { type: "finished", ticket, done, failed: items.map((item) => item.id) }
     for (const [volume, paths] of try pathsOf(items)) {
       const shown = try asShown(volume, parentOf(paths.keys().next().value ?? ""), paths, items, binding)
       failed.push(...shown.changed)
@@ -379,8 +391,18 @@ effect function performed(ticket: number, work: string, items: ReadonlyArray<Ite
 }
 
 // spec/app/files/index.md, "The owner opens the share sheet for a selection of one to a hundred files and no folder while none is open, shares from it, and Android says whether it could open it"; spec/app/files/change.md, "Each sheet sends once, by email when an account can take it, through the phone's chooser, as copied text or saved through the system picker, and then goes away; sharing by text message is not offered"
-effect function shared(ticket: number, channel: string, items: ReadonlyArray<Item>): Event!!(Files | Handles) {
+effect function shared(ticket: number, channel: string, items: ReadonlyArray<Item>, approval: number): Event!!(Files | Handles | Answers | Browser.Machine | Shell | Device) {
   return effect {
+    if (approval > 0) {
+      const bound = try (try Answers).reviewed(approval)
+      const refused: Event = { type: "shareEnded", ticket, opened: false, known: true }
+      if (channel !== "Chooser" || bound === undefined || bound.targets.length !== items.length || !bound.targets.every((entry, at) => entry.item.id === items[at]?.id)) return refused
+      const paths = bound.targets.map((item) => item.path)
+      const answer = try called("storageReviewedIdentities", (plugin) => plugin.storageReviewedIdentities({ volume: primary, paths }))
+      if (answer.status !== "ready" || answer.reviewed?.length !== paths.length || !answer.reviewed.every((token, at) => token === bound.targets[at]?.token) || !(try reviewCurrent(bound))) return refused
+      const reply = try called("storageShare", (plugin) => plugin.storageShare({ volume: primary, paths }))
+      return { type: "shareEnded", ticket, opened: reply.status === "opened" && "count" in reply && reply.count === paths.length, known: reply.status !== "opened" || ("count" in reply && reply.count === paths.length) }
+    }
     if (channel === "Copy") {
       const numbered = try Handles
       const lines: string[] = []
@@ -419,7 +441,7 @@ effect function allowed(settings: boolean): Event!!(Files | Browser.Machine) {
   return try reported(true)
 }
 
-function carry(fx: Out): Job<Event, Files | Handles | Browser.Machine | Bin.Machine | Documents | Opened | Recent.Machine | Shown.Machine | Answers, [by: Actor]> {
+function carry(fx: Out): Job<Event, Files | Handles | Browser.Machine | Bin.Machine | Documents | Opened | Recent.Machine | Shown.Machine | Answers | Device | Shell, [by: Actor]> {
   return match (fx) {
     when { tag: "AskAccess" }: answer("access", allowed(false), { type: "accessReported", grant: "Denied", supported: true }, "Phone");
     when { tag: "OpenSettings" }: answer("access", allowed(true), { type: "accessReported", grant: "Denied", supported: true }, "Phone");
@@ -431,14 +453,16 @@ function carry(fx: Out): Job<Event, Files | Handles | Browser.Machine | Bin.Mach
     when { tag: "Tell", let request, let ok, let items }: run(`tell ${request}`, effect { try (try Answers).tell(request, { ok, items }) }, "Phone");
     when { tag: "Perform", let ticket, let work, let items, let name, let folder, let dest, let replace }: answer(`perform ${ticket}`, performed(ticket, work, items, name, folder, dest, replace), { type: "finished", ticket, done: [], failed: [] }, "Phone");
     when { tag: "ToTrash", let items, let approval }: run("trash", ignore(effect {
-      const shown = (try (try Browser.Machine).get()).items
-      for (const item of shown) if (items.includes(item.id)) trashing.set(item.id, item)
+      if (approval === 0 || (try (try Answers).reviewed(approval)) === undefined) {
+        const shown = (try (try Browser.Machine).get()).items
+        for (const item of shown) if (items.includes(item.id)) trashing.set(item.id, item)
+      }
       try (try Bin.Machine).send({ type: "moveToTrash", items, approval }, "Phone")
     }), "Phone");
     when { tag: "Show", let item, let siblings }: run("show", view(item, siblings), "Phone");
-    when { tag: "Share", let ticket, let channel, let items }: answer(`share ${ticket}`, shared(ticket, channel, items), { type: "shareEnded", ticket, opened: false, known: false }, "Phone");
+    when { tag: "Share", let ticket, let channel, let items, let approval }: answer(`share ${ticket}`, shared(ticket, channel, items, approval), { type: "shareEnded", ticket, opened: false, known: false }, "Phone");
     when { tag: "Taken", let items }: run("taken", taken(items), "Phone");
-    when { tag: "Receipt", let ticket, let ran, let outcome }: run(`receipt ${ticket}`, effect { try (try Answers).receipt(ticket, { ran, outcome }) }, "Phone");
+    when { tag: "Receipt", let ticket, let ran, let outcome, let done }: run(`receipt ${ticket}`, effect { try (try Answers).receipt(ticket, { ran, outcome, ...(outcome === "Refused" && done > 0 ? { partial: true } : {}) }) }, "Phone");
   }
 }
 
@@ -530,25 +554,32 @@ function jobDone(number: number, results: ReadonlyArray<Bin.Entry>, known: boole
 const window = 5_000
 
 // spec/app/files/trash.md, "A job ends as its answer says for each item: only what the phone confirmed is done, and the rest was refused or is unknown"
-effect function binned(number: number, items: ReadonlyArray<number>): Bin.Event!!(Files | Handles | Answers | Bin.Machine) {
+effect function binned(number: number, items: ReadonlyArray<number>): Bin.Event!!(Files | Handles | Answers | Bin.Machine | Browser.Machine | Shell | Device) {
   return effect {
     const ids = new Set<string>()
     let answered = 0
-    const shown = items.flatMap((id) => { const item = trashing.get(id); trashing.delete(id); return item === undefined ? [] : [item] })
-    answered += items.length - shown.length
     const state = try (try Bin.Machine).get()
     if (state.attempt.id !== number) return jobDone(number, [], false)
     const binding = try (try Answers).reviewed(state.job.approval)
-    if (state.job.approval !== 0 && binding === undefined) return jobDone(number, [], true)
+    if (state.job.approval !== 0 && (binding === undefined || !(try reviewCurrent(binding)))) return jobDone(number, [], true)
+    const shown = binding !== undefined ? binding.targets.filter((one) => items.includes(one.item.id)).map((one) => one.item)
+      : items.flatMap((id) => { const item = trashing.get(id); trashing.delete(id); return item === undefined ? [] : [item] })
+    answered += items.length - shown.length
     for (const [volume, paths] of try pathsOf(shown)) {
       const asked = try asShown(volume, parentOf(paths.keys().next().value ?? ""), paths, shown, binding)
       answered += asked.changed.length
       const identity = new Map(asked.kept.map((path, at) => [path, asked.reviewed[at] ?? ""]))
       const batch = try batched("storageTrash", asked.kept, (plugin, part) => plugin.storageTrash({ volume, paths: part, reviewed: part.map((path) => identity.get(path) ?? "") }))
       answered += batch.unsent.length
-      for (const row of batch.rows) {
+      for (const path of asked.kept) {
+        const replies = batch.rows.filter((row) => row.path === path)
+        const [row] = replies
+        if (replies.length !== 1 || row === undefined) continue
+        if (row.status === "trashed") {
+          if (row.to === undefined) continue
+          ids.add(`${volume}\u0000${row.to}`)
+        }
         answered += 1
-        if (row.status === "trashed" && row.to !== undefined) ids.add(`${volume}\u0000${row.to}`)
       }
     }
     const results: Bin.Entry[] = []
@@ -612,7 +643,7 @@ effect function erased(number: number, entries: ReadonlyArray<Bin.Entry>): Bin.E
   } catch () => jobDone(number, [], false)
 }
 
-function carryBin(fx: Bin.Effect): Job<Bin.Event, Files | Handles | Bin.Machine | Browser.Machine | Recent.Machine | Shown.Machine | Answers, [by: Bin.Actor]> {
+function carryBin(fx: Bin.Effect): Job<Bin.Event, Files | Handles | Bin.Machine | Browser.Machine | Recent.Machine | Shown.Machine | Answers | Device | Shell, [by: Bin.Actor]> {
   return match (fx) {
     when { tag: "Look", let ticket }: answer("look", binLooked(ticket), { type: "listed", ticket, ok: false, rows: [], now: untimed }, "Phone");
     when { tag: "Bin", let ticket, let items }: answer(`job ${ticket}`, binned(ticket, items), jobDone(ticket, [], false), "Phone");
@@ -622,7 +653,7 @@ function carryBin(fx: Bin.Effect): Job<Bin.Event, Files | Handles | Bin.Machine 
       try taken(items)
       try (try Browser.Machine).send({ type: "refresh" }, "Phone")
     }), "Phone");
-    when { tag: "Receipt", let ticket, let ran, let outcome }: run(`receipt ${ticket}`, effect { try (try Answers).receipt(ticket, { ran, outcome }) }, "Phone");
+    when { tag: "Receipt", let ticket, let ran, let outcome, let done }: run(`receipt ${ticket}`, effect { try (try Answers).receipt(ticket, { ran, outcome, ...(outcome === "Refused" && done > 0 ? { partial: true } : {}) }) }, "Phone");
   }
 }
 
