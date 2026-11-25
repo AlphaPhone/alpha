@@ -516,7 +516,7 @@ const handoff = started(effect {
       return row?.kind === "phone" && row.item.owned === true && row.item.id === capture.ownedId
     })
     const photo = exact ?? owned
-    if (photo !== undefined) try ignore(viewer.send({ type: "openItem", photo, listed: true, secure: state.secure, only: state.only, reviewing: false }, "Owner"))
+    if (photo !== undefined) try ignore(viewer.send({ type: "openItem", photo, listed: true, secure: state.secure, only: state.only, reviewing: false, origin: "CameraCapture" }, "Owner"))
   })
 }, "Camera photo handoff")
 

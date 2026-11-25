@@ -7,11 +7,13 @@ import { useMachine as useLibrary } from "../../gen/app__photos.react.ts";
 import { useMachine as useTrash } from "../../gen/app__photos__trash.react.ts";
 import { useMachine as useAgent } from "../../gen/app__photos__agent.react.ts";
 import { useMachine as useViewer } from "../../gen/app__photos__viewer.react.ts";
+import { useMachine as useShell } from "../../gen/app__shell.react.ts";
 import type { Event, Filter } from "../../gen/app__photos.ts";
 import type { Event as TrashEvent } from "../../gen/app__photos__trash.ts";
 import type { Shown, Resident } from "../runtime/area.tsx";
 import { Time } from "../runtime/time.vibe";
 import { Catalog } from "./catalog.vibe";
+import { returnsToCamera } from "./area.vibe";
 import { MediaGrid } from "./Grid.tsx";
 import { MediaViewer } from "./Viewer.tsx";
 import type { agentPhotos } from "./agent.vibe";
@@ -135,6 +137,7 @@ export function Photos({ runtime, alpha }: PhotosProps) {
   const library = useLibrary(runtime);
   const trash = useTrash(runtime);
   const viewer = useViewer(runtime);
+  const shell = useShell(alpha.runtime);
   const agent = useAgent(runtime);
   const scan = useScan(runtime);
   const scanInput = useRef<HTMLInputElement>(null);
@@ -168,6 +171,7 @@ export function Photos({ runtime, alpha }: PhotosProps) {
     return row === undefined ? [] : [{ number, row }];
   });
   const index = ids.indexOf(opened);
+  const backToCamera = viewer.state !== undefined && shell.state !== undefined && returnsToCamera(viewer.state, shell.state);
   const starred = new Set(state.starred);
   const favourites = selected.length > 0 && selected.every((number) => starred.has(number));
   const title = selection ? `${selected.length} selected` : inTrash ? "Recently deleted" : album?.title ?? (albumList ? "Albums" : "Photos");
@@ -185,7 +189,7 @@ export function Photos({ runtime, alpha }: PhotosProps) {
       if (inTrash) binTalk({ type: "toggle", photo: number }); else talk({ type: "toggle", photo: number });
       return;
     }
-    const event = { type: "openItem", photo: number, listed: ids.includes(number), secure, only: secureItems, reviewing: false } as const;
+    const event = { type: "openItem", photo: number, listed: ids.includes(number), secure, only: secureItems, reviewing: false, origin: "LibraryItem" } as const;
     if (viewer.can(event, "Owner")) void viewer.send(event, "Owner");
   };
   const select = async (photo: number): Promise<boolean> => {
@@ -326,7 +330,8 @@ export function Photos({ runtime, alpha }: PhotosProps) {
           <span className="max-h-28 overflow-y-auto">{request.items.map((number) => content.rows.get(number)?.item.name ?? "Photo").join(" · ")}</span>
         </span>}
       </ConfirmDialog>
-      <MediaViewer runtime={runtime} row={content.rows.get(opened)} before={index > 0 ? ids[index - 1] : undefined} after={index >= 0 ? ids[index + 1] : undefined} inTrash={inTrash}
+      <MediaViewer runtime={runtime} onBack={() => { void alpha.back(); }} backToCamera={backToCamera}
+        row={content.rows.get(opened)} before={index > 0 ? ids[index - 1] : undefined} after={index >= 0 ? ids[index + 1] : undefined} inTrash={inTrash}
         onAddToAlbum={!inTrash && canStart ? () => { void viewerSelection("add"); } : undefined}
         onRecover={inTrash && canStart ? () => { void viewerSelection("recover"); } : undefined}
         onDelete={inTrash && canStart ? () => { void viewerSelection("delete"); } : undefined} />

@@ -53,13 +53,15 @@ interface Props {
   readonly after?: number;
   readonly row?: Row;
   readonly inTrash: boolean;
+  readonly onBack: () => void;
+  readonly backToCamera: boolean;
   readonly onAddToAlbum?: () => void;
   readonly onRecover?: () => void;
   readonly onDelete?: () => void;
 }
 
 /** The photo or video shown at full size, with its metadata, owner actions and preview. */
-export function MediaViewer({ runtime, before, after, row, inTrash, onAddToAlbum, onRecover, onDelete }: Props) {
+export function MediaViewer({ runtime, before, after, row, inTrash, onBack, backToCamera, onAddToAlbum, onRecover, onDelete }: Props) {
   const { state, can, send } = useMachine(runtime);
   const videoRef = useRef<HTMLVideoElement>(null);
   const imageRef = useRef<HTMLImageElement>(null);
@@ -189,7 +191,11 @@ export function MediaViewer({ runtime, before, after, row, inTrash, onAddToAlbum
     const neighbour = x < 0 ? after : before;
     if (neighbour !== undefined) action({ type: "swipe", neighbour });
   }
-  const close = () => editAction(state.cropping ? { type: "cancelCrop" } : state.editing ? { type: "cancelEdit" } : { type: "close" });
+  const close = () => {
+    videoRef.current?.pause();
+    onBack();
+  };
+  const backLabel = state.editing ? "Cancel edit" : backToCamera ? "Back to Camera" : "Back to photos";
   const beginCrop = { type: "beginCrop" } satisfies Event;
   function openCrop() {
     returnCropFocusRef.current = state?.open ?? 0;
@@ -235,7 +241,7 @@ export function MediaViewer({ runtime, before, after, row, inTrash, onAddToAlbum
       // eslint-disable-next-line better-tailwindcss/no-unknown-classes -- design.md, "Dark": the photo viewer and its controls keep their dark tokens in either app theme
       className={cn("dark absolute inset-0 z-50 flex min-h-0 flex-col bg-background text-foreground", dockClearance)}>
       <header data-host-chrome="" className={cn("flex min-h-14 shrink-0 items-center gap-2 px-2", !chrome && hiddenChrome)}>
-        <Button variant="ghost" size="icon" aria-label={state.editing ? "Cancel edit" : "Back to photos"} onClick={close}>{state.editing ? <X /> : <ChevronLeft />}</Button>
+        <Button variant="ghost" size="icon" aria-label={backLabel} onClick={close}>{state.editing ? <X /> : <ChevronLeft />}</Button>
         {state.editing ? <div className="flex-1"><h1 className="sr-only">{state.kind === "Clip" ? "Edit video" : "Edit photo"}</h1></div> : <div className="min-w-0 flex-1">
           <h1 className="truncate text-base font-semibold">{day}</h1>
           {expiry !== undefined ? <span className="block truncate text-caption text-muted-foreground">{trashDaysLabel(expiry)}</span>

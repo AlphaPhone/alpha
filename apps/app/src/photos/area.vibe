@@ -2,8 +2,14 @@
 import * as Library from "../../gen/app__photos.effect.vibe"
 import * as Trash from "../../gen/app__photos__trash.effect.vibe"
 import * as Viewer from "../../gen/app__photos__viewer.effect.vibe"
+import * as Shell from "../../gen/app__shell.effect.vibe"
 import { scanBack } from "../files/scan.vibe"
 import * as Assistant from "../../gen/app__photos__agent.effect.vibe"
+
+// spec/app/photos/viewer.md, "Back from a Camera capture returns to Camera"
+export function returnsToCamera(view: Viewer.Viewer, shell: Shell.Shell): boolean {
+  return Viewer.cameraBack(view) && Shell.showing(shell, "Photos") && shell.trail.at(-2) === "Camera"
+}
 
 /** Back closes the topmost Photos surface before it leaves the app. */
 export const back = effect {
@@ -15,7 +21,10 @@ export const back = effect {
   if (view.cropping) return Exit.isSuccess(try exit(shown.send({ type: "cancelCrop" }, "Owner")))
   if (view.editing) return Exit.isSuccess(try exit(shown.send({ type: "cancelEdit" }, "Owner")))
   if (view.info) return Exit.isSuccess(try exit(shown.send({ type: "toggleInfo" }, "Owner")))
-  if (view.open !== 0) return Exit.isSuccess(try exit(shown.send({ type: "close" }, "Owner")))
+  if (view.open !== 0) {
+    if (returnsToCamera(view, try (try Shell.Machine).get())) return false
+    return Exit.isSuccess(try exit(shown.send({ type: "close" }, "Owner")))
+  }
   const trashed = try Trash.Machine
   const bin = try trashed.get()
   if (bin.open) {

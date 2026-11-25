@@ -432,6 +432,28 @@ describe("Voice Bug 1 & Bug 3 journeys", () => {
 const talkMounts: Mount[] = [{ at: "assistant", load: () => import("../src/assistant/index.tsx") }];
 
 describe("Talk from Ask Alpha's composer (spec/app/voice/index.md, \"Story: Hold a spoken conversation\")", () => {
+  it("draws the compact Talk waveform for the device's listening and muted phases", async () => {
+    const world = { ...scene(), phone: true };
+    const { alpha } = await open(world, talkMounts);
+    const area = assistant.runtime(alpha);
+    await drawnUntil(alpha, area, Voice.Machine, (state) => state.warmed);
+    await drawn(() => alpha.runtime.runPromise(Effect.flatMap(Shell.Machine, (machine) => machine.send({ type: "openView", view: "Calendar" }))));
+    await press("Talk");
+    await drawnUntil(alpha, area, Voice.Machine, (state) => state.phase === "Listening" && state.mic === "On");
+    const waveform = () => document.querySelector("[data-alpha-pill-voice] [data-alpha-voice-animation]");
+    expect(waveform()?.getAttribute("data-phase")).toBe("Listening");
+    expect(waveform()?.children.length).toBe(5);
+
+    await press("Mute microphone");
+    await drawnUntil(alpha, area, Voice.Machine, (state) => state.muted && state.mic === "Off");
+    expect(waveform()?.getAttribute("data-phase")).toBe("Muted");
+    expect(world.voice.activeMicSession).toBeUndefined();
+
+    await press("Stop voice conversation");
+    await drawnUntil(alpha, area, Voice.Machine, (state) => state.phase === "Idle");
+    expect(waveform()).toBeNull();
+  });
+
   it("keeps the resting Talk control visible but unavailable on a browser without speech", async () => {
     const world = scene();
     const { alpha } = await open(world, talkMounts);

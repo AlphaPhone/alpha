@@ -100,7 +100,7 @@ export effect function photoAction(input: DeviceOperation): (Receipt | undefined
     case "photos_open": {
       const number = handle(input.id, now.rows, rows)
       if (number === undefined) return undefined
-      const sent = try exit(viewer.send({ type: "openItem", photo: number, listed: true, secure: false, only: [], reviewing: false }, "Agent"))
+      const sent = try exit(viewer.send({ type: "openItem", photo: number, listed: true, secure: false, only: [], reviewing: false, origin: "LibraryItem" }, "Agent"))
       if (!Exit.isSuccess(sent)) return undefined
       const ticket = sent.value.state.read.ticket
       const response = try Stream.runHead(Stream.filter(viewer.changes, (state) => state.read.ticket !== ticket || state.read.status !== "Loading" || state.open !== number))
