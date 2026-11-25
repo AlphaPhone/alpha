@@ -39,12 +39,14 @@ do next.
   `leading-row` sets `text-body` as a note's or a routine's title in a list, and `leading-transcript` a transcript read back, such as a voicemail's.
   `text-badge` is a video's length over a thumbnail and `text-tile-name` an album's name under its cover.
   `text-headline` is an open voice or link note's title and `text-quote` a clip kept from a page; `text-panel-title` heads a panel that covers Ask Alpha, such as its chat search.
+  `text-speaker` is the initials of a speaker in a voice note's transcript.
   On Camera, `text-camera-badge` is the timer and flash badge, `text-camera-countdown` the self-timer digit and
   `leading-detail` the line under its access notice. `text-review-title` heads the scanner's dialogs.
   `text-tab-count` in a `rounded-tab-count` outline is the Browser's count of open tabs.
   In Calendar, `text-fine` is an invitation's time, `text-prose` an event's notes and `text-date` a day
   chip's date; an event's page is titled `text-display` and its form `text-display-sm`. `leading-plain` is
-  the browser's own line height for Public Sans, for a line whose box the design measures. `leading-details`
+  the browser's own line height for Public Sans, for a line whose box the design measures, and `leading-serif`
+  Denton's, for a Notes title. `leading-details`
   spaces the From, To and Date lines of a message's details in Inbox, and `leading-message` the text of an email
   being written; `leading-status` sets the Maps status card.
 - **Shape.** `radius` is a card; `rounded-group` a group of rows; `rounded-panel` a notice or a search bar; `rounded-home-card` is a Home overview card;
@@ -53,9 +55,10 @@ do next.
   row, `rounded-action` a labelled action button; `rounded-segment` is a segmented control and
   `rounded-segment-option` the option chosen in it; `rounded-frame` is Camera's stop square and focus target and a scanned frame's preview; `rounded-list-icon` the icon box at the start of a list row. `rounded-tile` is an app tile, a menu and a dialog;
   `rounded-sheet` the top of a bottom sheet, `rounded-chat` the top of the Ask Alpha sheet; `rounded-full` a
-  button and a chip, `rounded-dock` the Ask Alpha bar and `rounded-dock-compact` its compact controls; `rounded-bar` is the foot bar of Maps guidance.
+  button and a chip, `rounded-dock` the Ask Alpha bar and `rounded-dock-compact` its compact controls; `rounded-bar` is the foot bar of Maps guidance;
+  `rounded-check` is the check box of a Notes checklist item or action item, `rounded-clip` a 2px bar: a link note's clip, Notes' unavailable slash and a recorder level.
   Everything pressed is at least 44px in both directions.
-- **Elevation.** `shadow-sm` lifts a control, `shadow-menu` a menu, `shadow-md` a dialog or a notice, `shadow-lg` a raised card,
+- **Elevation.** `shadow-sm` lifts a control, `shadow-menu` a menu, `shadow-note-menu` a Notes menu on the raised surface, `shadow-md` a dialog or a notice, `shadow-lg` a raised card,
   `shadow-dock` the floating Ask Alpha bar, `shadow-dock-compact` its compact controls, `shadow-bar` the ongoing-call bar over a view,
   `shadow-sheet` a map's resting sheet, `shadow-lift` a modal sheet or card rising over the page and `shadow-popup` a panel
   ringed by a 1px line, such as Files options. The menu, dialog, sheet, lift, popup,
@@ -157,6 +160,8 @@ this prose into tokens. To change the design, describe it, and have the change w
 | `rounded.frame` | 0.5rem |
 | `rounded.bar` | 2rem |
 | `rounded.list-icon` | 0.875rem |
+| `rounded.check` | 0.4375rem |
+| `rounded.clip` | 0.125rem |
 | `font.sans` | "Public Sans", system-ui, -apple-system, "Segoe UI", sans-serif |
 | `font.display` | Denton, Fraunces, Georgia, serif |
 | `font.mono` | ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas, monospace |
@@ -255,6 +260,8 @@ this prose into tokens. To change the design, describe it, and have the change w
 | `text.review-title.size` | 1.875rem |
 | `text.review-title.leading` | 1.15 |
 | `text.review-title.tracking` | -0.02em |
+| `text.speaker.size` | 0.65625rem |
+| `text.speaker.leading` | 1.175 |
 | `weight.light` | 300 |
 | `weight.normal` | 400 |
 | `weight.medium` | 500 |
@@ -275,6 +282,7 @@ this prose into tokens. To change the design, describe it, and have the change w
 | `leading.details` | 1.45 |
 | `leading.message` | 1.55 |
 | `leading.detail` | 1.35 |
+| `leading.serif` | 1.33 |
 | `tracking.tight` | -0.01em |
 | `tracking.caps` | 0.14em |
 | `tracking.loose` | 0.04em |
@@ -316,6 +324,7 @@ this prose into tokens. To change the design, describe it, and have the change w
 | `shadow.focus-target` | 0 0 2px oklch(0 0 0) |
 | `shadow.popup` | 0 16px 40px oklch(0 0 0 / 0.12) |
 | `shadow.popup-dark` | 0 16px 40px oklch(0 0 0 / 0.45) |
+| `shadow.note-menu` | 0 10px 30px oklch(0 0 0 / 0.2) |
 | `keyframes.rise` | from{opacity:0;transform:translateY(1.75rem)}to{opacity:1;transform:none} |
 | `keyframes.drop` | from{opacity:0;transform:translateY(-2.25rem)}to{opacity:1;transform:none} |
 | `keyframes.fade` | from{opacity:0}to{opacity:1} |
