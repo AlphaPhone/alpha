@@ -65,12 +65,14 @@ const isChange = (kind: Kind): kind is Change => kind in operationNames;
 /** What Mail holds, read at the state the screen shows. */
 const mailOf = <A,>(runtime: Runtime, read: (mail: Mail["Service"]) => A): A => runtime.runSync(Mail.use((mail) => Effect.sync(() => read(mail))));
 
+const mailTime = new Intl.DateTimeFormat(undefined, { hour: "numeric", minute: "2-digit" });
+const mailDate = new Intl.DateTimeFormat(undefined, { month: "short", day: "numeric" });
+
 /** When a message arrived, as the list words it: a time on Alpha's day, else a date. */
-function arrived(receivedAt: string, today: number): string {
+function arrived(receivedAt: string, today: string): string {
   const at = new Date(receivedAt);
   if (Number.isNaN(at.getTime())) return "";
-  const sameDay = new Date(today).toDateString() === at.toDateString();
-  return sameDay ? at.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }) : at.toLocaleDateString([], { month: "short", day: "numeric" });
+  return (at.toDateString() === today ? mailTime : mailDate).format(at);
 }
 
 /** When a message arrived in full, as its details word it: weekday, date, time with seconds, and time zone. */
@@ -184,7 +186,7 @@ function Opened({ runtime, list, onRefresh, onBegin }: { runtime: Runtime; list:
   const marking = useMarks(runtime);
   const changes = useTimed(runtime, useChanges);
   const remote = usePreferences(runtime).state?.images ?? false;
-  const today = runtime.runSync(Time.use((time) => time.latest()));
+  const today = new Date(runtime.runSync(Time.use((time) => time.latest()))).toDateString();
   const read = state ? mailOf(runtime, (mail) => mail.body(state.body.ticket)) : undefined;
   const reviewLink = useCallback((at: number) => {
     const link = read === undefined ? undefined : prepareMessage(read).links.at(at - 1);
@@ -370,7 +372,7 @@ export function Inbox({ runtime, alpha }: InboxProps & { alpha: Alpha }) {
         : folder === "Sent" ? `To: ${card.to.length ? card.to.join(", ") : "(no recipients)"}` : senderName(card.from),
       initial: draftsFolder ? "D" : folder === "Sent" ? (card.to[0] ?? "?").slice(0, 1).toUpperCase() : undefined,
       subject: card.subject || "(no subject)", snippet: card.snippet,
-      time: arrived(card.receivedAt, today), unread: card.isUnread, chosen, selecting,
+      time: arrived(card.receivedAt, today), unread: card.isUnread, attachment: card.hasAttachments, chosen, selecting,
       onOpen: editing ?? (opening ? () => void message.send(opening) : undefined),
       onChosenChange: selecting && can(toggle) ? () => void send(toggle) : undefined,
       onSwipe: canArchive ? () => void send(swipe).then((applied) => {
