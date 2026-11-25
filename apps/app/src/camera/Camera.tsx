@@ -137,7 +137,9 @@ function Access({ state, present, native, can, fire, takeSilent }: {
   const title = failed ? "Can’t start camera" : noCamera ? "Camera off" : "Mic off";
   const ask = { type: noCamera ? "askAccess" : "askMicrophone" } as const;
   // v121's one line under the notice: why access is needed, or what went wrong, and what the buttons below do.
-  const allow = native ? "Tap Allow to turn it on in Settings" : "Allow it for this page in your browser, then tap Retry";
+  // On the phone Allow opens Settings only once the phone stops asking; until then Retry asks again, and the line says so.
+  const settings = native && can({ type: "openSettings" });
+  const allow = settings ? "Tap Allow to turn it on in Settings" : native ? "Tap Retry to allow it" : "Allow it for this page in your browser, then tap Retry";
   const detail = failed
     ? "The camera didn’t start. If another app is using it, close that app, then tap Retry."
     : noCamera
@@ -150,7 +152,7 @@ function Access({ state, present, native, can, fire, takeSilent }: {
       <strong>{title}</strong>
       <p className="text-sm leading-snug text-muted-foreground">{detail}</p>
       <div className="flex flex-wrap justify-center gap-2">
-        {native && !failed && can({ type: "openSettings" }) && <Button variant="ghost" className={action} aria-label="Allow in Settings" onClick={() => fire({ type: "openSettings" })}>Allow</Button>}
+        {settings && !failed && <Button variant="ghost" className={action} aria-label="Allow in Settings" onClick={() => fire({ type: "openSettings" })}>Allow</Button>}
         {!failed && present && can(ask) && <Button variant="ghost" className={action} onClick={() => fire(ask)}>Retry</Button>}
         {failed && can({ type: "retry" }) && <Button variant="ghost" className={action} onClick={() => fire({ type: "retry" })}>Retry</Button>}
         {noMic && can({ type: "startRecording", sound: false }) && <Button variant="ghost" className={action} aria-label="Record without sound" onClick={takeSilent}>No sound</Button>}
