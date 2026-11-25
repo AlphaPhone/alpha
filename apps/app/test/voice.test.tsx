@@ -524,6 +524,34 @@ describe("Talk from Ask Alpha's composer (spec/app/voice/index.md, \"Story: Hold
     expect(waveform()).toBeNull();
   });
 
+  it("ends Talk for a call behind the call screen and waits for the owner to start it again (spec/app/voice/index.md, \"A phone call ends Talk and Alpha tells the owner once\")", async () => {
+    const world = { ...scene(), phone: true, image: true, signedIn: false };
+    const { alpha } = await open(world, talkMounts);
+    const area = assistant.runtime(alpha);
+    await drawnUntil(alpha, alpha.runtime, Phone, (state) => state.telecom === "NoCall");
+    await drawnUntil(alpha, area, Voice.Machine, (state) => state.warmed);
+    await press("Talk");
+    await drawnUntil(alpha, area, Voice.Machine, (state) => state.phase === "Listening" && state.mic === "On");
+
+    await seen(false);
+    await drawnUntil(alpha, area, Voice.Machine, (state) => state.phase === "Idle" && state.mic === "Off");
+    world.telephony.live = [{ id: "talk-interrupted", state: "active", connectedAt: world.now }];
+    await drawn(() => world.telephony.report());
+    await drawnUntil(alpha, alpha.runtime, Phone, (state) => state.telecom === "OrdinaryCall");
+    world.telephony.live = [];
+    await drawn(() => world.telephony.report());
+    await drawnUntil(alpha, alpha.runtime, Phone, (state) => state.telecom === "NoCall");
+    await seen(true);
+    await drawn(() => vi.waitFor(() => expect(document.body.textContent).toContain("Voice paused for a phone call.")));
+    expect([world.voice.startLiveCaptureCalls, world.voice.activeMicSession]).toEqual([1, undefined]);
+
+    await press("Talk");
+    await drawnUntil(alpha, area, Voice.Machine, (state) => state.phase === "Listening" && state.mic === "On");
+    expect(world.voice.startLiveCaptureCalls).toBe(2);
+    await press("Stop voice conversation");
+    await drawnUntil(alpha, area, Voice.Machine, (state) => state.phase === "Idle");
+  });
+
   it("restores the local speaker before unrelated playback when Talk stops during a mute (spec/app/voice/index.md, \"Speaker mute is offered after the current speech bridge confirms gain control\")", async () => {
     const world = { ...scene(), phone: true, signedIn: false };
     const { alpha } = await open(world, talkMounts);
