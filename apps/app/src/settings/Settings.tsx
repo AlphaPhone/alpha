@@ -72,6 +72,9 @@ import type { Alpha } from "../runtime/area.tsx";
 import { useTimed } from "../runtime/react.ts";
 import { untimed } from "../runtime/reactor.vibe";
 import type { Time } from "../runtime/time.vibe";
+import { useMachine as useListener } from "../../gen/app__voice__listener.react.ts";
+import type { Machine as ListenerMachine } from "../../gen/app__voice__listener.effect.vibe";
+import { ListenerControls } from "./ListenerControls.tsx";
 import type { Machine as AccessReviewMachine } from "../../gen/app__startup__access.effect.vibe";
 import { AccessReview } from "../startup/SettingsAccess.tsx";
 import { AppBack } from "../shell/AppBack.tsx";
@@ -79,7 +82,7 @@ import { AccountStatus } from "../account/index.tsx";
 import { CalendarAccount, type CalendarConnection } from "./calendar.vibe";
 
 /** What every Settings page reads: where the owner is, the phone's facts, the hand-overs to Android, the preferences, the reset and the developer tools. */
-export type SettingsRuntime = ManagedRuntime.ManagedRuntime<PagesMachine | CalendarAccount | FactsMachine | AccessReviewMachine | ActivityMachine | RecordsMachine | AndroidMachine | PrefsMachine | ResetMachine | DeveloperMachine | ShellMachine | LayersMachine | Time, unknown>;
+export type SettingsRuntime = ManagedRuntime.ManagedRuntime<PagesMachine | CalendarAccount | FactsMachine | AccessReviewMachine | ActivityMachine | RecordsMachine | AndroidMachine | PrefsMachine | ResetMachine | DeveloperMachine | ListenerMachine | ShellMachine | LayersMachine | Time, unknown>;
 
 /** What the frame gives each page: the runtime, Alpha's places, and the props every page shares. */
 export interface PageProps {
@@ -224,9 +227,11 @@ function useDevice(runtime: SettingsRuntime) {
 
 function Top({ runtime, alpha, common }: PageProps) {
   const pages = usePages(runtime).state;
+  const listener = useListener(runtime).state;
   return (
     <SettingsTopPage {...common} leading={<AppBack alpha={alpha} />} onPhone={pages?.phone ?? false}
-      developer={pages?.development ?? false} accountDetail={<AccountStatus alpha={alpha} />} />
+      developer={pages?.development ?? false} accountDetail={<AccountStatus alpha={alpha} />} micMayBeOn={listener?.mayBeOn}
+      onHandOver={(neighbour) => neighbour === "listener" ? common.onAndroid({ target: "android-home" }) : common.onHandOver(neighbour)} />
   );
 }
 
@@ -292,12 +297,12 @@ function Privacy({ runtime, alpha, common }: PageProps) {
   if (!device) return null;
   const { recovery, ...shown } = device;
   const review = { type: "reviewAllAccess" } as const;
-  const listener = { type: "handOver", neighbour: "Listener", micMayBeOn: false } as const;
   return (
     <>
       {recovery}
-      <SettingsPrivacyPage {...common} {...shown} onSetUpAccess={can(review) ? () => void send(review) : undefined} onListener={can(listener) ? () => void send(listener) : undefined}>
+      <SettingsPrivacyPage {...common} {...shown} onSetUpAccess={can(review) ? () => void send(review) : undefined}>
         {alpha.slot("settings/voice")}
+        <ListenerControls runtime={runtime} common={common} />
       </SettingsPrivacyPage>
     </>
   );

@@ -116,7 +116,7 @@ describe.each([["a browser", false], ["a phone", true]])("in %s", (_where, phone
     await until(alpha, runtime, List, (s) => s.selected.folder === "Incoming" && s.list.status === "Loaded");
     step("5");
 
-    // spec/app/inbox/message.md, "A message opens at its newest place in the thread, only while the grant of its account allows reading"; spec/app/inbox/marking.md, "Opening an unread message marks it read once in a session, silently, and never again, even when it is not known to have worked"
+    // spec/app/inbox/message.md, "Opening a row reads the exact message chosen while its account may be read"; spec/app/inbox/marking.md, "Opening an unread message marks it read once in a session, silently, and never again, even when it is not known to have worked"
     await row("Revised term sheet");
     await until(alpha, runtime, Shown, (s) => s.body.status === "Loaded");
     step("6");
@@ -126,6 +126,7 @@ describe.each([["a browser", false], ["a phone", true]])("in %s", (_where, phone
     expect([title(), world.inbox.changes]).toEqual(["Revised term sheet", ["mark-read g1"]]);
 
     // spec/app/inbox/message.md, "Previous and next move one place through the thread"
+    await until(alpha, runtime, Shown, (s) => s.position === 1 && s.thread === 2);
     await action("Earlier messages");
     await until(alpha, runtime, Shown, (s) => s.body.status === "Loaded" && s.position === 0);
     expect([title(), told()]).toEqual(["Earlier lunch plan", expect.stringContaining("Could you make it Friday?")]);
@@ -137,11 +138,22 @@ describe.each([["a browser", false], ["a phone", true]])("in %s", (_where, phone
     const visited = vi.spyOn(window, "open").mockReturnValue(null);
     await press("https://northpoint.test/room");
     await until(alpha, runtime, Shown, (s) => s.link === 1);
+    expect([world.browser.tabs.size, visited.mock.calls.length]).toEqual([0, 0]);
     step("8");
     await confirm("Open link");
     await until(alpha, runtime, Shown, (s) => s.link === 0);
     step("9");
-    expect(visited).toHaveBeenCalledWith("https://northpoint.test/room", "_blank", "noopener,noreferrer");
+    if (phone) {
+      await until(alpha, alpha.runtime, Shell, (state) => showing(state, "Browser"));
+      await vi.waitFor(() => {
+        const places = [...world.browser.tabs.values()].filter((tab) => tab.committed && !tab.private).map((tab) => tab.history.at(-1));
+        expect([places, visited.mock.calls.length]).toEqual([["https://northpoint.test/room"], 0]);
+      }, { timeout: 12_000 });
+      await hardware("back");
+      await until(alpha, alpha.runtime, Shell, (state) => showing(state, "Inbox"));
+    } else {
+      expect(visited).toHaveBeenCalledWith("https://northpoint.test/room", "_blank", "noopener,noreferrer");
+    }
 
     // spec/app/inbox/message.md, "An attachment is reviewed before it is opened or saved, and one use is in flight at a time"
     await action("Open agenda.txt");
@@ -162,6 +174,24 @@ describe.each([["a browser", false], ["a phone", true]])("in %s", (_where, phone
     await press("Back to the list");
     await until(alpha, runtime, Shown, (s) => s.message === 0);
     step("11");
+    await press("Sent");
+    await until(alpha, runtime, List, (s) => s.selected.folder === "Sent" && s.list.status === "Loaded");
+    const threadReply = Promise.withResolvers<void>();
+    world.inbox.threadReply = threadReply.promise;
+    try {
+      await row("Earlier lunch plan");
+      await until(alpha, runtime, Shown, (s) => s.body.status === "Loaded");
+      expect([title(), told(), Boolean(button("More messages"))]).toEqual(["Earlier lunch plan", expect.stringContaining("Could you make it Friday?"), false]);
+    } finally {
+      threadReply.resolve();
+      delete world.inbox.threadReply;
+    }
+    await until(alpha, runtime, Shown, (s) => s.body.status === "Loaded" && s.thread === 2);
+    expect([title(), Boolean(button("More messages")), world.inbox.changes]).toEqual(["Earlier lunch plan", true, ["mark-read g1", "mark-unread g1"]]);
+    await press("Back to the list");
+    await until(alpha, runtime, Shown, (s) => s.message === 0);
+    await press("Inbox");
+    await until(alpha, runtime, List, (s) => s.selected.folder === "Incoming" && s.list.status === "Loaded");
 
     // spec/app/inbox/sending.md, "Archive and Trash are held for the undo window, and only the owner's Undo before it ends sends nothing"
     await choose("Standup notes");

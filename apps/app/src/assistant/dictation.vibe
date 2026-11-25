@@ -1,9 +1,12 @@
 // spec/app/voice/index.md, "Story: Dictate into a field"; spec/app/voice/index.md, "Using the transcript fills the field dictation started in, and dictation never sends"
 import * as Composer from "../../gen/app__assistant__composer.effect.vibe"
 import * as Voice from "../../gen/app__voice.effect.vibe"
+import type { Machine as Speaker } from "../../gen/app__voice__output.effect.vibe"
+import { VoiceBridge } from "../platform/voice.vibe"
 import { contained } from "../runtime/reactor.vibe"
 import { VoiceWords, openDictation } from "../voice/voice.vibe"
 import { sameBinding } from "./attachments.vibe"
+import { stopTranscript } from "./read-aloud.vibe"
 import { Talk } from "./talk.vibe"
 
 export effect function dictate(): void!!(Voice.Machine | VoiceWords | Composer.Machine | Talk) {
@@ -23,12 +26,34 @@ export effect function dictate(): void!!(Voice.Machine | VoiceWords | Composer.M
   })
 }
 
-export effect function editDictation(text: string): void!!(Voice.Machine | VoiceWords) {
+export effect function editDictation(text: string): void!!(Voice.Machine | VoiceWords | Speaker) {
   const voice = try Voice.Machine
   const current = try voice.get()
   const event: Voice.Event = { type: "edit", words: text.trim() !== "" }
   if (current.recorder.field !== "ComposerField" || !Voice.enabled(current, event)) return
   const { memory } = try VoiceWords
+  const changed = memory.dictatedText !== text
   memory.dictatedText = text
+  if (changed) try stopTranscript(current.recorder.ticket)
   try ignore(voice.send(event))
+}
+
+// spec/app/voice/index.md, "Closing the recorder abandons any recording or transcription it was waiting for"
+export effect function closeDictationForKeyboard(ticket: number): boolean!!(Voice.Machine | VoiceBridge) {
+  const voice = try Voice.Machine
+  const current = try voice.get()
+  const ownsRecorder = (state: Voice.Voice) => state.recorder.ticket === ticket
+    && state.recorder.field === "ComposerField" && state.recorder.stage !== "Closed"
+  if (!ownsRecorder(current)) return false
+  const ready = current.recorder.stage === "Ready"
+  if (!ready && !(try (try VoiceBridge).abandon(ticket, () => Effect.map(voice.get(), ownsRecorder)))) return false
+  const closed = try contained(voice.send({ type: "closeRecorder" }, (state) => ownsRecorder(state)
+    && (!ready || state.recorder.stage === "Ready")), "returning from dictation to the keyboard")
+  return closed && (try dictationReturnedToKeyboard(ticket))
+}
+
+/** The recorder this action closed is still the one that released the composer. */
+export effect function dictationReturnedToKeyboard(ticket: number): boolean!!Voice.Machine {
+  const voice = try (try Voice.Machine).get()
+  return voice.recorder.ticket === ticket + 1 && voice.recorder.stage === "Closed" && Voice.quiet(voice)
 }

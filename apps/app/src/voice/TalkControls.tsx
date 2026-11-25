@@ -1,4 +1,4 @@
-// spec/app/voice/index.md, "Story: Hold a spoken conversation"; spec/app/voice/index.md, "Story: Pause for a phone call"; spec/app/voice/index.md, "A failed conversation ends quietly: why it failed is kept only until voice returns to idle, and nothing is shown"; spec/app/voice/index.md, "Speaker mute is offered after the current speech bridge confirms gain control"
+// spec/app/voice/index.md, "Story: Hold a spoken conversation"; spec/app/voice/index.md, "A reply that needs the owner's review in chat keeps voice listening with the microphone open"; spec/app/voice/index.md, "Story: Pause for a phone call"; spec/app/voice/index.md, "A failed conversation ends quietly: why it failed is kept only until voice returns to idle, and nothing is shown"; spec/app/voice/index.md, "Speaker mute is offered after the current speech bridge confirms gain control"
 import { Button, ConfirmDialog, cn } from "@repo/ui";
 import type { ManagedRuntime } from "effect";
 import type { ReactNode } from "react";
@@ -22,7 +22,7 @@ export interface TalkControlsProps {
 
 const compactStatus: Record<Phase, string> = {
   Idle: "", Starting: "Connecting to voice", Listening: "Listening", Transcribing: "Transcribing", Thinking: "Thinking",
-  Speaking: "Speaking", Paused: "Voice paused for a phone call", Stopping: "Stopping voice", Failed: "",
+  Speaking: "Speaking", Stopping: "Stopping voice", Failed: "",
 };
 
 const expandedStatus: Partial<Record<Phase, string>> = {
@@ -51,10 +51,11 @@ export function TalkControls({ runtime, trailing, compact = false, onKeyboard }:
   const setSpeaker = { type: "setSpeakerMuted", muted: !speakerMuted } as const;
   const spinner = <span aria-hidden="true" className="size-4.5 shrink-0 rounded-full border-2 border-border border-t-alpha motion-safe:animate-spin" style={{ animationDuration: "900ms" }} />;
   const activity = <VoiceWaveform phase={phase} compact={compact} />;
-  const label = compact ? undefined : connecting ? expandedStatus.Starting :
-    state.phase === "Stopping" || state.phase === "Paused" ? undefined : state.muted ? "Muted" : expandedStatus[state.phase];
+  const review = state.reviewPending && state.phase === "Listening";
+  const label = review ? "Review in chat" : compact ? undefined : connecting ? expandedStatus.Starting :
+    state.phase === "Stopping" ? undefined : state.muted ? "Muted" : expandedStatus[state.phase];
   const status = (
-    <p role="status" aria-label={compact ? undefined : "Voice conversation status"} className={label === undefined ? "sr-only" : "flex items-center gap-2.25 text-sm leading-voice-status font-semibold text-foreground"}>
+    <p role="status" aria-label={compact ? undefined : "Voice conversation status"} className={cn(label === undefined ? "sr-only" : "flex min-w-0 items-center gap-2.25 text-sm leading-voice-status font-semibold text-foreground", compact && review && "pr-1 text-xs")}>
       {!compact && connecting && spinner}
       <span className={label === undefined ? undefined : "truncate"}>{label ?? (state.muted ? "Microphone muted" : compactStatus[state.phase])}</span>
     </p>

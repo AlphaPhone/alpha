@@ -39,6 +39,8 @@ export interface InboxScene {
   offline: boolean;
   /** Google refuses every Gmail request: the owner withdrew access. */
   revoked: boolean;
+  /** A reply the journey holds at the Gmail thread boundary. */
+  threadReply?: Promise<void>;
   /** Every change asked of Gmail, as `<kind> <message>`, once it was dispatched. */
   readonly changes: string[];
   /** The name of every file a dispatched send carried. */
@@ -185,7 +187,8 @@ export function inboxRoutes(scene: InboxScene): Route[] {
         historyId: stored.card.metadata.historyId,
       }));
       const next = offset + messages.length;
-      return Response.json({ version: 1, threadId, historyId, total: thread.length, offset, nextOffset: next < thread.length ? next : null, messages });
+      const answer = Response.json({ version: 1, threadId, historyId, total: thread.length, offset, nextOffset: next < thread.length ? next : null, messages });
+      return scene.threadReply?.then(() => answer) ?? answer;
     },
     (request, url) => {
       if (request.method !== "GET") return;
