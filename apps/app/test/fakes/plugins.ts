@@ -24,7 +24,7 @@ import { alphaHostedDigests } from "./workflows.ts";
 export function plugins(world: Scene, services: { readonly agent: Answering; readonly cloud: Answering }): Record<string, Faked> {
   return {
     ElizaAgent: elizaAgent(services.agent, world.settings.recovery),
-    ElizaCloud: elizaCloud(services.cloud, () => world.signedIn, () => world.mailLease),
+    ElizaCloud: elizaCloud(services.cloud, () => world.signedIn, world.mailLease),
     ElizaSecureStore: elizaSecureStore(world.secrets, (key) => world.slots.has(key) || /^notes-(?:draft|folders):[1-9][0-9]*$/.test(key)),
     ElizaCalendar: elizaCalendar(world.calendar),
     ElizaReminders: elizaReminders(world.reminders, () => world.now),
@@ -45,7 +45,7 @@ export function plugins(world: Scene, services: { readonly agent: Answering; rea
     AlphaConnection: alphaConnection(world.platform),
     ...(world.voice.onDevice ? { AlphaVoiceCloud: alphaVoiceCloud(world.voice) } : {}),
     ElizaCloudSpeech: elizaCloudSpeech(world.voice),
-    ElizaSignIn: elizaSignIn(world.voice, () => world.signedIn),
+    ElizaSignIn: elizaSignIn(world.voice, () => world.signedIn, world.mailLease),
     AlphaBrowser: alphaBrowser(world.browser),
     ...(world.notes.audio.size > 0 ? { AlphaNotes: alphaNotes(world.notes) } : {}),
     ...(world.workflows.nativeDigests === undefined ? {} : { AlphaHostedDigestDelivery: alphaHostedDigests(world.workflows.nativeDigests) }),
