@@ -1,16 +1,17 @@
-import { Album, ChevronLeft, ChevronRight, Crop, Ellipsis, Heart, Info, Mail, Pause, Pencil, Play, RotateCcw, Share2, Sparkles, Trash2, Undo2, Volume2, VolumeX, X } from "lucide-react";
+import { Album, ChevronLeft, ChevronRight, Crop, Ellipsis, Heart, Info, Mail, MessageCircle, Pause, Pencil, Play, RotateCw, Share2, Sparkles, Trash2, Undo2, Volume2, VolumeX, X } from "lucide-react";
 import { Effect, type ManagedRuntime } from "effect";
-import { useCallback, useRef, type PointerEvent } from "react";
+import { useCallback, useRef, type PointerEvent, type RefCallback } from "react";
 import { Button, Menu, MenuContent, MenuItem, MenuTrigger, Sheet, SheetContent, Slider, cn, dockClearance } from "@repo/ui";
 import { useMachine } from "../../gen/app__photos__viewer.react.ts";
-import { maxZoom, panUnits, type Event, type Look, type Pan } from "../../gen/app__photos__viewer.ts";
+import { maxZoom, panUnits, type Event, type Look, type Pan, type Viewer as ViewerState } from "../../gen/app__photos__viewer.ts";
 import type { Machine } from "../../gen/app__photos__viewer.effect.vibe";
 import { taken, type Row } from "./catalog.vibe";
-import { OpenedPhoto, photoLook } from "./viewer.vibe";
+import { OpenedPhoto, photoEmailAllowed, photoLook, photoMessageType, type MediaView } from "./viewer.vibe";
 import { photoLooks } from "../platform/photoCanvas.vibe";
-import { CropFrame } from "./CropFrame.tsx";
+import { CropFrame, CropHeader, editFrame, editHeader, editTool } from "./CropFrame.tsx";
 import { headingOf, trashDaysLabel, trashDaysLeft } from "./Grid.tsx";
 import { Time } from "../runtime/time.vibe";
+import { Device } from "../platform/device.vibe";
 
 const filters: readonly Look[] = ["Original", "Vivid", "Warm", "Cool", "Mono", "Fade", "Noir"];
 const messages = {
@@ -48,37 +49,36 @@ function imageTransform(zoom: number, pan: Pan): string {
 }
 
 interface Props {
-  readonly runtime: ManagedRuntime.ManagedRuntime<Machine | OpenedPhoto | Time, unknown>;
+  readonly runtime: ManagedRuntime.ManagedRuntime<Machine | OpenedPhoto | Time | Device, unknown>;
   readonly before?: number;
   readonly after?: number;
   readonly row?: Row;
   readonly inTrash: boolean;
+  readonly onBack: () => void;
+  readonly backToCamera: boolean;
   readonly onAddToAlbum?: () => void;
   readonly onRecover?: () => void;
   readonly onDelete?: () => void;
 }
 
 /** The photo or video shown at full size, with its metadata, owner actions and preview. */
-export function MediaViewer({ runtime, before, after, row, inTrash, onAddToAlbum, onRecover, onDelete }: Props) {
+export function MediaViewer({ runtime, before, after, row, inTrash, onBack, backToCamera, onAddToAlbum, onRecover, onDelete }: Props) {
   const { state, can, send } = useMachine(runtime);
   const videoRef = useRef<HTMLVideoElement>(null);
-  const imageRef = useRef<HTMLImageElement>(null);
-  const dragRef = useRef<PanGesture | undefined>(undefined);
   const attachVideo = useCallback((element: HTMLVideoElement | null) => {
     if (element === null) return;
     videoRef.current = element;
     return () => { element.pause(); videoRef.current = null; };
   }, []);
-  const pointRef = useRef<{ readonly x: number; readonly y: number } | undefined>(undefined);
-  const pointersRef = useRef(new Map<number, { readonly x: number; readonly y: number }>());
   const returnCropFocusRef = useRef(0);
+  const openPhoto = state?.open;
+  const previewShowing = state?.preview.showing;
   const cropButton = useCallback((button: HTMLButtonElement | null) => {
-    if (button && state?.preview.showing && returnCropFocusRef.current === state.open) {
+    if (button && previewShowing && returnCropFocusRef.current === openPhoto) {
       returnCropFocusRef.current = 0;
       button.focus({ preventScroll: true });
     }
-  }, [state?.open, state?.preview.showing]);
-  const pinchRef = useRef<{ readonly level: number; readonly distance: number } | undefined>(undefined);
+  }, [openPhoto, previewShowing]);
   if (!state || state.open === 0) return null;
   const current = runtime.runSync(Effect.flatMap(OpenedPhoto, (opened) => opened.current()));
   const preview = runtime.runSync(Effect.flatMap(OpenedPhoto, (opened) => opened.preview()));
@@ -125,13 +125,163 @@ export function MediaViewer({ runtime, before, after, row, inTrash, onAddToAlbum
     if (position >= end) clip.pause();
     if (position !== state.position && can({ type: "played", position }, "Phone")) void send({ type: "played", position }, "Phone");
   }
+  const close = () => {
+    videoRef.current?.pause();
+    onBack();
+  };
+  const backLabel = state.editing ? "Cancel edit" : backToCamera ? "Back to Camera" : "Back to photos";
+  const crop = { type: state.kind === "Still" ? "beginCrop" : "crop" } satisfies Event;
+  function openCrop() {
+    if (state?.kind === "Still") returnCropFocusRef.current = state.open;
+    action(crop);
+  }
+  const useInMessages = !inTrash && showing && allows({ type: "useInMessages" }) && photoMessageType(current.item) !== undefined
+    && runtime.runSync(Effect.flatMap(Device, (device) => device.capabilities())).image;
+  const photosMenu = [
+    !inTrash && state.kind === "Still" && allows({ type: "askAlpha" }) && { label: "Ask Alpha", icon: <Sparkles />, select: () => action({ type: "askAlpha" }) },
+    onAddToAlbum && { label: "Add to album", icon: <Album />, select: onAddToAlbum },
+    !inTrash && photoEmailAllowed(current.item) && allows({ type: "email" }) && { label: "Email", icon: <Mail />, select: () => action({ type: "email" }) },
+    useInMessages && { label: "Use in Messages", icon: <MessageCircle />, select: () => action({ type: "useInMessages" }) },
+    !inTrash && allows({ type: "share" }) && { label: "Share", icon: <Share2 />, select: () => action({ type: "share" }) },
+    !inTrash && allows({ type: "trashOpen", neighbour: after ?? before ?? 0 }) && { label: "Delete", icon: <Trash2 />, select: () => action({ type: "trashOpen", neighbour: after ?? before ?? 0 }) },
+    onRecover && { label: "Recover", icon: <Undo2 />, select: onRecover },
+    onDelete && { label: "Delete this item forever", icon: <Trash2 />, select: onDelete },
+  ].filter((item) => item !== undefined && item !== false);
+  const control = (label: string, event: Event, icon: React.ReactNode) => allows(event) && (
+    <Button variant="ghost" size="icon" aria-label={label} onClick={() => action(event)}>{icon}</Button>
+  );
+  const swatchSource = current.item?.image || current.browser?.item.thumbnail || current.uri;
+  const chrome = state.chrome || state.editing || !showing;
+  const edited = preview !== undefined && preview.revision === state.preview.revision && state.editing && !state.unavailable ? preview : undefined;
+  if (state.cropping) return (
+    <div aria-label="Crop photo" data-alpha-subview="photos-crop"
+      // eslint-disable-next-line better-tailwindcss/no-unknown-classes -- design.md, "Dark": the crop tools follow the photo editor's fixed dark theme
+      className={cn("dark absolute inset-0 z-50 flex min-h-0 flex-col bg-background text-foreground", dockClearance)}>
+      {edited && edited.width > 0 && edited.height > 0 ? <CropFrame key={state.revision} source={edited} bounds={state.edit.bounds}
+        onCancel={close} onApply={(bounds) => action({ type: "applyCrop", bounds })} /> : <>
+        <CropHeader onCancel={close} />
+        <div className="m-auto text-center" role="status">
+          {state.unavailable ? <><p>Couldn’t prepare the photo.</p><Button variant="secondary" onClick={() => action({ type: "retryPreview" })}>Try again</Button></> : "Preparing photo…"}
+        </div>
+      </>}
+    </div>
+  );
+  return (
+    <div aria-label={name} data-alpha-subview={state.editing ? "photos-editor" : "photos-viewer"}
+      // eslint-disable-next-line better-tailwindcss/no-unknown-classes -- design.md, "Dark": the photo viewer and its controls keep their dark tokens in either app theme
+      className={cn("dark absolute inset-0 z-50 flex min-h-0 flex-col bg-background text-foreground", dockClearance)}>
+      <header data-host-chrome="" className={cn(state.editing ? editHeader : "flex min-h-14 shrink-0 items-center gap-2 px-2", !chrome && hiddenChrome)}>
+        <Button variant="ghost" size="icon" aria-label={backLabel} onClick={close}>{state.editing ? <X /> : <ChevronLeft />}</Button>
+        {state.editing ? <div className="flex-1"><h1 className="sr-only">{state.kind === "Clip" ? "Edit video" : "Edit photo"}</h1></div> : <div className="min-w-0 flex-1">
+          <h1 className="truncate text-base font-semibold">{day}</h1>
+          {expiry !== undefined ? <span className="block truncate text-caption text-muted-foreground">{trashDaysLabel(expiry)}</span>
+            : date && <time className="block truncate text-caption text-muted-foreground" dateTime={date.toISOString()}>{formatTime.format(date)}</time>}
+        </div>}
+        {!state.editing && showing && photosMenu.length > 0 && <Menu>
+          <MenuTrigger asChild><Button variant="ghost" size="icon" aria-label="Photo actions"><Ellipsis /></Button></MenuTrigger>
+          <MenuContent
+            // eslint-disable-next-line better-tailwindcss/no-unknown-classes -- design.md, "Dark": the portalled photo menu follows the viewer's fixed dark theme
+            className="dark">{photosMenu.map(({ label, icon, select }) => <MenuItem key={label} onSelect={select}>{icon}{label}</MenuItem>)}</MenuContent>
+        </Menu>}
+        {state.editing && preview?.canReplace && allows({ type: "chooseReplace", replace: !state.replace }) && <Button variant="secondary" size="sm" className={editTool} aria-pressed={state.replace} onClick={() => action({ type: "chooseReplace", replace: !state.replace })}>Replace</Button>}
+        {state.editing && <Button className="px-4.5" size="sm" disabled={!allows({ type: "save" })} onClick={() => editAction({ type: "save" })}>{state.replace ? "Replace" : "Save copy"}</Button>}
+        {control("Check saved copy", { type: "checkCopy" }, <Info />)}
+      </header>
+      <MediaViewport state={state} current={current} name={name} showing={showing} editedImage={edited?.image}
+        before={before} after={after} action={action} allows={allows} attachVideo={attachVideo} played={played} />
+      {showing && state.kind === "Clip" && <div className={cn("flex shrink-0 flex-col px-3", !chrome && hiddenChrome)}>
+        <div className="flex items-center gap-2">
+          <Button variant="ghost" size="icon" disabled={!allows({ type: "pause" }) && !allows({ type: "play" })} aria-label={state.playing ? "Pause video" : "Play video"} onClick={toggle}>{state.playing ? <Pause /> : <Play />}</Button>
+          <Slider className="flex-1" aria-label="Video position" min={state.editing ? state.edit.start : 0} max={state.editing ? state.edit.end : state.duration} value={state.position} onValueChange={seek} />
+        </div>
+        <div className="flex items-center justify-between gap-2 pl-4 text-caption text-muted-foreground">
+          <span aria-live="off" className="tabular-nums">{clipTime(state.position)} / {clipTime(state.duration)}</span>
+          {allows({ type: "toggleMute" }) && <Button variant="ghost" size="sm" aria-label={state.muted ? "Unmute video" : "Mute video"} onClick={() => action({ type: "toggleMute" })}>
+            {state.muted ? <VolumeX /> : <Volume2 />}{state.muted ? "Unmute" : "Mute"}
+          </Button>}
+        </div>
+      </div>}
+      {state.refusal !== "NoRefusal" && <p role="status" className="px-4 py-2 text-center text-sm">{messages[state.refusal]}</p>}
+      {state.save.outcome === "Unknown" && <p role="status" className="px-4 py-2 text-center text-sm">{state.lookup.status === "Loaded" ? state.found ? "Saved copy found" : "No saved copy found" : "Save unconfirmed"}</p>}
+      {state.editing && <div aria-label="Photo edit tools" className="mt-6.5 flex shrink-0 flex-col gap-5 px-4 pb-4 landscape:mt-2 landscape:gap-2">
+        <div className="flex items-center justify-center gap-4">
+          <Button variant="secondary" size="icon" className={editTool} aria-label="Rotate" disabled={!allows({ type: "rotate" })} onClick={() => action({ type: "rotate" })}><RotateCw /></Button>
+          <Button ref={state.kind === "Still" ? cropButton : undefined} variant="secondary" size="icon" aria-label="Crop"
+            aria-pressed={state.edit.cropped} disabled={!allows(crop)} onClick={openCrop}
+            className={state.edit.cropped ? "bg-foreground text-background hover:bg-foreground/90 active:bg-foreground/80" : editTool}><Crop /></Button>
+          {allows({ type: "retryPreview" }) && <Button variant="secondary" onClick={() => action({ type: "retryPreview" })}>Retry preview</Button>}
+        </div>
+        {state.kind === "Still" ? <div role="group" aria-label="Photo filters" className="flex gap-3 overflow-x-auto p-0.5">
+          {filters.map((look) => <Button key={look} variant="ghost" aria-label={look} aria-pressed={state.edit.look === look}
+            className="group h-auto min-w-14.5 flex-col gap-2 rounded-xl p-0 text-caption hover:bg-transparent" disabled={state.edit.look !== look && !allows({ type: "restyle", look })} onClick={() => action({ type: "restyle", look })}>
+            <span className="relative size-14.5 overflow-hidden rounded-xl bg-secondary group-aria-pressed:outline-focus">
+              {swatchSource && <img src={swatchSource} alt="" className="absolute inset-0 size-full object-cover" style={{ filter: photoLooks[photoLook(look)] }} />}
+            </span>
+            <span className={state.edit.look === look ? "text-foreground" : "text-muted-foreground"}>{look}</span>
+          </Button>)}
+        </div> : <>
+          <Slider aria-label="Trim start" min={0} max={Math.max(0, state.edit.end - 1)} value={state.edit.start}
+            onValueChange={(start) => editAction({ type: "trim", start, end: state.edit.end })} />
+          <Slider aria-label="Trim end" min={state.edit.start + 1} max={state.duration} value={state.edit.end}
+            onValueChange={(end) => editAction({ type: "trim", start: state.edit.start, end })} />
+        </>}
+      </div>}
+      {!state.editing && showing && <div role="toolbar" aria-label="Photo controls" className={cn("relative flex shrink-0 justify-around gap-0.5 px-4 pt-2 pb-5", !chrome && hiddenChrome)}>
+        {before !== undefined && <Button className="sr-only focus:not-sr-only" variant="ghost" size="icon" aria-label="Previous photo" onClick={() => action({ type: "swipe", neighbour: before })}><ChevronLeft /></Button>}
+        {!inTrash && control(state.favourite ? "Remove from favorites" : "Favorite", { type: "toggleFavourite" }, <Heart className={state.favourite ? "fill-current" : undefined} />)}
+        {!inTrash && allows({ type: "startEdit" }) && <Button variant="ghost" size="icon" aria-label="Edit" onClick={() => editAction({ type: "startEdit" })}><Pencil /></Button>}
+        {control("Info", { type: "toggleInfo" }, <Info />)}
+        {after !== undefined && <Button className="sr-only focus:not-sr-only" variant="ghost" size="icon" aria-label="Next photo" onClick={() => action({ type: "swipe", neighbour: after })}><ChevronRight /></Button>}
+      </div>}
+      <Sheet open={state.info} onOpenChange={(open) => { if (!open) action({ type: "toggleInfo" }); }}>
+        <SheetContent title={name} actions={onAddToAlbum && <Button variant="secondary" onClick={onAddToAlbum}><Album />Add to album</Button>}>
+          <dl className="grid grid-cols-2 gap-2 text-sm">
+            {date && <><dt>Taken</dt><dd>{formatDate.format(date)} {formatTime.format(date)}</dd></>}
+            {item !== undefined && <><dt>Dimensions</dt><dd>{item.width} × {item.height}</dd></>}
+            {item !== undefined && <><dt>Size</dt><dd>{Math.round((item.size) / 1024)} KB</dd></>}
+          </dl>
+        </SheetContent>
+      </Sheet>
+    </div>
+  );
+}
+
+interface ViewportProps {
+  readonly state: ViewerState;
+  readonly current: MediaView;
+  readonly name: string;
+  readonly showing: boolean;
+  readonly editedImage?: string;
+  readonly before?: number;
+  readonly after?: number;
+  readonly action: (event: Event) => void;
+  readonly allows: (event: Event) => boolean;
+  readonly attachVideo: RefCallback<HTMLVideoElement>;
+  readonly played: () => void;
+}
+
+/** The media area that turns pointer and keyboard input into viewer events. */
+function MediaViewport({ state, current, name, showing, editedImage, before, after, action, allows, attachVideo, played }: ViewportProps) {
+  const imageRef = useRef<HTMLImageElement>(null);
+  const dragRef = useRef<PanGesture | undefined>(undefined);
+  const pointRef = useRef<{ readonly x: number; readonly y: number } | undefined>(undefined);
+  const pointersRef = useRef(new Map<number, { readonly x: number; readonly y: number }>());
+  const pinchRef = useRef<{ readonly level: number; readonly distance: number } | undefined>(undefined);
+
+  const source = current.item ?? current.browser?.item;
+  const photoRatio = source && source.width > 0 && source.height > 0 ? source.width / source.height : undefined;
+  const sideways = state.edit.turns % 2 !== 0;
+  const videoRatio = state.editing && state.kind === "Clip" && source && source.width > 0 && source.height > 0
+    ? (sideways ? source.height / source.width : source.width / source.height) : undefined;
+  const videoScale = state.edit.cropped ? 130 : 100;
+
   function finishPan(commit: boolean) {
     const drag = dragRef.current;
     if (drag === undefined) return;
     dragRef.current = undefined;
     drag.image.style.removeProperty(dragX);
     drag.image.style.removeProperty(dragY);
-    if (commit && state?.open === drag.photo && (drag.pending.x !== drag.from.x || drag.pending.y !== drag.from.y)) action({ type: "panTo", pan: drag.pending });
+    if (commit && state.open === drag.photo && (drag.pending.x !== drag.from.x || drag.pending.y !== drag.from.y)) action({ type: "panTo", pan: drag.pending });
   }
   function pointerDown(event: PointerEvent<HTMLElement>) {
     if (event.button !== 0) return;
@@ -141,13 +291,13 @@ export function MediaViewer({ runtime, before, after, row, inTrash, onAddToAlbum
       finishPan(false);
       pointRef.current = point;
       const image = imageRef.current;
-      if (state && state.zoom > 1 && image !== null) {
+      if (state.zoom > 1 && image !== null) {
         const width = Math.max(0, (image.clientWidth * state.zoom - event.currentTarget.clientWidth) / 2);
         const height = Math.max(0, (image.clientHeight * state.zoom - event.currentTarget.clientHeight) / 2);
         dragRef.current = { image, photo: state.open, room: { x: width, y: height }, from: state.pan, pending: state.pan };
       }
     }
-    if (pointersRef.current.size === 2 && state) {
+    if (pointersRef.current.size === 2) {
       finishPan(true);
       const [a, b] = [...pointersRef.current.values()];
       if (a && b) pinchRef.current = { level: state.zoom, distance: Math.hypot(a.x - b.x, a.y - b.y) };
@@ -172,7 +322,7 @@ export function MediaViewer({ runtime, before, after, row, inTrash, onAddToAlbum
     const [a, b] = [...pointersRef.current.values()];
     if (!a || !b || !pinchRef.current || pinchRef.current.distance <= 0) return;
     const level = Math.max(1, Math.min(maxZoom, Math.round(pinchRef.current.level * Math.hypot(a.x - b.x, a.y - b.y) / pinchRef.current.distance)));
-    if (state?.zoom !== level) action({ type: "zoomTo", level });
+    if (state.zoom !== level) action({ type: "zoomTo", level });
   }
   function pointerEnd(event: PointerEvent<HTMLElement>) {
     pointersRef.current.delete(event.pointerId);
@@ -185,73 +335,13 @@ export function MediaViewer({ runtime, before, after, row, inTrash, onAddToAlbum
     finishPan(!cancelled && !tap);
     if (!from || cancelled) return;
     if (tap) { action({ type: "toggleChrome" }); return; }
-    if (state?.zoom !== 1 || Math.abs(x) <= Math.abs(y) || Math.abs(x) < 48) return;
+    if (state.zoom !== 1 || Math.abs(x) <= Math.abs(y) || Math.abs(x) < 48) return;
     const neighbour = x < 0 ? after : before;
     if (neighbour !== undefined) action({ type: "swipe", neighbour });
   }
-  const close = () => editAction(state.cropping ? { type: "cancelCrop" } : state.editing ? { type: "cancelEdit" } : { type: "close" });
-  const beginCrop = { type: "beginCrop" } satisfies Event;
-  function openCrop() {
-    returnCropFocusRef.current = state?.open ?? 0;
-    action(beginCrop);
-  }
-  const photosMenu = [
-    !inTrash && state.kind === "Still" && allows({ type: "askAlpha" }) && { label: "Ask Alpha", icon: <Sparkles />, select: () => action({ type: "askAlpha" }) },
-    onAddToAlbum && { label: "Add to album", icon: <Album />, select: onAddToAlbum },
-    !inTrash && state.kind === "Still" && allows({ type: "email" }) && { label: "Email", icon: <Mail />, select: () => action({ type: "email" }) },
-    !inTrash && allows({ type: "share" }) && { label: "Share", icon: <Share2 />, select: () => action({ type: "share" }) },
-    !inTrash && allows({ type: "trashOpen", neighbour: after ?? before ?? 0 }) && { label: "Delete", icon: <Trash2 />, select: () => action({ type: "trashOpen", neighbour: after ?? before ?? 0 }) },
-    onRecover && { label: "Recover", icon: <Undo2 />, select: onRecover },
-    onDelete && { label: "Delete this item forever", icon: <Trash2 />, select: onDelete },
-  ].filter((item) => item !== undefined && item !== false);
-  const control = (label: string, event: Event, icon: React.ReactNode) => allows(event) && (
-    <Button variant="ghost" size="icon" aria-label={label} onClick={() => action(event)}>{icon}</Button>
-  );
-  const swatchSource = current.item?.image || current.browser?.item.thumbnail || current.uri;
-  const source = current.item ?? current.browser?.item;
-  const photoRatio = source && source.width > 0 && source.height > 0 ? source.width / source.height : undefined;
-  const chrome = state.chrome || state.editing || !showing;
-  const sideways = state.edit.turns % 2 !== 0;
-  const videoRatio = state.editing && state.kind === "Clip" && source && source.width > 0 && source.height > 0
-    ? (sideways ? source.height / source.width : source.width / source.height) : undefined;
-  const videoScale = state.edit.cropped ? 130 : 100;
-  const edited = preview !== undefined && preview.revision === state.preview.revision && state.editing && !state.unavailable ? preview : undefined;
-  if (state.cropping) return (
-    <div aria-label="Crop photo" data-alpha-subview="photos-crop"
-      // eslint-disable-next-line better-tailwindcss/no-unknown-classes -- design.md, "Dark": the crop tools follow the photo editor's fixed dark theme
-      className={cn("dark absolute inset-0 z-50 flex min-h-0 flex-col bg-background text-foreground", dockClearance)}>
-      <header data-host-chrome="" className="flex min-h-14 shrink-0 items-center gap-2 px-2">
-        <Button variant="ghost" size="icon" aria-label="Cancel crop" onClick={close}><X /></Button>
-        <h1 className="text-base font-semibold">Crop photo</h1>
-      </header>
-      {edited && edited.width > 0 && edited.height > 0 ? <CropFrame key={state.revision} source={edited} bounds={state.edit.bounds}
-        onApply={(bounds) => action({ type: "applyCrop", bounds })} /> : <div className="m-auto text-center" role="status">
-        {state.unavailable ? <><p>Couldn’t prepare the photo.</p><Button variant="secondary" onClick={() => action({ type: "retryPreview" })}>Try again</Button></> : "Preparing photo…"}
-      </div>}
-    </div>
-  );
   return (
-    <div aria-label={name} data-alpha-subview={state.editing ? "photos-editor" : "photos-viewer"}
-      // eslint-disable-next-line better-tailwindcss/no-unknown-classes -- design.md, "Dark": the photo viewer and its controls keep their dark tokens in either app theme
-      className={cn("dark absolute inset-0 z-50 flex min-h-0 flex-col bg-background text-foreground", dockClearance)}>
-      <header data-host-chrome="" className={cn("flex min-h-14 shrink-0 items-center gap-2 px-2", !chrome && hiddenChrome)}>
-        <Button variant="ghost" size="icon" aria-label={state.editing ? "Cancel edit" : "Back to photos"} onClick={close}>{state.editing ? <X /> : <ChevronLeft />}</Button>
-        {state.editing ? <div className="flex-1"><h1 className="sr-only">{state.kind === "Clip" ? "Edit video" : "Edit photo"}</h1></div> : <div className="min-w-0 flex-1">
-          <h1 className="truncate text-base font-semibold">{day}</h1>
-          {expiry !== undefined ? <span className="block truncate text-caption text-muted-foreground">{trashDaysLabel(expiry)}</span>
-            : date && <time className="block truncate text-caption text-muted-foreground" dateTime={date.toISOString()}>{formatTime.format(date)}</time>}
-        </div>}
-        {!state.editing && showing && photosMenu.length > 0 && <Menu>
-          <MenuTrigger asChild><Button variant="ghost" size="icon" aria-label="Photo actions"><Ellipsis /></Button></MenuTrigger>
-          <MenuContent
-            // eslint-disable-next-line better-tailwindcss/no-unknown-classes -- design.md, "Dark": the portalled photo menu follows the viewer's fixed dark theme
-            className="dark">{photosMenu.map(({ label, icon, select }) => <MenuItem key={label} onSelect={select}>{icon}{label}</MenuItem>)}</MenuContent>
-        </Menu>}
-        {state.editing && preview?.canReplace && allows({ type: "chooseReplace", replace: !state.replace }) && <Button variant="secondary" size="sm" aria-pressed={state.replace} onClick={() => action({ type: "chooseReplace", replace: !state.replace })}>Replace</Button>}
-        {state.editing && <Button size="sm" disabled={!allows({ type: "save" })} onClick={() => editAction({ type: "save" })}>{state.replace ? "Replace" : "Save copy"}</Button>}
-        {control("Check saved copy", { type: "checkCopy" }, <Info />)}
-      </header>
-      <div className="relative flex min-h-0 flex-1 touch-none items-center justify-center overflow-hidden [container-type:size]"
+    <>
+      <div className={cn("relative flex min-h-0 touch-none items-center justify-center overflow-hidden [container-type:size]", state.editing ? editFrame : "flex-1")}
         onPointerDown={pointerDown} onPointerMove={pointerMove} onPointerUp={pointerEnd} onPointerCancel={pointerEnd} onLostPointerCapture={pointerEnd}
         role="group" aria-label="Photo viewer" aria-describedby="alpha-photo-viewer-keys" tabIndex={0}
         onKeyDown={(event) => {
@@ -289,64 +379,12 @@ export function MediaViewer({ runtime, before, after, row, inTrash, onAddToAlbum
             ? <img ref={imageRef} src={current.uri} alt={name} draggable={false} decoding="async"
               className="pointer-events-none absolute top-1/2 left-1/2 max-w-none object-contain"
               style={{ width: `min(100cqw, calc(100cqh * ${photoRatio}))`, aspectRatio: photoRatio, transform: imageTransform(state.zoom, state.pan) }} />
-            : <img src={edited?.image ?? current.uri} alt={name} draggable={false} decoding="async" className="size-full object-contain" style={{ transform: `scale(${state.zoom})` }} />)}
+            : <img src={editedImage ?? current.uri} alt={name} draggable={false} decoding="async" className="size-full object-contain" style={{ transform: `scale(${state.zoom})` }} />)}
         {state.gone && <p role="status">This item is no longer available.</p>}
         {state.read.status === "Loading" && <span role="status" aria-label="Loading photo">…</span>}
         {allows({ type: "reload" }) && <Button variant="secondary" onClick={() => action({ type: "reload" })}>Try again</Button>}
       </div>
       <span id="alpha-photo-viewer-keys" className="sr-only">{state.kind === "Clip" ? "Press Enter to show or hide video controls." : "Press Enter to show or hide controls. Use plus and minus to zoom, zero to reset, and the arrow keys to browse or pan."}</span>
-      {showing && state.kind === "Clip" && <div className={cn("flex shrink-0 flex-col px-3", !chrome && hiddenChrome)}>
-        <div className="flex items-center gap-2">
-          <Button variant="ghost" size="icon" disabled={!allows({ type: "pause" }) && !allows({ type: "play" })} aria-label={state.playing ? "Pause video" : "Play video"} onClick={toggle}>{state.playing ? <Pause /> : <Play />}</Button>
-          <Slider className="flex-1" aria-label="Video position" min={state.editing ? state.edit.start : 0} max={state.editing ? state.edit.end : state.duration} value={state.position} onValueChange={seek} />
-        </div>
-        <div className="flex items-center justify-between gap-2 pl-4 text-caption text-muted-foreground">
-          <span aria-live="off" className="tabular-nums">{clipTime(state.position)} / {clipTime(state.duration)}</span>
-          {allows({ type: "toggleMute" }) && <Button variant="ghost" size="sm" aria-label={state.muted ? "Unmute video" : "Mute video"} onClick={() => action({ type: "toggleMute" })}>
-            {state.muted ? <VolumeX /> : <Volume2 />}{state.muted ? "Unmute" : "Mute"}
-          </Button>}
-        </div>
-      </div>}
-      {state.refusal !== "NoRefusal" && <p role="status" className="px-4 py-2 text-center text-sm">{messages[state.refusal]}</p>}
-      {state.save.outcome === "Unknown" && <p role="status" className="px-4 py-2 text-center text-sm">{state.lookup.status === "Loaded" ? state.found ? "Saved copy found" : "No saved copy found" : "Save unconfirmed"}</p>}
-      {state.editing && <div aria-label="Photo edit tools" className="flex flex-col gap-4 px-4 py-4">
-        <div className="flex items-center justify-center gap-3">
-          {control("Rotate", { type: "rotate" }, <RotateCcw />)}
-          {state.kind === "Still" ? <Button ref={cropButton} variant="ghost" size="icon" aria-label="Crop" disabled={!allows(beginCrop)} onClick={openCrop}><Crop /></Button>
-            : control("Crop", { type: "crop" }, <Crop />)}
-          {allows({ type: "retryPreview" }) && <Button variant="secondary" onClick={() => action({ type: "retryPreview" })}>Retry preview</Button>}
-        </div>
-        {state.kind === "Still" ? <div role="group" aria-label="Photo filters" className="flex gap-3 overflow-x-auto p-0.5">
-          {filters.map((look) => <Button key={look} variant="ghost" aria-label={look} aria-pressed={state.edit.look === look}
-            className="group h-auto min-w-14 flex-col gap-1.5 rounded-xl p-0 text-caption hover:bg-transparent" disabled={state.edit.look !== look && !allows({ type: "restyle", look })} onClick={() => action({ type: "restyle", look })}>
-            <span className="relative size-14 overflow-hidden rounded-xl bg-secondary group-aria-pressed:outline-focus">
-              {swatchSource && <img src={swatchSource} alt="" className="absolute inset-0 size-full object-cover" style={{ filter: photoLooks[photoLook(look)] }} />}
-            </span>
-            <span className={state.edit.look === look ? "text-foreground" : "text-muted-foreground"}>{look}</span>
-          </Button>)}
-        </div> : <>
-          <Slider aria-label="Trim start" min={0} max={Math.max(0, state.edit.end - 1)} value={state.edit.start}
-            onValueChange={(start) => editAction({ type: "trim", start, end: state.edit.end })} />
-          <Slider aria-label="Trim end" min={state.edit.start + 1} max={state.duration} value={state.edit.end}
-            onValueChange={(end) => editAction({ type: "trim", start: state.edit.start, end })} />
-        </>}
-      </div>}
-      {!state.editing && showing && <div role="toolbar" aria-label="Photo controls" className={cn("relative flex shrink-0 justify-around gap-0.5 px-4 pt-2 pb-5", !chrome && hiddenChrome)}>
-        {before !== undefined && <Button className="sr-only focus:not-sr-only" variant="ghost" size="icon" aria-label="Previous photo" onClick={() => action({ type: "swipe", neighbour: before })}><ChevronLeft /></Button>}
-        {!inTrash && control(state.favourite ? "Remove from favorites" : "Favorite", { type: "toggleFavourite" }, <Heart className={state.favourite ? "fill-current" : undefined} />)}
-        {!inTrash && allows({ type: "startEdit" }) && <Button variant="ghost" size="icon" aria-label="Edit" onClick={() => editAction({ type: "startEdit" })}><Pencil /></Button>}
-        {control("Info", { type: "toggleInfo" }, <Info />)}
-        {after !== undefined && <Button className="sr-only focus:not-sr-only" variant="ghost" size="icon" aria-label="Next photo" onClick={() => action({ type: "swipe", neighbour: after })}><ChevronRight /></Button>}
-      </div>}
-      <Sheet open={state.info} onOpenChange={(open) => { if (!open) action({ type: "toggleInfo" }); }}>
-        <SheetContent title={name}>
-          <dl className="grid grid-cols-2 gap-2 text-sm">
-            {date && <><dt>Taken</dt><dd>{formatDate.format(date)} {formatTime.format(date)}</dd></>}
-            {item !== undefined && <><dt>Dimensions</dt><dd>{item.width} × {item.height}</dd></>}
-            {item !== undefined && <><dt>Size</dt><dd>{Math.round((item.size) / 1024)} KB</dd></>}
-          </dl>
-        </SheetContent>
-      </Sheet>
-    </div>
+    </>
   );
 }

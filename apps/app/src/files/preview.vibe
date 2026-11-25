@@ -3,7 +3,7 @@ import type { SelectedDocument, SelectedDocumentsClient, SelectionId } from "@el
 import { MMS_MAX_TOTAL_BYTES } from "@elizaos/os-bridges"
 import { type Machine as TextMessages } from "../../gen/app__messages.effect.vibe"
 import { type Machine as MessageComposer } from "../../gen/app__messages__composer.effect.vibe"
-import { type Drafts as MessageDrafts, handOverPicture, pictureMessagingReady } from "../messages/composer.vibe"
+import { type Drafts as MessageDrafts, handOverPicture, pictureBytes, pictureMessagingReady } from "../messages/composer.vibe"
 import type { Telephony } from "../platform/telephony.vibe"
 import * as KeyValueStore from "effect/persistence/KeyValueStore"
 import * as Browser from "../../gen/app__files.effect.vibe"
@@ -94,20 +94,6 @@ module kept {
   }
 
   /** @throws {never} */
-  export function pictureBytes(data: string, type: "image/png" | "image/jpeg", size: number, max: number): Uint8Array | undefined {
-    if (data.length % 4 !== 0 || data.length > Math.ceil(max / 3) * 4) return undefined
-    try {
-      const decoded = atob(data)
-      if (decoded.length !== size) return undefined
-      const signature = type === "image/png" ? [137, 80, 78, 71, 13, 10, 26, 10] : [255, 216, 255]
-      if (!signature.every((byte, at) => decoded.charCodeAt(at) === byte)) return undefined
-      return Uint8Array.from(decoded, (byte) => byte.charCodeAt(0))
-    } catch {
-      return undefined
-    }
-  }
-
-  /** @throws {never} */
   export function textFromBase64(data: string): string | undefined {
     try {
       return new TextDecoder("utf-8", { fatal: true }).decode(Uint8Array.from(atob(data), (byte) => byte.charCodeAt(0)))
@@ -137,7 +123,7 @@ module kept {
     }
   }
 }
-import { earlierOf, grantsOf, namesOf, pictureBytes, textFromBase64, upgradePreview } from kept
+import { earlierOf, grantsOf, namesOf, textFromBase64, upgradePreview } from kept
 
 /**
  * The documents Recent holds access to, each by its grant's number, kept across restarts with what the owner calls
@@ -442,7 +428,7 @@ effect function offerPicture(viewer: number, item: number, revision: number): vo
     }
     if (!(try samePreview(viewer, item, revision, grant))) return false
     const wireName = contentType === "image/png" ? "picture-1.png" : "picture-1.jpg"
-    return try handOverPicture({ name: file.value.name, wireName, contentType, bytes })
+    return try handOverPicture({ name: file.value.name, wireName, contentType, bytes }, "Files")
   } catch () => false
   if (!offered) try say("Messages could not open this picture", true)
 }

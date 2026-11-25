@@ -129,6 +129,39 @@ describe("Settings", () => {
     await until(alpha, machines, Facts.Machine, (s) => Facts.word(s, "Bluetooth") === "Reported");
   });
 
+  it.each([3, 2])("Review retained agent records before restarting (spec/app/account/records.md, \"Story: Restart after a failure that kept records\")", async (archived) => {
+    const recovery = { retained: 3, archived, starts: 0, tokens: [] as string[] };
+    const world = { ...scene(), phone: true };
+    world.settings.recovery = recovery;
+    await settingsOpen(world);
+    await press("About");
+    await press("Agent activity");
+    await press("Restart Alpha");
+    await vi.waitFor(() => expect(document.querySelector('[role="alertdialog"]')?.textContent).toContain("3 records"));
+    expect(recovery.tokens).toEqual([]);
+    await press("Cancel");
+    await vi.waitFor(() => expect(document.querySelector('[role="alertdialog"]')).toBeNull());
+    expect(recovery.tokens).toEqual([]);
+
+    await press("Restart Alpha");
+    await vi.waitFor(() => expect(document.querySelector('[role="alertdialog"]')?.textContent).toContain("3 records"));
+    world.signedIn = false;
+    await press("Archive and restart");
+    await vi.waitFor(() => expect(document.body.textContent).toContain("Alpha couldn’t confirm the recovery"));
+    expect(recovery.tokens).toEqual([]);
+    await press("Close review");
+    world.signedIn = true;
+
+    await press("Restart Alpha");
+    await press("Archive and restart");
+    await vi.waitFor(() => {
+      expect(recovery.tokens).toEqual(["1.check"]);
+      if (archived === recovery.retained) expect(recovery.starts).toBe(1);
+      else expect(document.body.textContent).toContain("Restart your phone");
+    });
+    expect(recovery.starts).toBe(archived === recovery.retained ? 1 : 0);
+  });
+
   it("Make Alpha the Home app (spec/app/settings/facts.md, \"Story: Make Alpha the Home app\")", async () => {
     const { alpha, machines } = await settingsOpen();
     await press("General");
@@ -162,6 +195,28 @@ describe("Settings", () => {
       await until(alpha, machines, Android.Machine, (s) => s.target === "AlertChannel" && s.start.read.status === "Loaded");
       expect(world.settings.opened).toEqual(["wifi", "mobile", "notifications", "channel opaque-reminders"]);
     });
+  });
+
+  it("Choose Android autofill in Passwords (spec/app/settings/android.md, \"Story: Change what only Android can change\")", async () => {
+    const { alpha, machines, world } = await settingsOpen();
+    await press("Apps");
+    await press("Passwords");
+    await until(alpha, machines, Facts.Machine, (s) => s.reported.some(({ fact, value }) => fact === "AutofillService" && value === "None"));
+    world.settings.autofillDestination = "system-settings";
+    await tap("Use for autofill");
+    await until(alpha, machines, Android.Machine, (s) => s.target === "PasswordAutofill" && s.told === "SaidNearby");
+    world.settings.autofillDestination = "autofill-picker";
+    await tap("Use for autofill");
+    await until(alpha, machines, Android.Machine, (s) => s.start.read.status === "Loaded" && s.told === "Silent");
+    expect(world.settings.opened).toEqual(["system-settings", "autofill-picker"]);
+
+    world.settings.autofill = { supported: true, selected: "this-app" };
+    await seen(false);
+    await seen(true);
+    await until(alpha, machines, Facts.Machine, (s) => s.reported.some(({ fact, value }) => fact === "AutofillService" && value === "Alpha"));
+    expect(titled("Use for autofill")).toBeUndefined();
+    await hardware("back");
+    expect(await page(alpha)).toBe("Apps");
   });
 
   it("Look at access again (spec/app/startup/access.md, \"Story: Look at access again\")", async () => {
