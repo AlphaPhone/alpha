@@ -64,11 +64,11 @@ export function InboxMessageRow({ sender, initial, subject, snippet, time, unrea
     <div className="relative touch-pan-y overflow-hidden">
       <span aria-hidden className="absolute inset-0 flex items-center justify-end bg-secondary px-6 text-muted-foreground"><Archive className="size-5.5" /></span>
       <button type="button" role={selecting ? "checkbox" : undefined} aria-checked={selecting ? chosen : undefined}
-        aria-label={`${unread ? "Unread, " : ""}${sender}, ${subject}${attachment ? ", has attachments" : ""}`}
         disabled={selecting ? !onChosenChange : !onOpen} onClick={activate}
         onPointerDown={start} onPointerUp={end} onPointerCancel={() => { swipeFromRef.current = undefined; }}
         className={cn(focusRing, "relative flex w-full touch-pan-y items-start gap-3.5 bg-background px-5 py-3.25 text-left focus-visible:-outline-offset-focus")}
       >
+        {unread ? <span className="sr-only">Unread</span> : null}
         {selecting ? (
           <span aria-hidden className={cn("mt-2 grid size-6 flex-none place-items-center rounded-box border text-background", chosen ? "border-foreground bg-foreground" : "border-muted-foreground")}>
             {chosen ? <Check className="size-4" /> : null}
@@ -88,6 +88,7 @@ export function InboxMessageRow({ sender, initial, subject, snippet, time, unrea
           </span>
           <span className="mt-0.5 block h-4 truncate text-snippet text-muted-foreground">{snippet}</span>
         </span>
+        {attachment ? <span className="sr-only">Has attachments</span> : null}
       </button>
     </div>
   );
