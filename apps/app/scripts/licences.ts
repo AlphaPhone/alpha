@@ -193,7 +193,7 @@ function ocrDrafts(): Draft[] {
   const directory = join(app, "licenses/tesseract-core")
   const sources = json(join(directory, "sources.json")) as OcrSources
   const engine = installed(app, sources.package)
-  if (engine === undefined || json(join(engine, "package.json")).version !== sources.version) throw new Error("The OCR engine does not match the recorded licences")
+  if (engine === undefined || (json(join(engine, "package.json")) as { version?: string }).version !== sources.version) throw new Error("The OCR engine does not match the recorded licences")
   for (const [file, digest] of Object.entries(sources.cores)) {
     if (sha256(join(engine, file)) !== digest) throw new Error(`The OCR core ${file} differs from its recorded binary`)
   }
@@ -214,7 +214,7 @@ function ocrDrafts(): Draft[] {
   if (english === undefined) throw new Error("The OCR language data is unavailable")
   drafts.push({
     name: "Tesseract English trained data (tessdata 4.0.0_best_int)",
-    version: json(join(english, "package.json")).version,
+    version: (json(join(english, "package.json")) as { version?: string }).version ?? "",
     license: "Apache-2.0", source: "https://github.com/tesseract-ocr/tessdata_best", flags: flagged("Apache-2.0"),
     text: read(join(app, "public/ocr/tessdata-LICENSE.txt")).trim(),
   })
