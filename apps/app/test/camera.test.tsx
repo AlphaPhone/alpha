@@ -7,7 +7,7 @@ import { Machine as Viewer } from "../gen/app__photos__viewer.effect.vibe";
 import type { Place } from "../src/areas.ts";
 import { requestCapture, type CaptureAnswer } from "../src/camera/camera.vibe";
 import camera from "../src/camera/index.tsx";
-import { photosArea } from "../src/photos/index.tsx";
+import photosArea from "../src/photos/index.tsx";
 import { button, closeAll, drawn, hardware, later, only, open, press, seen, underAct, until } from "./alpha.tsx";
 import { scene } from "./fakes/scene.ts";
 
