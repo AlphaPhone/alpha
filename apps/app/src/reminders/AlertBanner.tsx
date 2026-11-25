@@ -1,7 +1,7 @@
 // spec/app/reminders/alerts.md, "Story: Alert on due reminders and act from the banner"
 import { Button } from "@repo/ui";
 import type { ManagedRuntime } from "effect";
-import { BellRing, Check, Clock, X } from "lucide-react";
+import { Bell, Check, Clock, X } from "lucide-react";
 import { useSyncExternalStore } from "react";
 import type * as Alerts from "../../gen/app__reminders__alerts.effect.vibe";
 import { useMachine as useAlertsMachine } from "../../gen/app__reminders__alerts.react.ts";
@@ -39,7 +39,7 @@ export function AlertBanner({
     >
       <div className="flex items-start gap-3">
         <span className="mt-0.5 flex size-9 shrink-0 items-center justify-center rounded-full bg-accent text-accent-foreground">
-          <BellRing aria-hidden className="size-4" />
+          <Bell aria-hidden className="size-4" />
         </span>
         <div className="min-w-0 flex-1">
           <p className="text-xs font-medium tracking-caps text-muted-foreground uppercase">Reminder due</p>
