@@ -209,7 +209,7 @@ export function Camera({ runtime, alpha }: Shown<Runtime>) {
   const photoShutter = can({ type: "shutter" }) || can({ type: "cancelDelay" });
   const flashLabel = !video ? (state.flashAuto ? "Flash auto" : state.flash ? "Flash on" : "Flash off") : state.flash ? "Light on" : "Light off";
   const Flash = video ? (state.flash ? Flashlight : FlashlightOff) : state.flash || state.flashAuto ? Zap : ZapOff;
-  const videoShutter = can({ type: "stopRecording", now: untimed }) || can({ type: "startRecording", sound: true });
+  const videoShutter = state.film.stage === "Running" || can({ type: "startRecording", sound: true });
 
   return (
     <section
@@ -300,7 +300,7 @@ export function Camera({ runtime, alpha }: Shown<Runtime>) {
           <button
             type="button"
             aria-label={!video ? (state.countdown > 0 ? "Cancel timer" : "Take photo") : state.film.stage === "Running" ? "Stop recording" : "Record video"}
-            aria-busy={state.shot !== 0 || state.film.stage === "Opening" || state.film.stage === "Stopping"}
+            aria-busy={state.shot !== 0 || inProgress && state.film.stage !== "Running"}
             disabled={!active || (video ? !videoShutter : !photoShutter)}
             onClick={click}
             className={cn("flex size-20 items-center justify-center rounded-full border-4 border-foreground disabled:opacity-60", focusRing)}

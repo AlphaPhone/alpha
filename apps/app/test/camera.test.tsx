@@ -39,8 +39,9 @@ describe("Camera on a phone", () => {
     await until(alpha, runtime, Machine, (state) => state.mode === "Video");
     await press("Record video");
     await until(alpha, runtime, Machine, (state) => state.film.stage === "Running");
-    await press("Stop recording");
+    await hardware("back");
     await until(alpha, runtime, Machine, (state) => state.film.stage === "Saved");
+    expect(button("Record video")).toBeDefined();
     expect(world.camera.savedVideos).toHaveLength(1);
 
     // spec/app/camera/index.md, "Story: Leave and come back"
@@ -50,6 +51,53 @@ describe("Camera on a phone", () => {
     await until(alpha, runtime, Machine, (state) => state.phase === "Ready");
     await hardware("home");
     await until(alpha, runtime, Machine, (state) => !state.showing && state.phase === "Off");
+  });
+
+  it("Back waits for the recorder to open and keeps the viewfinder (spec/app/camera/index.md, \"Back stays in Camera while the recorder settles\")", async () => {
+    const world = { ...scene(), phone: true };
+    let recorderOpened = () => {};
+    world.camera.recordingGate = new Promise<void>((resolve) => { recorderOpened = resolve; });
+    const { alpha } = await open(world, only("home", "view:Camera", "notice"));
+    const runtime = camera.runtime(alpha);
+    await press("Camera");
+    await until(alpha, runtime, Machine, (state) => state.phase === "Ready");
+    await press("Video mode");
+    await press("Record video");
+    await until(alpha, runtime, Machine, (state) => state.film.stage === "Opening");
+
+    await press("Back to apps");
+    await hardware("back");
+    expect(button("Video mode")).toBeDefined();
+    expect(world.camera.savedVideos).toHaveLength(0);
+    await drawn(recorderOpened);
+    await until(alpha, runtime, Machine, (state) => state.film.stage === "Saved");
+    expect(button("Record video")).toBeDefined();
+    expect(world.camera.savedVideos).toHaveLength(1);
+
+    await hardware("back");
+    await until(alpha, runtime, Machine, (state) => !state.showing);
+  });
+
+  it("Volume stays with Android while Camera asks about the microphone (spec/app/camera/index.md, \"Volume keys fire the available shutter while Camera is ready for the owner\")", async () => {
+    const world = { ...scene(), phone: true };
+    world.camera.microphone = "denied";
+    const { alpha } = await open(world, only("home", "view:Camera", "notice"));
+    const runtime = camera.runtime(alpha);
+    await press("Camera");
+    await until(alpha, runtime, Machine, (state) => state.phase === "Ready");
+    await expect.poll(() => world.camera.volumeShutter).toBe(true);
+    await press("Video mode");
+    await expect.poll(() => world.camera.volumeShutter).toBe(false);
+
+    await drawn(() => window.dispatchEvent(new Event("alpha:volume-shutter")));
+    expect(world.camera.savedVideos).toHaveLength(0);
+    await press("Record without sound");
+    await until(alpha, runtime, Machine, (state) => state.film.stage === "Running");
+    await expect.poll(() => world.camera.volumeShutter).toBe(true);
+    await drawn(() => window.dispatchEvent(new Event("alpha:volume-shutter")));
+    await until(alpha, runtime, Machine, (state) => state.film.stage === "Saved");
+    expect(world.camera.savedVideos).toHaveLength(1);
+    await expect.poll(() => world.camera.volumeShutter).toBe(false);
   });
 
   it.each(["photo", "video"] as const)("Open the last owned %s without library access (spec/app/camera/index.md, \"The last capture opens in Photos\")", async (kind) => {
