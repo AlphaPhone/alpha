@@ -476,6 +476,28 @@ describe("Phone on an Alpha image", () => {
     expect(document.querySelector("[data-alpha-phone-transcript]")?.textContent).toBe("The current transcript");
   });
 
+  it("Waits for Android to retire the old voicemail observer before watching again (spec/app/phone/voicemail.md, \"A carrier notice refreshes the visible list from the phone's latest read\")", async () => {
+    const world = image();
+    const { alpha } = await openPhoneWorld(world);
+    await until(alpha, alpha.runtime, Shell, (state) => state.image);
+    await openPhone(alpha);
+    await vi.waitFor(() => expect(world.telephony.voicemailObservations).toEqual([true]));
+
+    world.telephony.voicemailRetirementRefused = true;
+    await hardware("home");
+    await until(alpha, alpha.runtime, Phone, (state) => !state.front);
+    await vi.waitFor(() => expect(world.telephony.voicemailObservations).toEqual([true, false]));
+    await openPhone(alpha);
+    await vi.waitFor(() => expect(world.telephony.voicemailObservations).toEqual([true, false, false]));
+
+    world.telephony.voicemailRetirementRefused = false;
+    await hardware("home");
+    await until(alpha, alpha.runtime, Phone, (state) => !state.front);
+    await openPhone(alpha);
+    await vi.waitFor(() => expect(world.telephony.voicemailObservations).toEqual([true, false, false, false, true]));
+    await until(alpha, alpha.runtime, Phone, (state) => state.voicemail);
+  });
+
   it(`Shows an unknown outcome when Android returns a malformed voicemail deletion acknowledgment (spec/app/phone/voicemail.md, "The phone's answer ends the removal it names")`, async () => {
     const world = image();
     world.telephony.deletionReply = "malformed";
