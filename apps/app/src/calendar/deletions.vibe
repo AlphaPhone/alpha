@@ -32,22 +32,35 @@ const observed = started(effect {
   const view = try View.Machine
   const held = try Held.Machine
   const loaded = Stream.filter(view.changes, (s) => s.phone.status === "Loaded" || s.google.status === "Loaded")
-  try Stream.runForEach(Stream.changesWith(loaded, (a, b) => a.phone.ticket === b.phone.ticket && a.google.ticket === b.google.ticket), effect () => {
-    const d = try held.get()
-    if (d.hiding === 0) return
-    const state = try view.get()
-    const prior = shown.find(d.hiding) ?? shown.lastSeen(d.hiding)
-    const source = prior?.source === "Phone" ? state.phone : state.google
-    if (source.status !== "Loaded") return
-    const found = shown.find(d.hiding)
-    const expected = released.get(d.hiding)
-    const unchanged = found !== undefined
-      && (expected === undefined
-        ? found.revision === d.revision
-        : found.revision === expected.revision && (expected.version === "" || found.version === expected.version) && found.answer === expected.answer)
-    try contained(held.send({ type: "readShows", id: d.hiding, unchanged }), "checking whether a hidden deletion changed")
-    if (!unchanged) released.delete(d.hiding)
-  })
+  try Stream.runForEach(
+    Stream.changesWith(
+      loaded,
+      (a, b) =>
+        a.phone.status === b.phone.status
+        && a.phone.ticket === b.phone.ticket
+        && a.google.status === b.google.status
+        && a.google.ticket === b.google.ticket,
+    ),
+    effect () => {
+      const d = try held.get()
+      if (d.hiding === 0) {
+        if (d.sending === 0 && released.size > 0) released.clear()
+        return
+      }
+      const state = try view.get()
+      const prior = shown.find(d.hiding) ?? shown.lastSeen(d.hiding)
+      const source = prior?.source === "Phone" ? state.phone : state.google
+      if (source.status !== "Loaded") return
+      const found = shown.find(d.hiding)
+      const expected = released.get(d.hiding)
+      const unchanged = found !== undefined
+        && (expected === undefined
+          ? found.revision === d.revision
+          : found.revision === expected.revision && (expected.version === "" || found.version === expected.version) && found.answer === expected.answer)
+      try contained(held.send({ type: "readShows", id: d.hiding, unchanged }), "checking whether a hidden deletion changed")
+      if (!unchanged) released.delete(d.hiding)
+    },
+  )
 }, "observing calendar reads for hidden deletions")
 
 // spec/app/calendar/deletions.md, "The window ends only once its Undo notice is no longer shown"

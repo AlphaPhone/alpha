@@ -203,6 +203,15 @@ const calendarSettings = () => document.querySelector('[data-settings-page="Cale
 
 const dayButton = (day: number) => `${narrowDay.format(dateOf(day))} ${dateOf(day).getDate()}`;
 
+async function declineLunch(alpha: Alpha, runtime: ReturnType<typeof calendar.runtime>) {
+  await tap("Team lunch");
+  await until(alpha, runtime, View, (s) => s.open !== 0);
+  await press("No");
+  await until(alpha, runtime, Held, (d) => d.waiting !== 0);
+  await hardware("home");
+  await until(alpha, runtime, Editor, (e) => e.kind === "Remove" && e.write.outcome !== "Sent");
+}
+
 describe("Calendar without a connected account", () => {
   it("Shows Calendar settings on the empty standalone timeline (spec/app/calendar/presentation.md, \"Story: Know what to do when Calendar cannot read\")", async () => {
     const world = { ...morning(false), signedIn: false };
@@ -853,6 +862,22 @@ describe("on a phone", () => {
     await until(alpha, runtime, Changes, (a) => a.result === "Done");
     expect(world.calendar.writes.slice(3)).toEqual(["approve approval-3", "answer ev-team-lunch tentative"]);
   });
+
+  it("Clears hidden deletions after a dual-source phone and Google refresh (spec/app/calendar/deletions.md, \"A refused send shows the event again and says it was not deleted; a sent deletion hides it until a read no longer has it unchanged\")", async () => {
+    const world = morning(true);
+    world.calendar.granted = true;
+    const mounted = await open(world, only("view:Calendar"));
+    const runtime = calendar.runtime(mounted.alpha);
+    await openCalendar(mounted.alpha);
+    await until(mounted.alpha, runtime, View, (s) => s.phone.status === "Loaded" && s.google.status === "Loaded");
+    await declineLunch(mounted.alpha, runtime);
+    expect((await runtime.runPromise(Editor.use((e) => e.get()))).write.outcome).toBe("Confirmed");
+    await openCalendar(mounted.alpha);
+    await runtime.runPromise(View.use((v) => v.send({ type: "refresh" })));
+    await until(mounted.alpha, runtime, View, (s) => s.phone.status === "Loaded" && s.google.status === "Loaded");
+    await drawn(() => {});
+    expect((await runtime.runPromise(Held.use((d) => d.get()))).hiding).toBe(0);
+  });
 });
 
 describe("in a browser", () => {
@@ -953,12 +978,7 @@ describe("in a browser", () => {
       agentEvent("Weekly sync", seed.at(2, 14), seed.at(2, 15), { id: "ev-weekly-2", externalId: "ev-weekly-2", recurringEventId: "series-weekly" }),
     ]);
 
-    await tap("Team lunch");
-    await until(alpha, runtime, View, (s) => s.open !== 0);
-    await press("No");
-    await until(alpha, runtime, Held, (d) => d.waiting !== 0);
-    await hardware("home");
-    await until(alpha, runtime, Editor, (e) => e.kind === "Remove" && e.write.outcome !== "Sent");
+    await declineLunch(alpha, runtime);
     expect((await runtime.runPromise(Editor.use((e) => e.get()))).write.outcome).toBe("Confirmed");
     await openCalendar(alpha);
     await runtime.runPromise(View.use((v) => v.send({ type: "refresh" })));
