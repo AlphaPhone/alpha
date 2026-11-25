@@ -3,9 +3,13 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { composerPlugin } from "../src/platform/composerPort.vibe";
 
 class Port extends EventTarget {
-  readonly posted: { requestId: string; kind: string; draft?: unknown }[] = [];
+  readonly posted: { requestId: string }[] = [];
   postMessage(data: string) {
-    this.posted.push(JSON.parse(data));
+    const request: unknown = JSON.parse(data);
+    if (typeof request !== "object" || request === null || !("requestId" in request) || typeof request.requestId !== "string") {
+      throw new Error("Expected a composer request with an ID.");
+    }
+    this.posted.push({ ...request, requestId: request.requestId });
   }
   answer(value: object) {
     this.dispatchEvent(new MessageEvent("message", { data: JSON.stringify(value) }));
@@ -19,10 +23,10 @@ function packagedPage(port: Port | undefined) {
 }
 
 const sms = { operationId: "reviewed-op", recipients: ["+14155550100"], body: "Exact draft", subscriptionId: 9 };
-const approved = async () => true;
+const approved = () => Promise.resolve(true);
 const native = () => ({
-  sendSms: vi.fn(async (_draft: typeof sms) => ({ status: "sent" })),
-  sendMms: vi.fn(async (_draft: typeof sms & { attachments: { name: string; contentType: string; size: number; sha256: string; data: string }[] }) => ({ status: "sent" })),
+  sendSms: vi.fn((_draft: typeof sms) => Promise.resolve({ status: "sent" })),
+  sendMms: vi.fn((_draft: typeof sms & { attachments: { name: string; contentType: string; size: number; sha256: string; data: string }[] }) => Promise.resolve({ status: "sent" })),
 });
 
 afterEach(() => vi.unstubAllGlobals());
@@ -42,7 +46,7 @@ describe("Manual Messages transport", () => {
     const fallback = native();
     const signal = new AbortController().signal;
     await expect(composerPlugin(fallback, false, signal, approved).sendSms(sms)).rejects.toMatchObject({ code: "composer-not-started" });
-    await expect(composerPlugin(fallback, true, signal, async () => false).sendSms(sms)).rejects.toMatchObject({ code: "composer-not-started" });
+    await expect(composerPlugin(fallback, true, signal, () => Promise.resolve(false)).sendSms(sms)).rejects.toMatchObject({ code: "composer-not-started" });
     expect(port.posted).toEqual([]);
     expect(fallback.sendSms).not.toHaveBeenCalled();
   });

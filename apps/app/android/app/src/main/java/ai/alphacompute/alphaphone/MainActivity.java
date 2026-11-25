@@ -211,7 +211,10 @@ public class MainActivity extends BridgeActivity {
    return;
   }
   boolean home = isHome(intent);
-  if (home) SmsNoticeOpenRequest.clear();
+  if (home) {
+   composerVisit.incrementAndGet();
+   SmsNoticeOpenRequest.clear();
+  }
   super.onNewIntent(intent);
   if (getBridge() != null && home) getBridge().getWebView().evaluateJavascript(HOME, null);
  }
