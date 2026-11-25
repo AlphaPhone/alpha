@@ -12,7 +12,7 @@ export async function executeMedia(alpha: Alpha, operation: DeviceOperation, cal
   }
   if (operation.type === "sms_reply_selected" || operation.type === "sms_compose") {
     const { messageAction } = await import("../messages/agent.vibe");
-    return alpha.runtime.runPromise(messageAction(operation, authority.target, authority.current));
+    return alpha.runtime.runPromise(messageAction(operation, authority.target, authority.current, authority.continueDraft, authority.phone));
   }
   if (operation.type === "sms_send") {
     const { reviewAgentSms } = await import("../messages/agent-send.vibe");
@@ -34,7 +34,7 @@ export async function executeMedia(alpha: Alpha, operation: DeviceOperation, cal
   }
   if (operation.type.startsWith("files_")) {
     const [{ default: files }, { fileAction }] = await Promise.all([import("../files/index.tsx"), import("../files/agent.vibe")]);
-    return files.runtime(alpha).runPromise(fileAction(operation, call, authority.files, authority.current));
+    return files.runtime(alpha).runPromise(fileAction(operation, call, authority.files, authority.current, authority.reportFiles));
   }
   if (operation.type === "browser_navigate" || operation.type === "browser_tabs_show") {
     const [{ default: browser }, { browserAction }] = await Promise.all([import("../browser/index.tsx"), import("../browser/agent.vibe")]);

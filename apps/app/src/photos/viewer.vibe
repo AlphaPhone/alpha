@@ -1,10 +1,11 @@
 // spec/app/photos/viewer.md, "Story: Look at a photo or video"; spec/app/photos/viewer.md, "Story: Edit a photo or trim a video"; spec/app/photos/viewer.md, "Story: Keep a copy through a restart"; spec/app/photos/viewer.md, "Story: Share what I am looking at"
-import type { CropRect, EditPreview, MediaItem, VideoEditSession } from "@elizaos/os-bridges"
+import type { CropRect, EditPreview, MediaItem, Reviewed, VideoEditSession } from "@elizaos/os-bridges"
+import { MMS_MAX_TOTAL_BYTES } from "@elizaos/os-bridges"
 import * as KeyValueStore from "effect/persistence/KeyValueStore"
 import * as Library from "../../gen/app__photos.effect.vibe"
 import type { Actor } from "../../gen/app__photos__actor.effect.vibe"
 import * as Viewer from "../../gen/app__photos__viewer.effect.vibe"
-import { PhotosPort, canReplaceBrowserEdit, isBrowserEdit, type BrowserSource } from "../platform/photos.vibe"
+import { PhotosPort, canReplaceBrowserEdit, isBrowserEdit, photoEmailMaxBytes, type BrowserSource, type PhotoAttachmentUse } from "../platform/photos.vibe"
 import { photoRefusal, renderBrowserPhoto, type BrowserEditFrame, type PhotoLook } from "../platform/photoCanvas.vibe"
 import { clipRefusal, renderBrowserClip } from "../platform/videoCanvas.vibe"
 import { Catalog } from "./catalog.vibe"
@@ -12,6 +13,8 @@ import { answer, applying, reacting, run, started, together, type Job } from "..
 import { say, type Said } from "../notices/toasts.vibe"
 import { handOver } from "../inbox/adding.vibe"
 import { attachToAlpha } from "../assistant/attachments.vibe"
+import { handOverPicture, pictureBytes, pictureMessagingReady } from "../messages/composer.vibe"
+import { Machine as Shell, showing } from "../../gen/app__shell.effect.vibe"
 import type { Machine as Toasts } from "../../gen/app__notices__toasts.effect.vibe"
 
 module sources {
@@ -295,7 +298,7 @@ effect function closeEditor() {
   }
 }
 
-effect function shared(photo: number, revision: number, channel: "alpha" | "email") {
+effect function askAboutPhoto(photo: number, revision: number) {
   const machine = try Viewer.Machine
   const open = try OpenedPhoto
   const current = try open.current()
@@ -309,13 +312,67 @@ effect function shared(photo: number, revision: number, channel: "alpha" | "emai
     try say("This photo could not be attached.", true)
     return
   }
-  const attached = channel === "alpha"
-    ? try attachToAlpha({ id: item.id, name: picture.name, mimeType: picture.mimeType, data: picture.data })
-    : try handOver(picture, "Photos")
+  const attached = try attachToAlpha({ id: item.id, name: picture.name, mimeType: picture.mimeType, data: picture.data })
   if (!attached) try say("This photo could not be attached.", true)
 }
 
-type Needs = PhotosPort | Catalog | OpenedPhoto | Viewer.Machine | Library.Machine | KeyValueStore.KeyValueStore | Toasts | Said | Effect.Services<ReturnType<typeof shared>>
+/** A permitted native still with a known, bounded original. */
+export function photoEmailAllowed(item: MediaItem | undefined): boolean {
+  return item !== undefined && item.kind === "image" && item.trashed !== true && item.id.startsWith("m:") && item.mutationRevision !== undefined
+    && Boolean(item.name?.trim()) && Number.isSafeInteger(item.size) && item.size > 0 && item.size <= photoEmailMaxBytes
+}
+
+/** The permitted still and known size which Photos can offer to the MMS composer. */
+export function photoMessageType(item: MediaItem | undefined): ("image/png" | "image/jpeg" | undefined) {
+  if (item === undefined || !photoEmailAllowed(item) || item.size > MMS_MAX_TOTAL_BYTES) return undefined
+  if (/\.png$/i.test(item.name ?? "")) return "image/png"
+  return /\.jpe?g$/i.test(item.name ?? "") ? "image/jpeg" : undefined
+}
+
+// spec/app/photos/viewer.md, "Use in Messages offers the exact readable original of a permitted photo"; spec/app/photos/viewer.md, "Story: Share what I am looking at"
+effect function offerPhoto(photo: number, revision: number, ticket: number, use: PhotoAttachmentUse) {
+  const viewer = try Viewer.Machine
+  const shell = try Shell
+  const catalog = try Catalog
+  const opened = try OpenedPhoto
+  const view = try opened.current()
+  const item = view.item
+  const mimeType = photoMessageType(item)
+  if (item === undefined || item.mutationRevision === undefined || !(use === "email" ? photoEmailAllowed(item) : mimeType !== undefined)) return
+  const requested: Reviewed = { id: item.id, revision: item.mutationRevision }
+  const current = effect {
+    const state = try viewer.get()
+    const library = try (try Library.Machine).get()
+    const row = (try catalog.displayed()).rows.get(photo)
+    return view.photo === photo && (try opened.current()) === view && state.open === photo && state.revision === revision && state.read.ticket === ticket
+      && (use === "email" ? Viewer.canEmail(state, "Owner") : Viewer.canUseInMessages(state, "Owner")) && library.visible && showing(try shell.get(), "Photos")
+      && row?.kind === "phone" && row.item.id === requested.id && row.item.mutationRevision === requested.revision
+      && row.item.contentRevision === item.contentRevision && row.item.trashed !== true
+  }
+  if (!(try current)) return
+  if (use === "message") {
+    const ready = try pictureMessagingReady()
+    if (!(try current)) return
+    if (!ready) { try say("Messages could not open this picture", true); return }
+  }
+  const received = (try PhotosPort).attachmentPicture(requested, use) catch () => undefined
+  if (!(try current)) return
+  const compatible = received !== undefined && received.name === item.name && (use === "email" || received.mimeType === mimeType)
+  const limit = use === "email" ? photoEmailMaxBytes : MMS_MAX_TOTAL_BYTES
+  const bytes = compatible ? pictureBytes(received.dataBase64, received.mimeType, received.size, limit) : undefined
+  const refusal = use === "email" ? "This photo could not be attached." : "Messages could not open this picture"
+  if (received === undefined || bytes === undefined) { try say(refusal, true); return }
+  if (use === "email") {
+    const { name, mimeType, size, dataBase64: data } = received
+    if (!(try handOver({ name, mimeType, size, data }, "Photos"))) try say(refusal, true)
+  } else if (mimeType !== undefined) {
+    const wireName = mimeType === "image/png" ? "picture-1.png" : "picture-1.jpg"
+    if (!(try handOverPicture({ name: received.name, wireName, contentType: mimeType, bytes }, "Photos"))) try say(refusal, true)
+  }
+}
+
+type Needs = PhotosPort | Catalog | OpenedPhoto | Viewer.Machine | Library.Machine | KeyValueStore.KeyValueStore | Toasts | Said
+  | Effect.Services<ReturnType<typeof askAboutPhoto>> | Effect.Services<ReturnType<typeof offerPhoto>>
 
 function carry(fx: Viewer.Effect): Job<Viewer.Event, Needs, [Actor]> {
   return match (fx) {
@@ -326,8 +383,9 @@ function carry(fx: Viewer.Effect): Job<Viewer.Event, Needs, [Actor]> {
     when { tag: "Request", let change, let photo, let revision }: run("change", ignore(effect {
       try (try Library.Machine).send({ type: "requested", change, photo, revision }, "Owner")
     }), "Phone");
-    when { tag: "AskAbout", let photo, let revision }: run("ask", shared(photo, revision, "alpha"), "Phone");
-    when { tag: "Compose", let photo, let revision }: run("compose", shared(photo, revision, "email"), "Phone");
+    when { tag: "AskAbout", let photo, let revision }: run("ask", askAboutPhoto(photo, revision), "Phone");
+    when { tag: "Compose", let photo, let revision, let ticket }: run("offer picture", offerPhoto(photo, revision, ticket, "email"), "Phone");
+    when { tag: "TextPicture", let photo, let revision, let ticket }: run("offer picture", offerPhoto(photo, revision, ticket, "message"), "Phone");
   }
 }
 

@@ -50,6 +50,7 @@ public class MainActivity extends BridgeActivity {
 
  @Override public void onCreate(Bundle state) {
   SplashScreen.installSplashScreen(this);
+  HostedDigestDelivery.get().capture(getIntent());
   MainActivity live = livePage.get();
   boolean frontStart = isFrontStart(getIntent());
   if (live != null && live != this && !live.isFinishing() && !live.isDestroyed()
@@ -83,6 +84,7 @@ public class MainActivity extends BridgeActivity {
   registerPlugin(AlphaBrowserPlugin.class);
   registerPlugin(AlphaCalendarPlugin.class);
   registerPlugin(AlphaNotificationsPlugin.class);
+  registerPlugin(AlphaHostedDigestDeliveryPlugin.class);
   registerPlugin(AlphaPhotosPermissionsPlugin.class);
   registerPlugin(AlphaResetPlugin.class);
   registerPlugin(AlphaActionJournalPlugin.class);
@@ -161,6 +163,7 @@ public class MainActivity extends BridgeActivity {
  @Override public void onResume() {
   composerVisit.incrementAndGet();
   super.onResume();
+  HostedDigestDelivery.get().refreshNotices();
   if (livePage.get() == this) unansweredFrontStarts = 0;
  }
 
@@ -206,12 +209,16 @@ public class MainActivity extends BridgeActivity {
  }
 
  @Override protected void onNewIntent(Intent intent) {
+  HostedDigestDelivery.get().capture(intent);
   if (isFrontStart(intent)) {
    if (!handingOff) unansweredFrontStarts = 0;
    return;
   }
   boolean home = isHome(intent);
-  if (home) SmsNoticeOpenRequest.clear();
+  if (home) {
+   composerVisit.incrementAndGet();
+   SmsNoticeOpenRequest.clear();
+  }
   super.onNewIntent(intent);
   if (getBridge() != null && home) getBridge().getWebView().evaluateJavascript(HOME, null);
  }

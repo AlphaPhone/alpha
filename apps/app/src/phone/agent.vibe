@@ -3,7 +3,7 @@ import { NOT_DISPATCHED, readResult, type DeviceOperation } from "@elizaos/agent
 import { Machine as Phone, clear } from "../../gen/app__phone.effect.vibe"
 import { Machine as Shell, available, showing } from "../../gen/app__shell.effect.vibe"
 import { Device } from "../platform/device.vibe"
-import { Telephony, TelephonyAbsent, TelephonyRefused, telephony } from "../platform/telephony.vibe"
+import { type Telephony, TelephonyAbsent, TelephonyRefused, telephony } from "../platform/telephony.vibe"
 import { contained } from "../runtime/reactor.vibe"
 import { currentPhoneContact, phoneQuery, type ReviewedPhoneContact } from "./named-review.vibe"
 import { Dialer, classifyDialNumber, prefilled } from "./phone.vibe"

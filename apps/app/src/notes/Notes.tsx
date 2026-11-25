@@ -1,6 +1,5 @@
 // spec/app/notes/index.md, "Story: See my notes"; spec/app/notes/index.md, "Story: Organise my notes"; spec/app/notes/editor.md, "Story: Write a note"; spec/app/notes/trash.md, "Story: Delete a note and get it back"
-import { Alert, AppHeader, Button, Chip, Input, LinkNoteView, Menu, MenuContent, MenuItem, MenuTrigger, NoteEditor as NoteForm, NoteRow, NotesList as NoteRows, VoiceNoteView } from "@repo/ui";
-import { Effect } from "effect";
+import { Alert, AppHeader, Button, Chip, Dialog, DialogContent, DialogDescription, DialogTitle, Input, LinkNoteView, Menu, MenuContent, MenuItem, MenuTrigger, NoteEditor as NoteForm, NoteRow, NotesList as NoteRows, Spinner, VoiceNoteView } from "@repo/ui";
 import { Ellipsis, FileDown, Folder, Mail, MessageSquare, Mic, Plus, Trash2 } from "lucide-react";
 import { useState, useSyncExternalStore, type FormEvent } from "react";
 import * as Notes from "../../gen/app__notes.ts";
@@ -20,7 +19,7 @@ import { NoteDevice } from "../platform/noteDevice.vibe";
 import { unfinished } from "../../gen/app__notes__recording.ts";
 import type { Alpha } from "../runtime/area.tsx";
 import { AppBack } from "../shell/AppBack.tsx";
-import { type Collection, type DraftWords, NoteContent, audioIdOf, hasContent } from "./content.vibe";
+import { type Collection, type DraftWords, NoteContent, audioIdOf, hasContent, savedVoice } from "./content.vibe";
 import { type Fields, NoteEditor } from "./editor.vibe";
 import { enter } from "./notes.vibe";
 import { record } from "./recording.vibe";
@@ -28,7 +27,7 @@ import { Previous } from "./Previous.tsx";
 import { clock, dated, preview, titleOf } from "./present.ts";
 import { Recording } from "./Recording.tsx";
 import { RecentlyDeleted } from "./RecentlyDeleted.tsx";
-import { pageOf } from "./sides.vibe";
+import { VoiceReview, copyTranscript, generateTranscript, pageOf } from "./sides.vibe";
 
 type Runtime = Alpha["runtime"];
 type Form = { readonly op: "AddFolder" } | { readonly op: "RenameFolder"; readonly folder: Notes.Folder };
@@ -173,40 +172,79 @@ function speaker(value: unknown) {
 
 function VoiceNote({ runtime, collection }: { readonly runtime: Runtime; readonly collection: Collection }) {
   const voice = useVoice(runtime);
-  const audio = runtime.runSync(NoteDevice.use((device) => Effect.succeed(device.available)));
+  const device = runtime.runSync(NoteDevice);
+  const review = runtime.runSync(VoiceReview);
   const state = voice.state;
   if (!state?.showing) return null;
   const note = collection.noteByNumber.get(state.note);
   const data = note?.format?.data;
-  const lines = Array.isArray(data?.lines) ? data.lines.flatMap((line) => typeof line === "object" && line !== null && "t" in line && typeof line.t === "string"
-    ? [{ ...speaker("s" in line ? line.s : undefined), at: clock("at" in line && typeof line.at === "number" ? line.at : 0), text: line.t }] : []) : [];
-  const summary = Array.isArray(data?.summary) ? data.summary.filter((line): line is string => typeof line === "string") : [];
-  const actions = Array.isArray(data?.actions) ? data.actions.flatMap((item) => typeof item === "object" && item !== null && "t" in item && typeof item.t === "string"
-    ? [{ text: item.t, done: "done" in item && item.done === true }] : []) : [];
-  const savedAudio = data?.audio;
-  const ms = typeof data?.durationMs === "number" ? data.durationMs : typeof savedAudio === "object" && savedAudio !== null
-    && "durationMs" in savedAudio && typeof savedAudio.durationMs === "number" ? savedAudio.durationMs : undefined;
+  const saved = note === undefined ? undefined : savedVoice(note);
+  const lines = saved?.lines.map((line) => ({ ...speaker(line.who), at: clock(line.at), text: line.text })) ?? [];
+  const ms = saved?.durationMs;
   const length = ms === undefined ? "" : clock(ms / 1000);
   const play = { type: "play", from: 0 } as const;
   const stop = { type: "stopPlaying" } as const;
-  const canPlay = audio && note !== undefined && audioIdOf(note) !== "" && voice.can(play, "Owner");
-  const playback = voice.can(stop, "Owner") ? () => void voice.send(stop, "Owner") : canPlay ? () => void voice.send(play, "Owner") : undefined;
+  const ask = { type: "askAlpha" } as const;
+  const transcribe = { type: "transcribe" } as const;
+  const retry = { type: "retryTranscription" } as const;
+  const cancel = { type: "cancelTranscription" } as const;
+  const showTranscript = { type: "showTranscript" } as const;
+  const addTranscript = { type: "addTranscript" } as const;
+  const back = { type: "back" } as const;
+  const audio = note !== undefined && audioIdOf(note) !== "";
+  const current = state.revision === collection.version;
+  const pending = current && state.heard > state.added ? runtime.runSync(review.get(state)) : undefined;
+  const canTranscribe = device.canTranscribe && audio && current && state.added === 0 && voice.can(transcribe, "Phone");
+  const canRetry = device.canTranscribe && audio && current && voice.can(retry, "Owner");
+  const generate = (again = false) => void runtime.runPromise(generateTranscript(state.note, state.revision, again));
+  const canUseTranscript = current && note !== undefined && lines.length > 0 && voice.can(ask, "Owner");
+  const copy = canUseTranscript ? () => void runtime.runPromise(copyTranscript({
+    owner: state.owner, number: state.note, opened: state.opened,
+    record: { kind: "canonical-note", id: note.id, revision: String(state.revision - 1) },
+  })) : undefined;
+  const player = device.available && audio;
+  const canPlay = player && current && voice.can(play, "Owner");
+  const toggle = voice.can(stop, "Owner") ? () => void voice.send(stop, "Owner") : canPlay ? () => void voice.send(play, "Owner") : undefined;
+  const seek = canPlay && Array.isArray(data?.segments) && data.segments.length > 0 ? (from: number) => {
+    const event = { type: "play", from } as const;
+    if (voice.can(event, "Owner")) void voice.send(event, "Owner");
+  } : undefined;
   return <VoiceNoteView
     className="relative inset-auto flex-1"
     title={note === undefined ? "Voice note" : titleOf(note)}
     meta={note === undefined ? "" : [dated(note, collection.readAt), length].filter(Boolean).join(" · ")}
-    time={length}
-    summary={summary}
-    actions={actions}
-    lines={lines.length === 0 && note?.body ? [{ ...speaker(undefined), at: "0:00", text: note.body }] : lines}
-    playing={state.play.status === "Loading"}
-    onBack={() => void voice.send({ type: "back" }, "Owner")}
-    onPlay={playback}
-    onSeek={canPlay && Array.isArray(data?.segments) && data.segments.length > 0 ? (from) => {
-      const event = { type: "play", from } as const;
-      if (voice.can(event, "Owner")) void voice.send(event, "Owner");
-    } : undefined}
-    feedback={state.play.status === "Failed" && <Alert variant="warn" className="mt-4">This recording couldn't be played</Alert>}
+    playback={player ? { time: length, playing: state.play.status === "Loading", toggle, seek } : undefined}
+    summary={saved?.summary}
+    actions={saved?.actions}
+    lines={lines}
+    onAskTranscript={canUseTranscript ? () => void voice.send(ask, "Owner") : undefined}
+    onCopyTranscript={copy}
+    onBack={() => void voice.send(back, "Owner")}
+    feedback={<>
+      {canTranscribe && <Button className="mt-4" variant="secondary" onClick={() => generate()}>Generate transcript</Button>}
+      {state.listen.status === "Loading" && <div className="mt-4 flex items-center gap-2">
+        <Spinner label="Transcribing on this phone" />
+        <span className="text-sm text-muted-foreground">Transcribing…</span>
+        {voice.can(cancel, "Owner") && <Button variant="ghost" size="sm" aria-label="Cancel transcription" onClick={() => void voice.send(cancel, "Owner")}>Cancel</Button>}
+      </div>}
+      {state.deaf && <Alert variant="warn" className="mt-4">This recording couldn't be transcribed</Alert>}
+      {canRetry && <Button className="mt-4" variant="secondary" onClick={() => generate(true)}>Try again</Button>}
+      {pending !== undefined && voice.can(showTranscript, "Owner") && <Button className="mt-4" variant="secondary" onClick={() => void voice.send(showTranscript, "Owner")}>Review transcript</Button>}
+      {state.writing.outcome === "Refused" && <Alert variant="warn" className="mt-4">The transcript couldn't be added. Reopen the note to review its saved version.</Alert>}
+      {state.writing.outcome === "Unknown" && <Alert variant="warn" className="mt-4">Alpha couldn't confirm the transcript was added. Reopen the note to check.</Alert>}
+      {state.play.status === "Failed" && <Alert variant="warn" className="mt-4">This recording couldn't be played</Alert>}
+      <Dialog open={pending !== undefined && state.review.showing} onOpenChange={(open) => { if (!open && state.review.showing) void voice.send(back, "Owner"); }}>
+        <DialogContent>
+          <DialogTitle>Review transcript</DialogTitle>
+          <DialogDescription>Read the transcript before you add it to the voice note.</DialogDescription>
+          <div className="max-h-60 overflow-y-auto whitespace-pre-wrap">{pending?.lines.map((line) => <p key={line.at} className="mb-2">{line.t}</p>)}</div>
+          <div className="flex justify-end gap-2">
+            <Button variant="secondary" onClick={() => void voice.send(back, "Owner")}>Cancel</Button>
+            {voice.can(addTranscript, "Owner") && <Button onClick={() => void voice.send(addTranscript, "Owner")}>Add to note</Button>}
+          </div>
+        </DialogContent>
+      </Dialog>
+    </>}
   />;
 }
 

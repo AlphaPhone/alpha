@@ -13,6 +13,9 @@ import type { Alpha } from "../src/runtime/area.tsx";
 import { useInEmail } from "../src/inbox/suggestion.vibe";
 import inbox from "../src/inbox/index.tsx";
 import { button, closeAll, drawn, fill, hardware, later, only, open, press, underAct, until } from "./alpha.tsx";
+import { Effect } from "effect";
+import { Letters, nothing } from "../src/inbox/composer.vibe";
+import { Mail } from "../src/inbox/gmail.vibe";
 import { letter } from "./fakes/inbox.ts";
 import { scene } from "./fakes/scene.ts";
 
@@ -240,6 +243,29 @@ it("Connect Gmail and keep to its grant (spec/app/inbox/index.md, \"Story: Conne
   await drawn(() => [...document.querySelectorAll("button")].find((one) => one.textContent?.includes("owner@gmail.test"))?.click());
   await until(alpha, runtime, List, (s) => s.selected.account !== 0);
   expect([rows(), told()]).toEqual([[], expect.stringContaining("Alpha cannot read this mail")]);
+
+  // spec/app/platform/index.md, "A mail or calendar request the phone holds back for want of its mail lease reads as the cloud's own refusal of the device key there, never as a sign-out"; spec/app/inbox/index.md, "A check the phone holds back for want of the mail lease keeps the session and everything kept, and asks for one more sign-in": on a phone signed in before mail leases existed, opening Inbox, twice, keeps the draft, the accounts and the owner's session, and asks to sign in.
+  const draft = { ...nothing, subject: "Kept through the lease" };
+  await alpha.runtime.runPromise(Letters.use((letters) => Effect.andThen(Effect.sync(() => letters.set(9, draft)), letters.keep(9))));
+  const generation = () => alpha.runtime.runPromise(Mail.use((mail) => Effect.sync(() => mail.generation())));
+  const kept = await generation();
+  const before = await runtime.runPromise(List.use((list) => list.get()));
+  world.mailLease = false;
+  for (const opening of [1, 2]) {
+    await alpha.back();
+    await press("Inbox");
+    await until(alpha, runtime, List, (s) => s.failure === "LeaseNeeded" && s.accounts.status === "Failed" && s.accounts.ticket >= before.accounts.ticket + opening);
+  }
+  const after = await runtime.runPromise(List.use((list) => list.get()));
+  const words = await alpha.runtime.runPromise(Letters.use((letters) => Effect.sync(() => letters.words(9))));
+  expect([after.signedIn, after.connected, after.selected, after.revision, await generation(), words, told().includes("Connect Eliza Cloud")])
+    .toEqual([true, before.connected, before.selected, before.revision, kept, draft, true]);
+
+  // spec/app/inbox/index.md, "The answer names the connected accounts, their credentials and grants; the account chosen stays selected while it is connected, else the one account that may be read, else none and the owner chooses": once the phone holds the lease, the next check answers and ends the wait.
+  world.mailLease = true;
+  await alpha.back();
+  await press("Inbox");
+  await until(alpha, runtime, List, (s) => s.failure === "Fine" && s.accounts.status === "Loaded" && s.connected.length === 1);
 });
 
 it("Send a draft I reviewed (spec/app/inbox/sending.md, \"Story: Send a draft I reviewed\"; spec/app/inbox/drafts.md, \"Story: Write a message\"; spec/app/inbox/drafts.md, \"Story: Set a draft aside or discard it\"; spec/app/inbox/adding.md, \"Story: Add files and people to my draft\"; spec/app/inbox/suggestion.md, \"Story: Review what is offered into my email\"; spec/app/inbox/sending.md, \"Story: Save my draft to Gmail, or delete it there, knowingly\")", async () => {

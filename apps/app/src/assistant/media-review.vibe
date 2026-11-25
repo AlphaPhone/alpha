@@ -1,13 +1,15 @@
 // spec/app/approvals/index.md, "Story: One action at a time"; spec/app/approvals/proposal.md, "Story: Decide"; spec/app/photos/agent.md, "Story: Let Alpha read my library"; spec/app/phone/comms.md, "Story: Approve what Alpha proposes, one thing at a time"; spec/app/messages/composer.md, "The agent's draft goes into the open conversation's draft only while it is empty, and never sends"
 import { DeviceExecution, NOT_DISPATCHED, type DeviceAgent, type ExecutorCall, type JournalIdentity, type RuntimeRequestHeaders } from "@elizaos/agent"
-import { readOperation, type DeviceOperation } from "@elizaos/agent"
+import { mayRunDirectly, readOperation, type DeviceOperation } from "@elizaos/agent"
 import { filterLabel } from "@elizaos/plugin-files-client"
 import { Machine as Conversation } from "../../gen/app__assistant.effect.vibe"
 import { Machine as Chats } from "../../gen/app__assistant__chats.effect.vibe"
 import { Machine as Messages } from "../../gen/app__messages.effect.vibe"
 import { Machine as Shell, showing } from "../../gen/app__shell.effect.vibe"
-import type { FileReview } from "../files/agent.vibe"
-import type { MessageDraftTarget } from "../messages/agent.vibe"
+import * as Layers from "../../gen/app__shell__layers.effect.vibe"
+import * as Prefs from "../../gen/app__settings__preferences.effect.vibe"
+import type { FileActionReport, FileReview, FilesReadContext } from "../files/agent.vibe"
+import { composeRecipient, reviewedCompose, type MessageDraftTarget } from "../messages/agent.vibe"
 import { readAgentSms } from "../messages/agent-send.vibe"
 import { currentSmsSelection, type MessageSmsRequest, type SmsSelection, type SmsSelectionContext } from "../messages/agent-sim.vibe"
 import { notesOperation, notesOperationWords } from "../notes/device-actions.vibe"
@@ -23,7 +25,8 @@ import { Talk } from "./talk.vibe"
 export service MediaExecutors {
   execute(operation: DeviceOperation, call: ExecutorCall, authority: ReviewAuthority): unknown!!
   reviewFiles(operation: DeviceOperation): (FileReview | undefined)!!
-  static readonly defaultValue = () => ({ execute: () => succeed({ kind: "refused", code: NOT_DISPATCHED }), reviewFiles: () => succeed(undefined) })
+  filesContext(): (FilesReadContext | undefined)!!
+  static readonly defaultValue = () => ({ execute: () => succeed({ kind: "refused", code: NOT_DISPATCHED }), reviewFiles: () => succeed(undefined), filesContext: () => succeed(undefined) })
 }
 
 // spec/app/assistant/context.md, "A turn carries the page Browser hands it for the tab in front, beside the observation, only to a peer that declares it"
@@ -35,17 +38,21 @@ export service ShownPage {
 
 export interface ReviewAuthority {
   readonly current: () => Promise<boolean>
+  readonly continueDraft?: () => Promise<boolean>
   readonly target?: MessageDraftTarget
   readonly sms?: SmsSelection
   readonly files?: FileReview
+  readonly reportFiles?: (outcome: FileActionReport) => void
   readonly phone?: ReviewedPhoneContact
 }
 
 interface ApprovalScope {
   readonly active: boolean!!
+  readonly continueDraft?: boolean!!
   readonly target?: MessageDraftTarget
   readonly sms?: SmsSelection
   readonly files?: FileReview
+  readonly reportFiles?: (outcome: FileActionReport) => void
   readonly phone?: ReviewedPhoneContact
 }
 
@@ -127,29 +134,108 @@ const phoneCapabilities = ["phone.keypad.v1", "phone.dial.v1", "phone.call.v1", 
 
 const needsMessage = (operation: DeviceOperation): boolean => operation.type === "sms_reply_selected" || operation.type === "messages_read_selected"
 
+export type DirectFilesOperation = Extract<DeviceOperation, { type: "files_filter" | "files_open" }>
+
+interface DirectFiles {
+  readonly operation: DirectFilesOperation
+  readonly files: FilesReadContext
+  readonly current: Effect.Effect<boolean>
+  readonly report: (note: string) => void
+}
+
+type DirectFilesTarget = Pick<MediaCard, "id" | "digest" | "expiresAt" | "operation" | "files">
+
 interface DeviceActionReply {
+  readonly directFiles?: DirectFiles
   readonly clientMessageId: string
   readonly sms?: MessageSmsRequest
   readonly actionResults: readonly { readonly action: string; readonly data: unknown }[]
 }
 
-/** The resident can repeat a still-pending proposal for this chat. It still needs fresh owner review. */
-function reviewedDeviceActions(actions: DeviceActionReply["actionResults"]): ReadonlySet<string> {
-  const kept = new Set<string>()
+function literal(value: string): string {
+  return value.trim().replace(/^(?:"([^"]*)"|“([^”]*)”)$/, (_match, straight: string | undefined, curved: string | undefined) => straight ?? curved ?? "")
+}
+
+const fileFilterWords = { image: ["images", "photos"], video: ["videos"], audio: ["audio", "audio files"], document: ["documents"], pdf: ["pdfs"], folder: ["folders"] }
+
+/** The owner’s exact Files command, parsed before the turn may ask the agent to act directly. */
+export function requestedFilesOperation(authored: string): DirectFilesOperation | undefined {
+  const command = authored.trim().replace(/^(?:(?:hey )?alpha[,\s]+)?(?:(?:could|can|would) you\s+)?(?:please\s+)?/i, "")
+  const open = /^open (?:the )?(.+?)(?: in Files)?[!?]?$/i.exec(command)
+  if (open?.[1] !== undefined) {
+    const name = open[1].replace(/^file (?=["“])/i, "").replace(/\.$/, "")
+    const position = /^(?:item|result|file) (\d+)$/i.exec(name)
+    const path = literal(name)
+    const namedFile = path !== name || path.includes("/") || /\.[A-Za-z0-9]{1,12}$/.test(path) || / in Files[.!?]?$/i.test(command)
+    if (position === null && !namedFile) return undefined
+    const decoded = readOperation(position === null
+      ? { type: "files_open", path } : { type: "files_open", shown: Number(position[1]) })?.operation
+    return decoded?.type === "files_open" ? decoded : undefined
+  }
+  const filter = /^(?:show|find|filter)(?: me)? (.+?)\s*[!?]?$/i.exec(command)
+  if (filter?.[1] === undefined) return undefined
+  const terms = /^(.*?)(?: (?:matching|named|containing) ("[^"]+"|“[^”]+”|.+?))?(?: in ("[^"]+"|“[^”]+”|.+?))?(?: from (\S+))?(?: to (\S+))?$/i.exec(filter[1].replace(/\.$/, ""))
+  if (terms === null) return undefined
+  const [, kind, search, folder, from, to] = terms
+  const item = kind?.toLowerCase()
+  const category = Object.entries(fileFilterWords).find(([, names]) => names.some((name) => name === item))?.[0]
+  if (category === undefined && item !== "files") return undefined
+  const place = folder === undefined ? undefined : literal(folder)
+  const decoded = readOperation({ type: "files_filter", ...(category === undefined ? {} : { kind: category }),
+    ...(search === undefined ? {} : { text: literal(search) }), ...(place === undefined ? {} : { folder: place === "Internal storage" ? "" : place }),
+    ...(from === undefined ? {} : { from }), ...(to === undefined ? {} : { to }) })?.operation
+  return decoded?.type === "files_filter" ? decoded : undefined
+}
+
+function sameFileOperation(expected: DirectFilesOperation, actual: DeviceOperation): boolean {
+  if (expected.type === "files_open" && actual.type === "files_open") {
+    return "path" in expected ? "path" in actual && expected.path === actual.path : "shown" in actual && expected.shown === actual.shown
+  }
+  return expected.type === "files_filter" && actual.type === "files_filter" && expected.kind === actual.kind
+    && expected.text === actual.text && expected.folder === actual.folder && expected.from === actual.from && expected.to === actual.to
+}
+
+export function sameFiles(before: FilesReadContext, after: FilesReadContext | undefined): boolean {
+  if (after === undefined || before.listing !== after.listing || before.search !== after.search) return false
+  const { where } = before
+  const now = after.where
+  return where.inCategory === now.inCategory && where.category === now.category && where.trail.length === now.trail.length
+    && where.trail.every((one, index) => one === now.trail[index])
+}
+
+type ReplyAction = "Review" | "Direct" | "Conflicted"
+
+/** The resident's review and direct-execution terminals bind distinct authorities to a fresh reply. */
+function repliedDeviceActions(actions: DeviceActionReply["actionResults"]): ReadonlyMap<string, ReplyAction> {
+  const kept = new Map<string, ReplyAction>()
   for (const { action, data } of actions) {
-    if (action !== "PROPOSE_DEVICE_ACTION" || typeof data !== "object" || data === null) continue
-    if ("proposalId" in data && typeof data.proposalId === "string" && /^[A-Za-z0-9_-]{1,128}$/.test(data.proposalId)
-      && "state" in data && data.state === "pending" && "executed" in data && data.executed === false
-      && "approvalRequired" in data && data.approvalRequired === true && "awaitingUserInput" in data && data.awaitingUserInput === true) {
-      kept.add(data.proposalId)
-    }
+    if (action !== "PROPOSE_DEVICE_ACTION" || typeof data !== "object" || data === null
+      || !("proposalId" in data) || typeof data.proposalId !== "string" || !/^[A-Za-z0-9_-]{1,128}$/.test(data.proposalId)
+      || !("state" in data) || data.state !== "pending" || !("executed" in data) || data.executed !== false
+      || !("approvalRequired" in data)) continue
+    const direct = "directRequest" in data && data.directRequest === true
+    const awaiting = "awaitingDeviceExecution" in data && data.awaitingDeviceExecution === true
+    const input = "awaitingUserInput" in data && data.awaitingUserInput === true
+    const kind = data.approvalRequired === true && input && !direct && !awaiting ? "Review"
+      : data.approvalRequired === false && direct && awaiting && !input ? "Direct" : "Conflicted"
+    const previous = kept.get(data.proposalId)
+    kept.set(data.proposalId, previous === undefined || previous === kind ? kind : "Conflicted")
   }
   return kept
 }
 
-function commsFromReply(proposal: Proposal, opened: Session, actions: ReadonlySet<string>): boolean {
-  return proposal.payload.requestMessageId === undefined && actions.has(proposal.id)
-    && proposal.payload.installationId === opened.identity.installationId && proposal.payload.enrollmentId === opened.identity.enrollmentId
+function fromThisEnrollment(proposal: Proposal, opened: Session): boolean {
+  return proposal.payload.installationId === opened.identity.installationId && proposal.payload.enrollmentId === opened.identity.enrollmentId
+}
+
+function reviewFromReply(proposal: Proposal, opened: Session, actions: ReadonlyMap<string, ReplyAction>): boolean {
+  return proposal.payload.requestMessageId === undefined && actions.get(proposal.id) === "Review" && fromThisEnrollment(proposal, opened)
+}
+
+export function namedReviewQuery(operation: DeviceOperation): string | undefined {
+  if (operation.type !== "sms_compose" || !reviewedCompose(operation)) return phoneQuery(operation)
+  const recipient = composeRecipient(operation)
+  return recipient.kind === "contact" ? recipient.query.trim() : undefined
 }
 
 function commsReview(operation: DeviceOperation): boolean {
@@ -158,7 +244,7 @@ function commsReview(operation: DeviceOperation): boolean {
     case "sms_send": return true
     case "phone_dial":
     case "phone_call": return operation.target.kind === "number" || operation.target.kind === "contact"
-    case "sms_compose": return "draft" in operation && operation.draft === true && operation.target.kind === "number" && operation.replyThreadId === undefined
+    case "sms_compose": return reviewedCompose(operation)
     default: return false
   }
 }
@@ -179,6 +265,16 @@ export interface MediaCard {
   readonly files?: FileReview
   readonly reviewRequest?: string
   readonly phone?: NamedPhoneReview
+}
+
+function visibleCards(entries: readonly ({ card: MediaCard; fromTerminal: boolean } | undefined)[], terminalCurrent: boolean): readonly MediaCard[] {
+  const firstRead = entries.find((entry) => entry?.card.operation.type === "messages_read_selected")?.card
+  const visible: MediaCard[] = []
+  for (const entry of entries) {
+    if (entry === undefined || (entry.fromTerminal && !terminalCurrent)) continue
+    if (entry.card.operation.type !== "messages_read_selected" || entry.card === firstRead) visible.push(entry.card)
+  }
+  return visible
 }
 
 interface Session {
@@ -203,7 +299,7 @@ function operation(raw: unknown) {
     case "phone_call":
       return value.target.kind === "number" || value.target.kind === "contact" ? value : undefined
     case "sms_compose":
-      return "draft" in value && value.draft === true && value.target.kind === "number" && value.replyThreadId === undefined ? value : undefined
+      return reviewedCompose(value) ? value : undefined
     case "camera_capture_photo":
     case "photos_filter":
     case "photos_open":
@@ -230,6 +326,11 @@ function operation(raw: unknown) {
   }
 }
 
+function composeDetails(value: Extract<DeviceOperation, { type: "sms_compose" }>, recipient: string): string {
+  const draftOnly = "draft" in value && value.draft === true
+  return `${recipient}\n${value.body}${draftOnly ? "" : "\nTap Send in Messages when you’re ready."}`
+}
+
 function words(value: NonNullable<ReturnType<typeof operation>>): { title: string; detail: string } {
   switch (value.type) {
     case "notes_move":
@@ -241,7 +342,11 @@ function words(value: NonNullable<ReturnType<typeof operation>>): { title: strin
     case "sms_reply_selected": return { title: "Draft a reply in Messages", detail: value.body }
     case "messages_read_selected": return { title: "Share open messages", detail: "Share up to 20 recent messages from the open conversation with the agent." }
     case "sms_send": return { title: "Review this text on your phone", detail: `${value.recipients.join(", ")}\n${value.body}\nConfirm the text and SIM in Android to send it.` }
-    case "sms_compose": return { title: `Draft a text to ${"target" in value && value.target.kind === "number" ? value.target.number : "the recipient"}`, detail: value.body }
+    case "sms_compose": {
+      const recipient = composeRecipient(value)
+      const label = recipient.kind === "number" ? displayNumber(recipient.number) : recipient.query
+      return { title: "Open an editable text draft", detail: composeDetails(value, label) }
+    }
     case "camera_capture_photo": return { title: "Take a photo", detail: value.lens === undefined ? "Open the viewfinder to review the shot" : `Open the ${value.lens === "front" ? "front" : "rear"} camera to review the shot` }
     case "photos_filter": return { title: "Filter Photos", detail: value.text ?? "Show the requested photos in your library" }
     case "photos_open": return { title: "Open a photo", detail: "Show the requested item in Photos" }
@@ -265,6 +370,8 @@ function words(value: NonNullable<ReturnType<typeof operation>>): { title: strin
 /** Enrollment and the proposal protocol share the same live resident identity. */
 export service MediaReview {
   session(): (Session | undefined)!!
+  filesContext(): (FilesReadContext | undefined)!!
+  spokenFiles(session: Session, message: string, request: DirectFiles, actions: DeviceActionReply["actionResults"]): boolean!!
   messageTarget(): (MessageDraftTarget | undefined)!!
   pending(session: Session, message: string, conversation: number, revision: number, target: MessageDraftTarget | undefined, reply: DeviceActionReply): readonly MediaCard[]!!Conversation
   choosePhone(card: MediaCard, choice: number): void!!(Talk | Conversation | Chats)
@@ -300,7 +407,7 @@ type Action = (op: DeviceOperation, call: ExecutorCall) => Promise<unknown>
 
 effect function enrolled(epoch: number, owner: string, image: boolean, runtime: Runtime, executeAction: Action, readBack: Action): Session!unknown {
   const offer = try Schema.decodeUnknownEffect(protocol)(try tryPromise(() => runtime.request(`${prefix}/capabilities`)))
-  if (offer.identityId !== owner) throw new EnrollmentRefused({ reason: "Device owner changed" })
+  if (offer.agentId !== owner) throw new EnrollmentRefused({ reason: "Device agent changed" })
   const origin = "https://device.alpha.invalid"
   const slot = try tryPromise(() => slotFor([origin, owner, offer.agentId]))
   const { key } = try tryPromise(() => enrollment().enrollmentKey({ slot }))
@@ -322,7 +429,7 @@ effect function enrolled(epoch: number, owner: string, image: boolean, runtime: 
     raw = try tryPromise(() => runtime.request(`${prefix}/context`, undefined, headers))
   }
   const confirmed = try Schema.decodeUnknownEffect(context)(raw)
-  if (confirmed.subjectUserId !== owner || confirmed.agentId !== offer.agentId || confirmed.installationId !== offer.agentId) throw new EnrollmentRefused({ reason: "Device scope changed" })
+  if (confirmed.subjectUserId !== offer.identityId || confirmed.agentId !== offer.agentId || confirmed.installationId !== offer.agentId) throw new EnrollmentRefused({ reason: "Device scope changed" })
   const identity = { origin, ownerId: owner, ...confirmed }
   const agent = routes(runtime, headers)
   const execute = new DeviceExecution<DeviceOperation>({
@@ -333,9 +440,20 @@ effect function enrolled(epoch: number, owner: string, image: boolean, runtime: 
   return { epoch, identity, headers, execute, decide: agent.decide }
 }
 
+function filesCompletion(outcome: FileActionReport, synced: boolean): string {
+  const pending = synced ? "" : " Agent receipt pending."
+  if (outcome.kind === "Filter") {
+    const count = `${outcome.count} ${outcome.count === 1 ? "item" : "items"}`
+    return (outcome.complete ? `Showing ${count} in Files.` : `Files could not finish this search. Showing ${count} from the folders read.`) + pending
+  }
+  const destination = outcome.kind === "Trash" ? " to Trash" : ""
+  return `Moved ${outcome.done} of ${outcome.requested}${destination}.${pending}`
+}
+
 function completion(op: DeviceOperation, synced: boolean): string {
   switch (op.type) {
     case "sms_send": return synced ? "Android accepted the text request." : "Android accepted the text request. Agent receipt pending."
+    case "sms_compose": return synced ? "Your editable draft is ready in Messages." : "Your draft is ready in Messages. Agent receipt pending."
     case "messages_read_selected": return synced ? "Shared the open messages with the agent." : "Open messages prepared. Agent receipt pending."
     case "photos_album_create":
     case "photos_share":
@@ -363,6 +481,8 @@ export const mediaReview = Layer.effect(MediaReview, effect {
   const telephony = try Telephony
   const messages = try Messages
   const shell = try Shell
+  const layers = try Layers.Machine
+  const preferences = try Prefs.Machine
   const smsContext = try Effect.context<SmsSelectionContext>()
   const sameSms = (selection: SmsSelection) => Effect.provideContext(currentSmsSelection(selection), smsContext)
   const lock = try Semaphore.make(1)
@@ -372,12 +492,22 @@ export const mediaReview = Layer.effect(MediaReview, effect {
   const guarded = (operation: DeviceOperation, call: ExecutorCall) => runPromise(effect {
     const scope = scopes.get(call.proposalId)
     if (scope === undefined || !(try scope.active)) return { kind: "refused", code: NOT_DISPATCHED }
+    const continueDraft = scope.continueDraft
     return try executors.execute(operation, call, { current: () => runPromise(scope.active), ...(scope.target === undefined ? {} : { target: scope.target }),
-      ...(scope.sms === undefined ? {} : { sms: scope.sms }), ...(scope.files === undefined ? {} : { files: scope.files }), ...(scope.phone === undefined ? {} : { phone: scope.phone }) })
+      ...(continueDraft === undefined ? {} : { continueDraft: () => runPromise(continueDraft) }),
+      ...(scope.sms === undefined ? {} : { sms: scope.sms }), ...(scope.files === undefined ? {} : { files: scope.files }),
+      ...(scope.reportFiles === undefined ? {} : { reportFiles: scope.reportFiles }), ...(scope.phone === undefined ? {} : { phone: scope.phone }) })
   })
   const readBack = (operation: DeviceOperation, call: ExecutorCall) => operation.type === "sms_send"
     ? runPromise(readAgentSms(operation, call) |> Effect.provideService(%, Device, device) |> Effect.provideService(%, Telephony, telephony))
     : Promise.resolve(undefined)
+  // spec/app/files/index.md, "An explicit request to open or filter Files may act directly on the same idle Files view"
+  effect function filesContext(): (FilesReadContext | undefined)!! {
+    const prefs = try preferences.get()
+    if (!Prefs.free(prefs) || Prefs.asksBeforeActing(prefs, "FilesAction")
+      || !(try device.showing()) || !showing(try shell.get(), "Files") || Layers.pageInert(try layers.get())) return undefined
+    return try executors.filesContext()
+  }
   effect function messageTarget(): (MessageDraftTarget | undefined)!! {
     if (!(try device.showing()) || !showing(try shell.get(), "Messages")) return undefined
     const state = try messages.get()
@@ -407,11 +537,40 @@ export const mediaReview = Layer.effect(MediaReview, effect {
     const front = (tryPromise(() => enrollment().authority()) |> map(%, (one) => one.active === true)) catch () => false
     return status?.state === "running" && status.epoch === opened.epoch && owner === opened.identity.ownerId && front && (try device.showing())
   }
-  effect function reviewContext(revision: number): boolean!!Conversation {
-    const conversation = try Conversation
+  effect function reviewContext(revision: number, conversation: Conversation.Shape): boolean!! {
     const showing = (try conversation.get()).context
     const { assistant } = try shell.get()
     return showing.revision === revision && !showing.sensitive && (assistant === "Sheet" || assistant === "Full") && (try device.showing())
+  }
+  effect function actOnFiles(opened: Session, card: DirectFilesTarget, request: DirectFiles): boolean!! {
+    return try lock.withPermits(1)(effect {
+      const matching = effect {
+        return opened === latest && (try request.current)
+          && (try Clock.currentTimeMillis) < card.expiresAt && sameFiles(request.files, try filesContext())
+      }
+      const active = effect { return (try matching) && (try enrollmentIsCurrent(opened)) && (try matching) }
+      if (!(try active)) return false
+      const { id, digest, expiresAt, operation } = card
+      const checked = readOperation(operation)
+      const requestEligible = checked !== undefined && mayRunDirectly(checked, "NoBinding", true)
+      const forceReview = Prefs.asksBeforeActing(try preferences.get(), "FilesAction")
+      if (!requestEligible || forceReview) return false
+      let filesOutcome: FileActionReport | undefined
+      scopes.set(id, { active, reportFiles: (outcome) => { filesOutcome = outcome }, ...(card.files === undefined ? {} : { files: card.files }) })
+      const done = (tryPromise(() => opened.execute.approve({ id, digest, expiresAt, operation }, {
+          live: true, nonsensitive: true, exact: true, forceReview, requestEligible, reviewed: false,
+        })) |> ensuring(%, sync(() => { scopes.delete(id) }))) catch () => undefined
+      if (done?.kind === "noAuthority" || done?.kind === "invalid") return false
+      if (try request.current) {
+        const note = done?.kind !== "settled" ? notStarted
+          : done.result.tag === "Unknown" ? "The result could not be confirmed. Check before trying again."
+          : filesOutcome !== undefined ? filesCompletion(filesOutcome, done.synced)
+          : done.result.tag === "Applied" ? done.synced ? "Opened the requested item in Files." : "Opened the requested item in Files. Agent receipt pending."
+          : "Nothing changed."
+        request.report(note)
+      }
+      return true
+    })
   }
   effect function hasReceipt(opened: Session, proposal: Proposal): boolean!! {
     if (proposal.execution === undefined) return false
@@ -472,13 +631,34 @@ export const mediaReview = Layer.effect(MediaReview, effect {
       })
     },
     messageTarget,
+    filesContext,
+    effect spokenFiles(opened, message, request, results) {
+      const actions = repliedDeviceActions(results)
+      if (![...actions.values()].some((action) => action === "Direct") || !(try request.current)) return false
+      const answer = try proposals(opened)
+      const at = try Clock.currentTimeMillis
+      const matching = answer?.filter((proposal) => proposal.state === "pending" && proposal.payload.workflow === undefined
+        && proposal.payload.requestMessageId === message && actions.get(proposal.id) === "Direct" && fromThisEnrollment(proposal, opened)
+        && Date.parse(proposal.expiresAt) > at)
+      if (matching === undefined || matching.length !== 1) return false
+      const offer = matching[0]
+      if (offer === undefined) return false
+      const exact = readOperation(offer.payload.operation)
+      if (exact === undefined || !sameFileOperation(request.operation, exact.operation) || !mayRunDirectly(exact, "NoBinding", true)) return false
+      const op = exact.operation
+      const files = op.type === "files_open" ? try executors.reviewFiles(op) : undefined
+      if (op.type === "files_open" && files === undefined) return false
+      return try actOnFiles(opened, { id: offer.id, digest: offer.digest, expiresAt: Date.parse(offer.expiresAt), operation: op,
+        ...(files === undefined ? {} : { files }) }, request)
+    },
     effect pending(opened: Session, message: string, conversation: number, revision: number, target: MessageDraftTarget | undefined, reply: DeviceActionReply) {
+      const view = try Conversation
       const answer = try proposals(opened)
       if (answer === undefined) return []
       const bound = sameTarget(target, try messageTarget()) ? target : undefined
-      const actions = reviewedDeviceActions(reply.actionResults)
-      const currentReview = answer.some((proposal) => commsFromReply(proposal, opened, actions)) && (try reviewContext(revision))
-        && (try enrollmentIsCurrent(opened)) && opened === latest && (try reviewContext(revision))
+      const actions = repliedDeviceActions(reply.actionResults)
+      const currentReview = answer.some((proposal) => reviewFromReply(proposal, opened, actions)) && (try reviewContext(revision, view))
+        && (try enrollmentIsCurrent(opened)) && opened === latest && (try reviewContext(revision, view))
       const at = try Clock.currentTimeMillis
       for (const [id, pin] of pinnedFiles) if (pin.expiresAt <= at) pinnedFiles.delete(id)
       const cards = try Effect.forEach(answer, effect (proposal) => {
@@ -486,9 +666,12 @@ export const mediaReview = Layer.effect(MediaReview, effect {
         const op = operation(proposal.payload.operation)
         const expiresAt = Date.parse(proposal.expiresAt)
         if (op === undefined || !Number.isFinite(expiresAt) || expiresAt <= at) return undefined
-        const comms = commsReview(op)
+        const filesOperation = op.type.startsWith("files_")
         const request = proposal.payload.requestMessageId
-        if (request === undefined ? !(comms && currentReview && commsFromReply(proposal, opened, actions)) : request !== message) return undefined
+        if (request === undefined) {
+          if (!(commsReview(op) || filesOperation) || !currentReview || !reviewFromReply(proposal, opened, actions)) return undefined
+        } else if (request !== message || (filesOperation && (!fromThisEnrollment(proposal, opened)
+          || (actions.get(proposal.id) !== "Review" && actions.get(proposal.id) !== "Direct")))) return undefined
         const selected = needsMessage(op)
         if (selected && bound === undefined) return undefined
         const sms = op.type === "sms_send" ? reply.sms?.selection : undefined
@@ -510,46 +693,56 @@ export const mediaReview = Layer.effect(MediaReview, effect {
         }
         const detail = words(op)
         const labelled = sms === undefined ? detail : { ...detail, detail: `SIM ${sms.subscription.slot + 1}\n${detail.detail}` }
-        const query = phoneQuery(op)
-        if (query !== undefined && (!(try reviewContext(revision)) || !(try enrollmentIsCurrent(opened)) || !(try reviewContext(revision)))) return undefined
+        const query = namedReviewQuery(op)
+        if (query !== undefined && (!(try reviewContext(revision, view)) || !(try enrollmentIsCurrent(opened)) || !(try reviewContext(revision, view)))) return undefined
         const phone = query === undefined ? undefined : try Effect.provideService(phoneContactChoices(query), Telephony, telephony)
-        if (phone !== undefined && (opened !== latest || !(try reviewContext(revision)))) return undefined
+        if (phone !== undefined && (opened !== latest || !(try reviewContext(revision, view)))) return undefined
         const card: MediaCard = { id: proposal.id, digest: proposal.digest, operation: op, expiresAt, message, conversation, revision, enrollmentId: opened.identity.enrollmentId, ...labelled,
           ...(selected && bound !== undefined ? { target: bound } : {}),
           ...(sms === undefined ? {} : { sms }),
-          ...(request === undefined || phone !== undefined ? { reviewRequest: reply.clientMessageId } : {}),
+          ...(request === undefined || filesOperation || phone !== undefined || op.type === "sms_compose" ? { reviewRequest: reply.clientMessageId } : {}),
           ...(phone === undefined ? {} : { phone }),
           ...(files === undefined ? {} : { files, detail: op.type === "files_folder_create" ? labelled.detail : files.targets.map((target) => target.path).join(", ")
             + (op.type === "files_move" ? ` → ${op.dest || "Internal storage"}` : "") }) }
         return { card, fromTerminal: request === undefined }
       }, { concurrency: 4 })
-      const firstRead = cards.find((entry) => entry?.card.operation.type === "messages_read_selected")?.card
-      const shown: MediaCard[] = []
-      const stillShowing = currentReview && opened === latest && (try reviewContext(revision))
-      for (const entry of cards) {
-        if (entry === undefined || (entry.fromTerminal && !stillShowing)) continue
-        if (entry.card.operation.type !== "messages_read_selected" || entry.card === firstRead) shown.push(entry.card)
-      }
-      return shown
+      const visible = visibleCards(cards, currentReview && opened === latest && (try reviewContext(revision, view)))
+      const owner = reply.directFiles
+      if (owner === undefined || !(try owner.current)) return visible
+      const direct = visible.find((card) => {
+        const proposal = answer.find((one) => one.id === card.id)
+        if (proposal?.payload.requestMessageId !== message || actions.get(card.id) !== "Direct"
+          || !fromThisEnrollment(proposal, opened) || !sameFileOperation(owner.operation, card.operation)) return false
+        const exact = readOperation(proposal.payload.operation)
+        return exact !== undefined && mayRunDirectly(exact, "NoBinding", true)
+      })
+      if (direct === undefined) return visible
+      const current = effect { return (try owner.current) && (try reviewContext(revision, view)) }
+      return (try actOnFiles(opened, direct, { ...owner, current })) ? visible.filter((card) => card !== direct) : visible
     },
     effect choosePhone(card: MediaCard, choice: number) {
       const { board } = try Talk
+      const view = try Conversation
       const chats = try Chats
       const option = card.phone?.tag === "Choices" ? card.phone.options[choice] : undefined
-      const query = phoneQuery(card.operation)
+      const query = namedReviewQuery(card.operation)
       if (option === undefined || query === undefined) return
       effect function shown(opened: Session): boolean!! {
         const time = try Clock.currentTimeMillis
         return opened === latest && card.enrollmentId === opened.identity.enrollmentId
           && board.snapshot().media.includes(card) && card.conversation === (try chats.get()).chosen
-          && card.reviewRequest === board.lastSentId && time < card.expiresAt && (try reviewContext(card.revision))
+          && card.reviewRequest === board.lastSentId && time < card.expiresAt && (try reviewContext(card.revision, view))
       }
       try lock.withPermits(1)(effect {
         const opened = try session()
         if (opened === undefined || !(try shown(opened)) || !(try enrollmentIsCurrent(opened)) || !(try shown(opened))) return
         const phone = try Effect.provideService(pickPhoneContact(query, option), Telephony, telephony)
         if (!(try enrollmentIsCurrent(opened)) || !(try shown(opened))) return
-        const detail = phone.tag === "Exact" ? `${phone.selected.name} · ${displayNumber(phone.selected.number)}` : card.detail
+        let detail = card.detail
+        if (phone.tag === "Exact") {
+          const identity = `${phone.selected.name} · ${displayNumber(phone.selected.number)}`
+          detail = card.operation.type === "sms_compose" ? composeDetails(card.operation, identity) : identity
+        }
         board.change({ media: board.snapshot().media.map((one) => one === card ? { ...card, phone, detail } : one) })
       })
     },
@@ -564,14 +757,24 @@ export const mediaReview = Layer.effect(MediaReview, effect {
         if (session !== latest || (card.target !== undefined && !sameTarget(card.target, try messageTarget())) || (card.sms !== undefined && !(try sameSms(card.sms)))
           || card.enrollmentId !== session.identity.enrollmentId || card.conversation !== chosen
           || card.revision !== showing.revision || showing.sensitive || time >= card.expiresAt) return false
-        return card.reviewRequest === undefined || (board.lastSentId === card.reviewRequest && (try reviewContext(card.revision)))
+        return card.reviewRequest === undefined || (board.lastSentId === card.reviewRequest && (try reviewContext(card.revision, conversation)))
       }
       effect function current(session: Session): boolean!! {
         return (try matches(session)) && (try enrollmentIsCurrent(session)) && (try matches(session))
       }
+      effect function canStage(session: Session): boolean!! {
+        const context = (try conversation.get()).context
+        const where = try shell.get()
+        return session === latest && card.enrollmentId === session.identity.enrollmentId && card.conversation === (try chats.get()).chosen
+          && card.reviewRequest !== undefined && card.reviewRequest === board.lastSentId && !context.sensitive && (try Clock.currentTimeMillis) < card.expiresAt
+          && showing(where, "Messages") && (where.assistant === "Sheet" || where.assistant === "Full") && (try device.showing())
+      }
+      effect function continueDraft(session: Session): boolean!! {
+        return (try canStage(session)) && (try enrollmentIsCurrent(session)) && (try canStage(session))
+      }
       try lock.withPermits(1)(effect {
         const unasked = directly && approve && direct(card)
-        if ((!unasked && !board.snapshot().media.includes(card)) || (approve && phoneQuery(card.operation) !== undefined && card.phone?.tag !== "Exact")) return
+        if ((!unasked && !board.snapshot().media.includes(card)) || (approve && namedReviewQuery(card.operation) !== undefined && card.phone?.tag !== "Exact")) return
         const held = try session()
         const live = held !== undefined && (try current(held))
         if (card.phone !== undefined && !board.snapshot().media.includes(card)) return
@@ -583,14 +786,17 @@ export const mediaReview = Layer.effect(MediaReview, effect {
           report(declined === undefined ? "Alpha couldn’t confirm the decline." : "Declined")
           return
         }
-        scopes.set(card.id, { active: current(held), ...(card.target === undefined ? {} : { target: card.target }), ...(card.files === undefined ? {} : { files: card.files }),
+        let filesOutcome: FileActionReport | undefined
+        scopes.set(card.id, { active: current(held), reportFiles: (outcome) => { filesOutcome = outcome }, ...(card.operation.type === "sms_compose" ? { continueDraft: continueDraft(held) } : {}), ...(card.target === undefined ? {} : { target: card.target }), ...(card.files === undefined ? {} : { files: card.files }),
           ...(card.sms === undefined ? {} : { sms: card.sms }), ...(card.phone?.tag === "Exact" ? { phone: card.phone.selected } : {}) })
         const { id, digest, expiresAt, operation } = card
         const screen = unasked ? { forceReview: false, reviewed: false } : { forceReview: true, reviewed: true }
         const result = (tryPromise(() => held.execute.approve({ id, digest, expiresAt, operation }, { live: true, nonsensitive: true, exact: true, requestEligible: true, ...screen }))
           |> ensuring(%, sync(() => { scopes.delete(card.id) }))) catch () => undefined
-        const note = result?.kind !== "settled" ? notStarted : result.result.tag === "Applied" ? completion(card.operation, result.synced)
-          : result.result.tag === "Unknown" ? "The result could not be confirmed. Check before trying again." : "Nothing changed."
+        const note = result?.kind !== "settled" ? notStarted
+          : result.result.tag === "Unknown" ? "The result could not be confirmed. Check before trying again."
+          : filesOutcome !== undefined ? filesCompletion(filesOutcome, result.synced)
+          : result.result.tag === "Applied" ? completion(card.operation, result.synced) : "Nothing changed."
         report(note)
       })
     },

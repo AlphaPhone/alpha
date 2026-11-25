@@ -1,4 +1,5 @@
 // spec/app/files/preview.md, "Story: Look at a file"; spec/app/files/preview.md, "Story: Act on the file I am looking at"; spec/app/files/preview.md, "Story: Get a file back when access was lost"; spec/app/files/recent.md, "Story: Find what I opened lately"
+import { validName } from "@elizaos/plugin-files-client";
 import { Alert, Button, Dialog, DialogContent, DialogTitle, FilesRow, Input, Menu, MenuContent, MenuItem, MenuTrigger, Spinner } from "@repo/ui";
 import { Effect, Option, type ManagedRuntime } from "effect";
 import { useState } from "react";
@@ -79,7 +80,6 @@ export function Preview({ runtime }: PreviewProps) {
   const editName = pickedRename
     ? { type: "renamePicked", name: nextName, renameable: true } as const
     : { type: "actOnStoredFile", operation: "RenameFile", name: nextName, stored: ownFile } as const;
-  const validName = (proposed: string) => proposed.length > 0 && proposed.length <= 255 && proposed !== "." && proposed !== ".." && /^[^/\\\u0000-\u001f\u007f]+$/u.test(proposed);
   const renaming = (ownFile || pickedRename) && rename?.viewer === state.viewer && rename.revision === state.revision;
   const showRename = owner({ ...editName, name: "/" });
   const place = file?.storage;
