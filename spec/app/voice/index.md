@@ -139,6 +139,20 @@ pure def releaseOut(v: Voice): List[Effect] =
 pure def onNetwork(r: R::Route, now: int): bool = R::way(r, now) != R::OnPhone
 ```
 
+### On-device Talk audio stays in the current owner's native capture and resident recognizer
+
+When Talk asks to open the microphone on the phone's speech route, Android
+checks that its native speech engine and resident route are available.
+An unavailable route ends the start quietly without opening the microphone.
+The native worker binds the capture to the calling phone's signed-in owner
+and to the resident's current launch epoch. The resident reports its
+actual owner and engine readiness before the worker sends any audio. Every batch and receipt must
+still belong to that account and launch. Only the transcript returns to
+the conversation. Stop discards or drains the worker's outstanding audio
+under the same authority, and a stopped or replaced owner gets no late
+transcript. The on-device speech route needs no network. The transcript
+is still sent to the agent as a text turn using its configured backend.
+
 ### The speech pipeline warms on startup, foreground return and account readiness without opening the microphone
 
 Warming prepares on-device speech output and cached status probes, and the

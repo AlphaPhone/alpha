@@ -16,7 +16,7 @@ import { agentOpen } from "../src/notes/agent.vibe";
 import { numberOf } from "../src/notes/content.vibe";
 import notes from "../src/notes/index.tsx";
 import { untimed } from "../src/runtime/reactor.vibe";
-import { button, closeAll, drawn, fill, only, open, press, pressOnTop, underAct, until } from "./alpha.tsx";
+import { button, closeAll, drawn, fill, hardware, only, open, press, pressOnTop, underAct, until } from "./alpha.tsx";
 import { note, prepared } from "./fakes/notes.ts";
 import { scene } from "./fakes/scene.ts";
 
@@ -225,6 +225,15 @@ describe("Notes", () => {
       { s: "me", t: "The door closes at dusk.", at: 0 },
       { s: "me", t: "Send a reminder on Thursday.", at: 25 },
     ]);
+
+    // spec/app/notes/voice.md, "Story: Leave a voice note"
+    await press("Play");
+    await drawn(() => vi.waitFor(() => expect(world.notes.playing).toEqual({ audioId: recordingId, noteId, offsetMs: 0 })));
+    await hardware("home");
+    await until(alpha, runtime, Voice, (state) => !state.showing && state.play.status === "Idle");
+    expect(world.notes.playing).toBeUndefined();
+    await drawn(() => runtime.runPromise(Effect.flatMap(Shell, (shell) => shell.send({ type: "openView", view: "Notes" }))));
+    await drawn(() => vi.waitFor(() => expect(button("Open Field recording")).toBeDefined()));
   });
 
   it("The agent opens the note I named, and only that, only for my request now (spec/app/notes/index.md, \"The agent opens the one note the owner named, as the list last read it, once for the owner's current request, and is told whether it opened\"; spec/app/notes/note.md, \"Only the owner opens a dialog or a question in Notes; a note is opened by the owner, or by the agent for the one the owner just named; and nothing opens while anything else of Notes is open\"; spec/app/assistant/index.md, \"Story: Let Alpha open what it is talking about\")", async () => {
