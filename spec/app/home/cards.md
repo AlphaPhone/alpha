@@ -1,12 +1,13 @@
 # Home cards
 
 The daily overview above Home's tiles: one row of cards for the agenda,
-Messages, Phone, mail, the brief and Workflows. Home reads the agenda
-itself, from the phone's calendar and from the agent's calendar. Every
-other card shows what its own area already holds, passed in as it is:
+Messages, Phone, mail, Telegram, Slack, the brief and Workflows. Home reads
+the agenda itself, from the phone's calendar and from the agent's calendar.
+Every other card shows what its own area already holds, passed in as it is:
 reminders saved on the phone, which calendars Calendar hides, Inbox's
-summary of unread mail, the rows waiting in Messages and Phone,
-Workflows' enabled rows, and the brief the digests area kept for Home.
+summary of unread mail, Telegram's and Slack's summaries of unread chats and
+mentions, the rows waiting in Messages and Phone, Workflows' enabled rows,
+and the brief the digests area kept for Home.
 Each card shows only what was really read, says when that is not up to
 date, and is not drawn when it has nothing to show. The
 [launcher](./index.md) owns the tiles below and says whether the cards
@@ -62,11 +63,15 @@ pure val eventsValues = Set(
   List({ id: 4, origin: AgentCalendar, calendar: 0, begin: 90000000, end: 93600000, allDay: false, overdue: false, done: false }))
 pure val reminder: Item = { id: 5, origin: Reminder, calendar: 0, begin: 0, end: 0, allDay: false, overdue: true, done: false }
 pure val quiet: Mail = { connected: false, unread: 0, rows: List(), current: false }
+pure val quietMessaging: Messaging = { connected: false, unread: 0, mentions: 0, rows: List(), current: false }
 pure val othersValues = Set(
-  { image: false, reminders: List(), hidden: Set(), mail: quiet, messages: List(), phone: List(),
+  { image: false, reminders: List(), hidden: Set(), mail: quiet, telegram: quietMessaging, slack: quietMessaging,
+    messages: List(), phone: List(),
     flows: { rows: List(), freshness: UpToDate }, brief: NoBrief },
   { image: true, reminders: List(reminder, { ...reminder, id: 6, done: true }), hidden: Set(2),
     mail: { connected: true, unread: 3, rows: List({ title: "Lunch", detail: "Ana" }), current: true },
+    telegram: { connected: true, unread: 2, mentions: 1, rows: List({ title: "Alex", detail: "See you at 5" }), current: true },
+    slack: { connected: true, unread: 4, mentions: 2, rows: List({ title: "#design", detail: "@you review?" }), current: false },
     messages: List({ title: "Ana", detail: "On my way" }), phone: List({ title: "Ben", detail: "Missed call" }),
     flows: { rows: List({ title: "a", detail: "" }, { title: "b", detail: "" }, { title: "c", detail: "" }), freshness: Stale },
     brief: RunFailed })
@@ -267,11 +272,12 @@ read.
 ```quint
 type Row = { title: str, detail: str }
 type Mail = { connected: bool, unread: int, rows: List[Row], current: bool }
+type Messaging = { connected: bool, unread: int, mentions: int, rows: List[Row], current: bool }
 type Freshness = UpToDate | NotCurrent | Stale | SomeUnavailable
 type Flows = { rows: List[Row], freshness: Freshness }
 type Outcome = NoBrief | Finished | RunFailed
 type Others = {
-  image: bool, reminders: List[Item], hidden: Set[int], mail: Mail,
+  image: bool, reminders: List[Item], hidden: Set[int], mail: Mail, telegram: Messaging, slack: Messaging,
   messages: List[Row], phone: List[Row], flows: Flows, brief: Outcome,
 }
 
@@ -406,6 +412,25 @@ pure def mailCard(m: Mail): Card =
   if (not(m.connected) or m.rows.length() == 0) Hidden else if (m.current) Current else NotUpdated
 ```
 
+### The Telegram and Slack cards show unread and mention counts with up to two preview rows, marked not up to date when stale, and are not drawn when disconnected or with nothing unread
+
+Home reads no chats of its own: each card reflects what its area holds.
+
+```quint
+pure def messagingCard(m: Messaging): Card =
+  if (not(m.connected) or m.unread <= 0 or m.rows.length() == 0) Hidden else if (m.current) Current else NotUpdated
+
+pure val messagingValues = Set(
+  quietMessaging,
+  { connected: true, unread: 0, mentions: 0, rows: List({ title: "Alex", detail: "Hi" }), current: true },
+  { connected: true, unread: 2, mentions: 1, rows: List({ title: "Alex", detail: "Hi" }), current: true },
+  { connected: true, unread: 2, mentions: 0, rows: List({ title: "#general", detail: "Update" }), current: false })
+
+pure def lawMessagingCardHidesWhenDisconnectedOrQuiet(messaging: Messaging): bool =
+  (not(messaging.connected) or messaging.unread <= 0 or messaging.rows.length() == 0)
+    implies messagingCard(messaging) == Hidden
+```
+
 ### The Workflows card shows the first two enabled rows and how many more, marked when they are not current, stale or partly unavailable, and is not drawn without a row
 
 The enabled rows are the agent's workflows that are active and not
@@ -437,18 +462,21 @@ pure def briefCard(brief: Outcome): BriefCard =
   if (brief == Finished) BriefShown else if (brief == RunFailed) FailureShown else NoBriefCard
 ```
 
-### The row holds the agenda, Messages, Phone, mail, brief and Workflows cards in that order, each only when drawn, and is not drawn when none is
+### The row holds the agenda, Messages, Phone, mail, Telegram, Slack, brief and Workflows cards in that order, each only when drawn, and is not drawn when none is
 
 ```quint
-type Kind = AgendaCard | MessagesCard | PhoneCard | MailCard | BriefOfToday | WorkflowsCard
+type Kind = AgendaCard | MessagesCard | PhoneCard | MailCard | TelegramCard | SlackCard | BriefOfToday | WorkflowsCard
 
-pure val cardOrder: List[Kind] = List(AgendaCard, MessagesCard, PhoneCard, MailCard, BriefOfToday, WorkflowsCard)
+pure val cardOrder: List[Kind] = List(
+  AgendaCard, MessagesCard, PhoneCard, MailCard, TelegramCard, SlackCard, BriefOfToday, WorkflowsCard)
 
 pure def drawn(c: Cards, now: int, o: Others, kind: Kind): bool =
   if (kind == AgendaCard) agendaCard(c, now, o) != Hidden
   else if (kind == MessagesCard) callsCard(o.image, o.messages) != Hidden
   else if (kind == PhoneCard) callsCard(o.image, o.phone) != Hidden
   else if (kind == MailCard) mailCard(o.mail) != Hidden
+  else if (kind == TelegramCard) messagingCard(o.telegram) != Hidden
+  else if (kind == SlackCard) messagingCard(o.slack) != Hidden
   else if (kind == BriefOfToday) briefCard(o.brief) != NoBriefCard
   else workflowsCard(o.flows) != Hidden
 
@@ -459,7 +487,7 @@ pure def row(c: Cards, now: int, o: Others): List[Kind] = cardOrder.select(k => 
 
 > As the owner, I want a tap on a card to open the app it comes from.
 
-### A card opens its app: the agenda Calendar, Messages and Phone their own, mail Inbox, the brief and Workflows Workflows; the agenda asks its calendar again if the last read did not succeed
+### A card opens its app: the agenda Calendar, Messages and Phone their own, mail Inbox, Telegram and Slack their own, the brief and Workflows Workflows; the agenda asks its calendar again if the last read did not succeed
 
 The shell opens the app.
 
@@ -469,6 +497,8 @@ pure def opens(kind: Kind): S::View =
   else if (kind == MessagesCard) S::Messages
   else if (kind == PhoneCard) S::Phone
   else if (kind == MailCard) S::Inbox
+  else if (kind == TelegramCard) S::Telegram
+  else if (kind == SlackCard) S::Slack
   else S::Workflows
 
 pure def failed(f: Feed): bool = not(loading(f)) and (f.source == Broken or f.source == Unavailable or f.source == TimedOut)

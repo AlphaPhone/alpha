@@ -286,6 +286,44 @@ pure def lawOffBrowserNoPageIsSent(handed: bool, peer: Peer): bool = not(sendsPa
 pure def lawAPageBrowserWithheldIsNeverSent(peer: Peer): bool = not(sendsPage(true, true, false, peer))
 ```
 
+## Story: Let my agent see the Telegram or Slack chat I have open
+
+> As the owner, when I ask about the Telegram chat or Slack channel or
+> thread I have open, I want my agent to see only a bounded snapshot of that
+> conversation when I allowed it, never while signing in or entering a code
+> or password, and never once I turned that share off.
+
+### A turn carries bounded Telegram or Slack context only while that app is in front, authenticated, non-sensitive, allowed by Settings' privacy share, and taken by the peer
+
+Telegram and Slack each own what they hand over: bounded recent messages
+and non-secret draft metadata, stripped of every code, password, QR token,
+OAuth secret and session token. When the screen is sensitive, the session
+is not authenticated, the matching privacy share (`TelegramContext` or
+`SlackContext`) is off or unread, or another app is in front, nothing of
+the chat leaves the phone.
+
+```quint
+type MessagingApp = NoMessaging | OnTelegram | OnSlack
+
+pure def asksForMessagingContext(observed: bool, app: MessagingApp, authenticated: bool, shareAllowed: bool): bool =
+  observed and app != NoMessaging and authenticated and shareAllowed
+
+pure def sendsMessagingContext(observed: bool, app: MessagingApp, authenticated: bool, shareAllowed: bool, handed: bool, peer: Peer): bool =
+  asksForMessagingContext(observed, app, authenticated, shareAllowed) and handed and peer.takes
+
+pure def lawASensitiveScreenSendsNoMessagingContext(app: MessagingApp, authenticated: bool, shareAllowed: bool, handed: bool, peer: Peer): bool =
+  not(sendsMessagingContext(false, app, authenticated, shareAllowed, handed, peer))
+
+pure def lawOffMessagingNoMessagingContextIsSent(authenticated: bool, shareAllowed: bool, handed: bool, peer: Peer): bool =
+  not(sendsMessagingContext(true, NoMessaging, authenticated, shareAllowed, handed, peer))
+
+pure def lawUnauthenticatedSendsNoMessagingContext(app: MessagingApp, shareAllowed: bool, handed: bool, peer: Peer): bool =
+  not(sendsMessagingContext(true, app, false, shareAllowed, handed, peer))
+
+pure def lawDisallowedShareSendsNoMessagingContext(app: MessagingApp, authenticated: bool, handed: bool, peer: Peer): bool =
+  not(sendsMessagingContext(true, app, authenticated, false, handed, peer))
+```
+
 ## Story: Let my agent see what Maps shows when I ask about it
 
 > As the owner, when I ask about the place or route Maps shows, I want my

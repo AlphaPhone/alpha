@@ -54,14 +54,14 @@ pure def there(apps: Set[str], shell: S::Shell, tile: Tile): bool =
 
 ```quint
 pure val homeOrder: List[S::View] = List(
-  S::Phone, S::Messages, S::Inbox, S::Calendar, S::Browser, S::Camera, S::Photos,
+  S::Phone, S::Messages, S::Inbox, S::Telegram, S::Slack, S::Calendar, S::Browser, S::Camera, S::Photos,
   S::Maps, S::Notes, S::Contacts, S::Files, S::Workflows, S::Settings)
 
 pure val defaults: List[Tile] = List(
-  Own({ view: S::Phone }), Own({ view: S::Messages }), Own({ view: S::Inbox }), Own({ view: S::Calendar }),
-  Own({ view: S::Browser }), Own({ view: S::Camera }), Own({ view: S::Photos }), Own({ view: S::Maps }),
-  Own({ view: S::Notes }), Own({ view: S::Contacts }), Own({ view: S::Files }), Own({ view: S::Workflows }),
-  Own({ view: S::Settings }))
+  Own({ view: S::Phone }), Own({ view: S::Messages }), Own({ view: S::Inbox }), Own({ view: S::Telegram }),
+  Own({ view: S::Slack }), Own({ view: S::Calendar }), Own({ view: S::Browser }), Own({ view: S::Camera }),
+  Own({ view: S::Photos }), Own({ view: S::Maps }), Own({ view: S::Notes }), Own({ view: S::Contacts }),
+  Own({ view: S::Files }), Own({ view: S::Workflows }), Own({ view: S::Settings }))
 
 pure val maxTiles = 4096
 
@@ -92,7 +92,7 @@ pure val tilesValues = Set(
   List(Own({ view: S::Inbox }), Own({ view: S::Inbox }), Installed({ app: "clock" })))
 pure val leftValues = Set(List(), List(Own({ view: S::Notes })), List(Installed({ app: "clock" }), Own({ view: S::Inbox })))
 pure val rightValues = leftValues
-pure val iValues = Set(-1, 0, 5, 12, 13)
+pure val iValues = Set(-1, 0, 5, 14, 15)
 pure val ticketValues = Set(1, 2, 3, 4, 5, 6)
 ```
 
@@ -317,19 +317,21 @@ pure def sometimesARearrangedHomeIsReadBack(t: Tiles): bool =
 
 ## Story: See what waits in an app
 
-> As the owner, I want Phone, Messages and Inbox to show that something
-> waits in them, and no badge to distract me while I rearrange Home.
+> As the owner, I want Phone, Messages, Inbox, Telegram and Slack to show
+> that something waits in them, and no badge to distract me while I
+> rearrange Home.
 
-### Only Phone, Messages and Inbox carry a badge, only when something waits there, and no tile does while Home is being edited
+### Only Phone, Messages, Inbox, Telegram and Slack carry a badge, only when something waits there, and no tile does while Home is being edited
 
 ```quint
-pure val badgeViews: Set[S::View] = Set(S::Phone, S::Messages, S::Inbox)
+pure val badgeViews: Set[S::View] = Set(S::Phone, S::Messages, S::Inbox, S::Telegram, S::Slack)
 
 pure def badged(tile: Tile, something: bool, editing: bool): bool =
   something and not(editing) and (match tile { | Own(o) => badgeViews.contains(o.view) | _ => false })
 
-pure def lawOnlyPhoneMessagesAndInboxCarryABadge(view: S::View, app: str, something: bool, editing: bool): bool =
+pure def lawOnlyBadgedAppsCarryABadge(view: S::View, app: str, something: bool, editing: bool): bool =
   (badged(Own({ view: view }), something, editing)
-    iff (something and not(editing) and (view == S::Phone or view == S::Messages or view == S::Inbox)))
+    iff (something and not(editing)
+      and (view == S::Phone or view == S::Messages or view == S::Inbox or view == S::Telegram or view == S::Slack)))
     and not(badged(Installed({ app: app }), something, editing))
 ```
