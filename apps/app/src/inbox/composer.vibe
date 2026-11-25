@@ -92,7 +92,7 @@ export service Letters {
   keep(draft: number): boolean!!
   /** Read back what the phone kept; whether it could be read. */
   load(): boolean!!
-  forget(draft: number): void!!
+  forget(drafts: ReadonlyArray<number>): void!!
   clear(): void!!
   /** Gmail's copy of a draft, by the number the rules know it by: its draft id and the digest Gmail holds it at. */
   copy(gmail: number): Copy | undefined
@@ -137,9 +137,9 @@ export const letters = Layer.effect(Letters, effect {
       held = { ...readWords(text), ...held }
       return true
     },
-    effect forget(draft: number) {
-      const { [String(draft)]: _gone, ...rest } = held
-      held = rest
+    effect forget(drafts: ReadonlyArray<number>) {
+      const gone = new Set(drafts.map(String))
+      held = Object.fromEntries(Object.entries(held).filter(([id]) => !gone.has(id)))
       try ignore(kept())
     },
     effect clear() {
@@ -338,7 +338,7 @@ effect function loaded(ticket: number): Event!!Letters {
 }
 
 const keptAside = (draft: number) => effect { try ignore((try Letters).keep(draft)) }
-const forgotten = (draft: number) => effect { try (try Letters).forget(draft) }
+const forgotten = (drafts: ReadonlyArray<number>) => effect { try (try Letters).forget(drafts) }
 
 function carry(fx: Out): Job<Event, Cloud | Mail | Letters | Install | Changes | Drafts.Machine | Inbox.Machine, [by: Actor]> {
   return match (fx) {
@@ -353,7 +353,9 @@ function carry(fx: Out): Job<Event, Cloud | Mail | Letters | Install | Changes |
       answer("copy", lookedUp(ticket, draft, account, gmail, attempt), copyFailed(ticket), "World");
     when { tag: "ReadSent", let ticket, let draft, let account, let attempt }:
       answer("sent", inSent(ticket, draft, account, attempt), { type: "checkedSent", ticket, ok: false, found: false }, "World");
-    when { tag: "Forget", let draft }: run("forget", forgotten(draft), "World");
+    when { tag: "Forget", let draft }: run("forget", forgotten([draft]), "World");
+    // spec/app/inbox/drafts.md, "The owner can review and delete selected local drafts on the shelf, at the revisions shown"
+    when { tag: "ForgetSelected", let drafts }: run("forget", forgotten(drafts), "World");
   }
 }
 
@@ -377,6 +379,19 @@ const sessions = started(effect {
     try contained(composer.send({ type: "sessionChanged" }, "World"), "a new cloud session")
   })
 }, "a new cloud session")
+
+const leavingShelf = started(effect {
+  const list = try Inbox.Machine
+  const shell = try Shell
+  const composer = try Drafts.Machine
+  try Stream.runForEach(Stream.zipLatest(list.changes, shell.changes), effect ([mail, visit]) => {
+    const selection = (try composer.get()).shelfSelection
+    if (selection.account !== 0 && (
+      !showing(visit, "Inbox") || mail.selected.folder !== "DraftsFolder" ||
+      mail.selected.account !== selection.account || !Inbox.readable(mail)
+    )) try ignore(exit(composer.send({ type: "endShelfSelection" }, "World")))
+  })
+}, "leaving the local draft selection")
 
 /** How a draft begins, for the screen: a new message, or a reply, reply to all or forward of the message open. */
 export interface Beginning {
@@ -441,7 +456,11 @@ export effect function begin(beginning: Beginning): boolean!!(Drafts.Machine | L
 export const backFromDraft = effect {
   const composer = try Drafts.Machine
   const state = try composer.get()
-  if (!state.open) return false
+  if (!state.open) {
+    if (state.shelfSelection.reviewing) return Exit.isSuccess(try exit(composer.send({ type: "closeShelfReview" }, "Owner")))
+    if (state.shelfSelection.account !== 0) return Exit.isSuccess(try exit(composer.send({ type: "endShelfSelection" }, "Owner")))
+    return false
+  }
   const changes = try Changes
   if ((try changes.get()).review.showing) {
     try ignore(exit(changes.send({ type: "cancel" }, "Owner")))
@@ -486,9 +505,12 @@ function copyAttemptOf(letter: Readonly<Record<string, unknown>>) {
 effect function composerRecord(raw: string | undefined): (string | undefined)!! {
   if (raw === undefined) return undefined
   const fields = readComposer(raw) catch () => undefined
-  if (fields === undefined || "copyAttempt" in fields.letter) return raw
+  if (fields === undefined || ("copyAttempt" in fields.letter && "shelfSelection" in fields)) return raw
   const shelf = { ...fields.shelf, letters: Object.fromEntries(Object.entries(fields.shelf.letters).map(([id, letter]) => [id, copyAttemptOf(letter)])) }
-  const migrated = Drafts.decodeState({ ...fields, shelf, letter: copyAttemptOf(fields.letter), kept: copyAttemptOf(fields.kept), copy: copyAttemptOf(fields.copy) }) catch () => undefined
+  const migrated = Drafts.decodeState({
+    ...fields, shelf, shelfSelection: fields.shelfSelection ?? Drafts.noShelfSelection,
+    letter: copyAttemptOf(fields.letter), kept: copyAttemptOf(fields.kept), copy: copyAttemptOf(fields.copy),
+  }) catch () => undefined
   return migrated === undefined ? raw : JSON.stringify(migrated)
 }
 
@@ -507,5 +529,6 @@ function stored(key: string, start = Drafts.initial) {
 export const composer = together(
   Layer.provideMerge(reacting({ ...Drafts, stored }, { keep: 1, open: [{ type: "restart" }, "World"], carry, timers }), letters),
   leaving,
+  leavingShelf,
   sessions,
 )
