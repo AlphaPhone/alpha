@@ -149,7 +149,7 @@ effect function carriedOut<R>(held: Held, view: View, front: boolean!!R) {
     : target === undefined ? { switched: false, opened: false }
     : try openNamed(target.noteId, held.asked, front)
   const result = { switched: done.switched, ...(done.opened && target !== undefined ? { shown: target } : {}) }
-  try ignore(ask(Agent, HttpClientRequest.post("/api/views/interact-result") |> HttpClientRequest.bodyJsonUnsafe(%, { ...binding, claimId: claim.claimId, success: true, result }), Answered))
+  try ignore(ask(Agent, HttpClientRequest.post("/api/views/interact-result") |> HttpClientRequest.bodyJsonUnsafe(%, { ...binding, claimId: claim.claimId, success: done.switched, result }), Answered))
 }
 
 // spec/app/assistant/index.md, "A complete reply may open one view, once, while the screen it was asked from still shows"; spec/app/notes/index.md, "The agent opens the one note the owner named, as the list last read it, once for the owner's current request, and is told whether it opened"

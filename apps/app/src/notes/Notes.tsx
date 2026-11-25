@@ -216,7 +216,7 @@ function speaker(value: unknown) {
 
 function VoiceNote({ runtime, collection }: { readonly runtime: Runtime; readonly collection: Collection }) {
   const voice = useVoice(runtime);
-  const audio = runtime.runSync(NoteDevice).available;
+  const audio = runtime.runSync(NoteDevice.use((device) => Effect.succeed(device.available)));
   const state = voice.state;
   if (!state?.showing) return null;
   const note = collection.noteByNumber.get(state.note);
