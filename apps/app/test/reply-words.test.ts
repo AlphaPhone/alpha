@@ -32,6 +32,7 @@ describe("a reply's words as the owner reads and hears them", () => {
     expect(replyBlocks("Looking.\n<tool_call>\n<function=search>{\"q\":", true).words).toBe("Looking.");
     expect(replyBlocks("Looking. <tool_c", true).words).toBe("Looking.");
     expect(replyBlocks("Use the <function=search> tag to look.").words).toBe("Use the <function=search> tag to look.");
+    expect(replyBlocks("Try <function=x>\n```\n</function>\n```").words).toBe("Try <function=x>\n```\n</function>\n```");
     expect(wordsOf({ mine: false, text: "Hi <tool_call>x</tool_call>" })).toBe("Hi");
     expect(wordsOf({ mine: true, text: "Hi <tool_call>x</tool_call>" })).toBe("Hi <tool_call>x</tool_call>");
   });

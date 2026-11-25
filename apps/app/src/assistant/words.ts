@@ -29,7 +29,8 @@ interface Blocks {
 /**
  * A reply read for the owner: its Maps cards (eliza's recognizer), its Maps share questions, its forms and any tool call the
  * model wrote out as text (`<tool_call>` or `<function=` to its closing tag) taken out of the words, outside a code fence
- * only, with each share question's answers kept; a line a tool call is taken from loses only its own trailing blanks. Any
+ * only and never across a fence, with each share question's answers kept; the prose left around a tool call is read again
+ * as one line, which loses only its own trailing blanks. Any
  * other block reads as text. While the reply is still `streaming`, a block that has not closed, and a last line that may
  * still become one, are held back; in a finished reply an unclosed block stays as text. @throws {never}
  */
@@ -54,7 +55,7 @@ export function replyBlocks(text: string, streaming = false): Blocks {
       const before = line.slice(0, call.index);
       let end = at;
       let after: string | undefined;
-      for (; end < lines.length; end++) {
+      for (; end < lines.length && (end === at || !fence.test(lines[end] ?? "")); end++) {
         const from = end === at ? call.index + call[0].length : 0;
         const rest = (lines[end] ?? "").slice(from);
         const closed = callClose.exec(rest);
@@ -71,7 +72,6 @@ export function replyBlocks(text: string, streaming = false): Blocks {
         if (before.trim() !== "") kept.push(before.trimEnd());
         break;
       }
-      // The prose around the call is read again, as one line, in case it holds another call or a block.
       const joined = (/(^|\s)$/.test(before) ? before + after.trimStart() : before + after).trimEnd();
       lines.splice(at, end - at + 1, ...(joined.trim() === "" ? [] : [joined]));
       at--;
