@@ -56,6 +56,7 @@ do next.
   `rounded-segment-option` the option chosen in it; `rounded-frame` is Camera's stop square and focus target and a scanned frame's preview; `rounded-list-icon` the icon box at the start of a list row. `rounded-tile` is an app tile, a menu and a dialog;
   `rounded-sheet` the top of a bottom sheet, `rounded-chat` the top of the Ask Alpha sheet; `rounded-full` a
   button and a chip, `rounded-dock` the Ask Alpha bar and `rounded-dock-compact` its compact controls; `rounded-bar` is the foot bar of Maps guidance;
+  `rounded-dictation-type` is the Type button offered after an unsuccessful transcription.
   `rounded-check` is the check box of a Notes checklist item or action item, `rounded-clip` a 2px bar: a link note's clip, Notes' unavailable slash and a recorder level.
   Everything pressed is at least 44px in both directions.
 - **Elevation.** `shadow-sm` lifts a control, `shadow-menu` a menu, `shadow-note-menu` a Notes menu on the raised surface, `shadow-md` a dialog or a notice, `shadow-lg` a raised card,
@@ -152,6 +153,7 @@ this prose into tokens. To change the design, describe it, and have the change w
 | `rounded.dock` | 1.9375rem |
 | `rounded.dock-compact` | 1.875rem |
 | `rounded.chat` | 1.875rem |
+| `rounded.dictation-type` | 1.25rem |
 | `rounded.tab-count` | 0.4375rem |
 | `rounded.action` | 1.125rem |
 | `rounded.chip` | 1.5rem |
