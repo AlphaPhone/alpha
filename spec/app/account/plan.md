@@ -15,6 +15,14 @@ The plan holds no account. Transitions that need the current sign-in take
 it as `signIn` from [Session](./session.md), which also resets the plan
 whenever the sign-in changes.
 
+The Account sheet reads a separate, authenticated Cloud snapshot while it is
+open to show the account's plan, credit balance and any current allowance.
+The same Cloud subject and organization must answer before and after the
+snapshot, and on a phone the same held credential must name that account
+both times. Leaving the sheet or hiding the app retires the reading. If
+Cloud cannot answer, the sheet can still show the account's profile. The
+snapshot neither admits AI nor writes the record used offline.
+
 ## Story: Know my plan
 
 > As the owner, I want to see whether I have Plus or Pro, credits, no

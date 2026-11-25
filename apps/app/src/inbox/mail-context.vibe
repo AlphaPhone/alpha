@@ -1,6 +1,7 @@
 // spec/app/inbox/message.md, "Story: Ask Alpha about a message"
 import type { MailMessage } from "@elizaos/cloud"
 import { validateMailContext, type MailContextDestination, type MailContextSource, type ReviewedMailContext } from "@elizaos/plugin-inbox-client"
+import { externalStore } from "../runtime/store.ts"
 
 export interface MailQuestion {
   readonly review: ReviewedMailContext
@@ -20,23 +21,15 @@ export service MailQuestions {
 
 /** Only the pending review or the mail attached to the next composer send, in memory for this page. */
 export const mailQuestions = Layer.sync(MailQuestions, () => {
-  let shown: MailReview = {}
+  const shown = externalStore<MailReview>({})
   let attached: MailQuestion | undefined
-  const listeners = new Set<() => void>()
-  function show(review: MailReview) {
-    shown = review
-    for (const listener of listeners) listener()
-  }
   return {
-    snapshot: () => shown,
-    subscribe: (listener) => {
-      listeners.add(listener)
-      return () => { listeners.delete(listener) }
-    },
-    show,
-    attach: (question) => { attached = question; show({}) },
+    snapshot: shown.snapshot,
+    subscribe: shown.subscribe,
+    show: shown.set,
+    attach: (question) => { attached = question; shown.set({}) },
     attached: () => attached,
-    clear: () => { attached = undefined; show({}) },
+    clear: () => { attached = undefined; shown.set({}) },
   }
 })
 

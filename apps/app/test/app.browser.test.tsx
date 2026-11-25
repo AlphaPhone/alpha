@@ -6,6 +6,7 @@ import { Machine as Shell } from "../gen/app__shell.effect.vibe";
 import { Machine as Workflows } from "../gen/app__workflows__list.effect.vibe";
 import { at, mounts } from "../src/areas.ts";
 import { single } from "../src/runtime/single.ts";
+import { home } from "../src/shell/shell.vibe";
 import { button, closeAll, later, only, open, seen, until } from "./alpha.tsx";
 import { scene } from "./fakes/scene.ts";
 import sample from "./sample/index.tsx";
@@ -57,7 +58,8 @@ function savedBrowserRecords(records: readonly { id: string; url: string; title:
   });
 }
 
-it("Keeps a browser frame while leaving and reopening Browser (spec/app/browser/address.md, \"A browser frame can be shown for the latest request, with no secure mark\"; spec/app/browser/index.md, \"Story: Open, pick and close tabs\"; spec/app/browser/index.md, \"Story: Keep my tabs through a restart\"; spec/app/browser/library.md, \"Story: Keep bookmarks\")", async () => {
+// spec/app/browser/address.md, "A browser frame can be shown for the latest request, with no secure mark"; spec/app/browser/index.md, "Story: Open, pick and close tabs"; spec/app/browser/index.md, "Story: Keep my tabs through a restart"; spec/app/browser/library.md, "Story: Keep bookmarks"; spec/app/browser/downloads.md, "Story: Download a file"
+it("Keeps a browser frame while leaving and reopening Browser", async () => {
   const fixture = new URL("/test/fakes/browser-page.html", location.origin);
   expect((await fetch(fixture)).ok).toBe(true);
   const first = { id: "old-tab-a", title: "Saved first", url: new URL("?tab=first", fixture).href };
@@ -65,7 +67,7 @@ it("Keeps a browser frame while leaving and reopening Browser (spec/app/browser/
   const bookmark = { url: "https://archive.example/reference", title: "Saved reference" };
   await savedBrowserRecords([first, second], [bookmark]);
   try {
-    await open(scene(), only("home", "view:Browser", "assistant"));
+    const { alpha } = await open(scene(), only("home", "view:Browser", "view:Files", "assistant"));
     await page.getByRole("button", { name: "Browser", exact: true }).click();
     const link = page.getByRole("link", { name: "Open in browser" });
     await expect.element(link).toHaveAttribute("href", second.url);
@@ -95,13 +97,21 @@ it("Keeps a browser frame while leaving and reopening Browser (spec/app/browser/
     if (!iframe) throw new Error("the browser frame is missing");
     await expect.poll(() => iframe.contentDocument).toBeNull();
 
-    await page.getByRole("button", { name: "Back", exact: true }).click();
+    await alpha.runtime.runPromise(home());
     await expect.element(page.getByRole("button", { name: "Browser", exact: true })).toBeVisible();
     await expect.element(link).not.toBeInTheDocument();
     await page.getByRole("button", { name: "Browser", exact: true }).click();
     await expect.element(link).toBeVisible();
     expect(Array.from(document.querySelectorAll("iframe[title=Website]"))).toContain(iframe);
     await expect.element(page.getByRole("img", { name: "Secure connection" })).not.toBeInTheDocument();
+
+    await page.getByRole("button", { name: "Menu", exact: true }).click();
+    await page.getByRole("button", { name: "Downloads", exact: true }).click();
+    await expect.element(page.getByRole("heading", { name: "Files", exact: true })).toBeVisible();
+    await page.getByRole("button", { name: "Back", exact: true }).click();
+    await page.getByRole("button", { name: "Browser", exact: true }).click();
+    await expect.element(link).toBeVisible();
+    expect(Array.from(document.querySelectorAll("iframe[title=Website]"))).toContain(iframe);
 
     await page.getByRole("button", { name: /^Tabs\b/ }).click();
     await page.getByRole("button", { name: `Close ${fixture.href}`, exact: true }).click();

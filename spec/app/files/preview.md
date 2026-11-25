@@ -48,6 +48,18 @@ pure val initial: Preview = {
 }
 ```
 
+### The caption and Details show facts for the exact document held
+
+The caption uses the listing's size and date format. It shows a location
+when the file comes from a known storage folder. A picked document may
+only have its name and type. The facts belong to the grant for the file
+and revision the preview still shows.
+
+```quint
+pure def showsFileFacts(s: Preview, file: int, revision: int): bool =
+  s.viewer != 0 and s.reachable and s.item == file and s.revision == revision
+```
+
 ### What the preview asks of the phone and of other areas
 
 A viewer closing takes its listeners with it, and tells Recent which file

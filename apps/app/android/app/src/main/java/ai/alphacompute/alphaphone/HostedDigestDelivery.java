@@ -19,6 +19,7 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.function.Consumer;
 import org.json.JSONObject;
 
 /** Owns the sole Android digest inbox writer for both WorkManager and Workflows. */
@@ -213,6 +214,20 @@ final class HostedDigestDelivery {
   });
  }
 
+ void captureQuestion(Intent intent, Consumer<Boolean> complete) {
+  Intent exact = new Intent(intent);
+  execute(() -> {
+   boolean captured = false;
+   try {
+    captured = notices.captureQuestion(exact);
+    if (captured) publishChange();
+   } catch (Exception unavailable) {
+    Log.w(TAG, "Digest question tap could not be retained");
+   }
+   complete.accept(captured);
+  });
+ }
+
  JSONObject peekNotice() throws Exception {
   ResidentDigestChannel.Session session;
   try { session = view().session(); }
@@ -223,10 +238,12 @@ final class HostedDigestDelivery {
   return notice;
  }
 
- void settleNotice(String token) throws Exception {
-  var session = view().session();
+ void settleNotice(String token, String questionLease) throws Exception {
+  var session = questionLease == null ? view().session() : admitted(questionLease);
   session.check();
-  notices.consume(session.scope(), token, inbox, session::check);
+  if (!notices.consume(session.scope(), token, questionLease != null, inbox, session::check)) {
+   throw new SecurityException("Digest notice changed");
+  }
   publishChange();
  }
 }

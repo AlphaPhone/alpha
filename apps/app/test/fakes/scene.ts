@@ -16,6 +16,7 @@ import { type LauncherScene, launcherScene } from "./launcher.ts";
 import { type SettingsScene, settingsScene } from "./settings.ts";
 import { type FilesScene, filesScene } from "./files.ts";
 import { type PhotosScene, photosScene } from "./photos.ts";
+import type { MailLeaseScene } from "./phone.ts";
 import { type TelephonyScene, telephonyRoutes, telephonyScene } from "./telephony.ts";
 import { textReviewRoute } from "./text-review.ts";
 import { type UpdateScene, updateScene } from "./update.ts";
@@ -28,8 +29,9 @@ export interface Scene {
   image: boolean;
   now: number;
   signedIn: boolean;
-  /** Whether the phone holds a device lease for mail and calendar: a phone signed in before mail leases existed holds none. */
-  mailLease: boolean;
+  /** The phone's device lease for mail and calendar: a phone signed in before mail leases existed holds none. */
+  readonly mailLease: MailLeaseScene;
+  residentAvailable: boolean;
   readonly secrets: Map<string, string>;
   readonly slots: Set<string>;
   readonly sample: SampleScene;
@@ -56,8 +58,8 @@ export interface Scene {
 
 export function scene(): Scene {
   return {
-    phone: false, image: false, now: 0, signedIn: true, secrets: new Map(), slots: new Set(),
-    mailLease: true,
+    phone: false, image: false, now: 0, signedIn: true, residentAvailable: true, secrets: new Map(), slots: new Set(),
+    mailLease: { held: true, answer: "SignsIn", asked: 0, heldBack: 0 },
     sample: sampleScene(),
     ask: askScene(),
     launcher: launcherScene(),
@@ -88,6 +90,7 @@ export function services(world: Scene) {
   const review = world.telephony.textReview;
   return {
     agent: answering([
+      () => world.residentAvailable ? undefined : new Response(null, { status: 503 }),
       health,
       ...sampleRoutes(world.sample),
       ...askRoutes(world.ask),
@@ -102,7 +105,7 @@ export function services(world: Scene) {
       ...walletRoutes(world.wallet, () => world.now),
     ]),
     cloud: answering([
-      ...cloudRoutes(() => world.signedIn),
+      ...cloudRoutes(() => world.signedIn, () => world.now),
       ...inboxRoutes(world.inbox),
       ...mapsRoutes(world.maps, () => world.now),
     ]),

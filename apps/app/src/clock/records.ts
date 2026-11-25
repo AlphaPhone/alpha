@@ -1,4 +1,5 @@
 // spec/app/clock/alarms.md, "Story: Manage my alarms"; spec/app/clock/timers.md, "Story: Run multiple countdown timers"
+import { externalStore } from "../runtime/store.ts";
 
 /** Supported alarm and timer chime profiles. */
 export type AlarmSound = "radar" | "chime" | "pulse" | "gentle" | "classic";
@@ -126,111 +127,101 @@ export function soundLabel(sound: AlarmSound): string {
   return ALARM_SOUNDS.find((item) => item.id === sound)?.label ?? "Radar";
 }
 
-let current: ClockMetaState = {
+const { snapshot: current, subscribe, set: publish } = externalStore<ClockMetaState>({
   alarms: new Map(),
   timers: new Map(),
   deletedAlarmIds: [],
   deletedTimerIds: [],
   version: 0,
   hour24: false,
-};
-
-const listeners = new Set<() => void>();
-
-function publish(next: ClockMetaState) {
-  current = next;
-  for (const listener of [...listeners]) listener();
-}
+});
 
 /** External store for Clock labels, sounds, remote sync IDs, tombstones, and 24-hour preference. */
 export const clockRecords = {
   /** @throws {never} */
-  snapshot: (): ClockMetaState => current,
+  snapshot: current,
   /** @throws {never} */
-  subscribe: (listener: () => void): (() => void) => {
-    listeners.add(listener);
-    return () => { listeners.delete(listener); };
-  },
+  subscribe,
   /** @throws {never} */
   reset: (hour24 = false): void => {
     publish({ alarms: new Map(), timers: new Map(), deletedAlarmIds: [], deletedTimerIds: [], version: 0, hour24 });
   },
   /** @throws {never} */
   setHour24: (hour24: boolean): void => {
-    if (current.hour24 === hour24) return;
-    publish({ ...current, hour24 });
+    if (current().hour24 === hour24) return;
+    publish({ ...current(), hour24 });
   },
   /** @throws {never} */
   setAlarm: (id: number, patch: Partial<AlarmMeta>): void => {
-    const existing = current.alarms.get(id);
-    const next = new Map(current.alarms);
+    const existing = current().alarms.get(id);
+    const next = new Map(current().alarms);
     next.set(id, {
       label: patch.label ?? existing?.label ?? "",
       sound: patch.sound ?? existing?.sound ?? "radar",
       remoteId: patch.remoteId ?? existing?.remoteId ?? `alarm-${id}`,
       updatedAtMs: patch.updatedAtMs ?? existing?.updatedAtMs ?? 0,
     });
-    publish({ ...current, alarms: next });
+    publish({ ...current(), alarms: next });
   },
   /** @throws {never} */
   alarm: (id: number): AlarmMeta => {
-    return current.alarms.get(id) ?? { label: "", sound: "radar", remoteId: `alarm-${id}`, updatedAtMs: 0 };
+    return current().alarms.get(id) ?? { label: "", sound: "radar", remoteId: `alarm-${id}`, updatedAtMs: 0 };
   },
   /** @throws {never} */
   markAlarmDeleted: (id: number): void => {
-    const remoteId = current.alarms.get(id)?.remoteId ?? `alarm-${id}`;
-    const deletedAlarmIds = current.deletedAlarmIds.includes(remoteId)
-      ? current.deletedAlarmIds
-      : [...current.deletedAlarmIds, remoteId];
-    publish({ ...current, deletedAlarmIds });
+    const remoteId = current().alarms.get(id)?.remoteId ?? `alarm-${id}`;
+    const deletedAlarmIds = current().deletedAlarmIds.includes(remoteId)
+      ? current().deletedAlarmIds
+      : [...current().deletedAlarmIds, remoteId];
+    publish({ ...current(), deletedAlarmIds });
   },
   /** @throws {never} */
   unmarkAlarmDeleted: (id: number): void => {
-    const remoteId = current.alarms.get(id)?.remoteId ?? `alarm-${id}`;
-    publish({ ...current, deletedAlarmIds: current.deletedAlarmIds.filter((item) => item !== remoteId) });
+    const remoteId = current().alarms.get(id)?.remoteId ?? `alarm-${id}`;
+    publish({ ...current(), deletedAlarmIds: current().deletedAlarmIds.filter((item) => item !== remoteId) });
   },
   /** @throws {never} */
   setTimer: (id: number, patch: Partial<TimerMeta>): void => {
-    const existing = current.timers.get(id);
-    const next = new Map(current.timers);
+    const existing = current().timers.get(id);
+    const next = new Map(current().timers);
     next.set(id, {
       label: patch.label ?? existing?.label ?? "",
       remoteId: patch.remoteId ?? existing?.remoteId ?? `timer-${id}`,
       updatedAtMs: patch.updatedAtMs ?? existing?.updatedAtMs ?? 0,
     });
-    publish({ ...current, timers: next });
+    publish({ ...current(), timers: next });
   },
   /** @throws {never} */
   timer: (id: number): TimerMeta => {
-    return current.timers.get(id) ?? { label: "", remoteId: `timer-${id}`, updatedAtMs: 0 };
+    return current().timers.get(id) ?? { label: "", remoteId: `timer-${id}`, updatedAtMs: 0 };
   },
   /** @throws {never} */
   markTimerDeleted: (id: number): void => {
-    const remoteId = current.timers.get(id)?.remoteId ?? `timer-${id}`;
-    const nextTimers = new Map(current.timers);
+    const remoteId = current().timers.get(id)?.remoteId ?? `timer-${id}`;
+    const nextTimers = new Map(current().timers);
     nextTimers.delete(id);
-    const deletedTimerIds = current.deletedTimerIds.includes(remoteId)
-      ? current.deletedTimerIds
-      : [...current.deletedTimerIds, remoteId];
-    publish({ ...current, timers: nextTimers, deletedTimerIds });
+    const deletedTimerIds = current().deletedTimerIds.includes(remoteId)
+      ? current().deletedTimerIds
+      : [...current().deletedTimerIds, remoteId];
+    publish({ ...current(), timers: nextTimers, deletedTimerIds });
   },
   /** @throws {never} */
   setVersion: (version: number): void => {
-    if (version <= current.version) return;
-    publish({ ...current, version });
+    if (version <= current().version) return;
+    publish({ ...current(), version });
   },
   /** @throws {never} */
   replaceAll: (next: Pick<ClockMetaState, "alarms" | "timers" | "deletedAlarmIds" | "deletedTimerIds" | "version">): void => {
-    publish({ ...current, ...next });
+    publish({ ...current(), ...next });
   },
   /** @throws {never} */
   serialize: (): string => {
     const payload: PersistedMeta = {
-      alarms: [...current.alarms.entries()],
-      timers: [...current.timers.entries()],
-      deletedAlarmIds: current.deletedAlarmIds,
-      deletedTimerIds: current.deletedTimerIds,
-      version: current.version,
+      alarms: [...current().alarms.entries()],
+      timers: [...current().timers.entries()],
+      deletedAlarmIds: current().deletedAlarmIds,
+      deletedTimerIds: current().deletedTimerIds,
+      version: current().version,
     };
     return JSON.stringify(payload);
   },
@@ -268,7 +259,7 @@ export const clockRecords = {
       const deletedAlarmIds = Array.isArray(parsed.deletedAlarmIds) ? parsed.deletedAlarmIds.filter((x): x is string => typeof x === "string") : [];
       const deletedTimerIds = Array.isArray(parsed.deletedTimerIds) ? parsed.deletedTimerIds.filter((x): x is string => typeof x === "string") : [];
       const version = typeof parsed.version === "number" && Number.isFinite(parsed.version) ? parsed.version : 0;
-      publish({ ...current, alarms, timers, deletedAlarmIds, deletedTimerIds, version });
+      publish({ ...current(), alarms, timers, deletedAlarmIds, deletedTimerIds, version });
     } catch {
       return;
     }
