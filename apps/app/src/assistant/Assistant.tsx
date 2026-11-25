@@ -123,8 +123,8 @@ export function Assistant({ runtime, messageActions, speech, canReadAloud = fals
       if (assistantDetent === "Typing") element.focus();
     }
   }, [assistantDetent, compact]);
-  const fileInput = useRef<HTMLInputElement>(null);
-  const fileTarget = useRef<{ binding: Writing["binding"]; slot: number } | undefined>(undefined);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const fileTargetRef = useRef<{ binding: Writing["binding"]; slot: number } | undefined>(undefined);
   const [talking, shown, writing, finding] = [conversation.state, chats.state, composer.state, search.state];
   const free = talking && shown && writing ? freedom(talking, writing, shown.chosen) : { replying: true, holding: true };
   const lines = !shown || (shown.page.status === "Idle" && shown.chosen === 0) ? emptyLines : seen.pages.get(shown.page.ticket)?.lines ?? emptyLines;
@@ -256,9 +256,9 @@ export function Assistant({ runtime, messageActions, speech, canReadAloud = fals
         src={`data:${previewed.mimeType};base64,${previewed.data}`}
         onOpenChange={(open) => { if (!open && attachments.can({ type: "closePreview" })) void attachments.send({ type: "closePreview" }); }}
       />}
-      <input ref={fileInput} type="file" accept={acceptedFiles} multiple hidden onChange={(event) => {
-        const target = fileTarget.current;
-        fileTarget.current = undefined;
+      <input ref={fileInputRef} type="file" accept={acceptedFiles} multiple hidden onChange={(event) => {
+        const target = fileTargetRef.current;
+        fileTargetRef.current = undefined;
         const files = Array.from(event.currentTarget.files ?? []);
         event.currentTarget.value = "";
         if (target && files.length > 0) void runtime.runPromise(insertFiles(target.binding, target.slot, files));
@@ -337,9 +337,9 @@ export function Assistant({ runtime, messageActions, speech, canReadAloud = fals
           onStop: conversation.can({ type: "stop" }) ? () => void conversation.send({ type: "stop" }) : undefined,
           stopping: talking.turn.stopping,
           onAttach: !onComms && composer.can({ type: "attach", count: 1 }) ? () => {
-            fileTarget.current = { binding: writing.binding, slot: writing.read.ticket };
+            fileTargetRef.current = { binding: writing.binding, slot: writing.read.ticket };
             openWithFocus(false);
-            fileInput.current?.click();
+            fileInputRef.current?.click();
           } : undefined,
           onFocusField: assistantDetent === "Typing" ? undefined : () => openWithFocus(false),
           onHistory: () => {
