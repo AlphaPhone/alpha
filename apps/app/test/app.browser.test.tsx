@@ -34,6 +34,26 @@ it("Move between Home and the apps, and find the same place after the page is op
   expect([await single(), await single()]).toEqual([true, false]);
 });
 
+it('Opens Clock by tapping its alarm in the Home card row (spec/app/home/cards.md, "The row holds the agenda, Messages, Phone, mail, brief and Workflows cards in that order, each only when drawn, and is not drawn when none is")', async () => {
+  await page.viewport(412, 915);
+  const world = scene();
+  world.now = Date.UTC(2026, 4, 15, 10, 15);
+  world.clock.version = 1;
+  world.clock.updatedAtMs = world.now;
+  world.clock.alarms.push({
+    id: "alarm-1", hour: 7, minute: 15, daysMask: 0, label: "Morning", sound: "radar", vibrate: true,
+    enabled: true, snoozeMinutes: 9, phase: "idle", fireAtMs: world.now + 3_600_000, snoozeUntilMs: null,
+    missed: false, revision: 1, updatedAtMs: world.now,
+  });
+
+  await open(world, only("home", "home/cards", "view:Clock", "assistant"));
+  const alarm = page.getByRole("region", { name: "Your day" }).getByRole("button", { name: /^Clock alarm:/ });
+  await expect.element(alarm).toBeVisible();
+  await alarm.click();
+  await expect.element(page.getByRole("heading", { name: "Clock", exact: true })).toBeVisible();
+  await expect.element(page.getByRole("tab", { name: "Alarms", exact: true })).toHaveAttribute("aria-selected", "true");
+});
+
 function savedBrowserRecords(records: readonly { id: string; url: string; title: string }[], marks: readonly { url: string; title: string }[] = []): Promise<void> {
   return new Promise((resolve, reject) => {
     const request = indexedDB.open("alpha.browser.documents.v1", 1);

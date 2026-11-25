@@ -439,6 +439,9 @@ pure def briefCard(brief: Outcome): BriefCard =
 
 ### The row holds the agenda, Messages, Phone, mail, brief and Workflows cards in that order, each only when drawn, and is not drawn when none is
 
+Clock may add its timer or next alarm after the daily cards, in the same
+scrolling row.
+
 ```quint
 type Kind = AgendaCard | MessagesCard | PhoneCard | MailCard | BriefOfToday | WorkflowsCard
 
