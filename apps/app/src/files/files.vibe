@@ -502,7 +502,7 @@ function carry(fx: Out): Job<Event, Files | Handles | Browser.Machine | Bin.Mach
     when { tag: "Search", let ticket, let where, let filter }: answer("search", searched(ticket, where, filter), { type: "searched", ticket, ok: false, complete: false, entries: [] }, "Phone");
     when { tag: "LookInto", let ticket, let trail }: answer("sheet", destination(ticket, trail), { type: "destRead", ticket, ok: false, entries: [] }, "Phone");
     when { tag: "AgentLook", let ticket, let folder, let filter }: answer("peek", peeked(ticket, folder, filter), { type: "agentLooked", ticket, ok: false, entries: [] }, "Phone");
-    when { tag: "Tell", let request, let ok, let items }: run(`tell ${request}`, effect { try (try Answers).tell(request, { ok, items }) }, "Phone");
+    when { tag: "Tell", let request, let ok, let items, let complete }: run(`tell ${request}`, effect { try (try Answers).tell(request, { ok, items, complete }) }, "Phone");
     when { tag: "Perform", let ticket, let work, let items, let name, let folder, let dest, let replace, let downloads }: answer(`perform ${ticket}`, performed(ticket, work, items, name, folder, dest, replace, downloads), { type: "finished", ticket, done: [], failed: [] }, "Phone");
     when { tag: "ToTrash", let items, let approval }: run("trash", ignore(effect {
       if (approval === 0 || (try (try Answers).reviewed(approval)) === undefined) {
@@ -514,7 +514,7 @@ function carry(fx: Out): Job<Event, Files | Handles | Browser.Machine | Bin.Mach
     when { tag: "Show", let item, let siblings, let owner }: run("show", view(item, siblings, owner), "Phone");
     when { tag: "Share", let ticket, let channel, let items, let approval }: answer(`share ${ticket}`, shared(ticket, channel, items, approval), { type: "shareEnded", ticket, opened: false, known: false }, "Phone");
     when { tag: "Taken", let items }: run("taken", taken(items), "Phone");
-    when { tag: "Receipt", let ticket, let ran, let outcome, let done }: run(`receipt ${ticket}`, effect { try (try Answers).receipt(ticket, { ran, outcome, ...(outcome === "Refused" && done > 0 ? { partial: true } : {}) }) }, "Phone");
+    when { tag: "Receipt", let ticket, let ran, let outcome, let done }: run(`receipt ${ticket}`, effect { try (try Answers).receipt(ticket, { ran, outcome, done }) }, "Phone");
   }
 }
 
@@ -717,7 +717,7 @@ function carryBin(fx: Bin.Effect): Job<Bin.Event, Files | Handles | Bin.Machine 
       try taken(items)
       try (try Browser.Machine).send({ type: "refresh" }, "Phone")
     }), "Phone");
-    when { tag: "Receipt", let ticket, let ran, let outcome, let done }: run(`receipt ${ticket}`, effect { try (try Answers).receipt(ticket, { ran, outcome, ...(outcome === "Refused" && done > 0 ? { partial: true } : {}) }) }, "Phone");
+    when { tag: "Receipt", let ticket, let ran, let outcome, let done }: run(`receipt ${ticket}`, effect { try (try Answers).receipt(ticket, { ran, outcome, done }) }, "Phone");
   }
 }
 

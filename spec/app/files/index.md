@@ -84,7 +84,7 @@ type Effect =
   | Search({ ticket: int, where: S::Where, filter: S::Filter })
   | LookInto({ ticket: int, trail: List[int] })
   | AgentLook({ ticket: int, folder: int, filter: S::Filter })
-  | Tell({ request: int, ok: bool, items: List[F::Item] })
+  | Tell({ request: int, ok: bool, items: List[F::Item], complete: bool })
   | Perform({ ticket: int, work: C::Work, items: List[F::Item], name: str, folder: int, dest: int, replace: bool, downloads: bool })
   | ToTrash({ items: List[int], approval: int })
   | Show({ item: F::Item, siblings: List[str], owner: bool })
@@ -228,8 +228,8 @@ with a failure and nothing else.
 
 ```quint
 pure def unanswered(s: S::Search): List[Effect] =
-  (if (s.asker != 0 and s.query.status == R::Loading) List(Tell({ request: s.asker, ok: false, items: List() })) else List())
-    .concat(if (s.peeker != 0 and s.peek.status == R::Loading) List(Tell({ request: s.peeker, ok: false, items: List() })) else List())
+  (if (s.asker != 0 and s.query.status == R::Loading) List(Tell({ request: s.asker, ok: false, items: List(), complete: false })) else List())
+    .concat(if (s.peeker != 0 and s.peek.status == R::Loading) List(Tell({ request: s.peeker, ok: false, items: List(), complete: false })) else List())
 
 pure def told(out: List[Effect], request: int): bool = out.some(e => match e { | Tell(x) => x.request == request | _ => false })
 
@@ -239,7 +239,7 @@ pure def stepTheAgentIsAnswered(before: Files, after: Files, out: List[Effect]):
     and (before.search.peeker != 0 and before.search.peek.status == R::Loading implies
       ((after.search.peeker == before.search.peeker and after.search.peek.ticket == before.search.peek.ticket
           and after.search.peek.status == R::Loading) or told(out, before.search.peeker)))
-    and out.every(e => match e { | Tell(x) => x.ok or x.items.length() == 0 | _ => true })
+    and out.every(e => match e { | Tell(x) => (x.ok or x.items.length() == 0) and (not(x.complete) or x.ok) | _ => true })
 ```
 
 ### Arriving at a place reads it afresh with nothing selected, and the filter on is asked again there, only while Files is open and allowed
@@ -663,7 +663,7 @@ pure def canSearched(s: Files, ticket: int, by: Actor): bool = by == Phone and S
 
 pure def searched(s: Files, ticket: int, ok: bool, complete: bool, entries: List[F::Item], by: Actor): Moved =
   val search = S::searched(s.search, ticket, ok, complete, entries.select(i => containsText(i.name, s.search.filter.text)))
-  { state: { ...s, search: search }, out: if (s.search.asker != 0) List(Tell({ request: s.search.asker, ok: ok, items: search.hits })) else List() }
+  { state: { ...s, search: search }, out: if (s.search.asker != 0) List(Tell({ request: s.search.asker, ok: ok, items: search.hits, complete: ok and complete })) else List() }
 
 pure def canClearFilter(s: Files, by: Actor): bool = by == Owner and S::canClearFilter(s.search)
 
@@ -716,7 +716,7 @@ pure def canAgentLook(s: Files, request: int, target: int, wanted: S::Filter, gu
 
 pure def agentLook(s: Files, request: int, target: int, wanted: S::Filter, guarded: bool, by: Actor): Moved =
   val search = S::agentLook(s.search, request)
-  if (not(allowed(s)) or guarded) { state: s, out: List(Tell({ request: request, ok: false, items: List() })) }
+  if (not(allowed(s)) or guarded) { state: s, out: List(Tell({ request: request, ok: false, items: List(), complete: false })) }
   else { state: { ...s, search: search },
     out: unanswered({ ...s.search, asker: 0 }).append(AgentLook({ ticket: search.peek.ticket, folder: target, filter: wanted })) }
 
@@ -724,16 +724,20 @@ pure def canAgentLooked(s: Files, ticket: int, by: Actor): bool = by == Phone an
 
 pure def agentLooked(s: Files, ticket: int, ok: bool, entries: List[F::Item], by: Actor): Moved =
   { state: { ...s, search: S::agentLooked(s.search, ticket, ok) },
-    out: List(Tell({ request: s.search.peeker, ok: ok, items: if (ok) entries else List() })) }
+    out: List(Tell({ request: s.search.peeker, ok: ok, items: if (ok) entries else List(), complete: false })) }
 ```
 
 ### The agent sets the owner's filter on Files on screen, and is told how many it found; otherwise it is told it failed
+
+The result counts only what came back from the current search and says
+when the phone could not finish reading. The count does not travel as an
+attachment or a list of file identities in the device receipt.
 
 ```quint
 pure def canAgentFilter(s: Files, request: int, wanted: S::Filter, guarded: bool, by: Actor): bool = by == Agent and request > 0
 
 pure def agentFilter(s: Files, request: int, wanted: S::Filter, guarded: bool, by: Actor): Moved =
-  if (not(s.open) or not(allowed(s)) or guarded) { state: s, out: List(Tell({ request: request, ok: false, items: List() })) }
+  if (not(s.open) or not(allowed(s)) or guarded) { state: s, out: List(Tell({ request: request, ok: false, items: List(), complete: false })) }
   else asking(wanted, request, s)
 ```
 
@@ -756,7 +760,7 @@ pure def agentFilterAt(s: Files, request: int, wanted: S::Filter, openedTrail: L
   val filtered = asking(wanted, request, there.state)
   if (safe and known)
     { state: filtered.state, out: unanswered({ ...s.search, peeker: 0 }).concat(there.out).concat(filtered.out) }
-  else { state: s, out: List(Tell({ request: request, ok: false, items: List() })) }
+  else { state: s, out: List(Tell({ request: request, ok: false, items: List(), complete: false })) }
 ```
 
 ### The agent opens a file the owner is shown, as listed or found now, when no file is open over Files; otherwise it is told it failed
@@ -769,8 +773,8 @@ pure def canAgentOpen(s: Files, request: int, file: F::Item, previewing: bool, g
 pure def agentOpen(s: Files, request: int, file: F::Item, previewing: bool, guarded: bool, by: Actor): Moved =
   val visible = if (s.search.searching) s.search.hits else s.items
   if (allowed(s) and s.open and not(s.trash) and not(guarded) and not(previewing) and file.kind != F::Folder and visible.includes(file))
-    { state: s, out: List(Show({ item: file, siblings: if (s.items.includes(file)) names(s) else List(), owner: false }), Tell({ request: request, ok: true, items: List(file) })) }
-  else { state: s, out: List(Tell({ request: request, ok: false, items: List() })) }
+    { state: s, out: List(Show({ item: file, siblings: if (s.items.includes(file)) names(s) else List(), owner: false }), Tell({ request: request, ok: true, items: List(file), complete: false })) }
+  else { state: s, out: List(Tell({ request: request, ok: false, items: List(), complete: false })) }
 ```
 
 ### A reviewed exact path opens its file or folder; a shown position is bound to the same path at review
@@ -797,8 +801,8 @@ pure def openReviewed(s: Files, request: int, file: F::Item, openedTrail: List[i
   val opened = if (folder) entered(openedTrail, false, F::Other, { ...s, handed: false }) else
     { state: s, out: List(Show({ item: file, siblings: if (s.items.includes(file)) names(s) else List(), owner: false })) }
   if (safe and file.id > 0 and (not(folder) or (resting and path)))
-    { state: opened.state, out: opened.out.append(Tell({ request: request, ok: true, items: List(file) })) }
-  else { state: s, out: List(Tell({ request: request, ok: false, items: List() })) }
+    { state: opened.state, out: opened.out.append(Tell({ request: request, ok: true, items: List(file), complete: false })) }
+  else { state: s, out: List(Tell({ request: request, ok: false, items: List(), complete: false })) }
 
 pure def stepReviewedOpenKeepsAFileInItsPreview(before: Files, via: str, after: Files, out: List[Effect]): bool =
   via == "openReviewed" implies out.every(e => match e {
