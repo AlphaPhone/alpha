@@ -410,13 +410,14 @@ export class AlphaClient {
       this.context.selectedObject?.kind === "browser-tab" && this.context.selectedObject.id === openingBrowserTab &&
       next.selectedObject?.kind === "browser-tab" && next.selectedObject.id === openingBrowserTab &&
       this.context.timeZone === next.timeZone;
-    const ownChange = ownView || this.isOwnPageChange(next, selection) || this.isOwnViewOpen(next) || this.isOwnContextRefresh(next, selection), previous = this.context;
+    const refresh = this.ownContextRefreshKind(next, selection);
+    const ownChange = ownView || this.isOwnPageChange(next, selection) || this.isOwnViewOpen(next) || refresh === "in-place", previous = this.context;
     this.localSelection = selection;
     this.context = copyContext(context, this.context.revision + 1);
     this.proposals.clear();
     // A view or page change committed by this request keeps its reply in flight.
     // Approvals stay bound to the earlier screen and are retired above.
-    if (ownChange || notesSourceLoaded || ownBrowserLoad) {
+    if (ownChange || notesSourceLoaded || ownBrowserLoad || refresh === "moved") {
       if (ownChange) this.activeRevision = this.context.revision;
       if (this.ownMoves.size >= 64) {
         const oldest = this.ownMoves.keys().next().value;
@@ -489,17 +490,24 @@ export class AlphaClient {
     this.ownContextRefresh = admitted;
     return () => { if (this.ownContextRefresh === admitted) this.ownContextRefresh = null; };
   }
-  clearOwnContextRefresh(): void {
-    this.ownContextRefresh = null;
-  }
-  private isOwnContextRefresh(next: ContextEnvelope, selection: string | null): boolean {
+  /**
+   * A same-view change inside the window opened by `admitOwnContextRefresh`. "in-place" keeps the
+   * selected object (the same record refreshed, or still none) and keeps the request in flight.
+   * "moved" selects a different object, or is any Browser change (a tab keeps its id across
+   * documents): like `ownBrowserLoad`, the conversation continues there, but a turn or approval for
+   * the earlier object never acquires the new one's authority, so the request in flight is retired.
+   */
+  private ownContextRefreshKind(next: ContextEnvelope, selection: string | null): "in-place" | "moved" | null {
     const own = this.ownContextRefresh;
-    if (!own || next.sensitive || this.context.sensitive || selection !== this.localSelection) return false;
+    if (!own || next.sensitive || this.context.sensitive || selection !== this.localSelection) return null;
     if (Date.now() > own.expiresAt) {
       this.ownContextRefresh = null;
-      return false;
+      return null;
     }
-    return next.view === this.context.view && next.view === own.view && next.timeZone === this.context.timeZone;
+    if (next.view !== this.context.view || next.view !== own.view || next.timeZone !== this.context.timeZone) return null;
+    const before = this.context.selectedObject, after = next.selectedObject;
+    const sameObject = before?.kind === after?.kind && before?.id === after?.id;
+    return sameObject && next.view !== "browser" ? "in-place" : "moved";
   }
   /**
    * True when the published context is `expected`, or was reached from it only by own page
