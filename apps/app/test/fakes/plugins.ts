@@ -3,7 +3,6 @@ import { elizaCamera } from "./camera.ts";
 import { elizaFiles, selectedDocuments } from "./files.ts";
 import { alphaMapsTransport, elizaLocation } from "./maps.ts";
 import { type Faked, elizaAgent, elizaCloud, elizaSecureStore } from "./phone.ts";
-import { type Faked, elizaAgent, elizaCloud, elizaSecureStore, present } from "./phone.ts";
 import { alphaPhotos } from "./photos.ts";
 import { alphaConnection } from "./platform.ts";
 import { elizaReminders } from "./reminders.ts";
@@ -39,7 +38,7 @@ export function plugins(world: Scene, services: { readonly agent: Answering; rea
     AlphaMapsTransport: alphaMapsTransport(world.maps),
     AlphaDevice: (emit) => ({ ...alphaDevice(world.update, () => world.now)(emit), ...settingsHost(world.settings), ...alphaAgentConsent(world.settings) }),
     ElizaNotifications: elizaNotices(world.settings),
-    ...(world.image ? { ElizaTelephony: present, ElizaContacts: present, ...telephonyPlugins(world.telephony) } : {}),
+    ...(world.image ? telephonyPlugins(world.telephony) : {}),
     AlphaConnection: alphaConnection(world.platform),
     ...(world.voice.onDevice ? { AlphaVoiceCloud: alphaVoiceCloud(world.voice) } : {}),
     ElizaCloudSpeech: elizaCloudSpeech(world.voice),
