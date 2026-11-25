@@ -33,9 +33,9 @@ export function Trash({ runtime, onBack }: TrashProps) {
   return (
     <section aria-label="Trash" className="flex min-h-0 flex-1 flex-col">
       <AppHeader title="Trash" leading={onBack && <Button variant="ghost" size="icon" aria-label="Files" onClick={onBack}><ChevronLeft /></Button>}>
-        {owner({ type: "refresh" }) && <Button variant="ghost" size="sm" onClick={() => tell({ type: "refresh" })}>Refresh</Button>}
-        {owner({ type: "restoreAll", now: untimed }) && <Button variant="outline" size="sm" onClick={() => tell({ type: "restoreAll", now: untimed })}>Restore all</Button>}
-        {owner({ type: "askToEmpty" }) && <Button variant="outline" size="sm" onClick={() => tell({ type: "askToEmpty" })}>Empty the Trash</Button>}
+        {owner({ type: "refresh" }) && <Button variant="ghost" className="h-11 px-3.5" onClick={() => tell({ type: "refresh" })}>Refresh</Button>}
+        {owner({ type: "restoreAll", now: untimed }) && <Button variant="ghost" className="h-11 px-3.5" onClick={() => tell({ type: "restoreAll", now: untimed })}>Restore all</Button>}
+        {owner({ type: "askToEmpty" }) && <Button variant="ghost" aria-label="Empty the Trash" className="h-11 px-3.5 text-warn" onClick={() => tell({ type: "askToEmpty" })}>Empty</Button>}
       </AppHeader>
       <div className="min-h-0 flex-1 touch-pan-y space-y-3 overflow-y-auto px-2 pb-28">
       {state.marked.length > 0 && (
@@ -61,8 +61,8 @@ export function Trash({ runtime, onBack }: TrashProps) {
               <ListRow
                 key={entry.mark}
                 title={entry.name}
-                className="min-h-15 gap-3.5 rounded-xl px-2"
-                leading={<span className="grid size-11 shrink-0 place-items-center rounded-lg bg-muted text-foreground"><Trash2 className="size-5" /></span>}
+                className="min-h-15 gap-3.5 rounded-drawer-icon px-2"
+                leading={<span className="grid size-11 shrink-0 place-items-center rounded-md bg-secondary text-foreground"><Trash2 className="size-5" /></span>}
                 selected={state.marked.includes(entry.mark)}
                 trailing={(
                   <span className="flex items-center gap-1">
