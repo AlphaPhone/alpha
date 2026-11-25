@@ -84,6 +84,13 @@ export function Files({ runtime, alpha }: FilesProps) {
   const [filtering, setFiltering] = useState(false);
   /** Which of v121's two selection actions opened the destination sheet: Move or Copy. */
   const [placing, setPlacing] = useState<"MoveTo" | "CopyTo" | undefined>(undefined);
+  /** Whether the Move to sheet was open at the last render: a sheet that closed forgets which action opened it. */
+  const [sheetWasOpen, setSheetWasOpen] = useState(false);
+  const sheetOpen = state?.sheet.open ?? false;
+  if (sheetOpen !== sheetWasOpen) {
+    setSheetWasOpen(sheetOpen);
+    if (!sheetOpen) setPlacing(undefined);
+  }
   const items = state?.items;
   const order = state?.order;
   const reversed = state?.reversed;
@@ -173,7 +180,7 @@ export function Files({ runtime, alpha }: FilesProps) {
           onClick={onClick}
           onContextMenu={onContextMenu}
         />
-        {selectable && !selecting && <Checkbox aria-label={`Select ${item.name}`} checked={false} className={`absolute right-3 min-h-6 min-w-6 rounded-full opacity-0 group-hover:opacity-100 focus-visible:opacity-100 ${grid ? "top-3" : "top-1/2 -translate-y-1/2"}`} onCheckedChange={() => tell(toggle)} />}
+        {selectable && !selecting && <Checkbox aria-label={`Select ${item.name}`} checked={false} className={`absolute right-3 min-h-6 min-w-6 rounded-full opacity-0 pointer-fine:group-hover:opacity-100 focus-visible:opacity-100 ${grid ? "top-3" : "top-1/2 -translate-y-1/2"}`} onCheckedChange={() => tell(toggle)} />}
       </div>
     );
   };
