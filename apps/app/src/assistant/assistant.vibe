@@ -26,7 +26,7 @@ import { Agent } from "../platform/agent.vibe"
 import { Device } from "../platform/device.vibe"
 import { Location } from "../platform/location.vibe"
 import type { VoiceBridge } from "../platform/voice.vibe"
-import { ask, outcomeOf } from "../platform/remote.vibe"
+import { Refused, ask, outcomeOf } from "../platform/remote.vibe"
 import { Attempts, fresh } from "../runtime/attempts.vibe"
 import { CommsPrompts, type CommsPrompt, commsViewOf } from "../phone/comms.vibe"
 import { MailQuestions, withMail } from "../inbox/mail-context.vibe"
@@ -464,8 +464,8 @@ effect function listed(ticket: number): Chats.Event!!(Agent | Talk) {
   } catch () => ({ type: "listed", ticket, ok: false, ids: [] })
 }
 
-// spec/app/assistant/chats.md, "A page of the conversation showing is taken only from the newest asking"; spec/app/assistant/chats.md, "Older or newer messages are read around a message of the conversation showing"
-/** A page of the conversation showing, each message numbered as Alpha first saw it: the page counts up to its highest number, which a scroll names. */
+// spec/app/assistant/chats.md, "A page of the conversation showing is taken only from the newest asking"; spec/app/assistant/chats.md, "Older or newer messages are read around a message of the conversation showing"; spec/app/assistant/chats.md, "A conversation the agent says it does not have is forgotten, and a new chat shows in its place"
+/** A page of the conversation showing, each message numbered as Alpha first saw it: the page counts up to its highest number, which a scroll names. The agent's 404 to a read of the latest messages says it has no such conversation. */
 effect function paged(conversation: number, around: number, ticket: number): Chats.Event!!(Agent | Talk | Chats.Machine | Composer.Machine) {
   return effect {
     const { board } = try Talk
@@ -491,7 +491,7 @@ effect function paged(conversation: number, around: number, ticket: number): Cha
     board.putPage(ticket, conversation, [...recorded, ...board.page(ticket).filter((one) => !ids.has(one.id))])
     const numbers = messages.map((one) => board.messageNumber(one.id))
     return { type: "paged", ticket, ok: true, messages: Math.max(0, ...numbers) }
-  } catch () => ({ type: "paged", ticket, ok: false, messages: 0 })
+  } catch (failure) => (around === 0 && failure instanceof Refused && failure.status === 404 ? { type: "gone", ticket } : { type: "paged", ticket, ok: false, messages: 0 })
 }
 
 /** A conversation the agent made, under the number Alpha gives it, or how its making ended where it was not. */
