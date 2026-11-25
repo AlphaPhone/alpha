@@ -137,6 +137,7 @@ function Viewfinder({ state, native, sheet, zoom, focusAt, bind }: {
         playsInline
         aria-hidden
         className={cn("pointer-events-none absolute inset-0 size-full object-cover", state.lens === "Front" && "-scale-x-100", native && "invisible")}
+        style={native ? undefined : { scale: state.zoom / 10 }}
       />
       <span aria-hidden className={cn("pointer-events-none absolute top-1/2 -left-[4%] block w-[108%] -translate-y-1/2", state.wide && state.mode === "Photo" ? "aspect-9/16" : "aspect-3/4")}>
         {state.grid && ready(state) && (
