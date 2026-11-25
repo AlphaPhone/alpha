@@ -1,11 +1,12 @@
 // spec/app/photos/index.md, "Story: Browse the library"; spec/app/photos/viewer.md, "Story: Look at a photo or video"
 import type { LibraryAccess, PhotosPlugin, Reviewed } from "@elizaos/os-bridges";
+import { boardingPass } from "./img/boarding-pass.ts";
 import { plugin, type Faked } from "./phone.ts";
 
 const photo = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+T5XQAAAAASUVORK5CYII=";
 
-function row(id: number, name: string, owned: boolean) {
-  return { id: `m:external_primary:i:${id}`, name, owned, kind: "image", image: photo, date: 1795400000000 + id * 60_000, width: 1, height: 1, size: 68, revision: `rev-image-${id}` };
+function row(id: number, name: string, owned: boolean, image = photo) {
+  return { id: `m:external_primary:i:${id}`, name, owned, kind: "image", image, date: 1795400000000 + id * 60_000, width: 1, height: 1, size: 68, revision: `rev-image-${id}` };
 }
 
 type FixtureRow = ReturnType<typeof row> & { duration?: number; path?: string; mutationRevision?: string; favorite?: boolean; trashed?: boolean };
@@ -40,7 +41,7 @@ export interface PhotosScene {
 export function photosScene(): PhotosScene {
   return {
     access: { scope: "denied", images: "denied", videos: "denied" },
-    rows: [row(3, "Park.jpg", false), row(2, "Camera.jpg", true), row(1, "Original.jpg", false)],
+    rows: [row(3, "Park.jpg", false), row(2, "Camera.jpg", true, `data:image/jpeg;base64,${boardingPass}`), row(1, "Original.jpg", false)],
     watching: false, changed: () => {}, promptCount: 0, readCount: 0, saves: [], editLookups: [],
   };
 }
