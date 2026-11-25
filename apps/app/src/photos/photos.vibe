@@ -76,9 +76,9 @@ effect function fetched(request: Fetch): Library.Event!!(PhotosPort | Catalog | 
     const tiles: ListedAlbum[] = []
     for (const album of standardAlbums) {
       const count = totals?.[album.target]
-      if (count === 0) continue
+      if (count === 0 && album.target !== "favorites") continue
       const sample = tryPromise(() => client.list({ album: album.target, limit: 1, thumbnails: true })) catch () => undefined
-      if (count === undefined && (sample?.items.length ?? 0) === 0) continue
+      if (count === undefined && (sample?.items.length ?? 0) === 0 && album.target !== "favorites") continue
       tiles.push({ ...album, count: count ?? sample?.items.length ?? 0, cover: sample?.items[0]?.image })
     }
     if (!Library.canListed(try machine.get(), request.ticket, "Phone")) return fail
