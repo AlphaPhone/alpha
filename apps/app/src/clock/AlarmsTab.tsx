@@ -1,7 +1,7 @@
 // spec/app/clock/alarms.md, "Story: Manage my alarms"; spec/app/clock/alarms.md, "Story: Ring, snooze, dismiss, and recover alarms"
 import { Banner, Button, Card, EmptyState, StatusDot, Switch } from "@repo/ui";
 import type { ManagedRuntime } from "effect";
-import { AlarmClock, BellOff, Plus, Trash2 } from "lucide-react";
+import { Clock, Plus, Trash2 } from "lucide-react";
 import { useSyncExternalStore } from "react";
 import type { Machine as ClockViewMachine } from "../../gen/app__clock.effect.vibe";
 import { useMachine as useClockView } from "../../gen/app__clock.react.ts";
@@ -71,7 +71,7 @@ export function AlarmsTab({ runtime }: AlarmsTabProps) {
       })}
 
       {sorted.length === 0 ? (
-        <EmptyState icon={<AlarmClock aria-hidden />} title="No alarms set">
+        <EmptyState icon={<Clock aria-hidden />} title="No alarms set">
           <Button onClick={openNew}>Add alarm</Button>
         </EmptyState>
       ) : (
@@ -83,7 +83,7 @@ export function AlarmsTab({ runtime }: AlarmsTabProps) {
             const repeatText = describeDaysMask(item.daysMask);
             const detailParts = [record.label, repeatText, soundLabel(record.sound)].filter((part) => part !== "");
             return (
-              <Card key={item.id} className="gap-3">
+              <Card key={item.id} className="gap-3 rounded-tile border-0 bg-secondary">
                 <div className="flex items-center justify-between gap-3">
                   <button
                     type="button"
@@ -92,7 +92,7 @@ export function AlarmsTab({ runtime }: AlarmsTabProps) {
                     className="flex min-w-0 flex-1 flex-col items-start text-left"
                   >
                     <div className="flex items-baseline gap-1.5">
-                      <span className={`text-3xl font-light tabular-nums ${item.enabled ? "text-foreground" : "text-muted-foreground"}`}>
+                      <span className={`font-display text-3xl font-light tabular-nums ${item.enabled ? "text-foreground" : "text-muted-foreground"}`}>
                         {display.time}
                       </span>
                       {display.period && (
@@ -133,7 +133,6 @@ export function AlarmsTab({ runtime }: AlarmsTabProps) {
                       </Button>
                     )}
                     <Button variant="destructive" size="sm" onClick={() => void runtime.runPromise(dismissAlarm(item.id))}>
-                      <BellOff aria-hidden className="size-4" />
                       Dismiss
                     </Button>
                   </div>

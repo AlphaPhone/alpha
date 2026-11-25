@@ -1,7 +1,7 @@
 // spec/app/clock/timers.md, "Story: Run multiple countdown timers"
 import { Button, Card, EmptyState, Input, Label, Progress, Sheet, SheetContent, StatusDot } from "@repo/ui";
 import type { ManagedRuntime } from "effect";
-import { Pause, Play, Plus, RotateCcw, Timer as TimerIcon, Trash2 } from "lucide-react";
+import { Clock, Pause, Play, Plus, Trash2, Undo2 } from "lucide-react";
 import { useState, useSyncExternalStore } from "react";
 import type { Machine as ClockViewMachine } from "../../gen/app__clock.effect.vibe";
 import { useMachine as useClockView } from "../../gen/app__clock.react.ts";
@@ -93,7 +93,7 @@ export function TimersTab({ runtime }: TimersTabProps) {
       </div>
 
       {items.length === 0 ? (
-        <EmptyState icon={<TimerIcon aria-hidden />} title="No active timers">
+        <EmptyState icon={<Clock aria-hidden />} title="No active timers">
           <Button onClick={() => void view.send({ type: "openSheet", sheet: { tag: "NewTimer" } })}>
             New timer
           </Button>
@@ -108,7 +108,7 @@ export function TimersTab({ runtime }: TimersTabProps) {
             const elapsed = Math.max(0, effectiveMax - remaining);
             const statusKind = item.status === "Ringing" ? "error" : item.status === "Running" ? "ok" : item.status === "Paused" ? "warn" : "off";
             return (
-              <Card key={item.id} className="gap-3">
+              <Card key={item.id} className="gap-3 rounded-tile border-0 bg-secondary">
                 <div className="flex items-center justify-between gap-2">
                   <div className="flex items-center gap-2">
                     <StatusDot status={statusKind} label={item.status} />
@@ -125,7 +125,7 @@ export function TimersTab({ runtime }: TimersTabProps) {
                 </div>
 
                 <div className="flex items-baseline justify-between gap-3">
-                  <span className={`text-4xl font-light tabular-nums ${item.status === "Ringing" ? "text-destructive" : "text-foreground"}`}>
+                  <span className={`font-display text-4xl font-light tabular-nums ${item.status === "Ringing" ? "text-destructive" : "text-foreground"}`}>
                     {formatTimerDuration(remaining)}
                   </span>
                   <span className="text-xs font-medium text-muted-foreground">
@@ -166,7 +166,7 @@ export function TimersTab({ runtime }: TimersTabProps) {
                   )}
                   {item.status !== "Ready" && item.status !== "Ringing" && (
                     <Button size="sm" variant="ghost" aria-label={`Reset ${title}`} onClick={() => void runtime.runPromise(resetTimer(item.id))}>
-                      <RotateCcw aria-hidden className="size-4" />
+                      <Undo2 aria-hidden className="size-4" />
                       Reset
                     </Button>
                   )}
