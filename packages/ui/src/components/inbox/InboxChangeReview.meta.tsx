@@ -23,16 +23,15 @@ export const meta: ComponentMeta<InboxChangeReviewProps> = {
     Default: async () => {
       onConfirm.mockClear();
       onCancel.mockClear();
-      const sheet = await screen.findByRole("dialog", { name: "Archive?" });
-      await expect(sheet).toHaveAccessibleDescription("3 emails");
-      await userEvent.click(within(sheet).getByRole("button", { name: "Archive" }));
+      const sheet = await screen.findByRole("alertdialog", { name: "Archive 3 emails?" });
+      await userEvent.click(within(sheet).getByRole("button", { name: "Yes" }));
       await expect(onConfirm).toHaveBeenCalledTimes(1);
       await userEvent.keyboard("{Escape}");
       await waitFor(() => expect(onCancel).toHaveBeenCalledTimes(1));
     },
     "Emails changed": async () => {
-      const sheet = await screen.findByRole("dialog", { name: "Archive?" });
-      await expect(within(sheet).queryByRole("button", { name: "Archive" })).toBeNull();
+      const sheet = await screen.findByRole("alertdialog", { name: "Archive 3 emails?" });
+      await expect(within(sheet).queryByRole("button", { name: "Yes" })).toBeNull();
     },
   },
 };

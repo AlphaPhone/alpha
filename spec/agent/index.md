@@ -33,7 +33,10 @@ and the bio is the one the old agent was given
 (the old tree's agent identity script at `26e827f06`, line 14). The old agent had no system
 prompt of its own and kept its preset's origin line, "{{name}}, made by Alpha
 Compute" (line 10); eliza's launch needs one, so that line, with the name, is
-it. The words are in `apps/agent/host/character.json`.
+its start. eliza's tools, notes and results name the person in the
+conversation "the owner", which the model repeated back to them, so the
+prompt also tells the agent to speak to that person as "you", never as "the
+owner" or "the user". The words are in `apps/agent/host/character.json`.
 
 ```quint
 pure val characterName: str = "Alpha"
@@ -68,10 +71,14 @@ whose only action is the calculator the old agent never had.
 pure val corePlugins: List[str] = List("@elizaos/plugin-personal-assistant", "@elizaos/plugin-calendar", "@elizaos/plugin-inbox", "@elizaos/plugin-notes", "@elizaos/plugin-files", "@elizaos/plugin-workflow")
 pure val viewPlugins: List[str] = List("@elizaos/plugin-maps", "@elizaos/plugin-browser")
 pure val hostedPlugins: List[str] = List("@elizaos/plugin-notes")
-pure val packedPlugins: List[str] = corePlugins.concat(viewPlugins)
-pure val bundledPlugins: List[str] = packedPlugins.select(p => not(hostedPlugins.includes(p)))
+pure val packedPlugins: List[str] = List("@elizaos/plugin-personal-assistant", "@elizaos/plugin-calendar", "@elizaos/plugin-inbox", "@elizaos/plugin-notes", "@elizaos/plugin-files", "@elizaos/plugin-workflow", "@elizaos/plugin-maps", "@elizaos/plugin-browser")
+pure val bundledPlugins: List[str] = List("@elizaos/plugin-personal-assistant", "@elizaos/plugin-calendar", "@elizaos/plugin-inbox", "@elizaos/plugin-files", "@elizaos/plugin-workflow", "@elizaos/plugin-maps", "@elizaos/plugin-browser")
 pure val agentModules: List[str] = List("@elizaos/agent/device-actions", "@elizaos/agent/reply-draft", "@elizaos/agent/approvals", "@elizaos/agent/notifications", "@elizaos/agent/views", "@elizaos/agent/scheduled-tasks", "@elizaos/agent/tasks", "@elizaos/agent/triggers", "@elizaos/agent/surface")
-pure val loadList: List[str] = packedPlugins.concat(agentModules)
+pure val loadList: List[str] = List("@elizaos/plugin-personal-assistant", "@elizaos/plugin-calendar", "@elizaos/plugin-inbox", "@elizaos/plugin-notes", "@elizaos/plugin-files", "@elizaos/plugin-workflow", "@elizaos/plugin-maps", "@elizaos/plugin-browser", "@elizaos/agent/device-actions", "@elizaos/agent/reply-draft", "@elizaos/agent/approvals", "@elizaos/agent/notifications", "@elizaos/agent/views", "@elizaos/agent/scheduled-tasks", "@elizaos/agent/tasks", "@elizaos/agent/triggers", "@elizaos/agent/surface")
+pure def lawPackListsAreConsistent(p: str): bool =
+  (packedPlugins.includes(p) iff (corePlugins.includes(p) or viewPlugins.includes(p)))
+    and (bundledPlugins.includes(p) iff (packedPlugins.includes(p) and not(hostedPlugins.includes(p))))
+    and (loadList.includes(p) iff (packedPlugins.includes(p) or agentModules.includes(p)))
 ```
 
 ### The agent may run the actions the old phone's agent ran plus Alpha's Clock and Reminders actions, and every other action the bundle registers is listed as refused with its reason
@@ -91,17 +98,20 @@ calculator.
 pure val productPluginName: str = "alpha-apps"
 pure val coreActions: List[str] = List("REPLY", "IGNORE", "NONE")
 pure val alphaAppActions: List[str] = List("CLOCK_ALARM", "CLOCK_TIMER", "CLOCK_WORLD", "REMINDERS_MANAGE")
-pure val allowedActions: List[str] = coreActions.concat(List(
-  "PROPOSE_DEVICE_ACTION", "VIEWS",
+pure val allowedActions: List[str] = List(
+  "REPLY", "IGNORE", "NONE",
   "OWNER_REMINDERS", "OWNER_GOALS", "TODO", "OWNER_ROUTINES", "BRIEF",
   "CALENDAR",
   "INBOX_READ", "INBOX_COMPOSE_EMAIL",
   "WORKFLOW",
-  "NOTES_LIST", "NOTES_GET", "NOTES_CREATE", "NOTES_UPDATE", "NOTES_DELETE", "NOTES_MOVE", "NOTES_RESTORE",
-  "MAPS_PLACE", "MAPS_ROUTE", "MAPS_NAVIGATION_START", "MAPS_NAVIGATION_REROUTE", "MAPS_NAVIGATION_STOP",
-  "MAPS_SELECT", "MAPS_SAVE", "MAPS_SAVED", "MAPS_SHARE", "MAPS_WHERE_AM_I", "MAPS_COVERAGE",
-  "BROWSER", "BROWSER_BACK", "BROWSER_FORWARD", "BROWSER_RELOAD"
-)).concat(alphaAppActions)
+  "MAPS_PLACE", "MAPS_WHERE_AM_I", "MAPS_ROUTE", "MAPS_NAVIGATION_START", "MAPS_NAVIGATION_REROUTE", "MAPS_NAVIGATION_STOP",
+  "MAPS_SELECT", "MAPS_SAVE", "MAPS_SHARE", "MAPS_COVERAGE", "MAPS_SAVED",
+  "BROWSER", "BROWSER_BACK", "BROWSER_FORWARD", "BROWSER_RELOAD",
+  "NOTES_LIST", "NOTES_GET", "NOTES_CREATE", "NOTES_UPDATE", "NOTES_DELETE", "NOTES_RESTORE", "NOTES_MOVE",
+  "PROPOSE_DEVICE_ACTION", "VIEWS",
+  "CLOCK_ALARM", "CLOCK_TIMER", "CLOCK_WORLD", "REMINDERS_MANAGE"
+)
+pure def lawCoreActionsAreAlwaysAllowed(a: str): bool = coreActions.includes(a) implies allowedActions.includes(a)
 pure def sameNames(a: List[str], b: List[str]): bool =
   a.length() == b.length() and a.every(x => b.includes(x)) and b.every(x => a.includes(x))
 pure def refusedActions(registered: List[str]): List[str] = registered.select(a => not(allowedActions.includes(a)))
@@ -241,14 +251,18 @@ pure val personalDetailSwap: bool = true
 pure def privacyAdmitted(secrets: bool, details: bool): bool = secrets == secretSwap and details == personalDetailSwap
 ```
 
-### The agent changes the owner's mail and calendar through Google only where the launch consents, and the pack consents to neither yet
+### The agent changes the owner's mail and calendar through Google only where the launch consents, and the pack's host file consents to neither
 
 eliza's launch carries the owner's consent for the agent to change Gmail
 and to edit Google Calendar (`spec/agent/host/launch.md`, `google`), off
-unless named. The old phone reached Google only through its own host
-module, with every change reviewed on the phone; whether the pack's launch
-consents to either waits on the owner, and until then it consents to
-neither.
+unless named. The pack's host file consents to neither. The owner's own
+choice in Settings replaces it at each launch once the phone has read or
+saved it (`spec/app/settings/preferences.md`, "The agent is launched
+allowed to change Gmail and Calendar exactly as the phone last read or
+saved, allowed neither once it could not read them, and Alpha says nothing
+of it before the first answer"): Alpha's agent service keeps that choice
+and gives it to eliza's, which launches with it in place of the host
+file's.
 
 ```quint
 pure val gmailChanges: bool = false

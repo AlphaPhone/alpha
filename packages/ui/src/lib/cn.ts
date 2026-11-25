@@ -23,5 +23,5 @@ export const cn = cnFor(tokens);
 /** The outline every control shows under keyboard focus: the focus tokens' width and offset, in `ring`. */
 export const focusRing = "focus-visible:outline-focus focus-visible:outline-offset-focus focus-visible:outline-ring";
 
-/** The ring of Home's tiles and the drawer's apps: shown only while the page is marked as moved by keyboard. */
+/** The ring of Home's tiles: shown only while the page is marked as moved by keyboard. */
 export const launcherRing = "in-data-[alpha-keyboard]:focus-visible:outline-solid in-data-[alpha-keyboard]:focus-visible:outline-focus in-data-[alpha-keyboard]:focus-visible:outline-offset-focus in-data-[alpha-keyboard]:focus-visible:outline-ring";

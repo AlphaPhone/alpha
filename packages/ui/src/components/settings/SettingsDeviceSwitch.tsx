@@ -1,4 +1,5 @@
-import { CalendarCog, Globe, Hash, ImageDown, MailCheck, MapPin, PanelTop, Send } from "lucide-react";
+import type { ReactNode } from "react";
+import { CalendarCog, Hash, MailCheck, MapPin, PanelTop, Send } from "lucide-react";
 import { SettingsRecoverRow } from "./SettingsRecoverRow.tsx";
 import { SettingsSwitchRow } from "./SettingsSwitchRow.tsx";
 import type { DeviceRead } from "./vocabulary.ts";
@@ -23,9 +24,15 @@ export type SettingsDeviceSwitchProps = {
   onRecover?: () => void;
 };
 
-const settings = {
-  "ask-first": { title: "Ask before Alpha acts", detail: "Web, camera, photos", icon: <Globe /> },
-  images: { title: "Load images", detail: "From the web, in Inbox", icon: <ImageDown /> },
+const tags = (words: string[]) => (
+  <span className="mt-1 flex flex-wrap gap-1.5 whitespace-normal">
+    {words.map((word) => <span key={word} className="rounded-sm bg-background px-2.5 py-0.75 text-fine text-muted-foreground">{word}</span>)}
+  </span>
+);
+
+const settings: Record<SettingsDeviceSwitchProps["setting"], { title: string; detail: ReactNode; icon?: ReactNode }> = {
+  "ask-first": { title: "Ask before Alpha acts", detail: tags(["Web", "Camera", "Photos"]) },
+  images: { title: "Load images", detail: undefined },
   "agent-location": { title: "Location", detail: "With each message to Alpha", icon: <MapPin /> },
   "browser-page": { title: "Browser page", detail: "The page open, with each message", icon: <PanelTop /> },
   "gmail-changes": { title: "Gmail changes", detail: "Drafts, labels and sending", icon: <MailCheck /> },

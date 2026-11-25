@@ -7,7 +7,6 @@ import { Machine as Held } from "../gen/app__calendar__deletions.effect.vibe";
 import { Machine as Shell } from "../gen/app__shell.effect.vibe";
 import { Machine as Link } from "../gen/app__calendar__link.effect.vibe";
 import calendar from "../src/calendar/index.tsx";
-import { shown } from "../src/calendar/shown.ts";
 import { civilDay, dateOf, dayStart } from "../src/calendar/time.ts";
 import type { Alpha } from "../src/runtime/area.tsx";
 import { button, closeAll, drawn, fill, hardware, later, only, open, press, underAct, until } from "./alpha.tsx";
@@ -17,23 +16,8 @@ import { type Scene, scene } from "./fakes/scene.ts";
 underAct();
 afterEach(closeAll);
 
-/** Choose `option` in the Select whose trigger has accessible name `name`. */
-async function chooseOption(name: string, option: string) {
-  await drawn(() => {
-    const trigger = document.querySelector<HTMLElement>(`[role=combobox][aria-label='${name}']`);
-    if (!trigger) throw new Error(`no select ${name}`);
-    trigger.focus();
-    trigger.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
-  });
-  await drawn(() => {
-    const found = [...document.querySelectorAll<HTMLElement>("[role=option]")].find((one) => one.textContent === option);
-    if (!found) throw new Error(`no option ${option}`);
-    found.click();
-  });
-}
-
 const hour = 3_600_000;
-const weekday = new Intl.DateTimeFormat(undefined, { weekday: "short" });
+const longDate = new Intl.DateTimeFormat(undefined, { weekday: "long", month: "long", day: "numeric" });
 
 /** A world at nine in the morning of a Tuesday, whose agent keeps a stand-up, a lunch it was invited to and a dentist's appointment, and whose phone keeps the gym. */
 function morning(phone: boolean): Scene & { at: (day: number, hours: number) => number; today: number } {
@@ -56,21 +40,27 @@ function morning(phone: boolean): Scene & { at: (day: number, hours: number) => 
   return Object.assign(world, { at, today });
 }
 
-/** The titles of the rows the day shows, in order. */
-const titles = () => [...document.querySelectorAll("main button")].map((found) => found.querySelector("span, div")?.textContent ?? found.textContent ?? "")
-  .map((text) => ["Standup", "Team lunch", "Dentist", "Gym", "Coffee"].find((title) => text.startsWith(title)) ?? "").filter((title) => title !== "");
+/** The titles of the events the days show, in order: each event's button is named by its title and time. */
+const titles = () => [...document.querySelectorAll("[data-alpha-subview=calendar-list] button")].map((found) => found.getAttribute("aria-label") ?? "")
+  .map((text) => ["Standup", "Team lunch", "Dentist", "Gym", "Coffee"].find((title) => text.startsWith(`${title}, `)) ?? "").filter((title) => title !== "");
 
-/** Tap the button whose text starts with `text`, as a row's does. */
+/** Tap the event whose name starts with `text`, as a row's or a block's does. */
 async function tap(text: string) {
-  const found = [...document.querySelectorAll("button")].find((candidate) => (candidate.textContent ?? "").startsWith(text));
+  const found = [...document.querySelectorAll("button")].find((candidate) => (candidate.getAttribute("aria-label") ?? "").startsWith(`${text}, `));
   if (!found) throw new Error(`no row ${text}`);
-  await press(found.getAttribute("aria-label") ?? found.textContent ?? "");
+  await press(found.getAttribute("aria-label") ?? "");
+}
+
+/** Open the month dialog under the title and choose `pill` there: a layout, or the Calendars sheet. */
+async function fromMonth(pill: string) {
+  await press("Choose date");
+  await press(pill);
 }
 
 /** Bring Calendar forward, as Home, a notice or Ask Alpha does through the shell. */
 const openCalendar = (alpha: Alpha) => alpha.runtime.runPromise(Shell.use((shell) => shell.send({ type: "openView", view: "Calendar" })));
 
-const dayButton = (day: number) => `${weekday.format(dateOf(day))} ${dateOf(day).getDate()}`;
+const dayButton = (day: number) => longDate.format(dateOf(day));
 
 describe.each([["a browser", false], ["a phone", true]])("in %s", (_where, phone) => {
   it("See my days (spec/app/calendar/index.md, \"Story: See my days\"; spec/app/calendar/index.md, \"Story: Move through the days\")", async () => {
@@ -105,22 +95,22 @@ describe.each([["a browser", false], ["a phone", true]])("in %s", (_where, phone
     // spec/app/calendar/index.md, "A day is empty only when every source it may read answered with nothing, no calendar is hidden, and there are no reminders": a browser, which may not read the phone, still calls tomorrow empty.
     await press(dayButton(world.today + 1));
     await until(alpha, runtime, View, (s) => s.anchor === world.today + 1 && s.google.status === "Loaded" && (!phone || s.phone.status === "Loaded"));
-    expect([titles(), Boolean(document.body.textContent?.includes("Nothing on this day"))]).toEqual([[], true]);
+    expect([titles(), Boolean(document.body.textContent?.includes("Free all day"))]).toEqual([[], true]);
     await press("Today");
     await until(alpha, runtime, View, (s) => s.anchor === world.today && s.google.status === "Loaded");
 
     // spec/app/calendar/index.md, "Choosing a layout closes the menu, and the agenda goes back to today"; spec/app/calendar/presentation.md, "A read for a day covers the month before it through the month after next": the agenda lists what is coming, not only today.
-    await press("Layout");
-    await until(alpha, runtime, View, (s) => s.overlay === "LayoutMenu");
-    await press("Agenda");
+    await press("Choose date");
+    await until(alpha, runtime, View, (s) => s.overlay === "MonthDialog");
+    await press("Schedule");
     await until(alpha, runtime, View, (s) => s.layout === "Agenda" && s.overlay === "NoOverlay");
     expect(titles()).toEqual(phone ? ["Standup", "Team lunch", "Gym", "Dentist"] : ["Standup", "Team lunch", "Dentist"]);
 
     // spec/app/calendar/index.md, "An event opens from the rows shown, with what it offers"; spec/app/calendar/index.md, "Back closes the event"; spec/app/calendar/index.md, "The video call is joined, and the event opened in Android Calendar, only from the event shown"; spec/app/calendar/presentation.md, "The people list says Organizer or Alpha's word for each reply, never the provider's value"
     await tap("Team lunch");
     await until(alpha, runtime, View, (s) => s.open !== 0 && s.place && !s.video && s.web && !s.local);
-    expect([Boolean(button("Open in Maps")), Boolean(button("Join video call")), Boolean(button("Open in Google Calendar")), Boolean(button("Open in Android Calendar"))]).toEqual([true, false, true, false]);
-    expect(["Organizer", "Hasn't answered"].map((word) => Boolean(document.body.textContent?.includes(word)))).toEqual([true, true]);
+    expect([Boolean(button("Open Cafe in Maps")), Boolean(button("Join video call")), Boolean(button("Open in Google Calendar")), Boolean(button("Open in Android Calendar"))]).toEqual([true, false, true, false]);
+    expect([Boolean(document.body.textContent?.includes("Organizer")), Boolean(document.querySelector("[aria-label='You']"))]).toEqual([true, false]);
     await hardware("back");
     await until(alpha, runtime, View, (s) => s.open === 0);
     expect((await alpha.runtime.runPromise(Shell.use((shell) => shell.get()))).trail).toEqual(["Calendar"]);
@@ -138,14 +128,14 @@ describe("on a phone", () => {
 
     // spec/app/calendar/index.md, "The event's place opens in Maps, and coming back reads the event again"; spec/app/calendar/index.md, "An event comes back only if the read finds it; otherwise it closes"
     await tap("Team lunch");
-    await press("Open in Maps");
+    await press("Open Cafe in Maps");
     await until(alpha, runtime, View, (s) => s.detail === "InMaps");
     expect((await alpha.runtime.runPromise(Shell.use((shell) => shell.get()))).trail).toEqual(["Calendar", "Maps"]);
     await hardware("back");
     await until(alpha, runtime, View, (s) => s.detail === "Showing" && s.open !== 0 && s.event.status === "Loaded");
 
     // spec/app/calendar/index.md, "An event comes back only if the read finds it; otherwise it closes": the lunch was cancelled while the owner was in Maps.
-    await press("Open in Maps");
+    await press("Open Cafe in Maps");
     await until(alpha, runtime, View, (s) => s.detail === "InMaps");
     world.calendar.events = world.calendar.events.filter((event) => event.title !== "Team lunch");
     await hardware("back");
@@ -163,13 +153,13 @@ describe("on a phone", () => {
     // spec/app/calendar/editor.md, "Saving sends the form once, as a new numbered write built on the revision its edits began from"; spec/app/calendar/writing.md, "Save is off while loading, while saving, for another account, for an event that changed, and without a title, in that order"
     await press("New event");
     await until(alpha, runtime, Editor, (e) => e.shown && e.form === "NewEvent" && e.receipts.status === "Loaded");
-    await fill("Place", "Corner");
+    await fill("Location", "Corner");
     await until(alpha, runtime, Editor, (e) => e.draft.edits === 1);
-    expect([button("Save")?.hasAttribute("disabled"), Boolean(document.body.textContent?.includes("Add a title."))]).toEqual([true, true]);
+    expect(button("Save event")?.getAttribute("aria-disabled")).toBe("true");
     await fill("Title", "Coffee");
     await until(alpha, runtime, Editor, (e) => e.draft.edits === 2 && e.kept && e.titled);
-    await chooseOption("Calendar", "This phone's calendar");
-    await press("Save");
+    await press("This phone's calendar");
+    await press("Save event");
     await until(alpha, runtime, Editor, (e) => e.form === "NoForm" && e.write.outcome === "Confirmed");
     await until(alpha, runtime, View, (s) => s.phoneRows === 2);
     expect([world.calendar.phoneEvents.map((event) => event.title), titles()]).toEqual([["Gym", "Coffee"], ["Coffee", "Standup", "Team lunch", "Gym"]]);
@@ -178,11 +168,11 @@ describe("on a phone", () => {
     world.calendar.lost = true;
     await press("New event");
     await fill("Title", "Walk");
-    await chooseOption("Calendar", "This phone's calendar");
-    await press("Save");
+    await press("This phone's calendar");
+    await press("Save event");
     await until(alpha, runtime, Editor, (e) => e.unknownCreate && e.draft.sync === "Saving" && e.write.outcome === "Unknown");
-    expect(button("Save")?.hasAttribute("disabled")).toBe(true);
-    await press("Check again");
+    expect(button("Save event")?.getAttribute("aria-disabled")).toBe("true");
+    await press("Check if events were saved");
     await until(alpha, runtime, Editor, (e) => !e.unknownCreate && e.form === "NoForm");
     expect(world.calendar.phoneEvents.filter((event) => event.title === "Walk").length).toBe(1);
 
@@ -190,6 +180,7 @@ describe("on a phone", () => {
     world.calendar.lost = false;
     await tap("Gym");
     await until(alpha, runtime, View, (s) => s.open !== 0);
+    await press("Event actions");
     expect(Boolean(button("Delete the series"))).toBe(false);
     // spec/app/calendar/deletions.md, "Confirming a deletion holds it; a deletion still waiting is sent first, so the only Undo shown is the newest"; spec/app/calendar/deletions.md, "Undo inside the window sends nothing, and shows the event again"
     await press("Delete");
@@ -203,6 +194,7 @@ describe("on a phone", () => {
     await tap("Gym");
     await until(alpha, runtime, View, (s) => s.open !== 0);
     vi.useFakeTimers({ toFake: ["performance"] });
+    await press("Event actions");
     await press("Delete");
     await later(alpha, 6_000);
     await later(alpha, 10_000);
@@ -224,6 +216,8 @@ describe("on a phone", () => {
     const runtime = calendar.runtime(alpha);
     await openCalendar(alpha);
     await until(alpha, runtime, Link, (l) => l.owner > 0);
+    await fromMonth("Calendars");
+    await until(alpha, runtime, View, (s) => s.overlay === "CalendarsSheet");
 
     // spec/app/calendar/link.md, "Setup starts only from a write grant, for the owner signed in; a read-only grant goes on to consent for more access, and a missing one sends nothing"
     await press("Link Google Calendar");
@@ -233,6 +227,7 @@ describe("on a phone", () => {
     // spec/app/calendar/link.md, "A write is sent only while the owner and the reviewed revision still hold, and its answer starts another review"; spec/app/calendar/link.md, "Synced needs a clean read back of the linked events; held or many conflicts are named"
     world.inbox.google = { email: "owner@alpha.test", connection: "google-owner", capabilities: ["google.basic_identity", "google.calendar.read", "google.calendar.write"] };
     await openCalendar(alpha);
+    if ((await runtime.runPromise(View.use((view) => view.get()))).overlay !== "CalendarsSheet") await fromMonth("Calendars");
     await press("Check again");
     await until(alpha, runtime, Link, (l) => l.phase === "Done" && l.ending === "Synced" && l.writes === 1 && l.linkReads === 1);
     expect(world.calendar.writes).toEqual(["sync select"]);
@@ -306,7 +301,7 @@ describe("in a browser", () => {
     await until(alpha, runtime, View, (s) => s.googleRows === 2);
 
     // spec/app/calendar/index.md, "Search and the Calendars sheet open over the days, never over an open event"
-    await press("Search");
+    await press("Search events");
     await until(alpha, runtime, View, (s) => s.overlay === "Search");
     await fill("Search events", "dent");
     await tap("Dentist");
@@ -314,7 +309,7 @@ describe("in a browser", () => {
     expect(titles()).toEqual(["Dentist"]);
 
     // spec/app/calendar/index.md, "A switch of the Calendars sheet hides or shows one calendar"; spec/app/calendar/presentation.md, "A hidden calendar's rows show neither in Calendar nor on Home"
-    await press("Calendars");
+    await fromMonth("Calendars");
     await until(alpha, runtime, View, (s) => s.overlay === "CalendarsSheet");
     const agent = [...document.querySelectorAll("[role=switch]")][0] as HTMLElement | undefined;
     if (!agent) throw new Error("no switch");
@@ -322,7 +317,7 @@ describe("in a browser", () => {
     await until(alpha, runtime, View, (s) => s.hidden.includes(0));
     await hardware("back");
     await until(alpha, runtime, View, (s) => s.overlay === "NoOverlay");
-    expect([titles(), Boolean(document.body.textContent?.includes("Nothing on this day"))]).toEqual([[], false]);
+    expect([titles(), Boolean(document.body.textContent?.includes("Free all day"))]).toEqual([[], false]);
   });
 
   it("Answer an invitation (spec/app/calendar/editor.md, \"Story: Delete an event, or answer an invitation\")", async () => {
@@ -335,7 +330,7 @@ describe("in a browser", () => {
     // spec/app/calendar/editor.md, "An invitation is answered Going or Maybe once, at the revision shown, and Decline is the deletion's decline"; spec/app/calendar/editor.md, "A confirmed answer holds its event until a read shows it"; spec/app/calendar/writing.md, "An applied create, change or answer is read back; only a read back that finds it as asked says saved"
     await tap("Team lunch");
     await until(alpha, runtime, View, (s) => s.open !== 0);
-    expect([Boolean(button("Going")), Boolean(button("Maybe")), Boolean(button("Decline"))]).toEqual([true, true, true]);
+    expect([Boolean(button("Going")), Boolean(button("Maybe")), Boolean(button("No"))]).toEqual([true, true, true]);
     await press("Going");
     await until(alpha, runtime, Editor, (e) => e.kind === "Reply" && e.write.outcome === "Confirmed" && e.latched.length === 0);
     expect(world.calendar.writes).toEqual(["answer ev-team-lunch accepted"]);

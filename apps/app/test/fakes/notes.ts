@@ -43,13 +43,13 @@ export function notesScene(now = Date.now()): NotesScene {
         data: {
           audio: { durationMs: 408_000 },
           lines: [
-            { s: "maya", t: "Okay, lock screen first. Notifications stay as icons until you unlock.", at: 0 },
+            { s: "Maya Chen", t: "Okay, lock screen first. Notifications stay as icons until you unlock.", at: 0 },
             { s: "me", t: "Agreed. Voice still works locked, but the answers stay vague.", at: 42 },
-            { s: "sam", t: "What about the chat over other apps?", at: 90 },
-            { s: "maya", t: "Four heights. Pill, input, half, full. You drag between them.", at: 125 },
+            { s: "Sam Okafor", t: "What about the chat over other apps?", at: 90 },
+            { s: "Maya Chen", t: "Four heights. Pill, input, half, full. You drag between them.", at: 125 },
             { s: "me", t: "Let's cut the mark button from the recorder. Nobody used it.", at: 190 },
-            { s: "sam", t: "I'll wire the new recorder into Notes by Thursday.", at: 242 },
-            { s: "maya", t: "I'll send the prototype to the team tonight.", at: 315 },
+            { s: "Sam Okafor", t: "I'll wire the new recorder into Notes by Thursday.", at: 242 },
+            { s: "Maya Chen", t: "I'll send the prototype to the team tonight.", at: 315 },
             { s: "me", t: "And I'll book a review with Jordan for next week.", at: 390 },
           ],
           summary: ["Notifications stay as icons until unlock", "Voice works while locked; answers stay vague", "Chat has four heights: pill, input, half, full", "The recorder drops the mark button"],
@@ -74,9 +74,45 @@ export function notesScene(now = Date.now()): NotesScene {
   };
 }
 
-/** The agent's Notes routes: its store's state, as `@elizaos/plugin-notes` serves it. */
+/** What a write sends to `/api/notes/interact`, as `@elizaos/plugin-notes` takes it. */
+interface Interaction {
+  capability: string;
+  params: { id?: string; content?: string; format?: StickyNote["format"]; expectedRevision?: number; creationId?: string };
+}
+
+const refusal = (status: number, code: string) => Response.json({ requestId: "fake", success: false, error: code, result: { success: false, text: code, code } }, { status });
+
+/** Change the store as a write asks, and answer as the plugin does: the state after it and the note it changed. */
+function interacted(scene: NotesScene, { capability, params }: Interaction, now: number): Response {
+  const at = iso(now);
+  const answered = (changed: StickyNote) => Response.json({ requestId: "fake", success: true, result: { success: true, text: "Updated.", state: { notes: scene.notes, revision: scene.revision }, data: { note: changed } } });
+  const parts = (content: string) => {
+    const newline = content.indexOf("\n");
+    return newline < 0 ? { title: content, body: "" } : { title: content.slice(0, newline), body: content.slice(newline) };
+  };
+  if (capability === "create-note") {
+    const made = scene.notes.find((one) => one.id === params.creationId);
+    if (made) return answered(made);
+    const note: StickyNote = { id: params.creationId ?? `note-${scene.revision + 1}`, ...parts(params.content ?? ""), color: "yellow", ...(params.format ? { format: params.format } : {}), createdAt: at, updatedAt: at };
+    scene.notes.unshift(note);
+    scene.revision += 1;
+    return answered(note);
+  }
+  if (capability !== "update-note") return refusal(400, "NOTES_VALIDATION_FAILED");
+  const note = scene.notes.find((one) => one.id === params.id);
+  if (!note) return refusal(404, "NOTES_NOT_FOUND");
+  if (params.expectedRevision !== undefined && params.expectedRevision !== scene.revision) return refusal(409, "NOTES_EDIT_CONFLICT");
+  Object.assign(note, params.content === undefined ? {} : parts(params.content), params.format === undefined ? {} : { format: params.format }, { updatedAt: at });
+  scene.revision += 1;
+  return answered(note);
+}
+
+/** The agent's Notes routes: its store's state and its writes, as `@elizaos/plugin-notes` serves them. */
 export function notesRoutes(scene: NotesScene): Route[] {
   return [
+    (request, url) => (request.method === "POST" && url.pathname === "/api/notes/interact"
+      ? request.json().then((body: Interaction) => interacted(scene, body, Date.now()))
+      : undefined),
     (request, url) => {
       if (request.method !== "GET" || url.pathname !== "/api/notes/state") return;
       if (scene.failing) return Response.json({ error: "Notes are unavailable" }, { status: 503 });

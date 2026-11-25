@@ -4,7 +4,7 @@ import { ListGroup } from "../ListGroup.tsx";
 import { ListRow } from "../ListRow.tsx";
 import { SearchField } from "../SearchField.tsx";
 import { SettingsPage } from "./SettingsPage.tsx";
-import { ChevronRight } from "lucide-react";
+import { ChevronRight, FileText } from "lucide-react";
 import { placed, type SettingsPlaceProps } from "./vocabulary.ts";
 
 /** A licence in the list: what it is for and the licence it is under. */
@@ -34,8 +34,8 @@ export type SettingsLicencesPageProps = SettingsPlaceProps & {
  */
 export function SettingsLicencesPage({ load, found, query, licences, onQuery, onOpen, onBack, place, onPlace }: SettingsLicencesPageProps) {
   return (
-    <SettingsPage title="Licences" onBack={onBack}>
-      <SearchField aria-label="Search licences" value={query} onValueChange={(next) => onQuery?.(next)} disabled={load !== "loaded" || !onQuery} />
+    <SettingsPage title="Licenses" onBack={onBack}>
+      <SearchField aria-label="Search licences" placeholder="Search components" className="[&>input]:h-15 [&>input]:rounded-group [&>input]:pl-4 [&>svg]:hidden" value={query} onValueChange={(next) => onQuery?.(next)} disabled={load !== "loaded" || !onQuery} />
       {load === "loading" ? <Skeleton className="h-40 rounded-lg" /> : null}
       {load === "failed" ? <EmptyState title="Licences are unavailable" /> : null}
       {load === "loaded" && found === 0 ? <EmptyState title="No licences found" /> : null}
@@ -43,7 +43,7 @@ export function SettingsLicencesPage({ load, found, query, licences, onQuery, on
       {load === "loaded" && licences.length ? (
         <ListGroup heading={query ? `${licences.length} of ${found}` : `${found} licences`}>
           {licences.map((licence, index) => (
-            <ListRow key={licence.name} title={licence.name} detail={licence.licence} trailing={<ChevronRight aria-hidden className="size-5" />} onClick={onOpen && (() => onOpen(index))} {...placed({ place, onPlace }, index)} />
+            <ListRow key={licence.name} leading={<FileText />} title={licence.name} detail={licence.licence} trailing={<ChevronRight aria-hidden className="size-4" />} onClick={onOpen && (() => onOpen(index))} {...placed({ place, onPlace }, index)} />
           ))}
         </ListGroup>
       ) : null}
