@@ -123,11 +123,13 @@ export function preparedIn(results: ReadonlyArray<{ readonly action: string; rea
   return found?.navigationBinding.clientId === clientId ? found : undefined
 }
 
-/** The last page the reply's actions asked this screen to open, as eliza's typed open, if any. */
+/** The page this screen was asked to open: eliza's typed open of the reply's last `BROWSER_OPEN` that opened one, if any. */
 export function pageIn(results: ReadonlyArray<{ readonly action: string; readonly data: unknown }>, clientId: string): AgentPage | undefined {
-  const asked = results.filter((result) => result.action === "BROWSER_OPEN").map((result) => Option.getOrUndefined(pageAskedOf(result.data))).at(-1)
-  const operation = asked?.clientId === clientId ? readOperation(asked.operation)?.operation : undefined
-  return asked !== undefined && operation?.type === "browser_navigate" ? { operation, review: asked.review } : undefined
+  return results.flatMap((result): AgentPage[] => {
+    const asked = result.action === "BROWSER_OPEN" ? Option.getOrUndefined(pageAskedOf(result.data)) : undefined
+    const operation = asked?.clientId === clientId ? readOperation(asked.operation)?.operation : undefined
+    return asked !== undefined && operation?.type === "browser_navigate" ? [{ operation, review: asked.review }] : []
+  }).at(-1)
 }
 
 /** Open `view` for the reply of `ticket`, once, as the conversation allows; whether it opened. */
@@ -195,7 +197,7 @@ effect function openPrepared(ticket: number) {
   if (Option.isNone(held) || held.value.asked !== (try views.current())) return
   if ("continueFiles" in held.value) return try held.value.continueFiles
   if ("page" in held.value) {
-    if (try navigated(ticket, "Browser")) try (try AgentPages).open(held.value.page)
+    if (try navigated(ticket, "Browser")) try (try AgentPages).open(held.value.page, Effect.map(views.current(), (now) => now === held.value.asked))
     return
   }
   const view = viewFor(held.value.handoff)
@@ -217,7 +219,7 @@ export const carriedAloud = started(effect {
   try Stream.runForEach(Stream.fromQueue(views.heard), effect (held) => {
     if (held.asked !== (try views.current())) return
     if ("page" in held) {
-      if (try voiced("Browser")) try (try AgentPages).open(held.page)
+      if (try voiced("Browser")) try (try AgentPages).open(held.page, Effect.map(views.current(), (now) => now === held.asked))
       return
     }
     const view = viewFor(held.handoff)

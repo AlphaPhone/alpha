@@ -7,20 +7,25 @@ import { TabHost } from "../platform/browser.vibe"
 import { contained } from "../runtime/reactor.vibe"
 import { Pages, inputOf, pageOf, tellPage, tellTabs } from "./browser.vibe"
 
+/** A page the agent asked for, with whether the owner's request that asked for it is still their latest. */
+export interface AskedPage extends AgentPage {
+  readonly current: Effect.Effect<boolean>
+}
+
 /** The page the agent asked for that waits for the owner's Open or Cancel on the Browser's card; only this area writes it. */
 export service Reviewing {
-  get(): AgentPage | undefined
-  set(page: AgentPage | undefined): void
+  get(): AskedPage | undefined
+  set(page: AskedPage | undefined): void
   subscribe(listener: () => void): () => void
 }
 
 /** The Browser's card for the agent's page, held for the life of the area. */
 export const reviewing = Layer.sync(Reviewing, () => {
-  let held: AgentPage | undefined
+  let held: AskedPage | undefined
   const listeners = new Set<() => void>()
   return {
     get: () => held,
-    set(page: AgentPage | undefined) {
+    set(page: AskedPage | undefined) {
       held = page
       for (const listener of [...listeners]) listener()
     },
@@ -34,10 +39,10 @@ export const reviewing = Layer.sync(Reviewing, () => {
 const steadyWait = 5000
 
 /** Open `url` in a new normal tab of the agent's, show it, and give the tab back to the owner: whether it is loading. */
-effect function opened(url: string, asked: boolean, approved: boolean): boolean!!(Tabs.Machine | Pages | Shell | TabHost) {
+effect function opened(url: string, asked: boolean, approved: boolean, current: boolean): boolean!!(Tabs.Machine | Pages | Shell | TabHost) {
   const input = inputOf(url)
   const secure = URL.parse(url)?.protocol === "https:"
-  if (!Tabs.agentPageOpens({ secure, userInfo: input.userInfo, asked, approved }) || Address.verdict(input) !== "Open") return false
+  if (!Tabs.agentPageOpens({ secure, userInfo: input.userInfo, asked, approved, current }) || Address.verdict(input) !== "Open") return false
   const shell = try Shell
   const tabs = try Tabs.Machine
   const steady = try race(Stream.runHead(Stream.filter(tabs.changes, Tabs.steady)), Effect.as(sleep(steadyWait), Option.none()))
@@ -52,21 +57,20 @@ effect function opened(url: string, asked: boolean, approved: boolean): boolean!
   return try tellTabs({ type: "agentDone" })
 }
 
-/** The page the agent's reply asked for: opened at once where the owner's message asked for it, else held for the Browser's card. */
-export effect function openAgentPage(page: AgentPage): boolean!!(Reviewing | Tabs.Machine | Pages | Shell | TabHost) {
-  if (!page.review) return try opened(page.operation.url, true, false)
+/** The page the agent's reply asked for, in place of any page an earlier request left on the card: opened at once where the owner's message asked for it, else held for the Browser's card. */
+export effect function openAgentPage(page: AskedPage): boolean!!(Reviewing | Tabs.Machine | Pages | Shell | TabHost) {
   const card = try Reviewing
-  card.set(page)
-  return true
+  card.set(page.review ? page : undefined)
+  return page.review || try opened(page.operation.url, true, false, try page.current)
 }
 
-/** The owner chose Open on the card: the page opens as shown. */
+/** The owner chose Open on the card: the page opens as shown while the request that asked for it is still the owner's latest. */
 export const approve: boolean!!(Reviewing | Tabs.Machine | Pages | Shell | TabHost) = effect {
   const card = try Reviewing
   const held = card.get()
   card.set(undefined)
   if (held === undefined) return false
-  return try opened(held.operation.url, false, true)
+  return try opened(held.operation.url, false, true, try held.current)
 }
 
 /** The owner approved the phone's `browser_navigate` proposal on Ask Alpha's card while it was still current: the Browser comes to the front and the page opens as approved. */
@@ -74,7 +78,7 @@ export effect function openApproved(url: string, current: () => Promise<boolean>
   if (!(try promise(current))) return false
   const shell = try Shell
   if (!showing(try shell.get(), "Browser") && !(try contained(shell.send({ type: "agentOpenView", view: "Browser" }), "opening Browser for the approved page"))) return false
-  return try opened(url, false, true)
+  return try opened(url, false, true, try promise(current))
 }
 
 /** The owner chose Cancel: nothing opens. */

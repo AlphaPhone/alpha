@@ -72,9 +72,9 @@ export function boot(platform: Layer.Layer<Platform>, mounts: readonly Mount[] =
     }).pipe(Effect.orElseSucceed(() => undefined)),
   });
   const agentPages = Layer.succeed(AgentPages, {
-    open: (page) => Effect.tryPromise(async () => {
+    open: (page, current) => Effect.tryPromise(async () => {
       const [{ default: browser }, { openAgentPage }] = await Promise.all([import("./browser/index.tsx"), import("./browser/agent.vibe")]);
-      return browser.runtime(alpha).runPromise(openAgentPage(page));
+      return browser.runtime(alpha).runPromise(openAgentPage({ ...page, current }));
     }).pipe(Effect.orElseSucceed(() => false)),
   });
   const scans = Layer.succeed(ScanExports, {

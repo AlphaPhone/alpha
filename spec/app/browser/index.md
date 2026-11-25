@@ -516,9 +516,11 @@ The agent's reply hands the Browser the address with eliza's word on
 whether the owner's whole message asked to open exactly that address. Only
 such an address opens at once. Any other, such as a site or article the
 owner named without its address, shows on the Browser's own card with its
-address, Open and Cancel, and opens only on Open; Cancel opens nothing. No
-reading of the owner's words here decides it, and an address that fails the
-agent's guard opens neither way.
+address, Open and Cancel, and opens only on Open; Cancel opens nothing. The
+card stands for the request that asked for it: once the owner has asked
+anything newer, Open on it only closes it, and a newer page, held or opened
+at once, takes its place. No reading of the owner's words here decides it,
+and an address that fails the agent's guard opens neither way.
 
 On a phone enrolled for the agent's device actions, eliza asks for the same
 open as its `browser_navigate` device proposal instead. That proposal is
@@ -527,16 +529,19 @@ proposals are. Approve there brings the Browser to the front and opens the
 page as an approved one, under the same guard. Decline opens nothing.
 
 ```quint
-type AgentRequest = { secure: bool, userInfo: bool, asked: bool, approved: bool }
+type AgentRequest = { secure: bool, userInfo: bool, asked: bool, approved: bool, current: bool }
 pure def agentPageOpens(request: AgentRequest): bool =
-  request.secure and not(request.userInfo) and (request.asked or request.approved)
-pure val askedRequest: AgentRequest = { secure: true, userInfo: false, asked: true, approved: false }
+  request.secure and not(request.userInfo) and request.current and (request.asked or request.approved)
+pure val askedRequest: AgentRequest = { secure: true, userInfo: false, asked: true, approved: false, current: true }
 pure val requestValues = Set(askedRequest, { ...askedRequest, asked: false }, { ...askedRequest, asked: false, approved: true },
+  { ...askedRequest, asked: false, approved: true, current: false }, { ...askedRequest, current: false },
   { ...askedRequest, secure: false }, { ...askedRequest, userInfo: true, approved: true })
 pure def lawAnAddressIDidNotAskForOpensOnlyOnOpen(request: AgentRequest): bool =
   (agentPageOpens(request) and not(request.asked)) implies request.approved
 pure def lawTheGuardHoldsEitherWay(request: AgentRequest): bool =
   agentPageOpens(request) implies (request.secure and not(request.userInfo))
+pure def lawOnlyMyLatestRequestOpensAPage(request: AgentRequest): bool =
+  agentPageOpens(request) implies request.current
 ```
 
 ### "Stop and take over" stops the agent and gives its tab to the owner

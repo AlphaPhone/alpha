@@ -81,9 +81,9 @@ export interface AgentPage {
 }
 
 // spec/app/browser/index.md, "A page the agent asks for opens at once only when my message asked for that address, and any other only once I choose Open on the Browser's card"
-/** Hand a page the agent asked for to the Browser, which opens it or shows it for review: whether the Browser took it. */
+/** Hand a page the agent asked for to the Browser, which opens it or shows it for review while `current` says the request that asked for it is still the owner's latest: whether the Browser took it. */
 export service AgentPages {
-  open(page: AgentPage): boolean!!
+  open(page: AgentPage, current: Effect.Effect<boolean>): boolean!!
 }
 
 /** One call of the tab host, failing with `TabHostFailed` where it refused, broke, or there is none. */
