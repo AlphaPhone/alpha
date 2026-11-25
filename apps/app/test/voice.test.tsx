@@ -24,7 +24,7 @@ import { dictate } from "../src/assistant/dictation.vibe";
 import assistant from "../src/assistant/index.tsx";
 import files from "../src/files/index.tsx";
 import type { Alpha } from "../src/runtime/area.tsx";
-import { button, closeAll, drawn, fill, later, open, press, seen, underAct, until as drawnUntil } from "./alpha.tsx";
+import { button, closeAll, drawn, fill, later, only, open, press, seen, underAct, until as drawnUntil } from "./alpha.tsx";
 import { scene, type Scene } from "./fakes/scene.ts";
 import { prepared } from "./fakes/notes.ts";
 import { textReview } from "./fakes/text-review.ts";
@@ -536,7 +536,7 @@ describe("Talk from Ask Alpha's composer (spec/app/voice/index.md, \"Story: Hold
 
   it("ends Talk for a call behind the call screen and waits for the owner to start it again (spec/app/voice/index.md, \"A phone call ends Talk and Alpha tells the owner once\")", async () => {
     const world = { ...scene(), phone: true, image: true, signedIn: false };
-    const { alpha, area } = await onComposer(world);
+    const { alpha, area } = await onComposer(world, ...only("notice"));
     await drawnUntil(alpha, alpha.runtime, Phone, (state) => state.telecom === "NoCall");
     await drawnUntil(alpha, area, Voice.Machine, (state) => state.warmed);
     await press("Talk");

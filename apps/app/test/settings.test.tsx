@@ -1,5 +1,4 @@
 // @vitest-environment happy-dom
-import { act } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import * as Android from "../gen/app__settings__android.effect.vibe";
 import * as Carrier from "../gen/app__settings__carrier.effect.vibe";
@@ -13,7 +12,7 @@ import * as Pages from "../gen/app__settings.effect.vibe";
 import { Machine as Shell } from "../gen/app__shell.effect.vibe";
 import * as Layers from "../gen/app__shell__layers.effect.vibe";
 import settings from "../src/settings/index.tsx";
-import { button, closeAll, fill, hardware, later, only, open as openAlpha, press, seen, underAct, until } from "./alpha.tsx";
+import { button, closeAll, drawn, fill, hardware, later, only, open as openAlpha, press, seen, underAct, until } from "./alpha.tsx";
 import { account } from "./fakes/cloud.ts";
 import { notices } from "./fakes/settings.ts";
 import { type Scene, scene } from "./fakes/scene.ts";
@@ -24,7 +23,12 @@ afterEach(closeAll);
 history.replaceState(null, "", "/?tools=1");
 
 const shipped = vi.fn(() => Promise.resolve(Response.json(notices)));
-vi.stubGlobal("fetch", ((input: RequestInfo | URL, init?: RequestInit) => (String(input).endsWith("licenses/third-party-notices.json") ? shipped() : fetch(input, init))) as typeof fetch);
+const originalFetch = globalThis.fetch;
+const fetchWithNotices: typeof fetch = (input, init) => {
+  const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
+  return url.endsWith("licenses/third-party-notices.json") ? shipped() : originalFetch(input, init);
+};
+vi.stubGlobal("fetch", fetchWithNotices);
 
 const open = (world: Scene) => openAlpha(world, only("home", "view:Settings", "settings/phone", "settings/activity", "overlay"));
 
@@ -32,7 +36,7 @@ const open = (world: Scene) => openAlpha(world, only("home", "view:Settings", "s
 const titled = (title: string) => [...document.querySelectorAll<HTMLElement>("button, label")].find((found) => found.querySelector("span > span")?.textContent === title);
 
 /** Press the row titled `title`; a switch's or a choice's row presses its control, as a tap on the row does. */
-const tap = (title: string) => act(async () => {
+const tap = (title: string) => drawn(() => {
   const found = titled(title);
   if (!found) throw new Error(`no row ${title}`);
   const control = found instanceof HTMLLabelElement ? document.getElementById(found.htmlFor) : found;
@@ -79,7 +83,7 @@ describe("Settings", () => {
     const shownBalance = new Intl.NumberFormat(undefined, { style: "currency", currency: "USD" }).format(12.5);
     await vi.waitFor(() => expect(document.querySelector('[role="dialog"]')?.textContent).toContain(account.email));
     await vi.waitFor(() => expect(document.querySelector('[aria-label="Cloud plan"]')?.textContent).toContain(shownBalance));
-    await act(async () => document.querySelector<HTMLElement>('[role="dialog"] summary')?.click());
+    await drawn(() => document.querySelector<HTMLElement>('[role="dialog"] summary')?.click());
     const offerPrice = new Intl.NumberFormat(undefined, { style: "currency", currency: "USD" }).format(19.5);
     const roundUsd = new Intl.NumberFormat(undefined, { style: "currency", currency: "USD", maximumFractionDigits: 0 });
     await vi.waitFor(() => {
@@ -403,11 +407,15 @@ describe("Settings", () => {
     await press("Export");
     await until(alpha, machines, Developer.Machine, (s) => s.exporting.read.status === "Loaded");
     const text = await sharedFiles[0]?.text();
-    const report = JSON.parse(text ?? "{}");
-    expect([report.format, report.roles, report.problems.count, report.permissions, text?.includes("launcher3"), text?.includes("ai.alphacompute"), text?.includes("\"session\""), report.talk]).toEqual([
-      "alpha-diagnostics/v1", [{ role: "home", held: false, available: true }, { role: "assistant", held: false, available: true }], 2, { CalendarAccess: true, FilesAccess: true, LocationAccess: true, MicrophoneAccess: false, NotificationsAccess: true }, false, false, false,
-      { format: "alpha-cloud-stream-timing-v1", sessions: [{ sttConnectedMs: 812, firstFrameSentMs: 815, consentRetry: true }, { sttConnectedMs: 390, firstFrameSentMs: null, consentRetry: false }] },
-    ]);
+    const report: unknown = JSON.parse(text ?? "{}");
+    expect(report).toEqual(expect.objectContaining({
+      format: "alpha-diagnostics/v1",
+      roles: [{ role: "home", held: false, available: true }, { role: "assistant", held: false, available: true }],
+      problems: expect.objectContaining({ count: 2 }),
+      permissions: { CalendarAccess: true, FilesAccess: true, LocationAccess: true, MicrophoneAccess: false, NotificationsAccess: true },
+      talk: { format: "alpha-cloud-stream-timing-v1", sessions: [{ sttConnectedMs: 812, firstFrameSentMs: 815, consentRetry: true }, { sttConnectedMs: 390, firstFrameSentMs: null, consentRetry: false }] },
+    }));
+    expect([text?.includes("launcher3"), text?.includes("ai.alphacompute"), text?.includes("\"session\"")]).toEqual([false, false, false]);
     // spec/app/settings/developer.md, "Clear is offered only for a log with problems, one at a time; once the startup area answers, the log is read again": Clear asks first, and backing out clears nothing.
     await press("Clear problem log");
     await press("Cancel");

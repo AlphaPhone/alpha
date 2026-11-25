@@ -49,11 +49,15 @@ const menu = (item: string, label = "More actions") => drawn(() => {
 const told = () => document.body.textContent ?? "";
 const title = () => document.querySelector("main[aria-label]:not([aria-label=Inbox]), main[aria-label=Inbox]")?.getAttribute("aria-label");
 const step = (name: string) => process.stderr.write(`STEP ${name}\n`);
-const tile = (view: string) => drawn(() => {
-  const found = document.querySelector<HTMLButtonElement>(`[data-home-tile='view:${view}']`);
-  if (!found) throw new Error(`no tile ${view}`);
-  found.click();
-});
+async function openInbox(alpha: Alpha) {
+  await until(alpha, alpha.runtime, Shell, (state) => state.trail.length === 0);
+  await until(alpha, home.runtime(alpha), Home, (state) => state.tiles.load.status === "Loaded");
+  await drawn(() => {
+    const tile = document.querySelector<HTMLButtonElement>("[data-home-tile='view:Inbox']");
+    if (!tile) throw new Error("no Inbox tile on Home");
+    tile.click();
+  });
+}
 const action = (name: string) => drawn(() => {
   const found = document.querySelector<HTMLButtonElement>(`button[aria-label='${name}']`);
   if (!found) throw new Error(`no action ${name}`);
@@ -75,12 +79,13 @@ describe.each([["a browser", false], ["a phone", true]])("in %s", (_where, phone
     termSheet.attachmentText = { "2": attachmentText };
     const earlierLunch = letter(0, "Earlier lunch plan", ["SENT"], "Could you make it Friday?", undefined, Date.parse(termSheet.card.receivedAt) - 3_600_000);
     world.inbox.mail.push({ ...earlierLunch, card: { ...earlierLunch.card, threadId: "t1" } });
-    const first = await open(world);
+    const mounts = only("home", "view:Inbox");
+    const first = await open(world, mounts);
     const { alpha } = first;
     const runtime = inbox.runtime(alpha);
 
     // spec/app/inbox/index.md, "Opening Inbox, and every change to Google access, checks the accounts again, even while a check is out"
-    await tile("Inbox");
+    await openInbox(alpha);
     await until(alpha, runtime, List, (s) => s.list.status === "Loaded" && s.pages === 1);
     step("1");
     expect([rows().slice(0, 2), rows().length]).toEqual([["Revised term sheet", "Notes for the 3:00 review"], 25]);
@@ -202,7 +207,7 @@ describe.each([["a browser", false], ["a phone", true]])("in %s", (_where, phone
     await first.close();
 
     // spec/app/inbox/index.md, "A restart keeps the selection, the list kept for it and its credential, whether Spam and Trash can be searched, and the count as no longer fresh, and forgets the rest"; spec/app/inbox/index.md, "The saved list can be on screen while Gmail cannot be reached"
-    const second = await open(world);
+    const second = await open(world, mounts);
     const again = inbox.runtime(second.alpha);
     await until(second.alpha, again, List, (s) => s.saved && s.accounts.status === "Failed");
     step("17");
@@ -222,12 +227,12 @@ it("Connect Gmail and keep to its grant (spec/app/inbox/index.md, \"Story: Conne
   const world = { ...scene(), phone: true };
   world.inbox.google = undefined;
   world.inbox.offline = true;
-  const { alpha } = await open(world);
+  world.signedIn = false;
+  const { alpha } = await open(world, only("home", "view:Inbox", "view:Settings"));
   const runtime = inbox.runtime(alpha);
 
   // spec/app/platform/index.md, "The owner's tap on a mail sign-in control starts the phone's one more sign-in for mail where the phone wants it, then reads again once": signed out, the phone wants no mail sign-in and Connect Eliza Cloud opens Settings as it always did.
-  world.signedIn = false;
-  await press("Inbox");
+  await openInbox(alpha);
   await until(alpha, runtime, List, (s) => !s.signedIn);
   await press("Connect Eliza Cloud");
   await until(alpha, alpha.runtime, Shell, (s) => showing(s, "Settings"));
@@ -236,7 +241,7 @@ it("Connect Gmail and keep to its grant (spec/app/inbox/index.md, \"Story: Conne
   await hardware("home");
 
   // spec/app/inbox/index.md, "The answer names the connected accounts, their credentials and grants; the account chosen stays selected while it is connected, else the one account that may be read, else none and the owner chooses": a failed check changes nothing, and with nothing listed the list says mail could not be read and offers to check again
-  await press("Inbox");
+  await openInbox(alpha);
   await until(alpha, runtime, List, (s) => s.accounts.status === "Failed");
   expect([rows(), told()]).toEqual([[], expect.stringContaining("Mail could not be read")]);
   world.inbox.offline = false;
@@ -249,7 +254,7 @@ it("Connect Gmail and keep to its grant (spec/app/inbox/index.md, \"Story: Conne
   // spec/app/inbox/index.md, "Mail is read only while signed in, for a selected account whose grant allows reading, and not once Google refused it as withdrawn"
   world.inbox.google = { email: "owner@gmail.test", connection: "grant-2", capabilities: ["google.basic_identity"] };
   await alpha.back();
-  await press("Inbox");
+  await openInbox(alpha);
   await until(alpha, runtime, List, (s) => s.accounts.status === "Loaded" && s.connected.length === 1);
   await drawn(() => [...document.querySelectorAll("button")].find((one) => one.textContent?.includes("owner@gmail.test"))?.click());
   await until(alpha, runtime, List, (s) => s.selected.account !== 0);
@@ -258,13 +263,13 @@ it("Connect Gmail and keep to its grant (spec/app/inbox/index.md, \"Story: Conne
   // spec/app/platform/index.md, "A mail or calendar request the phone holds back for want of its mail lease reads as the cloud's own refusal of the device key there, never as a sign-out"; spec/app/inbox/index.md, "A check the phone holds back for want of the mail lease keeps the session and everything kept, and asks for one more sign-in": on a phone signed in before mail leases existed, opening Inbox, twice, keeps the draft, the accounts and the owner's session, and asks to sign in.
   const draft = { ...nothing, subject: "Kept through the lease" };
   await alpha.runtime.runPromise(Letters.use((letters) => Effect.andThen(Effect.sync(() => letters.set(9, draft)), letters.keep(9))));
-  const generation = () => alpha.runtime.runPromise(Mail.use((mail) => Effect.sync(() => mail.generation())));
+  const generation = () => alpha.runtime.runPromise(Effect.map(Mail, (mail) => mail.generation()));
   const kept = await generation();
   const before = await runtime.runPromise(List.use((list) => list.get()));
   world.mailLease.held = false;
   for (const opening of [1, 2]) {
     await alpha.back();
-    await press("Inbox");
+    await openInbox(alpha);
     await until(alpha, runtime, List, (s) => s.failure === "LeaseNeeded" && s.accounts.status === "Failed" && s.accounts.ticket >= before.accounts.ticket + opening);
   }
   const after = await runtime.runPromise(List.use((list) => list.get()));
@@ -293,13 +298,13 @@ it("Connect Gmail and keep to its grant (spec/app/inbox/index.md, \"Story: Conne
   // spec/app/inbox/index.md, "A check the phone holds back for want of the mail lease keeps the session and everything kept, and asks for one more sign-in": with mail on screen, the list keeps its saved rows and asks to Reconnect above them.
   world.inbox.google = { email: "owner@gmail.test", connection: "grant-2", capabilities: ["google.basic_identity", "google.gmail.triage", "google.gmail.send", "google.gmail.manage"] };
   await hardware("home");
-  await tile("Inbox");
+  await openInbox(alpha);
   await until(alpha, runtime, List, (s) => s.list.status === "Loaded" && s.pages >= 1);
   const shown = rows();
   expect(shown.length).toBeGreaterThan(0);
   world.mailLease.held = false;
   await hardware("home");
-  await tile("Inbox");
+  await openInbox(alpha);
   await until(alpha, runtime, List, (s) => s.failure === "LeaseNeeded");
   expect([rows(), Boolean(button("Reconnect Gmail")), told().includes("Connect Eliza Cloud")]).toEqual([shown, true, false]);
 
@@ -317,9 +322,10 @@ it("Connect Gmail and keep to its grant (spec/app/inbox/index.md, \"Story: Conne
 
 it("Send a draft I reviewed (spec/app/inbox/sending.md, \"Story: Send a draft I reviewed\"; spec/app/inbox/drafts.md, \"Story: Write a message\"; spec/app/inbox/drafts.md, \"Story: Set a draft aside or discard it\"; spec/app/inbox/adding.md, \"Story: Add files and people to my draft\"; spec/app/inbox/suggestion.md, \"Story: Review what is offered into my email\"; spec/app/inbox/sending.md, \"Story: Save my draft to Gmail, or delete it there, knowingly\")", async () => {
   const world = { ...scene(), phone: false };
-  const { alpha, close } = await open(world);
+  const mounts = only("home", "view:Inbox");
+  const { alpha, close } = await open(world, mounts);
   const runtime = inbox.runtime(alpha);
-  await tile("Inbox");
+  await openInbox(alpha);
   await until(alpha, runtime, List, (s) => s.list.status === "Loaded" && s.pages === 1);
 
   // spec/app/inbox/drafts.md, "A new message, a reply, a reply to all or a forward begins as [one draft](./letter.md) says; a reply to a message with no usable address is refused and the owner told"
@@ -341,7 +347,7 @@ it("Send a draft I reviewed (spec/app/inbox/sending.md, \"Story: Send a draft I 
   await until(alpha, runtime, Offering, (s) => s.used === 1 && s.text === 0);
   await later(alpha, 10);
   await until(alpha, runtime, Writing, (s) => s.stored && !s.pending && s.write.status === "Loaded");
-  expect((document.querySelector("textarea[aria-label=Message]") as HTMLTextAreaElement | null)?.value).toBe("Thanks, it is all in order.\n\nSee you on Friday.");
+  expect(document.querySelector<HTMLTextAreaElement>("textarea[aria-label=Message]")?.value).toBe("Thanks, it is all in order.\n\nSee you on Friday.");
 
   // spec/app/inbox/sending.md, "Story: Save my draft to Gmail, or delete it there, knowingly"
   await menu("Save to Gmail", "Draft actions");
@@ -412,7 +418,7 @@ it("Send a draft I reviewed (spec/app/inbox/sending.md, \"Story: Send a draft I 
   await until(alpha, runtime, Writing, (s) => !s.open && s.shelf.shelved.length === 1);
   await close();
 
-  const again = await open(world);
+  const again = await open(world, mounts);
   const restored = inbox.runtime(again.alpha);
   await until(again.alpha, restored, Writing, (s) => !s.open && s.shelf.shelved.length === 1);
   await menu("Drafts", "More folders");
@@ -435,8 +441,7 @@ it("shows the authorized first page of unread Inbox mail on Home", async () => {
   async function homeIsReady(app: Alpha) {
     await until(app, home.runtime(app), Home, (state) => state.tiles.load.status === "Loaded");
   }
-  await homeIsReady(alpha);
-  await tile("Inbox");
+  await openInbox(alpha);
   await until(alpha, inboxState, List, (state) => state.list.status === "Loaded" && state.pages === 1);
   expect(document.querySelectorAll("h1")).toHaveLength(1);
   await press("Back to apps");
