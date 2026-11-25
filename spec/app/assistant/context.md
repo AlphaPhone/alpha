@@ -237,7 +237,8 @@ pure def lawAPeerThatDoesNotTakeTheScreenGetsNoDay(observed: bool, onCalendar: b
 
 Each turn of a voice conversation reads the screen again when it is sent:
 the observation with its day, location and selected record, the Browser
-page beside it, the direct-request mode of approvals, and, from a screen
+page beside it, the direct-request mode of approvals (for Files filter and
+open only, since a spoken turn shows no review card), and, from a screen
 that is not sensitive, the claim of a view the agent prepares for it. Voice
 opens that view as it opens any screen it is asked for, and a saved note
 the owner names aloud opens as one named in writing would ([Notes](../notes/index.md),
@@ -257,6 +258,22 @@ pure def lawASpokenTurnCarriesWhatATypedTurnDoes(part: Part, observed: bool, dir
 pure def lawASensitiveScreenSendsNoScreen(source: Source, direct: bool): bool =
   not(carries(source, Observation, false, direct)) and not(carries(source, Page, false, direct))
     and not(carries(source, ViewClaim, false, direct))
+```
+
+### A turn an agent refuses whole for a direct-request mode it does not know is sent once more without it
+
+An agent older than the direct-request mode a turn asks for refuses the
+whole turn as an invalid voice view context, before it records the owner's
+words. The turn is then sent once more, the same in every other part,
+without the mode, so it is answered with no direct action; any other
+refusal stands.
+
+```quint
+type TurnAnswer = TurnAccepted | ContextRefused | OtherRefusal
+pure def resent(answer: TurnAnswer, askedDirect: bool): bool = askedDirect and answer == ContextRefused
+pure def lawOnlyAContextRefusalOfADirectTurnIsResent(answer: TurnAnswer, askedDirect: bool): bool =
+  resent(answer, askedDirect) implies (askedDirect and answer == ContextRefused)
+pure def lawATurnWithoutTheModeIsNeverResent(answer: TurnAnswer): bool = not(resent(answer, false))
 ```
 
 ### A turn asked while Files shows a readable document attaches it for that turn

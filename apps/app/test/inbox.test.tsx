@@ -78,7 +78,7 @@ describe.each([["a browser", false], ["a phone", true]])("in %s", (_where, phone
     termSheet.files = [...termSheet.files, {
       partId: "2", name: "agenda.txt", mimeType: "text/plain", size: new TextEncoder().encode(attachmentText).byteLength, supported: true,
     }];
-    termSheet.attachmentText = { "2": attachmentText };
+    termSheet.attachmentData = { "2": new TextEncoder().encode(attachmentText) };
     const earlierLunch = letter(0, "Earlier lunch plan", ["SENT"], "Could you make it Friday?", undefined, Date.parse(termSheet.card.receivedAt) - 3_600_000);
     world.inbox.mail.push({ ...earlierLunch, card: { ...earlierLunch.card, threadId: "t1" } });
     const first = await open(world);
@@ -116,7 +116,7 @@ describe.each([["a browser", false], ["a phone", true]])("in %s", (_where, phone
     await until(alpha, runtime, List, (s) => s.selected.folder === "Incoming" && s.list.status === "Loaded");
     step("5");
 
-    // spec/app/inbox/message.md, "A message opens at its newest place in the thread, only while the grant of its account allows reading"; spec/app/inbox/marking.md, "Opening an unread message marks it read once in a session, silently, and never again, even when it is not known to have worked"
+    // spec/app/inbox/message.md, "Opening a row reads the exact message chosen while its account may be read"; spec/app/inbox/marking.md, "Opening an unread message marks it read once in a session, silently, and never again, even when it is not known to have worked"
     await row("Revised term sheet");
     await until(alpha, runtime, Shown, (s) => s.body.status === "Loaded");
     step("6");
@@ -126,6 +126,7 @@ describe.each([["a browser", false], ["a phone", true]])("in %s", (_where, phone
     expect([title(), world.inbox.changes]).toEqual(["Revised term sheet", ["mark-read g1"]]);
 
     // spec/app/inbox/message.md, "Previous and next move one place through the thread"
+    await until(alpha, runtime, Shown, (s) => s.position === 1 && s.thread === 2);
     await action("Earlier messages");
     await until(alpha, runtime, Shown, (s) => s.body.status === "Loaded" && s.position === 0);
     expect([title(), told()]).toEqual(["Earlier lunch plan", expect.stringContaining("Could you make it Friday?")]);
@@ -137,14 +138,29 @@ describe.each([["a browser", false], ["a phone", true]])("in %s", (_where, phone
     const visited = vi.spyOn(window, "open").mockReturnValue(null);
     await press("https://northpoint.test/room");
     await until(alpha, runtime, Shown, (s) => s.link === 1);
+    expect([world.browser.tabs.size, visited.mock.calls.length]).toEqual([0, 0]);
     step("8");
     await confirm("Open link");
     await until(alpha, runtime, Shown, (s) => s.link === 0);
     step("9");
-    expect(visited).toHaveBeenCalledWith("https://northpoint.test/room", "_blank", "noopener,noreferrer");
+    if (phone) {
+      await until(alpha, alpha.runtime, Shell, (state) => showing(state, "Browser"));
+      await vi.waitFor(() => {
+        const places = [...world.browser.tabs.values()].filter((tab) => tab.committed && !tab.private).map((tab) => tab.history.at(-1));
+        expect([places, visited.mock.calls.length]).toEqual([["https://northpoint.test/room"], 0]);
+      }, { timeout: 12_000 });
+      await hardware("back");
+      await until(alpha, alpha.runtime, Shell, (state) => showing(state, "Inbox"));
+    } else {
+      expect(visited).toHaveBeenCalledWith("https://northpoint.test/room", "_blank", "noopener,noreferrer");
+    }
 
     // spec/app/inbox/message.md, "An attachment is reviewed before it is opened or saved, and one use is in flight at a time"
-    await action("Open agenda.txt");
+    await drawn(() => {
+      const attachment = [...document.querySelectorAll<HTMLButtonElement>("main button")].find((one) => one.textContent?.startsWith("Open agenda.txt "));
+      if (!attachment) throw new Error("no attachment preview");
+      attachment.click();
+    });
     await until(alpha, runtime, Shown, (s) => s.attachment === 2);
     expect([world.inbox.attachmentReads, document.querySelector("[aria-label='Attachment contents']")]).toEqual([[], null]);
     await confirm("Open");
@@ -153,6 +169,15 @@ describe.each([["a browser", false], ["a phone", true]])("in %s", (_where, phone
     expect([world.inbox.attachmentReads, preview?.textContent, preview?.querySelector("strong")]).toEqual([["g1/2"], attachmentText, null]);
     await confirm("Close");
     await until(alpha, runtime, Shown, (s) => s.attachment === 0);
+    if (phone) {
+      await action("Save agenda.txt");
+      expect(world.inbox.savedAttachments.size).toBe(0);
+      await confirm("Save");
+      await until(alpha, runtime, Shown, (s) => s.file.outcome === "Confirmed");
+      expect([world.inbox.savedAttachments.get("agenda.txt"), told()]).toEqual([attachmentText, expect.stringContaining("Saved to Files")]);
+      await confirm("Close");
+      await until(alpha, runtime, Shown, (s) => s.attachment === 0);
+    }
 
     // spec/app/inbox/marking.md, "The owner marks a message read or unread; while another mark is in flight the owner is told it is still in progress, and a message whose last mark was unconfirmed is marked again only after the list was read afresh"
     await menu("Mark unread");
@@ -162,6 +187,24 @@ describe.each([["a browser", false], ["a phone", true]])("in %s", (_where, phone
     await press("Back to the list");
     await until(alpha, runtime, Shown, (s) => s.message === 0);
     step("11");
+    await press("Sent");
+    await until(alpha, runtime, List, (s) => s.selected.folder === "Sent" && s.list.status === "Loaded");
+    const threadReply = Promise.withResolvers<void>();
+    world.inbox.threadReply = threadReply.promise;
+    try {
+      await row("Earlier lunch plan");
+      await until(alpha, runtime, Shown, (s) => s.body.status === "Loaded");
+      expect([title(), told(), Boolean(button("More messages"))]).toEqual(["Earlier lunch plan", expect.stringContaining("Could you make it Friday?"), false]);
+    } finally {
+      threadReply.resolve();
+      delete world.inbox.threadReply;
+    }
+    await until(alpha, runtime, Shown, (s) => s.body.status === "Loaded" && s.thread === 2);
+    expect([title(), Boolean(button("More messages")), world.inbox.changes]).toEqual(["Earlier lunch plan", true, ["mark-read g1", "mark-unread g1"]]);
+    await press("Back to the list");
+    await until(alpha, runtime, Shown, (s) => s.message === 0);
+    await press("Inbox");
+    await until(alpha, runtime, List, (s) => s.selected.folder === "Incoming" && s.list.status === "Loaded");
 
     // spec/app/inbox/sending.md, "Archive and Trash are held for the undo window, and only the owner's Undo before it ends sends nothing"
     await choose("Standup notes");
@@ -307,18 +350,18 @@ it("Connect Gmail and keep to its grant (spec/app/inbox/index.md, \"Story: Conne
   await hardware("home");
   await tile("Inbox");
   await until(alpha, runtime, List, (s) => s.failure === "LeaseNeeded");
-  expect([rows(), Boolean(button("Reconnect")), told().includes("Connect Eliza Cloud")]).toEqual([shown, true, false]);
+  expect([rows(), Boolean(button("Reconnect Gmail")), told().includes("Connect Eliza Cloud")]).toEqual([shown, true, false]);
 
   // spec/app/inbox/message.md, "Only the newest read's answer is shown, while its account may still be read; a read that fails says why": a message the phone cannot read for want of the lease closes, back to the list and its Reconnect, never a Retry that cannot work.
   await row(shown[0] ?? "");
   await until(alpha, runtime, Shown, (s) => s.message === 0 && s.fault === "Revoked");
   await until(alpha, runtime, List, (s) => s.failure === "LeaseNeeded" && s.accounts.status === "Failed");
-  expect([Boolean(button("Retry")), Boolean(button("Reconnect")), rows()]).toEqual([false, true, shown]);
+  expect([Boolean(button("Retry")), Boolean(button("Reconnect Gmail")), rows()]).toEqual([false, true, shown]);
 
   // spec/app/platform/index.md, "The owner's tap on a mail sign-in control starts the phone's one more sign-in for mail where the phone wants it, then reads again once": Reconnect over the saved rows starts the sign-in for mail, and the list is read again with the lease.
-  await press("Reconnect");
+  await press("Reconnect Gmail");
   await until(alpha, runtime, List, (s) => s.failure === "Fine" && s.accounts.status === "Loaded" && s.list.status === "Loaded");
-  expect([world.mailLease.held, world.mailLease.asked, Boolean(button("Reconnect")), rows()]).toEqual([true, 3, false, shown]);
+  expect([world.mailLease.held, world.mailLease.asked, Boolean(button("Reconnect Gmail")), rows()]).toEqual([true, 3, false, shown]);
 });
 
 it("Send a draft I reviewed (spec/app/inbox/sending.md, \"Story: Send a draft I reviewed\"; spec/app/inbox/drafts.md, \"Story: Write a message\"; spec/app/inbox/drafts.md, \"Story: Set a draft aside or discard it\"; spec/app/inbox/adding.md, \"Story: Add files and people to my draft\"; spec/app/inbox/suggestion.md, \"Story: Review what is offered into my email\"; spec/app/inbox/sending.md, \"Story: Save my draft to Gmail, or delete it there, knowingly\")", async () => {

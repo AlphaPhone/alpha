@@ -27,28 +27,37 @@ import outside as O from "./outside"
 import plan as P from "./plan"
 
 type Goal = Subscribe | Fund | Pay
-type Paid = Settled | NotPaid | NotKnown
-type Notice = Quiet | PlanActive | NotYetPaid | CheckoutExpired | ConfirmUnknown
+type ReviewChoice = NoPurchaseReview | PurchaseReview({ ticket: int, tier: P::Tier, number: int })
+type Paid = Settled | NotPaid | NotKnown | Expired
+type Notice = Quiet | PlanActive | NotYetPaid | CheckoutExpired | ConfirmUnknown | CheckoutUnavailable
 type Effect =
   ReadOffers({ check: int }) | OpenCheckout({ visit: int, tier: P::Tier }) | OpenFunds({ visit: int, amount: int })
   | OpenInvoice({ visit: int }) | ConfirmCheckout({ attempt: int }) | CheckPlan
+type Checkout = { signIn: int, command: str, session: str }
 type Billing = {
-  offers: R::Read, visit: O::Visit, goal: Goal, chosen: P::Tier, amount: int, resumedFor: int,
-  pending: bool, pendingEnds: int, confirm: A::Attempt, unsettled: bool, notice: Notice,
+  review: ReviewChoice, reviewNumber: int, offers: R::Read, visit: O::Visit, goal: Goal, chosen: P::Tier, amount: int, resumedFor: int,
+  pending: bool, pendingEnds: int, checkout: Checkout, confirm: A::Attempt, unsettled: bool, notice: Notice,
 }
 type Moved = { state: Billing, out: List[Effect] }
 
+pure val noCheckout: Checkout = { signIn: 0, command: "", session: "" }
+
 pure val initial: Billing = {
-  offers: R::unread, visit: O::novisit, goal: Subscribe, chosen: P::Plus, amount: 0, resumedFor: 0,
-  pending: false, pendingEnds: 0, confirm: A::plan(0), unsettled: false, notice: Quiet,
+  review: NoPurchaseReview, reviewNumber: 0, offers: R::unread, visit: O::novisit, goal: Subscribe, chosen: P::Plus, amount: 0, resumedFor: 0,
+  pending: false, pendingEnds: 0, checkout: noCheckout, confirm: A::plan(0), unsettled: false, notice: Quiet,
 }
 
 pure val signInValues = Set(0, 1)
 pure val visitValues = Set(1, 2)
 pure val ticketValues = Set(1, 2, 3)
+pure val reviewedValues = Set(1, 2, 3)
 pure val attemptValues = Set(1, 2)
 pure val amountValues = Set(1, 10)
-pure val nowValues = Set(10, 200, 5000, 100000)
+pure val nowValues = Set(10, 200, 5000, 100000, 1800000, 86401000)
+pure val expiresAtValues = Set(0, 1000, 86400000)
+pure val commandValues = Set("", "command1", "command2")
+pure val sessionValues = Set("", "session1", "session2")
+pure val weight_checkoutOpened = 12
 pure val standingValues = Set(P::Unfunded, P::Declined, P::Member, P::Unavailable)
 pure val weight_returned = 5
 pure val weight_checkoutConfirmed = 10
@@ -57,7 +66,7 @@ pure val weight_checkoutConfirmed = 10
 ### Nothing new starts while a visit is open, a checkout's confirmation is out or its outcome unknown, or anything else is under way
 
 ```quint
-pure def quiet(b: Billing): bool = not(b.visit.open) and not(b.unsettled) and b.confirm.outcome != A::Sent
+pure def quiet(b: Billing): bool = not(b.visit.open) and not(b.pending) and not(b.unsettled) and b.confirm.outcome != A::Sent
 
 pure def alwaysTheVisitIsWellFormed(b: Billing): bool = O::valid(b.visit) and (b.pending implies b.goal == Subscribe)
 ```
@@ -72,7 +81,7 @@ Account retires the read. Opening Plans alone starts no checkout.
 ```quint
 pure def canAskOffers(b: Billing, signIn: int): bool = signIn > 0 and b.offers.status != R::Loading
 
-pure def askOffers(b: Billing, signIn: int): Moved = { state: { ...b, offers: R::ask(b.offers) }, out: List(ReadOffers({ check: b.offers.ticket + 1 })) }
+pure def askOffers(b: Billing, signIn: int): Moved = { state: { ...b, review: NoPurchaseReview, offers: R::ask(b.offers) }, out: List(ReadOffers({ check: b.offers.ticket + 1 })) }
 
 pure def canOffersRead(b: Billing, ticket: int): bool = R::canAnswer(b.offers, ticket)
 
@@ -91,6 +100,27 @@ pure def sometimesPlansLoading(b: Billing): bool = b.offers.status == R::Loading
 pure def sometimesPlansUnavailable(b: Billing): bool = b.offers.status == R::Failed
 ```
 
+### Reviewing the exact offer costs nothing until the owner continues
+
+The selected tier and the current offer ticket identify the price shown
+for confirmation. Each review has its own number. Closing Plans or a fresh read discards that selection.
+The app rechecks the same offer and the same owner before starting checkout.
+
+```quint
+pure def canReviewPlan(b: Billing, tier: P::Tier, ticket: int): bool =
+  quiet(b) and b.offers.status == R::Loaded and b.offers.ticket == ticket
+
+pure def reviewPlan(b: Billing, tier: P::Tier, ticket: int): Billing =
+  { ...b, review: PurchaseReview({ ticket: ticket, tier: tier, number: b.reviewNumber + 1 }), reviewNumber: b.reviewNumber + 1 }
+
+pure def canClosePurchaseReview(b: Billing): bool = b.review != NoPurchaseReview
+
+pure def closePurchaseReview(b: Billing): Billing = { ...b, review: NoPurchaseReview }
+
+pure def retireOffers(b: Billing): Billing =
+  { ...b, review: NoPurchaseReview, offers: O::retire(b.offers) }
+```
+
 ### Only an owner Cloud says has no plan subscribes, from the plans shown, on Stripe's page, one visit at a time
 
 A member changes plan in [Plan changes](./change.md). A plan that is
@@ -99,19 +129,57 @@ it is unknown nothing that could buy twice is offered. A card in the
 conversation only opens the funding sheet ([Plan](./plan.md)).
 
 ```quint
-pure val checkoutLife = 86400
+pure val checkoutLife = 86400000
 
-pure def canChoosePlan(b: Billing, tier: P::Tier, signIn: int, standing: P::Standing, origin: O::Origin, elsewhere: bool, now: int): bool =
+pure def canChoosePlan(b: Billing, tier: P::Tier, reviewed: int, signIn: int, standing: P::Standing, origin: O::Origin, elsewhere: bool, now: int): bool =
   signIn > 0 and O::acts(origin) and (standing == P::Unfunded or standing == P::Declined) and b.offers.status == R::Loaded
-    and quiet(b) and not(elsewhere)
+    and quiet(b) and not(elsewhere) and b.review == PurchaseReview({ ticket: b.offers.ticket, tier: tier, number: reviewed })
 
-pure def choosePlan(b: Billing, tier: P::Tier, signIn: int, standing: P::Standing, origin: O::Origin, elsewhere: bool, now: int): Moved =
-  { state: { ...b, visit: O::go(b.visit, now), goal: Subscribe, chosen: tier, pending: true, pendingEnds: now + checkoutLife, notice: Quiet },
+pure def choosePlan(b: Billing, tier: P::Tier, reviewed: int, signIn: int, standing: P::Standing, origin: O::Origin, elsewhere: bool, now: int): Moved =
+  { state: { ...b, review: NoPurchaseReview, visit: O::go(b.visit, now), goal: Subscribe, chosen: tier, pending: true, pendingEnds: now + checkoutLife, checkout: { ...noCheckout, signIn: signIn }, notice: Quiet },
     out: List(OpenCheckout({ visit: b.visit.number + 1, tier: tier })) }
 
 pure def lawAnUnknownPlanOffersNoCheckout(standing: P::Standing, origin: O::Origin): bool =
-  val ready = { ...initial, offers: { status: R::Loaded, ticket: 1 } }
-  canChoosePlan(ready, P::Plus, 1, standing, origin, false, 0) iff ((standing == P::Unfunded or standing == P::Declined) and origin == O::ByOwner)
+  val ready = { ...initial, review: PurchaseReview({ ticket: 1, tier: P::Plus, number: 0 }), offers: { status: R::Loaded, ticket: 1 } }
+  canChoosePlan(ready, P::Plus, 0, 1, standing, origin, false, 0) iff ((standing == P::Unfunded or standing == P::Declined) and origin == O::ByOwner)
+```
+
+### Cloud opens only the current sign-in's exact checkout before its deadline
+
+The first request reserves the browser visit. No confirmation is sent before
+Cloud names the command and session for that visit. A reply after leaving,
+changing sign-in or reaching the deadline does not open anything. The
+provider may give the checkout a shorter lifetime than Alpha's one-day
+upper bound. The receipt holds no checkout link or payment details.
+
+```quint
+pure def canCheckoutOpened(b: Billing, visit: int, signIn: int, command: str, session: str, expiresAt: int, now: int): bool =
+  O::canReturn(b.visit, visit) and b.pending and b.checkout.signIn == signIn and signIn > 0 and b.checkout.session == ""
+    and command != "" and session != "" and now < expiresAt and now < b.pendingEnds
+
+pure def checkoutOpened(b: Billing, visit: int, signIn: int, command: str, session: str, expiresAt: int, now: int): Billing =
+  { ...b, checkout: { signIn: signIn, command: command, session: session },
+    pendingEnds: if (expiresAt < b.pendingEnds) expiresAt else b.pendingEnds }
+
+pure def lawAnOlderCheckoutOpeningIsRefused(b: Billing, visit: int, signIn: int, command: str, session: str, expiresAt: int, now: int): bool =
+  visit != b.visit.number or signIn != b.checkout.signIn implies not(canCheckoutOpened(b, visit, signIn, command, session, expiresAt, now))
+```
+
+### A start that did not open is told as unavailable or unconfirmed
+
+A definite refusal ends the visit. When Cloud may have opened a checkout
+but did not confirm it, Alpha keeps that payment fenced to its deadline
+and reads the plan again. Neither result claims payment.
+
+```quint
+pure def canCheckoutUnopened(b: Billing, visit: int, signIn: int, unknown: bool): bool =
+  O::canReturn(b.visit, visit) and b.pending and b.checkout.signIn == signIn and b.checkout.session == ""
+
+pure def checkoutUnopened(b: Billing, visit: int, signIn: int, unknown: bool): Moved =
+  { state: { ...b, visit: O::back(b.visit), pending: unknown, unsettled: unknown,
+      checkout: if (unknown) b.checkout else noCheckout,
+      notice: if (unknown) ConfirmUnknown else CheckoutUnavailable },
+    out: List(CheckPlan) }
 ```
 
 ### Adding from five to a thousand dollars of funds opens Stripe's page
@@ -127,8 +195,10 @@ pure def addFunds(b: Billing, amount: int, signIn: int, origin: O::Origin, elsew
 
 ### A payment a plan change needs opens Stripe's invoice page
 
+Like the other payments, it waits for earlier checkouts to settle.
+
 ```quint
-pure def canPayInvoice(b: Billing, now: int): bool = not(b.visit.open)
+pure def canPayInvoice(b: Billing, now: int): bool = quiet(b)
 
 pure def payInvoice(b: Billing, now: int): Moved =
   { state: { ...b, visit: O::go(b.visit, now), goal: Pay, pending: false }, out: List(OpenInvoice({ visit: b.visit.number + 1 })) }
@@ -136,23 +206,32 @@ pure def payInvoice(b: Billing, now: int): Moved =
 
 ### Coming back from the browser, giving up on it, or waiting too long for it, confirms a checkout of this sign-in with Cloud and checks the plan; the return itself changes nothing
 
-Only the open visit's return is taken, once. A checkout waiting to be
-confirmed is confirmed once for each return, until Cloud says it was paid
-or a day has passed.
+Only the open visit's return is taken, once. A subscription's browser
+return must name the exact Cloud session already opened for this sign-in.
+A cancel return has no session and can only prompt Alpha's foreground
+check. A checkout waiting to be confirmed is confirmed once for each return,
+until Cloud says it was paid or its deadline passes.
 
 ```quint
-pure val visitLimit = 1800
+pure val visitLimit = 1800000
 
 pure def confirming(now: int, b: Billing): Moved =
   if (not(b.pending) or b.unsettled or b.confirm.outcome == A::Sent) { state: b, out: List(CheckPlan) }
-  else if (now >= b.pendingEnds) { state: { ...b, pending: false, notice: CheckoutExpired }, out: List(CheckPlan) }
+  else if (now >= b.pendingEnds) { state: { ...b, pending: false, checkout: noCheckout, notice: CheckoutExpired }, out: List(CheckPlan) }
+  else if (b.checkout.session == "") { state: b, out: List(CheckPlan) }
   else
     { state: { ...b, confirm: A::dispatch(A::record(A::plan(b.confirm.id + 1))) },
       out: List(ConfirmCheckout({ attempt: b.confirm.id + 1 }), CheckPlan) }
 
-pure def canReturned(b: Billing, visit: int, now: int): bool = O::canReturn(b.visit, visit)
+pure def canReturned(b: Billing, visit: int, signIn: int, session: str, now: int): bool =
+  O::canReturn(b.visit, visit) and (b.goal != Subscribe or
+    (signIn > 0 and b.checkout.signIn == signIn and session != "" and b.checkout.session == session))
 
-pure def returned(b: Billing, visit: int, now: int): Moved = confirming(now, { ...b, visit: O::back(b.visit) })
+pure def returned(b: Billing, visit: int, signIn: int, session: str, now: int): Moved = confirming(now, { ...b, visit: O::back(b.visit) })
+
+pure def lawASubscriptionReturnUsesTheOpenedSession(b: Billing, visit: int, signIn: int, session: str, now: int): bool =
+  b.goal == Subscribe and canReturned(b, visit, signIn, session, now) implies
+    signIn > 0 and signIn == b.checkout.signIn and session != "" and session == b.checkout.session
 
 pure def canStopWaiting(b: Billing, now: int): bool = b.visit.open
 
@@ -165,19 +244,27 @@ pure def visitTimedOut(b: Billing, now: int): Moved = confirming(now, { ...b, vi
 
 ### Coming back to Alpha with a visit open confirms and checks once for that visit
 
-The return may still come.
+The return may still come. If Stripe has already closed or Alpha has
+stopped waiting, the owner can recheck the known checkout until its
+deadline. A recheck never starts a payment.
 
 ```quint
-pure def canResumed(b: Billing, now: int): bool = b.visit.open and b.resumedFor != b.visit.number
+pure def canResumed(b: Billing, now: int): bool =
+  b.visit.open and b.resumedFor != b.visit.number and (not(b.pending) or b.checkout.session != "")
 
 pure def resumed(b: Billing, now: int): Moved = confirming(now, { ...b, resumedFor: b.visit.number })
+
+pure def canCheckPayment(b: Billing, now: int): bool =
+  b.pending and b.checkout.session != "" and b.confirm.outcome != A::Sent and not(b.unsettled)
+
+pure def checkPayment(b: Billing, now: int): Moved = confirming(now, b)
 ```
 
 ### A visit is only ever acted on by confirming its checkout and checking the plan
 
 ```quint
 pure def acting(via: str): bool =
-  via == "returned" or via == "stopWaiting" or via == "visitTimedOut" or via == "resumed" or via == "returnedCold"
+  via == "returned" or via == "stopWaiting" or via == "visitTimedOut" or via == "resumed" or via == "returnedCold" or via == "checkPayment"
 
 pure def stepAReturnIsCheckedNotTrusted(before: Billing, via: str, after: Billing, out: List[Effect]): bool =
   acting(via) implies (out.some(e => match e { | CheckPlan => true | _ => false }) and out.every(e => match e { | CheckPlan => true | ConfirmCheckout(c) => true | _ => false }))
@@ -202,12 +289,16 @@ pure val fair_visitTimedOut = "weak"
 ### Cloud's answer to a confirmation is told as it is: paid ends the checkout, not yet paid keeps it for the next return, and an unknown answer holds every new payment until the plan has been checked
 
 ```quint
-pure def canCheckoutConfirmed(b: Billing, attempt: int): bool = A::canConclude(b.confirm, attempt)
+pure def canCheckoutConfirmed(b: Billing, attempt: int, signIn: int, command: str): bool =
+  A::canConclude(b.confirm, attempt) and signIn > 0 and b.checkout.signIn == signIn
+    and command != "" and b.checkout.command == command
 
-pure def checkoutConfirmed(b: Billing, attempt: int, result: Paid): Moved =
+pure def checkoutConfirmed(b: Billing, attempt: int, signIn: int, command: str, result: Paid): Moved =
+  val keep = b.pending and (result == NotPaid or result == NotKnown)
   { state: { ...b, confirm: A::conclude(b.confirm, result == Settled, result != NotKnown),
-      pending: b.pending and result == NotPaid, unsettled: b.unsettled or result == NotKnown,
-      notice: if (result == Settled) PlanActive else if (result == NotPaid) NotYetPaid else ConfirmUnknown },
+      pending: keep, checkout: if (keep) b.checkout else noCheckout, unsettled: b.unsettled or result == NotKnown,
+      notice: if (result == Settled) PlanActive else if (result == NotPaid) NotYetPaid
+        else if (result == Expired) CheckoutExpired else ConfirmUnknown },
     out: List(CheckPlan) }
 
 pure def canPlanAnswered(b: Billing): bool = b.unsettled
@@ -226,10 +317,12 @@ pure def stepOnlyCloudSaysACheckoutWasPaid(before: Billing, via: str, after: Bil
 
 ### A checkout waiting longer than a day is dropped
 
+Cloud's earlier deadline also drops the checkout.
+
 ```quint
 pure def canCheckoutExpired(b: Billing, now: int): bool = b.pending and b.confirm.outcome != A::Sent and now >= b.pendingEnds
 
-pure def checkoutExpired(b: Billing, now: int): Billing = { ...b, pending: false, notice: CheckoutExpired }
+pure def checkoutExpired(b: Billing, now: int): Billing = { ...b, pending: false, checkout: noCheckout, notice: CheckoutExpired }
 
 pure def canDismissNotice(b: Billing): bool = b.notice != Quiet
 
@@ -293,14 +386,20 @@ pure def sometimesAConfirmationIsUnknown(b: Billing): bool = b.unsettled and b.c
 ### A new sign-in, or signing out, ends the visit and the checkout waiting, and leaves nothing under way or to tell
 
 A confirmation in flight for the earlier sign-in ends unknown without
-holding the new one; its answer is refused.
+holding the new one; its answer is refused. An owner check for an older
+visit cannot interrupt a newer one.
 
 ```quint
 pure def canReset(b: Billing, signIn: int): bool = signIn >= 0
 
 pure def reset(b: Billing, signIn: int): Billing =
-  { ...b, visit: O::ended(b.visit), pending: false, unsettled: false, notice: Quiet, offers: O::retire(b.offers),
+  { ...b, review: NoPurchaseReview, visit: O::ended(b.visit), pending: false, checkout: noCheckout, unsettled: false, notice: Quiet, offers: O::retire(b.offers),
     confirm: if (b.confirm.outcome == A::Sent) A::conclude(b.confirm, false, false) else b.confirm }
+
+pure def canCheckoutOwnerLost(b: Billing, visit: int, signIn: int): bool =
+  b.pending and visit == b.visit.number and signIn > 0 and signIn == b.checkout.signIn
+
+pure def checkoutOwnerLost(b: Billing, visit: int, signIn: int): Billing = reset(b, 0)
 
 pure def stepANewSignInLeavesNothingUnderWay(before: Billing, via: str, after: Billing): bool =
   via == "reset" implies and {
@@ -310,7 +409,7 @@ pure def stepANewSignInLeavesNothingUnderWay(before: Billing, via: str, after: B
 
 pure def lawAnEarlierSignInsVisitIsRefused(number: int, now: int): bool =
   val open = { ...initial, visit: { open: true, number: number, orphan: false, at: now }, pending: true }
-  not(canReturned(reset(open, 2), number, now)) and not(canReturnedCold(reset(open, 2), number))
+  not(canReturned(reset(open, 2), number, 1, "session1", now)) and not(canReturnedCold(reset(open, 2), number))
 ```
 
 ### A restart orphans the open visit, drops the checkout waiting, and holds new payments until the plan is checked when a confirmation's answer was lost
@@ -318,7 +417,7 @@ pure def lawAnEarlierSignInsVisitIsRefused(number: int, now: int): bool =
 ```quint
 pure def restart(b: Billing): Moved =
   val lost = b.confirm.outcome == A::Sent
-  { state: { ...b, visit: O::orphaned(b.visit), pending: false, offers: O::retire(b.offers),
+  { state: { ...b, review: NoPurchaseReview, visit: O::orphaned(b.visit), pending: false, checkout: noCheckout, offers: O::retire(b.offers),
       confirm: if (lost) A::conclude(b.confirm, false, false) else b.confirm,
       unsettled: b.unsettled or lost, notice: if (lost) ConfirmUnknown else b.notice },
     out: List(CheckPlan) }
@@ -342,6 +441,6 @@ pure def sometimesOrphanedByARestart(b: Billing): bool = b.visit.orphan and b.go
 
 ```quint
 pure def erase(b: Billing): Billing =
-  { ...b, visit: O::ended(b.visit), pending: false, offers: O::retire(b.offers), confirm: A::plan(b.confirm.id + 1),
+  { ...b, review: NoPurchaseReview, visit: O::ended(b.visit), pending: false, checkout: noCheckout, offers: O::retire(b.offers), confirm: A::plan(b.confirm.id + 1),
     unsettled: false, notice: Quiet }
 ```

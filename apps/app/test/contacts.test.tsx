@@ -125,15 +125,22 @@ describe("Contacts on an Alpha image", () => {
     const world = image();
     const first = world.telephony.people[0];
     if (!first) throw new Error("the phone has no starting contact");
-    world.telephony.people.push(...Array.from({ length: 51 }, (_, index) =>
-      ({ ...first, id: String(index + 10), displayName: `Contact ${index + 1}` })));
+    world.telephony.people.push(
+      ...Array.from({ length: 49 }, (_, index) => ({ ...first, id: String(index + 10), displayName: `Contact ${index + 1}` })),
+      { ...first, id: "59", displayName: "7 Studio" },
+      { ...first, id: "60", displayName: "Émile Amari" },
+    );
     const { alpha } = await open(world);
     await until(alpha, alpha.runtime, Shell, (s) => s.contacts);
     await launch("Contacts");
     await until(alpha, alpha.runtime, Contacts, (s) => s.list.status === "Loaded" && s.rows === 50 && s.more);
     await press("More contacts");
     await until(alpha, alpha.runtime, Contacts, (s) => s.list.status === "Loaded" && s.rows === 53 && !s.more);
-    await press("Contact 51");
+    const accented = button("Émile Amari")?.parentElement;
+    const last = accented?.parentElement?.lastElementChild;
+    expect([accented?.querySelector("h2")?.textContent, last?.querySelector("h2")?.textContent, last?.querySelector("button")?.getAttribute("aria-label")])
+      .toEqual(["E", "#", "7 Studio"]);
+    await press("Émile Amari");
     await until(alpha, alpha.runtime, Contacts, (s) => s.opened && s.card.status === "Loaded" && s.contact === "60");
   });
 
@@ -243,7 +250,7 @@ describe("Contacts on an Alpha image", () => {
     // spec/app/messages/composer.md, "The agent's draft goes into the open conversation's draft only while it is empty, and never sends"
     expect(await read({ type: "sms_reply_selected", body: "On my way" })).toEqual({ kind: "sms-reply", status: "drafted" });
     await until(alpha, alpha.runtime, Composer, (s) => s.slot.author === "AlphaWrote");
-    expect([await read({ type: "sms_reply_selected", body: "Running late" }), (document.querySelector("textarea[aria-label=Message]") as HTMLTextAreaElement).value, world.telephony.sent]).toEqual([
+    expect([await read({ type: "sms_reply_selected", body: "Running late" }), (document.querySelector("textarea[aria-label='Text Maya']") as HTMLTextAreaElement).value, world.telephony.sent]).toEqual([
       { kind: "sms-reply", status: "occupied" }, "On my way", [],
     ]);
 

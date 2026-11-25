@@ -94,8 +94,11 @@ Network, Carrier & SIM setup and Passwords only on a phone, which a browser is n
 and the Phone page only on an Alpha image, which is a phone. What the build
 and the phone are never changes while Alpha runs. A development build is
 the development server or a build that allows test mocks
-([platform](../platform/index.md)); a production build, a release or a
-debug one, never shows the developer pages or their controls.
+([platform](../platform/index.md)), opened with the explicit `?tools=1`
+query, as Alpha's earlier build gated its Developer page; that query alone
+admits nothing, and a development build opened without it shows Settings
+as a production build does. A production build, a release or a debug one,
+never shows the developer pages or their controls.
 
 ```quint
 pure def admitted(s: Settings, page: Page): bool =
@@ -277,9 +280,11 @@ pure def sometimesCarrierOnALauncher(s: Settings): bool = s.page == CarrierPage 
 
 Account and plan is on the first page. Google and email is on the Inbox
 page, and Google Calendar and its saved events on the Calendar page. Collecting other apps' notifications, with its
-history, is on Notifications. The listener is on Privacy, and on the first
-page while the voice area reports that it could not confirm the microphone
-stopped. The conversations are on Agent activity, and in a development
+history, is on Notifications. The listener is on Privacy on an Alpha
+image, the only phone that has one ([the listener](../voice/listener.md)),
+and on the first page while the voice area reports that it could not
+confirm the microphone stopped. Where speech goes is shown on Privacy as
+the voice area holds it ([where speech goes](../voice/route.md)). The conversations are on Agent activity, and in a development
 build the agent's restart details too and, on Developer, the calendar's
 backups. Settings hands over and keeps nothing.
 
@@ -294,7 +299,7 @@ pure def links(s: Settings, neighbour: Neighbour, micMayBeOn: bool): bool =
   else if (neighbour == GoogleAndEmail) s.page == InboxApp
   else if (neighbour == CalendarAccount) s.page == CalendarApp
   else if (neighbour == NotificationCollection) s.page == Notifications
-  else if (neighbour == Listener) s.page == Privacy or (s.page == Top and micMayBeOn)
+  else if (neighbour == Listener) (s.page == Privacy and s.image) or (s.page == Top and micMayBeOn)
   else if (neighbour == Conversations) s.page == Activity
   else if (neighbour == RestartDetails) s.page == Activity and s.development
   else s.page == Developer

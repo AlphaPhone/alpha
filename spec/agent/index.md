@@ -36,7 +36,18 @@ Compute" (line 10); eliza's launch needs one, so that line, with the name, is
 its start. eliza's tools, notes and results name the person in the
 conversation "the owner", which the model repeated back to them, so the
 prompt also tells the agent to speak to that person as "you", never as "the
-owner" or "the user". The words are in `apps/agent/host/character.json`.
+owner" or "the user". The model also described example.com from memory when
+asked to summarize "this page" on Home, where no page goes with the turn, so
+the prompt tells the agent that it sees a web page only in the latest
+message's Browser page, and with none to say that no page is open rather
+than describe one. Asked "Go home." from Notes, with Home declared as a
+view, the model most often planned directions to a saved Home place or asked
+which was meant, where the old phone went to its home screen. So the prompt
+tells the agent that the phone's screens are its views and Home is the home
+screen, and that a request to go to one of these screens by its name, with no
+directions, route or travel asked for, means that screen, shown with VIEWS
+without asking. The model still decides what a request means; nothing matches the
+owner's words. The words are in `apps/agent/host/character.json`.
 
 ```quint
 pure val characterName: str = "Alpha"
@@ -55,7 +66,10 @@ its own subpaths now), `-calendar`, `-inbox`, `-notes`, `-files`,
 `-workflow`, `-maps` and `-browser`, and the pack carries each in the same
 group. Notes exports no plugin, only a module the entry builds
 (`notesModule`), so it is hosted rather than bundled. Alpha opens Notes
-with three days of Trash retention. Scheduling is now the
+with three days of Trash retention. The wallet is eliza's `walletModule`,
+hosted the same way: the old phone's agent never loaded a wallet (the
+earlier product deferred it), and this one carries it so that the Wallet
+app has an agent to ask. Scheduling is now the
 agent's own `scheduled-tasks`, `tasks` and `triggers` modules; the
 proposal of a device step is its `device-actions` module, and a drafted
 reply its `reply-draft`; approvals, notifications, views and the task
@@ -72,18 +86,39 @@ and pack smoke launches with no socket load no speech model. Text replies
 still use the launch's Cloud text backend and embeddings remain off.
 
 ```quint
-pure val corePlugins: List[str] = List("@elizaos/plugin-personal-assistant", "@elizaos/plugin-calendar", "@elizaos/plugin-inbox", "@elizaos/plugin-notes", "@elizaos/plugin-files", "@elizaos/plugin-workflow", "@elizaos/plugin-local-inference")
+pure val corePlugins: List[str] = List("@elizaos/plugin-personal-assistant", "@elizaos/plugin-calendar", "@elizaos/plugin-inbox", "@elizaos/plugin-notes", "@elizaos/plugin-files", "@elizaos/plugin-workflow", "@elizaos/plugin-local-inference", "@elizaos/plugin-wallet")
 pure val viewPlugins: List[str] = List("@elizaos/plugin-maps", "@elizaos/plugin-browser")
-pure val hostedPlugins: List[str] = List("@elizaos/plugin-notes", "@elizaos/plugin-local-inference")
+pure val hostedPlugins: List[str] = List("@elizaos/plugin-notes", "@elizaos/plugin-local-inference", "@elizaos/plugin-wallet")
 pure val notesTrashDays = 3
-pure val packedPlugins: List[str] = List("@elizaos/plugin-personal-assistant", "@elizaos/plugin-calendar", "@elizaos/plugin-inbox", "@elizaos/plugin-notes", "@elizaos/plugin-files", "@elizaos/plugin-workflow", "@elizaos/plugin-maps", "@elizaos/plugin-browser", "@elizaos/plugin-local-inference")
+pure val packedPlugins: List[str] = List("@elizaos/plugin-personal-assistant", "@elizaos/plugin-calendar", "@elizaos/plugin-inbox", "@elizaos/plugin-notes", "@elizaos/plugin-files", "@elizaos/plugin-workflow", "@elizaos/plugin-maps", "@elizaos/plugin-browser", "@elizaos/plugin-local-inference", "@elizaos/plugin-wallet")
 pure val bundledPlugins: List[str] = List("@elizaos/plugin-personal-assistant", "@elizaos/plugin-calendar", "@elizaos/plugin-inbox", "@elizaos/plugin-files", "@elizaos/plugin-workflow", "@elizaos/plugin-maps", "@elizaos/plugin-browser")
 pure val agentModules: List[str] = List("@elizaos/agent/device-actions", "@elizaos/agent/reply-draft", "@elizaos/agent/approvals", "@elizaos/agent/notifications", "@elizaos/agent/views", "@elizaos/agent/scheduled-tasks", "@elizaos/agent/tasks", "@elizaos/agent/triggers", "@elizaos/agent/surface")
-pure val loadList: List[str] = List("@elizaos/plugin-personal-assistant", "@elizaos/plugin-calendar", "@elizaos/plugin-inbox", "@elizaos/plugin-notes", "@elizaos/plugin-files", "@elizaos/plugin-workflow", "@elizaos/plugin-maps", "@elizaos/plugin-browser", "@elizaos/plugin-local-inference", "@elizaos/agent/device-actions", "@elizaos/agent/reply-draft", "@elizaos/agent/approvals", "@elizaos/agent/notifications", "@elizaos/agent/views", "@elizaos/agent/scheduled-tasks", "@elizaos/agent/tasks", "@elizaos/agent/triggers", "@elizaos/agent/surface")
+pure val loadList: List[str] = List("@elizaos/plugin-personal-assistant", "@elizaos/plugin-calendar", "@elizaos/plugin-inbox", "@elizaos/plugin-notes", "@elizaos/plugin-files", "@elizaos/plugin-workflow", "@elizaos/plugin-maps", "@elizaos/plugin-browser", "@elizaos/plugin-local-inference", "@elizaos/plugin-wallet", "@elizaos/agent/device-actions", "@elizaos/agent/reply-draft", "@elizaos/agent/approvals", "@elizaos/agent/notifications", "@elizaos/agent/views", "@elizaos/agent/scheduled-tasks", "@elizaos/agent/tasks", "@elizaos/agent/triggers", "@elizaos/agent/surface")
 pure def lawPackListsAreConsistent(p: str): bool =
   (packedPlugins.includes(p) iff (corePlugins.includes(p) or viewPlugins.includes(p)))
     and (bundledPlugins.includes(p) iff (packedPlugins.includes(p) and not(hostedPlugins.includes(p))))
     and (loadList.includes(p) iff (packedPlugins.includes(p) or agentModules.includes(p)))
+```
+
+### The wallet runs on Sepolia and Solana's devnet until its keys can be backed up
+
+The wallet's keys are sealed on the phone and nothing exports them, so a
+phone that is lost or reset loses its wallet. Until the owner can back
+the keys up, the pack points the wallet at test networks only, where what
+it holds has no value: Sepolia for its EVM account and Solana's devnet
+for its Solana account. The entry gives the wallet module these settings
+and no others.
+
+```quint
+type WalletSetting = { setting: str, held: str }
+pure val walletSettings: List[WalletSetting] = List(
+  { setting: "WALLET_EVM_RPC_URL", held: "https://ethereum-sepolia-rpc.publicnode.com" },
+  { setting: "WALLET_EVM_CHAIN_ID", held: "11155111" },
+  { setting: "WALLET_SOLANA_RPC_URL", held: "https://api.devnet.solana.com" },
+  { setting: "WALLET_SOLANA_CHAIN_ID", held: "EtWTRABZaYq6iMfeYKouRu166VU2xqa1wcaWoxPkrZBG" })
+pure val valuedChains: List[str] = List("1", "5eykt4UsFv8P8NJdTREpY1vzqKqZKvdpKuc147dw2N9d")
+pure def lawTheWalletHoldsNothingOfValue(chain: str): bool =
+  valuedChains.includes(chain) implies not(walletSettings.some(s => s.held == chain))
 ```
 
 ### The agent may run the actions the old phone's agent ran plus Alpha's Clock and Reminders actions, and every other action the bundle registers is listed as refused with its reason
@@ -91,7 +126,12 @@ pure def lawPackListsAreConsistent(p: str): bool =
 The old agent had no allowlist: every action its plugins registered could
 run. The pack's plugins register those same actions under the pinned
 eliza's names, and Alpha's `alpha-apps` product plugin registers
-`CLOCK_ALARM`, `CLOCK_TIMER`, `CLOCK_WORLD` and `REMINDERS_MANAGE`. The
+`CLOCK_ALARM`, `CLOCK_TIMER`, `CLOCK_WORLD` and `REMINDERS_MANAGE`. Eliza's
+wallet module registers `WALLET`, which reads the wallet and asks for a
+transfer and can approve none.
+`BROWSER_OPEN` hands a web page the owner asks for to the screen they asked
+from, where no enrolled phone takes the open as a proposed step; the screen
+shows it for the owner to open, as the old phone did. The
 policy names `alpha-apps` as its product plugin and allows each action by
 name, so an action a later pin adds is refused until it is reviewed here.
 Core's `REPLY`, `IGNORE` and `NONE` are always allowed. Every other
@@ -111,10 +151,11 @@ pure val allowedActions: List[str] = List(
   "WORKFLOW",
   "MAPS_PLACE", "MAPS_WHERE_AM_I", "MAPS_ROUTE", "MAPS_NAVIGATION_START", "MAPS_NAVIGATION_REROUTE", "MAPS_NAVIGATION_STOP",
   "MAPS_SELECT", "MAPS_SAVE", "MAPS_SHARE", "MAPS_COVERAGE", "MAPS_SAVED",
-  "BROWSER", "BROWSER_BACK", "BROWSER_FORWARD", "BROWSER_RELOAD",
+  "BROWSER", "BROWSER_BACK", "BROWSER_FORWARD", "BROWSER_RELOAD", "BROWSER_OPEN",
   "NOTES_LIST", "NOTES_GET", "NOTES_CREATE", "NOTES_UPDATE", "NOTES_DELETE", "NOTES_RESTORE", "NOTES_MOVE",
   "PROPOSE_DEVICE_ACTION", "VIEWS",
-  "CLOCK_ALARM", "CLOCK_TIMER", "CLOCK_WORLD", "REMINDERS_MANAGE"
+  "CLOCK_ALARM", "CLOCK_TIMER", "CLOCK_WORLD", "REMINDERS_MANAGE",
+  "WALLET"
 )
 pure def lawCoreActionsAreAlwaysAllowed(a: str): bool = coreActions.includes(a) implies allowedActions.includes(a)
 pure def sameNames(a: List[str], b: List[str]): bool =
@@ -176,6 +217,50 @@ pure def proposalsAdmitted(loaded: List[str], allowed: List[str]): bool =
   deviceActionModules.every(m => loaded.includes(m)) and allowed.includes(proposalAction)
 ```
 
+### The launch names Home and every Alpha app but Notes as a view the agent may show, by the id the phone opens it by
+
+The old phone opened any of its apps, and Home, when the owner asked.
+eliza's views module declares, once at boot, the views of the plugins
+loaded before it and the launch's own `views` (`spec/agent/views.md` in
+eliza); its VIEWS action prepares a view only by a name declared there.
+Alpha's product plugin loads after every listed module, so a view it
+declared would never be seen, and Notes is `@elizaos/plugin-notes`'s own
+view. So the host file names Home and Alpha's other apps, in the order the
+phone lists them (`apps/app/src/shell/order.ts`), and eliza's agent service
+writes them into the launch (`spec/os/agentService/config.md`). Each id is
+the app's name in lower case, which the phone's renderer opens as that app.
+Clock and Reminders keep the other names the product plugin gave them, at
+most four each, as a launch allows. Home is also named the home screen and
+the launcher, the phone's own names for it, so that next to Maps' directions
+home it reads as a screen and not a place. The model chooses which view a request means, by one of
+these names; nothing matches the owner's words. Whether a prepared view
+opens is the phone's: an app the phone does not admit, or any app over a
+sensitive screen, stays closed (`spec/app/assistant/index.md`, "Story: Let
+Alpha open what it is talking about").
+
+```quint
+type LaunchView = { id: str, label: str, path: str, aliases: List[str] }
+pure val launchViews: List[LaunchView] = List(
+  { id: "home", label: "Home", path: "/home", aliases: List("home screen", "launcher") },
+  { id: "phone", label: "Phone", path: "/phone", aliases: List() },
+  { id: "messages", label: "Messages", path: "/messages", aliases: List() },
+  { id: "inbox", label: "Inbox", path: "/inbox", aliases: List() },
+  { id: "calendar", label: "Calendar", path: "/calendar", aliases: List() },
+  { id: "clock", label: "Clock", path: "/clock", aliases: List("alarms", "timers", "stopwatch", "world clock") },
+  { id: "reminders", label: "Reminders", path: "/reminders", aliases: List("reminder", "to-do", "todo", "tasks") },
+  { id: "browser", label: "Browser", path: "/browser", aliases: List() },
+  { id: "camera", label: "Camera", path: "/camera", aliases: List() },
+  { id: "photos", label: "Photos", path: "/photos", aliases: List() },
+  { id: "maps", label: "Maps", path: "/maps", aliases: List() },
+  { id: "contacts", label: "Contacts", path: "/contacts", aliases: List() },
+  { id: "files", label: "Files", path: "/files", aliases: List() },
+  { id: "workflows", label: "Workflows", path: "/workflows", aliases: List() },
+  { id: "wallet", label: "Wallet", path: "/wallet", aliases: List() },
+  { id: "settings", label: "Settings", path: "/settings", aliases: List() },
+)
+pure def viewsAdmitted(views: List[LaunchView]): bool = views == launchViews
+```
+
 ### The page reaches exactly the routes its platform services call, and nothing else
 
 The page's agent service (`apps/app/src/platform/agent.vibe`) on the phone
@@ -207,7 +292,9 @@ read and edit notes, erase Trash and finish recording cleanup. The scanner
 hands the owner’s reviewed scan text to Notes through that module. The approvals area lists the agent's proposals and resolves one
 through the approvals module. Ask Alpha completes a reviewed Messages read only
 for the exact owner turn after the agent acknowledges its device receipt.
-A route an area
+Wallet reads the wallet module's status, holdings, waiting requests and
+activity, makes and switches the wallet, asks for a transfer, and opens and
+decides its review. A route an area
 fakes for want of an agent plugin is not listed: none does today. Each line
 of `apps/agent/host/routes.jsonl` is one route; the pack is refused unless
 that list is this one, and eliza's route gate admits each of its routes.
@@ -318,6 +405,15 @@ pure val pageRoutes: List[Route] = List(
   { method: Post, path: "/api/scheduled-tasks/{id}/skip", stream: false },
   { method: Post, path: "/api/scheduled-tasks/{id}/reopen", stream: false },
   { method: Post, path: "/api/scheduled-tasks/{id}/fire", stream: false },
+  { method: Get, path: "/api/wallet", stream: false },
+  { method: Post, path: "/api/wallet", stream: false },
+  { method: Post, path: "/api/wallet/switch", stream: false },
+  { method: Get, path: "/api/wallet/holdings", stream: false },
+  { method: Get, path: "/api/wallet/activity", stream: false },
+  { method: Get, path: "/api/wallet/requests", stream: false },
+  { method: Post, path: "/api/wallet/requests", stream: false },
+  { method: Post, path: "/api/wallet/requests/{id}/review", stream: false },
+  { method: Post, path: "/api/wallet/requests/{id}/decide", stream: false },
 )
 pure def admitted(listed: List[Route], r: Route): bool = listed.includes(r)
 pure def routeListAdmitted(listed: List[Route]): bool =

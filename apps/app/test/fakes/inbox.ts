@@ -1,5 +1,6 @@
 // spec/app/inbox/index.md, "Story: See my mail"
 import type { GoogleStatus, MailCard, MailMessage, MailOperation, MailSearch } from "@elizaos/cloud";
+import type { OpaqueMailAttachment } from "@elizaos/plugin-inbox-client";
 import type { Route } from "./routes.ts";
 
 /** A message of the fake mailbox: eliza's card of it, and what reading it whole gives. */
@@ -8,7 +9,7 @@ export interface Stored {
   body: string;
   html: string | null;
   files: MailMessage["attachments"];
-  attachmentText?: Readonly<Record<string, string>>;
+  attachmentData?: Readonly<Record<string, Uint8Array<ArrayBuffer>>>;
 }
 
 type DraftFixture = {
@@ -39,12 +40,24 @@ export interface InboxScene {
   offline: boolean;
   /** Google refuses every Gmail request: the owner withdrew access. */
   revoked: boolean;
+  /** A reply the journey holds at the Gmail thread boundary. */
+  threadReply?: Promise<void>;
   /** Every change asked of Gmail, as `<kind> <message>`, once it was dispatched. */
   readonly changes: string[];
   /** The name of every file a dispatched send carried. */
   readonly attached: string[];
   readonly attachmentReads: string[];
+  readonly savedAttachments: Map<string, string>;
 }
+
+/** Android's save picker in the fake phone, with its selected documents kept as exact copies. */
+export const alphaInboxAttachments = (scene: InboxScene) => () => ({
+  saveReviewed: async ({ name, dataBase64 }: OpaqueMailAttachment) => {
+    scene.savedAttachments.set(name, atob(dataBase64));
+    return { status: "saved" };
+  },
+  cancelReviewed: async () => undefined,
+});
 
 const everything: GoogleStatus["grantedCapabilities"] = ["google.basic_identity", "google.gmail.triage", "google.gmail.send", "google.gmail.manage"];
 
@@ -86,7 +99,7 @@ export function inboxScene(): InboxScene {
       letter(8, "Win a prize", ["SPAM"], "About Win a prize", "Prize Desk <win@prize.example>", today(7, 0, 2)),
       letter(9, "Notes from me", ["SENT"], "About Notes from me", "You <you@gmail.example>", today(17, 0, 2)),
     ],
-    history: 500, offline: false, revoked: false, changes: [], attached: [], attachmentReads: [], drafts: new Map(),
+    history: 500, offline: false, revoked: false, changes: [], attached: [], attachmentReads: [], savedAttachments: new Map(), drafts: new Map(),
   };
 }
 
@@ -185,7 +198,8 @@ export function inboxRoutes(scene: InboxScene): Route[] {
         historyId: stored.card.metadata.historyId,
       }));
       const next = offset + messages.length;
-      return Response.json({ version: 1, threadId, historyId, total: thread.length, offset, nextOffset: next < thread.length ? next : null, messages });
+      const answer = Response.json({ version: 1, threadId, historyId, total: thread.length, offset, nextOffset: next < thread.length ? next : null, messages });
+      return scene.threadReply?.then(() => answer) ?? answer;
     },
     (request, url) => {
       if (request.method !== "GET") return;
@@ -205,10 +219,9 @@ export function inboxRoutes(scene: InboxScene): Route[] {
       if (grantId !== scene.google?.connection) return refused(403, "google_reauth_required");
       const stored = scene.mail.find(({ card }) => card.id === messageId);
       const file = stored?.files.find((part) => part.partId === partId);
-      const text = partId === undefined ? undefined : stored?.attachmentText?.[partId];
-      if (!file || text === undefined) return refused(404, "not_found");
+      const bytes = partId === undefined ? undefined : stored?.attachmentData?.[partId];
+      if (!file || bytes === undefined) return refused(404, "not_found");
       if (historyId === undefined || stored?.card.metadata.historyId !== historyId) return refused(409, "stale_revision");
-      const bytes = new TextEncoder().encode(text);
       scene.attachmentReads.push(`${messageId}/${partId}`);
       const dataBase64 = btoa(Array.from(bytes, (byte) => String.fromCharCode(byte)).join(""));
       return crypto.subtle.digest("SHA-256", bytes).then((digest) => Response.json({

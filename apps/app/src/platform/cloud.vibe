@@ -180,6 +180,17 @@ function relaying(relay: Relay, wifi: WiFi.Shape): typeof globalThis.fetch {
   }
 }
 
+/** Open the exact Stripe checkout Cloud answered through the Android host's URL allowlist. */
+export effect function openCloudCheckout(url: string): boolean!! {
+  const target = Effect.try(() => new URL(url)) catch () => undefined
+  if (target === undefined || target.protocol !== "https:" || target.hostname !== "checkout.stripe.com"
+    || target.port || target.username || target.password) return false
+  return effect {
+    try tryPromise(() => client().openExternal({ url, environment: CLOUD_ENVIRONMENT }))
+    return true
+  } catch () => false
+}
+
 /**
  * The cloud on the phone, through the `ElizaCloud` plugin of eliza's Android package: eliza's `cloudClient()` of
  * `@elizaos/os-bridges`, sent only while Android has not said the phone is offline.

@@ -33,6 +33,8 @@ export interface AskScene {
   nextReplyProvisional?: boolean;
   /** The actions the next reply says it ran, made from the turn's metadata, as eliza's agent lists them on its done frame. */
   nextActions?: (metadata: unknown) => readonly unknown[];
+  /** The agent is older than any direct-request mode: a turn that states one is refused whole, as eliza's agent refuses an invalid voice view context. */
+  knowsNoActionMode?: boolean;
   cloudWarmCalls: number;
   /** The fake native store, which survives disposal of the WebView runtime. */
   readonly drafts: Map<string, string>;
@@ -48,7 +50,7 @@ export interface AskScene {
 export interface Kept {
   readonly roomId: string;
   readonly title: string;
-  readonly messages: { id: string; role: "user" | "assistant"; text: string }[];
+  readonly messages: { id: string; role: "user" | "assistant"; text: string; failureKind?: string; cloudCode?: string }[];
 }
 
 export function askScene(): AskScene {
@@ -113,11 +115,14 @@ function reply(scene: AskScene, room: string, text: string, keep: (said: string)
       if (scene.acknowledgment !== undefined) controller.enqueue(frame({ type: "acknowledgment", text: scene.acknowledgment }));
       if (scene.acknowledgment !== undefined) controller.enqueue(frame({ type: "tool", name: "CALENDAR", label: "Using Calendar" }));
       if (scene.stalled) {
-        controller.enqueue(frame({ type: "token", text: "Thinking" }));
+        for (const piece of custom ?? ["Thinking"]) controller.enqueue(frame({ type: "token", text: piece }));
         scene.turns.set(room, () => controller.close());
         return;
       }
       const answer = () => {
+        for (const { action } of actions as readonly { readonly action?: unknown }[]) {
+          if (typeof action === "string") controller.enqueue(frame({ type: "tool", name: action, label: "Working" }));
+        }
         if (custom !== undefined && custom.length > 0) {
           for (const piece of custom) controller.enqueue(frame({ type: "token", text: piece, ...(provisional ? { provisional } : {}) }));
           const full = custom.join("");
@@ -204,10 +209,12 @@ export function askRoutes(scene: AskScene): Route[] {
         scene.metadata?.push(body.metadata);
         scene.spokenFiles?.push({ channel: body.channelType, images: body.images });
         if (body.text !== body.text.trim()) return Response.json({ error: "invalid_message" }, { status: 400 });
+        if (scene.knowsNoActionMode === true && JSON.stringify(body.metadata ?? {}).includes('"agentActionMode"')) return Response.json({ error: "VOICE_UI_CONTEXT_INVALID" }, { status: 400 });
         if (found[2] === undefined) return Response.json({ text: `You said: ${body.text}`, ...named(scene.said.length) });
         scene.said.push(body.text);
         keep("user", body.text);
         Object.assign(messages.at(-1) ?? {}, { clientMessageId: (body as { clientMessageId?: string }).clientMessageId });
+        if (scene.refusal !== undefined) messages.push({ id: `m${scene.said.length}a`, role: "assistant", text: "", failureKind: scene.refusal.failureKind, ...(scene.refusal.cloudCode === undefined ? {} : { cloudCode: scene.refusal.cloudCode }) });
         return reply(scene, `r${found[1]}`, body.text, (said) => keep("assistant", said), body.metadata);
       });
     },
