@@ -7,7 +7,7 @@ import { Machine as Composer, bound } from "../../gen/app__messages__composer.ef
 import { Machine as Messages, removing } from "../../gen/app__messages.effect.vibe"
 import { Machine as Shell, showing } from "../../gen/app__shell.effect.vibe"
 import { Device } from "../platform/device.vibe"
-import { Telephony, telephony } from "../platform/telephony.vibe"
+import { type Telephony, telephony } from "../platform/telephony.vibe"
 import { contained } from "../runtime/reactor.vibe"
 import { currentPhoneContact, type ReviewedPhoneContact } from "../phone/named-review.vibe"
 import { Drafts } from "./composer.vibe"
@@ -40,7 +40,7 @@ module selection {
 
   const maxRows = 20
   const maxBody = 1600
-  // The native execution journal caps its entire encrypted entry at 64 KiB.
+  /** Leave room for metadata in the native journal’s 64 KiB entry. */
   const maxBodyWireBytes = 48 * 1024
   const wire = new TextEncoder()
 

@@ -55,7 +55,7 @@ function stamp(at: number, now: number): string {
 }
 
 function clearChoice(runtime: MessagesProps["runtime"]) {
-  runtime.runSync(Inbox.use((inbox) => inbox.set({ chosen: "" })));
+  runtime.runSync(Effect.flatMap(Inbox, (inbox) => inbox.set({ chosen: "" })));
 }
 
 /**
@@ -81,17 +81,17 @@ export function Messages({ runtime, onBack, onOpenLink }: MessagesProps) {
 function Threads({ runtime, messages: { state, can, send }, onBack }: MessagesProps & { messages: MessagesUI }) {
   const [searching, setSearching] = useState(false);
   if (!state) return null;
-  const { threads, sought, names } = runtime.runSync(Inbox.use((inbox) => inbox.get()));
-  const now = runtime.runSync(Time.use((time) => time.latest()));
+  const { threads, sought, names } = runtime.runSync(Effect.flatMap(Inbox, (inbox) => inbox.get()));
+  const now = runtime.runSync(Effect.flatMap(Time, (time) => time.latest()));
   const search = (typed: string) => {
     const event = { type: "search", typed: typed.trim() !== "" } as const;
     if (!can(event)) return;
-    runtime.runSync(Inbox.use((inbox) => inbox.set({ sought: typed })));
+    runtime.runSync(Effect.flatMap(Inbox, (inbox) => inbox.set({ sought: typed })));
     void send(event);
   };
   const open = (row: ThreadRow) => {
     clearChoice(runtime);
-    const thread = runtime.runSync(Conversations.use((numbering) => numbering.of({ id: row.id, addresses: "incomplete" in row ? [] : row.addresses })));
+    const thread = runtime.runSync(Effect.flatMap(Conversations, (numbering) => numbering.of({ id: row.id, addresses: "incomplete" in row ? [] : row.addresses })));
     if (can({ type: "openThread", thread })) void send({ type: "openThread", thread });
   };
   const allow = { type: "allow", need: "SmsAccess" } as const;
@@ -113,7 +113,7 @@ function Threads({ runtime, messages: { state, can, send }, onBack }: MessagesPr
           <h1 className="min-w-0 flex-1 truncate text-xl leading-tight font-semibold">Messages</h1>
           {!smsNeeded(state) && <Button variant="ghost" size="icon" aria-label="Search messages" data-alpha-messages-search onClick={() => setSearching(true)}><Search /></Button>}
           {can({ type: "newMessage" }) && <Button variant="ghost" size="icon" aria-label="New message" data-alpha-messages-new onClick={() => {
-            runtime.runSync(Inbox.use((inbox) => inbox.set({ typed: "" })));
+            runtime.runSync(Effect.flatMap(Inbox, (inbox) => inbox.set({ typed: "" })));
             void send({ type: "newMessage" });
           }}><Pencil /></Button>}
         </header>
@@ -206,8 +206,8 @@ interface BubbleActions {
 }
 
 const Bubble = memo(function Bubble({ row, now, choose, actions, onOpenLink }: { row: MessageRow; now: number; choose: (id: string) => void; actions?: BubbleActions | undefined; onOpenLink?: MessagesProps["onOpenLink"] }) {
-  const trigger = useRef<HTMLDivElement>(null);
-  const pointer = useRef<{ x: number; y: number; at: number } | null>(null);
+  const triggerRef = useRef<HTMLDivElement>(null);
+  const pointerRef = useRef<{ x: number; y: number; at: number } | null>(null);
   const complete = "incomplete" in row ? undefined : row;
   const outgoing = complete?.direction === "outgoing";
   const failed = complete?.status === "failed";
@@ -218,13 +218,13 @@ const Bubble = memo(function Bubble({ row, now, choose, actions, onOpenLink }: {
     choose(row.id);
   };
   const moved = (event: PointerEvent) => {
-    const started = pointer.current;
-    if (started && Math.hypot(event.clientX - started.x, event.clientY - started.y) > 12) pointer.current = null;
+    const started = pointerRef.current;
+    if (started && Math.hypot(event.clientX - started.x, event.clientY - started.y) > 12) pointerRef.current = null;
   };
   const label = complete ? complete.body || "Picture message" : "A message Alpha cannot show";
   return (
     <div className={`flex max-w-[min(17.5rem,100%)] flex-col ${outgoing ? "items-end self-end" : "items-start self-start"}`}>
-      <div ref={trigger} data-alpha-message-id={row.id} data-alpha-sms-outgoing={outgoing} role="button" tabIndex={0} aria-label={`Message actions: ${label}`} aria-haspopup="menu" aria-expanded={Boolean(actions)}
+      <div ref={triggerRef} data-alpha-message-id={row.id} data-alpha-sms-outgoing={outgoing} role="button" tabIndex={0} aria-label={`Message actions: ${label}`} aria-haspopup="menu" aria-expanded={Boolean(actions)}
         className={`flex max-w-full flex-col gap-0.5 rounded-tile focus-visible:outline-2 focus-visible:outline-ring ${outgoing ? "items-end" : "items-start"}`}
         onClick={select}
         onContextMenu={(event) => {
@@ -232,12 +232,12 @@ const Bubble = memo(function Bubble({ row, now, choose, actions, onOpenLink }: {
           event.preventDefault();
           select(event);
         }}
-        onPointerDown={(event) => { if (event.pointerType === "touch") pointer.current = { x: event.clientX, y: event.clientY, at: event.timeStamp }; }}
+        onPointerDown={(event) => { if (event.pointerType === "touch") pointerRef.current = { x: event.clientX, y: event.clientY, at: event.timeStamp }; }}
         onPointerMove={moved}
-        onPointerCancel={() => { pointer.current = null; }}
+        onPointerCancel={() => { pointerRef.current = null; }}
         onPointerUp={(event) => {
-          const started = pointer.current;
-          pointer.current = null;
+          const started = pointerRef.current;
+          pointerRef.current = null;
           if (started && event.timeStamp - started.at >= 500) choose(row.id);
         }}
         onKeyDown={(event) => {
@@ -261,7 +261,7 @@ const Bubble = memo(function Bubble({ row, now, choose, actions, onOpenLink }: {
           if (event.key !== "Escape") return;
           event.stopPropagation();
           choose("");
-          trigger.current?.focus();
+          triggerRef.current?.focus();
         }}>
           {actions.copy && <Button role="menuitem" autoFocus size="sm" variant="secondary" onClick={actions.copy}><Copy />Copy</Button>}
           {actions.remove && <Button role="menuitem" autoFocus={!actions.copy} size="sm" variant="ghost" className="text-destructive" onClick={actions.remove}><Trash2 />Delete</Button>}
@@ -275,31 +275,31 @@ const Bubble = memo(function Bubble({ row, now, choose, actions, onOpenLink }: {
 function Conversation({ runtime, messages: { state, can, send }, onOpenLink }: MessagesProps & { messages: MessagesUI }) {
   const phone = usePhone(runtime).state;
   const [selected, setSelected] = useState("");
-  const scroll = useRef<HTMLDivElement>(null);
-  const nearEnd = useRef(true);
-  const held = runtime.runSync(Inbox.use((inbox) => inbox.get()));
-  const now = runtime.runSync(Time.use((time) => time.latest()));
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const nearEndRef = useRef(true);
+  const held = runtime.runSync(Effect.flatMap(Inbox, (inbox) => inbox.get()));
+  const now = runtime.runSync(Effect.flatMap(Time, (time) => time.latest()));
   const rows = state?.shown.rows && held.messagesThread === state.thread ? held.messages : noMessages;
-  const chronological = useMemo(() => rows.toReversed(), [rows]);
+  const chronological = rows.toReversed();
   const latest = rows[0]?.id;
   const anchor = useCallback((element: HTMLDivElement | null) => {
-    if (element && latest && nearEnd.current && scroll.current) scroll.current.scrollTop = scroll.current.scrollHeight;
+    if (element && latest && nearEndRef.current && scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
   }, [latest]);
   const viewport = useCallback((element: HTMLDivElement | null) => {
-    scroll.current = element;
+    scrollRef.current = element;
     if (!element || typeof ResizeObserver === "undefined") return;
     const resize = new ResizeObserver(() => {
-      if (nearEnd.current) element.scrollTop = element.scrollHeight;
+      if (nearEndRef.current) element.scrollTop = element.scrollHeight;
     });
     resize.observe(element);
-    return () => { resize.disconnect(); scroll.current = null; };
+    return () => { resize.disconnect(); scrollRef.current = null; };
   }, []);
   const choose = useCallback((id: string) => {
-    runtime.runSync(Inbox.use((inbox) => inbox.set({ chosen: id })));
+    runtime.runSync(Effect.flatMap(Inbox, (inbox) => inbox.set({ chosen: id })));
     setSelected(id);
   }, [runtime]);
   if (!state || !phone) return null;
-  const conversation = runtime.runSync(Conversations.use((numbering) => numbering.get(state.thread)));
+  const conversation = runtime.runSync(Effect.flatMap(Conversations, (numbering) => numbering.get(state.thread)));
   const addresses = conversation._tag === "Some" ? conversation.value.addresses : [];
   const title = titleOf(addresses, held.names) || "Conversation";
   const selectedRow = rows.find((row) => row.id === selected);
@@ -308,7 +308,7 @@ function Conversation({ runtime, messages: { state, can, send }, onOpenLink }: M
     copy: selectedRow.body && can({ type: "copy" }) ? () => { void send({ type: "copy" }); } : undefined,
     remove: state.smsApp && state.removal.outcome !== "Unknown" && can({ type: "askDelete" }) ? () => {
       const { id, kind, threadId, date } = selectedRow;
-      runtime.runSync(Inbox.use((inbox) => inbox.set({ deleteTarget: { id, kind, threadId, date } })));
+      runtime.runSync(Effect.flatMap(Inbox, (inbox) => inbox.set({ deleteTarget: { id, kind, threadId, date } })));
       void send({ type: "askDelete" });
     } : undefined,
   } : undefined;
@@ -322,7 +322,7 @@ function Conversation({ runtime, messages: { state, can, send }, onOpenLink }: M
       </header>
       <div ref={viewport} data-alpha-messages-thread className="min-h-0 flex-1 touch-pan-y overflow-y-auto overscroll-contain px-4 pb-3" onScroll={(event) => {
         const viewport = event.currentTarget;
-        nearEnd.current = viewport.scrollHeight - viewport.scrollTop - viewport.clientHeight < 64;
+        nearEndRef.current = viewport.scrollHeight - viewport.scrollTop - viewport.clientHeight < 64;
       }}>
         <div className="flex min-h-full flex-col gap-1.5">
           {state.page.status === "Loading" && state.shown.rows === 0 && <Spinner label="Reading the conversation" />}
@@ -350,10 +350,10 @@ function Compose({ runtime, title, addresses, thread }: MessagesProps & { title:
   const phone = usePhone(runtime).state;
   const dock = useCommsDock(runtime);
   const voice = useVoice(runtime);
-  const field = useRef<HTMLTextAreaElement>(null);
-  const picturesInput = useRef<HTMLInputElement>(null);
-  const cameraInput = useRef<HTMLInputElement>(null);
-  const focus = useRef(false);
+  const fieldRef = useRef<HTMLTextAreaElement>(null);
+  const picturesInputRef = useRef<HTMLInputElement>(null);
+  const cameraInputRef = useRef<HTMLInputElement>(null);
+  const focusRef = useRef(false);
   const subscriptionChoice = useMemo(() => runtime.runSync(Effect.map(Drafts, (drafts) => drafts.subscriptionChoice)), [runtime]);
   const simChoice = useSyncExternalStore(subscriptionChoice.subscribe, subscriptionChoice.get, subscriptionChoice.get);
   const simControls = useCallback((node: HTMLDivElement | null) => {
@@ -363,13 +363,13 @@ function Compose({ runtime, title, addresses, thread }: MessagesProps & { title:
   const { state, can, send } = composer;
   if (!state || !phone || state.thread !== thread || addresses.length === 0) return <CommsBar runtime={runtime} />;
   const person = { label: title, initials: callerInitials(title) };
-  const text = state.slot.author === "Nobody" ? "" : runtime.runSync(Drafts.use((drafts) => drafts.text(thread)));
-  const pictures = runtime.runSync(Drafts.use((drafts) => drafts.pictures()));
-  const subscriptions = runtime.runSync(Drafts.use((drafts) => drafts.subscriptions()));
+  const text = state.slot.author === "Nobody" ? "" : runtime.runSync(Effect.flatMap(Drafts, (drafts) => drafts.text(thread)));
+  const pictures = runtime.runSync(Effect.flatMap(Drafts, (drafts) => drafts.pictures()));
+  const subscriptions = runtime.runSync(Effect.flatMap(Drafts, (drafts) => drafts.subscriptions()));
   const write = (next: string) => {
     const event = { type: "typeText", empty: next.length === 0 } as const;
     if (!can(event)) return;
-    runtime.runSync(Drafts.use((drafts) => drafts.write(thread, next)));
+    runtime.runSync(Effect.flatMap(Drafts, (drafts) => drafts.write(thread, next)));
     void send(event);
   };
   const outgoing = state.outgoing;
@@ -387,8 +387,8 @@ function Compose({ runtime, title, addresses, thread }: MessagesProps & { title:
   const edit = () => {
     if (!can({ type: "typeText", empty: false })) return;
     write(text);
-    if (!dock.open) { field.current?.focus(); return; }
-    focus.current = true;
+    if (!dock.open) { fieldRef.current?.focus(); return; }
+    focusRef.current = true;
     dock.close();
   };
   const sendLabel = checking ? "Check send status" : "Send";
@@ -417,22 +417,22 @@ function Compose({ runtime, title, addresses, thread }: MessagesProps & { title:
     <div data-alpha-composer data-alpha-messages-composer className="flex min-w-0 flex-1 items-end gap-1">
       <Textarea className="max-h-[min(10.5rem,28dvh)] min-w-0 flex-1 overflow-y-auto border-0 bg-transparent pl-2 shadow-none" aria-label="Message" placeholder={`Text ${firstName(title)}`} rows={1} value={text} maxLength={MMS_MAX_BODY} readOnly={!editable}
         ref={(element) => {
-          field.current = element;
-          if (element && focus.current) { focus.current = false; element.focus(); }
+          fieldRef.current = element;
+          if (element && focusRef.current) { focusRef.current = false; element.focus(); }
         }}
         onChange={(event) => write(event.target.value)} />
       {(canPicture || canSuggest) && <Menu>
         <MenuTrigger asChild><Button variant="ghost" size="icon" aria-label="Message actions"><Plus /></Button></MenuTrigger>
         <MenuContent aria-label="Message actions" side="top" sideOffset={8}>
           {canPicture && <>
-            <MenuItem onSelect={() => cameraInput.current?.click()}><Camera />Camera</MenuItem>
-            <MenuItem onSelect={() => picturesInput.current?.click()}><ImagePlus />Add media</MenuItem>
+            <MenuItem onSelect={() => cameraInputRef.current?.click()}><Camera />Camera</MenuItem>
+            <MenuItem onSelect={() => picturesInputRef.current?.click()}><ImagePlus />Add media</MenuItem>
           </>}
           {canSuggest && <MenuItem onSelect={() => void send({ type: "suggest" })}><Sparkles />Let Alpha suggest a reply</MenuItem>}
         </MenuContent>
       </Menu>}
-      {([["Attach a picture", picturesInput, false], ["Take a picture", cameraInput, true]] as const).map(([label, input, camera]) => (
-        <input key={label} ref={input} hidden type="file" aria-label={label} multiple={!camera} capture={camera ? "environment" : undefined} accept={MMS_ATTACHMENT_TYPES.join(",")} disabled={!canPicture} onChange={(event) => {
+      {([["Attach a picture", picturesInputRef, false], ["Take a picture", cameraInputRef, true]] as const).map(([label, input, camera]) => (
+        <Input key={label} ref={input} hidden className="hidden" type="file" aria-label={label} multiple={!camera} capture={camera ? "environment" : undefined} accept={MMS_ATTACHMENT_TYPES.join(",")} disabled={!canPicture} onChange={(event) => {
           const files = [...(event.target.files ?? [])];
           event.target.value = "";
           if (files.length > 0) void runtime.runPromise(attachAll(files));
@@ -470,8 +470,8 @@ function Compose({ runtime, title, addresses, thread }: MessagesProps & { title:
         {here && outgoing.op.outcome === "Refused" && !outgoing.denied && outgoing.failed > 0 && <Banner variant="destructive">The message did not reach everyone</Banner>}
         {here && sentAll(outgoing) && <p role="status" className="basis-full text-xs text-muted-foreground">{`${delivered(outgoing) ? "Delivered" : "Sent"} to ${title}`}</p>}
         {pictures.map((picture, at) => (
-          <Chip key={`${picture.name}-${at}`} onClear={can({ type: "detach" }) ? () => {
-            runtime.runSync(Drafts.use((drafts) => drafts.setPictures(pictures.filter((_, other) => other !== at))));
+          <Chip key={picture.name} onClear={can({ type: "detach" }) ? () => {
+            runtime.runSync(Effect.flatMap(Drafts, (drafts) => drafts.setPictures(pictures.filter((_, other) => other !== at))));
             void send({ type: "detach" });
           } : undefined} clearLabel={`Remove ${picture.name}`}>{picture.name}</Chip>
         ))}
@@ -511,21 +511,21 @@ function Compose({ runtime, title, addresses, thread }: MessagesProps & { title:
 function Picker({ runtime, messages: { state, can, send } }: MessagesProps & { messages: MessagesUI }) {
   const [typed, setTyped] = useState("");
   const [browsing, setBrowsing] = useState(false);
-  const input = useRef<HTMLInputElement>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
   if (!state) return null;
-  const held = runtime.runSync(Inbox.use((inbox) => inbox.get()));
+  const held = runtime.runSync(Effect.flatMap(Inbox, (inbox) => inbox.get()));
   const find = (text: string) => {
     setTyped(text);
-    runtime.runSync(Inbox.use((inbox) => inbox.set({ typed: text.split(",").at(-1)?.trim() ?? "" })));
+    runtime.runSync(Effect.flatMap(Inbox, (inbox) => inbox.set({ typed: text.split(",").at(-1)?.trim() ?? "" })));
     if (can({ type: "findChoices" })) void send({ type: "findChoices" });
   };
   const open = (addresses: ReadonlyArray<string>, typedIn: boolean) => {
     clearChoice(runtime);
-    const thread = runtime.runSync(Conversations.use((numbering) => numbering.of({ id: "", addresses })));
+    const thread = runtime.runSync(Effect.flatMap(Conversations, (numbering) => numbering.of({ id: "", addresses })));
     const event = { type: state.offeredPicture > 0 ? "choosePictureRecipient" : "choose", thread, typed: typedIn } as const;
     if (can(event)) void send(event);
   };
-  const offer = state.offeredPicture > 0 ? runtime.runSync(Drafts.use((drafts) => drafts.offeredPicture())) : undefined;
+  const offer = state.offeredPicture > 0 ? runtime.runSync(Effect.flatMap(Drafts, (drafts) => drafts.offeredPicture())) : undefined;
   const to = typed.split(",").map((part) => part.trim());
   const parsed = to.map((part) => /^\+?[\d\s().-]+$/u.test(part) && part.replace(/\D/gu, "").length >= 3 ? normalizePhoneNumber(part) : null);
   const numbers = parsed.length <= MMS_MAX_RECIPIENTS && parsed.every((number) => number !== null) ? [...new Set(parsed)] : [];
@@ -536,10 +536,10 @@ function Picker({ runtime, messages: { state, can, send } }: MessagesProps & { m
       <header data-alpha-navigation-header className={`${header} pr-4 pb-2`}>
         {can({ type: "back" }) && <Button variant="ghost" size="icon" aria-label="Back" onClick={() => void send({ type: "back" })}><ChevronLeft /></Button>}
         <form className="min-w-0 flex-1" onSubmit={(event) => { event.preventDefault(); if (numbers.length > 0) open(numbers, true); }}>
-          <SearchField ref={input} aria-label="To" placeholder="To" autoComplete="off" autoCapitalize="none" autoCorrect="off" spellCheck={false} maxLength={230}
+          <SearchField ref={inputRef} aria-label="To" placeholder="To" autoComplete="off" autoCapitalize="none" autoCorrect="off" spellCheck={false} maxLength={230}
             data-alpha-messages-recipients value={typed} onValueChange={find} />
         </form>
-        <Button variant="ghost" size="icon" aria-label="Choose a contact" aria-expanded={browsing} onClick={() => { setBrowsing(!browsing); input.current?.focus(); }}><Plus /></Button>
+        <Button variant="ghost" size="icon" aria-label="Choose a contact" aria-expanded={browsing} onClick={() => { setBrowsing(!browsing); inputRef.current?.focus(); }}><Plus /></Button>
       </header>
       {offer?.ticket === state.offeredPicture && (
         <div aria-label="Picture for this message" className="flex px-5 py-2">

@@ -4,7 +4,7 @@ import { Machine as Composer } from "../../gen/app__messages__composer.effect.vi
 import { Machine as Messages } from "../../gen/app__messages.effect.vibe"
 import { Machine as Shell, showing } from "../../gen/app__shell.effect.vibe"
 import { Device } from "../platform/device.vibe"
-import { Telephony, telephony } from "../platform/telephony.vibe"
+import { type Telephony, telephony } from "../platform/telephony.vibe"
 import { fresh } from "../runtime/attempts.vibe"
 import { Drafts, type PickedSubscription, sameSubscription } from "./composer.vibe"
 

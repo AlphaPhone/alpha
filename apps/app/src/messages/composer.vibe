@@ -9,12 +9,11 @@ import type { Effect as SendOut } from "../../gen/app__messages__sending.effect.
 import { Machine as Messages, canNewPictureMessage, type Messages as MessagesState } from "../../gen/app__messages.effect.vibe"
 import { Machine as Phone, clear } from "../../gen/app__phone.effect.vibe"
 import { Machine as Shell, showing } from "../../gen/app__shell.effect.vibe"
-import { type Machine as Toasts } from "../../gen/app__notices__toasts.effect.vibe"
-import { type Said, say } from "../notices/toasts.vibe"
+import { say } from "../notices/toasts.vibe"
 import { Agent } from "../platform/agent.vibe"
 import { ask } from "../platform/remote.vibe"
 import { SystemSettings } from "../platform/systemSettings.vibe"
-import { Telephony, TelephonyAbsent, TelephonyRefused, sendFromComposer, telephony } from "../platform/telephony.vibe"
+import { type Telephony, TelephonyAbsent, type TelephonyRefused, sendFromComposer, telephony } from "../platform/telephony.vibe"
 import { Attempts } from "../runtime/attempts.vibe"
 import { type Job, answer, applying, contained, following, hearing, reacting, run, started, stream, together } from "../runtime/reactor.vibe"
 import { grantOf } from "../phone/phone.vibe"
@@ -245,7 +244,6 @@ function mmsReview(send: Outgoing, sim: number): MmsReview {
 effect function receiptOf(send: Outgoing, sim: number, operation: OperationId): (SmsSendStatus | undefined)!!Telephony {
   if (usingMms(send.to.length, send.pictured)) {
     if (send.mms === undefined) {
-      // Older text-only group sends can reproduce their complete binding without any pictures.
       if (send.pictured) return undefined
       const receipt = telephony("mmsSendResult", (c) => c.messages.mmsSendResult(mmsReview(send, sim), operation)) catch () => undefined
       return receipt?.status

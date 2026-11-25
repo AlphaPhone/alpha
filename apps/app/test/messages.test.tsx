@@ -1,7 +1,6 @@
 // @vitest-environment happy-dom
 import { NOT_DISPATCHED } from "@elizaos/agent";
 import { type Context, Effect, type ManagedRuntime, Stream } from "effect";
-import { act } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { Machine as Conversation } from "../gen/app__assistant.effect.vibe";
 import { Machine as Shell } from "../gen/app__shell.effect.vibe";
@@ -62,14 +61,14 @@ async function openUnreadCard() {
 }
 
 /** Press `name` in the open confirmation. */
-const confirm = (name: string) => act(async () => {
+const confirm = (name: string) => drawn(() => {
   const found = [...document.querySelectorAll("[role=alertdialog] button")].find((one) => one.textContent === name);
   if (!(found instanceof HTMLButtonElement)) throw new Error(`no ${name} in the confirmation`);
   found.click();
 });
 
 /** Type into the text box named `name`, as a person does. */
-const write = (name: string, text: string) => act(async () => {
+const write = (name: string, text: string) => drawn(() => {
   const found = [...document.querySelectorAll("textarea, input")].find((one) => one.getAttribute("aria-label") === name);
   if (!(found instanceof HTMLTextAreaElement || found instanceof HTMLInputElement)) throw new Error(`no field ${name}`);
   Object.getOwnPropertyDescriptor(Object.getPrototypeOf(found) as object, "value")?.set?.call(found, text);
@@ -77,7 +76,7 @@ const write = (name: string, text: string) => act(async () => {
 });
 
 /** Open the message action menu from the keyboard. */
-const bubble = (text: string) => act(async () => {
+const bubble = (text: string) => drawn(() => {
   const found = [...document.querySelectorAll("[role=log] [data-alpha-message-id]")].find((one) => one.textContent?.includes(text));
   if (!(found instanceof HTMLElement)) throw new Error(`no message ${text}`);
   found.focus();
@@ -520,7 +519,7 @@ describe("Messages on an Alpha image", () => {
 
     const links = [...document.querySelectorAll<HTMLAnchorElement>("[data-alpha-message-body] a")];
     expect([links.map((one) => one.href), world.browser.tabs.size]).toEqual([["http://news.example/lunch"], 0]);
-    await act(async () => links[0]?.click());
+    await drawn(() => links[0]?.click());
     await ready(alpha.runtime, Shell, "Alpha image admitted", (state) => state.trail.at(-1) === "Browser");
     const runtime = browser.runtime(alpha);
     const linkTab = await vi.waitFor(() => {
