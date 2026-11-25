@@ -15,6 +15,7 @@ import type { Alpha, Resident } from "../runtime/area.tsx";
 import { AppBack } from "../shell/AppBack.tsx";
 import { Time } from "../runtime/time.vibe";
 import { Handles } from "./handles.vibe";
+import { changedOn, folderLocation, parentPath, sized } from "./entries.vibe";
 import { CategoryGroups } from "./category.vibe";
 import type { Machine as PreviewMachine } from "../../gen/app__files__preview.effect.vibe";
 import type { Machine as RecentMachine } from "../../gen/app__files__recent.effect.vibe";
@@ -41,14 +42,6 @@ const kinds: readonly [Kind | undefined, string][] = [[undefined, "Any kind"], [
 const kindNames: Record<Kind, string> = { Folder: "Folder", Image: "Image", Video: "Video", Audio: "Audio", Document: "Document", Pdf: "PDF", Download: "Download", Other: "File" };
 /** A name no folder holds, since it is a path's separator: what asks whether a new name would be taken at all. */
 const unnamed = "/";
-/** A size in the units the owner reads, to one decimal above a kilobyte. */
-function sized(bytes: number): string {
-  const units = ["B", "KB", "MB", "GB", "TB"];
-  let at = 0;
-  let value = bytes;
-  while (value >= 1024 && at < units.length - 1) { value /= 1024; at += 1; }
-  return `${at === 0 || value >= 100 ? Math.round(value) : Math.round(value * 10) / 10} ${units[at]}`;
-}
 /** The kind a downloaded or unknown file shows by its name's extension, as develop names and draws it. */
 const byExtension: readonly [RegExp, string, LucideIcon][] = [
   [/\.pdf$/i, "PDF", FileText], [/\.(jpe?g|png|gif|webp|heic)$/i, "Image", Image], [/\.(mp4|mov|webm|mkv)$/i, "Video", Video],
@@ -62,17 +55,6 @@ function kindOf(item: Item): { name: string; icon: LucideIcon } {
 }
 /** Develop's empty folder: a large muted icon over one line, well below the header. */
 const filesEmpty = "gap-3 px-4 pt-24 pb-4 [&_svg]:size-11";
-const changedTime = new Intl.DateTimeFormat(undefined, { hour: "numeric", minute: "2-digit" });
-const changedDay = new Intl.DateTimeFormat(undefined, { month: "short", day: "numeric" });
-const changedDate = new Intl.DateTimeFormat(undefined, { year: "numeric", month: "short", day: "numeric" });
-
-/** A file's listing time today, its day this year, or its date with the year. */
-function changedOn(revision: number, today: Date): string {
-  const date = new Date(revision);
-  if (revision <= 0 || Number.isNaN(date.getTime())) return "";
-  if (date.toDateString() === today.toDateString()) return changedTime.format(date);
-  return (date.getFullYear() === today.getFullYear() ? changedDay : changedDate).format(date);
-}
 function dateRange(filter: Filter): string {
   const date = (value: number) => new Date(value).toLocaleDateString();
   if (filter.from === everything.from) return filter.to === everything.to ? "" : `Through ${date(filter.to)}`;
@@ -153,11 +135,11 @@ export function Files({ runtime, alpha }: FilesProps) {
   const today = new Date(runtime.runSync(Effect.flatMap(Time, (time) => time.latest())));
   const parentOf = (item: Item) => {
     const spot = runtime.runSync(Effect.flatMap(Handles, (handles) => handles.spot(item.id)));
-    return Option.map(spot, ({ path }) => path.slice(0, Math.max(0, path.lastIndexOf("/"))));
+    return Option.map(spot, ({ path }) => parentPath(path));
   };
   const location = (item: Item) => {
     const folder = Option.getOrElse(parentOf(item), () => "");
-    return [label(item.volume), ...folder.split("/").filter(Boolean)].join(" › ");
+    return folderLocation(label(item.volume), folder);
   };
   const summary = (item: Item, showFolder: boolean) => {
     if (item.kind === "Folder") return "";
@@ -319,8 +301,8 @@ export function Files({ runtime, alpha }: FilesProps) {
           ]} />
         )}
       </div>
-      <FileLayers state={state} picked={picked} naming={naming} setNaming={setNaming} placing={placing} owner={owner} tell={tell} label={label} location={location} />
-      <Preview runtime={runtime} />
+<FileLayers state={state} picked={picked} naming={naming} setNaming={setNaming} placing={placing} owner={owner} tell={tell} label={label} location={location} />
+      <Preview runtime={runtime} today={today} />
       {scanner}
       <Sheet open={change.panel !== 0} onOpenChange={(open) => { if (!open && owner({ type: "closeShare" })) tell({ type: "closeShare" }); }}>
         <SheetContent title="Share">
