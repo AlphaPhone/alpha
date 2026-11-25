@@ -40,6 +40,7 @@ its editor is not available.
 
 ```quint
 type Kind = Still | Clip
+type ViewerOrigin = LibraryItem | CameraCapture
 type Look = Original | Vivid | Warm | Cool | Mono | Fade | Noir
 type CropBounds = { x: int, y: int, width: int, height: int }
 type Edit = { turns: int, cropped: bool, bounds: CropBounds, look: Look, start: int, end: int }
@@ -91,7 +92,7 @@ lookup and the count of saves are kept through a restart.
 ```quint
 type Viewer = {
   visible: bool, secure: bool, scope: Set[int],
-  open: int, openedBy: Actor, listed: bool, read: R::Read,
+  open: int, openedBy: Actor, origin: ViewerOrigin, listed: bool, read: R::Read,
   kind: Kind, duration: int, revision: int, favourite: bool, gone: bool,
   zoom: int, pan: Pan, chrome: bool, muted: bool, playing: bool, position: int, info: bool,
   editing: bool, cropping: bool, edit: Edit, preview: V::Review, unavailable: bool, refusal: Refusal, replace: bool,
@@ -102,7 +103,7 @@ type Done = { state: Viewer, out: List[Effect] }
 
 pure val initial: Viewer = {
   visible: true, secure: false, scope: Set(),
-  open: 0, openedBy: Owner, listed: false, read: R::unread,
+  open: 0, openedBy: Owner, origin: LibraryItem, listed: false, read: R::unread,
   kind: Still, duration: 0, revision: 0, favourite: false, gone: false,
   zoom: 1, pan: centered, chrome: true, muted: false, playing: false, position: 0, info: false,
   editing: false, cropping: false, edit: untouched(0), preview: V::unreviewed, unavailable: false, refusal: NoRefusal, replace: false,
@@ -165,19 +166,35 @@ pure def reading(photo: int, v: Viewer): Done =
     zoom: 1, pan: centered, chrome: true, muted: false, playing: false, position: 0, info: false, edit: untouched(0), replace: false,
   })
 
-pure def canOpenItem(s: Viewer, photo: int, listed: bool, secure: bool, only: Set[int], reviewing: bool, by: Actor): bool =
+pure def canOpenItem(s: Viewer, photo: int, listed: bool, secure: bool, only: Set[int], reviewing: bool, origin: ViewerOrigin, by: Actor): bool =
   s.visible and photo > 0 and not(s.editing) and listed and (secure implies only.contains(photo))
     and (by == Owner or (by == Agent and not(secure) and not(reviewing)))
+    and (origin == CameraCapture implies (by == Owner and not(secure)))
 
-pure def openItem(s: Viewer, photo: int, listed: bool, secure: bool, only: Set[int], reviewing: bool, by: Actor): Done =
-  reading(photo, { ...s, secure: secure, scope: if (secure) only else Set(), openedBy: by, listed: listed })
+pure def openItem(s: Viewer, photo: int, listed: bool, secure: bool, only: Set[int], reviewing: bool, origin: ViewerOrigin, by: Actor): Done =
+  reading(photo, { ...s, secure: secure, scope: if (secure) only else Set(), openedBy: by, origin: origin, listed: listed })
 
 pure def alwaysOpensOnlyWhatPhotosLists(s: Viewer): bool =
   (s.open != 0 implies s.listed) and ((s.open != 0 and s.openedBy == Agent) implies not(s.secure))
 
+```
+
+### Back from a Camera capture returns to Camera
+
+When the owner has opened the last capture from Camera, Back returns along
+the shell's trail if Camera is directly behind Photos. Crop, edit and item
+info take Back first. An item opened from the grid returns to the grid.
+
+```quint
+pure def cameraBack(s: Viewer): bool =
+  s.visible and s.open != 0 and s.origin == CameraCapture and not(s.cropping or s.editing or s.info)
+
+pure def alwaysCameraOriginBelongsToTheOwner(s: Viewer): bool =
+  s.origin == CameraCapture implies (s.open != 0 and s.openedBy == Owner and not(s.secure))
+
 pure def canClose(s: Viewer, by: Actor): bool = by == Owner and s.open != 0 and not(s.editing)
 
-pure def close(s: Viewer, by: Actor): Viewer = { ...s, open: 0, playing: false, info: false, gone: false }
+pure def close(s: Viewer, by: Actor): Viewer = { ...s, open: 0, origin: LibraryItem, playing: false, info: false, gone: false }
 ```
 
 ### Only the newest read's answer is shown, while the viewer is showing; one that failed can be read again
@@ -334,7 +351,7 @@ pure def showView(s: Viewer, by: Actor): Done =
 pure def canRevoked(s: Viewer, by: Actor): bool = by == Phone and s.open != 0
 
 pure def revoked(s: Viewer, by: Actor): Viewer =
-  { ...s, open: 0, gone: false, playing: false, info: false, editing: false, cropping: false, preview: V::dismiss(s.preview), secure: false, scope: Set() }
+  { ...s, open: 0, origin: LibraryItem, gone: false, playing: false, info: false, editing: false, cropping: false, preview: V::dismiss(s.preview), secure: false, scope: Set() }
 ```
 
 ### An item can be loading, fail to load, play part way, be zoomed in, or show its info
@@ -396,7 +413,7 @@ pure def trashOpen(s: Viewer, neighbour: int, by: Actor): Done =
   val asked = Request({ change: C::Trash, photo: s.open, revision: s.revision })
   val onward = reading(neighbour, { ...s, openedBy: Owner })
   if (neighbour > 0) { state: onward.state, out: List(asked).concat(onward.out) }
-  else emit(List(asked), { ...s, open: 0, playing: false, info: false })
+  else emit(List(asked), { ...s, open: 0, origin: LibraryItem, playing: false, info: false })
 
 pure def stepItemLeavesOnlyByTheOwner(before: Viewer, via: str, after: Viewer, out: List[Effect]): bool =
   out.every(e => match e {

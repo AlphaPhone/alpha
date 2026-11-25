@@ -167,11 +167,30 @@ describe("Camera on a phone", () => {
     expect(document.querySelector('img[alt="Camera.jpg"]')).not.toBeNull();
     expect(world.photos.readCount).toBe(1);
 
-    await press("Back to photos");
-    await until(alpha, library, Viewer, (state) => state.open === 0);
+    // spec/app/photos/viewer.md, "Back from a Camera capture returns to Camera"
+    await press("Info");
+    await until(alpha, library, Viewer, (state) => state.info);
+    await hardware("back");
+    await until(alpha, library, Viewer, (state) => !state.info && state.open !== 0);
+
+    await press("Back to Camera");
+    await until(alpha, runtime, Machine, (state) => state.showing && state.phase === "Ready");
+    await press("Open last capture in Photos");
+    await until(alpha, library, Viewer, (state) => state.read.status === "Loaded" && state.origin === "CameraCapture");
+    await hardware("back");
+    await until(alpha, runtime, Machine, (state) => state.showing && state.phase === "Ready");
+    await hardware("back");
+    await until(alpha, runtime, Machine, (state) => !state.showing);
+
+    await press("Photos");
+    await until(alpha, library, Library, (state) => state.visible && state.library.status === "Loaded" && state.rows.length === 2);
     expect(button("Camera.jpg")).toBeUndefined();
     await press("Show more");
     await until(alpha, library, Library, (state) => state.library.status === "Loaded" && state.rows.length === 3);
+    await press("Camera.jpg");
+    await until(alpha, library, Viewer, (state) => state.read.status === "Loaded" && state.origin === "LibraryItem");
+    await press("Back to photos");
+    await until(alpha, library, Viewer, (state) => state.open === 0);
     expect(button("Camera.jpg")).toBeDefined();
   });
 
