@@ -668,22 +668,25 @@ effect function idOf(entry: Bin.Entry): string!!Handles {
 
 // spec/app/files/trash.md, "The owner restores a listed item before its time, from a list read since the last job"
 effect function restored(number: number, entries: ReadonlyArray<Bin.Entry>): Bin.Event!!(Files | Handles) {
-  return effect {
-    const results: Bin.Entry[] = []
-    let answered = 0
-    for (const [volume, mine] of try idsOf(entries)) {
-      const ids: string[] = []
-      for (const entry of mine) ids.push(try idOf(entry))
-      const reply = try called("storageRestore", (plugin) => plugin.storageRestore({ volume, ids }))
-      if (reply.status !== "ready") answered += ids.length
-      for (const row of reply.outcomes ?? []) {
-        answered += 1
-        const entry = mine[ids.indexOf(row.path)]
-        if (row.status === "restored" && entry !== undefined) results.push(entry)
+  const results: Bin.Entry[] = []
+  let answered = 0
+  for (const [volume, mine] of try idsOf(entries)) {
+    const byId = new Map<string, Bin.Entry>()
+    for (const entry of mine) byId.set(try idOf(entry), entry)
+    const batch = try batched("storageRestore", [...byId.keys()], (plugin, ids) => plugin.storageRestore({ volume, ids }))
+    const unsent = new Set(batch.unsent)
+    const outcomes = new Map<string, FileOutcomeRow | null>()
+    for (const row of batch.rows) outcomes.set(row.path, outcomes.has(row.path) ? null : row)
+    for (const [id, entry] of byId) {
+      const row = outcomes.get(id)
+      if (unsent.has(id)) answered += 1
+      else if (row) {
+        if (row.status !== "restored") answered += 1
+        else if (row.to !== undefined) { results.push(entry); answered += 1 }
       }
     }
-    return jobDone(number, results, answered === entries.length)
-  } catch () => jobDone(number, [], false)
+  }
+  return jobDone(number, results, answered === entries.length)
 }
 
 // spec/app/files/trash.md, "Confirming erases exactly the entries shown"
