@@ -341,6 +341,7 @@ export function Photos({ runtime, alpha }: PhotosProps) {
         </span>}
       </ConfirmDialog>
       <MediaViewer runtime={runtime} onBack={() => { void alpha.back(); }} backToCamera={backToCamera}
+        albumNamesFor={(id) => [...content.albums.values()].filter((entry) => entry.owned?.memberIds.some((member) => member === id) === true).map((entry) => entry.title)}
         row={content.rows.get(opened)} before={index > 0 ? ids[index - 1] : undefined} after={index >= 0 ? ids[index + 1] : undefined} inTrash={inTrash}
         onAddToAlbum={!inTrash && (offPageCamera ? canAddCamera && owner(cameraAlbum) : canStart && ids.includes(opened))
           ? () => {
