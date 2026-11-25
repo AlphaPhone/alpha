@@ -234,7 +234,7 @@ export const phonePhotos = Layer.sync(PhotosPort, () => {
   const phone = registered(photosName) ? Option.some(phoneLibrary(photosName)) : Option.none<PhotosClient>()
   const reviewed = registered(reviewedName) ? Option.some(reviewedLibrary(reviewedName)) : Option.none<DeviceLibraryClient>()
   const changes = Option.isNone(phone) ? Stream.empty : Stream.callback<void>((queue) => Effect.asVoid(acquireRelease(
-    Effect.orElseSucceed(tryPromise(() => phone.value.onLibraryChanged(() => { Queue.offerUnsafe(queue, undefined) })), () => undefined),
+    Effect.orElseSucceed(tryPromise(() => phone.value.onLibraryChanged((): void => { Queue.offerUnsafe(queue, undefined) })), () => undefined),
     (handle) => handle === undefined ? Effect.void : ignore(tryPromise(() => handle.remove())),
   )))
   return { phone, reviewed, changes, captures: () => succeed([]), original: () => succeed(undefined), ...entry() }
