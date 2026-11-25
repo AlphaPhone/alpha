@@ -17,6 +17,9 @@ export interface AskScene {
   /** How many reads of a conversation's messages, and of the list of conversations, the agent was asked. */
   pageReads: number;
   listReads: number;
+  /** While set, the agent holds each answer to a read of the list until the test lets it go. */
+  holdLists: boolean;
+  readonly heldLists: (() => void)[];
   acknowledgment?: string;
   metadata?: unknown[];
   /** The failure fields of the resident's terminal reply. */
@@ -35,7 +38,7 @@ export interface Kept {
 }
 
 export function askScene(): AskScene {
-  return { opened: 0, said: [], down: false, stalled: false, turns: new Map(), kept: new Map(), searchDown: false, pagesDown: false, pagesMissing: false, pageReads: 0, listReads: 0, cloudWarmCalls: 0 };
+  return { opened: 0, said: [], down: false, stalled: false, turns: new Map(), kept: new Map(), searchDown: false, pagesDown: false, pagesMissing: false, pageReads: 0, listReads: 0, holdLists: false, heldLists: [], cloudWarmCalls: 0 };
 }
 
 const encoder = new TextEncoder();
@@ -96,7 +99,8 @@ export function askRoutes(scene: AskScene): Route[] {
     (request, url) => {
       if (request.method !== "GET" || url.pathname !== "/api/conversations") return;
       scene.listReads += 1;
-      return Response.json({ conversations: [...scene.kept].map(([id, one]) => ({ id, roomId: one.roomId, title: one.title, createdAt: 0, updatedAt: 0 })) });
+      const listing = Response.json({ conversations: [...scene.kept].map(([id, one]) => ({ id, roomId: one.roomId, title: one.title, createdAt: 0, updatedAt: 0 })) });
+      return scene.holdLists ? new Promise<Response>((resolve) => void scene.heldLists.push(() => resolve(listing))) : listing;
     },
     (request, url) => {
       const id = /^\/api\/conversations\/([^/]+)\/messages$/.exec(url.pathname)?.[1];

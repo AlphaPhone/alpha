@@ -7,9 +7,19 @@ import type { Event, Look } from "../../gen/app__photos__viewer.ts";
 import type { Machine } from "../../gen/app__photos__viewer.effect.vibe";
 import type { Row } from "./catalog.vibe";
 import { OpenedPhoto } from "./viewer.vibe";
+import { CropFrame } from "./CropFrame.tsx";
 import { Time } from "../runtime/time.vibe";
 
 const filters: readonly Look[] = ["Original", "Vivid", "Warm", "Cool", "Mono", "Fade", "Noir"];
+const filterPaint: Record<Look, string> = {
+  Original: "none",
+  Vivid: "saturate(1.55) contrast(1.08)",
+  Warm: "sepia(.3) saturate(1.35) hue-rotate(-8deg)",
+  Cool: "saturate(1.1) hue-rotate(14deg) brightness(1.03)",
+  Mono: "grayscale(1) contrast(1.05)",
+  Fade: "contrast(.78) brightness(1.12) saturate(.75)",
+  Noir: "grayscale(1) contrast(1.55) brightness(.88)",
+};
 const messages = {
   NoRefusal: "", Animated: "This photo is animated.", TooLarge: "This item is too large to edit.", TooLong: "This video is too long to edit.",
   NoRoom: "There is not enough storage to edit this video.", NoEditor: "This item cannot be edited here.",
@@ -39,6 +49,13 @@ export function MediaViewer({ runtime, before, after, row, inTrash, onAddToAlbum
   }, []);
   const pointRef = useRef<{ readonly x: number; readonly y: number } | undefined>(undefined);
   const pointersRef = useRef(new Map<number, { readonly x: number; readonly y: number }>());
+  const returnCropFocusRef = useRef(0);
+  const cropButton = useCallback((button: HTMLButtonElement | null) => {
+    if (button && state?.preview.showing && returnCropFocusRef.current === state.open) {
+      returnCropFocusRef.current = 0;
+      button.focus({ preventScroll: true });
+    }
+  }, [state?.open, state?.preview.showing]);
   const pinchRef = useRef<{ readonly level: number; readonly distance: number } | undefined>(undefined);
   if (!state || state.open === 0) return null;
   const current = runtime.runSync(Effect.flatMap(OpenedPhoto, (opened) => opened.current()));
@@ -112,7 +129,12 @@ export function MediaViewer({ runtime, before, after, row, inTrash, onAddToAlbum
     const neighbour = x < 0 ? after : before;
     if (neighbour !== undefined) action({ type: "swipe", neighbour });
   }
-  const close = () => editAction(state.editing ? { type: "cancelEdit" } : { type: "close" });
+  const close = () => editAction(state.cropping ? { type: "cancelCrop" } : state.editing ? { type: "cancelEdit" } : { type: "close" });
+  const beginCrop = { type: "beginCrop" } satisfies Event;
+  function openCrop() {
+    returnCropFocusRef.current = state?.open ?? 0;
+    action(beginCrop);
+  }
   const photosMenu = [
     !inTrash && state.kind === "Still" && allows({ type: "askAlpha" }) && { label: "Ask Alpha", icon: <Sparkles />, select: () => action({ type: "askAlpha" }) },
     onAddToAlbum && { label: "Add to album", icon: <Album />, select: onAddToAlbum },
@@ -125,20 +147,40 @@ export function MediaViewer({ runtime, before, after, row, inTrash, onAddToAlbum
   const control = (label: string, event: Event, icon: React.ReactNode) => allows(event) && (
     <Button variant="ghost" size="icon" aria-label={label} onClick={() => action(event)}>{icon}</Button>
   );
+  const swatchSource = current.item?.image || current.uri;
   const edited = preview !== undefined && preview.revision === state.preview.revision && state.editing && !state.unavailable ? preview : undefined;
+  if (state.cropping) return (
+    <div aria-label="Crop photo" data-alpha-subview="photos-crop"
+      // eslint-disable-next-line better-tailwindcss/no-unknown-classes -- design.md, "Dark": the crop tools follow the photo editor's fixed dark theme
+      className="dark absolute inset-0 z-50 flex min-h-0 flex-col bg-background text-foreground">
+      <header data-host-chrome="" className="flex min-h-14 shrink-0 items-center gap-2 px-2">
+        <Button variant="ghost" size="icon" aria-label="Cancel crop" onClick={close}><X /></Button>
+        <h1 className="text-base font-semibold">Crop photo</h1>
+      </header>
+      {edited && edited.width > 0 && edited.height > 0 ? <CropFrame key={state.revision} source={edited} bounds={state.edit.bounds}
+        onApply={(bounds) => action({ type: "applyCrop", bounds })} /> : <div className="m-auto text-center" role="status">
+        {state.unavailable ? <><p>Couldn’t prepare the photo.</p><Button variant="secondary" onClick={() => action({ type: "retryPreview" })}>Try again</Button></> : "Preparing photo…"}
+      </div>}
+    </div>
+  );
   return (
-    <div aria-label={name} data-alpha-subview={state.editing ? "photos-editor" : "photos-viewer"} className="absolute inset-0 z-50 flex min-h-0 flex-col bg-foreground text-background dark:bg-background dark:text-foreground">
+    <div aria-label={name} data-alpha-subview={state.editing ? "photos-editor" : "photos-viewer"}
+      // eslint-disable-next-line better-tailwindcss/no-unknown-classes -- design.md, "Dark": the photo viewer and its controls keep their dark tokens in either app theme
+      className="dark absolute inset-0 z-50 flex min-h-0 flex-col bg-background text-foreground">
       <header data-host-chrome="" className="flex min-h-14 shrink-0 items-center gap-2 px-2">
         <Button variant="ghost" size="icon" aria-label={state.editing ? "Cancel edit" : "Back to photos"} onClick={close}>{state.editing ? <X /> : <ChevronLeft />}</Button>
-        {state.editing ? <h1 className="min-w-0 flex-1 truncate text-xl font-semibold">{state.kind === "Clip" ? "Edit video" : "Edit photo"}</h1> : <div className="min-w-0 flex-1">
+        {state.editing ? <div className="flex-1"><h1 className="sr-only">{state.kind === "Clip" ? "Edit video" : "Edit photo"}</h1></div> : <div className="min-w-0 flex-1">
           <h1 className="truncate text-base font-semibold">{day}</h1>
           {date && <time className="block truncate text-caption text-muted-foreground" dateTime={date.toISOString()}>{formatTime.format(date)}</time>}
         </div>}
         {!state.editing && showing && photosMenu.length > 0 && <Menu>
           <MenuTrigger asChild><Button variant="ghost" size="icon" aria-label="Photo actions"><Ellipsis /></Button></MenuTrigger>
-          <MenuContent className="bg-foreground text-background dark:bg-background dark:text-foreground">{photosMenu.map(({ label, icon, select }) => <MenuItem key={label} onSelect={select}>{icon}{label}</MenuItem>)}</MenuContent>
+          <MenuContent
+            // eslint-disable-next-line better-tailwindcss/no-unknown-classes -- design.md, "Dark": the portalled photo menu follows the viewer's fixed dark theme
+            className="dark">{photosMenu.map(({ label, icon, select }) => <MenuItem key={label} onSelect={select}>{icon}{label}</MenuItem>)}</MenuContent>
         </Menu>}
-        {state.editing && <Button disabled={!allows({ type: "save" })} onClick={() => editAction({ type: "save" })}>{state.replace ? "Replace" : "Save copy"}</Button>}
+        {state.editing && preview?.canReplace && allows({ type: "chooseReplace", replace: !state.replace }) && <Button variant="secondary" size="sm" aria-pressed={state.replace} onClick={() => action({ type: "chooseReplace", replace: !state.replace })}>Replace</Button>}
+        {state.editing && <Button size="sm" disabled={!allows({ type: "save" })} onClick={() => editAction({ type: "save" })}>{state.replace ? "Replace" : "Save copy"}</Button>}
         {control("Check saved copy", { type: "checkCopy" }, <Info />)}
       </header>
       <div className="relative flex min-h-0 flex-1 touch-none items-center justify-center overflow-hidden"
@@ -163,15 +205,21 @@ export function MediaViewer({ runtime, before, after, row, inTrash, onAddToAlbum
       </div>}
       {state.refusal !== "NoRefusal" && <p role="status" className="px-4 py-2 text-center text-sm">{messages[state.refusal]}</p>}
       {state.save.outcome === "Unknown" && <p role="status" className="px-4 py-2 text-center text-sm">{state.lookup.status === "Loaded" ? state.found ? "Saved copy found" : "No saved copy found" : "Save unconfirmed"}</p>}
-      {state.editing && <div aria-label="Photo edit tools" className="flex flex-col gap-2 px-3 py-2">
-        <div className="flex items-center justify-around gap-1">
+      {state.editing && <div aria-label="Photo edit tools" className="flex flex-col gap-4 px-4 py-4">
+        <div className="flex items-center justify-center gap-3">
           {control("Rotate", { type: "rotate" }, <RotateCcw />)}
-          {control("Crop", { type: "crop" }, <Crop />)}
-          {preview?.canReplace && allows({ type: "chooseReplace", replace: !state.replace }) && <Button variant="ghost" aria-pressed={state.replace} onClick={() => action({ type: "chooseReplace", replace: !state.replace })}>Replace original</Button>}
+          {state.kind === "Still" ? <Button ref={cropButton} variant="ghost" size="icon" aria-label="Crop" disabled={!allows(beginCrop)} onClick={openCrop}><Crop /></Button>
+            : control("Crop", { type: "crop" }, <Crop />)}
           {allows({ type: "retryPreview" }) && <Button variant="secondary" onClick={() => action({ type: "retryPreview" })}>Retry preview</Button>}
         </div>
-        {state.kind === "Still" ? <div className="flex gap-1 overflow-x-auto">
-          {filters.map((look) => <Button key={look} variant={state.edit.look === look ? "secondary" : "ghost"} size="sm" aria-pressed={state.edit.look === look} disabled={state.edit.look !== look && !allows({ type: "restyle", look })} onClick={() => action({ type: "restyle", look })}>{look}</Button>)}
+        {state.kind === "Still" ? <div role="group" aria-label="Photo filters" className="flex gap-3 overflow-x-auto p-0.5">
+          {filters.map((look) => <Button key={look} variant="ghost" aria-label={look} aria-pressed={state.edit.look === look}
+            className="group h-auto min-w-14 flex-col gap-1.5 rounded-xl p-0 text-caption hover:bg-transparent" disabled={state.edit.look !== look && !allows({ type: "restyle", look })} onClick={() => action({ type: "restyle", look })}>
+            <span className="relative size-14 overflow-hidden rounded-xl bg-secondary group-aria-pressed:outline-focus">
+              {swatchSource && <img src={swatchSource} alt="" className="absolute inset-0 size-full object-cover" style={{ filter: filterPaint[look] }} />}
+            </span>
+            <span className={state.edit.look === look ? "text-foreground" : "text-muted-foreground"}>{look}</span>
+          </Button>)}
         </div> : <>
           <Slider aria-label="Trim start" min={0} max={Math.max(0, state.edit.end - 1)} value={state.edit.start}
             onValueChange={(start) => editAction({ type: "trim", start, end: state.edit.end })} />

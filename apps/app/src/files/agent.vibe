@@ -1,11 +1,12 @@
 // spec/app/files/index.md, "Story: Let the agent read my files"
 import type { ExecutorCall } from "@elizaos/agent/client"
 import type { DeviceOperation } from "@elizaos/agent/operations"
+import { filterTime } from "@elizaos/plugin-files/client"
 import * as Browser from "../../gen/app__files.effect.vibe"
 import type { Action, Event, Offer } from "../../gen/app__files.effect.vibe"
 import { type Place, nowhere } from "../../gen/app__files__change.effect.vibe"
 import * as Shown from "../../gen/app__files__preview.effect.vibe"
-import type { Filter } from "../../gen/app__files__search.effect.vibe"
+import { type Filter, everything } from "../../gen/app__files__search.effect.vibe"
 import type { Item, Kind } from "../../gen/app__files__shared.effect.vibe"
 import type { Outcome } from "../../gen/kit__attempt.effect.vibe"
 import { Files, called } from "../platform/files.vibe"
@@ -141,7 +142,7 @@ const notShown: FileActionResult = { kind: "refused", code: "FILES_NOT_SHOWN" }
 const unsupported: FileActionResult = { kind: "refused", code: "FILES_UNSUPPORTED" }
 const unchanged: FileActionResult = { kind: "refused", code: "FILES_UNCHANGED" }
 const kinds: Readonly<Partial<Record<string, Kind>>> = {
-  image: "Image", video: "Video", audio: "Audio", document: "Document", folder: "Folder",
+  image: "Image", video: "Video", audio: "Audio", document: "Document", pdf: "Pdf", folder: "Folder",
 }
 
 effect function primaryAt(id: number, path: string): boolean!!Handles {
@@ -184,9 +185,12 @@ export effect function fileAction(operation: DeviceOperation, call: ExecutorCall
     case "files_filter": {
       const { kind, text, from, to, folder: path } = operation
       const wanted = kind === undefined ? undefined : kinds[kind]
-      if (from !== undefined || to !== undefined || (kind !== undefined && wanted === undefined)) return unsupported
+      if (kind !== undefined && wanted === undefined) return unsupported
       if (path !== undefined && !(folder === 0 && path === "" && !shown.inCategory) && !(try primaryAt(folder, path))) return notShown
-      const filtered = try agentFilter(request, { text: text ?? "", kind: wanted ?? "Other", anyKind: wanted === undefined }, false)
+      const first = from === undefined ? everything.from : Math.max(everything.from, filterTime(from))
+      const last = to === undefined ? everything.to : filterTime(to, true)
+      if (!Number.isSafeInteger(first) || !Number.isSafeInteger(last)) return unsupported
+      const filtered = try agentFilter(request, { text: text ?? "", kind: wanted ?? "Other", anyKind: wanted === undefined, from: first, to: last }, false)
       return filtered.ok ? applied : notShown
     }
     case "files_open": {

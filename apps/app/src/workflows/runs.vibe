@@ -5,7 +5,7 @@ import * as Model from "../../gen/app__workflows__runs.effect.vibe"
 import type { Effect as Out, Event } from "../../gen/app__workflows__runs.effect.vibe"
 import * as Listing from "../../gen/app__workflows__list.effect.vibe"
 import * as Sheet from "../../gen/app__workflows__sheet.effect.vibe"
-import { Agent } from "../platform/agent.vibe"
+import type { Agent } from "../platform/agent.vibe"
 import { ownerAt } from "../platform/owner.vibe"
 import { type Job, answer, applying, following, reacting, started, together } from "../runtime/reactor.vibe"
 import { WorkflowsApi } from "./api.vibe"
@@ -98,10 +98,13 @@ effect function start(id: number, version: number, owner: number): Event!!Needs 
   const answer = effect {
     const run = kept !== undefined ? try workflow.resubmit(target.id, target.versionId, kept.submission) : try workflow.run(target.id, target.versionId, hold)
     return { kind: "accepted", run } as const
-  } catch (failure) => !dispatched || failure instanceof WorkflowAdmissionRejected || (failure instanceof WorkflowHttpError && [400, 401, 403, 404, 409, 422].includes(failure.status))
-    ? { kind: "refused" } as const : { kind: "unknown" } as const
-  if ((ownerAt() catch () => "") !== scope || answer.kind === "unknown") return lost
-  if (answer.kind === "refused") {
+  } catch (failure) => ({
+    kind: !dispatched || failure instanceof WorkflowAdmissionRejected || (failure instanceof WorkflowHttpError && [400, 401, 403, 404, 409, 422].includes(failure.status))
+      ? "refused" as const : "unknown" as const,
+  })
+  if ((ownerAt() catch () => "") !== scope) return lost
+  if (answer.kind !== "accepted") {
+    if (answer.kind === "unknown") return lost
     if (!state.request.again) try ignore(store.remove(key))
     return failed
   }

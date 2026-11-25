@@ -134,6 +134,9 @@ pure def refresh(s: Contacts): Moved =
 
 ### Searching or changing the filter chip starts a new list
 
+The header search and the closed Ask Alpha bar both filter on the phone
+while the owner types. Submitting the bar passes those words to Ask Alpha.
+
 ```quint
 pure def narrowed(s: Contacts): bool = s.sought or s.chip != Everyone
 
@@ -152,8 +155,9 @@ pure def pick(s: Contacts, chip: Chip): Moved = relisted(s.sought, chip, s)
 
 ### Back from the search field clears the query and returns to Contacts
 
-The search field opens from the list. A filter that Alpha applied can be
-cleared from the list without opening the field.
+The search field opens from the list. Back clears its query and returns
+to All contacts. A filter that Alpha applied can be cleared from the list
+without opening the field.
 
 ```quint
 pure def canBeginSearch(s: Contacts): bool =
@@ -163,12 +167,12 @@ pure def beginSearch(s: Contacts): Moved =
   { state: { ...s, searching: true }, out: List() }
 
 pure def canEndSearch(s: Contacts): bool =
-  s.front and not(s.opened) and s.form == Shut and (s.searching or s.sought)
+  s.front and not(s.opened) and s.form == Shut and (s.searching or narrowed(s))
 
 pure def endSearch(s: Contacts): Moved =
   val listing = { ...s, searching: false }
-  if (s.sought and readable(s)) relisted(false, s.chip, listing)
-  else { state: { ...listing, sought: false }, out: List() }
+  if (narrowed(s) and readable(s)) relisted(false, Everyone, listing)
+  else { state: { ...listing, sought: false, chip: Everyone }, out: List() }
 ```
 
 ### "More contacts" reads further only when the phone said there are more

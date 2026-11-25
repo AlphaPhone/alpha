@@ -1,16 +1,18 @@
 // @vitest-environment happy-dom
 import { Effect } from "effect";
 import { afterEach, describe, expect, it } from "vitest";
+import { Machine as Tabs } from "../gen/app__browser.effect.vibe";
 import { Machine as Browser } from "../gen/app__files.effect.vibe";
 import { Machine as Shown } from "../gen/app__files__preview.effect.vibe";
 import { Machine as Recent } from "../gen/app__files__recent.effect.vibe";
+import { everything } from "../gen/app__files__search.effect.vibe";
 import { Machine as Bin } from "../gen/app__files__trash.effect.vibe";
 import { Machine as Shell } from "../gen/app__shell.effect.vibe";
 import { Machine as Inbox } from "../gen/app__inbox.effect.vibe";
 import { Machine as Drafts } from "../gen/app__inbox__drafts.effect.vibe";
 import { Letters } from "../src/inbox/composer.vibe";
 import { agentFilter, agentOpen, agentRead, approved, fileAction, offer, shownAt } from "../src/files/agent.vibe";
-import { showDownloads } from "../src/files/files.vibe";
+import browser from "../src/browser/index.tsx";
 import files from "../src/files/index.tsx";
 import { called } from "../src/platform/files.vibe";
 import { button, closeAll, drawn, fill, hardware, later, open, press, pressOnTop, seen, underAct, until } from "./alpha.tsx";
@@ -44,12 +46,20 @@ const paths = (world: ReturnType<typeof scene>) => world.files.stored.map((one) 
 const select = (name: string) => (button(`Select ${name}`) ? press(`Select ${name}`) : openRow(name));
 const buttonOnTop = (name: string) => [...([...document.querySelectorAll("[role=dialog]")].at(-1)?.querySelectorAll("button") ?? [])].find((one) => (one.getAttribute("aria-label") ?? one.textContent) === name);
 
+/** The Home tile of `view`, by its place rather than its words, which carry its badge. */
+const homeTile = (view: string) => document.querySelector<HTMLButtonElement>(`[data-home-tile='view:${view}']`);
+const openFromHome = (view: string) => drawn(() => {
+  const found = homeTile(view);
+  if (!found) throw new Error(`no Home tile ${view}`);
+  found.click();
+});
+
 /** Alpha on a phone with Files on screen, its storage read. */
 async function onFiles(world = { ...scene(), phone: true }) {
   const running = await open(world);
   const { alpha } = running;
   const runtime = files.runtime(alpha);
-  if (button("Files")) await press("Files");
+  if (homeTile("Files")) await openFromHome("Files");
   return { ...running, world, runtime };
 }
 
@@ -112,8 +122,8 @@ describe("Files on a phone", () => {
     expect([world.files.watching, Boolean(button("Internal storage"))]).toEqual([undefined, true]);
   });
 
-  it("Browse my storage from the Browser's Show in Files, and go back (spec/app/files/index.md, \"Story: Browse my storage\")", async () => {
-    const { alpha, runtime, world } = await onFiles();
+  it("Browse my storage from the Browser's Show in Files, and go back (spec/app/files/index.md, \"Story: Browse my storage\"; spec/app/browser/downloads.md, \"Story: Download a file\")", async () => {
+    const { alpha, runtime, world } = await onFiles({ ...scene(), phone: true, image: true });
     await until(alpha, runtime, Browser, (s) => s.storage.status === "Loaded");
     await press("Internal storage");
     await press("Download");
@@ -142,14 +152,26 @@ describe("Files on a phone", () => {
 
     // spec/app/files/index.md, "Another area opens Files at Downloads: the Download folder of the main volume where the phone has one, else the Downloads category; the owner's own move to the top, a volume or a category ends that walk"
     await hardware("home");
-    await runtime.runPromise(showDownloads);
+    await openFromHome("Browser");
+    await until(alpha, browser.runtime(alpha), Tabs, (s) => s.hydrated);
+    const showInFiles = async () => {
+      await press("Menu");
+      await press("Downloads");
+      await drawn(() => {
+        const choose = world.browser.showInFiles;
+        if (choose === undefined) throw new Error("the phone did not open Browser Downloads");
+        choose();
+      });
+    };
+    await showInFiles();
     await until(alpha, runtime, Browser, (s) => s.open && s.handed && s.trail.length === 2 && s.listing.status === "Loaded");
     expect(listed().sort()).toEqual(["beach.jpg", "lease.pdf"]);
     await hardware("back");
     await until(alpha, runtime, Browser, (s) => !s.open);
+    expect(alpha.runtime.runSync(Shell.use((m) => m.get())).trail.at(-1)).toBe("Browser");
 
     world.files.stored.splice(world.files.stored.findIndex((one) => one.path === "Download"), 1);
-    await runtime.runPromise(showDownloads);
+    await showInFiles();
     await until(alpha, runtime, Browser, (s) => s.open && s.handed && s.inCategory && s.category === "Download" && s.listing.status === "Loaded");
   });
 
@@ -392,7 +414,8 @@ describe("Files on a phone", () => {
     expect(document.querySelector("pre")?.textContent).toBe("The words of restored.txt");
     await hardware("back");
     await until(alpha, runtime, Shown, (s) => s.viewer === 0);
-    expect(runtime.runSync(Recent.use((m) => m.get())).rows.map((row) => row.origin)).toEqual(["Picked"]);
+    // spec/app/files/recent.md, "A file selected again takes the place of its lapsed row": restored.txt stands where notes.txt was, ahead of code.txt, which still holds its access
+    expect(runtime.runSync(Recent.use((m) => m.get())).rows.map((row) => [row.origin, row.grant > 0])).toEqual([["Picked", true], ["InFolder", true]]);
 
   });
 
@@ -402,10 +425,10 @@ describe("Files on a phone", () => {
     world.files.stored.push({ volume: "primary", path: "Download/attach.txt", directory: false, mimeType: "text/plain", size: content.length, modified: 12 });
     world.files.texts["Download/attach.txt"] = content;
     await hardware("home");
-    await press("Inbox");
+    await openFromHome("Inbox");
     await until(alpha, alpha.runtime, Inbox, (state) => state.signedIn && state.selected.account !== 0 && state.accounts.status === "Loaded");
     await hardware("home");
-    await press("Files");
+    await openFromHome("Files");
     await until(alpha, runtime, Browser, (state) => state.open && state.storage.status === "Loaded");
     await press("Internal storage");
     await press("Download");
@@ -433,18 +456,27 @@ describe("Files on a phone", () => {
     await press("Download");
     await until(alpha, runtime, Browser, (s) => s.listing.status === "Loaded" && s.items.length === 2);
     const now = () => runtime.runSync(Browser.use((m) => m.get()));
-    const everything = { text: "", kind: "Other", anyKind: true } as const;
     // spec/app/files/index.md, "The phone offers Files to an agent that takes Files' operations, and naming files by their place among the results shown only beside them; a request the phone cannot take is never shown for approval"
     expect(await runtime.runPromise(offer)).toEqual({ operations: true, positions: true });
 
     // spec/app/files/index.md, "The agent reads a folder for itself, and only its newest reading is told to it; it is told it failed without access or on a protected screen"
     // spec/app/files/index.md, "The agent's reading and opening change nothing the owner is working on"
-    const read = await runtime.runPromise(agentRead(1, { volume: "primary", path: "Documents" }, { text: "NOTES", kind: "Other", anyKind: true }, false));
+    const read = await runtime.runPromise(agentRead(1, { volume: "primary", path: "Documents" }, { ...everything, text: "NOTES" }, false));
     expect([read.ok, read.items.map((item) => item.name), now().trail.length, now().items.length]).toEqual([true, ["notes.txt"], 2, 2]);
     expect((await runtime.runPromise(agentRead(2, { volume: "primary", path: "Documents" }, everything, true))).ok).toBe(false);
 
+    const dated = Date.parse("2026-03-04T12:00:00Z");
+    world.files.stored.push(
+      { volume: "primary", path: "Download/during.pdf", directory: false, mimeType: "application/pdf", size: 10, modified: dated },
+      { volume: "primary", path: "Download/earlier.pdf", directory: false, mimeType: "application/pdf", size: 10, modified: dated - 86_400_000 },
+      { volume: "primary", path: "Download/plain.pdf", directory: false, mimeType: "text/plain", size: 10, modified: dated },
+    );
+    const filter = { type: "files_filter", kind: "pdf", from: "2026-03-04T00:00:00Z", to: "2026-03-04T23:59:59Z" } as const;
+    const filteredByDate = await runtime.runPromise(fileAction(filter, { attemptId: 1, proposalId: "dated-pdfs", operationId: "dated-pdfs" }));
+    expect([filteredByDate?.kind, now().search.hits.map((item) => item.name)]).toEqual(["applied", ["during.pdf"]]);
+
     // spec/app/files/index.md, "The agent sets the owner's filter on Files on screen, and is told how many it found; otherwise it is told it failed"
-    const filtered = await runtime.runPromise(agentFilter(3, { text: "", kind: "Image", anyKind: false }, false));
+    const filtered = await runtime.runPromise(agentFilter(3, { ...everything, kind: "Image", anyKind: false }, false));
     expect([filtered.ok, filtered.items.map((item) => item.name), now().search.filter.kind]).toEqual([true, ["beach.jpg"], "Image"]);
     // spec/app/files/index.md, "A position names a result on screen, counting from one; a request naming a position that is not shown names nothing and leaves no card, and a card keeps the files it showed"
     const [first] = await runtime.runPromise(shownAt([1]));
@@ -501,6 +533,7 @@ describe("Files on a phone", () => {
     const first = await onFiles(world);
     await until(first.alpha, first.runtime, Recent, (s) => s.rows.length === 1 && s.rows[0]?.origin === "Picked");
     expect(localStorage.getItem("alpha.files.recent.v1")).toBeNull();
+    await until(first.alpha, first.runtime, Browser, (s) => s.open && s.storage.status === "Loaded");
     await press("lease.pdf");
     await until(first.alpha, first.runtime, Shown, (s) => s.drawing.status === "Loaded" && s.kind === "Pdf");
     await press("Close");

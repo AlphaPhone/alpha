@@ -7,6 +7,7 @@ interface TabEvents {
   tabOpened: { session: string; id: string; opener?: string; private?: boolean };
   tabClosed: { session: string; id: string };
   findResult: { session: string; id: string; navigation?: string; cleared?: boolean; index?: number; count?: number; done?: boolean };
+  showDownloads: { session: string };
 }
 
 /** One native tab of the fake tab host: its web view's history and what it shows. */
@@ -33,6 +34,7 @@ export interface BrowserScene {
   shown: { id: string; x: number; y: number; width: number; height: number } | undefined;
   /** Every call the page made, by method. */
   readonly calls: string[];
+  showInFiles: (() => void) | undefined;
 }
 
 /** develop's fixture photographs, served beside the fakes. */
@@ -133,6 +135,7 @@ export function browserScene(): BrowserScene {
     tabs: new Map(),
     shown: undefined,
     calls: [],
+    showInFiles: undefined,
   };
 }
 
@@ -292,7 +295,14 @@ export function alphaBrowser(world: BrowserScene): Faked {
       cancelReading: () => Promise.resolve(),
       share: (options) => Promise.resolve(stateOf(held(options))),
       openExternalBrowser: () => Promise.resolve(),
-      downloads: () => Promise.resolve(),
+      downloads: ({ session: requested }) => {
+        world.calls.push("downloads");
+        world.showInFiles = () => {
+          world.showInFiles = undefined;
+          emit("showDownloads", { session: requested });
+        };
+        return Promise.resolve();
+      },
       loginFillStatus: () => Promise.resolve({ available: false }),
     };
   });

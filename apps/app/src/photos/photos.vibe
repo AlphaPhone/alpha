@@ -16,12 +16,12 @@ import { answer, following, reacting, run, started, together, type Job } from ".
 import { Catalog, catalog, reviewed, taken, type ListedAlbum, type Row } from "./catalog.vibe"
 
 const pageLimit = 120
-const standardAlbums: readonly ListedAlbum[] = [
+const standardAlbums = [
   { title: "Favorites", target: "favorites" },
   { title: "Videos", target: "videos" },
   { title: "Camera", target: "camera" },
   { title: "Screenshots", target: "screenshots" },
-]
+] as const
 
 /** Access to this library and to its video rows. */
 type Access = Extract<Library.Event, { type: "accessIs" }>
@@ -66,9 +66,27 @@ effect function fetched(request: Fetch): Library.Event!!(PhotosPort | Catalog | 
   const fail = failedList(request.ticket)
   if (request.tab === "Albums" && request.album === 0) {
     if (Option.isNone(phone)) return fail
-    const shelves = tryPromise(() => phone.value.albums()) catch () => undefined
+    const client = phone.value
+    const [shelves, totals] = try.all [
+      effect { return tryPromise(() => client.albums()) catch () => undefined },
+      effect { return tryPromise(() => client.summary()) catch () => undefined },
+    ]
     if (shelves === undefined || !Library.canListed(try machine.get(), request.ticket, "Phone")) return fail
-    const albums = try cache.shelves([...standardAlbums, ...shelves.map((owned): ListedAlbum => ({ title: owned.name, target: `custom:${owned.id}`, owned }))])
+    const known = new Map([...((try cache.displayed()).rows.values())].flatMap((row) => row.kind === "phone" && row.item.image ? [[row.item.id, row.item.image] as const] : []))
+    const tiles: ListedAlbum[] = []
+    for (const album of standardAlbums) {
+      const count = totals?.[album.target]
+      if (count === 0 && album.target !== "favorites") continue
+      const sample = tryPromise(() => client.list({ album: album.target, limit: 1, thumbnails: true })) catch () => undefined
+      if (count === undefined && (sample?.items.length ?? 0) === 0 && album.target !== "favorites") continue
+      tiles.push({ ...album, count: count ?? sample?.items.length ?? 0, cover: sample?.items[0]?.image })
+    }
+    if (!Library.canListed(try machine.get(), request.ticket, "Phone")) return fail
+    const custom = shelves.map((owned): ListedAlbum => ({
+      title: owned.name, target: `custom:${owned.id}`, owned, count: owned.count,
+      cover: owned.memberIds.map((id) => known.get(id)).find((image) => image !== undefined),
+    }))
+    const albums = try cache.shelves([...tiles, ...custom], totals?.trash ?? 0)
     return { ...fail, ok: true, rows: albums, revision }
   }
   const { albums } = try cache.displayed()

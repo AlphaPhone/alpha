@@ -269,7 +269,7 @@ function posted(ticket: number, told: boolean, context: Conversation.Context): S
         if (board.snapshot().reply === "") board.change({ label: label ?? `Using ${name}` })
       },
     }
-    board.change({ media: [], mediaNote: "" })
+    board.change({ media: [], mediaNote: undefined })
     const views = try Views
     const asked = try views.begin()
     const metadata = { ...observed(told, context, location, selection), ...(told ? delivery(views.clientId) : {}), ...(quoted === undefined ? {} : { replyToMessageId: quoted.id }) }
@@ -280,7 +280,6 @@ function posted(ticket: number, told: boolean, context: Conversation.Context): S
       const archive = { owner: composer.binding.owner, conversation: known.record.id, room: known.record.roomId }
       if (!(try rememberFiles(archive, result.clientMessageId, files))) board.change({ attachmentNotice: "Could not keep the sent attachments on this phone." })
     }
-    board.change({ reply: "", label: "" })
     board.lastSentId = result !== undefined && "clientMessageId" in result ? result.clientMessageId : ""
     const ending = replied(ticket, result)
     const keepStreamed = ending.type === "stop" || (ending.type === "failed" && !Reply.refusedBeforeOutput(ending.kind))

@@ -194,12 +194,14 @@ export function Assistant({ runtime, messageActions, speech, canReadAloud = fals
       </div>
     ),
   }));
-  const mediaNote = seen.mediaNote === "" ? [] : [{ id: "media result", author: "alpha" as const, text: seen.mediaNote }];
+  const mediaNote = talking.context.sensitive || seen.mediaNote?.conversation !== shown.chosen
+    ? [] : [{ id: "media result", author: "alpha" as const, text: seen.mediaNote.text }];
   const failed = seen.failure === undefined ? [] : [{ id: "failure", author: "alpha", text: "", children: <ReplyFailure {...seen.failure} fix={seen.failure.kind === "OutOfFunds" ? "FundingFix" : seen.failure.fix} live onRetry={() => type(board.lastSent)} onSettings={settingsAction ? onSettings : undefined} /> } as const];
   const quoted = board.line(shown.chosen, writing.editor.quote)?.text;
   const view = talking.context.showing.tag === "App" ? talking.context.showing.view : "Home";
   const assistantDetent = shell.state?.assistant ?? "Bar";
   const open = dockOpen(assistantDetent);
+  const compact = view === "Camera" || view === "Photos" || view === "Files";
   const full = assistantDetent === "Full";
   const keptHeight = assistantDetent === "Sheet" && dock.state && dock.state.kept > 0 ? dock.state.kept : undefined;
   const openWithFocus = (focusField: boolean) => {
@@ -219,12 +221,12 @@ export function Assistant({ runtime, messageActions, speech, canReadAloud = fals
       }}
       onLift={() => {
         void dock.send({ type: "lift", now: untimed });
-        if (!open) composerRef.current?.focus();
+        if (!open && !compact) composerRef.current?.focus();
       }}
       onCancel={() => { void dock.send({ type: "shift", now: untimed }); }}
       onTap={({ keyboard }) => {
         void dock.send({ type: "click", now: untimed });
-        if (!open && keyboard) composerRef.current?.focus();
+        if (!open && keyboard && !compact) composerRef.current?.focus();
       }}
     />
   ) : undefined;
@@ -309,7 +311,8 @@ export function Assistant({ runtime, messageActions, speech, canReadAloud = fals
           quote: onComms ? undefined : quoted,
           editing: !onComms && writing.editor.editing > 0,
           opener: !open ? grabber : undefined,
-          onOpen: !open && !grabber ? () => openWithFocus(true) : undefined,
+          onOpen: !open && !grabber ? () => openWithFocus(!compact) : undefined,
+          onType: compact ? () => openWithFocus(true) : undefined,
           onSend: sendable && !inFlight(talking.turn) ? send : undefined,
           onStop: conversation.can({ type: "stop" }) ? () => void conversation.send({ type: "stop" }) : undefined,
           stopping: talking.turn.stopping,

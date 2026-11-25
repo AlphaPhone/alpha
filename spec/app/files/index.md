@@ -117,7 +117,8 @@ pure val hitsValues = Set(List(), List({ id: 2, name: "b", revision: 1, kind: F:
 pure val positionsValues = Set(List(), List(1), List(2, 1), List(3))
 pure val weight_showDownloads = 3
 pure val weight_showDetails = 5
-pure val wantedValues = Set({ text: "", kind: F::Image, anyKind: false }).union(Set({ text: "b", kind: F::Other, anyKind: true }))
+pure val wantedValues = Set({ ...S::everything, kind: F::Image, anyKind: false })
+  .union(Set({ ...S::everything, text: "b" }, { ...S::everything, kind: F::Pdf, anyKind: false, from: 1, to: 2 }))
 pure val destValues = Set({ folder: 1, path: List(), names: List("b") }).union(Set({ folder: 4, path: List(1), names: List() }))
 pure val weight_enter = 30
 pure val weight_accessReported = 15
@@ -337,7 +338,7 @@ pure def canOpenVolume(s: Files, target: int, by: Actor): bool =
 
 pure def openVolume(s: Files, target: int, by: Actor): Moved = entered(List(target), false, F::Other, { ...s, handed: false })
 
-pure def canOpenCategory(s: Files, kind: F::Kind, by: Actor): bool = by == Owner and browse(s) == AtTop and kind != F::Folder
+pure def canOpenCategory(s: Files, kind: F::Kind, by: Actor): bool = by == Owner and browse(s) == AtTop and kind != F::Folder and kind != F::Pdf
 
 pure def openCategory(s: Files, kind: F::Kind, by: Actor): Moved = entered(List(), true, kind, { ...s, handed: false })
 
@@ -478,7 +479,7 @@ pure def refresh(s: Files, by: Actor): Moved =
 pure def canListed(s: Files, ticket: int, by: Actor): bool = by == Phone and R::canAnswer(s.listing, ticket)
 
 pure def listed(s: Files, ticket: int, ok: bool, gone: bool, complete: bool, entries: List[F::Item], by: Actor): Moved =
-  val items = if (not(ok)) List() else if (s.inCategory) entries.select(i => i.kind == s.category) else entries
+  val items = if (not(ok)) List() else if (s.inCategory) entries.select(i => F::fitsKind(s.category, i.kind)) else entries
   val picked = s.picked.select(id => has(items, id))
   val same = chosen(s) == items.select(i => picked.includes(i.id))
   val back = entered(List(), false, F::Other, s)
@@ -522,7 +523,7 @@ pure def alwaysAnUnreadPlaceListsNothing(s: Files): bool =
 pure def alwaysAnOpenPlaceIsRead(s: Files): bool =
   (s.open and allowed(s) and not(atTop(s))) implies s.listing.status != R::Idle
 
-pure def alwaysACategoryListsOnlyItsKind(s: Files): bool = s.inCategory implies s.items.every(i => i.kind == s.category)
+pure def alwaysACategoryListsOnlyItsKind(s: Files): bool = s.inCategory implies s.items.every(i => F::fitsKind(s.category, i.kind))
 ```
 
 ### A read under way ends
@@ -609,7 +610,8 @@ pure def lawEveryNameContainsItself(label: str): bool = containsText(label, labe
 
 ### The owner sets a filter of a kind and a text for the place showing, as a chip the owner sees and clears; only what matches both is shown
 
-The filter's own rules are those of [Search](./search.md). A filter the
+The filter's own rules are those of [Search](./search.md). A filter may also
+limit the dates a file last changed. A filter the
 agent set and is still waiting on is answered as failed when the owner
 replaces it.
 
