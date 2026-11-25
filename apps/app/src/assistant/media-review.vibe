@@ -7,7 +7,7 @@ import { Machine as Chats } from "../../gen/app__assistant__chats.effect.vibe"
 import { Machine as Messages } from "../../gen/app__messages.effect.vibe"
 import { Machine as Shell, showing } from "../../gen/app__shell.effect.vibe"
 import type { FileReview } from "../files/agent.vibe"
-import type { MessageDraftTarget } from "../messages/agent.vibe"
+import { composeRecipient, reviewedCompose, type MessageDraftTarget } from "../messages/agent.vibe"
 import { readAgentSms } from "../messages/agent-send.vibe"
 import { currentSmsSelection, type MessageSmsRequest, type SmsSelection, type SmsSelectionContext } from "../messages/agent-sim.vibe"
 import { notesOperation, notesOperationWords } from "../notes/device-actions.vibe"
@@ -28,6 +28,7 @@ export service MediaExecutors {
 
 export interface ReviewAuthority {
   readonly current: () => Promise<boolean>
+  readonly continueDraft?: () => Promise<boolean>
   readonly target?: MessageDraftTarget
   readonly sms?: SmsSelection
   readonly files?: FileReview
@@ -36,6 +37,7 @@ export interface ReviewAuthority {
 
 interface ApprovalScope {
   readonly active: boolean!!
+  readonly continueDraft?: boolean!!
   readonly target?: MessageDraftTarget
   readonly sms?: SmsSelection
   readonly files?: FileReview
@@ -144,13 +146,19 @@ function commsFromReply(proposal: Proposal, opened: Session, actions: ReadonlySe
     && proposal.payload.installationId === opened.identity.installationId && proposal.payload.enrollmentId === opened.identity.enrollmentId
 }
 
+export function namedReviewQuery(operation: DeviceOperation): string | undefined {
+  if (operation.type !== "sms_compose" || !reviewedCompose(operation)) return phoneQuery(operation)
+  const recipient = composeRecipient(operation)
+  return recipient.kind === "contact" ? recipient.query.trim() : undefined
+}
+
 function commsReview(operation: DeviceOperation): boolean {
   switch (operation.type) {
     case "phone_keypad":
     case "sms_send": return true
     case "phone_dial":
     case "phone_call": return operation.target.kind === "number" || operation.target.kind === "contact"
-    case "sms_compose": return "draft" in operation && operation.draft === true && operation.target.kind === "number" && operation.replyThreadId === undefined
+    case "sms_compose": return reviewedCompose(operation)
     default: return false
   }
 }
@@ -195,7 +203,7 @@ function operation(raw: unknown) {
     case "phone_call":
       return value.target.kind === "number" || value.target.kind === "contact" ? value : undefined
     case "sms_compose":
-      return "draft" in value && value.draft === true && value.target.kind === "number" && value.replyThreadId === undefined ? value : undefined
+      return reviewedCompose(value) ? value : undefined
     case "camera_capture_photo":
     case "photos_filter":
     case "photos_open":
@@ -220,6 +228,11 @@ function operation(raw: unknown) {
   }
 }
 
+function composeDetails(value: Extract<DeviceOperation, { type: "sms_compose" }>, recipient: string): string {
+  const draftOnly = "draft" in value && value.draft === true
+  return `${recipient}\n${value.body}${draftOnly ? "" : "\nTap Send in Messages when you’re ready."}`
+}
+
 function words(value: NonNullable<ReturnType<typeof operation>>): { title: string; detail: string } {
   switch (value.type) {
     case "notes_move":
@@ -231,7 +244,11 @@ function words(value: NonNullable<ReturnType<typeof operation>>): { title: strin
     case "sms_reply_selected": return { title: "Draft a reply in Messages", detail: value.body }
     case "messages_read_selected": return { title: "Share open messages", detail: "Share up to 20 recent messages from the open conversation with the agent." }
     case "sms_send": return { title: "Review this text on your phone", detail: `${value.recipients.join(", ")}\n${value.body}\nConfirm the text and SIM in Android to send it.` }
-    case "sms_compose": return { title: `Draft a text to ${"target" in value && value.target.kind === "number" ? value.target.number : "the recipient"}`, detail: value.body }
+    case "sms_compose": {
+      const recipient = composeRecipient(value)
+      const label = recipient.kind === "number" ? displayNumber(recipient.number) : recipient.query
+      return { title: "Open an editable text draft", detail: composeDetails(value, label) }
+    }
     case "camera_capture_photo": return { title: "Take a photo", detail: value.lens === undefined ? "Open the viewfinder to review the shot" : `Open the ${value.lens === "front" ? "front" : "rear"} camera to review the shot` }
     case "photos_filter": return { title: "Filter Photos", detail: value.text ?? "Show the requested photos in your library" }
     case "photos_open": return { title: "Open a photo", detail: "Show the requested item in Photos" }
@@ -322,6 +339,7 @@ effect function enrolled(epoch: number, owner: string, image: boolean, runtime: 
 function completion(op: DeviceOperation, synced: boolean): string {
   switch (op.type) {
     case "sms_send": return synced ? "Android accepted the text request." : "Android accepted the text request. Agent receipt pending."
+    case "sms_compose": return synced ? "Your editable draft is ready in Messages." : "Your draft is ready in Messages. Agent receipt pending."
     case "messages_read_selected": return synced ? "Shared the open messages with the agent." : "Open messages prepared. Agent receipt pending."
     case "photos_album_create":
     case "photos_share":
@@ -354,7 +372,9 @@ export const mediaReview = Layer.effect(MediaReview, effect {
   const guarded = (operation: DeviceOperation, call: ExecutorCall) => runPromise(effect {
     const scope = scopes.get(call.proposalId)
     if (scope === undefined || !(try scope.active)) return { kind: "refused", code: NOT_DISPATCHED }
+    const continueDraft = scope.continueDraft
     return try executors.execute(operation, call, { current: () => runPromise(scope.active), ...(scope.target === undefined ? {} : { target: scope.target }),
+      ...(continueDraft === undefined ? {} : { continueDraft: () => runPromise(continueDraft) }),
       ...(scope.sms === undefined ? {} : { sms: scope.sms }), ...(scope.files === undefined ? {} : { files: scope.files }), ...(scope.phone === undefined ? {} : { phone: scope.phone }) })
   })
   const readBack = (operation: DeviceOperation, call: ExecutorCall) => operation.type === "sms_send"
@@ -492,14 +512,14 @@ export const mediaReview = Layer.effect(MediaReview, effect {
         }
         const detail = words(op)
         const labelled = sms === undefined ? detail : { ...detail, detail: `SIM ${sms.subscription.slot + 1}\n${detail.detail}` }
-        const query = phoneQuery(op)
+        const query = namedReviewQuery(op)
         if (query !== undefined && (!(try reviewContext(revision)) || !(try enrollmentIsCurrent(opened)) || !(try reviewContext(revision)))) return undefined
         const phone = query === undefined ? undefined : try Effect.provideService(phoneContactChoices(query), Telephony, telephony)
         if (phone !== undefined && (opened !== latest || !(try reviewContext(revision)))) return undefined
         const card: MediaCard = { id: proposal.id, digest: proposal.digest, operation: op, expiresAt, message, conversation, revision, enrollmentId: opened.identity.enrollmentId, ...labelled,
           ...(selected && bound !== undefined ? { target: bound } : {}),
           ...(sms === undefined ? {} : { sms }),
-          ...(request === undefined || phone !== undefined ? { reviewRequest: reply.clientMessageId } : {}),
+          ...(request === undefined || phone !== undefined || op.type === "sms_compose" ? { reviewRequest: reply.clientMessageId } : {}),
           ...(phone === undefined ? {} : { phone }),
           ...(files === undefined ? {} : { files, detail: op.type === "files_folder_create" ? labelled.detail : files.targets.map((target) => target.path).join(", ")
             + (op.type === "files_move" ? ` → ${op.dest || "Internal storage"}` : "") }) }
@@ -518,7 +538,7 @@ export const mediaReview = Layer.effect(MediaReview, effect {
       const { board } = try Talk
       const chats = try Chats
       const option = card.phone?.tag === "Choices" ? card.phone.options[choice] : undefined
-      const query = phoneQuery(card.operation)
+      const query = namedReviewQuery(card.operation)
       if (option === undefined || query === undefined) return
       effect function shown(opened: Session): boolean!! {
         const time = try Clock.currentTimeMillis
@@ -531,7 +551,11 @@ export const mediaReview = Layer.effect(MediaReview, effect {
         if (opened === undefined || !(try shown(opened)) || !(try enrollmentIsCurrent(opened)) || !(try shown(opened))) return
         const phone = try Effect.provideService(pickPhoneContact(query, option), Telephony, telephony)
         if (!(try enrollmentIsCurrent(opened)) || !(try shown(opened))) return
-        const detail = phone.tag === "Exact" ? `${phone.selected.name} · ${displayNumber(phone.selected.number)}` : card.detail
+        let detail = card.detail
+        if (phone.tag === "Exact") {
+          const identity = `${phone.selected.name} · ${displayNumber(phone.selected.number)}`
+          detail = card.operation.type === "sms_compose" ? composeDetails(card.operation, identity) : identity
+        }
         board.change({ media: board.snapshot().media.map((one) => one === card ? { ...card, phone, detail } : one) })
       })
     },
@@ -551,8 +575,18 @@ export const mediaReview = Layer.effect(MediaReview, effect {
       effect function current(session: Session): boolean!! {
         return (try matches(session)) && (try enrollmentIsCurrent(session)) && (try matches(session))
       }
+      effect function canStage(session: Session): boolean!! {
+        const context = (try conversation.get()).context
+        const where = try shell.get()
+        return session === latest && card.enrollmentId === session.identity.enrollmentId && card.conversation === (try chats.get()).chosen
+          && card.reviewRequest !== undefined && card.reviewRequest === board.lastSentId && !context.sensitive && (try Clock.currentTimeMillis) < card.expiresAt
+          && showing(where, "Messages") && (where.assistant === "Sheet" || where.assistant === "Full") && (try device.showing())
+      }
+      effect function continueDraft(session: Session): boolean!! {
+        return (try canStage(session)) && (try enrollmentIsCurrent(session)) && (try canStage(session))
+      }
       try lock.withPermits(1)(effect {
-        if (!board.snapshot().media.includes(card) || (approve && phoneQuery(card.operation) !== undefined && card.phone?.tag !== "Exact")) return
+        if (!board.snapshot().media.includes(card) || (approve && namedReviewQuery(card.operation) !== undefined && card.phone?.tag !== "Exact")) return
         const held = try session()
         const live = held !== undefined && (try current(held))
         if (card.phone !== undefined && !board.snapshot().media.includes(card)) return
@@ -564,7 +598,7 @@ export const mediaReview = Layer.effect(MediaReview, effect {
           report(declined === undefined ? "Alpha couldn’t confirm the decline." : "Declined")
           return
         }
-        scopes.set(card.id, { active: current(held), ...(card.target === undefined ? {} : { target: card.target }), ...(card.files === undefined ? {} : { files: card.files }),
+        scopes.set(card.id, { active: current(held), ...(card.operation.type === "sms_compose" ? { continueDraft: continueDraft(held) } : {}), ...(card.target === undefined ? {} : { target: card.target }), ...(card.files === undefined ? {} : { files: card.files }),
           ...(card.sms === undefined ? {} : { sms: card.sms }), ...(card.phone?.tag === "Exact" ? { phone: card.phone.selected } : {}) })
         const { id, digest, expiresAt, operation } = card
         const result = (tryPromise(() => held.execute.approve({ id, digest, expiresAt, operation }, { live: true, nonsensitive: true, exact: true, forceReview: true, requestEligible: true, reviewed: true }))

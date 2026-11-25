@@ -470,6 +470,46 @@ describe("Messages on an Alpha image", () => {
     expect([review.confirmations, world.telephony.sent]).toEqual([[], []]);
   });
 
+  it("Reviews the exact number for a named text, then opens an editable draft (spec/app/contacts/agent.md, \"The owner picks the exact number or the one contact, and that one is shown\"; spec/app/messages/composer.md, \"The agent's draft goes into the open conversation's draft only while it is empty, and never sends\")", async () => {
+    const world = image();
+    const compose = { type: "sms_compose", query: "Maya", body: "Meet at the front door" } as const;
+    const review = textReview(world.notes.owner, "draft-for-maya", compose);
+    world.telephony.textReview = review;
+    const { alpha } = await openImage(world);
+    const runtime = assistant.runtime(alpha);
+    await ready(alpha.runtime, Shell, "Alpha image admitted", (state) => state.image);
+    await ready(runtime, Conversation, "Ask Alpha ready on Home", (state) => state.ready && state.context.showing.tag === "Home");
+    await vi.waitFor(() => expect(button("Open conversation")).toBeDefined());
+    await press("Open conversation");
+    await ready(alpha.runtime, Shell, "Ask Alpha open", (state) => state.assistant === "Sheet");
+
+    world.ask.nextReplyChunks = ["Review the draft for Maya."];
+    world.ask.nextActions = () => [{ action: "PROPOSE_DEVICE_ACTION", data: { proposalId: review.proposal.id, state: "pending", executed: false, approvalRequired: true, awaitingUserInput: true } }];
+    await write("Message Alpha", "Text Maya: Meet at the front door");
+    await vi.waitFor(() => expect(button("Send")?.disabled).toBe(false));
+    await press("Send");
+    await ready(runtime, Conversation, "The named proposal is ready", (state) => review.pendingReads === 1 && state.turn.reply === "Complete");
+    const choice = await vi.waitFor(() => {
+      const found = document.querySelector<HTMLButtonElement>('[aria-label="Choose a phone number"] button');
+      expect(found?.textContent).toContain("Maya Chen");
+      return found!;
+    });
+    expect(button("Open draft")).toBeUndefined();
+    expect(review.decisions).toEqual([]);
+    await drawn(() => choice.click());
+    await vi.waitFor(() => expect(button("Open draft")).toBeDefined());
+    expect(review.decisions).toEqual([]);
+    await press("Open draft");
+    await ready(alpha.runtime, Composer, "The exact draft is ready", (state) => state.slot.author === "AlphaWrote");
+    await vi.waitFor(() => expect(review.receipts).toEqual([{
+      outcome: "applied", operationId: review.proposal.id, result: { kind: "sms-compose", status: "drafted" },
+    }]));
+    expect([review.decisions, review.claims, review.confirmations, world.telephony.sent]).toEqual([[review.proposal.id], [review.proposal.id], [], []]);
+    await vi.waitFor(() => expect(button("Back to texting Maya Chen")).toBeDefined());
+    await press("Back to texting Maya Chen");
+    await vi.waitFor(() => expect(document.querySelector('[aria-label^="Message draft to Maya Chen"]')?.textContent).toContain(compose.body));
+  });
+
   it("Opens the exact notified conversation and follows an owner's safe link tap (spec/app/messages/index.md, \"A message notification opens its exact conversation once access is available\"; spec/app/messages/index.md, \"Story: Read a conversation\")", async () => {
     const world = image();
     world.telephony.texts.push({ id: 2, thread: 23, address: "+14155550122", box: "inbox", date: 1_700_000_060_000, body: "Lunch? http://news.example/lunch or https://example-user@private.example/lunch", read: false });

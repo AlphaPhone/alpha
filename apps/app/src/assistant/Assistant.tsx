@@ -32,7 +32,7 @@ import { untimed } from "../runtime/reactor.vibe";
 import { MailQuestions } from "../inbox/mail-context.vibe";
 import { home } from "../shell/shell.vibe";
 import { isCommsView } from "../shell/views.tsx";
-import { MediaReview } from "./media-review.vibe";
+import { MediaReview, namedReviewQuery } from "./media-review.vibe";
 import { Documents } from "../platform/documents.vibe";
 import { AttachmentSources } from "./AttachmentSources.tsx";
 import { askComms, freedom } from "./assistant.vibe";
@@ -206,7 +206,7 @@ export function Assistant({ runtime, messageActions, speech, canReadAloud = fals
       <div className="grid gap-2">
         {card.phone?.tag === "Choices" ? (
           <div role="group" aria-label="Choose a phone number" className="grid gap-2 rounded-sheet bg-secondary p-3">
-            <p className="font-semibold">Choose a number for {card.detail}</p>
+            <p className="font-semibold">Choose a number for {namedReviewQuery(card.operation)}</p>
             {card.phone.options.map((choice, index) => (
               <Button key={`${choice.contact}\n${choice.number}`} variant="ghost" className="h-auto min-h-11 justify-start text-left whitespace-normal"
                 onClick={() => void runtime.runPromise(Effect.flatMap(MediaReview, (review) => review.choosePhone(card, index)))}>
@@ -218,7 +218,7 @@ export function Assistant({ runtime, messageActions, speech, canReadAloud = fals
         ) : card.phone?.tag === "Unavailable" ? (
           <Alert role="status">{card.phone.reason}</Alert>
         ) : (
-          <AssistantCard card={{ kind: "decision", variant: "proposal", title: card.title, detail: card.detail, action: "Approve" }}
+          <AssistantCard card={{ kind: "decision", variant: "proposal", title: card.title, detail: card.detail, action: card.operation.type === "sms_compose" ? "Open draft" : "Approve" }}
             onHandOn={() => void runtime.runPromise(Effect.flatMap(MediaReview, (review) => review.decide(card, true)))} />
         )}
         <Button className="justify-self-end" variant="ghost" onClick={() => void runtime.runPromise(Effect.flatMap(MediaReview, (review) => review.decide(card, false)))}>Decline</Button>

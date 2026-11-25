@@ -5,13 +5,12 @@ import { readJsonBody, type Route } from "./routes.ts";
 const installationId = "agent-on-phone";
 const enrollmentId = "this-phones-enrollment";
 const key = "a".repeat(64);
-const capability = "sms.send.v1";
 const attemptId = "device-attempt-1";
 
 type Sms = Extract<DeviceOperation, { type: "sms_send" }>;
 type Confirmation = Pick<Sms, "recipients" | "body" | "subscriptionId"> & { operationId: string; confirm(): void };
 
-export function textReview(owner: string, id: string, operation: Sms) {
+export function textReview(owner: string, id: string, operation: Extract<DeviceOperation, { type: "sms_send" | "sms_compose" }>) {
   return {
     owner,
     proposal: {
@@ -37,6 +36,7 @@ export const textReviewEnrollment: Faked = plugin<{
 /** The resident lists and settles only this enrolled phone's exact proposal. */
 export function textReviewRoute(review: TextReviewScene): Route {
   const { proposal } = review;
+  const capabilities = proposal.payload.operation.type === "sms_send" ? ["sms.send.v1"] : ["sms.compose.v1", "sms.compose.v2"];
   const prefix = "/api/client-devices/";
   const reject = (status: number) => Response.json({ error: "review refused" }, { status });
   return (request, url) => {
@@ -44,10 +44,10 @@ export function textReviewRoute(review: TextReviewScene): Route {
     if (!path.startsWith(prefix)) return undefined;
     const resource = path.slice(prefix.length);
     if (request.method === "GET" && resource === "capabilities") {
-      return Response.json({ agentId: installationId, identityId: review.owner, deviceActions: { protocol: 1, capabilities: [capability] } });
+      return Response.json({ agentId: installationId, identityId: review.owner, deviceActions: { protocol: 1, capabilities } });
     }
     if (request.headers.get("x-eliza-device-id") !== installationId || request.headers.get("x-eliza-device-key") !== key
-      || request.headers.get("x-eliza-device-capabilities") !== capability) return reject(401);
+      || request.headers.get("x-eliza-device-capabilities") !== capabilities.join(",")) return reject(401);
     if (request.method === "GET" && resource === "context") {
       return Response.json({ agentId: installationId, installationId, enrollmentId, subjectUserId: review.owner });
     }
