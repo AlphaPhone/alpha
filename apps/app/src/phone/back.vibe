@@ -31,6 +31,7 @@ export const contactsBack = effect {
   const step = state.confirming ? { type: "keep" } as const
     : state.form !== "Shut" && !Contacts.pending(state) ? { type: "discard" } as const
     : state.opened ? { type: "closeContact" } as const
+    : Contacts.canEndSearch(state) ? { type: "endSearch" } as const
     : undefined
   return try stepped(contacts, step)
 }

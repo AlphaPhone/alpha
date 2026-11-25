@@ -295,14 +295,19 @@ function contacts(world: TelephonyScene): Faked {
         world.contacts = true;
         return Promise.resolve(status());
       },
-      list: ({ query, limit }) => {
+      list: ({ query, limit, cursor }) => {
         const q = query.toLowerCase();
         const digits = query.replace(/[^\d+]/g, "");
         const found = world.people.filter((one) => one.displayName.toLowerCase().includes(q) || (digits !== "" && one.phoneNumbers.some((phone) => phone.number.replace(/[^\d+]/g, "").includes(digits)))).sort((x, y) => Number(x.id) - Number(y.id));
-        const page = found.slice(0, limit);
+        const offset = cursor === undefined ? 0 : Number(cursor.split(".", 3)[1]);
+        const page = found.slice(offset, offset + limit);
+        const after = offset + page.length;
+        const last = page.at(-1);
+        const more = after < found.length;
         return Promise.resolve({
           contacts: page.map((one) => ({ id: one.id, lookup: `lookup-${one.id}`, name: one.displayName, revision: String(one.revision), starred: false, phones: one.phoneNumbers.map(({ number }) => number), emails: one.emailAddresses.map(({ address }) => address) })),
-          more: found.length > limit,
+          more,
+          ...(more && last !== undefined ? { next: `v1.${after}.${last.id}.${encodeURIComponent(query)}` } : {}),
         });
       },
       create: () => {
