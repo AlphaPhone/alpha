@@ -36,7 +36,7 @@ export function photosScene(): PhotosScene {
 
 /** The native Photos plugin fixture talks to the real Eliza media bridge. */
 export function alphaPhotos(scene: PhotosScene): Faked {
-  type Used = "libraryAccess" | "requestLibraryAccess" | "watchLibrary" | "list" | "listPermitted" | "read"
+  type Used = "libraryAccess" | "requestLibraryAccess" | "watchLibrary" | "list" | "listPermitted" | "read" | "readPermitted"
     | "thumbnails" | "beginEdit" | "previewEdit" | "saveEdit" | "cancelEdit" | "albums" | "openLibrarySettings";
   return plugin<Pick<PhotosPlugin, Used>, { libraryChanged: undefined }>((emit) => {
     scene.changed = () => { if (scene.watching) emit("libraryChanged", undefined); };
@@ -59,17 +59,27 @@ export function alphaPhotos(scene: PhotosScene): Faked {
         scene.watching = active;
         return Promise.resolve({ active });
       },
-      list: ({ thumbnails }) => Promise.resolve(scene.access.scope === "denied"
-        ? { items: listed(owned(), thumbnails), next: "" }
-        : { items: listed(scene.rows, thumbnails), next: "", access: scene.access }),
+      list: ({ album, limit, thumbnails }) => {
+        const permittable = album === "camera" ? scene.rows.filter((item) => item.owned) : scene.rows;
+        const availableOwned = album === "camera" ? owned().slice(0, limit) : owned();
+        return Promise.resolve(scene.access.scope === "denied"
+          ? { items: listed(availableOwned, thumbnails), next: "" }
+          : { items: listed(permittable.slice(0, limit), thumbnails), next: "", access: scene.access });
+      },
       listPermitted({ before, query, thumbnails }: Parameters<PhotosPlugin["listPermitted"]>[0] = {}) {
         const rows = scene.rows.filter((item) => query === undefined || item.name.toLowerCase().includes(query.toLowerCase()));
         return Promise.resolve({ items: listed(before === undefined ? rows.slice(0, 2) : rows.slice(2), thumbnails), next: before === undefined && rows.length > 2 ? "next" : "", access: scene.access });
       },
       thumbnails: ({ ids }) => Promise.resolve({ items: ids.flatMap((id) => available().filter((row) => row.id === id).map((row) => ({ id, image: row.image }))) }),
+      readPermitted({ id, pixels }) {
+        const item = scene.access.scope === "denied" ? undefined : scene.rows.find((row) => row.id === id);
+        if (item === undefined) return Promise.reject(new Error("This item is unavailable"));
+        return Promise.resolve(listed([item], pixels)[0]);
+      },
       read({ id }) {
         scene.readCount++;
-        return Promise.resolve(available().find((item) => item.id === id));
+        const candidates = /^(?:v:)?[1-9][0-9]*$/.test(id) ? owned() : scene.access.scope === "denied" ? [] : scene.rows;
+        return Promise.resolve(candidates.find((item) => item.id === id));
       },
       beginEdit: ({ id, revision }) => scene.rows.some((item) => item.id === id && item.revision === revision)
         ? Promise.resolve(preview) : Promise.reject(new Error("This item changed")),

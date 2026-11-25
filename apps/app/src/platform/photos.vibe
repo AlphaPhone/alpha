@@ -726,6 +726,7 @@ export service PhotosPort {
   editResult(operation: string): BrowserEditReceipt!PhotosFailed
   handoff(capture: PhotoHandoff): void!!
   hasHandoff(): boolean!!
+  peekHandoff(): (PhotoHandoff | undefined)!!
   takeHandoff(): (PhotoHandoff | undefined)!!
 }
 
@@ -736,6 +737,7 @@ function entry() {
   return {
     handoff: (capture: PhotoHandoff) => sync(() => { next = capture }),
     hasHandoff: () => sync(() => next !== undefined),
+    peekHandoff: () => sync(() => next),
     takeHandoff: () => sync(() => { const known = next; next = undefined; return known }),
   }
 }

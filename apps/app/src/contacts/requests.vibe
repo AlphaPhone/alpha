@@ -5,7 +5,7 @@ import * as Agent from "../../gen/app__contacts__agent.effect.vibe"
 import { Machine as ContactsMachine, canBookChanged } from "../../gen/app__contacts.effect.vibe"
 import { Machine as PhoneMachine, clear } from "../../gen/app__phone.effect.vibe"
 import type { Ask, Effect as Out, Ending, Event, Request } from "../../gen/app__contacts__agent.effect.vibe"
-import { Telephony, TelephonyRefused, namesOf, telephony } from "../platform/telephony.vibe"
+import { Telephony, TelephonyRefused, namesOf, readAddressBook, telephony } from "../platform/telephony.vibe"
 import { Attempts } from "../runtime/attempts.vibe"
 import { type Job, answer, contained, reacting, run, together } from "../runtime/reactor.vibe"
 import { Time } from "../runtime/time.vibe"
@@ -184,14 +184,14 @@ effect function searched(ticket: number): Event!!(Telephony | Requested | Agent.
     ? [...new Set([operation.contact.displayName, ...operation.contact.phoneNumbers].map((text) => text.trim()).filter((text) => text !== ""))]
     : [askOf(operation).search]
   const pages = effect {
-    try telephony("open", (c) => c.contacts.open())
-    return try Effect.forEach(searches, (query) => telephony("list", (c) => c.contacts.list({ query, limit: Agent.maxMatches + 1 })))
+    try readAddressBook("open contacts", (c) => c.open())
+    return try Effect.forEach(searches, (query) => readAddressBook("search contacts", (c) => c.list({ query, limit: Agent.maxMatches + 1 })))
   } catch () => undefined
   if (pages === undefined) return failed
   const all = Array.from(new Map(complete(pages.flatMap((page) => page.contacts)).map((one) => [one.id, one] as const)).values())
   const candidates = all.slice(0, Agent.maxMatches)
   const documents = state.ask === "ChangeContact" || state.ask === "DeleteContact"
-    ? try Effect.forEach(candidates, (one) => Effect.orElseSucceed(telephony("get", (c) => c.contacts.get(one.id, "ExplicitRead")), () => undefined), { concurrency: 4 })
+    ? try Effect.forEach(candidates, (one) => Effect.orElseSucceed(readAddressBook("read reviewed contact", (c) => c.get(one.id, "ExplicitRead")), () => undefined))
     : []
   if (documents.some((document) => document === undefined)) return failed
   const reviewed = new Map(documents.flatMap((document) => document === undefined ? [] : [[document.id, document] as const]))
