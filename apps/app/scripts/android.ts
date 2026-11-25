@@ -7,7 +7,7 @@ import { tmpdir } from "node:os";
 import { dirname, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import * as NodeServices from "@effect/platform-node/NodeServices";
-import { generateAndroidHost, stageRuntimePayload } from "@elizaos/os";
+import { generateAndroidHost, parseApkSignerDigest, stageRuntimePayload } from "@elizaos/os";
 import { packPrepared, prepared } from "@repo/eliza-harness";
 import { Effect, Layer } from "effect";
 import { FetchHttpClient } from "effect/http";
@@ -355,7 +355,7 @@ interface Row {
   readonly sha256: string;
   readonly bytes: number;
   readonly signed: boolean;
-  readonly signer: string | null;
+  readonly signerSha256: string | null;
   readonly debuggable: boolean;
   readonly versionCode: number;
   readonly versionName: string;
@@ -458,12 +458,12 @@ export function checkApk(file: string, mode: "debug" | "release", env: NodeJS.Pr
   const missing = REQUIRED_CLASSES.filter((descriptor) => !classes.includes(`Class descriptor  : '${descriptor}'`));
   if (missing.length > 0) throw new Error(`${name} lacks ${missing.join(", ")}`);
   const signed = !name.endsWith("-unsigned.apk");
-  const signer = signed ? /Signer #1 certificate SHA-256 digest: ([0-9a-f]{64})/.exec(execFileSync(buildTool("apksigner", env), ["verify", "--print-certs", file], { encoding: "utf8" }))?.[1] ?? null : null;
-  if (signed && signer === null) throw new Error(`${name} has no verifiable signer`);
+  const signerSha256 = signed ? parseApkSignerDigest(execFileSync(buildTool("apksigner", env), ["verify", "--print-certs", file], { encoding: "utf8" })) ?? null : null;
+  if (signed && signerSha256 === null) throw new Error(`${name} has no single verifiable signer`);
   const blockers = [...(mode === "debug" ? ["debug build"] : []), ...(signed ? [] : ["unsigned release"]),
     ...(runtimeNotices ? [] : ["Node runtime notices missing or unverified"])];
   return {
-    mode, variant, flavor: variant, file: name, name, sha256: sha256(bytes), bytes: bytes.byteLength, signed, signer, debuggable, versionCode, versionName: packageLine[3] ?? "",
+    mode, variant, flavor: variant, file: name, name, sha256: sha256(bytes), bytes: bytes.byteLength, signed, signerSha256, debuggable, versionCode, versionName: packageLine[3] ?? "",
     abis: abiList, testMocks: false, bundleAudit: "passed", runtime: "PACKAGED", runtimeNotices, distributable: blockers.length === 0, blockers,
   };
 }
@@ -484,7 +484,7 @@ export function verify(env: NodeJS.ProcessEnv = environment()) {
     results,
   };
   writeJson(join(artifacts, "apk-manifest.json"), manifest);
-  for (const row of results) console.log(`${row.mode} ${row.file} versionCode ${row.versionCode} ${row.abis.join(",")} ${row.signed ? `signed ${row.signer}` : "unsigned"}, page audit passed, runtime packaged, Node notices ${row.runtimeNotices ? "verified" : "unverified"}`);
+  for (const row of results) console.log(`${row.mode} ${row.file} versionCode ${row.versionCode} ${row.abis.join(",")} ${row.signed ? `signed ${row.signerSha256}` : "unsigned"}, page audit passed, runtime packaged, Node notices ${row.runtimeNotices ? "verified" : "unverified"}`);
   return manifest;
 }
 
