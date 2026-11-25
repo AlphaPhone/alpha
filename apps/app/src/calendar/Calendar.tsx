@@ -275,12 +275,15 @@ export function Calendar({ runtime, alpha }: CalendarProps) {
   const pageCovered = open !== undefined || editor.state?.shown === true;
   return (
     <div className="absolute inset-0 flex flex-col overflow-hidden leading-plain">
+      <div className="relative shrink-0">
       <CalendarHeader inert={pageCovered} title={title} expanded={month} onTitle={month ? send({ type: "closeOverlay" }) : view.can({ type: "openMonth" }) ? send({ type: "openMonth" }) : undefined}
         className="pr-2 pl-2" leading={alpha ? <AppBack alpha={alpha} className="size-13 [&_svg]:size-5.5" /> : null}>
         {month ? null : view.can({ type: "goToday" }) ? <CalendarHeaderAction aria-label="Today" onClick={send({ type: "goToday" })}><CalendarDays aria-hidden /></CalendarHeaderAction> : null}
         {!month && view.can({ type: "openSearch" }) ? <CalendarHeaderAction aria-label="Search events" onClick={send({ type: "openSearch" })}><Search aria-hidden /></CalendarHeaderAction> : null}
         {!month && editor.can(newEvent) ? <CalendarHeaderAction aria-label="New event" onClick={() => void runtime.runPromise(startForm(newEvent, s.anchor))}><Plus aria-hidden /></CalendarHeaderAction> : null}
       </CalendarHeader>
+      <Undo runtime={runtime} />
+      </div>
       <div data-alpha-subview="calendar-list" inert={pageCovered} className="relative flex min-h-0 flex-1 flex-col">
         {searching ? <Searching runtime={runtime} /> : null}
         <Access runtime={runtime} />
@@ -349,7 +352,6 @@ export function Calendar({ runtime, alpha }: CalendarProps) {
       <Calendars runtime={runtime} />
       {open === undefined ? null : <EventPage runtime={runtime} row={open} today={s.today} />}
       {editor.state?.shown ? <Form runtime={runtime} day={s.anchor} today={s.today} connected={s.connected} /> : null}
-      <Undo runtime={runtime} />
     </div>
   );
 }
@@ -565,7 +567,7 @@ function Undo({ runtime }: CalendarProps) {
   const d = held.state;
   if (!d) return null;
   const titled = (id: number) => shown.lastSeen(id)?.title || "the event";
-  const region = (toast: ReactNode) => <div role="status" aria-live="polite" className="pointer-events-none absolute inset-x-4 top-15 z-toast flex flex-col items-center">{toast}</div>;
+  const region = (toast: ReactNode) => <div role="status" aria-live="polite" className="pointer-events-none absolute inset-x-4 top-full mt-2 z-toast flex flex-col items-center">{toast}</div>;
   if (d.waiting === 0 || !d.notice) {
     if (d.dropped !== 0) return region(<Toast>{`${titled(d.dropped)} was not deleted: you signed in to another account.`}</Toast>);
     if (d.failed !== 0) return region(<Toast>{`Couldn't delete ${titled(d.failed)}. It may have changed; it's shown again.`}</Toast>);
