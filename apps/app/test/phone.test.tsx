@@ -54,7 +54,7 @@ const pressVoicemailRow = (expanded = false) => drawn(() => {
 });
 
 /** Press a tab, as a finger does: Radix's tabs choose on the press, before the click. */
-const tab = (name: string) => act(async () => {
+const tab = (name: string) => drawn(() => {
   const found = [...document.querySelectorAll("[role=tab]")].find((one) => one.textContent === name);
   if (!found) throw new Error(`no tab ${name}`);
   found.dispatchEvent(new MouseEvent("mousedown", { bubbles: true, button: 0 }));
@@ -64,7 +64,7 @@ const tab = (name: string) => act(async () => {
 const inReview = (name: string) => [...document.querySelectorAll("[role=dialog] button")].find((one) => one.textContent === name);
 
 /** Press `name` in the open confirmation. */
-const confirm = (name: string) => act(async () => {
+const confirm = (name: string) => drawn(() => {
   const found = [...document.querySelectorAll("[role=alertdialog] button, [aria-label='Delete voicemail'] button")].find((one) => one.textContent === name);
   if (!(found instanceof HTMLButtonElement)) throw new Error(`no ${name} in the confirmation`);
   found.click();
@@ -86,7 +86,6 @@ describe("Phone on an Alpha image", () => {
     await until(alpha, alpha.runtime, Phone, (s) => s.dialled && s.dial.status === "Loaded");
     expect([world.telephony.dialed, world.telephony.placed]).toEqual([[], ["+14155550100"]]);
 
-    // spec/app/phone/index.md, "The filter and "Retry call history" read the log again"
     await press("Missed");
     await until(alpha, alpha.runtime, Phone, (s) => s.chip === "MissedCalls" && s.recents.status === "Loaded" && s.rows === 1);
   });
@@ -156,16 +155,18 @@ describe("Phone on an Alpha image", () => {
     const current = () => Promise.resolve(true);
 
     const choices = await alpha.runtime.runPromise(phoneContactChoices(query));
-    if (choices.tag !== "Choices" || choices.options.length !== 1) throw new Error("expected one exact choice");
-    expect(choices.options[0]?.number).toBe("+14155550100");
+    const choice = choices.tag === "Choices" && choices.options.length === 1 ? choices.options.at(0) : undefined;
+    if (choice === undefined) throw new Error("expected one exact choice");
+    expect(choice.number).toBe("+14155550100");
     expect(await alpha.runtime.runPromise(phoneAction(operation, current))).toMatchObject({ kind: "refused" });
-    const reviewed = await alpha.runtime.runPromise(pickPhoneContact(query, choices.options[0]!));
+    const reviewed = await alpha.runtime.runPromise(pickPhoneContact(query, choice));
     if (reviewed.tag !== "Exact") throw new Error("expected the chosen number's review");
     expect([world.telephony.placed, world.telephony.dialed]).toEqual([[], []]);
 
     const provider = world.telephony.people.find((person) => person.id === reviewed.selected.contact);
-    if (!provider) throw new Error("expected the native contact");
-    provider.phoneNumbers[0]!.number = "+14155550122";
+    const phone = provider?.phoneNumbers.at(0);
+    if (provider === undefined || phone === undefined) throw new Error("expected the native contact's number");
+    phone.number = "+14155550122";
     provider.revision += 1;
     expect(await alpha.runtime.runPromise(phoneAction(operation, current, reviewed.selected))).toMatchObject({ kind: "refused" });
     expect([world.telephony.placed, world.telephony.dialed]).toEqual([[], []]);
@@ -304,17 +305,17 @@ describe("Phone on an Alpha image", () => {
     // spec/app/phone/voicemail.md, "Play needs the audio, and never plays during a call"
     await press("Play");
     await until(alpha, alpha.runtime, Voicemail, (s) => s.playback === "Playing" && s.heard);
-    await until(alpha, alpha.runtime, Voicemail, () => world.telephony.voicemails[0]!.heard);
+    await until(alpha, alpha.runtime, Voicemail, () => world.telephony.voicemails.at(0)?.heard === true);
 
     // spec/app/phone/voicemail.md, "Delete asks first, stops playback, and Keep closes the question"
     await press("Delete");
     await until(alpha, alpha.runtime, Voicemail, (s) => s.confirming && s.playback === "Stopped");
-    expect(world.telephony.voicemails[0]!.deleted).toBe(false);
+    expect(world.telephony.voicemails.at(0)?.deleted).toBe(false);
 
     // spec/app/phone/voicemail.md, "Confirming removes the open voicemail under a new number"
     await confirm("Delete");
     await until(alpha, alpha.runtime, Voicemail, (s) => s.removal.outcome === "Confirmed" && s.list.status === "Loaded" && s.items === 0);
-    expect(world.telephony.voicemails[0]!.deleted).toBe(true);
+    expect(world.telephony.voicemails.at(0)?.deleted).toBe(true);
   });
 
   it(`Shows only the transcript of the current opening (spec/app/phone/voicemail.md, "Only the open voicemail's newest transcript is shown")`, async () => {
@@ -365,11 +366,11 @@ describe("Phone on an Alpha image", () => {
     await until(alpha, alpha.runtime, Voicemail, (s) => s.confirming);
     await confirm("Delete");
     await until(alpha, alpha.runtime, Voicemail, (s) => s.undo === "CanUndo" && s.removal.outcome === "Sent");
-    expect(world.telephony.voicemails[0]!.deleted).toBe(false);
+    expect(world.telephony.voicemails.at(0)?.deleted).toBe(false);
     await press("Undo");
     await until(alpha, alpha.runtime, Voicemail, (s) => s.undo === "Kept" && s.list.status === "Loaded" && s.items === 1);
     expect(world.telephony.staged[0]?.phase).toBe("undone");
-    expect(world.telephony.voicemails[0]!.deleted).toBe(false);
+    expect(world.telephony.voicemails.at(0)?.deleted).toBe(false);
   });
 });
 
@@ -392,7 +393,7 @@ describe("The call strip on an Alpha image", () => {
     await until(alpha, alpha.runtime, Strip, (s) => s.shown && s.calls[0]?.phase === "Active");
 
     // spec/app/phone/call.md, "Return and End act only on the call the bar shows, and End is asked once"
-    await act(async () => {
+    await drawn(() => {
       const bar = document.querySelector("[role=region][aria-label='Ongoing call'] button");
       if (!(bar instanceof HTMLButtonElement)) throw new Error("no call bar");
       bar.click();

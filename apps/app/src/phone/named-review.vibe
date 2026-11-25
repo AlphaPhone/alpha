@@ -2,7 +2,7 @@
 import type { DeviceOperation } from "@elizaos/agent"
 import { normalizePhoneNumber, type AddressBookContact, type ContactDetail, type PhoneNumber } from "@elizaos/os-bridges"
 import { maxMatches } from "../../gen/app__contacts__agent.effect.vibe"
-import { Telephony, telephony } from "../platform/telephony.vibe"
+import { type Telephony, telephony } from "../platform/telephony.vibe"
 import { classifyDialNumber } from "./phone.vibe"
 
 export interface PhoneChoice {

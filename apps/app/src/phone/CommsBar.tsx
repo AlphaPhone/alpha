@@ -1,6 +1,6 @@
 // spec/app/phone/comms.md, "Story: Address the person or Alpha from one bar"; spec/app/phone/comms.md, "Story: Never lose End"
 import { Button, Input, Mark } from "@repo/ui";
-import type { ManagedRuntime } from "effect";
+import { Effect, type ManagedRuntime } from "effect";
 import { ArrowUp, Mic, PhoneOff } from "lucide-react";
 import { type ReactNode, useCallback, useRef, useState } from "react";
 import type { Machine as ShellMachine } from "../../gen/app__shell.effect.vibe";
@@ -49,11 +49,11 @@ export function CommsBar({ runtime, closed, person }: CommsBarProps) {
   const comms = useComms(runtime);
   const bar = useBar(runtime);
   const shell = useShell(runtime);
-  const hold = useRef<{ id: number; x: number; y: number; cancel: () => void }>(undefined);
-  const skipTap = useRef(false);
+  const holdRef = useRef<{ id: number; x: number; y: number; cancel: () => void }>(undefined);
+  const skipTapRef = useRef(false);
   const release = useCallback(() => {
-    hold.current?.cancel();
-    hold.current = undefined;
+    holdRef.current?.cancel();
+    holdRef.current = undefined;
   }, []);
   const holdButton = useCallback((node: HTMLButtonElement | null) => {
     if (node) return release;
@@ -69,13 +69,13 @@ export function CommsBar({ runtime, closed, person }: CommsBarProps) {
     const text = query.trim();
     if (text !== "" && about !== undefined) await comms.send({ type: "requestTyped", about, request: text }, "Owner");
     await shell.send(raise);
-    if (text !== "" && about !== undefined) await runtime.runPromise(CommsPrompts.use((prompts) => prompts.submit({ about, text })));
+    if (text !== "" && about !== undefined) await runtime.runPromise(Effect.flatMap(CommsPrompts, (prompts) => prompts.submit({ about, text })));
   };
   const view = shell.state.trail.at(-1);
   const talk = () => {
     const about = comms.state?.key;
     if (!opening || !about || (view !== "Phone" && view !== "Messages" && view !== "Contacts")) return;
-    void runtime.runPromise(CommsPrompts.use((prompts) => prompts.talk({ about, view })));
+    void runtime.runPromise(Effect.flatMap(CommsPrompts, (prompts) => prompts.talk({ about, view })));
   };
   const phone = view === "Phone";
   const placeholder = ending ? "Ask during call" : phone ? "Call or ask" : person ? `Ask about ${person.label.split(" ")[0]}` : "Search or ask";
@@ -85,27 +85,27 @@ export function CommsBar({ runtime, closed, person }: CommsBarProps) {
         onPointerDown={(event) => {
           if (!event.isPrimary || event.button !== 0) return;
           release();
-          skipTap.current = false;
+          skipTapRef.current = false;
           const id = event.pointerId;
           event.currentTarget.setPointerCapture?.(id);
           const fiber = runtime.runFork(commsHeld(() => {
-            if (hold.current?.id !== id) return;
-            skipTap.current = true;
+            if (holdRef.current?.id !== id) return;
+            skipTapRef.current = true;
             talk();
           }));
-          hold.current = { id, x: event.clientX, y: event.clientY, cancel: () => fiber.interruptUnsafe() };
+          holdRef.current = { id, x: event.clientX, y: event.clientY, cancel: () => fiber.interruptUnsafe() };
         }}
         onPointerMove={(event) => {
-          const from = hold.current;
+          const from = holdRef.current;
           if (!from || from.id !== event.pointerId || Math.hypot(event.clientX - from.x, event.clientY - from.y) <= holdMovement) return;
-          skipTap.current = true;
+          skipTapRef.current = true;
           release();
         }}
         onPointerUp={release} onPointerCancel={release} onLostPointerCapture={release}
         onContextMenu={(event) => event.preventDefault()}
         onClick={(event) => {
-          if (event.detail === 0 || !skipTap.current) void open();
-          skipTap.current = false;
+          if (event.detail === 0 || !skipTapRef.current) void open();
+          skipTapRef.current = false;
         }}><Mark className="size-[118%]" aria-hidden /></Button>
       {typeof closed === "function" ? closed((query) => void open(query), ending ? undefined : talk) : closed ?? <CommsQuery runtime={runtime} phone={phone && !ending} placeholder={placeholder} onAsk={(query) => void open(query)} onTalk={ending ? undefined : talk} />}
       {ending && <Button variant="destructive" size="icon" className="size-11 shrink-0" aria-label="End call" onClick={() => void bar.send(end)}><PhoneOff /></Button>}
@@ -117,7 +117,7 @@ function CommsQuery({ runtime, phone, placeholder, onAsk, onTalk }: { runtime: D
   const machine = usePhone(runtime);
   const filtering = phone && machine.can({ type: "search", typed: true });
   const [draft, setDraft] = useState("");
-  const query = filtering ? runtime.runSync(Dialer.use((dialer) => dialer.get())).sought : draft;
+  const query = filtering ? runtime.runSync(Effect.flatMap(Dialer, (dialer) => dialer.get())).sought : draft;
   return (
     <form className="flex min-w-0 flex-1 items-center gap-1 px-1" onSubmit={(event) => {
       event.preventDefault();
@@ -127,7 +127,7 @@ function CommsQuery({ runtime, phone, placeholder, onAsk, onTalk }: { runtime: D
       <Input key={filtering ? "search" : "ask"} name="query" data-alpha-composer="" aria-label={placeholder} placeholder={placeholder} value={query}
         onChange={filtering ? (event) => {
           const sought = event.target.value;
-          runtime.runSync(Dialer.use((dialer) => dialer.set({ sought, filterLabel: "" })));
+          runtime.runSync(Effect.flatMap(Dialer, (dialer) => dialer.set({ sought, filterLabel: "" })));
           const search = { type: "search", typed: sought.trim() !== "" } as const;
           if (machine.can(search)) void machine.send(search);
         } : (event) => setDraft(event.target.value)}
