@@ -44,12 +44,20 @@ const paths = (world: ReturnType<typeof scene>) => world.files.stored.map((one) 
 const select = (name: string) => (button(`Select ${name}`) ? press(`Select ${name}`) : openRow(name));
 const buttonOnTop = (name: string) => [...([...document.querySelectorAll("[role=dialog]")].at(-1)?.querySelectorAll("button") ?? [])].find((one) => (one.getAttribute("aria-label") ?? one.textContent) === name);
 
+/** The Home tile of `view`, by its place rather than its words, which carry its badge. */
+const homeTile = (view: string) => document.querySelector<HTMLButtonElement>(`[data-home-tile='view:${view}']`);
+const openFromHome = (view: string) => drawn(() => {
+  const found = homeTile(view);
+  if (!found) throw new Error(`no Home tile ${view}`);
+  found.click();
+});
+
 /** Alpha on a phone with Files on screen, its storage read. */
 async function onFiles(world = { ...scene(), phone: true }) {
   const running = await open(world);
   const { alpha } = running;
   const runtime = files.runtime(alpha);
-  if (button("Files")) await press("Files");
+  if (homeTile("Files")) await openFromHome("Files");
   return { ...running, world, runtime };
 }
 
@@ -392,7 +400,8 @@ describe("Files on a phone", () => {
     expect(document.querySelector("pre")?.textContent).toBe("The words of restored.txt");
     await hardware("back");
     await until(alpha, runtime, Shown, (s) => s.viewer === 0);
-    expect(runtime.runSync(Recent.use((m) => m.get())).rows.map((row) => row.origin)).toEqual(["Picked"]);
+    // spec/app/files/recent.md, "A file selected again takes the place of its lapsed row": restored.txt stands where notes.txt was, ahead of code.txt, which still holds its access
+    expect(runtime.runSync(Recent.use((m) => m.get())).rows.map((row) => [row.origin, row.grant > 0])).toEqual([["Picked", true], ["InFolder", true]]);
 
   });
 
@@ -402,10 +411,10 @@ describe("Files on a phone", () => {
     world.files.stored.push({ volume: "primary", path: "Download/attach.txt", directory: false, mimeType: "text/plain", size: content.length, modified: 12 });
     world.files.texts["Download/attach.txt"] = content;
     await hardware("home");
-    await press("Inbox");
+    await openFromHome("Inbox");
     await until(alpha, alpha.runtime, Inbox, (state) => state.signedIn && state.selected.account !== 0 && state.accounts.status === "Loaded");
     await hardware("home");
-    await press("Files");
+    await openFromHome("Files");
     await until(alpha, runtime, Browser, (state) => state.open && state.storage.status === "Loaded");
     await press("Internal storage");
     await press("Download");
@@ -501,6 +510,7 @@ describe("Files on a phone", () => {
     const first = await onFiles(world);
     await until(first.alpha, first.runtime, Recent, (s) => s.rows.length === 1 && s.rows[0]?.origin === "Picked");
     expect(localStorage.getItem("alpha.files.recent.v1")).toBeNull();
+    await until(first.alpha, first.runtime, Browser, (s) => s.open && s.storage.status === "Loaded");
     await press("lease.pdf");
     await until(first.alpha, first.runtime, Shown, (s) => s.drawing.status === "Loaded" && s.kind === "Pdf");
     await press("Close");
