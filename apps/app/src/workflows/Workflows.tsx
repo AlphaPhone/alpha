@@ -2,7 +2,7 @@
 import { Effect } from "effect";
 import { Button, EmptyState, ListRow, Screen, Spinner } from "@repo/ui";
 import { Bell, Calendar, ChevronDown, ChevronRight, Clock as ClockIcon, Info, Phone, Plus, Repeat, Sparkles, Sun, Workflow } from "lucide-react";
-import { useMemo, useRef, useState } from "react";
+import { type MouseEvent, useMemo, useRef, useState } from "react";
 import { useMachine } from "../../gen/app__workflows__list.react.ts";
 import { type Event, badge, passes } from "../../gen/app__workflows__list.ts";
 import type { Machine } from "../../gen/app__workflows__list.effect.vibe";
@@ -30,6 +30,7 @@ import type { DigestWords } from "./digests.vibe";
 import type { ApprovalWords } from "./approvals.vibe";
 import type { Resident, Shown } from "../runtime/area.tsx";
 import { AppBack } from "../shell/AppBack.tsx";
+import { AddOption } from "./AddOption.tsx";
 import { Filters, kinds, statuses } from "./Filters.tsx";
 import { History } from "./History.tsx";
 import type { HistoryWordsPort } from "./history.vibe";
@@ -68,6 +69,7 @@ function WorkflowListRow({ row, open }: { row: WorkflowRow; open: () => void }) 
 /** The owner's workflows, prompts, reminders and schedules, with the last filter choices kept while looking at a row. */
 export function Workflows({ runtime, alpha }: Shown<Resident | Rows | Machine | RunSheet | HistoryWordsPort | WorkflowMachine | DefinitionWords | RunsMachine | ApprovalsMachine | ApprovalWords | BuilderMachine | GenerateMachine | DraftWords | AutomationsMachine | AutomationWords | ClockMachine | AlarmLabel | DigestMachine | DigestWords>) {
   const { state, can, send } = useMachine(runtime);
+  const [more, setMore] = useState(false);
   const [clockSurface, setClockSurface] = useState<HTMLDivElement | null>(null);
   const clockOpenerRef = useRef<HTMLButtonElement>(null);
   const editingAutomation = useAutomations(runtime).state?.editing;
@@ -75,15 +77,12 @@ export function Workflows({ runtime, alpha }: Shown<Resident | Rows | Machine | 
   const clock = useClock(runtime);
   const hasClock = clockAvailable();
   const openClock = { type: "openClock", available: hasClock } as const;
-  const alarms = (newItem = false) => hasClock && <ListRow className="min-h-17.5 px-1"
-    title={newItem ? "Alarm" : "Alarms"} leading={newItem ? <ClockIcon /> : undefined}
-    aria-label="Clock alarms" aria-haspopup="dialog" trailing={<ChevronRight aria-hidden className="size-5" />}
-    onClick={(event) => {
-      if (clock.can(openClock)) {
-        clockOpenerRef.current = event.currentTarget;
-        void clock.send(openClock);
-      }
-    }} />;
+  const showAlarms = (event: MouseEvent<HTMLButtonElement>) => {
+    if (clock.can(openClock)) {
+      clockOpenerRef.current = event.currentTarget;
+      void clock.send(openClock);
+    }
+  };
   const read = () => void runtime.runPromiseExit(refresh());
   const snapshot = state === undefined ? undefined : runtime.runSync(Effect.flatMap(Rows, (rows) => rows.view(state.owner)));
   const kind = state?.kind;
@@ -101,13 +100,15 @@ export function Workflows({ runtime, alpha }: Shown<Resident | Rows | Machine | 
     ? place.result === 0 ? "Scheduled digests" : "Digest" : "Workflows");
   const openDigests: Event = { type: "openDigests" };
   const digestLink = can(openDigests)
-    ? <ListRow className="min-h-18 px-1" title="Scheduled digests" leading={<Sun />} trailing={<ChevronRight aria-hidden className="size-5" />} onClick={() => dispatch(openDigests)} />
+    ? <AddOption title="Scheduled digests" leading={<Sun />} onClick={() => dispatch(openDigests)} />
     : null;
   const filter = { type: "openFilters" } as const;
   const add = { type: "openAdd" } as const;
+  const addAutomation = state && <Automation runtime={runtime} owner={state.owner} />;
+  const addWorkflow = state && <Authoring runtime={runtime} owner={state.owner} />;
   const screen = (
     <Screen title={title} leading={<AppBack alpha={alpha} />} actions={can(add) &&
-      <Button variant="ghost" size="icon" aria-label="Add to Workflows" onClick={() => dispatch(add)}><Plus aria-hidden /></Button>}>
+      <Button variant="ghost" size="icon" aria-label="Add to Workflows" onClick={() => { setMore(false); dispatch(add); }}><Plus aria-hidden /></Button>}>
       {state === undefined && <Spinner aria-label="Refreshing workflows" />}
       {state !== undefined && place?.tag === "ListingRows" && <>
         <div className="flex items-center justify-between gap-3 px-1">
@@ -134,20 +135,27 @@ export function Workflows({ runtime, alpha }: Shown<Resident | Rows | Machine | 
         )}
         <ul aria-label="Workflows" className="mx-1.5 flex flex-col">
           {rows.map((row) => <WorkflowListRow key={row.number} row={row} open={() => dispatch({ type: "openRow", row: row.number })} />)}
-          {hasClock && <li className="border-b border-border">{alarms()}</li>}
+          {hasClock && <li className="border-b border-border">
+            <ListRow className="min-h-17.5 px-1" title="Alarms" aria-label="Clock alarms" aria-haspopup="dialog"
+              trailing={<ChevronRight aria-hidden className="size-5" />} onClick={showAlarms} />
+          </li>}
         </ul>
         <Filters listing={state} can={can} send={dispatch} refresh={read} />
       </>}
-      {state && place?.tag === "ListingAdd" && <>
-        {!editingWorkflow && <Automation runtime={runtime} owner={state.owner} />}
-        {!editingAutomation && <Authoring runtime={runtime} owner={state.owner} />}
-        {!editingAutomation && !editingWorkflow && <>
-          <ListRow className="min-h-18 px-1" title="Phone reminder" leading={<Phone />} trailing={<ChevronRight aria-hidden className="size-5" />}
-            onClick={() => void runtime.runPromiseExit(newPhoneReminder())} />
+      {state && place?.tag === "ListingAdd" && (editingAutomation ? addAutomation : editingWorkflow ? addWorkflow : (
+        <div className="mx-2 flex flex-col gap-1.5">
+          {addAutomation}
           {digestLink}
-          {alarms(true)}
-        </>}
-      </>}
+          {hasClock && <AddOption title="Alarm" leading={<ClockIcon />} aria-label="Clock alarms" aria-haspopup="dialog" onClick={showAlarms} />}
+          <Button variant="ghost" className="self-start px-0 text-muted-foreground" aria-expanded={more} onClick={() => setMore((open) => !open)}>
+            {more ? "Fewer options" : "More options"}
+          </Button>
+          {more && <>
+            {addWorkflow}
+            <AddOption title="Phone reminder" leading={<Phone />} onClick={() => void runtime.runPromiseExit(newPhoneReminder())} />
+          </>}
+        </div>
+      ))}
       {state && place?.tag === "ListingDigests" && <Digests runtime={runtime} owner={state.owner} result={place.result}
         notice={place.notice.runId === "" ? undefined : place.notice}
         onResult={(result) => dispatch({ type: "openDigestResult", result })} />}

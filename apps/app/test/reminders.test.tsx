@@ -206,6 +206,8 @@ describe("Reminders full journeys", () => {
     await press("Workflows");
     await until(alpha, workflows.runtime(alpha), Listing, (s) => s.owner > 0);
     await press("Add to Workflows");
+    expect(button(/^Phone reminder/)).toBeUndefined();
+    await press("More options");
     await press(/^Phone reminder/);
     await until(alpha, runtime, RemindersMachine.Machine, (s) => s.sync.status === "Loaded");
     await until(alpha, runtime, Editor, (s) => s.open);
