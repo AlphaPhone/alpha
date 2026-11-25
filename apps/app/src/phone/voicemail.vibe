@@ -91,12 +91,11 @@ effect function settlement(id: number, requested: StagedDeletion): Event!!(Telep
       }
       try time.until(requested.expiresAt + delay)
     }
-    const pending = telephony("pending voicemail deletions", (c) => c.deletions.pending()) catch () => undefined
-    const phase = pending?.deletions.find((receipt) => receipt.id === requested.id && receipt.kind === requested.kind)?.phase
-    if (phase === "Deleted") return { type: "removed", id, done: true, known: true, kept: false }
-    if (phase === "Undone") return { type: "removed", id, done: false, known: true, kept: true }
-    if (phase === "DeletionConflict") return { type: "removed", id, done: false, known: true, kept: false }
-    if (phase === "UnknownOutcome") break
+    const phase = telephony("voicemail deletion receipt", (c) => c.deletionReceipt(requested)) catch () => undefined
+    if (phase === "deleted") return { type: "removed", id, done: true, known: true, kept: false }
+    if (phase === "undone") return { type: "removed", id, done: false, known: true, kept: true }
+    if (phase === "conflict") return { type: "removed", id, done: false, known: true, kept: false }
+    if (phase === "unknown") break
   }
   return { type: "removed", id, done: false, known: false, kept: false }
 }

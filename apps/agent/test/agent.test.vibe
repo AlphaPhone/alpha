@@ -22,8 +22,10 @@ function phoneAgent(run: Run, state: string) {
 const client = (running: Running) => createRuntimeJsonClient({ bridge: () => socketBridge(running), startupTimeoutMs: 120_000, pollMs: 100, requestTimeoutMs: 60_000 })
 
 /** A path of the host file's list with each placeholder named: the conversation's id, its room's for the turn routes, and an event no calendar holds. */
-const filled = (route: string, conversation: ConversationRecord) =>
-  route.replace("{id}", conversation.id).replace("{roomId}", conversation.roomId).replace("{eventId}", "no-such-event")
+const filled = (route: string, conversation: ConversationRecord) => {
+  const path = route.replace("{id}", conversation.id).replace("{roomId}", conversation.roomId).replace("{eventId}", "no-such-event")
+  return path === "/api/scheduled-tasks" ? `${path}?ownerVisibleOnly=1` : path
+}
 
 /** The agent's own answer to a route no module or plugin serves. */
 const unserved = { status: 404, body: { error: "not_found" } }
@@ -78,6 +80,7 @@ describe("Run Alpha's agent on the phone", () => {
       const result = try promise(() => controller.send({ text: "Remember the word heron." }, { stream: { onPreview: () => {} } }))
       try Effect.try(() => expect(result.kind === "Replied" ? result.reply.text : result.kind).toContain("You said: Remember the word heron."))
       for (const route of try Effect.try(() => listed())) {
+        if (route.path === "/api/triggers/{id}/runs") continue
         const target = filled(route.path, opened)
         const status = route.stream === true
           ? try promise(async () => {

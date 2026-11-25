@@ -12,10 +12,11 @@ import { Machine as Inbox } from "../gen/app__inbox.effect.vibe";
 import { Machine as Drafts } from "../gen/app__inbox__drafts.effect.vibe";
 import { Letters } from "../src/inbox/composer.vibe";
 import { agentFilter, agentOpen, agentRead, approved, fileAction, offer, shownAt } from "../src/files/agent.vibe";
+import type { Place } from "../src/areas.ts";
 import browser from "../src/browser/index.tsx";
 import files from "../src/files/index.tsx";
 import { called } from "../src/platform/files.vibe";
-import { button, closeAll, drawn, fill, hardware, later, open, press, pressOnTop, seen, underAct, until } from "./alpha.tsx";
+import { button, closeAll, drawn, fill, hardware, later, only, open, press, pressOnTop, seen, underAct, until } from "./alpha.tsx";
 import { scene } from "./fakes/scene.ts";
 
 underAct();
@@ -55,8 +56,8 @@ const openFromHome = (view: string) => drawn(() => {
 });
 
 /** Alpha on a phone with Files on screen, its storage read. */
-async function onFiles(world = { ...scene(), phone: true }) {
-  const running = await open(world);
+async function onFiles(world = { ...scene(), phone: true }, ...otherPlaces: Place[]) {
+  const running = await open(world, only("home", "view:Files", "notice", ...otherPlaces));
   const { alpha } = running;
   const runtime = files.runtime(alpha);
   if (homeTile("Files")) await openFromHome("Files");
@@ -123,7 +124,7 @@ describe("Files on a phone", () => {
   });
 
   it("Browse my storage from the Browser's Show in Files, and go back (spec/app/files/index.md, \"Story: Browse my storage\"; spec/app/browser/downloads.md, \"Story: Download a file\")", async () => {
-    const { alpha, runtime, world } = await onFiles({ ...scene(), phone: true, image: true });
+    const { alpha, runtime, world } = await onFiles({ ...scene(), phone: true, image: true }, "view:Browser");
     await until(alpha, runtime, Browser, (s) => s.storage.status === "Loaded");
     await press("Internal storage");
     await press("Download");
@@ -340,7 +341,7 @@ describe("Files on a phone", () => {
   });
 
   it("Look at a file, and find what I opened lately (spec/app/files/preview.md, \"Story: Look at a file\"; spec/app/files/recent.md, \"Story: Find what I opened lately\"; spec/app/files/recent.md, \"Story: Pick a file with the system picker\"; spec/app/files/preview.md, \"Story: Act on the file I am looking at\")", async () => {
-    const { alpha, runtime, world } = await onFiles();
+    const { alpha, runtime, world } = await onFiles(undefined, "assistant");
     await until(alpha, runtime, Browser, (s) => s.storage.status === "Loaded");
     await press("Internal storage");
     await openRow("Documents");
@@ -420,7 +421,7 @@ describe("Files on a phone", () => {
   });
 
   it("Offer the file I am looking at to Inbox (spec/app/files/preview.md, \"Story: Act on the file I am looking at\"; spec/app/inbox/adding.md, \"Story: Add files and people to my draft\")", async () => {
-    const { alpha, runtime, world } = await onFiles();
+    const { alpha, runtime, world } = await onFiles(undefined, "view:Inbox");
     const content = "A reviewed attachment";
     world.files.stored.push({ volume: "primary", path: "Download/attach.txt", directory: false, mimeType: "text/plain", size: content.length, modified: 12 });
     world.files.texts["Download/attach.txt"] = content;
@@ -673,7 +674,7 @@ describe("Files on a phone", () => {
 describe("Files in a browser", () => {
   it("Browse my storage (spec/app/files/index.md, \"Story: Browse my storage\")", async () => {
     const world = scene();
-    const { alpha } = await open(world);
+    const { alpha } = await open(world, only("home", "view:Files", "notice"));
     const runtime = files.runtime(alpha);
     await press("Files");
     // spec/app/files/index.md, "Files is closed, unsupported, not yet allowed, denied, at the top, reading, unavailable or showing a place"

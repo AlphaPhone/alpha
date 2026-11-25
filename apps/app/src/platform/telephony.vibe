@@ -1,19 +1,36 @@
 // spec/app/shell/index.md, "Phone and Messages exist only on an Alpha image, and Contacts only where that image admits it"
-import type { DeferredDeletionsClient } from "@elizaos/os/bridges/action-journal"
+import type { DeferredDeletionsClient, StagedDeletion } from "@elizaos/os/bridges/action-journal"
 import type { AddressBookClient, ContactNamesClient, NameSurface } from "@elizaos/os/bridges/contacts"
 import type { MessagesClient } from "@elizaos/os/bridges/messages"
 import type { PhoneClient } from "@elizaos/os/bridges/phone"
 
 module held {
-  import { actionJournalPlugin, createDeferredDeletions } from "@elizaos/os/bridges/action-journal"
+  import { registerPlugin } from "@capacitor/core"
+  import { createDeferredDeletions, type ActionJournalPlugin, type StagedDeletion } from "@elizaos/os/bridges/action-journal"
   import { rejectionCode } from "@elizaos/os/bridges/bridge"
   import { addressBookPlugin, createAddressBookClient, createContactNames } from "@elizaos/os/bridges/contacts"
   import { messagesClient, messagesPlugin } from "@elizaos/os/bridges/messages"
   import { phoneClient, telephonyPlugin } from "@elizaos/os/bridges/phone"
+
+  type RecordReceiptKey = { readonly kind: "message" | "voicemail"; readonly id: string }
+  type Journal = ActionJournalPlugin & { telephonyDeletionReceipt(key: RecordReceiptKey): Promise<unknown> }
+  export type TelephonyDeletionPhase = "deleted" | "undone" | "conflict" | "unknown"
+
+  async function deletionReceipt(journal: Journal, staged: StagedDeletion): Promise<TelephonyDeletionPhase | undefined> {
+    const kind = staged.kind === "MessageRecord" ? "message" : staged.kind === "VoicemailRecord" ? "voicemail" : undefined
+    if (kind === undefined) return undefined
+    const received = await journal.telephonyDeletionReceipt({ kind, id: staged.id })
+    if (typeof received !== "object" || received === null || !("kind" in received) || received.kind !== kind
+      || !("id" in received) || received.id !== staged.id || !("phase" in received)) return undefined
+    const { phase } = received
+    return phase === "deleted" || phase === "undone" || phase === "conflict" || phase === "unknown" ? phase : undefined
+  }
+
   function make() {
-    const journal = actionJournalPlugin()
+    const journal = registerPlugin<Journal>("ElizaActionJournal")
     return {
       deletions: createDeferredDeletions(journal),
+      deletionReceipt: (staged: StagedDeletion) => deletionReceipt(journal, staged),
       phone: phoneClient(telephonyPlugin(), journal),
       messages: messagesClient(messagesPlugin(), journal),
       contacts: createAddressBookClient({ install: "WritingInstall", plugin: addressBookPlugin(), journal }),
@@ -34,7 +51,7 @@ module held {
     return typeof cause === "object" && cause !== null && "_tag" in cause && typeof cause._tag === "string" ? cause._tag : ""
   }
 }
-import { clients, codeOf, tagOf } from held
+import { clients, codeOf, tagOf, type TelephonyDeletionPhase } from held
 import { registered } from "./device.vibe"
 
 /** eliza's clients of an Alpha image's telephony: calls, the call log and voicemail; conversations and sends; the address book. */
@@ -44,6 +61,7 @@ export interface TelephonyClients {
   readonly contacts: AddressBookClient
   readonly names: ContactNamesClient
   readonly deletions: DeferredDeletionsClient
+  deletionReceipt(staged: StagedDeletion): Promise<TelephonyDeletionPhase | undefined>
 }
 
 /** Phone, Messages and Contacts are not on this phone: nothing reached its native side. */

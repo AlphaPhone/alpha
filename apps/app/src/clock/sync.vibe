@@ -198,7 +198,7 @@ export effect function syncClockNow(): boolean!!(Agent | Alarms.Machine | Timers
   const nextAlarmMeta = new Map<number, AlarmMeta>()
   const deletedAlarmSet = new Set([...metaSnap.deletedAlarmIds, ...remote.deletedAlarmIds])
   for (const record of remote.alarms) {
-    if (deletedAlarmSet.has(record.id) && !remote.alarms.some((candidate) => candidate.id === record.id && candidate.updatedAtMs > metaSnap.version)) continue
+    if (deletedAlarmSet.has(record.id) && !(remote.version > metaSnap.version && !remote.deletedAlarmIds.includes(record.id))) continue
     let localId = existingAlarmByRemote.get(record.id) ?? parseNumericSuffix(record.id, nextAlarmIssued + 1)
     while (usedAlarmIds.has(localId) || localId <= 0) {
       nextAlarmIssued += 1

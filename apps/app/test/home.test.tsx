@@ -1,5 +1,7 @@
 // @vitest-environment happy-dom
-import { afterEach, describe, expect, it } from "vitest";
+import { digestInbox, type DigestResult, hostedDigestProtocol } from "@elizaos/plugin-workflow/digests";
+import { Effect } from "effect";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import * as Home from "../gen/app__home.effect.vibe";
 import * as Cards from "../gen/app__home__cards.effect.vibe";
 import { Machine as Shell } from "../gen/app__shell.effect.vibe";
@@ -10,6 +12,7 @@ import { scene, type Scene } from "./fakes/scene.ts";
 import { savedKey, written } from "../src/home/saved.vibe";
 import { waiting } from "../src/home/waiting.vibe";
 import { fromAreas } from "../src/home/cards.vibe";
+import { digestScope } from "../src/workflows/brief.vibe";
 
 underAct();
 afterEach(closeAll);
@@ -235,6 +238,39 @@ describe("Home on a phone", () => {
 });
 
 describe("Home in a browser", () => {
+  // spec/app/digests/index.md, "Home shows the newest kept result of the owner that ran, finished or failed, through a restart; a result that did not run never replaces it, and a page of another owner never reaches it"
+  it("Shows the current owner's retained brief after restart (spec/app/digests/index.md, \"Story: Receive results without losing or repeating one\")", async () => {
+    const world = scene();
+    const setup = await open(world);
+    const result = (cursor: number, status: string, output: string): DigestResult => {
+      const at = new Date(cursor * 3600000).toISOString();
+      return { cursor, runId: `run-${cursor}`, workflowId: "workflow", workflowVersionId: "version", templateVersion: "template",
+        scheduledAt: at, startedAt: at, completedAt: at, source: {}, status, output, error: null };
+    };
+    const store = async (owner: string, entries: readonly DigestResult[]) => {
+      let acknowledged = false;
+      const agent = hostedDigestProtocol((path) => Effect.sync(() => {
+        if (path.endsWith("/ack")) { acknowledged = true; return {}; }
+        return { entries: acknowledged ? [] : entries };
+      }));
+      await setup.alpha.runtime.runPromise(Effect.flatMap(digestInbox(digestScope(owner)), (inbox) => inbox.sync(agent, 1)));
+    };
+    await store(world.notes.owner, [result(1, "finished", "Owner’s morning brief"), result(2, "missed", "Must stay off Home")]);
+    await store("another-owner", [result(1, "finished", "Another owner’s morning brief")]);
+    await setup.close();
+
+    await open(world);
+    const latest = () => [...document.querySelectorAll("section[aria-label='Your day'] > button")]
+      .find((card) => card.textContent?.startsWith("Latest brief"))?.textContent;
+    await vi.waitFor(() => expect(latest()).toContain("Owner’s morning brief"));
+    expect(latest()).not.toContain("Must stay off Home");
+
+    world.notes.owner = "another-owner";
+    await seen(false);
+    await seen(true);
+    await vi.waitFor(() => expect(latest()).toContain("Another owner’s morning brief"));
+  });
+
   // spec/app/home/index.md, "Story: Open an app"
   it("Open one of Alpha's apps from Home (spec/app/home/index.md, \"Story: Open an app\")", async () => {
     const world = scene();

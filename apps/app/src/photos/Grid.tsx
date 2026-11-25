@@ -1,13 +1,115 @@
 // spec/app/photos/index.md, "While Photos is open, the owner can pinch the grid between three, four and five columns"
+import type { Effect, ManagedRuntime } from "effect";
 import { Check, Heart, Image, Play } from "lucide-react";
-import { memo, useMemo, useRef, type MouseEvent, type TouchEvent, type UIEvent } from "react";
+import { memo, useCallback, useMemo, useRef, useState, type MouseEvent, type TouchEvent, type UIEvent } from "react";
 import { cn } from "@repo/ui";
 import type { Density } from "../../gen/app__photos.ts";
 import { taken, type Row } from "./catalog.vibe";
+import { thumbnailBatch, viewportThumbnails } from "./photos.vibe";
+
+type Thumbnails = ReadonlyMap<number, string>;
+type ThumbnailContext = Effect.Services<ReturnType<typeof viewportThumbnails>>;
+
+const viewportInset = "192px 0px";
+const thumbnailRoom = 144;
+
+type GridObserver = {
+  observe(line: HTMLDivElement, ids: string): void;
+  forget(line: HTMLDivElement): void;
+};
+
+function useThumbnails(runtime: ManagedRuntime.ManagedRuntime<ThumbnailContext, unknown>, revision: number, trash: boolean) {
+  const view = `${revision}:${trash}`;
+  const [rendered, setRendered] = useState<{ scope: string; images: Thumbnails }>();
+  const observingRef = useRef<GridObserver | undefined>(undefined);
+  const connect = useCallback((root: HTMLDivElement | null) => {
+    if (!root || typeof IntersectionObserver === "undefined") return;
+    const active = new Map<Element, readonly number[]>();
+    const membership = new WeakMap<Element, readonly number[]>();
+    const pixels = new Map<number, string | undefined>();
+    let closed = false;
+    let reading = false;
+
+    function wanted(): Set<number> {
+      return new Set([...active.values()].flat().slice(0, thumbnailRoom));
+    }
+    function publish() {
+      const images = new Map([...pixels].flatMap(([id, image]) => image ? [[id, image] as const] : []));
+      setRendered({ scope: view, images });
+    }
+    async function settle() {
+      if (closed) return;
+      const current = wanted();
+      let removed = false;
+      for (const id of pixels.keys()) if (!current.has(id)) { pixels.delete(id); removed = true; }
+      if (removed) publish();
+      if (reading) return;
+      const missing = [...current].filter((id) => !pixels.has(id)).slice(0, thumbnailBatch);
+      if (missing.length === 0) return;
+      reading = true;
+      const read = await runtime.runPromiseExit(viewportThumbnails(missing, { revision, trash }));
+      reading = false;
+      if (closed) return;
+      const latest = wanted();
+      for (const id of missing) if (latest.has(id)) pixels.set(id, read._tag === "Success" ? read.value.get(id) : undefined);
+      publish();
+      void settle();
+    }
+
+    const observer = new IntersectionObserver((changes) => {
+      if (closed) return;
+      for (const change of changes) {
+        const line = change.target;
+        if (!change.isIntersecting || !line.isConnected) {
+          active.delete(line);
+        } else {
+          active.set(line, membership.get(line) ?? []);
+        }
+      }
+      void settle();
+    }, { root, rootMargin: viewportInset });
+    observingRef.current = {
+      observe(line, ids) {
+        membership.set(line, ids.split(",").map(Number).filter((id) => id > 0 && Number.isSafeInteger(id)));
+        observer.observe(line);
+      },
+      forget: (line) => {
+        observer.unobserve(line);
+        active.delete(line);
+        void settle();
+      },
+    };
+    for (const line of root.querySelectorAll<HTMLDivElement>("[data-alpha-grid-line]")) observingRef.current.observe(line, line.dataset.alphaGridLine ?? "");
+    return () => {
+      closed = true;
+      observingRef.current = undefined;
+      observer.disconnect();
+      active.clear();
+      pixels.clear();
+    };
+  }, [runtime, revision, trash, view]);
+  const observeLine = useCallback((line: HTMLDivElement | null, ids: string) => {
+    if (!line) return;
+    observingRef.current?.observe(line, ids);
+    return () => observingRef.current?.forget(line);
+  }, []);
+  return { connect, observeLine, images: rendered?.scope === view ? rendered.images : undefined };
+}
+
+function ThumbnailLine({ members, observe, style, children }: {
+  members: string;
+  observe: (node: HTMLDivElement | null, members: string) => (() => void) | undefined;
+  style: string;
+  children: ReactNode;
+}) {
+  const mark = useCallback((line: HTMLDivElement | null) => observe(line, members), [observe, members]);
+  return <div ref={mark} data-alpha-grid-line={members} className={cn("mb-0.5 grid gap-0.5 [content-visibility:auto]", style)}>{children}</div>;
+}
 
 type TileProps = {
   readonly number: number;
   readonly row: Row;
+  readonly image?: string;
   readonly selected?: boolean;
   readonly interactive: boolean;
 };
@@ -35,9 +137,8 @@ function timing(seconds: number): string {
   return `${Math.floor(whole / 60)}:${String(whole % 60).padStart(2, "0")}`;
 }
 
-const Tile = memo(function Tile({ number, row, selected, interactive }: TileProps) {
+const Tile = memo(function Tile({ number, row, image, selected, interactive }: TileProps) {
   const video = row.kind === "phone" ? row.item.kind === "video" : row.item.mimeType.startsWith("video/");
-  const image = row.kind === "phone" ? row.item.image : row.item.thumbnail;
   const name = row.item.name ?? (video ? "Video" : "Photo");
   const starred = row.kind === "phone" && row.item.favorite === true;
   return (
@@ -69,6 +170,9 @@ interface MediaGridProps {
   readonly selection?: ReadonlySet<number>;
   readonly grouped?: boolean;
   readonly density: Density;
+  readonly runtime: ManagedRuntime.ManagedRuntime<ThumbnailContext, unknown>;
+  readonly revision: number;
+  readonly trash: boolean;
   readonly resize: (density: Density) => void;
   /** Alpha's latest time, which the day headings count back from. */
   readonly now: number;
@@ -78,7 +182,8 @@ interface MediaGridProps {
 }
 
 /** The most recent photos come first in a grid, with day headings in the Library. */
-export function MediaGrid({ rows, selection, grouped, density, resize, now, open, start, more }: MediaGridProps) {
+export function MediaGrid({ rows, selection, grouped, density, runtime, revision, trash, resize, now, open, start, more }: MediaGridProps) {
+  const { connect, observeLine, images } = useThumbnails(runtime, revision, trash);
   const pinchRef = useRef<{ distance: number; start: Density; reported: Density } | undefined>(undefined);
   const size = sizes[density];
   const groups = useMemo(() => {
@@ -124,7 +229,7 @@ export function MediaGrid({ rows, selection, grouped, density, resize, now, open
     if (pane.scrollHeight - pane.scrollTop - pane.clientHeight < pane.clientHeight / 2) more?.();
   }
   return (
-    <div data-alpha-app-scroll="photos" className="min-h-0 flex-1 touch-pan-y overflow-y-auto px-3 pb-28 [container-type:inline-size]" onScroll={scrolled}
+    <div ref={connect} data-alpha-app-scroll="photos" className="min-h-0 flex-1 touch-pan-y overflow-y-auto px-3 pb-28 [container-type:inline-size]" onScroll={scrolled}
       onClick={(event) => choose(event, open)} onContextMenu={(event) => choose(event, start)}
       onTouchStart={startPinch} onTouchMove={movePinch} onTouchEnd={clearPinch} onTouchCancel={clearPinch}>
       {groups.map(([label, items]) => (
@@ -132,9 +237,9 @@ export function MediaGrid({ rows, selection, grouped, density, resize, now, open
           {label && <header className="sticky top-0 z-10 flex items-baseline justify-between bg-background px-1 py-2 text-sm font-semibold"><h2>{label}</h2><span className="text-xs font-normal text-muted-foreground">{items.length}</span></header>}
           {Array.from({ length: Math.ceil(items.length / size.columns) }, (_, index) => {
             const line = items.slice(index * size.columns, (index + 1) * size.columns);
-            return <div key={line[0]?.number ?? index} className={cn("mb-0.5 grid gap-0.5 [content-visibility:auto]", size.style)}>{line.map(({ number, row }) => (
-              <Tile key={number} number={number} row={row} selected={selection?.has(number)} interactive={open !== undefined} />
-            ))}</div>;
+            return <ThumbnailLine key={line[0]?.number ?? index} members={line.map((item) => item.number).join(",")} observe={observeLine} style={size.style}>{line.map(({ number, row }) => (
+              <Tile key={number} number={number} row={row} image={images?.get(number)} selected={selection?.has(number)} interactive={open !== undefined} />
+            ))}</ThumbnailLine>;
           })}
         </section>
       ))}
