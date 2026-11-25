@@ -10,8 +10,8 @@ module held {
   export interface SelectedDocumentHost extends SelectedDocumentsPlugin {
     pickSelected(): Promise<unknown>
     attachmentSelected(input: { selectionId: string }): Promise<unknown>
-    reviewStorageAttachment(input: StorageAttachmentRow): Promise<unknown>
-    readStorageAttachment(input: StorageAttachmentTarget & { reviewed: StorageAttachmentReceipt }): Promise<unknown>
+    reviewStorageAttachment(input: { readonly path: string; readonly volume?: string; readonly name: string; readonly mimeType: string; readonly size: number; readonly modified: number }): Promise<unknown>
+    readStorageAttachment(input: { readonly path: string; readonly volume?: string; readonly reviewed: string }): Promise<unknown>
   }
 
   let plugin: SelectedDocumentHost | undefined
