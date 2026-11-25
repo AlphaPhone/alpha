@@ -25,12 +25,13 @@ const choose = (name: string) => drawn(() => {
   row.click();
 });
 
-/** Type into the field a visible label wraps, as the builder's Name and Text are drawn. */
+/** Press a button inside the open workflow change review. */
 const pressInReview = (name: string) => drawn(() => {
   const found = [...document.querySelectorAll("[aria-label='Review workflow change'] button")].find((one) => one.textContent === name);
   if (!(found instanceof HTMLButtonElement)) throw new Error(`no button ${name} in the review`);
   found.click();
 });
+/** Type into the field a visible label wraps, as the builder's Name and Text are drawn. */
 const write = (name: string, text: string) => drawn(() => {
   const label = [...document.querySelectorAll("label")].find((one) => one.firstChild?.textContent?.trim() === name);
   const found = label?.querySelector<HTMLInputElement | HTMLTextAreaElement>("input, textarea");
