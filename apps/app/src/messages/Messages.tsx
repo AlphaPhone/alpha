@@ -283,8 +283,8 @@ function Conversation({ runtime, messages: { state, can, send }, onOpenLink }: M
   const chronological = rows.toReversed();
   const latest = rows[0]?.id;
   const anchor = useCallback((element: HTMLDivElement | null) => {
-    if (element && latest && nearEndRef.current && scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
-  }, [latest]);
+    if (element && nearEndRef.current && scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+  }, []);
   const viewport = useCallback((element: HTMLDivElement | null) => {
     scrollRef.current = element;
     if (!element || typeof ResizeObserver === "undefined") return;
@@ -332,7 +332,7 @@ function Conversation({ runtime, messages: { state, can, send }, onOpenLink }: M
             {chronological.map((row) => <Bubble key={row.id} row={row} now={now} choose={choose} actions={row.id === selected && (actions?.copy || actions?.remove) ? actions : undefined} onOpenLink={onOpenLink} />)}
           </div>
           {selectedRow && "incomplete" in selectedRow && can({ type: "openElsewhere" }) && <Button size="sm" variant="outline" className="self-start" onClick={() => void send({ type: "openElsewhere" })}>Open in messaging app</Button>}
-          <div ref={anchor} aria-hidden />
+          <div key={latest} ref={latest ? anchor : undefined} aria-hidden />
         </div>
       </div>
       {state.removal.outcome === "Unknown" && <Banner variant="warn">Alpha cannot tell whether the message was deleted</Banner>}
