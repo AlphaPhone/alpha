@@ -1079,4 +1079,62 @@ describe("Talk from Ask Alpha's composer (spec/app/voice/index.md, \"Story: Hold
     expect([after.recorder.stage, after.permission.asked]).toEqual(["Closed", true]);
     expect([document.querySelector("[role=alertdialog], [role=alert], [role=note], [role=status], section[aria-label='Voice transcription']"), world.voice.permission]).toEqual([null, "denied"]);
   });
+
+  // spec/app/voice/index.md, "Closing the recorder abandons any recording or transcription it was waiting for"
+  it.each(["ready", "confirmed", "view changed", "unconfirmed"] as const)("switches from dictation to the owning keyboard after closure (%s)", async (outcome) => {
+    const world = { ...scene(), phone: true, signedIn: false };
+    const { alpha } = await open(world, talkMounts);
+    const area = assistant.runtime(alpha);
+    await drawnUntil(alpha, area, Composer, (state) => state.slot === "Open");
+    await drawn(() => alpha.runtime.runPromise(Effect.flatMap(Shell.Machine, (machine) => machine.send({ type: "raise", detent: "Sheet" }))));
+    const editor = document.querySelector<HTMLTextAreaElement>("textarea[data-alpha-composer]");
+    expect(editor).not.toBeNull();
+    await fill("Message Alpha", "Draft stays here");
+    await drawn(() => area.runPromise(dictate()));
+    await drawnUntil(alpha, area, Voice.Machine, (state) => state.recorder.stage === "Ready");
+
+    if (outcome !== "ready") {
+      await press("Start recording");
+      await drawnUntil(alpha, area, Voice.Machine, (state) => state.recorder.stage === "Recording");
+    }
+    const canceling = Promise.withResolvers<void>();
+    const settled = Promise.withResolvers<void>();
+    let called = false;
+    world.voice.recordingCancelGate = async () => {
+      called = true;
+      canceling.resolve();
+      await settled.promise;
+      if (outcome === "unconfirmed") throw new Error("Microphone cleanup did not settle");
+    };
+    try {
+      await drawn(() => button("Switch to keyboard")?.focus());
+      await press("Switch to keyboard");
+      if (outcome !== "ready") {
+        await canceling.promise;
+        const state = await area.runPromise(Effect.flatMap(Voice.Machine, (machine) => machine.get()));
+        expect(state.recorder.stage).toBe("Recording");
+        expect(document.activeElement).not.toBe(editor);
+        if (outcome === "view changed") {
+          await drawn(() => alpha.runtime.runPromise(Effect.flatMap(Shell.Machine, (machine) => machine.send({ type: "openView", view: "Notes" }))));
+        }
+      }
+    } finally {
+      settled.resolve();
+    }
+
+    expect(called).toBe(outcome !== "ready");
+    if (outcome === "unconfirmed") {
+      await drawn(async () => { for (let turn = 0; turn < 20; turn += 1) await area.runPromise(Effect.yieldNow); });
+      expect(button("Stop recording")).toBeDefined();
+    } else {
+      await drawnUntil(alpha, area, Voice.Machine, (state) => state.recorder.stage === "Closed");
+    }
+    if (outcome === "confirmed" || outcome === "ready") {
+      expect(document.activeElement).toBe(editor);
+      expect(editor?.value).toBe("Draft stays here");
+    } else {
+      expect(document.activeElement).not.toBe(editor);
+    }
+    expect(world.ask.said).toEqual([]);
+  });
 });

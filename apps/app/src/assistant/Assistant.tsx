@@ -49,13 +49,13 @@ import { displayNumber } from "../phone/words.ts";
 import { replyBlocks, wordsOf } from "./words.ts";
 import { handToMaps } from "../maps/handoff.ts";
 import type { MapsCard } from "@elizaos/plugin-maps-client";
-import { type TalkStopReceipt, type VoiceKeyboard, useTalkKeyboard } from "../voice/useTalkKeyboard.ts";
+import { type DictationKeyboard, type TalkStopReceipt, type VoiceKeyboard, useTalkKeyboard } from "../voice/useTalkKeyboard.ts";
 
 export interface AssistantProps {
   runtime: ManagedRuntime.ManagedRuntime<ConversationMachine | AttachmentMachine | ChatsMachine | ComposerMachine | SearchMachine | ReplyMachine | DockMachine | ShellMachine | CommsMachine | CommsTargetServices | CommsBriefing | Talk | MailQuestions | LayersMachine | MediaReview | Documents | Agent, unknown>;
   messageActions?: MessageActions;
   speech?: Pick<AssistantComposerProps, "onTalk" | "onDictate" | "showUnavailableTalk" | "voiceNotice"> & {
-    voicePanel?: ReactNode;
+    voicePanel?: (onKeyboard: DictationKeyboard) => ReactNode;
     interim?: ReactNode;
     keyboard?: TalkStopReceipt;
     voice?: (presentation: { compactDock: boolean; atBar: boolean; onKeyboard: VoiceKeyboard }) => ReactNode;
@@ -295,9 +295,10 @@ export function Assistant({ runtime, messageActions, speech, canReadAloud = fals
   const reviewed = useSyncExternalStore(mailStore.subscribe, mailStore.snapshot);
   const composerRef = useRef<HTMLTextAreaElement>(null);
   const focusOnRevealRef = useRef(false);
-  const { voice: renderVoice, voicePanel, interim, keyboard, ...speechProps } = speech ?? {};
+  const { voice: renderVoice, voicePanel: renderDictation, interim, keyboard, ...speechProps } = speech ?? {};
   const keyboardOwner = useCallback(() => keyboardScope(runtime), [runtime]);
-  const { onKeyboard, takeFocus } = useTalkKeyboard(composerRef, keyboardOwner, keyboard);
+  const { onKeyboard, onDictationKeyboard, takeFocus } = useTalkKeyboard(composerRef, keyboardOwner, keyboard);
+  const voicePanel = renderDictation?.(onDictationKeyboard);
   const currentView = shell.state?.trail.at(-1);
   const onComms = isCommsView(currentView);
   const assistantDetent = shell.state?.assistant ?? "Bar";
@@ -491,7 +492,7 @@ export function Assistant({ runtime, messageActions, speech, canReadAloud = fals
         }}
         composer={{
           ...speechProps,
-          voice: renderVoice?.({ compactDock: compact, atBar: assistantDetent === "Bar", onKeyboard }),
+          voice: voicePanel ?? renderVoice?.({ compactDock: compact, atBar: assistantDetent === "Bar", onKeyboard }),
           onDictate: onComms || inFlight(talking.turn) || !speech?.onDictate ? undefined : () => {
             openWithFocus(false);
             speech.onDictate?.();

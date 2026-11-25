@@ -202,7 +202,8 @@ export service VoiceBridge {
   startRecording(ticket: number): RecordedClip!VoiceBridgeFailed
   dictationForeground(): boolean!!
   transcribe(ticket: number, network: boolean, automatic: boolean): DictationAnswer!!
-  abandon(ticket: number): void!!
+  /** Cancel the recording, optionally after rechecking which recorder still owns it, and report native confirmation. */
+  abandon(ticket: number, isCurrent?: () => boolean!!): boolean!!
 }
 
 const LOCAL_PLUGIN = "AlphaVoiceCloud"
@@ -788,14 +789,21 @@ export const phoneVoiceBridge = Layer.effect(VoiceBridge, effect {
       }) catch (kind) => kind
       return typeof result === "string" ? { kind: result, durationMs: clip.durationMs } : { kind: "recognized", text: result.text ?? "", durationMs: clip.durationMs }
     },
-    effect abandon(ticket: number): void!! {
-      retiredRecording = Math.max(retiredRecording, ticket)
-      if (!registered(LOCAL_PLUGIN)) return
-      try recordingLock.withPermits(1)(Effect.uninterruptible(effect {
+    effect abandon(ticket: number, isCurrent?: () => boolean!!): boolean!! {
+      if (isCurrent === undefined) retiredRecording = Math.max(retiredRecording, ticket)
+      if (!registered(LOCAL_PLUGIN)) return false
+      return try recordingLock.withPermits(1)(Effect.uninterruptible(effect {
+        if (isCurrent !== undefined && !(try isCurrent())) return false
         const clip = recording
-        if (clip === undefined || clip.started > ticket) return
-        recording = undefined
-        try ignore(tryPromise(() => localPlugin().cancelRecording({})))
+        if (clip !== undefined && clip.started > ticket) return false
+        if (clip === undefined && isCurrent === undefined) return true
+        if (isCurrent === undefined) recording = undefined
+        const confirmed = effect { try tryPromise(() => localPlugin().cancelRecording({})); return true } catch () => false
+        if (confirmed) {
+          retiredRecording = Math.max(retiredRecording, ticket)
+          recording = undefined
+        }
+        return confirmed
       }))
     },
   }
@@ -834,6 +842,6 @@ export const browserVoiceBridge = Layer.effect(VoiceBridge, effect {
     startRecording: () => Effect.fail(new VoiceBridgeFailed({ method: "startRecording", cause: "browser-no-native-voice" })),
     dictationForeground: () => succeed(false),
     transcribe: () => succeed<DictationAnswer>({ kind: "lost" }),
-    abandon: () => Effect.void,
+    abandon: () => succeed(false),
   }
 })

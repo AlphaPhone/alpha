@@ -1086,6 +1086,9 @@ pure def stepDictationFillsItsOwnField(before: Voice, after: Voice, out: List[Ef
 ### Closing the recorder abandons any recording or transcription it was waiting for
 
 A clip kept for a recognition retry or review is also discarded when the recorder closes.
+Switch to keyboard does the same for Ask Alpha dictation. While the recorder
+has starting, live or kept audio, the keyboard waits for their cancellation
+to settle. Focus returns to the same draft only if it still owns that field.
 
 ```quint
 pure def canCloseRecorder(v: Voice): bool = D::canCloseRecorder(v.recorder)

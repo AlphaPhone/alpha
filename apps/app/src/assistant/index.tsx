@@ -53,7 +53,6 @@ function LiveAssistant({ runtime, alpha }: Shown<Layer.Success<typeof screens> |
   const canDictate = available && noCall && audioFree && composer.state?.away === "Free" && composer.can({ type: "edit", blank: false, long: false }) && voice.can({ type: "openRecorder", target: "ComposerField" });
   const recorder = voice.state?.recorder;
   const dictating = recorder !== undefined && recorder.stage !== "Closed" && recorder.field === "ComposerField";
-  const recorderPanel = dictating ? <DictationControls runtime={runtime} /> : undefined;
   const readingAllowed = noCall && speaker !== undefined && !speaker.latched && voice.state !== undefined && quiet(voice.state) && recorder?.stage === "Closed" && runtime.runSync(bridge.canRead());
   return <Assistant
     runtime={runtime}
@@ -71,13 +70,11 @@ function LiveAssistant({ runtime, alpha }: Shown<Layer.Success<typeof screens> |
         confirmed: quiet(voice.state) ? voice.state.phase === "Idle" && !voice.state.latched && recorder?.stage === "Closed" : undefined,
       },
       showUnavailableTalk: !available,
-      voicePanel: recorderPanel,
+      voicePanel: dictating ? (onKeyboard) => <DictationControls runtime={runtime} onKeyboard={onKeyboard} /> : undefined,
       interim: <VoiceInterim runtime={runtime} />,
       onTalk: canTalk ? () => void runtime.runPromise(beginTalk()) : undefined,
       onDictate: canDictate ? () => void runtime.runPromise(dictate()) : undefined,
-      voice: ({ compactDock, atBar, onKeyboard }) => dictating
-        ? recorderPanel
-        : voice.state !== undefined && !quiet(voice.state)
+      voice: ({ compactDock, atBar, onKeyboard }) => voice.state !== undefined && !quiet(voice.state)
           ? <TalkControls runtime={runtime} compact={compactDock || (atBar && !voice.state.network)} onKeyboard={onKeyboard} trailing={<VoiceEnd runtime={runtime} />} />
           : undefined,
     }}

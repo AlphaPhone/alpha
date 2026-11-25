@@ -21,6 +21,7 @@ export interface VoiceScene {
   dictationInFront: boolean;
   refuseRecordingStop: boolean;
   recordingStartGate?: () => Promise<void>;
+  recordingCancelGate?: () => Promise<void>;
   finishRecording?: () => void;
   readonly dictationClips: string[];
   voicemailTranscription: ((id: string, requestId: string) => Promise<string>) | undefined;
@@ -191,10 +192,11 @@ export function alphaVoiceCloud(voice: VoiceScene): Faked {
         return finish();
       },
       dictationForeground: () => Promise.resolve({ available: voice.dictationInFront }),
-      cancelRecording: () => {
+      cancelRecording: async () => {
+        await voice.recordingCancelGate?.();
         activeRecording = undefined;
         finishedRecording = undefined;
-        return Promise.resolve({});
+        return {};
       },
       transcribeLocalRecording: ({ recordingId }: { recordingId: string }) => {
         voice.dictationClips.push(recordingId);
