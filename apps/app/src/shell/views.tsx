@@ -1,10 +1,18 @@
-import { Calendar, Camera, Clock, Folder, Globe, Image, ListChecks, type LucideIcon, MailOpen, MapPin, MessageSquare, Phone, Settings, StickyNote, UserRound, Workflow } from "lucide-react";
+import { Camera, Clock, createLucideIcon, Folder, Globe, Image, ListChecks, type LucideIcon, Mail, MapPin, MessageSquare, Phone, Settings, StickyNote, UserRound, Workflow } from "lucide-react";
 import type { View } from "../../gen/app__shell.ts";
+
+/** lucide-react 1.18.0's calendar, which v121 drew on Home: a day lower than today's lucide calendar, with longer rings and the rule on 10. */
+const Calendar = createLucideIcon("calendar", [
+  ["path", { d: "M8 2v4", key: "1cmpym" }],
+  ["path", { d: "M16 2v4", key: "4m81vk" }],
+  ["rect", { width: "18", height: "18", x: "3", y: "4", rx: "2", key: "1hopcy" }],
+  ["path", { d: "M3 10h18", key: "8toen8" }],
+]);
 
 export const views = {
   Phone: { label: "Phone", icon: Phone },
   Messages: { label: "Messages", icon: MessageSquare },
-  Inbox: { label: "Inbox", icon: MailOpen },
+  Inbox: { label: "Inbox", icon: Mail },
   Calendar: { label: "Calendar", icon: Calendar },
   Clock: { label: "Clock", icon: Clock },
   Reminders: { label: "Reminders", icon: ListChecks },

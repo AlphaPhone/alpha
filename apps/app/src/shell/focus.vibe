@@ -131,7 +131,7 @@ const framed = started(effect {
   })
 }, "focus")
 
-// spec/app/shell/focus.md, "Home's tiles show a focus ring only while the owner moves by keyboard; every other control, a field above all, shows its ring whenever it has focus"
+// spec/app/shell/focus.md, "Home's tiles and cards show a focus ring only while the owner moves by keyboard; every other control, a field above all, shows its ring whenever it has focus"
 const watching = started(effect {
   if (!paged()) return
   const focus = try Focus.Machine

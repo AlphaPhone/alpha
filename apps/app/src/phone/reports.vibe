@@ -8,26 +8,73 @@ import { Machine as Shell } from "../../gen/app__shell.effect.vibe"
 import { Device } from "../platform/device.vibe"
 import { Telephony, telephony } from "../platform/telephony.vibe"
 import { fromAreas } from "../home/cards.vibe"
+import { shortWhen } from "../home/when.ts"
+import { Time } from "../runtime/time.vibe"
 import { waiting } from "../home/waiting.vibe"
 import { applying, contained, started, together } from "../runtime/reactor.vibe"
 import { recentsLimit } from "./phone.vibe"
 
-const called = (row: { readonly cachedName: string | null; readonly number: string; readonly date: number }): Row => ({
-  title: row.cachedName || row.number || "Unknown caller",
-  detail: new Date(row.date).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }),
-})
+/** A row of one of Home's cards, with when it came, so the newest leads. */
+interface Dated extends Row { readonly date: number }
+
+const cardRows = 2
+
+const callerOf = (row: { readonly cachedName: string | null; readonly number: string }): string => row.cachedName || row.number || "Unknown caller"
+
+const clockLength = (seconds: number): string => {
+  const total = Math.max(0, Math.floor(seconds))
+  return `${Math.floor(total / 60)}:${String(total % 60).padStart(2, "0")}`
+}
+
+/** Home's Messages card as v121 drew it: the unread conversations, newest first, counted, with when the newest came. */
+function unreadCard(unread: ReadonlyArray<{ readonly date: number; readonly snippet: string; readonly addresses: ReadonlyArray<string> }>, now: number) {
+  const newest = [...unread].sort((a, b) => b.date - a.date)
+  const rows = newest.slice(0, cardRows).map((row) => ({ title: row.addresses.join(", ") || "Unknown sender", detail: row.snippet }))
+  return { rows, says: { count: String(unread.length), status: newest.length ? shortWhen(newest[0].date, now) : "", label: `Open Messages, ${unread.length} unread` } }
+}
+
+/** Home's Phone card as v121 drew it: new missed calls grouped by caller, then unheard voicemail, newest first, counted, with when the newest came. */
+function callsCard(
+  missed: ReadonlyArray<{ readonly cachedName: string | null; readonly number: string; readonly date: number }>,
+  unheard: ReadonlyArray<{ readonly cachedName: string | null; readonly number?: string; readonly date: number; readonly durationSeconds: number }>,
+  now: number,
+) {
+  const callers = new Map<string, { title: string; count: number; date: number }>()
+  for (const call of missed) {
+    const key = call.number || `unknown:${call.date}`
+    const seen = callers.get(key)
+    if (seen) callers.set(key, { ...seen, count: seen.count + 1, date: Math.max(seen.date, call.date) })
+    else callers.set(key, { title: callerOf(call), count: 1, date: call.date })
+  }
+  const dated: Dated[] = [
+    ...[...callers.values()].map((caller) => ({ date: caller.date, title: caller.title, detail: caller.count > 1 ? `Missed · ${caller.count}` : "Missed" })),
+    ...unheard.map((one) => ({ date: one.date, title: callerOf({ cachedName: one.cachedName, number: one.number ?? "" }), detail: `Voicemail · ${clockLength(one.durationSeconds)}` })),
+  ].sort((a, b) => b.date - a.date)
+  const parts = [missed.length ? `${missed.length} missed ${missed.length === 1 ? "call" : "calls"}` : "", unheard.length ? `${unheard.length} voicemail` : ""].filter(Boolean)
+  return {
+    rows: dated.slice(0, cardRows).map(({ title, detail }) => ({ title, detail })),
+    says: { count: String(missed.length + unheard.length), status: dated.length ? shortWhen(dated[0].date, now) : "", label: `Open Phone, ${parts.join(", ")}` },
+  }
+}
 
 // spec/app/home/cards.md, "The Messages and Phone cards show their waiting rows, only on an Alpha image, and are not drawn without a row"
 /** The phone's existing native reports are the source of both the counts and the Home card rows. */
-effect function report(): void!!(Telephony | Phone | Messages | Voicemail) {
+effect function report(): void!!(Telephony | Phone | Messages | Voicemail | Time) {
   const calls = telephony("recentCalls", (c) => c.phone.recentCalls({ limit: recentsLimit })) catch () => undefined
   const missed = calls?.calls.filter((call) => call.type === "missed" && call.isNew)
   const threads = telephony("threadPage", (c) => c.messages.threadPage()) catch () => undefined
   const unread = threads?.rows.flatMap((row) => "incomplete" in row || !row.unread ? [] : [row])
   const listing = telephony("refreshVoicemail", (c) => c.phone.refreshVoicemail("AutomaticRead")) catch () => undefined
   const unheard = listing?.carrier === "CarrierReady" ? listing.voicemails.filter((one) => !one.heard) : undefined
-  if (unread !== undefined) fromAreas.messages(unread.slice(0, 2).map((row) => ({ title: row.addresses.join(", ") || "Unknown sender", detail: row.snippet })))
-  if (missed !== undefined || unheard !== undefined) fromAreas.phone((missed?.length ? missed : unheard ?? []).slice(0, 2).map(called))
+  const now = try (try Time).now()
+  if (unread !== undefined) {
+    const card = unreadCard(unread, now)
+    fromAreas.messages(card.rows, card.says)
+  }
+  if (missed !== undefined || unheard !== undefined) {
+    const card = callsCard(missed ?? [], unheard ?? [], now)
+    fromAreas.phone(card.rows, card.says)
+  }
   if (missed !== undefined) try contained((try Phone).send({ type: "missedReported", count: missed.length }), "missed calls")
   if (unread !== undefined) try contained((try Messages).send({ type: "unreadReported", count: unread.length }), "unread conversations")
   if (listing !== undefined) try contained((try Phone).send({ type: "voicemailReported", ready: listing.carrier === "CarrierReady" }), "visual voicemail")

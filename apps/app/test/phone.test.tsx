@@ -40,7 +40,7 @@ async function openPhone(alpha: Alpha) {
 
 const pressPhoneCard = () => drawn(() => {
   const cards = document.querySelectorAll<HTMLButtonElement>("[aria-label='Your day'] button");
-  const card = [...cards].find((item) => item.textContent?.startsWith("Phone"));
+  const card = [...cards].find((item) => item.getAttribute("aria-label")?.startsWith("Open Phone,"));
   if (!card) throw new Error("no call card on Home");
   card.click();
 });

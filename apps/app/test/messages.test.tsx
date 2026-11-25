@@ -47,7 +47,7 @@ async function openMessages(alpha: Awaited<ReturnType<typeof openImage>>["alpha"
 
 async function openUnreadCard() {
   const card = await vi.waitFor(() => {
-    const found = [...document.querySelectorAll<HTMLButtonElement>("section[aria-label='Your day'] > button")].find((button) => button.textContent?.startsWith("Messages"));
+    const found = [...document.querySelectorAll<HTMLButtonElement>("section[aria-label='Your day'] > button")].find((button) => button.getAttribute("aria-label")?.startsWith("Open Messages,"));
     if (!found) throw new Error("Messages unread card was not drawn");
     return found;
   });

@@ -52,17 +52,20 @@ pure def there(apps: Set[str], shell: S::Shell, tile: Tile): bool =
 
 ### Home's defaults are every one of Alpha's own apps, in Home order, and Home holds at most 4096 tiles
 
+Home order is v121's: Phone, Messages, Inbox, Calendar, Browser, Camera,
+Photos, Maps, Notes, Contacts, Files, Workflows and Settings, each where
+v121 drew it. Clock and Reminders, which v121 did not have, follow Settings.
+
 ```quint
 pure val homeOrder: List[S::View] = List(
-  S::Phone, S::Messages, S::Inbox, S::Calendar, S::Clock, S::Reminders, S::Browser, S::Camera, S::Photos,
-  S::Maps, S::Notes, S::Contacts, S::Files, S::Workflows, S::Settings)
+  S::Phone, S::Messages, S::Inbox, S::Calendar, S::Browser, S::Camera, S::Photos,
+  S::Maps, S::Notes, S::Contacts, S::Files, S::Workflows, S::Settings, S::Clock, S::Reminders)
 
 pure val defaults: List[Tile] = List(
   Own({ view: S::Phone }), Own({ view: S::Messages }), Own({ view: S::Inbox }), Own({ view: S::Calendar }),
-  Own({ view: S::Clock }), Own({ view: S::Reminders }),
   Own({ view: S::Browser }), Own({ view: S::Camera }), Own({ view: S::Photos }), Own({ view: S::Maps }),
   Own({ view: S::Notes }), Own({ view: S::Contacts }), Own({ view: S::Files }), Own({ view: S::Workflows }),
-  Own({ view: S::Settings }))
+  Own({ view: S::Settings }), Own({ view: S::Clock }), Own({ view: S::Reminders }))
 
 pure val maxTiles = 4096
 

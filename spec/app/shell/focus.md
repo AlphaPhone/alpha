@@ -171,7 +171,7 @@ pure def stepARowIsTheOneNoted(before: Focus, via: str, after: Focus): bool =
 pure def sometimesARowGetsFocusBack(f: Focus): bool = f.lastRow != ""
 ```
 
-### Home's tiles show a focus ring only while the owner moves by keyboard; every other control, a field above all, shows its ring whenever it has focus
+### Home's tiles and cards show a focus ring only while the owner moves by keyboard; every other control, a field above all, shows its ring whenever it has focus
 
 A Tab or an arrow key starts moving by keyboard and a press ends it.
 
