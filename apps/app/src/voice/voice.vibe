@@ -447,8 +447,8 @@ export const voiceWithCalls = started(effect {
 // spec/app/voice/index.md, "A failed conversation ends quietly: why it failed is kept only until voice returns to idle, and nothing is shown"
 const quietly = following(Voice.Machine, (voice) => voice.phase === "Failed", Voice.Machine, (failed): Voice.Event | undefined => (failed ? { type: "dismiss" } : undefined))
 
-// spec/app/voice/dictation.md, "A failed dictation ends quietly: the failure waits in its stage only until voice closes the recorder, and nothing is shown"
-const dictationQuietly = following(Voice.Machine, (voice) => voice.recorder.stage !== "Closed" && voice.recorder.failure !== "NoFailure", Voice.Machine, (failed): Voice.Event | undefined => (failed ? { type: "closeRecorder" } : undefined))
+// spec/app/voice/dictation.md, "A microphone failure ends dictation quietly and a failed transcription keeps its clip"
+const dictationQuietly = following(Voice.Machine, (voice) => voice.recorder.stage === "Ready" && voice.recorder.failure !== "NoFailure", Voice.Machine, (failed): Voice.Event | undefined => (failed ? { type: "closeRecorder" } : undefined))
 
 const bridgeEvents = hearing(
   Stream.unwrap(effect {

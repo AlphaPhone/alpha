@@ -1,4 +1,4 @@
-// spec/app/voice/index.md, "Story: Dictate into a field"; spec/app/voice/dictation.md, "A failed dictation ends quietly: the failure waits in its stage only until voice closes the recorder, and nothing is shown"
+// spec/app/voice/index.md, "Story: Dictate into a field"; spec/app/voice/dictation.md, "A microphone failure ends dictation quietly and a failed transcription keeps its clip"
 import { Button, Spinner, Textarea } from "@repo/ui";
 import type { ManagedRuntime } from "effect";
 import { Mic, Square, X } from "lucide-react";
@@ -8,7 +8,7 @@ import { editDictation } from "../assistant/dictation.vibe";
 import { untimed } from "../runtime/reactor.vibe";
 import { VoiceWords } from "./voice.vibe";
 
-/** The controls the recorder admits while the Ask Alpha composer is receiving dictation: its stage shows in icons, never in words, and a failure shows nothing. */
+/** The controls the recorder admits while Ask Alpha is receiving dictation, with icons for its status and actions for a kept clip. */
 export function DictationControls({ runtime }: { runtime: ManagedRuntime.ManagedRuntime<Voice | VoiceWords, unknown> }) {
   const { state, can, send } = useMachine(runtime);
   if (!state || state.recorder.field !== "ComposerField" || state.recorder.stage === "Closed") return null;

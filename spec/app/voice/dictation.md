@@ -135,12 +135,12 @@ pure def alwaysAClipIsKeptOnlyAfterRecording(r: Recorder): bool =
 pure def alwaysWordsOnlyInReview(r: Recorder): bool = r.words implies r.stage == Review
 ```
 
-### A failed dictation ends quietly: the failure waits in its stage only until voice closes the recorder, and nothing is shown
+### A microphone failure ends dictation quietly and a failed transcription keeps its clip
 
-As in the existing app, a dictation that fails shows no words: voice closes
-the recorder at once, and the field keeps what was written. Until then a
-microphone failure waits in ready; a transcription failure waits with its
-clip; a kept clip is there only because its transcription failed.
+A microphone failure waits in ready until voice closes the recorder. The
+field keeps what was written. A transcription failure keeps the clip for
+retry or discard. The recorder shows actions for the clip without an error
+notice.
 
 ```quint
 pure def micFailure(f: Failure): bool = f == Denied or f == NoMicrophone

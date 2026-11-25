@@ -435,7 +435,7 @@ describe("Talk from Ask Alpha's composer (spec/app/voice/index.md, \"Story: Hold
     ]);
   });
 
-  // spec/app/voice/index.md, "Story: Dictate into a field"; spec/app/voice/index.md, "Recording asks for the microphone the first time, like a conversation"; spec/app/voice/dictation.md, "A failed dictation ends quietly: the failure waits in its stage only until voice closes the recorder, and nothing is shown"
+  // spec/app/voice/index.md, "Story: Dictate into a field"; spec/app/voice/index.md, "Recording asks for the microphone the first time, like a conversation"; spec/app/voice/dictation.md, "A microphone failure ends dictation quietly and a failed transcription keeps its clip"
   it("a dictation the microphone refuses ends quietly: the recorder closes, nothing is shown, and Dictate is offered again", async () => {
     const world = { ...scene(), phone: true, signedIn: false };
     world.voice.permission = "prompt";
