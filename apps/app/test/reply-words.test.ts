@@ -25,6 +25,19 @@ describe("a reply's words as the owner reads and hears them", () => {
   });
 });
 
+describe("a reply's words without the agent's turn tag (spec/app/assistant/reply.md, \"The agent's turn tag is never drawn, copied, quoted, emailed or spoken, and a reply still being written holds back what may become one\")", () => {
+  it("takes the tag out wherever it stands, in either bracket and any case, holds back one still being written, and never reads the owner's words", () => {
+    expect([
+      wordsOf({ mine: false, text: "It is [ANSWER] Paris.</promise>" }),
+      wordsOf({ mine: false, text: "```\n[answer] ls\n```" }),
+      replyBlocks("Paris <pro", true).words,
+      replyBlocks("Paris <pro").words,
+      replyBlocks("Paris [about](https://example.com)", true).words,
+      wordsOf({ mine: true, text: "<promise> [answer] mine" }),
+    ]).toEqual(["It is Paris.", "ls", "Paris", "Paris <pro", "Paris [about](https://example.com)", "<promise> [answer] mine"]);
+  });
+});
+
 describe("a Maps card's search handed to Maps", () => {
   it("is taken once, and its watchers hear it left and taken", async () => {
     const { handToMaps, handedQuery, takeHandedQuery, watchHandoff } = await import("../src/maps/handoff.ts");
