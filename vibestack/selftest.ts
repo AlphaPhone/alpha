@@ -4837,7 +4837,7 @@ test("the lint refuses, in a project's own code, a comment that is neither a cit
   const storyHeading = spec?.stories.find((story) => !story.title.includes('"'))?.title ?? "Story: Say hello";
   const ruleHeading = spec ? heading(spec.rules.find((rule) => !heading(rule).includes('"'))!) : "The number of greetings is never negative";
   assert.deepEqual(await found("apps/app/src/probe.vibe", [
-    `// ${specFile}, "${storyHeading}"; ${specFile}, "${ruleHeading}"`,
+    `// ${specFile}, "${storyHeading}"; ${specFile}, "${ruleHeading}": covers both`,
     `/* ${specFile}, "${storyHeading}" */`,
     "//@ ghost",
     `/** @model ${specFile} */`,
@@ -4853,7 +4853,11 @@ test("the lint refuses, in a project's own code, a comment that is neither a cit
     "const later = React.useLayoutEffect;",
     `globalThis["queueMicrotask"](later);`,
     "// eslint-disable-next-line no-undef -- a global the page defines",
-  ]), ["6 code/comments", "7 code/comments", "8 code/comments", "9 code/comments", "10 code/effects", "11 code/effects", "12 code/effects", "13 no-console", "14 code/effects", "15 code/effects"]);
+    "export function inside() {",
+    "  /** inside a function */",
+    "  return 1;",
+    "}",
+  ]), ["6 code/comments", "9 code/comments", "10 code/effects", "11 code/effects", "12 code/effects", "13 no-console", "14 code/effects", "15 code/effects", "18 code/comments"]);
   assert.deepEqual([...new Set(await found("apps/app/src/probe.vibe", [
     "const clock = { setTimeout: () => undefined }",
     "const capture = { setTimeout: globalThis.setTimeout }",
@@ -5110,4 +5114,163 @@ test("vibestack.json spec.exclude, link, upgrade, doctor, conformance and explor
 
   const exploreRes = await runCli(cli, brownfield, "explore");
   assert.equal(exploreRes.status, 0, exploreRes.stdout + exploreRes.stderr);
+});
+
+test("secrecy blocks structural equality leaks, secret map keys, imported secret values, and allows Secret records and sums", async () => {
+  const cases: [string, Record<string, string>, RegExp][] = [
+    ["record structural equality", {
+      "spec/t.md": ruleSpec(`type SecretCard = str
+type Wallet = { card: SecretCard, label: str }
+pure val initial: Wallet = { card: "", label: "" }
+pure def save(w: Wallet, c: SecretCard): Wallet = { ...w, card: c }
+pure def leak(w: Wallet): str = if (w == { card: "4111", label: w.label }) "yes" else "no"`),
+    }, /\bleak .*: what it returns depends on a secret/],
+    ["variant structural equality", {
+      "spec/t.md": ruleSpec(`type SecretCard = str
+type Box = Full({ card: SecretCard }) | Empty
+pure val initial: Box = Empty
+pure def putCard(b: Box, c: SecretCard): Box = Full({ card: c })
+pure def leak(b: Box): str = if (b == Full({ card: "4111" })) "yes" else "no"`),
+    }, /\bleak .*: what it returns depends on a secret/],
+    ["list includes on records holding a secret", {
+      "spec/t.md": ruleSpec(`type SecretCard = str
+type Wallet = { card: SecretCard }
+pure val initial: List[Wallet] = List()
+pure def add(xs: List[Wallet], c: SecretCard): List[Wallet] = xs.append({ card: c })
+pure def leak(xs: List[Wallet]): bool = xs.includes({ card: "4111" })`),
+    }, /\bleak .*: what it returns depends on a secret/],
+    ["secret map key read via getOr", {
+      "spec/t.md": ruleSpec(`type SecretCard = str
+pure val initial: SecretCard -> int = Map()
+pure def noop(m: SecretCard -> int): SecretCard -> int = m
+pure def leak(m: SecretCard -> int): int = m.getOr("4111", 0)`),
+    }, /\bleak .*: what it returns depends on a secret/],
+    ["secret key stored in public-keyed map", {
+      "spec/t.md": ruleSpec(`type SecretCard = str
+type S = { m: str -> SecretCard }
+pure val initial: S = { m: Map() }
+pure def store(s: S, c: SecretCard): S = { m: s.m.put(c, c) }`),
+    }, /\bstore .*: a secret reaches a key in a map/],
+    ["imported secret pure val", {
+      "spec/vault.md": ruleSpec('type SecretCard = str\npure val master: SecretCard = "4111"'),
+      "spec/user.md": ruleSpec('import vault as V from "./vault"\npure val initial: str = ""\npure def leakVal(s: str): str = V::master'),
+    }, /\bleakVal .*: what it returns depends on a secret/],
+    ["imported secret pure def", {
+      "spec/vault.md": ruleSpec("type SecretCard = str\npure def makeCard(x: str): SecretCard = x"),
+      "spec/user.md": ruleSpec('import vault as V from "./vault"\npure val initial: str = ""\npure def leakDef(s: str): str = V::makeCard(s)'),
+    }, /\bleakDef .*: what it returns depends on a secret/],
+    ["leaking from a Secret record", {
+      "spec/t.md": ruleSpec(`type SecretBox = { raw: str }
+pure val initial: SecretBox = { raw: "" }
+pure def noop(b: SecretBox): SecretBox = b
+pure def leak(b: SecretBox): str = b.raw`),
+    }, /\bleak .*: what it returns depends on a secret/],
+    ["transitive imported record holding a secret", {
+      "spec/leaf.md": ruleSpec('type SecretCard = str\ntype Leaf = { card: SecretCard }\npure val empty: Leaf = { card: "" }'),
+      "spec/mid.md": ruleSpec('import leaf as R from "./leaf"\ntype Mid = { leaf: R::Leaf }\npure val midInit: Mid = { leaf: R::empty }'),
+      "spec/top.md": ruleSpec('import mid as P from "./mid"\npure val initial: P::Mid = P::midInit\npure def noop(s: P::Mid): P::Mid = s\npure def leak(a: P::Mid, b: P::Mid): bool = a == b'),
+    }, /\bleak .*: what it returns depends on a secret/],
+  ];
+  const validCases: [string, Record<string, string>][] = [
+    ["storing SecretCard in a Secret record", {
+      "spec/t.md": ruleSpec(`type SecretCard = str
+type SecretBox = { raw: str }
+pure val initial: SecretBox = { raw: "" }
+pure def save(b: SecretBox, c: SecretCard): SecretBox = { raw: c }`),
+    }],
+    ["storing SecretCard in a Secret sum variant", {
+      "spec/t.md": ruleSpec(`type SecretCard = str
+type SecretWrap = SecretWrapped({ v: str }) | SecretEmpty
+pure val initial: SecretWrap = SecretEmpty
+pure def wrapCard(s: SecretWrap, c: SecretCard): SecretWrap = SecretWrapped({ v: c })`),
+    }],
+    ["storing SecretCard as a key in SecretCard -> int", {
+      "spec/t.md": ruleSpec(`type SecretCard = str
+type S = { byCard: SecretCard -> int }
+pure val initial: S = { byCard: Map() }
+pure def add(s: S, c: SecretCard): S = { byCard: s.byCard.put(c, 1) }`),
+    }],
+    ["transitive imported public record", {
+      "spec/leaf.md": ruleSpec("type Leaf = { n: int }\npure val empty: Leaf = { n: 0 }"),
+      "spec/mid.md": ruleSpec('import leaf as R from "./leaf"\ntype Mid = { leaf: R::Leaf }\npure val midInit: Mid = { leaf: R::empty }'),
+      "spec/top.md": ruleSpec('import mid as P from "./mid"\npure val initial: P::Mid = P::midInit\npure def noop(s: P::Mid): P::Mid = s\npure def same(a: P::Mid, b: P::Mid): bool = a == b'),
+    }],
+  ];
+  await Promise.all([
+    ...cases.map(([what, files, message]) => assert.rejects(() => genAll(scratch(files)), message, what)),
+    ...validCases.map(([, files]) => genAll(scratch(files))),
+  ]);
+});
+
+test("matching an imported variant and constructing a distinct local variant with the same tag proves in Dafny", async () => {
+  const root = scratch({
+    "spec/other.md": ruleSpec("type Remote = Open({ n: int }) | Closed\npure val remoteInit: Remote = Open({ n: 1 })"),
+    "spec/main.md": ruleSpec(`import other as O from "./other"
+type Local = Open({ n: int }) | Idle
+pure val initial: Local = Idle
+pure val rValues = Set(O::Open({ n: 1 }), O::Closed)
+pure def adopt(s: Local, r: O::Remote): Local =
+  match r {
+    | Open(p) => Open(p)
+    | Closed => Idle
+  }
+pure def adoptInc(s: Local, r: O::Remote): Local =
+  match r {
+    | Open(p) => Open({ ...p, n: p.n + 1 })
+    | Closed => Idle
+  }`),
+  });
+  const checked = await run(root);
+  assert.deepEqual(checked.failed, ["review"], checked.text);
+  const domain = await import(pathToFileURL(path.join(root, "gen/main.ts")).href);
+  assert.deepEqual(domain.adopt(domain.initial, { tag: "Open", n: 4 }), { tag: "Open", n: 4 });
+  assert.deepEqual(domain.adoptInc(domain.initial, { tag: "Open", n: 4 }), { tag: "Open", n: 5 });
+});
+
+test("expandListHelpers handles parenthesized lambdas without unbalancing parentheses", async () => {
+  const root = oneRule("parens", "Parenthesized lambdas", `pure val initial: List[int] = List(1, 2)
+pure def hasPos(xs: List[int]): bool = xs.some((x => x > 0))
+pure def allPos(xs: List[int]): bool = xs.every(((x) => x > 0))
+pure def bumped(xs: List[int]): List[int] = xs.listMap((x => x + 1))`);
+  await gen(root, parseSpec(root, "spec/parens.md"));
+  const domain = await import(pathToFileURL(path.join(root, "gen/parens.ts")).href);
+  assert.equal(domain.hasPos([-1, 2]), true);
+  assert.equal(domain.allPos([1, 2]), true);
+  assert.deepEqual(domain.bumped([1, 2]), [2, 3]);
+});
+
+test("canonicalizing maps sorts keys so equal map states stringify identically", async () => {
+  const root = oneRule("mapcanon", "Map canonicalization", `type S = { m: str -> int }
+pure val initial: S = { m: Map("a" -> 1, "b" -> 2) }
+pure def flip(s: S): S = { m: Map("b" -> 2, "a" -> 1) }`);
+  const model = await gen(root, parseSpec(root, "spec/mapcanon.md"));
+  const a = JSON.stringify(model.canon(model.stateType!, { m: { $a: 1, $b: 2 } }));
+  const b = JSON.stringify(model.canon(model.stateType!, { m: { $b: 2, $a: 1 } }));
+  assert.equal(a, b);
+});
+
+test("vibestackConfig accepts spec citations with trailing reasons and declaration doc comments", async () => {
+  const [{ default: js }, { default: tseslint }, { Linter }, { vibestackConfig }] = await Promise.all([
+    import("@eslint/js"),
+    import("typescript-eslint"),
+    import("eslint"),
+    import("./eslint.ts"),
+  ]);
+  const root = scratch({ "package.json": JSON.stringify({ name: "eslint-preset", private: true }) });
+  const configs = vibestackConfig({ root, plugins: { js, tseslint } }).map((entry) => {
+    const next = { ...entry };
+    if (next.languageOptions?.parserOptions && typeof next.languageOptions.parserOptions === "object" && "projectService" in next.languageOptions.parserOptions) {
+      next.languageOptions = { ...next.languageOptions, parserOptions: { ...(next.languageOptions.parserOptions as Record<string, unknown>), projectService: false } };
+    }
+    if (next.rules) {
+      next.rules = Object.fromEntries(Object.entries(next.rules).filter(([rule]) => !rule.startsWith("@typescript-eslint/")));
+    }
+    return next;
+  });
+  const linter = new Linter({ configType: "flat", cwd: root });
+  const filename = path.join(root, "apps/app/src/example.ts");
+  const valid = `${citing("spec/order.md", "Story: Pay").trimEnd()}: pays the full amount\n/** Doc comment on a declaration. @throws {never} */\nexport const x = 1;\n`;
+  assert.deepEqual(linter.verify(valid, configs as never, { filename }), []);
+  const invalid = "// plain explanation comment\n/** @throws {This is ordinary prose} */\nexport const x = 1;\n";
+  assert.deepEqual(linter.verify(invalid, configs as never, { filename }).map((m) => `${m.line} ${m.ruleId}`), ["1 code/comments", "2 code/comments"]);
 });

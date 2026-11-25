@@ -107,8 +107,16 @@ const negative = (e: Json): Json | undefined => (e.kind === "app" && e.opcode ==
 /** Puts a binding back as it was before an inner scope shadowed it. */
 const restore = <V>(m: Map<string, V>, k: string, v: V | undefined) => (v === undefined ? m.delete(k) : m.set(k, v));
 
+/** Latest field updates in a chain of `{ ...x, f: v }` nodes, mapped by field name. */
+function fieldUpdates(e: Json, render: (v: Json) => string): Map<string, string> {
+  const byField = new Map<string, string>();
+  for (; e.kind === "app" && e.opcode === "with"; e = e.args[0])
+    if (!byField.has(e.args[1].value)) byField.set(e.args[1].value, render(e.args[2]));
+  return byField;
+}
+
 export function printer({ types, inferred, importedConstantType, ref, helper, bind, variants, definitions, simulatorOnly, proof }: Scope) {
-  const { resolve, tagged, isScalar, setElem, keyOf, storedKey, holdsSet, named, ownerOf, typeName, tsType } = types;
+  const { fields, payload, typedef, resolve, tagged, isScalar, setElem, keyOf, storedKey, holdsSet, named, ownerOf, typeName, tsType } = types;
   const typeOf = typeOfIn(inferred);
   const forSimulator = (n: string): never => fail(`\`${n}\` is for the simulator only (a sample set or a weight_, fair_ or within_ setting) and cannot be used in a definition`);
   /** Which helpers the printed code needs (see typescript.ts), and the types of the maps it looks things up in. */
@@ -116,7 +124,7 @@ export function printer({ types, inferred, importedConstantType, ref, helper, bi
   const lookups: { map: string; key: string; of: string; stored: string }[] = [];
   /** Names that stand for something else while a `match` arm is printed: the arm's binder is the matched value. */
   const renamed = new Map<string, string>();
-  const matchedAs = new Map<string, string>(); // binder -> the variant its arm matched
+  const matchedAs = new Map<string, { owner: string; variant: string }>(); // binder -> the sum type and variant its arm matched
   let locals = new Map<string, string>();
   let localId = 0;
   let nesting = 0;
@@ -326,10 +334,21 @@ export function printer({ types, inferred, importedConstantType, ref, helper, bi
     if (variants.has(op)) {
       // A variant that carries a record: Paid({ receipt: 7 }) is { tag: "Paid", receipt: 7 }.
       const owner = ownerOf(op);
-      // Updating the matched value in place: Packed({ ...x, labels: … }) inside the Packed arm keeps the tag it has.
+      const tagName = op.split("::").pop()!;
+      // Updating the matched value in place: Packed({ ...x, labels: … }) inside the Packed arm keeps the tag it has,
+      // provided the matched value belongs to the same sum type; otherwise rebuild field by field for the target type.
       const { base, updates } = unroll(a[0]);
-      if (base.kind === "name" && matchedAs.get(base.name) === op.split("::").pop())
-        return [updates.length ? `({ ...${renamed.get(base.name)}, ${updates.join(", ")} } as ${typeName(owner)})` : renamed.get(base.name)!, ATOM];
+      const matched = base.kind === "name" ? matchedAs.get(base.name) : undefined;
+      if (matched) {
+        if (matched.owner === typeName(owner) && matched.variant === tagName)
+          return [updates.length ? `({ ...${renamed.get(base.name)}, ${updates.join(", ")} } as ${typeName(owner)})` : renamed.get(base.name)!, ATOM];
+        const carried = payload(fields(owner.type).find((f: Json) => f.fieldName === tagName));
+        if (carried) {
+          const byField = fieldUpdates(a[0], (v) => at("typed", () => ex(v, TERNARY)));
+          const src = renamed.get(base.name)!;
+          return variant(`({ ${[`tag: ${tag(op)}`, ...fields(carried).map((f: Json) => `${f.fieldName}: ${byField.get(f.fieldName) ?? `${src}.${f.fieldName}`}`)].join(", ")} } as ${typeName(owner)})`, owner);
+        }
+      }
       if (a[0].kind !== "app" || a[0].opcode !== "Rec") fail(`${op}(…): give the record field by field, or update the value matched in the ${op} arm`);
       return variant(`({ ${[`tag: ${tag(op)}`, ...at("typed", () => pairs(a[0].args))].join(", ")} } as ${typeName(owner)})`, owner);
     }
@@ -337,16 +356,19 @@ export function printer({ types, inferred, importedConstantType, ref, helper, bi
       // match o { | Draft(d) => … | _ => … } becomes a chain of tests on the tag, with d standing for o itself.
       if (a[0].kind !== "name") fail("`match` must be on a name; bind the value with `val` first");
       const subject = ex(a[0], ATOM);
-      const isTagged = tagged(resolve(typeOf(a[0].id)));
+      const subjectType = typeOf(a[0].id);
+      const subjectOwner = subjectType.kind === "const" ? typedef(subjectType.name) : named(resolve(subjectType), "sum");
+      const subjectOwnerName = subjectOwner ? typeName(subjectOwner) : "";
+      const isTagged = tagged(resolve(subjectType));
       const arms: { test?: string; result: string }[] = [];
       for (let i = 1; i < a.length; i += 2) {
         const binder = a[i + 1].params[0]?.name;
         // Inside the arm the binder stands for the matched value; an outer arm's binder of the same name comes back after.
         const bound = binder && binder !== "_";
-        const outer = bound ? [renamed.get(binder), matchedAs.get(binder)] : [];
-        if (bound) { renamed.set(binder, subject); matchedAs.set(binder, a[i].value); }
+        const outer = bound ? [renamed.get(binder), matchedAs.get(binder)] as const : undefined;
+        if (bound) { renamed.set(binder, subject); matchedAs.set(binder, { owner: subjectOwnerName, variant: a[i].value }); }
         const result = ex(a[i + 1].expr, OR);
-        if (bound) { restore(renamed, binder, outer[0]); restore(matchedAs, binder, outer[1]); }
+        if (bound) { restore(renamed, binder, outer![0]); restore(matchedAs, binder, outer![1]); }
         arms.push({ test: a[i].value === "_" ? undefined : `${subject}${isTagged ? ".tag" : ""} === ${JSON.stringify(a[i].value)}`, result });
       }
       const last = arms.pop()!;
