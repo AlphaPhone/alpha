@@ -100,8 +100,9 @@ pure def lawAtMost100AreListed(results: int): bool =
 
 ### The panel opens with what this phone can check, and opening it drops the result notice, whose result it shows
 
-A phone whose checks are not ready offers no switch; a plain browser
-offers result checks while it is open.
+A phone whose checks are not ready offers no switch. A browser that is an
+exclusive writer for its inbox offers result checks while the Alpha page
+is visible, including outside this panel after the owner opts in.
 
 ```quint
 pure def drop(d: Digests): List[Effect] = if (d.notice) List(DropNotice({ owner: d.owner, upTo: d.bucket.posted })) else List()
@@ -159,7 +160,16 @@ pure def canAskAbout(d: Digests, result: int): bool = d.open and 1 <= result and
 pure def askAbout(d: Digests, result: int): Moved = { state: d, out: List(AskAlpha({ result: result })) }
 ```
 
-### Background checks and notifications are asked of the agent, one at a time each, and shown as the agent last took them
+### Background checks and notifications are asked one at a time each and shown as the platform last took them
+
+Browser result checks are a setting for the verified owner on this browser.
+Alpha confirms the launch owner's identity belongs to the same resident
+agent named by local auth. Consent and retained history are scoped to
+that verified pair. An older agent-only record proves neither its owner
+nor their consent and stays sealed. A verified owner starts with checks
+off until they choose otherwise.
+The browser answers with what it durably saved; Android supplies its own
+delivery and notification settings.
 
 ```quint
 pure def canSetBackground(d: Digests, on: bool): bool =
@@ -230,7 +240,9 @@ pure def sometimesAResultIsOpenedFromItsNotice(d: Digests): bool = d.fromNotice 
 Each fetch begins a round with a new number.
 
 ```quint
-pure def canPull(d: Digests): bool = d.stage == Idle and d.owner >= 1 and (d.open or d.background.on)
+pure def pullAllowed(d: Digests): bool = d.owner >= 1 and (d.open or d.background.on)
+
+pure def canPull(d: Digests): bool = d.stage == Idle and pullAllowed(d)
 
 pure def pull(d: Digests): Moved =
   val asked = R::ask(d.inbox)
@@ -380,7 +392,7 @@ pure def sometimesAResultArrivesWithNotificationsOff(d: Digests): bool = d.bucke
 
 ## Story: Keep digests to their owner and through a restart
 
-> As the owner, I want every result kept and the switches as the agent
+> As the owner, I want every result kept and the switches as the platform
 > took them after Alpha restarts, a round in progress begun again, and my
 > results neither shown to nor lost for whoever signs in next.
 
@@ -397,16 +409,23 @@ pure def restart(d: Digests): Digests = {
 }
 ```
 
-### When another owner signs in, the round ends, the previous owner's results are put aside for them and their notice dropped, and the new owner's own results are taken up
+### When another owner signs in, the previous owner's results are put aside and the new owner's results and confirmed switches are taken up
+
+Switches are off unless the platform has a confirmed choice for this owner.
+A delayed answer to the former owner's switch cannot change the new owner's
+choice.
 
 ```quint
-pure def canOwnerChanged(d: Digests, owner: int): bool = owner != d.owner and owner >= 0
+pure def canOwnerChanged(d: Digests, owner: int, backgroundOn: bool, noticesOn: bool): bool =
+  owner != d.owner and owner >= 0 and (owner > 0 or not(backgroundOn or noticesOn))
 
-pure def ownerChanged(d: Digests, owner: int): Moved =
-  { state: { ...d, owner: owner, open: false, stage: Idle, inbox: { ...d.inbox, status: R::Idle }, page: 0, pageRan: noBrief,
+pure def keptSwitch(s: Switch, on: bool): Switch = { ...unconfirmed(s), on: on, wanted: on }
+
+pure def ownerChanged(d: Digests, owner: int, backgroundOn: bool, noticesOn: bool): Moved =
+  { state: { ...d, owner: owner, open: false, checks: NoChecks, stage: Idle, inbox: { ...d.inbox, status: R::Idle }, page: 0, pageRan: noBrief,
              others: d.others.put(d.owner, d.bucket), bucket: d.others.getOr(owner, empty), notice: false,
              focus: 0, fromNotice: false, details: { ...d.details, status: R::Idle },
-             background: unconfirmed(d.background), notices: unconfirmed(d.notices) },
+             background: keptSwitch(d.background, backgroundOn), notices: keptSwitch(d.notices, noticesOn) },
     out: drop(d) }
 ```
 

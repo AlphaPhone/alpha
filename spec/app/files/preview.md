@@ -63,9 +63,9 @@ type Effect =
   | Read({ ticket: int, item: int, revision: int })
   | Draw({ ticket: int, item: int, revision: int, page: int })
   | OfferEmail({ ticket: int, viewer: int, item: int, revision: int, account: int })
-  | AskAlpha({ item: int })
+  | AskAlpha({ viewer: int, item: int, revision: int })
   | Transcribe({ item: int })
-  | OpenElsewhere({ item: int, revision: int, writable: bool })
+  | OpenElsewhere({ viewer: int, item: int, revision: int, writable: bool })
   | ShareFile({ viewer: int, item: int, revision: int })
   | ActOnStoredFile({ viewer: int, item: int, revision: int, operation: StorageAction, name: str })
   | RenamePicked({ viewer: int, item: int, revision: int, name: str })
@@ -273,12 +273,19 @@ pure def sometimesAPhotoCouldNotBeRead(s: Preview): bool = s.content.status == R
 
 ### Ask Alpha, Transcribe and Open elsewhere hand the file on and change nothing here
 
+Ask Alpha uses the file the owner reviewed and only while its viewer,
+revision and grant still match. When the provider proves the full file is
+over the upload limit, Alpha may attach a bounded excerpt of the already
+read text or the already drawn PDF page. A failed exact read or changed
+file cannot be replaced with a preview. The excerpt is marked in its
+filename and must pass the same sensitive text check.
+
 Transcribe is offered for a recording or a video.
 
 ```quint
 pure def canAskAlpha(s: Preview, by: Actor): bool = by == Owner and loaded(s) and not(s.secret)
 
-pure def askAlpha(s: Preview, by: Actor): Moved = { state: s, out: List(AskAlpha({ item: s.item })) }
+pure def askAlpha(s: Preview, by: Actor): Moved = { state: s, out: List(AskAlpha({ viewer: s.viewer, item: s.item, revision: s.revision })) }
 
 pure def canTranscribe(s: Preview, by: Actor): bool = by == Owner and usable(s) and s.kind == Media
 
@@ -287,7 +294,7 @@ pure def transcribe(s: Preview, by: Actor): Moved = { state: s, out: List(Transc
 pure def canOpenElsewhere(s: Preview, by: Actor): bool = by == Owner and usable(s)
 
 pure def openElsewhere(s: Preview, by: Actor): Moved =
-  { state: s, out: List(OpenElsewhere({ item: s.item, revision: s.revision, writable: false })) }
+  { state: s, out: List(OpenElsewhere({ viewer: s.viewer, item: s.item, revision: s.revision, writable: false })) }
 ```
 
 ### The owner can share the readable file shown through Android using its own selected-document grant
@@ -371,16 +378,19 @@ file is read.
 
 ```quint
 pure def stepASecretIsNeverAsked(before: Preview, after: Preview, out: List[Effect]): bool =
-  out.every(e => match e { | AskAlpha(x) => not(before.secret) | _ => true })
+  out.every(e => match e { | AskAlpha(x) => not(before.secret) and x.viewer == before.viewer and x.item == before.item and x.revision == before.revision | _ => true })
 
 pure def sometimesASecretIsHeldBack(s: Preview): bool = loaded(s) and s.secret
 ```
 
 ### Open elsewhere hands the file over to read only
 
+The phone opens the chooser for the same live viewer and grant and says
+when Android cannot open it.
+
 ```quint
 pure def stepAnotherAppOnlyReads(before: Preview, after: Preview, out: List[Effect]): bool =
-  out.every(e => match e { | OpenElsewhere(x) => not(x.writable) and x.revision == before.revision | _ => true })
+  out.every(e => match e { | OpenElsewhere(x) => not(x.writable) and x.viewer == before.viewer and x.item == before.item and x.revision == before.revision | _ => true })
 ```
 
 ### Forget removes the file from Recent, with or without access, and closes the viewer

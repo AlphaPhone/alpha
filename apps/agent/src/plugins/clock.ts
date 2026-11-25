@@ -386,10 +386,10 @@ function makeClockAction(
     description,
     parameters,
     validate: () => Promise.resolve(true),
-    handler: async (_runtime, message, _state, options) => {
+    handler: (_runtime, message, _state, options) => {
       const params = asRecord(asRecord(options).parameters ?? asRecord(options));
       const text = readRawString(asRecord(message.content), "text") ?? "";
-      return run(params, text);
+      return Promise.resolve(run(params, text));
     },
   };
   showsApp(action, "clock");

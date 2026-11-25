@@ -12,11 +12,11 @@ export type CalendarAgendaRowProps = Omit<ComponentProps<"button">, "title" | "c
 /** One event of the schedule or of search results: its time, its title and where it is. */
 export function CalendarAgendaRow({ time, title, where, className, ...props }: CalendarAgendaRowProps) {
   return (
-    <button type="button" aria-label={`${title}, ${time}`}
+    <button type="button" aria-label={[time, title, where].filter(Boolean).join(", ")}
       className={cn(focusRing, "mb-2 box-border flex min-h-12 w-full flex-col gap-1 rounded-md bg-secondary px-4 py-3 text-left wrap-anywhere text-foreground disabled:cursor-default", className)} {...props}>
-      <span className="text-meta leading-plain text-muted-foreground">{time}</span>
+      <span className="text-meta leading-plain text-muted-foreground">{time}</span>{" "}
       <strong className="text-body leading-snug">{title}</strong>
-      {where ? <span className="text-meta leading-plain text-muted-foreground">{where}</span> : null}
+      {where ? <>{" "}<span className="text-meta leading-plain text-muted-foreground">{where}</span></> : null}
     </button>
   );
 }

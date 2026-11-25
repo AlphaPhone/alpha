@@ -17,13 +17,14 @@ export interface BrowserAddressChoicesProps {
   onOpen: (url: string) => void;
   refusal?: string;
   privateTab?: boolean;
+  privateNotice?: string;
 }
 
 /** Local bookmark and history suggestions beneath the Browser's address field. */
-export function BrowserAddressChoices({ choices, onOpen, refusal, privateTab }: BrowserAddressChoicesProps) {
+export function BrowserAddressChoices({ choices, onOpen, refusal, privateTab, privateNotice }: BrowserAddressChoicesProps) {
   return (
     <section aria-label="Address suggestions" className="absolute inset-x-0 top-25 bottom-0 z-20 overflow-y-auto bg-background pt-1.5 pb-35">
-      {privateTab && <PrivateNotice icon={<PrivateMark aria-hidden className="size-4.5 shrink-0 self-center" />} className="mx-5.5 mt-2.5 mb-3 flex items-baseline gap-2.5" />}
+      {privateTab && <PrivateNotice icon={<PrivateMark aria-hidden className="size-4.5 shrink-0 self-center" />} className="mx-5.5 mt-2.5 mb-3 flex items-baseline gap-2.5">{privateNotice}</PrivateNotice>}
       {refusal && <p role="alert" className="mx-5.5 py-2 text-base">{refusal}</p>}
       <ul>
         {choices.map(({ url, kind, title, detail }) => {

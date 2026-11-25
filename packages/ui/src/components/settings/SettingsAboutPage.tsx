@@ -52,7 +52,7 @@ export function SettingsAboutPage({ alphaVersion, androidVersion, onPhone = true
         </ListGroup>
       ) : null}
       <ListGroup>
-        {onPhone ? <SettingsNavRow title="Agent activity" value={agent === "running" ? "Running" : agent === "starting" ? "Starting" : agent === "needs-you" ? "Needs attention" : agent === "stopped" ? "Stopped" : undefined} icon={<Clock />} aria-label="Agent activity" onOpen={onOpen && (() => onOpen("activity"))} {...at(0)} /> : null}
+        {onPhone ? <SettingsNavRow title="Agent activity" value={agent === "running" ? "Running" : agent === "starting" ? "Starting" : agent === "needs-you" ? "Needs attention" : agent === "stopped" ? "Stopped" : undefined} icon={<Clock />} onOpen={onOpen && (() => onOpen("activity"))} {...at(0)} /> : null}
         <SettingsNavRow title="Licenses" icon={<SlidersHorizontal />} onOpen={onOpen && (() => onOpen("licences"))} {...at(1)} />
       </ListGroup>
       {children}

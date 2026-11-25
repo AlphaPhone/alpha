@@ -36,7 +36,7 @@ import { type MediaCard, MediaReview, namedReviewQuery } from "./media-review.vi
 import { Documents } from "../platform/documents.vibe";
 import { AttachmentSources } from "./AttachmentSources.tsx";
 import { askComms, freedom } from "./assistant.vibe";
-import { acceptedFiles, acceptedPhotos, chooseDocument, type FileTarget, insertFiles, previewFile, readChosenDocument, removeFile, sameBinding } from "./attachments.vibe";
+import { acceptedFiles, acceptedPhotos, attachmentAuthority, chooseDocument, type FileTarget, insertFiles, previewFile, readChosenDocument, removeFile, retireTranscript, sameBinding } from "./attachments.vibe";
 import { chip, type MessageActions, useHistorySheets, useMessageRows } from "./history.tsx";
 import { ReplyFailure } from "./ReplyFailure.tsx";
 import { type Attached, type Line, Talk } from "./talk.vibe";
@@ -47,7 +47,9 @@ import { displayNumber } from "../phone/words.ts";
 export interface AssistantProps {
   runtime: ManagedRuntime.ManagedRuntime<ConversationMachine | AttachmentMachine | ChatsMachine | ComposerMachine | SearchMachine | ReplyMachine | DockMachine | ShellMachine | CommsMachine | CommsTargetServices | CommsBriefing | Talk | MailQuestions | LayersMachine | MediaReview | Documents, unknown>;
   messageActions?: MessageActions;
-  speech?: Pick<AssistantComposerProps, "onTalk" | "onDictate" | "showUnavailableTalk" | "voiceNotice"> & { voice?: (compact: boolean) => ReactNode };
+  speech?: Pick<AssistantComposerProps, "onTalk" | "onDictate" | "showUnavailableTalk" | "voiceNotice"> & {
+    voice?: (presentation: { compactDock: boolean; atBar: boolean }) => ReactNode;
+  };
   canReadAloud?: boolean;
 }
 
@@ -78,18 +80,18 @@ function noticeOf(writing: Writing): AssistantDraftNoticeProps["status"] | undef
   return undefined;
 }
 
-function waiting(writing: Writing, files: readonly Attached[]): AssistantAttachment[] {
+function waiting(writing: Writing, files: readonly Attached[], transcriptTitle: string | undefined): AssistantAttachment[] {
   const { editor } = writing;
   return [
     ...files.slice(0, editor.files).map(chip),
     ...(editor.mail ? [{ id: "mail", kind: "mail", name: "Mail" } as const] : []),
-    ...(editor.transcript ? [{ id: "transcript", kind: "transcript", name: "Transcript" } as const] : []),
+    ...(editor.transcript && transcriptTitle !== undefined ? [{ id: "transcript", kind: "transcript", name: transcriptTitle } as const] : []),
     ...(editor.shown ? [{ id: "shown", kind: "image", name: "Photo" } as const] : []),
     ...(editor.question ? [{ id: "question", kind: "transcript", name: "Question" } as const] : []),
   ];
 }
 
-const detached = { mail: "Mail", transcript: "Transcript", shown: "Shown" } as const;
+const detached = { mail: "Mail", shown: "Shown" } as const;
 
 const barHeight = 102;
 const emptyLines: readonly Line[] = [];
@@ -126,11 +128,11 @@ interface AssistantAttachmentsProps {
   runtime: AssistantProps["runtime"];
   attachments: ReturnType<typeof useAttachments>;
   preview: Attached | undefined;
-  target: RefObject<FileTarget | undefined>;
-  composer: RefObject<HTMLTextAreaElement | null>;
+  targetRef: RefObject<FileTarget | undefined>;
+  composerRef: RefObject<HTMLTextAreaElement | null>;
 }
 
-function AssistantAttachments({ runtime, attachments, preview, target, composer }: AssistantAttachmentsProps) {
+function AssistantAttachments({ runtime, attachments, preview, targetRef, composerRef }: AssistantAttachmentsProps) {
   return (
     <>
       {preview !== undefined && <AssistantPhotoPreview
@@ -148,20 +150,20 @@ function AssistantAttachments({ runtime, attachments, preview, target, composer 
           if (chosen) return { id: chosen.id, name: chosen.name, bytes: chosen.bytes, load: () => runtime.runPromise(readChosenDocument(chosen.id)) };
         } : undefined}
         onClose={() => {
-          target.current = undefined;
+          targetRef.current = undefined;
           void attachments.send({ type: "cancel" });
         }}
-        onReturnFocus={() => composer.current?.parentElement?.querySelector<HTMLButtonElement>('button[aria-label="Chat actions"]')?.focus()}
+        onReturnFocus={() => composerRef.current?.parentElement?.querySelector<HTMLButtonElement>('button[aria-label="Chat actions"]')?.focus()}
         onTab={(tab) => void attachments.send({ type: "switchTab", tab })}
         onAttach={async (selected) => {
-          const held = target.current;
+          const held = targetRef.current;
           if (!held) return false;
           const files = await Promise.all(selected.map((file) => file.load()));
-          const current = () => target.current === held;
+          const current = () => targetRef.current === held;
           if (files.some((file) => file === undefined) || !current()) return false;
           const accepted = await runtime.runPromise(insertFiles(held, files.filter((file) => file !== undefined), current));
           if (accepted && current()) {
-            target.current = undefined;
+            targetRef.current = undefined;
             await attachments.send({ type: "cancel" });
           }
           return accepted;
@@ -197,10 +199,11 @@ interface DockHandleProps {
   dock: ReturnType<typeof useDock>;
   detent: Parameters<typeof dockOpen>[0];
   compact: boolean;
+  focusOnPointerOpen: boolean;
   field: RefObject<HTMLTextAreaElement | null>;
 }
 
-function DockHandle({ dock, detent, compact, field }: DockHandleProps) {
+function DockHandle({ dock, detent, compact, focusOnPointerOpen, field }: DockHandleProps) {
   const open = dockOpen(detent);
   return (
     <AssistantGrabber
@@ -213,7 +216,7 @@ function DockHandle({ dock, detent, compact, field }: DockHandleProps) {
       }}
       onLift={() => {
         void dock.send({ type: "lift", now: untimed });
-        if (!open && !compact) field.current?.focus();
+        if (!open && focusOnPointerOpen) field.current?.focus();
       }}
       onCancel={() => { void dock.send({ type: "shift", now: untimed }); }}
       onTap={({ keyboard }) => {
@@ -289,6 +292,7 @@ export function Assistant({ runtime, messageActions, speech, canReadAloud = fals
   const check = { type: "checkForReply" } as const;
   const checkable = conversation.can(check) && (talking.turn.send.outcome === "Unknown" || talking.turn.reply === "Stopped" || talking.check === "LookLater" || writing.unsettled);
   const draftFiles = sameBinding(seen.filesBinding, writing.binding) ? seen.files : [];
+  const transcriptTitle = sameBinding(seen.transcript?.binding, writing.binding) ? seen.transcript?.offered.title : undefined;
   const previewed = seen.preview?.ticket === attachments.state?.preview ? seen.preview?.file : undefined;
 
   const type = (text: string) => {
@@ -354,11 +358,12 @@ export function Assistant({ runtime, messageActions, speech, canReadAloud = fals
       if (sent._tag === "Failure") focusOnRevealRef.current = false;
     });
   };
-  const grabber = shell.state ? <DockHandle dock={dock} detent={assistantDetent} compact={compact} field={composerRef} /> : undefined;
+  const grabber = shell.state ? <DockHandle dock={dock} detent={assistantDetent} compact={compact}
+    focusOnPointerOpen={currentView !== undefined && !compact} field={composerRef} /> : undefined;
 
   return (
     <>
-      <AssistantAttachments runtime={runtime} attachments={attachments} preview={previewed} target={fileTargetRef} composer={composerRef} />
+      <AssistantAttachments runtime={runtime} attachments={attachments} preview={previewed} targetRef={fileTargetRef} composerRef={composerRef} />
       {onComms && full && <CommsTarget runtime={runtime} placement="strip" />}
       {(!onComms || open) && <AssistantConversation
         detent={assistantDetent === "Full" ? "full" : assistantDetent === "Sheet" ? "sheet" : "bar"}
@@ -392,7 +397,7 @@ export function Assistant({ runtime, messageActions, speech, canReadAloud = fals
         }}
         composer={{
           ...speech,
-          voice: speech?.voice?.(compact),
+          voice: speech?.voice?.({ compactDock: compact, atBar: assistantDetent === "Bar" }),
           onDictate: onComms || inFlight(talking.turn) || !speech?.onDictate ? undefined : () => {
             openWithFocus(false);
             speech.onDictate?.();
@@ -417,7 +422,7 @@ export function Assistant({ runtime, messageActions, speech, canReadAloud = fals
             onCheck: writing.unsettled && conversation.can(check) ? () => void conversation.send(check) : undefined,
           },
           unavailable: !talking.ready ? "away" : talking.context.sensitive ? "sensitive" : undefined,
-          attachments: onComms ? undefined : waiting(writing, draftFiles),
+          attachments: onComms ? undefined : waiting(writing, draftFiles, transcriptTitle),
           onPreviewAttachment: !onComms && canPreview ? (id) => {
             const file = draftFiles.find((one) => one.id === id);
             if (file) preview(file);
@@ -436,9 +441,15 @@ export function Assistant({ runtime, messageActions, speech, canReadAloud = fals
           onAttach: !onComms && composer.can({ type: "attach", count: 1 }) ? () => {
             const request = { type: "openPicker", room: maxFiles - attachmentCount(writing.editor) } as const;
             if (!attachments.can(request)) return;
-            fileTargetRef.current = { binding: writing.binding, slot: writing.read.ticket, revision: talking.context.revision };
-            openWithFocus(false);
-            void attachments.send(request);
+            void runtime.runPromise(attachmentAuthority()).then((authority) => {
+              if (authority === undefined) {
+                board.change({ attachmentNotice: "Could not verify the owner for these attachments. Try again." });
+                return;
+              }
+              fileTargetRef.current = { binding: writing.binding, slot: writing.read.ticket, revision: talking.context.revision, authority };
+              openWithFocus(false);
+              void attachments.send(request);
+            });
           } : undefined,
           onFocusField: assistantDetent === "Typing" ? undefined : () => openWithFocus(false),
           onHistory: history.browse,
@@ -451,7 +462,9 @@ export function Assistant({ runtime, messageActions, speech, canReadAloud = fals
           } : undefined,
           onRemoveAttachment: (id) => {
             if (id === "question") void composer.send({ type: "removeQuestion" });
-            else if (id === "mail" || id === "transcript" || id === "shown") {
+            else if (id === "transcript") {
+              if (composer.can({ type: "detach", kind: "Transcript" })) void runtime.runPromise(retireTranscript());
+            } else if (id === "mail" || id === "shown") {
               if (id === "mail") mail.clear();
               void composer.send({ type: "detach", kind: detached[id] });
             } else void runtime.runPromise(removeFile(id));

@@ -22,7 +22,7 @@
     "load": [
       "@elizaos/plugin-personal-assistant", "@elizaos/plugin-calendar", "@elizaos/plugin-inbox", "@elizaos/plugin-notes",
       "@elizaos/plugin-files", "@elizaos/plugin-workflow", "@elizaos/plugin-maps", "@elizaos/plugin-browser",
-      "@elizaos/agent/device-actions", "@elizaos/agent/reply-draft", "@elizaos/agent/approvals", "@elizaos/agent/notifications",
+      "@elizaos/plugin-local-inference", "@elizaos/agent/device-actions", "@elizaos/agent/reply-draft", "@elizaos/agent/approvals", "@elizaos/agent/notifications",
       "@elizaos/agent/views", "@elizaos/agent/scheduled-tasks", "@elizaos/agent/tasks", "@elizaos/agent/triggers", "@elizaos/agent/surface"
     ],
     "product": "alpha-apps"

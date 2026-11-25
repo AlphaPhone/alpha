@@ -2,13 +2,16 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { Machine as Listing } from "../gen/app__workflows__list.effect.vibe";
 import { Machine as Definition } from "../gen/app__workflows.effect.vibe";
+import { Machine as Automations } from "../gen/app__workflows__automations.effect.vibe";
 import { Machine as Runs } from "../gen/app__workflows__runs.effect.vibe";
 import { Machine as Sheet } from "../gen/app__workflows__sheet.effect.vibe";
 import { Machine as Clock } from "../gen/app__workflows__clock.effect.vibe";
 import { Machine as Approvals } from "../gen/app__workflows__approvals.effect.vibe";
 import workflows from "../src/workflows/index.tsx";
-import { button, closeAll, drawn, later, open, press, pressOnTop, seen, underAct, until } from "./alpha.tsx";
-import { scene } from "./fakes/scene.ts";
+import home from "../src/home/index.tsx";
+import { Machine as Home } from "../gen/app__home.effect.vibe";
+import { button, closeAll, drawn, fill, later, only, open, press, pressOnTop, seen, underAct, until } from "./alpha.tsx";
+import { type Scene, scene } from "./fakes/scene.ts";
 
 underAct();
 afterEach(closeAll);
@@ -21,11 +24,24 @@ const choose = (name: string) => drawn(() => {
   row.click();
 });
 
+
+async function openWorkflows(world: Scene) {
+  const { alpha } = await open(world, only("home", "view:Workflows", "notice"));
+  const runtime = home.runtime(alpha);
+  await vi.waitFor(async () => {
+    await drawn(() => undefined);
+    const state = await runtime.runPromise(Home.use((machine) => machine.get()));
+    expect(state.tiles.load.status).toBe("Loaded");
+    expect(button("Workflows")).toBeDefined();
+  }, { timeout: 15_000 });
+  await press("Workflows");
+  return alpha;
+}
+
 describe("Workflows", () => {
   it('Filters the owner’s work and keeps removed history (spec/app/workflows/list.md, "Story: Find a workflow")', async () => {
     const world = scene();
-    const { alpha } = await open(world);
-    await press("Workflows");
+    const alpha = await openWorkflows(world);
     const area = workflows.runtime(alpha);
     await until(alpha, area, Listing, (state) => state.list.status === "Loaded" && state.complete);
     expect(visible("Monthly statement", "Desk check", "Retired brief")).toEqual(["Monthly statement", "Desk check"]);
@@ -50,8 +66,7 @@ describe("Workflows", () => {
   it('Reviews a Clock request within its Alarms page and restores focus to the list (spec/app/workflows/clock.md, "Story: Review, then hand over to Clock")', async () => {
     const world = scene();
     world.phone = true;
-    const { alpha } = await open(world);
-    await press("Workflows");
+    const alpha = await openWorkflows(world);
     const area = workflows.runtime(alpha);
     await until(alpha, area, Listing, (state) => state.list.status === "Loaded");
 
@@ -80,11 +95,64 @@ describe("Workflows", () => {
     });
   });
 
+  it('Keeps the saved schedule while editing prompt instructions (spec/app/workflows/automations.md, "Story: Create or edit an automation on a schedule")', async () => {
+    const world = scene();
+    const existing = [
+      { id: "single-prompt", displayName: "Call reminder", triggerType: "once", scheduledAtIso: "2027-02-08T14:15:00.000Z" },
+      { id: "event-prompt", displayName: "Inbox event", triggerType: "event", eventKind: "inbox-delivered" },
+      { id: "complex-prompt", displayName: "Monthly review", triggerType: "cron", cronExpression: "5 9 1 * *" },
+      { id: "weekly-prompt", displayName: "Delivery review", triggerType: "cron", cronExpression: "13 8 * * 1-5" },
+    ] as const;
+    for (const prompt of existing) world.workflows.prompts.set(prompt.id, {
+      ...prompt, instructions: "Review the details.", enabled: false, revision: 1, timezone: "America/Los_Angeles",
+    });
+    const alpha = await openWorkflows(world);
+    const area = workflows.runtime(alpha);
+    await until(alpha, area, Listing, (state) => state.list.status === "Loaded" && state.complete);
+
+    for (const { id, displayName, ...timing } of existing) {
+      await choose(displayName);
+      await until(alpha, area, Automations, (state) => state.present && state.list.status === "Loaded");
+      await press("Edit");
+      await fill("Instructions", "Review the updated details.");
+      await press("Review");
+      await pressOnTop("Save changes");
+      await until(alpha, area, Automations, (state) => state.change.attempt.outcome === "Confirmed");
+      expect(world.workflows.promptEdits.at(-1)).toEqual({
+        kind: "prompt", displayName, instructions: "Review the updated details.", timezone: "America/Los_Angeles",
+        expectedRevision: 1, ...timing,
+      });
+      expect(world.workflows.prompts.get(id)).toMatchObject({ ...timing, instructions: "Review the updated details.", revision: 2 });
+      await drawn(() => alpha.back());
+      await until(alpha, area, Listing, (state) => state.place.tag === "ListingRows" && state.list.status === "Loaded");
+    }
+
+    await choose("Delivery review");
+    await until(alpha, area, Automations, (state) => state.present && state.list.status === "Loaded");
+    await press("Edit");
+    await press("Weekends");
+    await press("Review");
+    await pressOnTop("Save changes");
+    await until(alpha, area, Automations, (state) => state.change.attempt.outcome === "Confirmed");
+    expect(world.workflows.prompts.get("weekly-prompt")).toMatchObject({ cronExpression: "13 8 * * 0,6", revision: 3 });
+
+    await until(alpha, area, Automations, (state) => state.present && state.list.status === "Loaded");
+    await press("Edit");
+    await fill("Instructions", "One more update.");
+    await press("Review");
+    const current = world.workflows.prompts.get("weekly-prompt");
+    if (!current) throw new Error("No weekly prompt");
+    world.workflows.prompts.set("weekly-prompt", { ...current, revision: 4, instructions: "Changed in another session." });
+    await pressOnTop("Save changes");
+    await until(alpha, area, Automations, (state) => state.change.attempt.outcome === "Refused");
+    expect(world.workflows.promptEdits.at(-1)).toMatchObject({ expectedRevision: 3 });
+    expect(world.workflows.prompts.get("weekly-prompt")?.instructions).toBe("Changed in another session.");
+  });
+
   it('Runs the reviewed version, follows its approval and opens its output (spec/app/workflows/runs.md, "Story: Run a workflow now"; spec/app/workflows/sheet.md, "Story: Read a run\'s sheet"; spec/app/workflows/approvals.md, "Story: Answer a run\'s approval on the phone")', async () => {
     const world = scene();
     world.workflows.stage = "Running";
-    const { alpha } = await open(world);
-    await press("Workflows");
+    const alpha = await openWorkflows(world);
     const area = workflows.runtime(alpha);
     await until(alpha, area, Listing, (state) => state.list.status === "Loaded");
     await choose("Monthly statement");
