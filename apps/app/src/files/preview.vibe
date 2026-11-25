@@ -489,9 +489,20 @@ export effect function readCurrentFileText(prior: FileSelection): (Attached | un
 
 effect function askAbout(viewer: number, item: number, revision: number): void!!(Documents | FilePreview | MediaHandoff | Toasts | Said) {
   const prior = { viewer, item, revision, grant: try grantOf(item) }
+  const machine = try Shown.Machine
+  const opened = try Opened
+  const drawing = (try machine.get()).drawing.ticket
+  const content = try opened.content()
+  const context = try Effect.context<FilePreview>()
+  const current = Effect.provideContext(effect {
+    const state = try machine.get()
+    return Shown.canAskAlpha(state, "Owner") && state.drawing.ticket === drawing && (try opened.content()) === content
+      && (try samePreview(viewer, item, revision, prior.grant))
+  }, context)
   const data = try readAttachment(prior, true)
-  if (!(try samePreview(viewer, item, revision, prior.grant))) return
-  if (data === undefined || !(try attachToAlpha(data))) try say("Alpha could not attach this file", true)
+  if (!(try current)) return
+  if (data !== undefined && (try attachToAlpha(data, current))) return
+  if (try current) try say("Alpha could not attach this file", true)
 }
 
 // spec/app/files/preview.md, "Use in email offers the exact file to the selected Inbox account for review before it joins a new draft"
