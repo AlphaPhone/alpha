@@ -1002,6 +1002,13 @@ public final class AlphaDevicePlugin extends Plugin {
    bars.setAppearanceLightStatusBars(!dark);bars.setAppearanceLightNavigationBars(!dark);call.resolve();
   });
  }
+ /** The Google consent the agent launches with from now on (AlphaAgentService), as the owner's Settings last read or saved it. */
+ @PluginMethod public void setAgentGoogleConsent(PluginCall call){
+  Boolean gmail=call.getBoolean("gmailChanges"),calendar=call.getBoolean("calendarEdits");
+  if(gmail==null||calendar==null){call.reject("Choose Gmail changes and Calendar edits.");return;}
+  try{if(AlphaAgentService.keep(getContext(),new ai.eliza.os.agent.AgentConfig.GoogleConsent(gmail,calendar)))call.resolve();else call.reject("Agent consent could not be saved");}
+  catch(IllegalStateException unconfigured){call.reject("The agent service is not configured");}
+ }
  /** Touch feedback for a renderer control (AlphaHaptics). Android skips it when the owner turned touch feedback off. */
  @PluginMethod public void haptic(PluginCall call){
   int feedback=AlphaHaptics.constant(call.getString("kind"),Build.VERSION.SDK_INT);if(feedback<0){call.reject("Unknown feedback");return;}

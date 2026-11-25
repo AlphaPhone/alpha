@@ -35,8 +35,8 @@ function phoneWith(offered: readonly ReturnType<typeof release>[], digest: strin
 const report = (alpha: Awaited<ReturnType<typeof open>>["alpha"], area: string, engagement: Partial<Engagement>) =>
   alpha.runtime.runPromise(Effect.flatMap(Engagements, (reports) => reports.report(area, engagement)));
 
-/** Settings → About, where the update rows are drawn. */
-async function about(alpha: Awaited<ReturnType<typeof open>>["alpha"]) {
+/** Settings → General, where the update rows are drawn. */
+async function general(alpha: Awaited<ReturnType<typeof open>>["alpha"]) {
   await press("Settings");
   await until(alpha, alpha.runtime, Shell, (s) => s.trail.at(-1) === "Settings");
   await press("General");
@@ -52,7 +52,7 @@ describe("Updates", () => {
     // spec/app/update/index.md, "Of a complete manifest, Alpha keeps only the well-formed launcher release signed by the phone's own signing root"
     expect((await updatesOf(alpha)).offer.release.version).toBe(121);
     expect(world.update.installs).toEqual([]);
-    await about(alpha);
+    await general(alpha);
     // spec/app/update/index.md, "A version name is shown only when it has 1 to 64 characters, and notes only when they have at most 500"
     expect([document.body.textContent?.includes("Version 1.121 (121)"), document.body.textContent?.includes("Fixes the clock.")]).toEqual([true, true]);
     // spec/app/update/index.md, "Allow automatic updates is offered only while the permission is required, and opens Android's setting"
@@ -87,7 +87,7 @@ describe("Updates", () => {
     world.update.permission = "unsupported";
     const { alpha } = await open(world);
     await until(alpha, alpha.runtime, Updates.Machine, (s) => s.checked === "Fine" && s.offer.release.version === 121);
-    await about(alpha);
+    await general(alpha);
     // spec/app/update/index.md, "An install Android refused for its permission offers Allow automatic updates at once"
     world.update.installAnswer = "permission-required";
     await pressRow("Install update");
@@ -121,7 +121,7 @@ describe("Updates", () => {
     await until(alpha, alpha.runtime, Updates.Machine, (s) => s.checked === "Fine");
     // spec/app/update/index.md, "A check that fails never replaces the saved offer"
     world.update.unreadable = true;
-    await about(alpha);
+    await general(alpha);
     // spec/app/update/index.md, "Android's install permission is unsupported, required, starting or supported": a phone still starting says so, and installs nothing on its own.
     expect([document.body.textContent?.includes("Automatic updatesStarting"), world.update.installs]).toEqual([true, []]);
     await press("Check for updates");

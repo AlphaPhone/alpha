@@ -242,9 +242,8 @@ function General({ runtime, alpha, common }: PageProps) {
       said={reset.state && saidNames[reset.state.said]}
       requestingHome={facts !== undefined && loading(facts.request)}
       onRequestHome={can(request) ? () => void send(request) : undefined}
-    >
-      {alpha.slot("settings/update")}
-    </SettingsGeneralPage>
+      updates={alpha.slot("settings/update")}
+    />
   );
 }
 

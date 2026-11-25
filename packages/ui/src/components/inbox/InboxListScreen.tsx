@@ -1,4 +1,4 @@
-import { CheckCheck, ChevronLeft, Ellipsis, ListChecks, PenLine, Plus, RefreshCw, Search, UserRound } from "lucide-react";
+import { CheckCheck, ChevronLeft, Ellipsis, ListChecks, PenLine, Plus, RotateCw, Search, UserRound } from "lucide-react";
 import { useRef } from "react";
 import { Button } from "../Button.tsx";
 import { Menu, MenuContent, MenuItem, MenuTrigger } from "../Menu.tsx";
@@ -76,7 +76,7 @@ export function InboxListScreen({
   };
   const actions = (
     <>
-      {onRefresh || loading ? <Button variant="ghost" size="icon" aria-label="Refresh" loading={loading} disabled={!onRefresh} onClick={onRefresh}><RefreshCw /></Button> : null}
+      {onRefresh || loading ? <Button variant="ghost" size="icon" aria-label="Refresh" loading={loading} disabled={!onRefresh} onClick={onRefresh}><RotateCw /></Button> : null}
       <Button variant="ghost" size="icon" aria-label="Search email" disabled={!onOpenSearch} onClick={onOpenSearch} ref={(button) => {
         if (button && focusSearchAfterCloseRef.current) {
           focusSearchAfterCloseRef.current = false;
@@ -110,7 +110,9 @@ export function InboxListScreen({
       {searching ? null : <InboxFolderBar folder={folder} unavailable={unavailable} onChoose={onChooseFolder} />}
       {notice ? <InboxNotice kind={notice} onAction={onNoticeAction} /> : null}
       {chosen > 0 ? <InboxSelectionBar count={chosen} onArchive={onArchive} onTrash={onTrash} onRestore={onRestore} /> : null}
-      {state && rows.length === 0 && !loading ? <InboxListState kind={state} onAction={onStateAction} /> : <InboxList rows={rows} loading={loading} onLoadMore={onLoadMore} loadingMore={loadingMore} />}
+      {rows.length === 0 && loading ? <InboxListState kind="loading" />
+        : state && rows.length === 0 ? <InboxListState kind={state === "empty" && folder === "sent" ? "emptySent" : state} onAction={onStateAction} />
+        : <InboxList rows={rows} loading={loading} onLoadMore={onLoadMore} loadingMore={loadingMore} />}
     </Screen>
   );
 }

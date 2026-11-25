@@ -205,3 +205,5 @@ export * from "./components/photos/PhotosMenu.tsx";
 export * from "./components/photos/PhotosSections.tsx";
 export * from "./components/photos/PhotoTile.tsx";
 export * from "./components/photos/PhotoTrashRow.tsx";
+export * from "./components/browser/BrowserMenu.tsx";
+export * from "./components/browser/BrowserTabs.tsx";

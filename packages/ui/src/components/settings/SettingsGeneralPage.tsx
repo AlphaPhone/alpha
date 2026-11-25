@@ -42,8 +42,8 @@ export type SettingsGeneralPageProps = SettingsAndroidProps &
     onRequestHome?: () => void;
     /** What Alpha said about the last reset attempt. */
     said?: SettingsResetNoticeProps["said"];
-    /** The update area's controls, above reset. */
-    children?: ReactNode;
+    /** Update rows owned by the update area. */
+    updates?: ReactNode;
     /** Commands in the General header. */
     actions?: ReactNode;
   };
@@ -55,7 +55,7 @@ const themes = { system: "System", light: "Light", dark: "Dark" } as const;
  * and default apps, and Erase all data at the foot. Rows are numbered by slot, as on the first page.
  * @model spec/app/settings/index.md
  */
-export function SettingsGeneralPage({ wifi, bluetooth, mobileData, theme, alerts, image = false, told, onBack, onOpen, onPhone = false, reviewing, onErase, requestingHome, onRequestHome, said, starting, onAndroid, place, onPlace, children, actions }: SettingsGeneralPageProps) {
+export function SettingsGeneralPage({ wifi, bluetooth, mobileData, theme, alerts, image = false, told, onBack, onOpen, onPhone = false, reviewing, onErase, requestingHome, onRequestHome, said, updates, starting, onAndroid, place, onPlace, actions }: SettingsGeneralPageProps) {
   const at = (row: number) => placed({ place, onPlace }, row);
   const android = { starting, onAndroid };
   return (
@@ -85,7 +85,7 @@ export function SettingsGeneralPage({ wifi, bluetooth, mobileData, theme, alerts
         <SettingsAndroidRow target="default-apps" title="Default apps" icon={<AppWindow />} {...android} {...at(10)} />
         {!image && (requestingHome || onRequestHome) ? <SettingsSetAsHomeRow requesting={requestingHome} onRequest={onRequestHome} {...at(14)} /> : null}
       </ListGroup>
-      {children}
+      {updates}
       {onPhone ? (
         <ListGroup>
           <SettingsResetRow reviewing={reviewing} onErase={onErase} {...at(11)} />

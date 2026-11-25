@@ -1,4 +1,4 @@
-import { expect, fn, screen, userEvent, waitFor, within } from "storybook/test";
+import { expect, fn, userEvent, within } from "storybook/test";
 import type { ComponentMeta } from "vibestack/stories";
 import type { InboxFromFieldProps } from "./InboxFromField.tsx";
 import { sampleAccounts } from "./samples.ts";
@@ -11,10 +11,9 @@ export const meta: ComponentMeta<InboxFromFieldProps> = {
   play: {
     Default: async ({ canvasElement }: { canvasElement: HTMLElement }) => {
       onChange.mockClear();
-      await userEvent.click(within(canvasElement).getByRole("combobox", { name: "From" }));
-      await userEvent.click(await screen.findByRole("option", { name: /studio@/ }));
-      await waitFor(() => expect([onChange.mock.calls, screen.queryByRole("listbox")]).toEqual([[["2"]], null]));
+      await userEvent.selectOptions(within(canvasElement).getByRole("combobox", { name: "From account" }), "2");
+      await expect(onChange.mock.calls).toEqual([["2"]]);
     },
-    "A reply keeps its account": ({ canvasElement }: { canvasElement: HTMLElement }) => expect(within(canvasElement).getByRole("combobox", { name: "From" })).toBeDisabled(),
+    "A reply keeps its account": ({ canvasElement }: { canvasElement: HTMLElement }) => expect(within(canvasElement).getByRole("combobox", { name: "From account" })).toBeDisabled(),
   },
 };
