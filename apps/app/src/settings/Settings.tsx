@@ -525,6 +525,8 @@ export function Settings({ runtime, alpha, further }: { runtime: SettingsRuntime
   const { state, cause, can, send } = usePages(runtime);
   const android = useTimed(runtime, useAndroid);
   const facts = useTimed(runtime, useFacts);
+  const [entered, setEntered] = useState<{ page?: Page; depth: number; opened: boolean }>({ depth: 0, opened: false });
+  if (state && entered.page !== state.page) setEntered({ page: state.page, depth: state.places.length, opened: state.places.length > entered.depth });
   if (cause) return <Banner variant="destructive" className="m-4">Alpha could not open Settings</Banner>;
   if (!state) return null;
   const page = state.page;
@@ -550,7 +552,7 @@ export function Settings({ runtime, alpha, further }: { runtime: SettingsRuntime
       if (android.can(handOff)) void android.send(handOff);
     },
     told: android.state && toldWords[android.state.told],
-    place: state.places[state.places.length - 1] ?? 0,
+    place: entered.opened && (state.places[state.places.length - 1] ?? 0) === 0 ? -1 : state.places[state.places.length - 1] ?? 0,
     onPlace: (focused) => {
       if (focused !== (state.places[state.places.length - 1] ?? 0)) void send({ type: "focus", focused });
     },
