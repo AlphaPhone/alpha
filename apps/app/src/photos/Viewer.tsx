@@ -5,11 +5,11 @@ import { Button, Menu, MenuContent, MenuItem, MenuTrigger, Sheet, SheetContent, 
 import { useMachine } from "../../gen/app__photos__viewer.react.ts";
 import { maxZoom, panUnits, type Event, type Look, type Pan } from "../../gen/app__photos__viewer.ts";
 import type { Machine } from "../../gen/app__photos__viewer.effect.vibe";
-import type { Row } from "./catalog.vibe";
+import { taken, type Row } from "./catalog.vibe";
 import { OpenedPhoto, photoLook } from "./viewer.vibe";
 import { photoLooks } from "../platform/photoCanvas.vibe";
 import { CropFrame } from "./CropFrame.tsx";
-import { trashDaysLabel, trashDaysLeft } from "./Grid.tsx";
+import { headingOf, trashDaysLabel, trashDaysLeft } from "./Grid.tsx";
 import { Time } from "../runtime/time.vibe";
 
 const filters: readonly Look[] = ["Original", "Vivid", "Warm", "Cool", "Mono", "Fade", "Noir"];
@@ -83,13 +83,15 @@ export function MediaViewer({ runtime, before, after, row, inTrash, onAddToAlbum
   const current = runtime.runSync(Effect.flatMap(OpenedPhoto, (opened) => opened.current()));
   const preview = runtime.runSync(Effect.flatMap(OpenedPhoto, (opened) => opened.preview()));
   const showing = state.read.status === "Loaded" && current.photo === state.open && !state.gone;
-  const item = showing ? current.item ?? current.browser?.item ?? row?.item : row?.item;
+  const showingRow: Row | undefined = showing && current.item !== undefined ? { kind: "phone", item: current.item }
+    : showing && current.browser !== undefined ? { kind: "browser", item: current.browser.item } : row;
+  const item = showingRow?.item;
   const name = item?.name ?? (state.kind === "Clip" ? "Video" : "Photo");
-  const timestamp = current.item?.takenAt ?? current.item?.date ?? current.browser?.item.created ?? (row?.kind === "browser" ? row.item.created : undefined);
+  const timestamp = showingRow === undefined ? 0 : taken(showingRow);
   const now = runtime.runSync(Effect.flatMap(Time, (time) => time.latest()));
-  const date = timestamp === undefined ? undefined : new Date(timestamp);
-  const expiry = inTrash ? trashDaysLeft(current.item?.expiresAt ?? (row?.kind === "phone" ? row.item.expiresAt : undefined), now) : undefined;
-  const day = date === undefined ? name : date.toDateString() === new Date(now).toDateString() ? "Today" : formatDate.format(date);
+  const date = timestamp > 0 ? new Date(timestamp) : undefined;
+  const expiry = inTrash && showingRow?.kind === "phone" ? trashDaysLeft(showingRow.item.expiresAt, now) : undefined;
+  const day = date === undefined ? name : headingOf(timestamp, now, true);
   function action(event: Event) {
     if (can(event, "Owner")) void send(event, "Owner");
   }

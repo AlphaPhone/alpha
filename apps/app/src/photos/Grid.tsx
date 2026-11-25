@@ -138,15 +138,15 @@ const dayHeadings = 30;
 
 const startOfDay = (at: number) => new Date(at).setHours(0, 0, 0, 0);
 
-/** The heading an item taken `at` falls under, as of `now`: "Today", "Yesterday", "Sat, Oct 31", then "October 2026". */
-export function headingOf(at: number, now: number): string {
+/** The section heading or the exact day of an individual photo. */
+export function headingOf(at: number, now: number, exactDay = false): string {
   const ago = Math.round((startOfDay(now) - startOfDay(at)) / 86_400_000);
   const shot = new Date(at);
   if (ago <= 0) return "Today";
   if (ago === 1) return "Yesterday";
-  if (ago < dayHeadings) {
-    const otherYear = shot.getFullYear() !== new Date(now).getFullYear();
-    return shot.toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric", ...(otherYear ? { year: "numeric" } : {}) });
+  if (ago < dayHeadings || exactDay) {
+    const includeYear = ago >= dayHeadings || shot.getFullYear() !== new Date(now).getFullYear();
+    return shot.toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric", ...(includeYear ? { year: "numeric" } : {}) });
   }
   return shot.toLocaleDateString("en-US", { month: "long", year: "numeric" });
 }
