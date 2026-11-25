@@ -1,5 +1,5 @@
 import { AppHeader, Toast } from "@repo/ui";
-import { Effect, Layer, ManagedRuntime, Stream } from "effect";
+import { Effect, Layer, Stream } from "effect";
 import { HttpClient, HttpClientResponse } from "effect/http";
 import { createRoot } from "react-dom/client";
 import { Machine as Composer } from "../gen/app__assistant__composer.effect.vibe";
@@ -13,7 +13,8 @@ import { agentAt } from "../src/platform/agent.vibe";
 import { cloudAt } from "../src/platform/cloud.vibe";
 import { pagePlatform } from "../src/platform/platform.vibe";
 import { resident } from "../src/resident.vibe";
-import { together, whole } from "../src/runtime/reactor.vibe";
+import { together } from "../src/runtime/reactor.vibe";
+import { rooted } from "../src/runtime/root.vibe";
 import { voicing } from "../src/voice/voice.vibe";
 
 const closers: (() => Promise<void>)[] = [];
@@ -43,7 +44,8 @@ export async function mountDock({ view = "Browser", withToast = false, flush }: 
     Layer.succeed(MediaHandoff, { attach: () => Effect.succeed(false) }),
     Layer.succeed(MediaExecutors, { execute: () => Effect.succeed(undefined) }),
   );
-  const runtime = ManagedRuntime.make(Layer.provideMerge(whole(together(resident, assisting, voicing, aloud)), platform));
+  const root = rooted(Layer.provideMerge(resident, platform));
+  const runtime = root.over(together(assisting, voicing, aloud));
   const host = document.body.appendChild(document.createElement("div"));
   const reactRoot = createRoot(host);
   await run(async () => {
@@ -59,7 +61,7 @@ export async function mountDock({ view = "Browser", withToast = false, flush }: 
   closers.push(async () => {
     await run(() => { reactRoot.unmount(); });
     host.remove();
-    await runtime.dispose();
+    await root.dispose();
   });
   await run(async () => {
     if (view === "Browser") await runtime.runPromise(Effect.flatMap(Shell, (m) => m.send({ type: "openView", view: "Browser" })));
