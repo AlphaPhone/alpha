@@ -32,6 +32,7 @@ export const meta: ComponentMeta<InboxMessageScreenProps> = {
     "Saved copy": { fromPhone: true, ...noActions, onOlder: undefined, attachments: [] },
     "Marking unconfirmed": { notice: "markUnconfirmed", onNoticeAction: fn() },
     "Read only account": { ...noActions, onAskAlpha: fn() },
+    "Full date in the details": { date: "09:41", fullDate: "Friday, 14 November 2025 at 09:41:07 GMT" },
   },
   play: {
     Default: async ({ canvasElement }: { canvasElement: HTMLElement }) => {
@@ -45,6 +46,11 @@ export const meta: ComponentMeta<InboxMessageScreenProps> = {
       onShowImages.mockClear();
       await userEvent.click(within(canvasElement).getByRole("button", { name: "Show images" }));
       await expect(onShowImages.mock.calls.length).toBe(1);
+    },
+    "Full date in the details": async ({ canvasElement }: { canvasElement: HTMLElement }) => {
+      const canvas = within(canvasElement);
+      await expect(canvas.getByText("To me · 09:41")).toBeInTheDocument();
+      await expect(canvas.getByText("Friday, 14 November 2025 at 09:41:07 GMT")).toBeInTheDocument();
     },
     "Saved copy": async ({ canvasElement }: { canvasElement: HTMLElement }) => {
       await expect(within(canvasElement).queryByRole("button", { name: "Show images" })).toBeNull();

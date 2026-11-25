@@ -699,8 +699,9 @@ pure def sometimesTheSavedListIsShownOffline(s: Mailbox): bool =
 
 ### Attention says whether the owner is signed out, has no account, is being checked, or has a count of unread messages, fresh or no longer fresh, or could not be read
 
-Only counts, a time and whether there are more leave Inbox: no sender,
-subject or body.
+Attention itself is only counts, a time and whether there are more. Home's
+mail card also shows the senders and subjects of the first unread messages
+Inbox loaded, and which account it read when; no body ever leaves Inbox.
 
 ```quint
 type Standing = SignedOut | NotConnected | Checking | Ready | Stale | Unavailable

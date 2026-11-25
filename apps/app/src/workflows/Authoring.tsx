@@ -1,7 +1,7 @@
 // spec/app/workflows/builder.md, "Story: Write a workflow step by step"; spec/app/workflows/builder.md, "Story: Save a workflow on the agent once"; spec/app/workflows/generate.md, "Story: Have the agent draft a workflow"
 import { Effect } from "effect";
-import { Alert, Button, ConfirmDialog, Input, ListRow, Select, SelectContent, SelectItem, SelectTrigger, Sheet, SheetContent, Spinner, Textarea } from "@repo/ui";
-import { ChevronRight, Plus, Sparkles, Workflow } from "lucide-react";
+import { Alert, Button, ConfirmDialog, Input, Select, SelectContent, SelectItem, SelectTrigger, Sheet, SheetContent, Spinner, Textarea, WorkflowChoice } from "@repo/ui";
+import { ListChecks, Plus, Sparkles } from "lucide-react";
 import { useState } from "react";
 import type { Machine as BuilderMachine } from "../../gen/app__workflows__builder.effect.vibe";
 import { useMachine as useBuilder } from "../../gen/app__workflows__builder.react.ts";
@@ -15,6 +15,8 @@ import { type DraftOperation, DraftWords, appendDraft, available, describeDraft,
 
 interface AuthoringProps extends Pick<Shown<Resident | BuilderMachine | GenerateMachine | DraftWords>, "runtime"> {
   readonly owner: number;
+  /** Whether Add to Workflows shows its further choices, where a workflow of steps is one. */
+  readonly offered?: boolean;
 }
 
 const titles: Readonly<Record<string, string>> = {
@@ -77,7 +79,7 @@ function StepInput({ options, prior, onAdd }: {
 }
 
 /** Create a typed workflow, set when it runs, and review exactly what the agent will save. */
-export function Authoring({ runtime, owner }: AuthoringProps) {
+export function Authoring({ runtime, owner, offered = true }: AuthoringProps) {
   const builder = useBuilder(runtime);
   const generate = useGenerate(runtime);
   const [prompt, setPrompt] = useState("");
@@ -87,11 +89,7 @@ export function Authoring({ runtime, owner }: AuthoringProps) {
   const draft = runtime.runSync(Effect.flatMap(DraftWords, (words) => words.view()));
   const open = { type: "openBuilder", workflow: 0, version: 0, unfinished: false } as const;
   const tell = (event: Event) => { if (builder.can(event)) void builder.send(event); };
-  if (!state.open) return (
-    <ul className="divide-y divide-border">
-      {builder.can(open) && <li><ListRow title="Workflow" leading={<Workflow />} trailing={<ChevronRight aria-hidden />} onClick={() => tell(open)} /></li>}
-    </ul>
-  );
+  if (!state.open) return offered && builder.can(open) ? <WorkflowChoice label="Steps" icon={<ListChecks />} onClick={() => tell(open)} /> : null;
   const editable = unlocked(state);
   const describe = { type: "describe", unlocked: editable, generates: state.generates } as const;
   const review = { type: "reviewSave", unfinished: false } as const;

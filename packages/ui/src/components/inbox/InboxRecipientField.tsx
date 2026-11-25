@@ -44,8 +44,8 @@ export function InboxRecipientField({ label, recipients, value, onValueChange, o
     if (address) onAdd(address);
   };
   return (
-    <div role="group" aria-label={label} className="flex min-h-13 items-start gap-2 border-b border-border py-1.5">
-      <span aria-hidden className="flex h-9.5 w-6 shrink-0 items-center text-sm text-muted-foreground">{label}</span>
+    <div role="group" aria-label={label} className={cn("flex items-start gap-2 border-b border-border", label === "To" ? "min-h-13 py-1.5" : "min-h-11 py-0.75")}>
+      {label === "To" ? <span aria-hidden className="flex h-9.5 w-6 shrink-0 items-center text-sm text-muted-foreground">{label}</span> : null}
       <div className="flex min-w-0 flex-1 flex-wrap items-center gap-1.5">
         {recipients.map(({ address, valid }) => (
           <button
@@ -53,10 +53,10 @@ export function InboxRecipientField({ label, recipients, value, onValueChange, o
             type="button"
             aria-label={`Remove ${address}`}
             onClick={() => onRemove(address)}
-            className={cn(focusRing, "flex min-h-11 max-w-full min-w-0 items-center gap-1.5 rounded-lg bg-secondary py-2 pr-2 pl-3 text-left text-sm font-semibold text-secondary-foreground", !valid && "text-destructive ring-1 ring-destructive")}
+            className={cn(focusRing, "flex min-h-8.5 max-w-full min-w-0 items-center gap-1.5 rounded-full bg-secondary py-1.5 pr-2 pl-3 text-left text-sm font-semibold text-secondary-foreground", !valid && "text-destructive ring-1 ring-destructive")}
           >
             {valid ? null : <CircleAlert role="img" aria-label="Not an address Gmail accepts" className="size-4 shrink-0" />}
-            <span className="min-w-0 break-all">{address}</span>
+            <span className="min-w-0 truncate">{address}</span>
             <X aria-hidden className="size-3.5 shrink-0 text-muted-foreground" />
           </button>
         ))}
@@ -64,12 +64,12 @@ export function InboxRecipientField({ label, recipients, value, onValueChange, o
           <input
             type="email"
             aria-label={label}
-            placeholder={recipients.length > 0 ? "Add" : label === "To" ? "Email address" : label}
+            placeholder={label === "To" ? "Email address" : label}
             enterKeyHint="done"
             autoComplete="off"
             value={value}
             onChange={(event) => onValueChange(event.target.value)}
-            className="h-9.5 w-full bg-transparent p-0 text-body leading-tight text-foreground outline-0 placeholder:text-muted-foreground"
+            className="h-9.5 w-full bg-transparent p-0 text-md text-foreground outline-0 placeholder:text-muted-foreground"
           />
         </form>
       </div>

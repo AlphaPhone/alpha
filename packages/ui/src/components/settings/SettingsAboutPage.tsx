@@ -44,12 +44,12 @@ export function SettingsAboutPage({ alphaVersion, androidVersion, storage, onPho
           <Mark aria-hidden className="size-[118%] shrink-0" />
         </span>
         <h2 className="font-display text-title font-light">Alpha Phone</h2>
-        <p className="text-caption text-muted-foreground">
+        <p className="text-caption leading-normal text-muted-foreground">
           {alphaVersion.word === "reported" ? `Version ${alphaVersion.value}` : <SettingsReading reading={alphaVersion} />}
         </p>
       </div>
       <ListGroup>
-        <SettingsFactRow title="Android" reading={androidVersion} />
+        <SettingsFactRow title="Android version" reading={androidVersion} />
         {storage ? <SettingsFactRow title="Storage" reading={storage} /> : null}
       </ListGroup>
       <ListGroup>

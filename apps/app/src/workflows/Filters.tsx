@@ -36,7 +36,7 @@ export function Filters({ listing, can, send, refresh, restoreFocus }: FiltersPr
   return (
     <Sheet open={listing.sheet} onOpenChange={(open) => { if (!open && can(dismiss)) send(dismiss); }}>
       <SheetContent title="Filter workflows" overlayClassName="bg-foreground/28 dark:bg-background/28"
-        className="inset-x-3 bottom-3 max-h-[calc(100dvh-2rem)] max-w-100 rounded-panel bg-background pt-5 pr-9.5 pb-6 pl-6 text-foreground shadow-none [&>div:first-child]:min-h-11 [&>div:first-child]:justify-center [&_h2]:mr-14 [&_h2]:leading-row"
+        className="inset-x-3 bottom-3 max-h-[calc(100dvh-2rem)] before:hidden max-w-100 rounded-panel bg-background pt-5 pr-9.5 pb-6 pl-6 text-foreground shadow-none [&>div:first-child]:min-h-11 [&>div:first-child]:justify-center [&_h2]:mr-14 [&_h2]:font-sans [&_h2]:text-xl [&_h2]:leading-row [&_h2]:font-semibold"
         onCloseAutoFocus={(event) => { event.preventDefault(); restoreFocus(); }}
         actions={<Button className="h-12 rounded-full bg-foreground text-prose font-semibold text-background hover:bg-foreground/90"
           onClick={() => send({ type: "applyFilters" })} disabled={!can({ type: "applyFilters" })}>Done</Button>}>

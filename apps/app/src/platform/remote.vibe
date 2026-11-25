@@ -10,10 +10,14 @@ export error Unreachable { cause: unknown }
 /** The other side answered with a status other than 2xx, how many seconds it asked Alpha to wait, where it asked, and the reason it named, where Alpha reads one. */
 export error Refused { status: number; wait?: number; reason?: string }
 
-/** The refusal of `status`, with the wait `said` gave where the platform's rule takes it: a `Retry-After` of whole seconds, or seconds already read. */
-export function refusal(status: number, said: string | number | undefined): Refused {
+/**
+ * The refusal of `status`, with the wait `said` gave where the platform's rule takes it: a `Retry-After` of whole
+ * seconds, or seconds already read; and with the `reason` the other side named, where it named one.
+ */
+export function refusal(status: number, said: string | number | undefined, reason?: string): Refused {
   const seconds = typeof said === "number" ? said : said !== undefined && /^\d+$/.test(said.trim()) ? Number(said.trim()) : undefined
-  return seconds !== undefined && waitAdvised(status, Number.isSafeInteger(seconds), seconds) ? new Refused({ status, wait: seconds }) : new Refused({ status })
+  const wait = seconds !== undefined && waitAdvised(status, Number.isSafeInteger(seconds), seconds) ? { wait: seconds } : {}
+  return new Refused({ status, ...wait, ...(reason === undefined ? {} : { reason }) })
 }
 
 /** The other side answered 2xx with something that is not what was asked for. */
@@ -165,12 +169,12 @@ export effect function attempted<I>(remote: Context.Key<I, Remote>, request: Htt
 /**
  * Carry out the kit attempt `id` as `attempted` does, where the request itself names the attempt's idempotency key, as
  * eliza's calendar routes ask in their body or query: `build` makes it from the key, and no header carries it. Beside
- * how it ended, the answer's body, untrusted, where it came.
+ * how it ended, the answer's body, untrusted, where it came, and the reason a refusal named, where it named one.
  */
-export effect function attemptedWith<I>(remote: Context.Key<I, Remote>, build: (key: string) => HttpClientRequest.HttpClientRequest, id: number): (Outcome & { readonly body: unknown })!!(I | Attempts) {
+export effect function attemptedWith<I>(remote: Context.Key<I, Remote>, build: (key: string) => HttpClientRequest.HttpClientRequest, id: number): (Outcome & { readonly body: unknown; readonly reason?: string })!!(I | Attempts) {
   const key = try (try Attempts).key(id)
   return effect {
     const body = try (try remote).call(build(key))
     return { confirmed: true, known: true, body }
-  } catch (failure) => ({ ...outcomeOf(failure), body: undefined })
+  } catch (failure) => ({ ...outcomeOf(failure), body: undefined, ...(failure._tag === "Refused" && failure.reason !== undefined ? { reason: failure.reason } : {}) })
 }

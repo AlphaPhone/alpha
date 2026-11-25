@@ -35,6 +35,7 @@ export interface FakeEvent {
   attendees: FakeAttendee[];
   metadata: Record<string, unknown>;
   recurringEventId: string | null;
+  recurrence?: string[] | null;
   syncedAt: string;
   updatedAt: string;
 }
@@ -344,6 +345,7 @@ function occurrence(seed: Seed, today: Date, off: number, series: boolean): Fake
   return agentEvent(seed.title, begin, begin + seed.d * 3_600_000, {
     id, externalId: id, calendarId: seed.work ? "eliza-calendar/primary" : "eliza-calendar/personal", description: seed.notes ?? "", location: seed.where ?? "",
     conferenceLink: seed.video ? `https://${seed.video}` : null, attendees, recurringEventId: series ? seed.id : null, provider: seed.invite ? "google" : "eliza",
+    recurrence: series ? ["RRULE:FREQ=WEEKLY;BYDAY=MO,TU,WE,TH,FR"] : null,
     organizer: seed.invite ? { self: false, displayName: reference[seed.invite] } : { self: true },
   });
 }

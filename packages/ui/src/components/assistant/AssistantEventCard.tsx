@@ -1,4 +1,4 @@
-import { CalendarDays } from "lucide-react";
+import { CalendarDays, Plus } from "lucide-react";
 import { AssistantCardFrame, type AssistantCardFrameProps } from "./AssistantCardFrame.tsx";
 
 export type AssistantEventCardProps = Pick<AssistantCardFrameProps, "settled" | "onOpen"> & {
@@ -10,5 +10,5 @@ export type AssistantEventCardProps = Pick<AssistantCardFrameProps, "settled" | 
 
 /** An event of the calendar that a reply names; pressing it opens the event in Calendar. */
 export function AssistantEventCard({ title, time, ...frame }: AssistantEventCardProps) {
-  return <AssistantCardFrame icon={<CalendarDays />} title={title} detail={time} {...frame} />;
+  return <AssistantCardFrame icon={<CalendarDays />} title={title} detail={time} trailing={<Plus aria-hidden className="size-5 shrink-0 text-primary" />} {...frame} />;
 }

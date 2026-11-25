@@ -1,4 +1,4 @@
-// spec/app/home/index.md, "Story: Open an app"; spec/app/home/cards.md, "The row holds the agenda, Messages, Phone, mail, brief and Workflows cards in that order, each only when drawn, and is not drawn when none is"; spec/app/home/index.md, "On the assistant alone Home shows no tile and no card"; spec/app/home/index.md, "Story: Edit Home"; spec/app/home/index.md, "Story: Pull down for notifications"
+// spec/app/home/index.md, "Story: Open an app"; spec/app/home/cards.md, "The row holds the agenda, Messages, Phone, Workflows, mail and brief cards in that order, each only when drawn, and is not drawn when none is"; spec/app/home/index.md, "On the assistant alone Home shows no tile and no card"; spec/app/home/index.md, "Story: Edit Home"; spec/app/home/index.md, "Story: Pull down for notifications"
 import type { InstalledApp } from "@elizaos/os-bridges";
 import { AppsDrawer, type AppsDrawerProps, type DrawerApp, HomeScreen, type HomeTileItem, InstalledAppIcon } from "@repo/ui";
 import { useCallback, useSyncExternalStore } from "react";
@@ -100,6 +100,7 @@ export function HomePage({ runtime, alpha }: Shown<HomeMachines | Resident>) {
     <HomeScreen
       launcher={h.host === "AsLauncher"}
       cards={Home.showsCards(h) ? day : []}
+      appCards={Home.showsCards(h) && alpha.slot("home/cards")}
       tiles={ready(h.tiles) ? Home.tilesShown(h, s).map((tile) => tileItem(tile, known.apps, tile.tag === "Own" ? waits.get(tile.view) : undefined, h.editing)) : undefined}
       editing={h.editing}
       onOpenTile={(id) => {
@@ -131,7 +132,6 @@ export function HomePage({ runtime, alpha }: Shown<HomeMachines | Resident>) {
     <>
       <div inert={showingApps || undefined} className="contents">
         {deck}
-        {Home.showsCards(h) && alpha.slot("home/cards")}
       </div>
       {showingApps && (
         <AppsDrawer apps={catalogApps} query={drawer.state?.query ?? ""}

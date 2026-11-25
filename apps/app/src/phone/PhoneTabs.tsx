@@ -1,6 +1,7 @@
 import { AppHeader, Button, TabsList, TabsTrigger, cn } from "@repo/ui";
-import { ChevronLeft, Clock, UserRound, Voicemail, createLucideIcon } from "lucide-react";
+import { ChevronLeft } from "lucide-react";
 import type { ReactNode } from "react";
+import { ContactsGlyph, Dialpad, RecentsGlyph, VoicemailGlyph } from "./icons.ts";
 
 export interface PhoneTabsProps {
   title: string;
@@ -12,16 +13,11 @@ export interface PhoneTabsProps {
   children?: ReactNode;
 }
 
-const Dialpad = createLucideIcon({
-  name: "Dialpad",
-  node: [["path", { key: "dots", d: "M6 6h.01M12 6h.01M18 6h.01M6 12h.01M12 12h.01M18 12h.01M6 18h.01M12 18h.01M18 18h.01" }]],
-});
-
 const tabs = [
-  { name: "Recents", Icon: Clock },
+  { name: "Recents", Icon: RecentsGlyph },
   { name: "Keypad", Icon: Dialpad },
-  { name: "Voicemail", Icon: Voicemail },
-  { name: "Contacts", Icon: UserRound },
+  { name: "Voicemail", Icon: VoicemailGlyph },
+  { name: "Contacts", Icon: ContactsGlyph },
 ] as const;
 
 /** Recents, keypad and the phone's admitted voicemail and address book, in the Phone header. */
@@ -37,7 +33,7 @@ export function PhoneTabs({ title, contacts, voicemail, unheard, onBack, childre
             <Icon aria-hidden className="size-5" />
             <span className="sr-only">{name}</span>
             {name === "Voicemail" && unheard && <span role="img" aria-label="Unheard voicemail"
-              className={cn("absolute top-2 size-2 rounded-full bg-alpha", separate ? "right-4" : "right-2")} />}
+              className={cn("absolute top-2 size-2 rounded-full bg-primary", separate ? "right-4" : "right-2")} />}
           </TabsTrigger>
         );
       })}
@@ -46,7 +42,7 @@ export function PhoneTabs({ title, contacts, voicemail, unheard, onBack, childre
   return (
     <>
       <AppHeader title={title} data-alpha-phone-header="" className="mt-[max(0.125rem,env(safe-area-inset-top))] shrink-0 flex-wrap"
-        leading={onBack && <Button variant="ghost" size="icon" aria-label="Back" onClick={onBack}><ChevronLeft /></Button>}>
+        leading={onBack && <Button variant="ghost" size="icon" aria-label={separate ? "Back" : "Back to apps"} className="rounded-lg" onClick={onBack}><ChevronLeft /></Button>}>
         {separate ? children : selector}
       </AppHeader>
       {separate && <div className="flex shrink-0 justify-center px-4 pb-2">{selector}</div>}
