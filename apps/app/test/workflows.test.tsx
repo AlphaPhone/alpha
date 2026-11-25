@@ -63,6 +63,24 @@ describe("Workflows", () => {
     expect(visible("Monthly statement", "Desk check", "Retired brief")).toEqual(["Retired brief"]);
   });
 
+  it('Explores Add to Workflows while signed out (spec/app/workflows/list.md, "From the list the owner can open a row, Add to Workflows, or the digests; Back returns to the same filters")', async () => {
+    const world = scene();
+    world.signedIn = false;
+    world.residentAvailable = false;
+    const alpha = await openWorkflows(world);
+    const area = workflows.runtime(alpha);
+    await until(alpha, area, Listing, (state) => state.owner === 0 && state.place.tag === "ListingRows");
+    expect(visible("Monthly statement", "Desk check", "Retired brief")).toEqual([]);
+    await press("Add to Workflows");
+    await until(alpha, area, Listing, (state) => state.place.tag === "ListingAdd");
+    const choices = [...document.querySelectorAll<HTMLButtonElement>("main button")];
+    expect(["Automation", "Reminder", "Scheduled digest"].map((name) => choices.find((item) => item.textContent?.startsWith(name))?.disabled)).toEqual([true, true, true]);
+    await drawn(() => alpha.back());
+    await until(alpha, area, Listing, (state) => state.place.tag === "ListingRows");
+    expect(button("Add to Workflows")).toBeDefined();
+    expect(visible("Monthly statement", "Desk check", "Retired brief")).toEqual([]);
+  });
+
   it('Reviews a Clock request within its Alarms page and restores focus to the list (spec/app/workflows/clock.md, "Story: Review, then hand over to Clock")', async () => {
     const world = scene();
     world.phone = true;
@@ -194,5 +212,20 @@ describe("Workflows", () => {
     await later(alpha, 4_000);
     await until(alpha, area, Sheet, (state) => state.output.status === "Loaded" && state.status === "Done");
     expect(document.querySelector('[aria-label="Run details"]')?.textContent).toContain("Your statement is ready.");
+    await drawn(() => {
+      const details = document.querySelector<HTMLDetailsElement>('details[aria-label="Workflow execution details"]');
+      const reveal = details?.querySelector("summary");
+      if (!details || !reveal) throw new Error("No execution details");
+      reveal.click();
+      expect({
+        open: details.open,
+        activity: [...details.querySelectorAll("time")].map((time) => ({
+          at: time.dateTime, node: time.parentElement?.querySelector("span")?.textContent,
+        })),
+      }).toEqual({
+        open: true,
+        activity: [{ at: "2026-11-24T07:02:00.000Z", node: undefined }, { at: "2026-11-24T07:01:00.000Z", node: "preview" }],
+      });
+    });
   });
 });

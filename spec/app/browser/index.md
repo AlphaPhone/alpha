@@ -329,6 +329,17 @@ pure def canTouch(s: Browser, tab: int): bool = s.open.contains(tab) and not(s.p
 pure def touch(s: Browser, tab: int): Browser = { ...s, stale: true }
 ```
 
+### A history edit is carried by the same session writer
+
+Marking the saved session stale lets it carry an exact history edit even if
+the selected tab is private. Its write still carries only normal tabs.
+
+```quint
+pure def canHistoryChanged(s: Browser): bool = s.hydrated and s.erasing == Kept
+
+pure def historyChanged(s: Browser): Browser = { ...s, stale: true }
+```
+
 ### A stale session is written once it has been read, one write at a time, and never while browsing data is being cleared
 
 The write carries the normal tabs only. After a failed write the next one

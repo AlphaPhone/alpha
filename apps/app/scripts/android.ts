@@ -258,7 +258,7 @@ export async function generateHost(runtime: string) {
   const marker = join(android, MARKER);
   if (!existsSync(marker)) writeJson(marker, { schema: 2, output: androidPaths.project, appId: identity.appId, files: [] });
   const version = String(record(readJson(join(app, "package.json"))).version);
-  return runEffect(generateAndroidHost({
+  const host = await runEffect(generateAndroidHost({
     consumerRoot: app,
     dependencyRoot: join(app, "node_modules"),
     output: android,
@@ -266,6 +266,8 @@ export async function generateHost(runtime: string) {
     profile: hostProfile(),
     runtime,
   }));
+  writeJson(join(android, "app/src/main/assets/capacitor.plugins.json"), []);
+  return host;
 }
 
 interface BuildConsumer {
@@ -411,6 +413,10 @@ export function checkApk(file: string, mode: "debug" | "release", env: NodeJS.Pr
     if (sha256(read(path)) !== row.sha256) throw new Error(`${name}'s ${path} differs from its inventory`);
   }
   for (const data of ["host.json", "character.json", "policy.json"]) if (!entries.includes(`assets/agent/${data}`)) throw new Error(`${name} carries no agent ${data}`);
+  const pluginManifest = "assets/capacitor.plugins.json";
+  if (!entries.includes(pluginManifest)) throw new Error(`${name} lacks the Capacitor plugin discovery manifest`);
+  const discovered: unknown = JSON.parse(read(pluginManifest).toString("utf8"));
+  if (!Array.isArray(discovered) || discovered.length !== 0) throw new Error(`${name} carries discovered plugins outside the Android host registration`);
   const capacitor = record(JSON.parse(read("assets/capacitor.config.json").toString("utf8")));
   const signIn = record(record(capacitor.plugins).ElizaSignIn);
   if (signIn.testEnvironments !== false) throw new Error(`${name} registers test cloud environments`);

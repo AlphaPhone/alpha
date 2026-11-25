@@ -148,7 +148,8 @@ goes through eliza's `ElizaAgent` plugin, which checks each request against
 the host file's route list. Ask Alpha opens its conversation with
 `POST /api/conversations` (`apps/app/src/ask/ask.vibe`), and eliza's
 `TurnController`, which carries its turns, posts each message buffered or
-streamed and asks the agent to stop a turn by its room. The assistant
+streamed and asks the agent to stop a turn by its room; the assistant
+also asks the agent to warm its model before the owner's first turn. The assistant
 (`apps/app/src/assistant/assistant.vibe`) lists conversations, reads a
 conversation's messages, forks one, searches messages, asks the agent's
 health and which device steps it takes; Home and Calendar
@@ -169,7 +170,9 @@ retained page after storing it, using the final result's cursor and run ID.
 Notes reads the same owner identity and calls the Notes module to
 read and edit notes, erase Trash and finish recording cleanup. The scanner
 hands the owner’s reviewed scan text to Notes through that module. The approvals area lists the agent's proposals and resolves one
-through the approvals module. A route an area
+through the approvals module. Ask Alpha completes a reviewed Messages read only
+for the exact owner turn after the agent acknowledges its device receipt.
+A route an area
 fakes for want of an agent plugin is not listed: none does today. Each line
 of `apps/agent/host/routes.jsonl` is one route; the pack is refused unless
 that list is this one, and eliza's route gate admits each of its routes.
@@ -188,6 +191,7 @@ pure val pageRoutes: List[Route] = List(
   { method: Post, path: "/api/conversations/{id}/messages/stream", stream: true },
   { method: Post, path: "/api/conversations/{id}/fork", stream: false },
   { method: Post, path: "/api/turns/{roomId}/abort", stream: false },
+  { method: Post, path: "/api/turns/warm", stream: false },
   { method: Get, path: "/api/client-devices/capabilities", stream: false },
   { method: Post, path: "/api/client-devices/register", stream: false },
   { method: Get, path: "/api/client-devices/context", stream: false },
@@ -195,6 +199,7 @@ pure val pageRoutes: List[Route] = List(
   { method: Post, path: "/api/client-devices/proposals/{id}/decision", stream: false },
   { method: Post, path: "/api/client-devices/proposals/{id}/claim", stream: false },
   { method: Post, path: "/api/client-devices/proposals/{id}/receipt", stream: false },
+  { method: Post, path: "/api/client-devices/proposals/{id}/read-completion", stream: false },
   { method: Post, path: "/api/client-devices/proposals/{id}/reconciliation", stream: false },
   { method: Get, path: "/api/approvals", stream: false },
   { method: Post, path: "/api/approvals/{id}/resolve", stream: false },

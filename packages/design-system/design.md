@@ -185,6 +185,8 @@ this prose into tokens. To change the design, describe it, and have the change w
 | `text.4xl.tracking` | -0.01em |
 | `text.figure.size` | 2.75rem |
 | `text.figure.leading` | 1 |
+| `text.recorder-clock.size` | 3rem |
+| `text.recorder-clock.leading` | 1 |
 | `text.headline.size` | 2.125rem |
 | `text.headline.leading` | 1.08 |
 | `text.headline.tracking` | -0.01em |
@@ -228,6 +230,8 @@ this prose into tokens. To change the design, describe it, and have the change w
 | `leading.snug` | 1.25 |
 | `leading.row` | 1.3 |
 | `leading.normal` | 1.4 |
+| `leading.transcript` | 1.45 |
+| `leading.voice-status` | 1rem |
 | `leading.relaxed` | 1.6 |
 | `leading.field` | 1.375 |
 | `leading.chat` | 1.5 |

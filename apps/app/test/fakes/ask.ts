@@ -1,5 +1,7 @@
 // spec/app/ask/index.md, "Story: Talk to my agent"
 import type { TurnReply } from "@elizaos/agent";
+import type { DraftAddress } from "../../src/assistant/draft-device.vibe";
+import type { Faked } from "./phone.ts";
 import type { Route } from "./routes.ts";
 
 export interface AskScene {
@@ -32,6 +34,15 @@ export interface AskScene {
   /** The actions the next reply says it ran, made from the turn's metadata, as eliza's agent lists them on its done frame. */
   nextActions?: (metadata: unknown) => readonly unknown[];
   cloudWarmCalls: number;
+  /** The fake native store, which survives disposal of the WebView runtime. */
+  readonly drafts: Map<string, string>;
+  beforeDraftExchange?: () => Promise<void>;
+  refusedDraftExchanges: number;
+  /** Whether the agent's status says it can answer, and each warm-up it was asked for, with the headers it came with. */
+  canRespond: boolean;
+  warmUps: Record<string, string>[];
+  warmUpFails: boolean;
+  statusReads: number;
 }
 
 export interface Kept {
@@ -41,7 +52,42 @@ export interface Kept {
 }
 
 export function askScene(): AskScene {
-  return { opened: 0, said: [], down: false, stalled: false, turns: new Map(), kept: new Map(), searchDown: false, pagesDown: false, pagesMissing: false, pageReads: 0, listReads: 0, holdLists: false, heldLists: [], cloudWarmCalls: 0 };
+  return { opened: 0, said: [], down: false, stalled: false, turns: new Map(), kept: new Map(), searchDown: false, pagesDown: false, pagesMissing: false, pageReads: 0, listReads: 0, holdLists: false, heldLists: [], cloudWarmCalls: 0, drafts: new Map(), refusedDraftExchanges: 0, canRespond: true, warmUps: [], warmUpFails: false, statusReads: 0 };
+}
+
+/** A storage address within the fake phone's already verified local account. */
+export function draftKey(owner: string, agent: string, conversation?: string, room?: string) {
+  return JSON.stringify([owner, agent, conversation ?? null, room ?? null]);
+}
+
+/** AlphaAssistantDraft derives the slot after admitting the supplied owner, agent and epoch as assertions. */
+export function alphaAssistantDraft(scene: AskScene, authority: () => Pick<DraftAddress, "owner" | "agent" | "epoch">): Faked {
+  function admitted(assertion: DraftAddress) {
+    const current = authority();
+    if (assertion.owner !== current.owner || assertion.agent !== current.agent || assertion.epoch !== current.epoch ||
+      (assertion.conversation === undefined) !== (assertion.room === undefined)) return undefined;
+    return draftKey(current.owner, current.agent, assertion.conversation, assertion.room);
+  }
+  return () => ({
+    read(address: DraftAddress) {
+      const key = admitted(address);
+      if (key === undefined) return Promise.resolve({ status: "denied" });
+      const raw = scene.drafts.get(key);
+      return Promise.resolve(raw === undefined ? { status: "read" } : { status: "read", raw });
+    },
+    async exchange(address: DraftAddress & { expected?: string; next?: string }) {
+      const key = admitted(address);
+      if (key !== undefined) await scene.beforeDraftExchange?.();
+      if (key === undefined || admitted(address) !== key) {
+        scene.refusedDraftExchanges += 1;
+        return { status: "denied" };
+      }
+      if (scene.drafts.get(key) !== address.expected) return { status: "conflict" };
+      if (address.next === undefined) scene.drafts.delete(key);
+      else scene.drafts.set(key, address.next);
+      return { status: "landed" };
+    },
+  });
 }
 
 const encoder = new TextEncoder();
@@ -175,7 +221,16 @@ export function askRoutes(scene: AskScene): Route[] {
         return Response.json({ aborted: stop !== undefined, roomId: room, reason, outcome: stop === undefined ? "nothingRunning" : "stopped" });
       });
     },
-    (request, url) => (request.method === "GET" && url.pathname === "/api/status" ? Response.json({ serverInstanceId: "alpha-fake" }) : undefined),
+    (request, url) => {
+      if (request.method !== "GET" || url.pathname !== "/api/status") return;
+      scene.statusReads += 1;
+      return Response.json({ serverInstanceId: "alpha-fake", canRespond: scene.canRespond });
+    },
+    (request, url) => {
+      if (request.method !== "POST" || url.pathname !== "/api/turns/warm") return;
+      scene.warmUps.push(Object.fromEntries([...request.headers].filter(([name]) => name.startsWith("x-eliza-"))));
+      return scene.warmUpFails ? Response.json({ error: "warm_up_failed" }, { status: 500 }) : Response.json({ started: true }, { status: 202 });
+    },
     (request, url) => {
       if (request.method !== "POST" || url.pathname !== "/api/cloud/warm") return;
       scene.cloudWarmCalls += 1;
