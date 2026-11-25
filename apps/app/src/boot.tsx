@@ -2,10 +2,14 @@ import { Effect, Layer } from "effect";
 import { type ReactElement, Suspense, lazy } from "react";
 import { MediaHandoff, stageAttachment, stageTranscript } from "./assistant/attachments.vibe";
 import { executeMedia } from "./assistant/media-executors.ts";
+import { FileContext } from "./assistant/file-context.vibe";
+import { Machine as Shell, showing } from "../gen/app__shell.effect.vibe";
+import { Machine as Layers, pageInert } from "../gen/app__shell__layers.effect.vibe";
 import { MediaExecutors } from "./assistant/media-review.vibe";
 import { type Mount, type Place, mounts as every } from "./areas.ts";
 import { ScanExports } from "./files/scanEntry.vibe";
 import { BrowserDownloadsHandoff } from "./platform/browser.vibe";
+import { Device } from "./platform/device.vibe";
 import type { Platform } from "./platform/platform.vibe";
 import { resident } from "./resident.vibe";
 import type { Alpha } from "./runtime/area.tsx";
@@ -32,6 +36,27 @@ export function boot(platform: Layer.Layer<Platform>, mounts: readonly Mount[] =
     }).pipe(Effect.orElseSucceed(() => undefined)),
     execute: (operation, call, authority) => Effect.tryPromise(() => executeMedia(alpha, operation, call, authority)).pipe(Effect.orElseSucceed(() => undefined)),
   });
+  const filesShowing = Effect.gen(function* () {
+    const shell = yield* Shell;
+    const layers = yield* Layers;
+    const device = yield* Device;
+    return (yield* device.showing()) && showing(yield* shell.get(), "Files") && !pageInert(yield* layers.get());
+  });
+  const inFiles = <A,>(read: (signal: AbortSignal) => Promise<A | undefined>) => Effect.tryPromise(async (signal) => {
+    if (!(await alpha.runtime.runPromise(filesShowing, { signal }))) return undefined;
+    const result = await read(signal);
+    return (await alpha.runtime.runPromise(filesShowing, { signal })) ? result : undefined;
+  }).pipe(Effect.orElseSucceed(() => undefined));
+  const fileContext = Layer.succeed(FileContext, {
+    selected: () => inFiles(async (signal) => {
+      const [{ default: files }, { selectedTextContext }] = await Promise.all([import("./files/index.tsx"), import("./files/preview.vibe")]);
+      return files.runtime(alpha).runPromise(selectedTextContext(), { signal });
+    }),
+    read: (expected) => inFiles(async (signal) => {
+      const [{ default: files }, { readCurrentFileText }] = await Promise.all([import("./files/index.tsx"), import("./files/preview.vibe")]);
+      return files.runtime(alpha).runPromise(readCurrentFileText(expected), { signal });
+    }),
+  });
   const downloads = Layer.succeed(BrowserDownloadsHandoff, {
     open: () => Effect.tryPromise(async () => {
       const [{ default: files }, { showBrowserDownloads }] = await Promise.all([import("./files/index.tsx"), import("./files/files.vibe")]);
@@ -44,7 +69,7 @@ export function boot(platform: Layer.Layer<Platform>, mounts: readonly Mount[] =
       await files.runtime(alpha).runPromise(retainScanExport(selection));
     }).pipe(Effect.orElseSucceed(() => undefined)),
   });
-  const root = rooted(Layer.provideMerge(resident, Layer.mergeAll(platform, media, executors, downloads, scans)));
+  const root = rooted(Layer.provideMerge(resident, Layer.mergeAll(platform, media, executors, fileContext, downloads, scans)));
   const placed = new Map<Place, ReactElement[]>();
   const alpha: Alpha = {
     runtime: root.runtime,
