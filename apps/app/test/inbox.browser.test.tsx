@@ -12,7 +12,7 @@ it("Review an attachment and save the copy in Files (spec/app/inbox/message.md, 
   const message = world.inbox.mail.find(({ card }) => card.id === "g1");
   if (!message) throw new Error("Missing mail fixture");
   const name = `Inbox receipt ${crypto.randomUUID().slice(0, 8)}.png`;
-  const raw = atob("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jC0cAAAAASUVORK5CYII=");
+  const raw = atob("iVBORw0KGgoAAAANSUhEUgAAABgAAAAYCAIAAABvFaqvAAAAH0lEQVR4nGMwTz1AFcQwatCoQaMGjRo0atCoQQNvEADDgg8uFeV++AAAAABJRU5ErkJggg==");
   const bytes = Uint8Array.from(raw, (character) => character.charCodeAt(0));
   message.files = [{ partId: "1", name, mimeType: "image/png", size: bytes.length, supported: true }];
   message.attachmentData = { "1": bytes };
@@ -32,7 +32,7 @@ it("Review an attachment and save the copy in Files (spec/app/inbox/message.md, 
   if (!(rendered instanceof HTMLImageElement)) throw new Error("Missing rendered attachment");
   await rendered.decode();
   const previewUrl = rendered.src;
-  expect([rendered.naturalWidth, world.inbox.attachmentReads]).toEqual([1, ["g1/1"]]);
+  expect([rendered.naturalWidth, world.inbox.attachmentReads]).toEqual([24, ["g1/1"]]);
   await preview.getByRole("button", { name: "Close", exact: true }).click();
   await expect.poll(async () => fetch(previewUrl).then(() => false, () => true)).toBe(true);
 

@@ -572,7 +572,7 @@ export const phoneVoiceBridge = Layer.effect(VoiceBridge, effect {
         && (capture.phase === "Opening" || capture.phase === "Listening") && capture.stopPreview !== undefined, lifetime)
       return try tryPromise({
         try: () => {
-          if (nativeCapture !== capture || capture.phase !== "Opening" || activeSession !== session) throw new Error("session-changed")
+          if (nativeCapture !== capture || capture.phase !== "Opening" || activeSession !== session) return Promise.reject(new Error("session-changed"))
           const requested = localPlugin().startLiveCapture({
             captureId: capture.captureId, nativeAsr: true, echoCancel: true, bargeIn: true, reopen,
           })
