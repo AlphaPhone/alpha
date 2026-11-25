@@ -90,6 +90,19 @@ pure def lawANewAccountAsksAgain(r: Route, account: Account, key: int, now: int)
   way(changeAccount(r, account, key), now) == OnPhone
 ```
 
+### Settings names where speech goes as the owner set it up: this phone, Alpha Cloud or the owner's own key, leaving out a hold after a failure
+
+A hold lasts at most an hour and lifts by itself, so Privacy names the
+route the owner chose, as Alpha's earlier build named it on its Voice row,
+and it is where speech goes whenever no hold is in force.
+
+```quint
+pure def chosen(r: Route): Way = if (r.consent) wanted({ ...r, holdUntil: 0 }, 0) else OnPhone
+
+pure def lawSettingsNamesWhereSpeechGoesWithoutAHold(r: Route, now: int): bool =
+  not(held(r, now)) implies chosen(r) == way(r, now)
+```
+
 ## Story: Keep talking when the network fails
 
 > As the owner, I want a conversation to carry on on this phone when the
