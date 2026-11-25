@@ -9,12 +9,12 @@ const attemptId = "device-attempt-1";
 type Sms = Extract<DeviceOperation, { type: "sms_send" }>;
 type Confirmation = Pick<Sms, "recipients" | "body" | "subscriptionId"> & { operationId: string; confirm(): void };
 
-export function textReview(agentId: string, id: string, operation: Extract<DeviceOperation, { type: "sms_send" | "sms_compose" }>) {
+export function textReview(agentId: string, id: string, operation: Extract<DeviceOperation, { type: "sms_send" | "sms_compose" | "files_filter" | "files_open" }>, requestMessageId?: string) {
   return {
     agentId,
     proposal: {
       id, digest: "b".repeat(64), state: "pending", expiresAt: new Date(Date.now() + 60_000).toISOString(),
-      payload: { installationId: agentId, enrollmentId, operation },
+      payload: { installationId: agentId, enrollmentId, operation, requestMessageId },
     },
     pendingReads: 0,
     journal: new Map<string, JournalEntry>(),
@@ -35,7 +35,9 @@ export const textReviewEnrollment: Faked = plugin<{
 /** The resident lists and settles only this enrolled phone's exact proposal. */
 export function textReviewRoute(review: TextReviewScene, subjectUserId: string): Route {
   const { agentId, proposal } = review;
-  const capabilities = proposal.payload.operation.type === "sms_send" ? ["sms.send.v1"] : ["sms.compose.v1", "sms.compose.v2"];
+  const type = proposal.payload.operation.type;
+  const capabilities = type === "sms_send" ? ["sms.send.v1"]
+    : type === "sms_compose" ? ["sms.compose.v1", "sms.compose.v2"] : ["files.browser.v1", "files.shown-target.v1"];
   const prefix = "/api/client-devices/";
   const reject = (status: number) => Response.json({ error: "review refused" }, { status });
   return (request, url) => {

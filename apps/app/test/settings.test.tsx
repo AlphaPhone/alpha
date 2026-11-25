@@ -153,6 +153,7 @@ describe("Settings", () => {
     world.signedIn = true;
 
     await press("Restart Alpha");
+    await vi.waitFor(() => expect(document.querySelector('[role="alertdialog"]')?.textContent).toContain("3 records"));
     await press("Archive and restart");
     await vi.waitFor(() => {
       expect(recovery.tokens).toEqual(["1.check"]);

@@ -4,9 +4,11 @@ import { AppTile } from "../AppTile.tsx";
 import { Input } from "../Input.tsx";
 import { cn } from "../../lib/cn.ts";
 import { dockClearance } from "../../lib/styles.ts";
+import { HomeAppMenu, type HomeAppMenuProps } from "./HomeAppMenu.tsx";
 import { type HomeNoticeMessage, HomeNotice } from "./HomeNotice.tsx";
 import { InstalledAppIcon } from "./InstalledAppIcon.tsx";
 import { tileColumns } from "./HomeTileGrid.tsx";
+import { type LauncherHold, useLauncherPress } from "./launcherPress.ts";
 
 /** An app from the accepted launcher catalog. */
 export interface DrawerApp {
@@ -26,10 +28,13 @@ export interface AppsDrawerProps {
   readonly catalog: "reading" | "ready" | "unavailable";
   readonly opening?: string;
   readonly notice?: HomeNoticeMessage;
+  readonly hold?: LauncherHold;
+  readonly menu?: { readonly app: string; readonly actions: NonNullable<HomeAppMenuProps["actions"]> };
   onSearch: (query: string) => void;
   onClose: () => void;
   onBack?: () => void;
   onOpen: (id: string) => void;
+  onOpenMenu?: (id: string) => void;
   onRetry?: () => void;
 }
 
@@ -92,8 +97,33 @@ function matches(apps: readonly DrawerApp[], query: string) {
     || a.app.packageName.localeCompare(b.app.packageName) || a.app.id.localeCompare(b.app.id));
 }
 
+function DrawerTile({ app, detail, opening, hold, menu, onOpen, onOpenMenu }: {
+  app: DrawerApp;
+  detail: readonly string[];
+  opening?: string;
+  hold?: LauncherHold;
+  menu?: AppsDrawerProps["menu"];
+  onOpen: AppsDrawerProps["onOpen"];
+  onOpenMenu?: AppsDrawerProps["onOpenMenu"];
+}) {
+  const actions = menu?.app === app.id ? menu.actions : undefined;
+  const longPress = onOpenMenu && opening === undefined ? () => onOpenMenu(app.id) : undefined;
+  const activation = useLauncherPress(hold, longPress, () => onOpen(app.id));
+  return (
+    <div data-launcher-app={app.id} className="flex min-w-0 justify-center">
+      <HomeAppMenu label={app.label} actions={actions}>
+        <AppTile drawer label={app.label} detail={detail.join(" · ")}
+          aria-busy={opening === app.id || undefined} disabled={opening !== undefined}
+          aria-haspopup={onOpenMenu ? "menu" : undefined} aria-expanded={onOpenMenu ? actions !== undefined : undefined}
+          icon={<InstalledAppIcon image={app.image} className={app.image ? "size-14 rounded-drawer-icon" : "size-6.5"} />}
+          {...activation} />
+      </HomeAppMenu>
+    </div>
+  );
+}
+
 /** The native launcher catalog in a drawer over Home. @model spec/app/home/drawer.md */
-export function AppsDrawer({ apps, query, catalog, opening, notice, onSearch, onClose, onBack = onClose, onOpen, onRetry }: AppsDrawerProps) {
+export function AppsDrawer({ apps, query, catalog, opening, notice, hold, menu, onSearch, onClose, onBack = onClose, onOpen, onOpenMenu, onRetry }: AppsDrawerProps) {
   const entries = matches(apps, query);
   const reading = catalog === "reading";
   const failed = catalog === "unavailable";
@@ -118,16 +148,8 @@ export function AppsDrawer({ apps, query, catalog, opening, notice, onSearch, on
       {notice && <HomeNotice notice={notice} place="InDrawer" className="mx-5 mt-1" />}
       <div aria-busy={reading || undefined} className={cn(dockClearance, "min-h-0 flex-1 touch-pan-y overflow-y-auto px-2 pt-1 [scrollbar-width:none]")}>
         <div data-alpha-apps-grid="" className={cn(tileColumns, "gap-y-5 px-0.5 py-1.5")}>
-          {entries.map(({ app, detail }) => {
-            const description = detail.join(" · ");
-            return (
-              <div key={app.id} data-launcher-app={app.id} className="flex min-w-0 justify-center">
-                <AppTile drawer label={app.label} detail={description}
-                  aria-busy={opening === app.id || undefined} disabled={opening !== undefined} onClick={() => onOpen(app.id)}
-                  icon={<InstalledAppIcon image={app.image} className={app.image ? "size-14 rounded-drawer-icon" : "size-6.5"} />} />
-              </div>
-            );
-          })}
+          {entries.map(({ app, detail }) => <DrawerTile key={app.id} app={app} detail={detail} opening={opening}
+            hold={hold} menu={menu} onOpen={onOpen} onOpenMenu={onOpenMenu} />)}
         </div>
         {(failed || (entries.length === 0 && !reading)) && (
           <div className="px-4 py-7 text-center text-sm text-muted-foreground">

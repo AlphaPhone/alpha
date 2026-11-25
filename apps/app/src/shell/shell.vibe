@@ -25,19 +25,19 @@ export effect function taking(place: string, took: () => Promise<boolean>): void
 }
 
 module previous {
-  /** The version-one state with the new route closed, still untrusted. @throws {never} */
-  export function withDrawerClosed(raw: string): unknown {
+  /** Older shell state with the route number initialized, still untrusted. @throws {never} */
+  export function withRoute(raw: string, needsDrawer: boolean): unknown {
     try {
       const parsed: unknown = JSON.parse(raw)
       return typeof parsed === "object" && parsed !== null && !Array.isArray(parsed)
-        ? { ...parsed, drawer: false }
+        ? { ...parsed, ...(needsDrawer ? { drawer: false } : {}), route: 0 }
         : undefined
     } catch {
       return undefined
     }
   }
 }
-import { withDrawerClosed } from previous
+import { withRoute } from previous
 
 // spec/app/shell/index.md, "When Alpha opens again the trail is kept, and Ask Alpha is closed"
 function stored(key: string, start?: Shell.Shell) {
@@ -45,13 +45,14 @@ function stored(key: string, start?: Shell.Shell) {
     const store = try KeyValueStore.KeyValueStore
     const current = store.get(key) catch () => undefined
     if (current !== undefined) return Shell.stored(key, start)
-    const raw = store.get("alpha/app/shell/index@1") catch () => undefined
-    const recovered = raw === undefined ? undefined : (Shell.decodeState(withDrawerClosed(raw)) catch () => undefined)
+    const withDrawer = store.get("alpha/app/shell/index@2") catch () => undefined
+    const raw = withDrawer ?? (store.get("alpha/app/shell/index@1") catch () => undefined)
+    const recovered = raw === undefined ? undefined : (Shell.decodeState(withRoute(raw, withDrawer === undefined)) catch () => undefined)
     return Shell.stored(key, recovered ?? start)
   })
 }
 
-const kept = reacting({ ...Shell, stored }, { keep: 2, open: [{ type: "reopen" }] })
+const kept = reacting({ ...Shell, stored }, { keep: 3, open: [{ type: "reopen" }] })
 
 // spec/app/shell/layers.md, "Story: Keep a sheet or a dialog above the phone"
 const layered = reacting(Layers, {})
