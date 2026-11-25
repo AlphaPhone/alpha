@@ -310,9 +310,9 @@ pure def canEmptyReadied(s: Bin, ticket: int, by: Actor): bool =
   by == Phone and s.open and s.scope == EntireBrowserBin and R::canAnswer(s.preparing, ticket)
 
 pure def emptyReadied(s: Bin, ticket: int, ok: bool, items: Set[int], revision: int, by: Actor): Bin =
-  val current = ok and items.size() > 0 and s.rows.subseteq(items) and s.revision == revision and s.read.status == R::Loaded
-  val answered = { ...s, preparing: R::answer(s.preparing, current) }
-  if (current) { ...answered, prepared: items, confirm: V::present(V::revise(s.confirm)), expired: false }
+  val fresh = ok and items.size() > 0 and s.rows.subseteq(items) and s.revision == revision and s.read.status == R::Loaded
+  val answered = { ...s, preparing: R::answer(s.preparing, fresh) }
+  if (fresh) { ...answered, prepared: items, confirm: V::present(V::revise(s.confirm)), expired: false }
   else dropping(answered)
 ```
 
