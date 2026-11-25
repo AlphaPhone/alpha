@@ -185,6 +185,8 @@ this prose into tokens. To change the design, describe it, and have the change w
 | `text.4xl.tracking` | -0.01em |
 | `text.figure.size` | 2.75rem |
 | `text.figure.leading` | 1 |
+| `text.recorder-clock.size` | 3rem |
+| `text.recorder-clock.leading` | 1 |
 | `text.headline.size` | 2.125rem |
 | `text.headline.leading` | 1.08 |
 | `text.headline.tracking` | -0.01em |
@@ -228,6 +230,8 @@ this prose into tokens. To change the design, describe it, and have the change w
 | `leading.snug` | 1.25 |
 | `leading.row` | 1.3 |
 | `leading.normal` | 1.4 |
+| `leading.transcript` | 1.45 |
+| `leading.voice-status` | 1rem |
 | `leading.relaxed` | 1.6 |
 | `leading.field` | 1.375 |
 | `leading.chat` | 1.5 |
@@ -257,12 +261,14 @@ this prose into tokens. To change the design, describe it, and have the change w
 | `keyframes.drop` | from{opacity:0;transform:translateY(-2.25rem)}to{opacity:1;transform:none} |
 | `keyframes.fade` | from{opacity:0}to{opacity:1} |
 | `keyframes.shimmer` | from{background-position:200% 0}to{background-position:-200% 0} |
+| `keyframes.page-loading` | from{transform:translateX(-100%)}to{transform:translateX(300%)} |
 | `keyframes.wiggle` | from{transform:rotate(-1.5deg)}to{transform:rotate(1.5deg)} |
 | `keyframes.blink` | 0%,100%{opacity:0.2}50%{opacity:1} |
 | `animate.rise` | rise 460ms cubic-bezier(0.19, 1, 0.22, 1) both |
 | `animate.drop` | drop 500ms cubic-bezier(0.19, 1, 0.22, 1) both |
 | `animate.fade` | fade 700ms ease both |
 | `animate.shimmer` | shimmer 2s linear infinite |
+| `animate.page-loading` | page-loading 1.2s linear infinite |
 | `animate.wiggle` | wiggle 300ms ease-in-out infinite alternate |
 | `animate.blink` | blink 1.2s ease-in-out infinite |
 | `breakpoint.sm` | 40rem |

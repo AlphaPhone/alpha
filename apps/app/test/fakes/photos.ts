@@ -30,6 +30,7 @@ export interface PhotosScene {
   changed(): void;
   promptCount: number;
   readCount: number;
+  readGate?: Promise<void>;
   readonly saves: string[];
   readonly editLookups: string[];
   selectedPicture?: (picture: Reviewed) => Promise<FixturePicture>;
@@ -96,8 +97,10 @@ export function alphaPhotos(scene: PhotosScene): Faked {
       readEmailPicture: selectedPicture,
       read({ id }) {
         scene.readCount++;
-        const candidates = /^(?:v:)?[1-9][0-9]*$/.test(id) ? owned() : scene.access.scope === "denied" ? [] : scene.rows;
-        return Promise.resolve(candidates.find((item) => item.id === id));
+        return Promise.resolve(scene.readGate).then(() => {
+          const candidates = /^(?:v:)?[1-9][0-9]*$/.test(id) ? owned() : scene.access.scope === "denied" ? [] : scene.rows;
+          return candidates.find((item) => item.id === id);
+        });
       },
       beginEdit: ({ id, revision }) => scene.rows.some((item) => item.id === id && item.revision === revision)
         ? Promise.resolve(preview) : Promise.reject(new Error("This item changed")),

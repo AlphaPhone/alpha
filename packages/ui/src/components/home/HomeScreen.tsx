@@ -23,6 +23,8 @@ export type HomeScreenProps = {
   launcher?: boolean;
   /** Opens a tile's app; left out where nothing may be opened. */
   onOpenTile?: (id: string) => void;
+  /** Opens the phone's installed Apps drawer. */
+  onOpenDrawer?: () => void;
   /** Starts editing from a long press on a tile; left out off the phone, before the tiles are read and under a layer. */
   onBeginEditing?: () => void;
   /** Schedules and cancels a stationary press on a tile. */
@@ -59,7 +61,7 @@ const homeSpacing = "[--alpha-home-spacing:clamp(3px,calc(100cqi/103),var(--spac
  * @model spec/app/home/index.md
  */
 export function HomeScreen({
-  cards = [], appCards, tiles, editing = false, covered = false, launcher = false, onOpenTile, onBeginEditing, hold, onRemoveTile, onMoveTile, scrollRef,
+  cards = [], appCards, tiles, editing = false, covered = false, launcher = false, onOpenTile, onOpenDrawer, onBeginEditing, hold, onRemoveTile, onMoveTile, scrollRef,
   onShowHidden, onDone, notice, adding = false, hidden = [], onAddToHome, onCloseAdding = () => undefined, className,
 }: HomeScreenProps) {
   return (
@@ -77,6 +79,7 @@ export function HomeScreen({
             tiles={tiles}
             editing={editing}
             onOpen={onOpenTile}
+            onOpenDrawer={onOpenDrawer}
             onBeginEditing={onBeginEditing}
             hold={hold}
             onRemove={onRemoveTile}

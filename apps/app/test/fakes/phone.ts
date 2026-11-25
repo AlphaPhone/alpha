@@ -1,4 +1,5 @@
 import type { AgentEvents, AgentRequest, AgentStatus, AgentStreamRequest, ElizaAgentPlugin, ElizaCloudPlugin, NativeCloudRequest, ElizaSecureStorePlugin, ElizaSecureStoreResult } from "@elizaos/os-bridges";
+import { deviceRoutes } from "@elizaos/cloud";
 import type { RecoveryScene } from "./settings.ts";
 import type { Answering } from "./routes.ts";
 
@@ -18,9 +19,6 @@ export type Faked = (emit: (event: string, data: unknown) => void) => object;
 
 /** The fake of a plugin whose definition is `P` and whose events are `Events`: it does not compile once eliza changes either. */
 export const plugin = <P, Events = Record<never, never>>(make: (emit: Emit<Events>) => Native<P>): Faked => (emit) => make(emit);
-
-/** A plugin the host registers and no journey calls: its presence alone is what the page reads. */
-export const present: Faked = () => ({});
 
 /** What a plugin rejects a call with: Android's `call.reject(message, code)`. */
 export function rejection(message: string, code = message) {
@@ -140,17 +138,33 @@ export function elizaAgent(agent: Answering, recovery?: RecoveryScene): Faked {
   });
 }
 
+/** The phone's mail lease as eliza's sign-in keeps it: whether it holds one, how the owner answers the browser sign-in for one, how many of those sign-ins the phone started, and how many mail or calendar requests it held back for want of the lease. */
+export interface MailLeaseScene { held: boolean; answer: "SignsIn" | "Cancels"; asked: number; heldBack: number }
+
+/** Whether eliza's cloud client lists `method` and the path of `target` as a mail or calendar route (`Mail`), which the phone sends only with its device lease. */
+function mailRoute(method: string, target: string): boolean {
+  const pieces = new URL(target, "http://cloud.phone").pathname.slice(1).split("/");
+  return deviceRoutes.some((route) => route.auth === "Mail" && route.method.toUpperCase() === method && route.path.length === pieces.length
+    && route.path.every((piece, at) => piece.tag === "Param" || piece.text === pieces[at]));
+}
+
 /**
- * `ElizaCloudPlugin.java`, the `ElizaCloud` plugin: `request` sends one listed route under the device key it alone
- * holds and answers the status, the headers a page may read and the body in base64; what it will not send it rejects
- * with one of eliza's `CloudFailure` codes.
+ * `ElizaCloudPlugin.java`, the `ElizaCloud` plugin: `request` sends one listed route under the credential it alone
+ * holds, the device lease on a mail or calendar route and the device key on any other, and answers the status, the
+ * headers a page may read and the body in base64; what it will not send it rejects with one of eliza's `CloudFailure`
+ * codes, `mail-lease-upgrade-required` for a mail or calendar route on a phone signed in without a lease.
  */
-export function elizaCloud(cloud: Answering, signedIn: () => boolean): Faked {
+export function elizaCloud(cloud: Answering, signedIn: () => boolean, lease: MailLeaseScene): Faked {
   return plugin<ElizaCloudPlugin>(() => ({
     async request({ method, target, headers, body }: NativeCloudRequest) {
       if (!target.startsWith("/api/")) throw rejection("not-listed");
       if (!signedIn()) throw rejection("sign-in-required");
-      const response = await cloud(new Request(new URL(target, "http://cloud.phone"), { method, headers: { ...headers, authorization: "Bearer device-key", ...(body === undefined ? {} : { "content-type": "application/json" }) }, body })).catch(() => { throw rejection("network"); });
+      const mail = mailRoute(method, target);
+      if (mail && !lease.held) {
+        lease.heldBack += 1;
+        throw rejection("mail-lease-upgrade-required");
+      }
+      const response = await cloud(new Request(new URL(target, "http://cloud.phone"), { method, headers: { ...headers, authorization: mail ? "Bearer mail-lease" : "Bearer device-key", ...(body === undefined ? {} : { "content-type": "application/json" }) }, body })).catch(() => { throw rejection("network"); });
       const found = { etag: response.headers.get("etag"), contentType: response.headers.get("content-type"), retryAfter: response.headers.get("retry-after") };
       return { status: response.status, body: base64(new Uint8Array(await response.arrayBuffer())), ...Object.fromEntries(Object.entries(found).filter(([, value]) => value !== null)) };
     },
