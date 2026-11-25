@@ -33,6 +33,7 @@ const pulled = (startY = 68, dx = 0) => drawn(() => {
   zone?.dispatchEvent(pointer("pointerup", 100 + dx, startY + 80));
 });
 const alphaApps = ["view:Inbox", "view:Calendar", "view:Browser", "view:Camera", "view:Photos", "view:Maps", "view:Notes", "view:Files", "view:Workflows", "view:Wallet", "view:Settings"];
+const homeOrder = ["view:Phone", "view:Messages", "view:Inbox", "view:Calendar", "view:Browser", "view:Camera", "view:Photos", "view:Maps", "view:Notes", "view:Contacts", "view:Files", "view:Workflows", "view:Wallet", "view:Settings"];
 const holdingHome = (world: Scene) => {
   world.settings.roles = world.settings.roles.map((role) => role.role === "home" ? { ...role, held: true, holders: ["ai.alphacompute.alphaphone"] } : role);
   return world;
@@ -104,8 +105,14 @@ describe("Home on a phone", () => {
     await until(second.alpha, home.runtime(second.alpha), Home.Machine, (h) => h.tiles.load.status === "Loaded" && h.tiles.load.ticket === 2);
     expect(tiles().at(-1)).toBe("view:Notes");
 
-    // spec/app/home/tiles.md, "What was saved comes back as it was saved, an empty Home included; with no record Home shows its defaults"
+    // spec/app/shell/index.md, "Phone and Messages exist only on an Alpha image, and Contacts only where that image admits it": the same saved tiles on an Alpha image that grants contacts show Phone, Messages and Contacts in Home order too.
     await second.close();
+    const third = await open({ ...world, image: true });
+    await until(third.alpha, home.runtime(third.alpha), Home.Machine, (h) => h.tiles.load.status === "Loaded" && h.tiles.load.ticket === 3);
+    expect(tiles()).toEqual([...homeOrder.filter((tile) => tile !== "view:Notes"), "view:Notes"]);
+
+    // spec/app/home/tiles.md, "What was saved comes back as it was saved, an empty Home included; with no record Home shows its defaults"
+    await third.close();
     localStorage.setItem(savedKey, "{invalid");
     const recovered = await open(world);
     await until(recovered.alpha, home.runtime(recovered.alpha), Home.Machine, (h) => h.tiles.load.status === "Failed");
@@ -255,6 +262,39 @@ describe("Home on a phone", () => {
     await drawn(() => agenda()?.click());
     await until(alpha, alpha.runtime, Shell, (s) => s.trail.at(-1) === "Calendar");
     await drawn(() => { fromAreas.reminders([]); fromAreas.hidden([]); });
+  });
+
+  // spec/app/home/cards.md, "Story: See my day at a glance"
+  it("See my day as it is where I am, west of UTC and east of it (spec/app/home/cards.md, \"Story: See my day at a glance\")", async () => {
+    const hour = 3_600_000;
+    const agenda = () => document.querySelector<HTMLButtonElement>("button[aria-label^='Open calendar event:']");
+    const dated = (at: number) => new Date(at).toLocaleDateString([], { weekday: "short", month: "short", day: "numeric" });
+    // spec/app/home/cards.md, "Story: See my day at a glance": Home tells the day as it is where the owner is, west of UTC after its midnight as well as east of it. The agenda card heads its event with the owner's day and tells its time in the owner's zone, so the UTC day ("Mon, Nov 23" on Tuesday the 24th in Los Angeles) is never drawn. Each place is opened later than the last, as a restart keeps the day it last read.
+    const zone = process.env.TZ;
+    const day = 10 * 86_400_000;
+    const seenThere: Array<{ readonly card: string | undefined; readonly utcDay: boolean }> = [];
+    const wanted: string[][] = [];
+    try {
+      for (const [where, at] of [["Asia/Tokyo", day - 3 * hour], ["UTC", day + 8 * hour], ["America/Los_Angeles", day + 18 * hour]] as const) {
+        process.env.TZ = where;
+        const there = { ...scene(), phone: true, now: at };
+        there.calendar.granted = true;
+        there.calendar.calendars.push({ id: "1", name: "Work", writable: true, local: true });
+        there.calendar.phoneEvents = [{ id: "a", calendarId: "1", title: "Standup", begin: at + 2 * hour, end: at + 3 * hour, allDay: false, recurring: false }];
+        const opened = await open(there);
+        await until(opened.alpha, home.runtime(opened.alpha), Cards.Machine, (c) => c.calendar.source === "Ready" && c.calendar.items.length === 1);
+        await drawn(() => undefined);
+        const utcMidnight = Math.floor(at / 86_400_000) * 86_400_000;
+        const utcDays = [dated(utcMidnight), new Date(utcMidnight).toLocaleDateString([], { weekday: "long", day: "numeric" })];
+        seenThere.push({ card: agenda()?.textContent ?? undefined, utcDay: dated(utcMidnight) !== dated(at) && utcDays.some((shown) => (document.body.textContent ?? "").includes(shown)) });
+        wanted.push(["Standup", dated(at + 2 * hour), new Date(at + 2 * hour).toLocaleTimeString([], { hour: "numeric", minute: "2-digit", timeZone: where })]);
+        await opened.close();
+      }
+    } finally {
+      if (zone === undefined) delete process.env.TZ;
+      else process.env.TZ = zone;
+    }
+    expect(seenThere.map(({ card, utcDay }, at) => [wanted[at]?.every((part) => card?.includes(part)) ?? false, utcDay])).toEqual(seenThere.map(() => [true, false]));
   });
 
   // spec/app/home/cards.md, "Story: The other cards"; spec/app/home/cards.md, "Story: Open my day from a card"
