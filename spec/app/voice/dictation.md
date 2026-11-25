@@ -21,10 +21,11 @@ transcription failed or was unavailable), transcribing, or showing its transcrip
 type Stage = Closed | Ready | Starting | Recording | Recorded | Transcribing | Review
 type Field = NoteField | ComposerField | PhoneBar | MessagesBar | ContactsBar
 type Failure = NoFailure | Denied | NoMicrophone | NoSpeech | AgentUnavailable | Recognition
-type Recorder = { stage: Stage, field: Field, ticket: int, clip: bool, failure: Failure, words: bool, filled: int }
+type Preparation = NotChecked | Preparing | Prepared | Unavailable
+type Recorder = { stage: Stage, field: Field, ticket: int, clip: bool, failure: Failure, words: bool, filled: int, preparation: Preparation }
 
 pure val initial: Recorder =
-  { stage: Closed, field: ComposerField, ticket: 0, clip: false, failure: NoFailure, words: false, filled: 0 }
+  { stage: Closed, field: ComposerField, ticket: 0, clip: false, failure: NoFailure, words: false, filled: 0, preparation: NotChecked }
 
 pure val ticketValues = Set(1, 2, 3, 4)
 ```
@@ -35,13 +36,28 @@ pure val ticketValues = Set(1, 2, 3, 4)
 pure def canOpenRecorder(r: Recorder): bool = r.stage == Closed
 
 pure def openRecorder(r: Recorder, target: Field): Recorder =
-  { ...r, stage: Ready, field: target, ticket: r.ticket + 1, clip: false, failure: NoFailure, words: false }
+  { ...r, stage: Ready, field: target, ticket: r.ticket + 1, clip: false, failure: NoFailure, words: false,
+    preparation: if (target == ComposerField) Preparing else NotChecked }
+```
+
+### Ask Alpha names recognition preparation and can start only after its recognition check succeeds
+
+Preparing and unavailable are states of the disabled record button. The
+other fields keep their usual recording entry. A late check cannot ready a
+new recorder, and checking does not open the microphone.
+
+```quint
+pure def canRecognitionChecked(r: Recorder, ticket: int, ready: bool): bool =
+  r.field == ComposerField and r.stage == Ready and r.preparation == Preparing and r.ticket == ticket
+
+pure def recognitionChecked(r: Recorder, ticket: int, ready: bool): Recorder =
+  { ...r, preparation: if (ready) Prepared else Unavailable }
 ```
 
 ### Recording starts from ready, and only the answer to that start opens it
 
 ```quint
-pure def canStartRecording(r: Recorder): bool = r.stage == Ready
+pure def canStartRecording(r: Recorder): bool = r.stage == Ready and (r.field != ComposerField or r.preparation == Prepared)
 
 pure def startRecording(r: Recorder): Recorder = { ...r, stage: Starting, ticket: r.ticket + 1, failure: NoFailure }
 
@@ -131,7 +147,7 @@ The text joins that field's draft; sending it is the owner's own Send there.
 pure def canFill(r: Recorder): bool = r.stage == Review and r.words
 
 pure def fill(r: Recorder): Recorder =
-  { ...r, stage: Closed, ticket: r.ticket + 1, clip: false, words: false, filled: r.filled + 1 }
+  { ...r, stage: Closed, ticket: r.ticket + 1, clip: false, words: false, filled: r.filled + 1, preparation: NotChecked }
 ```
 
 ### Closing the recorder abandons what it was doing, and a late answer to it is refused
@@ -140,7 +156,7 @@ pure def fill(r: Recorder): Recorder =
 pure def canCloseRecorder(r: Recorder): bool = r.stage != Closed
 
 pure def closeRecorder(r: Recorder): Recorder =
-  { ...r, stage: Closed, ticket: r.ticket + 1, clip: false, failure: NoFailure, words: false }
+  { ...r, stage: Closed, ticket: r.ticket + 1, clip: false, failure: NoFailure, words: false, preparation: NotChecked }
 ```
 
 ### The clip is kept from the stop until it is used, discarded or closed

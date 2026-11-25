@@ -15,6 +15,8 @@ export interface VoiceScene {
   permission: "granted" | "denied" | "prompt";
   grantOnRequest: boolean;
   localReady: boolean;
+  recognitionReady?: boolean;
+  recognitionProbeGate?: () => Promise<void>;
   liveCaptureAvailable: boolean;
   nativeTransport: boolean;
   transcriptionFailures: number;
@@ -124,10 +126,11 @@ export function alphaVoiceCloud(voice: VoiceScene): Faked {
         voice.warmSpeechOutputCalls += 1;
         return Promise.resolve({ warmed: true });
       },
-      localSpeechStatus: async () => {
+      localSpeechStatus: async ({ ttsOnly }: { ttsOnly?: boolean }) => {
         voice.localSpeechStatusCalls += 1;
         if (voice.probeGate !== undefined) await voice.probeGate();
-        return { ready: voice.localReady, ttsReady: voice.localReady };
+        if (!ttsOnly) await voice.recognitionProbeGate?.();
+        return { ready: ttsOnly ? voice.localReady : (voice.recognitionReady ?? voice.localReady), ttsReady: voice.localReady };
       },
       holdSpeechEngine: () => {
         voice.holdEngineCalls += 1;
