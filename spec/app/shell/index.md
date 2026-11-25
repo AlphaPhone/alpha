@@ -222,15 +222,15 @@ pure def canAgentOpenSpoken(s: Shell, view: View, route: int): bool =
   s.route == route and canAgentOpenView(s, view)
 
 pure def agentOpenSpoken(s: Shell, view: View, route: int): Shell =
-  val moved = agentOpenView(s, view)
-  { ...moved, spokenRoute: moved.route }
+  val opened = agentOpenView(s, view)
+  { ...opened, spokenRoute: opened.route }
 
 pure def canAgentHomeSpoken(s: Shell, route: int): bool =
   s.route == route and canAgentGoHome(s)
 
 pure def agentHomeSpoken(s: Shell, route: int): Shell =
-  val moved = agentGoHome(s)
-  { ...moved, spokenRoute: moved.route }
+  val returned = agentGoHome(s)
+  { ...returned, spokenRoute: returned.route }
 
 pure def stepSpokenRouteMarksTheWriter(before: Shell, via: str, after: Shell): bool =
   if (via == "agentOpenSpoken" or via == "agentHomeSpoken")
