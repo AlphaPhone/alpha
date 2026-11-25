@@ -225,6 +225,7 @@ function posted(ticket: number, told: boolean, context: Conversation.Context): S
     }
     const review = try MediaReview
     const enrolled = context.sensitive ? undefined : try review.session()
+    const messageTarget = enrolled === undefined ? undefined : try review.messageTarget()
     board.change({ media: [], mediaNote: "" })
     const location = try whereabouts(context.sensitive, told)
     const metadata = { ...observed(told, context, location), ...(quoted === undefined ? {} : { replyToMessageId: quoted.id }) }
@@ -263,7 +264,7 @@ function posted(ticket: number, told: boolean, context: Conversation.Context): S
       board.append({ id: result.reply.messageId, mine: false, text: result.reply.text })
       try syncAlphaApps()
       if (enrolled !== undefined && result.reply.userMessageId !== undefined) {
-        const media = try review.pending(enrolled, result.reply.userMessageId, chats.chosen, context.revision)
+        const media = try review.pending(enrolled, result.reply.userMessageId, chats.chosen, context.revision, messageTarget)
         if ((try (try Conversation.Machine).get()).context.revision === context.revision && (try (try Chats.Machine).get()).chosen === chats.chosen) board.change({ media })
       }
     }

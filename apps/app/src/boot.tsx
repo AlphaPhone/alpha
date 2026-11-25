@@ -20,7 +20,7 @@ export function boot(platform: Layer.Layer<Platform>, mounts: readonly Mount[] =
     }).pipe(Effect.catchCause(() => Effect.succeed(false))),
   });
   const executors = Layer.succeed(MediaExecutors, {
-    execute: (operation, call) => Effect.tryPromise(() => executeMedia(alpha, operation, call)).pipe(Effect.orElseSucceed(() => undefined)),
+    execute: (operation, call, authority) => Effect.tryPromise(() => executeMedia(alpha, operation, call, authority)).pipe(Effect.orElseSucceed(() => undefined)),
   });
   const root = rooted(Layer.provideMerge(resident, Layer.mergeAll(platform, media, executors)));
   const placed = new Map<Place, ReactElement[]>();
