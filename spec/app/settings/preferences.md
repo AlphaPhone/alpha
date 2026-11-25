@@ -411,7 +411,10 @@ eliza's agent takes the owner's consent to change Gmail and to edit
 Calendar only from its launch (the pinned eliza's
 `spec/os/agentService/config.md`, "A launch carries the Google consent the
 owner saved, else the host file's"). On a phone the shell tells Alpha's
-host the consent each answered read gives; the host keeps it for every
+host the consent each answered read gives, and again the consent each save
+the host took gives, taking it from Settings only once any save before it
+has finished, so the last consent the host is told is the one Settings
+shows even when a read answers just as a save starts; the host keeps it for every
 launch, restarts a running or starting agent only when it changed, and
 keeps what it had when it cannot. A consent the host refused is told again
 at the next read. Until the phone has answered the first read, Alpha has
