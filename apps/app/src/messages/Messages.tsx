@@ -1,6 +1,7 @@
 // spec/app/messages/index.md, "Story: See my conversations"; spec/app/messages/index.md, "Story: Read a conversation"; spec/app/messages/index.md, "Story: Act on a message"; spec/app/messages/index.md, "Story: Start a new message"; spec/app/messages/composer.md, "Story: Keep my draft"; spec/app/messages/composer.md, "Story: Send a message"
 import { MMS_ATTACHMENT_TYPES, MMS_MAX_BODY, MMS_MAX_RECIPIENTS } from "@elizaos/os-bridges";
 import type { MessageRow, ThreadRow } from "@elizaos/os-bridges";
+import { normalizePhoneNumber } from "@elizaos/os-bridges";
 import { Alert, Avatar, Banner, Button, Chip, ConfirmDialog, Input, Menu, MenuContent, MenuItem, MenuTrigger, SearchField, Spinner, Textarea } from "@repo/ui";
 import type { Layer, ManagedRuntime } from "effect";
 import { ArrowUp, Camera, ChevronDown, ChevronLeft, ChevronUp, CircleAlert, Copy, Image as PictureIcon, ImagePlus, Mic, Pencil, Phone as Call, Plus, RefreshCw, Search, Send, Sparkles, Square, Trash2, X } from "lucide-react";
