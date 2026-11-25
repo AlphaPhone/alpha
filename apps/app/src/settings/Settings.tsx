@@ -491,7 +491,7 @@ export function Settings({ runtime, alpha, further }: { runtime: SettingsRuntime
   };
   const Shown = further[page] ?? drawn[page];
   return (
-    <section aria-label="Settings" className="flex h-full min-h-0 flex-col">
+    <section aria-label="Settings" className="relative flex h-full min-h-0 flex-col">
       {state.phone && facts.state?.read.read.status === "Failed" && (page === "Top" || page === "General") ? <Banner variant="warn">The phone did not answer</Banner> : null}
       {Shown ? <Shown runtime={runtime} alpha={alpha} common={common} /> : null}
       <AccessReview runtime={runtime} />

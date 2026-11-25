@@ -33,7 +33,7 @@ export function SettingsAndroidRow({ target, channel, title, icon, reading, star
       title={title}
       detail={reading ? <SettingsReading reading={reading} /> : undefined}
       leading={icon}
-      trailing={same(starting, target, channel) ? <Spinner size="sm" label="Opening" /> : onAndroid ? <ExternalLink role="img" aria-label="Opens in Android settings" className="size-5" /> : null}
+      trailing={same(starting, target, channel) ? <Spinner size="sm" label="Opening" /> : onAndroid ? <ExternalLink role="img" aria-label="Opens in Android settings" className="size-4" /> : null}
       {...pressable}
       {...props}
     />

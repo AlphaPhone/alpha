@@ -1,6 +1,6 @@
 // spec/app/notes/index.md, "Story: See my notes"; spec/app/notes/index.md, "Story: Organise my notes"; spec/app/notes/editor.md, "Story: Write a note"; spec/app/notes/trash.md, "Story: Delete a note and get it back"
-import { Alert, AppHeader, Button, Checkbox, Chip, EmptyState, Input, Menu, MenuContent, MenuItem, MenuTrigger, NoteRow, NotesList as NoteRows, Spinner, Textarea } from "@repo/ui";
-import { ArrowLeft, AudioLines, Ellipsis, FileDown, Folder, Mail, MessageSquare, ListChecks, Mic, Plus, Trash2, X } from "lucide-react";
+import { Alert, AppHeader, Button, Chip, EmptyState, Input, LinkNoteView, Menu, MenuContent, MenuItem, MenuTrigger, NoteEditor as NoteForm, NoteRow, NotesList as NoteRows, Spinner, VoiceNoteView } from "@repo/ui";
+import { ArrowLeft, Ellipsis, FileDown, Folder, Mail, MessageSquare, Mic, Plus, Trash2 } from "lucide-react";
 import { Effect } from "effect";
 import { useState, useSyncExternalStore, type FormEvent } from "react";
 import * as Notes from "../../gen/app__notes.ts";
@@ -27,7 +27,7 @@ import { type Fields, NoteEditor } from "./editor.vibe";
 import { enter } from "./notes.vibe";
 import { record } from "./recording.vibe";
 import { Previous } from "./Previous.tsx";
-import { dated, preview } from "./present.ts";
+import { clock, dated, preview } from "./present.ts";
 import { Recording } from "./Recording.tsx";
 import { pageOf } from "./sides.vibe";
 
@@ -60,17 +60,16 @@ function EditorScreen({ runtime, saved }: { readonly runtime: Runtime; readonly 
   const bin = useTrash(runtime).state;
   const transfer = useTransfer(runtime);
   const hasDocuments = runtime.runSync(NoteDocuments.use((device) => Effect.succeed(device.available)));
+  const [next, setNext] = useState("");
   const current = writing.state;
   if (!current?.showing) return null;
   const owner = (event: Editor.Event) => writing.can(event, "Owner");
   const send = (event: Editor.Event) => void writing.send(event, "Owner");
-  const edit = (fields: Partial<Fields>) => void runtime.runPromise(NoteEditor.use((editor) => editor.typed(fields)));
-  const action = (kind: "close" | "save" | "takeSaved" | "keepMine" | "keepAsNew" | "discard") =>
-    void runtime.runPromise(NoteEditor.use((editor) => editor[kind]()));
-  const close = () => action("close");
-  const updateItem = (index: number, change: Partial<DraftWords["items"][number]>) =>
-    edit({ items: saved.items.map((item, at) => at === index ? { ...item, ...change } : item) });
-  const folder = saved.kind === "Checklist";
+  const edit = (fields: Partial<Fields>) => void runtime.runPromise(NoteEditor.use((writer) => writer.typed(fields)));
+  const action = (kind: "close" | "save" | "takeSaved" | "keepMine" | "keepAsNew") =>
+    void runtime.runPromise(NoteEditor.use((writer) => writer[kind]()));
+  const close = owner({ type: "close" }) ? () => action("close") : undefined;
+  const checklist = saved.kind === "Checklist";
   const deletion: Editor.Event = { type: "deleteNote", ready: bin !== undefined && Trash.ready(bin) };
   const deletable = owner(deletion);
   const exporting = { type: "exportNote", note: current.note, revision: current.draft.base } as const;
@@ -78,33 +77,47 @@ function EditorScreen({ runtime, saved }: { readonly runtime: Runtime; readonly 
   const shared = sharing.saved && current.link.tie === "NoLink" && (actions.can(sharing, "Owner") || actions.state?.open === true);
   const exportable = hasDocuments && current.draft.sync === "Kept" && transfer.can(exporting, "Owner");
   const editable = owner({ type: "edit", kept: true });
+  const status = current.draft.sync === "Saving" ? "Saving…" : current.failed ? "Couldn't save the note"
+    : current.full ? "There isn't room to keep your draft" : current.told === "WasUnknown" ? "Alpha couldn't confirm the deletion"
+      : current.told === "WasRefused" ? "Couldn't delete the note" : current.told === "WasFull" ? "Recently deleted is full" : undefined;
+  const menu = (deletable || exportable || shared) && <Menu onOpenChange={(open) => {
+    if (open && actions.can(sharing, "Owner")) void actions.send(sharing, "Owner");
+    if (!open && actions.can({ type: "closeMenu" }, "Owner")) void actions.send({ type: "closeMenu" }, "Owner");
+  }}>
+    <MenuTrigger asChild><Button aria-label="Note actions" size="icon" variant="ghost"><Ellipsis /></Button></MenuTrigger>
+    <MenuContent align="end">
+      {shared && actions.state?.open && <>
+        <MenuItem onSelect={() => void actions.send({ type: "share", channel: "Email", mark: 0 }, "Owner")}><Mail /> Share by email</MenuItem>
+        <MenuItem onSelect={() => void actions.send({ type: "share", channel: "Messages", mark: 0 }, "Owner")}><MessageSquare /> Share in Messages</MenuItem>
+      </>}
+      {exportable && <MenuItem onSelect={() => void transfer.send(exporting, "Owner")}><FileDown /> Save as text</MenuItem>}
+      {deletable && <MenuItem destructive onSelect={() => send(deletion)}><Trash2 /> Delete</MenuItem>}
+    </MenuContent>
+  </Menu>;
   return (
-    <section aria-label="Note editor" data-alpha-subview="notes-editor" className="flex min-h-0 flex-1 flex-col">
-      <AppHeader title="" leading={<Button aria-label="Back to notes" size="icon" variant="ghost" onClick={close}><ArrowLeft /></Button>}>
-        {editable && <Button aria-label={folder ? "Switch to text" : "Make a checklist"} aria-pressed={folder} size="icon" variant="ghost"
-          onClick={() => edit(folder ? { kind: "Text", body: saved.items.map((row) => row.t).join("\n") }
-            : { kind: "Checklist", items: saved.body.split("\n").filter((line) => line.trim() !== "").map((t) => ({ t, done: false })), body: "" })}><ListChecks /></Button>}
-        {(deletable || exportable || shared) && <Menu onOpenChange={(open) => {
-          if (open && actions.can(sharing, "Owner")) void actions.send(sharing, "Owner");
-          if (!open && actions.can({ type: "closeMenu" }, "Owner")) void actions.send({ type: "closeMenu" }, "Owner");
-        }}>
-          <MenuTrigger asChild><Button aria-label="Note actions" size="icon" variant="ghost"><Ellipsis /></Button></MenuTrigger>
-          <MenuContent align="end">
-            {shared && actions.state?.open && <>
-              <MenuItem onSelect={() => void actions.send({ type: "share", channel: "Email", mark: 0 }, "Owner")}><Mail /> Share by email</MenuItem>
-              <MenuItem onSelect={() => void actions.send({ type: "share", channel: "Messages", mark: 0 }, "Owner")}><MessageSquare /> Share in Messages</MenuItem>
-            </>}
-            {exportable && <MenuItem onSelect={() => void transfer.send(exporting, "Owner")}><FileDown /> Save as text</MenuItem>}
-            {deletable && <MenuItem destructive onSelect={() => send(deletion)}><Trash2 /> Delete</MenuItem>}
-          </MenuContent>
-        </Menu>}
-        {owner({ type: "close" }) && <Button variant="ghost" onClick={close}>Done</Button>}
-      </AppHeader>
-      <div className="flex w-full max-w-192 flex-1 flex-col self-center px-6">
+    <NoteForm
+      className="relative inset-auto flex-1"
+      data-alpha-subview="notes-editor"
+      title={saved.title}
+      body={saved.body}
+      kind={checklist ? "list" : "text"}
+      items={saved.items.map((item, index) => ({ key: `${saved.creation}:${index}`, text: item.t, done: item.done }))}
+      next={next}
+      locked={!editable}
+      status={status}
+      menu={menu}
+      onTitle={(title) => edit({ title: title.slice(0, 240) })}
+      onBody={(body) => edit({ body: body.slice(0, 20_000) })}
+      onItem={(index, item) => edit({ items: saved.items.map((old, at) => at === index ? { t: item.text, done: item.done } : old) })}
+      onRemoveItem={(index) => edit({ items: saved.items.filter((_, at) => at !== index) })}
+      onNext={setNext}
+      onAddItem={() => { if (next.trim() !== "") { edit({ items: [...saved.items, { t: next.trim(), done: false }] }); setNext(""); } }}
+      onFormat={editable ? () => edit(checklist ? { kind: "Text", body: saved.items.map((row) => row.t).join("\n") }
+        : { kind: "Checklist", items: saved.body.split("\n").filter((line) => line.trim() !== "").map((t) => ({ t, done: false })), body: "" }) : undefined}
+      onBack={close}
+      onDone={close}
+      feedback={<>
         <TransferNotice runtime={runtime} />
-        <div aria-live="polite" className="text-xs text-muted-foreground">
-          {current.draft.sync === "Saving" ? "Saving…" : current.failed ? "Couldn't save the note" : current.full ? "There isn't room to keep your draft" : current.told === "WasUnknown" ? "Alpha couldn't confirm the deletion" : current.told === "WasRefused" ? "Couldn't delete the note" : current.told === "WasFull" ? "Recently deleted is full" : ""}
-        </div>
         {current.draft.sync === "Conflicted" && <Alert variant="warn">This note changed while you were writing.
           <div className="mt-2 flex flex-wrap gap-2">
             {owner({ type: "keepMine" }) && <Button size="sm" onClick={() => action("keepMine")}>Keep mine</Button>}
@@ -115,22 +128,8 @@ function EditorScreen({ runtime, saved }: { readonly runtime: Runtime; readonly 
           {owner({ type: "keepAsNew" }) && <Button size="sm" onClick={() => action("keepAsNew")}>Keep as a new note</Button>}
         </Alert>}
         {current.failed && owner({ type: "save" }) && hasContent(saved) && <Button className="self-start" size="sm" onClick={() => action("save")}>Try again</Button>}
-        <Input aria-label="Title" placeholder="Title" maxLength={240} value={saved.title} readOnly={!editable}
-          onChange={(event) => edit({ title: event.currentTarget.value })} className="h-auto rounded-none border-0 bg-transparent px-0 py-1.5 font-display text-[2rem] font-light shadow-none focus-visible:ring-0" />
-        {folder ? <div className="flex flex-col gap-1 py-2">
-          {saved.items.map((item, index) => (
-            <div className="flex min-h-12 items-center gap-2" key={index}>
-              <Checkbox checked={item.done} disabled={!editable} aria-label={item.done ? "Uncheck item" : "Check item"} onCheckedChange={() => updateItem(index, { done: !item.done })} />
-              <Input aria-label="Item" value={item.t} readOnly={!editable} onChange={(event) => updateItem(index, { t: event.currentTarget.value })}
-                className={`border-0 bg-transparent shadow-none ${item.done ? "text-muted-foreground line-through" : ""}`} />
-              {editable && <Button size="icon" variant="ghost" aria-label="Remove item" onClick={() => edit({ items: saved.items.filter((_, at) => at !== index) })}><X /></Button>}
-            </div>
-          ))}
-          {editable && <Button variant="ghost" className="self-start" onClick={() => edit({ items: [...saved.items, { t: "", done: false }] })}><Plus /> Add item</Button>}
-        </div> : <Textarea aria-label="Note" placeholder="Note" maxLength={20_000} value={saved.body} readOnly={!editable} onChange={(event) => edit({ body: event.currentTarget.value })}
-          className="min-h-52 flex-1 resize-none rounded-none border-0 bg-transparent px-0 py-2 text-[1.0625rem] leading-relaxed shadow-none focus-visible:ring-0" />}
-      </div>
-    </section>
+      </>}
+    />
   );
 }
 
@@ -181,24 +180,38 @@ function LinkedNote({ runtime, collection }: { readonly runtime: Runtime; readon
   const state = link.state;
   if (!state?.showing) return null;
   const note = collection.noteByNumber.get(state.note);
-  const page = pageOf(note?.format?.data.url);
+  const data = note?.format?.data;
+  const page = pageOf(data?.url);
   const event = { type: "visit", mark: state.link.mark } as const;
-  return <section aria-label="Link note" className="flex flex-1 flex-col">
-    <AppHeader title="Source" leading={<Button variant="ghost" size="icon" aria-label="Back to notes" onClick={() => void link.send({ type: "back" }, "Owner")}><ArrowLeft /></Button>} />
-    <article className="flex flex-col items-start gap-4 px-6">
-      <h1 className="font-display text-3xl">{note === undefined ? "Link note" : titleOf(note)}</h1>
-      {page && <p className="max-w-full break-all text-sm text-muted-foreground">{page}</p>}
-      <p className="whitespace-pre-wrap">{note?.body}</p>
-      {page && link.can(event, "Owner") && <Button onClick={() => void link.send(event, "Owner")}>Visit page</Button>}
-      {link.can({ type: "askRemove" }, "Owner") && <Button variant="secondary" onClick={() => void link.send({ type: "askRemove" }, "Owner")}>Remove source</Button>}
-      {state.review.showing && <Alert variant="warn">Remove the web source from this note?
-        <div className="mt-2 flex gap-2">
-          <Button variant="secondary" onClick={() => void link.send({ type: "back" }, "Owner")}>Cancel</Button>
-          {link.can({ type: "confirmRemove" }, "Owner") && <Button variant="destructive" onClick={() => void link.send({ type: "confirmRemove" }, "Owner")}>Remove</Button>}
-        </div>
-      </Alert>}
-    </article>
-  </section>;
+  const close = () => void link.send({ type: "back" }, "Owner");
+  const askRemove = { type: "askRemove" } as const;
+  const confirmRemove = { type: "confirmRemove" } as const;
+  const clips = Array.isArray(data?.clips) ? data.clips.filter((part): part is string => typeof part === "string") : [];
+  if (clips.length === 0 && note?.body.trim()) clips.push(note.body);
+  return <LinkNoteView
+    className="relative inset-auto flex-1"
+    title={note === undefined ? "Link note" : titleOf(note)}
+    domain={typeof data?.domain === "string" ? data.domain : URL.parse(page)?.hostname ?? ""}
+    clips={clips}
+    onBack={close}
+    onVisit={page !== "" && link.can(event, "Owner") ? () => void link.send(event, "Owner") : undefined}
+    menu={link.can(askRemove, "Owner") && <Menu>
+      <MenuTrigger asChild><Button aria-label="Link actions" size="icon" variant="ghost"><Ellipsis /></Button></MenuTrigger>
+      <MenuContent><MenuItem destructive onSelect={() => void link.send(askRemove, "Owner")}>Remove source</MenuItem></MenuContent>
+    </Menu>}
+    feedback={state.review.showing && <Alert variant="warn" className="mt-4">Remove the web source from this note?
+      <div className="mt-2 flex gap-2">
+        <Button variant="secondary" onClick={close}>Cancel</Button>
+        {link.can(confirmRemove, "Owner") && <Button variant="destructive" onClick={() => void link.send(confirmRemove, "Owner")}>Remove</Button>}
+      </div>
+    </Alert>}
+  />;
+}
+
+function speaker(value: unknown) {
+  const words = typeof value === "string" ? value.trim().split(/\s+/).filter(Boolean) : [];
+  if (words.length === 0 || value === "me") return { initials: "You", who: "You", own: true };
+  return { initials: words.map((word) => word[0]).join("").slice(0, 2).toUpperCase(), who: words[0] ?? "", own: false };
 }
 
 function VoiceNote({ runtime, collection }: { readonly runtime: Runtime; readonly collection: Collection }) {
@@ -208,22 +221,36 @@ function VoiceNote({ runtime, collection }: { readonly runtime: Runtime; readonl
   if (!state?.showing) return null;
   const note = collection.noteByNumber.get(state.note);
   const data = note?.format?.data;
-  const text = Array.isArray(data?.lines) ? data.lines.flatMap((line) => typeof line === "object" && line !== null && "t" in line && typeof line.t === "string" ? [line.t] : []) : [];
+  const lines = Array.isArray(data?.lines) ? data.lines.flatMap((line) => typeof line === "object" && line !== null && "t" in line && typeof line.t === "string"
+    ? [{ ...speaker("s" in line ? line.s : undefined), at: clock("at" in line && typeof line.at === "number" ? line.at : 0), text: line.t }] : []) : [];
   const summary = Array.isArray(data?.summary) ? data.summary.filter((line): line is string => typeof line === "string") : [];
+  const actions = Array.isArray(data?.actions) ? data.actions.flatMap((item) => typeof item === "object" && item !== null && "t" in item && typeof item.t === "string"
+    ? [{ text: item.t, done: "done" in item && item.done === true }] : []) : [];
+  const savedAudio = data?.audio;
+  const ms = typeof data?.durationMs === "number" ? data.durationMs : typeof savedAudio === "object" && savedAudio !== null
+    && "durationMs" in savedAudio && typeof savedAudio.durationMs === "number" ? savedAudio.durationMs : undefined;
+  const length = ms === undefined ? "" : clock(ms / 1000);
   const play = { type: "play", from: 0 } as const;
   const stop = { type: "stopPlaying" } as const;
-  return <section aria-label="Voice note" className="flex flex-1 flex-col">
-    <AppHeader title="Voice note" leading={<Button variant="ghost" size="icon" aria-label="Back to notes" onClick={() => void voice.send({ type: "back" }, "Owner")}><ArrowLeft /></Button>} />
-    <article className="flex flex-col gap-3 px-6">
-      <h1 className="font-display text-3xl">{note === undefined ? "Voice note" : titleOf(note)}</h1>
-      {audio && note !== undefined && audioIdOf(note) !== "" && voice.can(play, "Owner") && <Button className="self-start" variant="secondary" onClick={() => void voice.send(play, "Owner")}><AudioLines /> Play recording</Button>}
-      {voice.can(stop, "Owner") && <Button className="self-start" variant="secondary" onClick={() => void voice.send(stop, "Owner")}>Stop playback</Button>}
-      {state.play.status === "Failed" && <Alert variant="warn">This recording couldn't be played</Alert>}
-      {summary.length > 0 && <section><h2 className="text-sm font-semibold">Summary</h2>{summary.map((line, index) => <p key={index}>{line}</p>)}</section>}
-      {text.length > 0 && <section><h2 className="text-sm font-semibold">Transcript</h2>{text.map((line, index) => <p key={index}>{line}</p>)}</section>}
-      {text.length === 0 && note?.body && <p className="whitespace-pre-wrap">{note.body}</p>}
-    </article>
-  </section>;
+  const canPlay = audio && note !== undefined && audioIdOf(note) !== "" && voice.can(play, "Owner");
+  const playback = voice.can(stop, "Owner") ? () => void voice.send(stop, "Owner") : canPlay ? () => void voice.send(play, "Owner") : undefined;
+  return <VoiceNoteView
+    className="relative inset-auto flex-1"
+    title={note === undefined ? "Voice note" : titleOf(note)}
+    meta={note === undefined ? "" : [dated(note, collection.readAt), length].filter(Boolean).join(" · ")}
+    time={length}
+    summary={summary}
+    actions={actions}
+    lines={lines.length === 0 && note?.body ? [{ ...speaker(undefined), at: "0:00", text: note.body }] : lines}
+    playing={state.play.status === "Loading"}
+    onBack={() => void voice.send({ type: "back" }, "Owner")}
+    onPlay={playback}
+    onSeek={canPlay && Array.isArray(data?.segments) && data.segments.length > 0 ? (from) => {
+      const event = { type: "play", from } as const;
+      if (voice.can(event, "Owner")) void voice.send(event, "Owner");
+    } : undefined}
+    feedback={state.play.status === "Failed" && <Alert variant="warn" className="mt-4">This recording couldn't be played</Alert>}
+  />;
 }
 
 function NotesList({ alpha, runtime }: { readonly alpha: Alpha; readonly runtime: Runtime }) {

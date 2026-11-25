@@ -12,7 +12,7 @@ const none: Partial<InboxListScreenProps> = { onArchive: undefined, onTrash: und
 export const meta: ComponentMeta<InboxListScreenProps> = {
   args: {
     ...none, account: "sam.rivera@gmail.com", folder: "incoming", search: "", rows, onSearchChange: fn(), onSearch: fn(), onChooseFolder: fn(), onOpenSearch: fn(), onCloseSearch: fn(),
-    onRefresh, onCompose, onAccount, loading: false, loadingMore: false, chosen: 0, aside: 0,
+    onBack: fn(), onRefresh, onCompose, onAccount, loading: false, loadingMore: false, chosen: 0, aside: 0,
   },
   examples: {
     "More to read": { onLoadMore: fn() },

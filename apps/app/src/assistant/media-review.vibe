@@ -1,5 +1,5 @@
 // spec/app/approvals/index.md, "Story: One action at a time"; spec/app/approvals/proposal.md, "Story: Decide"; spec/app/photos/agent.md, "Story: Let Alpha read my library"
-import { DeviceExecution, type DeviceAgent, type ExecutorCall, type JournalIdentity, type RuntimeRequestHeaders } from "@elizaos/agent/client"
+import { DeviceExecution, NOT_DISPATCHED, type DeviceAgent, type ExecutorCall, type JournalIdentity, type RuntimeRequestHeaders } from "@elizaos/agent/client"
 import { operationOf, readOperation, type DeviceOperation } from "@elizaos/agent/operations"
 import { Machine as Conversation } from "../../gen/app__assistant.effect.vibe"
 import { Machine as Chats } from "../../gen/app__assistant__chats.effect.vibe"
@@ -49,7 +49,8 @@ module native {
 
   export async function slotFor(identity: readonly string[]): Promise<string> {
     const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(JSON.stringify(identity)))
-    return `device:${new Uint8Array(digest).toHex()}`
+    const hex = Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("")
+    return `device:${hex}`
   }
 }
 import { enrollment, journal, slotFor } from native
@@ -120,7 +121,9 @@ function operation(raw: unknown) {
     case "photo_library_inspect":
     case "photo_library_select":
     case "photo_library_review":
+      return value
     case "files_filter":
+      return value.from === undefined && value.to === undefined && value.kind !== "pdf" ? value : undefined
     case "files_open":
     case "files_folder_create":
       return value
@@ -164,7 +167,7 @@ function words(value: NonNullable<ReturnType<typeof operation>>): { title: strin
 export service MediaReview {
   session(): (Session | undefined)!!
   pending(session: Session, message: string, conversation: number, revision: number): readonly MediaCard[]!!
-  decide(card: MediaCard, approve: boolean): void!!(Conversation | Chats)
+  decide(card: MediaCard, approve: boolean): void!!(Talk | Conversation | Chats)
   /** Same enrollment and custody as the cards, without exposing its tokens or action payloads. */
   history(): (readonly ActivityProposal[] | undefined)!!
   /** Acts only against the exact current proposal and the local receipt the SDK can verify. */
@@ -230,15 +233,24 @@ export const mediaReview = Layer.effect(MediaReview, effect {
   const { runtime, life } = agent
   const executors = try MediaExecutors
   const device = try Device
-  const { board } = try Talk
   const lock = try Semaphore.make(1)
   let latest: Session | undefined
+  const scopes = new Map<string, boolean!!>()
+  const guarded: MediaExecutors.Shape = {
+    effect execute(operation: DeviceOperation, call: ExecutorCall) {
+      const allowed = scopes.get(call.proposalId)
+      if (allowed === undefined || !(try allowed)) return { kind: "refused", code: NOT_DISPATCHED }
+      return try executors.execute(operation, call)
+    },
+  }
   effect function session(): (Session | undefined)!! {
     if (!registered("AlphaMediaEnrollment") || !registered("ElizaActionJournal")) return undefined
     const status = life.status() catch () => undefined
     if (status?.state !== "running") { latest = undefined; return undefined }
     if (latest?.epoch === status.epoch) return latest
-    latest = Effect.provideService(enrolled(status.epoch, runtime, executors), Agent, agent) catch () => undefined
+    latest = Effect.provideService(enrolled(status.epoch, runtime, guarded), Agent, agent) catch () => undefined
+    const fresh = latest
+    if (fresh !== undefined) try ignore(tryPromise(() => fresh.execute.sync()))
     return latest
   }
   effect function proposals(opened: Session): (readonly Proposal[] | undefined)!! {
@@ -246,7 +258,7 @@ export const mediaReview = Layer.effect(MediaReview, effect {
     if (answer === undefined || opened !== latest) return undefined
     return answer.proposals
   }
-  effect function current(opened: Session): boolean!! {
+  effect function enrollmentIsCurrent(opened: Session): boolean!! {
     const status = life.status() catch () => undefined
     const owner = Effect.provideService(ownerAt(), Agent, agent) catch () => ""
     const front = (tryPromise(() => enrollment().authority()) |> map(%, (one) => one.active === true)) catch () => false
@@ -267,7 +279,7 @@ export const mediaReview = Layer.effect(MediaReview, effect {
     session,
     effect history() {
       const opened = try session()
-      if (opened === undefined || !(try current(opened))) return undefined
+      if (opened === undefined || !(try enrollmentIsCurrent(opened))) return undefined
       const answer = try proposals(opened)
       if (answer === undefined) return undefined
       const at = try Clock.currentTimeMillis
@@ -279,15 +291,15 @@ export const mediaReview = Layer.effect(MediaReview, effect {
         const labelled = visible === undefined ? { title: "Phone action", detail: "" } : words(visible)
         return { proposal: proposal.id, ...labelled, outcome, declinable: readyToDecline(proposal, at), unsettled: toSettle(proposal) && (try hasReceipt(opened, proposal)) }
       }, { concurrency: 4 })
-      if (!(try current(opened))) return undefined
+      if (!(try enrollmentIsCurrent(opened))) return undefined
       return rows.filter((row) => row !== undefined)
     },
     effect settle(id, action) {
       return try lock.withPermits(1)(effect {
         const opened = try session()
-        if (opened === undefined || !(try current(opened))) return false
+        if (opened === undefined || !(try enrollmentIsCurrent(opened))) return false
         const found = (try proposals(opened))?.find((proposal) => proposal.id === id && proposal.payload.workflow === undefined)
-        if (found === undefined || !(try current(opened))) return false
+        if (found === undefined || !(try enrollmentIsCurrent(opened))) return false
         if (action === "decline") {
           if (!readyToDecline(found, try Clock.currentTimeMillis)) return false
           const result = tryPromise(() => opened.decide(found.id, { digest: found.digest, approved: false })) catch () => undefined
@@ -310,15 +322,21 @@ export const mediaReview = Layer.effect(MediaReview, effect {
       })
     },
     effect decide(card: MediaCard, approve: boolean) {
+      const { board } = try Talk
+      const conversation = try Conversation
+      const chats = try Chats
+      effect function current(session: Session): boolean!! {
+        const showing = (try conversation.get()).context
+        const chosen = (try chats.get()).chosen
+        const time = try Clock.currentTimeMillis
+        if (session !== latest || card.enrollmentId !== session.identity.enrollmentId || card.conversation !== chosen
+          || card.revision !== showing.revision || showing.sensitive || time >= card.expiresAt) return false
+        return try enrollmentIsCurrent(session)
+      }
       try lock.withPermits(1)(effect {
         if (!board.snapshot().media.includes(card)) return
-        const showing = (try (try Conversation).get()).context
-        const chosen = (try (try Chats).get()).chosen
         const held = try session()
-        const time = try Clock.currentTimeMillis
-        const front = (tryPromise(() => enrollment().authority()) |> map(%, (one) => one.active === true)) catch () => false
-        const live = held !== undefined && card.enrollmentId === held.identity.enrollmentId && card.conversation === chosen
-          && card.revision === showing.revision && !showing.sensitive && time < card.expiresAt && front && (try device.showing())
+        const live = held !== undefined && (try current(held))
         board.change({ media: board.snapshot().media.filter((one) => one !== card) })
         if (!live || held === undefined) { board.change({ mediaNote: "That review expired. Ask again from the current screen." }); return }
         if (!approve) {
@@ -326,7 +344,9 @@ export const mediaReview = Layer.effect(MediaReview, effect {
           board.change({ mediaNote: declined === undefined ? "Alpha couldn’t confirm the decline." : "Declined" })
           return
         }
-        const result = tryPromise(() => held.execute.approve(card, { live: true, nonsensitive: true, exact: true, forceReview: true, requestEligible: true, reviewed: true })) catch () => undefined
+        scopes.set(card.id, current(held))
+        const result = (tryPromise(() => held.execute.approve(card, { live: true, nonsensitive: true, exact: true, forceReview: true, requestEligible: true, reviewed: true }))
+          |> ensuring(%, sync(() => { scopes.delete(card.id) }))) catch () => undefined
         const note = result?.kind !== "settled" ? notStarted : result.result.tag === "Applied" ? (result.synced ? "Done" : "Done. Agent receipt pending.")
           : result.result.tag === "Unknown" ? "The result could not be confirmed. Check before trying again." : "Nothing changed."
         board.change({ mediaNote: note })

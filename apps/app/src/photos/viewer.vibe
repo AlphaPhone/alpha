@@ -2,6 +2,7 @@
 import type { EditOperationId, EditPreview, MediaItem, VideoEditSession } from "@elizaos/os/bridges/definitions/media"
 import * as KeyValueStore from "effect/persistence/KeyValueStore"
 import * as Library from "../../gen/app__photos.effect.vibe"
+import type { Actor } from "../../gen/app__photos__actor.effect.vibe"
 import * as Viewer from "../../gen/app__photos__viewer.effect.vibe"
 import { PhotosPort } from "../platform/photos.vibe"
 import { Catalog } from "./catalog.vibe"
@@ -229,7 +230,7 @@ effect function shared(photo: number, revision: number, channel: "alpha" | "emai
 
 type Needs = PhotosPort | Catalog | OpenedPhoto | Viewer.Machine | Library.Machine | KeyValueStore.KeyValueStore | Toasts | Said | Effect.Services<ReturnType<typeof shared>>
 
-function carry(fx: Viewer.Effect): Job<Viewer.Event, Needs, [Viewer.Actor]> {
+function carry(fx: Viewer.Effect): Job<Viewer.Event, Needs, [Actor]> {
   return match (fx) {
     when { tag: "Load", let ticket, let photo }: answer("view", loaded(ticket, photo), failed(ticket), "Phone");
     when { tag: "Render", let revision, let edit }: answer("preview", rendered(revision, edit), { type: "previewed", revision, ok: false }, "Phone");

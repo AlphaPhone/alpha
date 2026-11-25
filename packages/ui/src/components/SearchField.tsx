@@ -23,7 +23,7 @@ export function SearchField({ value, onValueChange, clearLabel = "Clear", disabl
         value={value}
         disabled={disabled}
         onChange={(event) => onValueChange(event.target.value)}
-        className="rounded-panel border-0 bg-secondary pr-12 pl-11 text-md [&::-webkit-search-cancel-button]:appearance-none"
+        className="rounded-panel border-0 pr-12 pl-11 [&::-webkit-search-cancel-button]:appearance-none"
         {...props}
       />
       {value ? (
