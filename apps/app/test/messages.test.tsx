@@ -710,7 +710,7 @@ describe("Messages on an Alpha image", () => {
 
     world.ask.nextReplyChunks = ["Review this request on your phone before it can run."];
     world.ask.nextActions = () => [{ action: "PROPOSE_DEVICE_ACTION", data: { proposalId: review.proposal.id, state: "pending", executed: false, approvalRequired: true, awaitingUserInput: true } }];
-    await write("Message Alpha", draft ? "Draft a text to 202-555-0142 saying, can you bring ice tomorrow?" : "text 202-555-0142 can you bring ice tomorrow?");
+    await fill("Message Alpha", draft ? "Draft a text to 202-555-0142 saying, can you bring ice tomorrow?" : "text 202-555-0142 can you bring ice tomorrow?");
     await vi.waitFor(() => expect(button("Send")?.disabled).toBe(false));
     await press("Send");
     await ready(runtime, Conversation, "The proposal is read", (state) => review.pendingReads >= 1 && state.turn.reply === "Complete");
@@ -735,7 +735,7 @@ describe("Messages on an Alpha image", () => {
 
     world.ask.nextReplyChunks = ["Review this request on your phone before it can run."];
     world.ask.nextActions = () => [{ action: "PROPOSE_DEVICE_ACTION", data: { proposalId: review.proposal.id, state: "pending", executed: false, approvalRequired: true, awaitingUserInput: true } }];
-    await write("Message Alpha", `text ${query} I'm running late`);
+    await fill("Message Alpha", `text ${query} I'm running late`);
     await vi.waitFor(() => expect(button("Send")?.disabled).toBe(false));
     await press("Send");
     await ready(runtime, Conversation, "The named proposal is read", (state) => review.pendingReads >= 1 && state.turn.reply === "Complete");

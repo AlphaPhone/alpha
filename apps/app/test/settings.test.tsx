@@ -1,4 +1,5 @@
 // @vitest-environment happy-dom
+import { act } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import * as Android from "../gen/app__settings__android.effect.vibe";
 import * as Carrier from "../gen/app__settings__carrier.effect.vibe";
