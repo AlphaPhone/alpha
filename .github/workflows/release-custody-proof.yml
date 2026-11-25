@@ -1,0 +1,64 @@
+name: release-custody-proof
+
+# spec/release/index.md, "The protected keys are proven to be the enrolled ones: each of the nine OS certificates,
+# the two verified-boot keys and Alpha's app key pairs with its committed public identity, none is a test key, and no
+# two are the same". The release owner dispatches this on main with the commit they reviewed; the protected `release`
+# environment runs `pnpm release custody` on memory that never reaches a disk, and only public digests leave the run.
+on:
+  workflow_dispatch:
+    inputs:
+      workflow_commit:
+        description: The exact reviewed commit on main
+        required: true
+        type: string
+
+permissions: {}
+
+concurrency:
+  group: release-custody-proof
+  cancel-in-progress: false
+
+env:
+  TURBO_TELEMETRY_DISABLED: "1"
+
+jobs:
+  verify:
+    if: github.repository_id == '1396333361' && github.ref == 'refs/heads/main' && inputs.workflow_commit == github.sha
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    environment: release
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: ./.github/actions/setup
+        with:
+          job: release-custody
+          verification: "false"
+      - name: Check the custody proof with disposable keys
+        run: pnpm --filter @repo/app exec vitest run test/image.test.ts -t "Prove the protected release keys"
+      - name: Prove the protected release keys
+        working-directory: apps/app
+        env:
+          ALPHA_OS_RELEASE_KEYS_PART1_B64: ${{ secrets.ALPHA_OS_RELEASE_KEYS_PART1_B64 }}
+          ALPHA_OS_RELEASE_KEYS_PART2_B64: ${{ secrets.ALPHA_OS_RELEASE_KEYS_PART2_B64 }}
+          ALPHA_OS_RELEASE_KEYS_PASSPHRASE: ${{ secrets.ALPHA_OS_RELEASE_KEYS_PASSPHRASE }}
+          ALPHA_APP_RELEASE_KEYSTORE_B64: ${{ secrets.ALPHA_APP_RELEASE_KEYSTORE_B64 }}
+          ALPHA_APP_RELEASE_KEYSTORE_PASSWORD: ${{ secrets.ALPHA_APP_RELEASE_KEYSTORE_PASSWORD }}
+        run: |
+          set -euo pipefail
+          set +x
+          umask 077
+          ulimit -c 0
+          test "$(stat -f -c %T /dev/shm)" = tmpfs
+          mkdir -p artifacts
+          pnpm -s release custody --out artifacts/release-custody-proof.json --scratch /dev/shm
+      - uses: actions/upload-artifact@v5
+        with:
+          name: release-custody-proof-${{ github.sha }}-${{ github.run_id }}
+          path: apps/app/artifacts/release-custody-proof.json
+          if-no-files-found: error
+          retention-days: 14

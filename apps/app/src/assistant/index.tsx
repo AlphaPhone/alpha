@@ -15,6 +15,7 @@ import { VoiceEnd } from "../phone/CommsTarget.tsx";
 import { area, type Resident, type Shown } from "../runtime/area.tsx";
 import { applying, following, together, untimed } from "../runtime/reactor.vibe";
 import { keyboardVoice } from "../shell/canvas.vibe";
+import { voiceReported } from "../update/activity.vibe";
 import { TalkControls } from "../voice/TalkControls.tsx";
 import { DictationControls } from "../voice/DictationControls.tsx";
 import { Assistant } from "./Assistant.tsx";
@@ -30,6 +31,7 @@ const screens = together(
   assisting, voiceArea, aloud, talkFromComms, commsVoicePanel,
   following(Voice, voiceOwnsComposer, Dock, (on) => ({ type: "voicing", on, now: untimed } as const)),
   applying(Voice, voiceOwnsComposer, keyboardVoice),
+  voiceReported("assistant"),
 );
 
 /** The conversation with Talk, the system clipboard and Inbox's current review destination. */

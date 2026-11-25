@@ -217,7 +217,7 @@ import os as Os from "../../release/os"
 
 type Channel = { name: str, product: str, device: str, downgradeAllowed: bool }
 
-pure val alphaChannel: Channel = { name: "stable", product: Os::pinned.product, device: Os::pinned.device, downgradeAllowed: false }
+pure val alphaChannel: Channel = { name: "stable", product: Os::pinned.product, device: Os::pinned.device, downgradeAllowed: Os::pinned.downgrade }
 
 pure def channelIsAlphas(c: Channel): bool = c == alphaChannel
 
@@ -235,7 +235,7 @@ run as passed only then.
 ```quint
 import pilot as P from "../../release/pilot"
 
-pure def pilotPassed(p: P::Pilot): bool = p.leg == P::Done and p.passed
+pure def pilotPassed(p: P::Pilot): bool = P::runPassed(p)
 ```
 
 ### Each operator command reads Alpha's channel and the stallion stock source lock where it reads one and the operator named none
@@ -268,9 +268,11 @@ wiped rather than updated in place, so nothing reads a rotation lineage any
 more; a record that names one is refused rather than ignored.
 
 ```quint
+import release as Rel from "../../release"
+
 type SignerRecord = { rotation: bool }
 
-pure def signerRecordAdmitted(r: SignerRecord): bool = not(r.rotation)
+pure def signerRecordAdmitted(r: SignerRecord): bool = Rel::oneKey(1, r.rotation)
 
 pure val rValues = Set({ rotation: true }, { rotation: false })
 
