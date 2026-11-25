@@ -235,6 +235,7 @@ module audio {
   }
 }
 import { type PlaybackPosition, makeAudio, pauseAudio, positionOf, sourceOf } from audio
+export type { PlaybackPosition }
 
 /** The one audio element the open voicemail plays in, outside any screen. */
 export service Player {
