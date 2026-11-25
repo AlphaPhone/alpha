@@ -29,10 +29,10 @@ export function MenuContent({ align = "end", sideOffset = 0, collisionPadding = 
 }
 
 /**
- * One action of a menu; an icon before its words is decorative. A touch chooses it only when the touch began on it:
- * the tap that opened the menu lands its click on whichever item opened under the finger, and is not a choice.
+ * One action of a menu; an icon before its words is decorative. A pointer release can choose the action only if
+ * the press began on that item. The menu may open before the pointer that pressed its trigger is released.
  */
-export function MenuItem({ destructive = false, className, onPointerDown, onClick, ...props }: MenuItemProps) {
+export function MenuItem({ destructive = false, className, onPointerDown, onPointerUp, onPointerCancel, onClick, ...props }: MenuItemProps) {
   const pressedRef = useRef(false);
   return (
     <MenuPrimitive.Item
@@ -40,6 +40,14 @@ export function MenuItem({ destructive = false, className, onPointerDown, onClic
       onPointerDown={(event) => {
         pressedRef.current = true;
         onPointerDown?.(event);
+      }}
+      onPointerUp={(event) => {
+        if (!pressedRef.current) event.preventDefault();
+        onPointerUp?.(event);
+      }}
+      onPointerCancel={(event) => {
+        pressedRef.current = false;
+        onPointerCancel?.(event);
       }}
       onClick={(event) => {
         const touched = "pointerType" in event.nativeEvent && (event.nativeEvent.pointerType === "touch" || event.nativeEvent.pointerType === "pen");
