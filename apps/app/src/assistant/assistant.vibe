@@ -17,7 +17,7 @@ import * as World from "../../gen/app__clock__world.effect.vibe"
 import * as Reminders from "../../gen/app__reminders.effect.vibe"
 import * as Comms from "../../gen/app__phone__comms.effect.vibe"
 import * as Voice from "../../gen/app__voice.effect.vibe"
-import { Machine as Speaker } from "../../gen/app__voice__output.effect.vibe"
+import type { Machine as Speaker } from "../../gen/app__voice__output.effect.vibe"
 import { Machine as Shell, canReturnCommsView, showing } from "../../gen/app__shell.effect.vibe"
 import { Machine as Canvas } from "../../gen/app__shell__keyboard.effect.vibe"
 import { Machine as Layers } from "../../gen/app__shell__layers.effect.vibe"
@@ -58,7 +58,6 @@ const turns = Layer.effect(Turns, effect {
   let streamed: string | undefined
   const transport: TurnTransport = {
     request: (path, body, headers) => {
-      // The SDK can recover a reply under the same message ID without a terminal stream frame.
       if (clientMessageOf(body) === streamed) streamed = undefined
       return runtime.request(path, body, headers)
     },
