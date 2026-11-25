@@ -383,7 +383,7 @@ export interface Beginning {
   readonly kind: Kind
   readonly account: number
   /** The message answered, as Gmail names it, with its sender, other recipients, subject and attachments. */
-  readonly message?: { readonly id: string; readonly from: string; readonly replyTo: MailMessage["message"]["replyTo"]; readonly others: ReadonlyArray<string>; readonly subject: string; readonly body: string; readonly historyId: string | null; readonly files: MailMessage["attachments"] }
+  readonly message?: { readonly id: string; readonly from: string; readonly replyTo?: string; readonly others: ReadonlyArray<string>; readonly subject: string; readonly body: string; readonly historyId: string | null; readonly files: MailMessage["attachments"] }
 }
 
 const addressOf = (from: string) => /<([^>]+)>/u.exec(from)?.[1] ?? from.trim()

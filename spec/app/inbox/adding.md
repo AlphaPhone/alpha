@@ -174,6 +174,13 @@ pure def clearPeople(s: Adding): Adding =
 pure def canClosePeople(s: Adding): bool = s.contactDraft != 0
 
 pure def closePeople(s: Adding): Adding = clearPeople(s)
+
+pure def canContactsReported(s: Adding, draft: int): bool =
+  draft != 0 and draft == s.contactDraft and s.contacts == Asked
+
+pure def contactsReported(s: Adding, draft: int, allowed: bool): Added =
+  if (allowed) readPeople(s, draft, "", false)
+  else { state: { ...s, contacts: InSettings }, out: List() }
 ```
 
 ### Nothing joins a draft but a file that fit, a file the owner saw, or a contact picked for it
@@ -186,7 +193,9 @@ pure def stepNothingJoinsUnseen(before: Adding, via: str, after: Adding, out: Li
         (via == "picked" and a.account == 0 and a.draft == before.draft and a.draft != 0)
           or (via == "takeIn" and before.thing != 0 and a.draft == before.into and a.account == before.account and a.mib == before.mib)
       )
-    | PickContact(c) => (via == "pickContact" or via == "findPeople" or via == "morePeople") and c.draft == after.contactDraft and c.draft != 0
+    | PickContact(c) =>
+      (via == "pickContact" or via == "findPeople" or via == "morePeople" or via == "contactsReported")
+        and c.draft == after.contactDraft and c.draft != 0
     | AddContact(c) => via == "chooseContact" and canChooseContact(before, c.draft, c.ticket, c.address)
     | _ => true
   })

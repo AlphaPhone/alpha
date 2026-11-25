@@ -1,12 +1,16 @@
 // spec/app/inbox/adding.md, "Story: Add files and people to my draft"
+import type { ContactCursor } from "@elizaos/os-bridges"
 import * as Inbox from "../../gen/app__inbox.effect.vibe"
 import * as Adding from "../../gen/app__inbox__adding.effect.vibe"
 import type { Effect as Out, Event, Picked } from "../../gen/app__inbox__adding.effect.vibe"
 import * as Drafts from "../../gen/app__inbox__drafts.effect.vibe"
 import { canAttach } from "../../gen/app__inbox__letter.effect.vibe"
-import { Machine as Shell } from "../../gen/app__shell.effect.vibe"
+import { Machine as Shell, available, showing } from "../../gen/app__shell.effect.vibe"
+import { grantOf } from "../phone/phone.vibe"
+import { SystemSettings } from "../platform/systemSettings.vibe"
+import { Telephony, readAddressBook, telephony } from "../platform/telephony.vibe"
 import { type Job, answer, contained, reacting, run, started, together, untimed } from "../runtime/reactor.vibe"
-import { type Attached, Letters, mibOf, policy } from "./composer.vibe"
+import { type Attached, Letters, acceptable, mibOf, policy } from "./composer.vibe"
 import { ownerChanges } from "./mailbox.vibe"
 
 module web {
@@ -63,6 +67,95 @@ export const incoming = Layer.sync(Incoming, () => {
   }
 })
 
+interface Address {
+  readonly name: string
+  readonly email: string
+}
+
+interface AddressPage {
+  readonly ticket: number
+  readonly addresses: ReadonlyArray<Address>
+  readonly next?: ContactCursor
+}
+
+export service ContactAddresses {
+  current(): AddressPage | undefined
+  show(page: AddressPage | undefined): void
+}
+
+const contactAddresses = Layer.sync(ContactAddresses, () => {
+  let current: AddressPage | undefined
+  return { current: () => current, show: (page) => { current = page } }
+})
+
+effect function activeDraft(draft: number): boolean!!(Drafts.Machine | Shell) {
+  const writing = try (try Drafts.Machine).get()
+  return writing.open && writing.letter.id === draft && showing(try (try Shell).get(), "Inbox")
+}
+
+// spec/app/inbox/adding.md, "A contact is picked only where the phone has Alpha's contacts and Android allows them; without the permission the owner is asked once, and afterwards sent to Settings; on a phone without them nothing is asked and the owner is told"
+export effect function pickPeople(draft: number): void!!(Adding.Machine | Drafts.Machine | Shell | Telephony) {
+  if (!(try activeDraft(draft))) return
+  const shell = try Shell
+  const adding = try Adding.Machine
+  const admitted = available(try shell.get(), "Contacts")
+  const status = admitted ? (telephony("mail contact permission", (phone) => phone.phone.status()) catch () => undefined) : undefined
+  if (!(try activeDraft(draft))) return
+  const grant = grantOf(status?.permissions.contacts)
+  const asked = (try adding.get()).contacts !== "Usable"
+  const contacts = { grant, asked: asked || grant !== "Unasked" }
+  const event: Event = { type: grant === "Granted" && admitted ? "pickContact" : "wantContacts", draft, admitted, contacts }
+  try ignore(exit(adding.send(event)))
+}
+
+// spec/app/inbox/adding.md, "The people shown are for the draft and the newest Contacts read, and choosing one adds only its displayed address"
+effect function people(draft: number, ticket: number, query: string, further: boolean): Event!!(ContactAddresses | Adding.Machine | Telephony | Drafts.Machine | Shell) {
+  const failed = { type: "peopleRead", draft, ticket, ok: false, addresses: 0, more: false } satisfies Event
+  const cache = try ContactAddresses
+  const adding = try Adding.Machine
+  const previous = further ? cache.current() : undefined
+  const cursor = previous?.next
+  if (!(try activeDraft(draft)) || (further && cursor === undefined)) return failed
+  const page = effect {
+    if (!further) {
+      const book = try readAddressBook("open Inbox contacts", (contacts) => contacts.open())
+      if (!book.available || !book.readable) return undefined
+    }
+    return try readAddressBook("find email addresses", (contacts) => contacts.list({
+      kind: "ExplicitRead", query, limit: 50, ...(cursor === undefined ? {} : { cursor }),
+    }))
+  } catch () => undefined
+  if (page === undefined || !(try activeDraft(draft))) return failed
+  const addresses = new Map((previous?.addresses ?? []).map((entry) => [entry.email.toLowerCase(), entry]))
+  for (const row of page.contacts) {
+    if ("incomplete" in row) continue
+    for (const email of row.emails) {
+      const key = email.toLowerCase()
+      if (acceptable(email) && !addresses.has(key)) addresses.set(key, { name: row.name || email, email })
+    }
+  }
+  const next = page.next !== cursor ? page.next ?? undefined : undefined
+  if (Adding.canPeopleRead(try adding.get(), draft, ticket, addresses.size)) cache.show({ ticket, addresses: Array.from(addresses.values()), next })
+  return { type: "peopleRead", draft, ticket, ok: true, addresses: addresses.size, more: next !== undefined }
+}
+
+// spec/app/inbox/adding.md, "Nothing joins a draft but a file that fit, a file the owner saw, or a contact picked for it"
+effect function addedContact(draft: number, ticket: number, address: number): void!!(ContactAddresses | Adding.Machine | Drafts.Machine | Letters | Shell) {
+  const adding = try Adding.Machine
+  const chosen = (try ContactAddresses).current()
+  const found = chosen?.ticket === ticket ? chosen.addresses.at(address - 1) : undefined
+  if (found === undefined || !(try activeDraft(draft)) || !Adding.canChooseContact(try adding.get(), draft, ticket, address)) return
+  const composer = try Drafts.Machine
+  const words = try Letters
+  const before = words.words(draft)
+  const email = found.email
+  if (before.to.some((one) => one.toLowerCase() === email.toLowerCase())) return
+  const sent = try exit(composer.send({ type: "addRecipient", now: untimed, draft, valid: true }, "Owner"))
+  if (!Exit.isSuccess(sent)) return
+  words.set(draft, { ...before, to: [...before.to, email], pending: { to: "", cc: before.pending?.cc ?? "", bcc: before.pending?.bcc ?? "" } })
+  try ignore(exit(adding.send({ type: "closePeople" })))
+}
+
 // spec/app/inbox/adding.md, "A file is attached to the draft open only once the picker gives one that fits within the room its account leaves; one too large, unreadable or without room is refused and said so"
 /** The picker's answer under `ticket`: what the owner chose, how many MiB it counts for, and whether the draft has room for it. */
 effect function picked(ticket: number): Event!!(Incoming | Drafts.Machine) {
@@ -94,14 +187,19 @@ effect function joined(draft: number, account: number, mib: number): void!!(Inco
   words.set(into, { ...before, files: [...before.files, file] })
 }
 
-function carry(fx: Out): Job<Event, Incoming | Drafts.Machine | Letters | Shell, []> {
+function carry(fx: Out): Job<Event, Incoming | ContactAddresses | Adding.Machine | Drafts.Machine | Letters | Shell | Telephony | SystemSettings, []> {
   return match (fx) {
     when { tag: "PickFile", let ticket }: answer("pick", picked(ticket), { type: "picked", ticket, result: "Cancelled", mib: 1, room: false });
     when { tag: "Attach", let draft, let account, let mib }: run("attach", joined(draft, account, mib));
-    // spec/app/inbox/adding.md, "A contact is picked only where the phone has Alpha's contacts and Android allows them; without the permission the owner is asked once, and afterwards sent to Settings; on a phone without them nothing is asked and the owner is told"
-    when { tag: "PickContact" }: run("contact", effect { try ignore((try Shell).send({ type: "openView", view: "Contacts" })) });
-    when { tag: "AskForContacts" }: run("contacts", effect { try ignore((try Shell).send({ type: "openView", view: "Contacts" })) });
-    when { tag: "OpenContactsSettings" }: run("contacts", effect { try ignore((try Shell).send({ type: "openView", view: "Settings" })) });
+    when { tag: "PickContact", let draft, let ticket, let query, let further }:
+      answer("contacts", people(draft, ticket, query, further), { type: "peopleRead", draft, ticket, ok: false, addresses: 0, more: false });
+    when { tag: "AddContact", let draft, let ticket, let address }:
+      run("contact", addedContact(draft, ticket, address));
+    when { tag: "AskForContacts", let draft }: answer("contacts permission", effect {
+      const access = telephony("request mail contacts", (phone) => phone.contacts.requestPermissions()) catch () => undefined
+      return { type: "contactsReported", draft, allowed: access?.readable === true && (try activeDraft(draft)) }
+    }, { type: "contactsReported", draft, allowed: false });
+    when { tag: "OpenContactsSettings" }: run("contacts settings", effect { try (try SystemSettings).open("AppPermissions", "") });
   }
 }
 
@@ -120,8 +218,10 @@ const closing = started(effect {
 const sessions = started(effect {
   const adding = try Adding.Machine
   const incoming = try Incoming
+  const contacts = try ContactAddresses
   try Stream.runForEach(ownerChanges, effect () => {
     incoming.take()
+    contacts.show(undefined)
     try contained(adding.send({ type: "sessionChanged" }), "a new cloud session")
   })
 }, "a new cloud session")
@@ -146,4 +246,4 @@ export effect function handOver(file: Attached, source: "Files" | "Photos"): boo
 }
 
 /** Files and contacts on their way into a draft: one at a time, dropped with the draft, the session or a restart. */
-export const adding = together(Layer.provideMerge(reacting(Adding, { open: [{ type: "restart" }], carry }), incoming), closing, sessions)
+export const adding = together(Layer.provideMerge(reacting(Adding, { open: [{ type: "restart" }], carry }), Layer.merge(incoming, contactAddresses)), closing, sessions)

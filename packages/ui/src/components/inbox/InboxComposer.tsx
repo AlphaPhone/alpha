@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { ChevronDown, ChevronLeft, Cloud, CloudOff, Ellipsis, Mail, Paperclip, Send, Trash2, TriangleAlert, X } from "lucide-react";
+import { ChevronDown, ChevronLeft, Cloud, CloudOff, Ellipsis, Mail, Paperclip, Send, Trash2, TriangleAlert, UserRound, X } from "lucide-react";
 import { cn, focusRing } from "../../lib/cn.ts";
 import { Menu, MenuContent, MenuItem, MenuTrigger } from "../Menu.tsx";
 import type { InboxAccount } from "./InboxAccountList.tsx";
@@ -28,7 +28,15 @@ export type InboxComposerProps = Pick<InboxDraftStatusProps, "keeping" | "gmail"
     /** The To line. */
     to: Line;
     /** People the owner has mail from, offered under the To line: a few while it is empty, every match while an address is typed. Choosing one adds it to To. */
-    suggestions?: { name: string; email: string }[];
+    suggestions?: { name: string; email: string; onChoose?: () => void }[];
+    /** Opens or closes the native address choices. */
+    onContacts?: () => void;
+    /** Whether the native address choices are showing. */
+    contactsOpen?: boolean;
+    /** What the phone said about its address choices. */
+    contactsStatus?: string;
+    /** Reads the next page of contacts where the phone has more. */
+    onMoreContacts?: () => void;
     /** The Cc line. */
     cc: Line;
     /** The Bcc line. */
@@ -83,7 +91,7 @@ export type InboxComposerProps = Pick<InboxDraftStatusProps, "keeping" | "gmail"
  * @model spec/app/inbox/drafts.md
  */
 export function InboxComposer({
-  kind, accounts, from, onFromChange, to, suggestions = [], cc, bcc, subject, onSubjectChange, text, onTextChange, attachments, onRemoveAttachment, onAttach, clash = false,
+  kind, accounts, from, onFromChange, to, suggestions = [], onContacts, contactsOpen = false, contactsStatus, onMoreContacts, cc, bcc, subject, onSubjectChange, text, onTextChange, attachments, onRemoveAttachment, onAttach, clash = false,
   onRestoreMine, onUseSaved, notice, onNoticeAction, outcome, storage, onReloadStorage, keeping, gmail, sent, onKeepAgain, onSend, onSaveToGmail, onCheckCopy, onDeleteGmailCopy, onSetAside, onDiscard,
 }: InboxComposerProps) {
   const [more, setMore] = useState(false);
@@ -123,12 +131,16 @@ export function InboxComposer({
             <InboxRecipientField
               label="To"
               {...to}
-              trailing={<button type="button" aria-label="Cc and Bcc" aria-expanded={showMore} disabled={cc.recipients.length > 0 || bcc.recipients.length > 0 || cc.value !== "" || bcc.value !== ""} onClick={() => setMore(!more)} className={inboxLineButton}><ChevronDown aria-hidden /></button>}
+              trailing={<>
+                {onContacts ? <button type="button" aria-label="Choose contacts" aria-expanded={contactsOpen} onClick={onContacts} className={inboxLineButton}><UserRound aria-hidden /></button> : null}
+                <button type="button" aria-label="Cc and Bcc" aria-expanded={showMore} disabled={cc.recipients.length > 0 || bcc.recipients.length > 0 || cc.value !== "" || bcc.value !== ""} onClick={() => setMore(!more)} className={inboxLineButton}><ChevronDown aria-hidden /></button>
+              </>}
             />
+            {contactsStatus ? <p role="status" className="py-2 text-sm text-muted-foreground">{contactsStatus}</p> : null}
             {suggestions.length > 0 ? (
-              <div role="group" aria-label="Suggested recipients" className="flex max-h-82.5 flex-col overflow-y-auto border-b border-border py-1.5">
-                {suggestions.map(({ name, email }) => (
-                  <button key={email} type="button" onClick={() => to.onAdd(email)} className={cn(focusRing, "flex items-center gap-3 rounded-md px-1 py-1.75 text-left active:bg-accent")}>
+              <div role="group" aria-label={contactsOpen ? "Contact addresses" : "Suggested recipients"} className="flex max-h-82.5 flex-col overflow-y-auto border-b border-border py-1.5">
+                {suggestions.map(({ name, email, onChoose }) => (
+                  <button key={email} type="button" onClick={onChoose ?? (() => to.onAdd(email))} className={cn(focusRing, "flex items-center gap-3 rounded-md px-1 py-1.75 text-left active:bg-accent")}>
                     <span aria-hidden className="flex size-9.5 shrink-0 items-center justify-center rounded-full bg-secondary text-xs font-bold whitespace-nowrap text-secondary-foreground">{Array.from(name.trim())[0]?.toUpperCase()}</span>
                     <span className="flex min-w-0 flex-col">
                       <span className="truncate text-base">{name}</span>
@@ -138,6 +150,7 @@ export function InboxComposer({
                 ))}
               </div>
             ) : null}
+            {onMoreContacts ? <button type="button" onClick={onMoreContacts} className={cn(focusRing, "min-h-11 self-start px-1 text-sm text-primary")}>More contacts</button> : null}
             {showMore ? (
               <>
                 <InboxRecipientField label="Cc" {...cc} />
