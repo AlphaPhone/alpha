@@ -43,7 +43,7 @@ import { CommsTarget, type CommsTargetServices } from "../phone/CommsTarget.tsx"
 export interface AssistantProps {
   runtime: ManagedRuntime.ManagedRuntime<ConversationMachine | AttachmentMachine | ChatsMachine | ComposerMachine | SearchMachine | ReplyMachine | DockMachine | ShellMachine | CommsMachine | CommsTargetServices | Talk | MailQuestions | LayersMachine | MediaReview, unknown>;
   messageActions?: MessageActions;
-  speech?: Pick<AssistantComposerProps, "onTalk" | "onDictate" | "voice" | "voiceNotice">;
+  speech?: Pick<AssistantComposerProps, "onTalk" | "onDictate" | "showUnavailableTalk" | "voice" | "voiceNotice">;
   canReadAloud?: boolean;
 }
 
