@@ -191,6 +191,29 @@ describe("Notes", () => {
     expect(saved()).toEqual(previouslyShown);
   });
 
+  it("Pins the open note from its own menu, as v121's note menu held Pin (spec/app/notes/index.md, \"Story: Organise my notes\")", async () => {
+    const world = scene();
+    const { alpha, runtime } = await openNotesFromHome(world);
+    await until(alpha, runtime, List, (state) => state.read.status === "Loaded");
+    // Rows carry no menu of their own, as v121's had none.
+    expect(button("Gift ideas · Priya options")).toBeUndefined();
+    await press("Open Gift ideas · Priya");
+    await until(alpha, runtime, Editor, (state) => state.showing && state.draft.sync === "Kept");
+    const pinned = () => (world.notes.notes.find((row) => row.id === "gifts")?.format?.data as { readonly pinned?: boolean } | undefined)?.pinned;
+    const choose = async (name: string) => {
+      await control("More");
+      await drawn(() => button("More")?.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true })));
+      const choice = () => [...document.querySelectorAll<HTMLElement>("[role=menuitem]")].find((item) => item.textContent?.trim() === name);
+      await rendered(() => expect(choice()?.getAttribute("aria-disabled")).toBeNull());
+      await drawn(() => choice()?.click());
+    };
+    await choose("Pin");
+    await rendered(() => expect(pinned()).toBe(true));
+    await until(alpha, runtime, List, (state) => state.read.status === "Loaded" && state.version === world.notes.revision + 1);
+    await choose("Unpin");
+    await rendered(() => expect(pinned()).toBe(false));
+  });
+
   it("Copies only the exact saved voice note after choosing Copy text (spec/app/notes/voice.md, \"Story: Share the text of a saved voice note\")", async () => {
     const world = scene();
     const { alpha, runtime } = await openNotesFromHome(world);
