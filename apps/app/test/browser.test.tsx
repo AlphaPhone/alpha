@@ -1,5 +1,4 @@
 // @vitest-environment happy-dom
-import type { DeviceOperation, ExecutorCall } from "@elizaos/agent";
 import { Effect } from "effect";
 import { act } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -13,7 +12,6 @@ import { Machine as Home } from "../gen/app__home.effect.vibe";
 import { Machine as Inbox } from "../gen/app__inbox.effect.vibe";
 import { Machine as Offering } from "../gen/app__inbox__suggestion.effect.vibe";
 import assistant from "../src/assistant/index.tsx";
-import { executeMedia } from "../src/assistant/media-executors.ts";
 import { Pages } from "../src/browser/browser.vibe";
 import browser from "../src/browser/index.tsx";
 import home from "../src/home/index.tsx";
@@ -21,7 +19,6 @@ import inbox from "../src/inbox/index.tsx";
 import { Offers } from "../src/inbox/suggestion.vibe";
 import { button, closeAll, drawn, fill, hardware, later, only, open, press, pressOnTop, underAct, until } from "./alpha.tsx";
 import { scene } from "./fakes/scene.ts";
-import { textReview } from "./fakes/text-review.ts";
 
 underAct();
 afterEach(closeAll);
@@ -324,82 +321,6 @@ describe("The Browser on a phone", () => {
     const offered = letters.runSync(Effect.flatMap(Offering, (machine) => machine.get()));
     expect(letters.runSync(Effect.map(Offers, (offers) => offers.text(offered.text)))).toBe("https://news.example/on-device-agents");
     expect(world.inbox.drafts.size).toBe(0);
-  });
-
-  it("Let the agent open a page from Ask Alpha's card (spec/app/browser/index.md, \"Story: Let the agent open a page\"; spec/app/approvals/proposal.md, \"Story: Decide\")", async () => {
-    const world = { ...scene(), phone: true, image: true };
-    const review = textReview(world.notes.owner, "open-a-page", { type: "browser_navigate", url: "https://news.example/on-device-agents" }, "m1u");
-    world.telephony.textReview = review;
-    world.browser.holding.add("news.example");
-    const running = await askingOnBrowser(world);
-    const { alpha, runtime } = running;
-    const owner = runtime.runSync(Tabs.use((m) => m.get())).selected;
-
-    await ask(running, "Open the article about on-device agents");
-    await vi.waitFor(() => expect(button("Approve")).toBeDefined());
-    expect(document.body.textContent).toContain("Open a page in Browser");
-    expect(document.body.textContent).toContain("https://news.example/on-device-agents");
-    expect(runtime.runSync(Tabs.use((m) => m.get())).agent).toBe(0);
-    await press("Approve");
-
-    // spec/app/browser/index.md, "The agent opens only an HTTPS address with no user name or password in it, in a new normal tab, one at a time"
-    await until(alpha, runtime, Tabs, (s) => s.agent !== 0 && s.native.includes(s.agent));
-    const agentTab = runtime.runSync(Tabs.use((m) => m.get())).agent;
-    expect([agentTab === owner, runtime.runSync(Tabs.use((m) => m.get())).selected]).toEqual([false, owner]);
-    expect(world.browser.tabs.get(`tab${agentTab}`)?.history).toEqual(["https://news.example/on-device-agents"]);
-    await vi.waitFor(() => expect(review.receipts).toEqual([expect.objectContaining({ outcome: "applied" })]));
-    expect(review.decisions).toEqual([review.proposal.id]);
-
-    // spec/app/browser/index.md, "\"Stop and take over\" stops the agent and gives its tab to the owner"
-    await press("Stop and take over");
-    await until(alpha, runtime, Tabs, (s) => s.agent === 0);
-    expect(button("Stop and take over")).toBeUndefined();
-  });
-
-  it("Declining the agent's page tells the agent and opens nothing (spec/app/approvals/proposal.md, \"Story: Decide\")", async () => {
-    const world = { ...scene(), phone: true, image: true };
-    const review = textReview(world.notes.owner, "declined-page", { type: "browser_navigate", url: "https://news.example/on-device-agents" }, "m1u");
-    world.telephony.textReview = review;
-    const running = await askingOnBrowser(world);
-    await ask(running, "Open the article about on-device agents");
-    await vi.waitFor(() => expect(button("Decline")).toBeDefined());
-    await press("Decline");
-    await vi.waitFor(() => expect(review.declines).toEqual([review.proposal.id]));
-    expect([review.decisions, review.claims, running.runtime.runSync(Tabs.use((m) => m.get())).agent]).toEqual([[], [], 0]);
-  });
-
-  it("The tab list opens with no card for the owner's current message (spec/app/approvals/direct.md, \"Story: Let Alpha show me things without asking each time\")", async () => {
-    const world = { ...scene(), phone: true, image: true };
-    const review = textReview(world.notes.owner, "show-tabs", { type: "browser_tabs_show" }, "m1u");
-    world.telephony.textReview = review;
-    const running = await askingOnBrowser(world);
-    const { alpha, runtime } = running;
-    await ask(running, "Show my tabs");
-    // spec/app/approvals/direct.md, "The agent runs directly only what is on the allow-list, for the message being answered, at most four times, by the owner's choice and on a screen that is not protected"
-    await until(alpha, runtime, Tabs, (s) => s.layer === "Switcher");
-    expect(button("Approve")).toBeUndefined();
-    await vi.waitFor(() => expect(review.receipts).toEqual([expect.objectContaining({ outcome: "applied" })]));
-    await hardware("back");
-    await until(alpha, runtime, Tabs, (s) => s.layer === "Uncovered");
-  });
-
-  it("The agent's page is refused unless it is HTTPS with no user name, still approved, and the only agent tab (spec/app/browser/index.md, \"The agent opens only an HTTPS address with no user name or password in it, in a new normal tab, one at a time\")", async () => {
-    const { alpha, runtime, world } = await onBrowser();
-    await until(alpha, runtime, Tabs, (s) => s.hydrated);
-    const approved = (operation: unknown, current = true) => act(async () => executeMedia(alpha, operation as DeviceOperation, {} as ExecutorCall, { current: async () => current }));
-    expect(await approved({ type: "browser_navigate", url: "http://news.example/on-device-agents" })).toMatchObject({ kind: "refused" });
-    expect(await approved({ type: "browser_navigate", url: "https://me:secret@news.example/on-device-agents" })).toMatchObject({ kind: "refused" });
-    expect(await approved({ type: "browser_navigate", url: "https://news.example/on-device-agents" }, false)).toMatchObject({ kind: "refused" });
-    const before = runtime.runSync(Tabs.use((m) => m.get()));
-    expect(before.agent).toBe(0);
-    expect(await approved({ type: "browser_navigate", url: "https://news.example/on-device-agents" })).toEqual({ kind: "applied" });
-    // spec/app/browser/index.md, "The agent gives its tab up when it is done": once its page has loaded, the next page the owner approves opens too.
-    await until(alpha, runtime, Tabs, (s) => s.agent === 0 && s.open.length === before.open.length + 1);
-    world.browser.holding.add("enclave.example");
-    expect(await approved({ type: "browser_navigate", url: "https://enclave.example/keys-in-hardware" })).toEqual({ kind: "applied" });
-    await until(alpha, runtime, Tabs, (s) => s.agent !== 0);
-    expect(await approved({ type: "browser_navigate", url: "https://news.example/on-device-agents" })).toMatchObject({ kind: "refused" });
-    expect(await approved({ type: "browser_tabs_show" }, false)).toMatchObject({ kind: "refused" });
   });
 
   it("Let my agent read the page I have open in Browser (spec/app/assistant/context.md, \"Story: Let my agent read the page I have open in Browser\")", async () => {

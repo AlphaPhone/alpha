@@ -7,7 +7,7 @@ const key = "a".repeat(64);
 const attemptId = "device-attempt-1";
 
 type Sms = Extract<DeviceOperation, { type: "sms_send" }>;
-type ReviewOperation = Extract<DeviceOperation, { type: "sms_send" | "sms_compose" | "sms_latest_sender" | "messages_read_selected" | "voicemail_read_selected" | "files_filter" | "files_open" | "files_move" | "files_share" | "files_trash" | "files_folder_create" | "browser_navigate" | "browser_tabs_show" }>;
+type ReviewOperation = Extract<DeviceOperation, { type: "sms_send" | "sms_compose" | "sms_latest_sender" | "messages_read_selected" | "voicemail_read_selected" | "files_filter" | "files_open" | "files_move" | "files_share" | "files_trash" | "files_folder_create" }>;
 interface ReadOrigin { readonly version: 1; readonly requestId: string; readonly conversationId: string; readonly inReplyTo: string }
 
 type Confirmation = Pick<Sms, "recipients" | "body" | "subscriptionId"> & { operationId: string; confirm(): void };
@@ -26,7 +26,6 @@ export function textReview(agentId: string, id: string, operation: ReviewOperati
     journal: new Map<string, JournalEntry>(),
     confirmations: [] as Confirmation[],
     decisions: [] as string[],
-    declines: [] as string[],
     claims: [] as string[],
     receipts: [] as unknown[],
   };
@@ -44,7 +43,6 @@ export function textReviewRoute(review: TextReviewScene, subjectUserId: string):
   const { agentId, proposal } = review;
   const operation = proposal.payload.operation;
   const files = ["files.browser.v1", "files.shown-target.v1"];
-  const browser = ["browser.open-new-tab.v1", "browser.tabs.show.v1"];
   const capabilities = {
     sms_send: ["sms.send.v1"],
     sms_compose: ["sms.compose.v1", "sms.compose.v2"],
@@ -57,8 +55,6 @@ export function textReviewRoute(review: TextReviewScene, subjectUserId: string):
     files_share: files,
     files_trash: files,
     files_folder_create: files,
-    browser_navigate: browser,
-    browser_tabs_show: browser,
   }[operation.type];
   const prefix = "/api/client-devices/";
   const reject = (status: number) => Response.json({ error: "review refused" }, { status });
@@ -82,11 +78,6 @@ export function textReviewRoute(review: TextReviewScene, subjectUserId: string):
     const step = resource.split("/").at(-1);
     return readJsonBody(request).then((body) => {
       if (body.digest !== proposal.digest) return reject(409);
-      if (step === "decision" && proposal.state === "pending" && body.decision === "reject") {
-        review.declines.push(proposal.id);
-        proposal.state = "rejected";
-        return Response.json({ digest: proposal.digest, proposal });
-      }
       if (step === "decision" && proposal.state === "pending" && body.decision === "approve") {
         review.decisions.push(proposal.id);
         proposal.state = "approved";

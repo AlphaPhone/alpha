@@ -138,7 +138,6 @@ const outcomes: Readonly<Partial<Record<string, string>>> = {
 const cameraCapabilities = ["camera.capture-photo.v1", "camera.capture-lens.v1", "camera.capture-library-id.v1"]
 const photosCapabilities = ["photos.library.v1", "photos.view.v1"]
 const filesCapabilities = ["files.browser.v1", "files.shown-target.v1"]
-const browserCapabilities = ["browser.open-new-tab.v1", "browser.tabs.show.v1"]
 const phoneCapabilities = ["phone.keypad.v1", "phone.dial.v1", "phone.call.v1", "views.telephony.v1", "sms.compose.v1", "sms.compose.v2", "sms.send.v1", "messages.read.v1", "sms.latest-sender.v1", "sms.latest-sender.v2", "voicemail.read.v1"]
 
 const needsMessage = (operation: DeviceOperation): boolean => operation.type === "sms_reply_selected" || operation.type === "messages_read_selected"
@@ -374,8 +373,6 @@ function operation(raw: unknown) {
     case "files_filter":
     case "files_open":
     case "files_folder_create":
-    case "browser_navigate":
-    case "browser_tabs_show":
       return value
     case "photos_album_create":
     case "photos_share":
@@ -429,8 +426,6 @@ function words(value: NonNullable<ReturnType<typeof operation>>): { title: strin
     case "files_share": return { title: "Share in Android", detail: "paths" in value ? value.paths.join(", ") : "Review the selected files" }
     case "files_move": return { title: "Move files", detail: "paths" in value ? `${value.paths.join(", ")} → ${value.dest || "Internal storage"}` : value.dest || "Internal storage" }
     case "files_trash": return { title: "Move to Trash", detail: "paths" in value ? value.paths.join(", ") : "Review the selected files" }
-    case "browser_navigate": return { title: "Open a page in Browser", detail: value.url }
-    case "browser_tabs_show": return { title: "Show your Browser tabs", detail: "Open the tab list" }
   }
 }
 
@@ -445,8 +440,7 @@ export service MediaReview {
   voicemailTarget(): (VoicemailTarget | undefined)!!
   pending(session: Session, message: string, conversation: number, revision: number, target: MessageDraftTarget | undefined, reply: DeviceActionReply): readonly MediaCard[]!!Conversation
   choosePhone(card: MediaCard, choice: number): void!!(Talk | Conversation | Chats)
-  /** The owner's answer on the card; `directly` runs an allow-listed card with no review, for the message being answered. */
-  decide(card: MediaCard, approve: boolean, directly?: boolean): void!!(Talk | Conversation | Chats)
+  decide(card: MediaCard, approve: boolean): void!!(Talk | Conversation | Chats)
   /** Builds, for Files as it now shows, the card of each Files change that waited for Files to be opened. */
   reviewInFiles(): void!!(Talk | Conversation | Chats)
   /** Same enrollment and custody as the cards, without exposing its tokens or action payloads. */
@@ -489,7 +483,6 @@ effect function enrolled(epoch: number, owner: string, image: boolean, runtime: 
     ...(registered("AlphaPhotoLibrary") ? photosCapabilities : []),
     ...(registered("ElizaFiles") ? filesCapabilities : []),
     ...(registered("AlphaNotes") ? ["notes.organize.v1"] : []),
-    ...(registered("AlphaBrowser") ? browserCapabilities : []),
     ...(image && registered("ElizaTelephony") ? phoneCapabilities : []),
   ].filter((name) => offer.deviceActions.capabilities.includes(name))
   if (capabilities.length === 0) throw new EnrollmentRefused({ reason: "Media operations are unavailable" })
@@ -536,10 +529,6 @@ function completion(op: DeviceOperation, synced: boolean): string {
     default: return synced ? "Done" : "Done. Agent receipt pending."
   }
 }
-
-// spec/app/approvals/direct.md, "The agent runs directly only what is on the allow-list, for the message being answered, at most four times, by the owner's choice and on a screen that is not protected"
-/** A proposal the agent may run without a card for the message being answered: showing the Browser's own tab list, which changes nothing. */
-export const direct = (card: MediaCard): boolean => card.operation.type === "browser_tabs_show" && card.reviewRequest === undefined
 
 const notStarted = "Alpha couldn’t start that action."
 const sameTarget = (one: MessageDraftTarget | undefined, other: MessageDraftTarget | undefined): boolean =>
@@ -1045,7 +1034,7 @@ export const mediaReview = Layer.effect(MediaReview, effect {
         }) })
       })
     },
-    effect decide(card: MediaCard, approve: boolean, directly = false) {
+    effect decide(card: MediaCard, approve: boolean) {
       const { board } = try Talk
       const conversation = try Conversation
       const chats = try Chats
@@ -1091,14 +1080,13 @@ export const mediaReview = Layer.effect(MediaReview, effect {
         return (try canStage(session)) && (try enrollmentIsCurrent(session)) && (try canStage(session))
       }
       try lock.withPermits(1)(effect {
-        const unasked = directly && approve && direct(card)
-        if ((!unasked && !board.snapshot().media.includes(card)) || (approve && card.notice !== undefined)
+        if (!board.snapshot().media.includes(card) || (approve && card.notice !== undefined)
           || (approve && namedReviewQuery(card.operation) !== undefined && card.phone?.tag !== "Exact")) return
         const held = try session()
         const live = held !== undefined && (try current(held))
         if (card.phone !== undefined && !board.snapshot().media.includes(card)) return
         board.change({ media: board.snapshot().media.filter((one) => one !== card) })
-        const report = (text: string) => { if (!unasked) board.change({ mediaNote: { conversation: card.conversation, text } }) }
+        const report = (text: string) => board.change({ mediaNote: { conversation: card.conversation, text } })
         if (!live || held === undefined) { report("That review expired. Ask again from the current screen."); return }
         if (!approve) {
           const declined = tryPromise(() => held.decide(card.id, { digest: card.digest, approved: false })) catch () => undefined
@@ -1109,8 +1097,7 @@ export const mediaReview = Layer.effect(MediaReview, effect {
         scopes.set(card.id, { active: current(held), ...(card.voicemail === undefined ? {} : { voicemail: card.voicemail }), reportFiles: (outcome) => { filesOutcome = outcome }, ...(card.operation.type === "sms_compose" ? { continueDraft: continueDraft(held) } : {}), ...(card.target === undefined ? {} : { target: card.target }), ...(card.files === undefined ? {} : { files: card.files }),
           ...(card.sms === undefined ? {} : { sms: card.sms }), ...(card.phone?.tag === "Exact" ? { phone: card.phone.selected } : {}) })
         const { id, digest, expiresAt, operation } = card
-        const screen = unasked ? { forceReview: false, reviewed: false } : { forceReview: true, reviewed: true }
-        const result = (tryPromise(() => held.execute.approve({ id, digest, expiresAt, operation }, { live: true, nonsensitive: true, exact: true, requestEligible: true, ...screen }))
+        const result = (tryPromise(() => held.execute.approve({ id, digest, expiresAt, operation }, { live: true, nonsensitive: true, exact: true, forceReview: true, requestEligible: true, reviewed: true }))
           |> ensuring(%, sync(() => { scopes.delete(card.id) }))) catch () => undefined
         if (card.read !== undefined) {
           if (result?.kind === "settled" && result.result.tag === "Applied" && result.synced && (try completeRead(held))) return

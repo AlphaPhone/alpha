@@ -40,7 +40,7 @@ import { type Job, answer, applying, contained, following, reacting, run, starte
 import { Time } from "../runtime/time.vibe"
 import { VoiceWords } from "../voice/voice.vibe"
 import { FileContext, documentObservation } from "./file-context.vibe"
-import { MediaReview, direct, mediaReview } from "./media-review.vibe"
+import { MediaReview, mediaReview } from "./media-review.vibe"
 import { agentWarmUp } from "./warm-up.vibe"
 import { type Attached, type Board, type Line, Talk, talk } from "./talk.vibe"
 import { Views, carried, carriedAloud, delivery, handoffs, preparedIn, resendWithoutMode } from "./views.vibe"
@@ -490,12 +490,7 @@ function posted(ticket: number, told: boolean, context: Conversation.Context): S
             ...(voicemail === undefined ? {} : { voicemail }), ...(inFiles === undefined ? {} : { directFiles: inFiles }),
             ...(outsideFiles === undefined ? {} : { outsideFiles }) })
         if (board.lastSentId === result.clientMessageId && (try conversation.get()).context.revision === context.revision
-          && (try history.get()).chosen === chats.chosen) {
-          // spec/app/approvals/direct.md, "Review first, an unreadable choice, a protected screen, a fifth run and a request for another message each refuse a direct run"
-          const directly = context.sensitive || (try (try Prefs.Machine).get()).askFirst ? [] : media.filter(direct).slice(0, 4)
-          board.change({ media: media.filter((card) => !directly.includes(card)) })
-          for (const card of directly) try review.decide(card, true, true)
-        }
+          && (try history.get()).chosen === chats.chosen) board.change({ media })
       }
       if (continueFiles !== undefined) try views.hold(ticket, { asked, continueFiles })
       else if (prepared !== undefined) try views.hold(ticket, { asked, handoff: prepared })
