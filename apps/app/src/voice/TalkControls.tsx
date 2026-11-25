@@ -22,7 +22,7 @@ export interface TalkControlsProps {
 
 const compactStatus: Record<Phase, string> = {
   Idle: "", Starting: "Connecting to voice", Listening: "Listening", Transcribing: "Transcribing", Thinking: "Thinking",
-  Speaking: "Speaking", Paused: "Voice paused for a phone call", Stopping: "Stopping voice", Failed: "",
+  Speaking: "Speaking", Stopping: "Stopping voice", Failed: "",
 };
 
 const expandedStatus: Partial<Record<Phase, string>> = {
@@ -53,7 +53,7 @@ export function TalkControls({ runtime, trailing, compact = false, onKeyboard }:
   const activity = <VoiceWaveform phase={phase} compact={compact} />;
   const review = state.reviewPending && state.phase === "Listening";
   const label = review ? "Review in chat" : compact ? undefined : connecting ? expandedStatus.Starting :
-    state.phase === "Stopping" || state.phase === "Paused" ? undefined : state.muted ? "Muted" : expandedStatus[state.phase];
+    state.phase === "Stopping" ? undefined : state.muted ? "Muted" : expandedStatus[state.phase];
   const status = (
     <p role="status" aria-label={compact ? undefined : "Voice conversation status"} className={cn(label === undefined ? "sr-only" : "flex min-w-0 items-center gap-2.25 text-sm leading-voice-status font-semibold text-foreground", compact && review && "pr-1 text-xs")}>
       {!compact && connecting && spinner}

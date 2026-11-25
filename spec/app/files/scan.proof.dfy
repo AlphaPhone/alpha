@@ -23,11 +23,11 @@ lemma SwapKeeps(pages: seq<app__files__scanDraft_Page>, at: int)
   }
 }
 
-lemma lawAdjacentPagesSwapWhole_ensures(pages: seq<app__files__scanDraft_Page>, at: int, earlier: int, later: int)
-  ensures (lawAdjacentPagesSwapWhole(pages, at, earlier, later) == true)
+lemma lawAdjacentPagesSwapWhole_ensures(pages: seq<app__files__scanDraft_Page>, slot: int, earlier: int, later: int)
+  ensures (lawAdjacentPagesSwapWhole(pages, slot, earlier, later) == true)
 {
-  if adjacentPages(pages, at, earlier, later) {
-    SwapKeeps(pages, at);
+  if adjacentPages(pages, slot, earlier, later) {
+    SwapKeeps(pages, slot);
   }
 }
 
@@ -72,30 +72,30 @@ lemma remove_ensures(s: Scan, image: int, by_: Actor)
   }
 }
 
-lemma swapPages_ensures(s: Scan, at: int, earlier: int, later: int, by_: Actor)
-  ensures (inv(s) ==> canSwapPages(s, at, earlier, later, by_) ==> alwaysASelectedImageDoesNotHoldADraft(swapPages(s, at, earlier, later, by_)))
-  ensures (inv(s) ==> canSwapPages(s, at, earlier, later, by_) ==> alwaysAScanHoldsAtMostTwentyPages(swapPages(s, at, earlier, later, by_)))
-  ensures (inv(s) ==> canSwapPages(s, at, earlier, later, by_) ==> alwaysPagesShowImagesMade(swapPages(s, at, earlier, later, by_)))
-  ensures (inv(s) ==> canSwapPages(s, at, earlier, later, by_) ==> alwaysTextStaysWithItsPage(swapPages(s, at, earlier, later, by_)))
-  ensures (inv(s) ==> canSwapPages(s, at, earlier, later, by_) ==> alwaysAReviewedPageIsShown(swapPages(s, at, earlier, later, by_)))
-  ensures (inv(s) ==> canSwapPages(s, at, earlier, later, by_) ==> alwaysTheTextKeepsItsRules(swapPages(s, at, earlier, later, by_)))
-  ensures (inv(s) ==> canSwapPages(s, at, earlier, later, by_) ==> alwaysADeletedDraftLeavesNoPages(swapPages(s, at, earlier, later, by_)))
-  ensures (inv(s) ==> canSwapPages(s, at, earlier, later, by_) ==> alwaysTheDraftKeepsItsRules(swapPages(s, at, earlier, later, by_)))
-  ensures (inv(s) ==> canSwapPages(s, at, earlier, later, by_) ==> alwaysNoTextIsReadDuringAnExport(swapPages(s, at, earlier, later, by_)))
-  ensures (inv(s) ==> canSwapPages(s, at, earlier, later, by_) ==> alwaysAClosedScanReadsNothing(swapPages(s, at, earlier, later, by_)))
-  ensures (inv(s) ==> canSwapPages(s, at, earlier, later, by_) ==> stepResumeBringsBackWhatIsStored(s, "swapPages", swapPages(s, at, earlier, later, by_)))
-  ensures (inv(s) ==> canSwapPages(s, at, earlier, later, by_) ==> stepOnlyShownTextIsUsed(s, swapPages(s, at, earlier, later, by_), []))
-  ensures (inv(s) ==> canSwapPages(s, at, earlier, later, by_) ==> stepASaveCarriesThePagesShown(s, swapPages(s, at, earlier, later, by_), []))
-  ensures (inv(s) ==> canSwapPages(s, at, earlier, later, by_) ==> stepOnlyTheOwnerDeletesADraft(s, "swapPages", swapPages(s, at, earlier, later, by_), []))
-  ensures (inv(s) ==> canSwapPages(s, at, earlier, later, by_) ==> stepExportingFreezesThePages(s, "swapPages", swapPages(s, at, earlier, later, by_)))
-  ensures (inv(s) ==> canSwapPages(s, at, earlier, later, by_) ==> stepAnExportIsNotRepeated(s, "swapPages", swapPages(s, at, earlier, later, by_), []))
-  ensures (inv(s) ==> canSwapPages(s, at, earlier, later, by_) ==> stepWrittenPagesStayWritten(s, "swapPages", swapPages(s, at, earlier, later, by_)))
-  ensures (inv(s) ==> canSwapPages(s, at, earlier, later, by_) ==> stepAPhotoIsKeptOnce(s, swapPages(s, at, earlier, later, by_), []))
-  ensures (inv(s) ==> canSwapPages(s, at, earlier, later, by_) ==> stepARestartLeavesNothingUnderWay(s, "swapPages", swapPages(s, at, earlier, later, by_)))
+lemma swapPages_ensures(s: Scan, slot: int, earlier: int, later: int, by_: Actor)
+  ensures (inv(s) ==> canSwapPages(s, slot, earlier, later, by_) ==> alwaysASelectedImageDoesNotHoldADraft(swapPages(s, slot, earlier, later, by_)))
+  ensures (inv(s) ==> canSwapPages(s, slot, earlier, later, by_) ==> alwaysAScanHoldsAtMostTwentyPages(swapPages(s, slot, earlier, later, by_)))
+  ensures (inv(s) ==> canSwapPages(s, slot, earlier, later, by_) ==> alwaysPagesShowImagesMade(swapPages(s, slot, earlier, later, by_)))
+  ensures (inv(s) ==> canSwapPages(s, slot, earlier, later, by_) ==> alwaysTextStaysWithItsPage(swapPages(s, slot, earlier, later, by_)))
+  ensures (inv(s) ==> canSwapPages(s, slot, earlier, later, by_) ==> alwaysAReviewedPageIsShown(swapPages(s, slot, earlier, later, by_)))
+  ensures (inv(s) ==> canSwapPages(s, slot, earlier, later, by_) ==> alwaysTheTextKeepsItsRules(swapPages(s, slot, earlier, later, by_)))
+  ensures (inv(s) ==> canSwapPages(s, slot, earlier, later, by_) ==> alwaysADeletedDraftLeavesNoPages(swapPages(s, slot, earlier, later, by_)))
+  ensures (inv(s) ==> canSwapPages(s, slot, earlier, later, by_) ==> alwaysTheDraftKeepsItsRules(swapPages(s, slot, earlier, later, by_)))
+  ensures (inv(s) ==> canSwapPages(s, slot, earlier, later, by_) ==> alwaysNoTextIsReadDuringAnExport(swapPages(s, slot, earlier, later, by_)))
+  ensures (inv(s) ==> canSwapPages(s, slot, earlier, later, by_) ==> alwaysAClosedScanReadsNothing(swapPages(s, slot, earlier, later, by_)))
+  ensures (inv(s) ==> canSwapPages(s, slot, earlier, later, by_) ==> stepResumeBringsBackWhatIsStored(s, "swapPages", swapPages(s, slot, earlier, later, by_)))
+  ensures (inv(s) ==> canSwapPages(s, slot, earlier, later, by_) ==> stepOnlyShownTextIsUsed(s, swapPages(s, slot, earlier, later, by_), []))
+  ensures (inv(s) ==> canSwapPages(s, slot, earlier, later, by_) ==> stepASaveCarriesThePagesShown(s, swapPages(s, slot, earlier, later, by_), []))
+  ensures (inv(s) ==> canSwapPages(s, slot, earlier, later, by_) ==> stepOnlyTheOwnerDeletesADraft(s, "swapPages", swapPages(s, slot, earlier, later, by_), []))
+  ensures (inv(s) ==> canSwapPages(s, slot, earlier, later, by_) ==> stepExportingFreezesThePages(s, "swapPages", swapPages(s, slot, earlier, later, by_)))
+  ensures (inv(s) ==> canSwapPages(s, slot, earlier, later, by_) ==> stepAnExportIsNotRepeated(s, "swapPages", swapPages(s, slot, earlier, later, by_), []))
+  ensures (inv(s) ==> canSwapPages(s, slot, earlier, later, by_) ==> stepWrittenPagesStayWritten(s, "swapPages", swapPages(s, slot, earlier, later, by_)))
+  ensures (inv(s) ==> canSwapPages(s, slot, earlier, later, by_) ==> stepAPhotoIsKeptOnce(s, swapPages(s, slot, earlier, later, by_), []))
+  ensures (inv(s) ==> canSwapPages(s, slot, earlier, later, by_) ==> stepARestartLeavesNothingUnderWay(s, "swapPages", swapPages(s, slot, earlier, later, by_)))
 {
-  if inv(s) && canSwapPages(s, at, earlier, later, by_) {
-    SwapKeeps(s.pages, at);
-    assert swapPages(s, at, earlier, later, by_).pages == swappedPages(s.pages, at);
+  if inv(s) && canSwapPages(s, slot, earlier, later, by_) {
+    SwapKeeps(s.pages, slot);
+    assert swapPages(s, slot, earlier, later, by_).pages == swappedPages(s.pages, slot);
   }
 }
 

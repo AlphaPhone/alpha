@@ -1,10 +1,14 @@
 // spec/app/messages/index.md, "Story: Read a conversation"; spec/app/phone/index.md, "Story: Call a number"
 package ai.alphacompute.alphaphone;
 
+import ai.eliza.plugins.actionjournal.ActionJournal;
+import ai.eliza.plugins.contacts.ContactsEditor;
 import ai.eliza.plugins.messages.SmsTelephony;
 import ai.eliza.plugins.messages.SmsTelephonyConfiguration;
 import ai.eliza.plugins.messages.TelephonyPlugin;
 import android.Manifest;
+import android.os.CancellationSignal;
+import android.telephony.PhoneNumberUtils;
 import android.telephony.TelephonyManager;
 import android.webkit.WebView;
 import com.getcapacitor.JSObject;
@@ -14,6 +18,8 @@ import com.getcapacitor.annotation.CapacitorPlugin;
 import com.getcapacitor.annotation.Permission;
 import java.util.function.BooleanSupplier;
 import java.util.function.Consumer;
+import org.json.JSONArray;
+import org.json.JSONObject;
 
 @CapacitorPlugin(name = "ElizaTelephony", permissions = {
  @Permission(alias = "contacts", strings = { Manifest.permission.READ_CONTACTS }),
@@ -31,7 +37,7 @@ public final class AlphaTelephonyPlugin extends TelephonyPlugin {
   }
  }
 
- void sendComposed(MainActivity activity, WebView view, PluginCall call, boolean mms, BooleanSupplier active, Consumer<Runnable> queue) {
+ void sendComposed(MainActivity activity, WebView view, PluginCall call, boolean mms, JSObject approval, BooleanSupplier active, Consumer<Runnable> queue) {
   long visit = activity.composerVisit();
   BooleanSupplier current = () -> composerCurrent(activity, view, visit, active, true);
   if (!current.getAsBoolean()) {
@@ -42,6 +48,11 @@ public final class AlphaTelephonyPlugin extends TelephonyPlugin {
    if (!composerCurrent(activity, view, visit, active, mms)) {
     throw new IllegalStateException("The Messages composer is no longer current");
    }
+   if (approval != null) {
+    try { requireReviewedText(call.getData(), approval); }
+    catch (Exception stale) { throw new IllegalStateException("The approved text is no longer current", stale); }
+    if (!composerCurrent(activity, view, visit, active, true)) throw new IllegalStateException("The text review is no longer in front");
+   }
   };
   queue.accept(() -> {
    try {
@@ -49,12 +60,64 @@ public final class AlphaTelephonyPlugin extends TelephonyPlugin {
      call.reject("Open and unlock Messages to send this draft.", "composer-not-started");
      return;
     }
+    if (approval != null) {
+     try { requireReviewedText(call.getData(), approval); }
+     catch (Exception stale) {
+      call.reject("Approve this exact text again.", "composer-not-started");
+      return;
+     }
+    }
     if (mms) sendOwnerApprovedMms(call, guard);
     else sendOwnerApprovedSms(call, guard);
    } catch (RuntimeException unavailable) {
     call.reject("The Messages send could not be confirmed.");
    }
   });
+ }
+
+ private void requireReviewedText(JSObject draft, JSObject approval) throws Exception {
+  String operationId = draft.getString("operationId");
+  String digest = approval.getString("digest");
+  long attemptId = approval.getLong("attemptId"), expiresAt = approval.getLong("expiresAt");
+  JSONObject contact = approval.optJSONObject("contact");
+  if (approval.length() != (contact == null ? 3 : 4) || digest == null || digest.isBlank() || attemptId <= 0 || expiresAt <= System.currentTimeMillis()) {
+   throw new SecurityException("The text's approval is no longer current");
+  }
+  JSONObject entry = DeviceExecutionJournal.of(getContext()).get(operationId);
+  if (entry == null || entry.getBoolean("acknowledged") || !operationId.equals(entry.getString("operationId"))
+    || !digest.equals(entry.getString("digest")) || !entry.getString("agentAttemptId").matches("[A-Za-z0-9][A-Za-z0-9_-]{0,127}")) {
+   throw new SecurityException("No claim for this text");
+  }
+  JSONObject attempt = entry.getJSONObject("attempt");
+  if (!"Called".equals(attempt.getJSONObject("phase").getString("tag")) || !"Approval".equals(attempt.getString("authority"))
+    || attempt.getBoolean("retired") || attempt.getInt("calls") != 1 || attempt.getLong("attemptId") != attemptId
+    || !operationId.equals(attempt.getString("operationId")) || !reviewedDraft(new JSONObject(entry.getString("operation")), draft, contact)) {
+   throw new SecurityException("The approved card names another text");
+  }
+ }
+
+ private boolean reviewedDraft(JSONObject operation, JSObject draft, JSONObject contact) throws Exception {
+  JSONArray recipients = draft.getJSONArray("recipients");
+  String body = draft.getString("body");
+  if ("sms_send".equals(operation.optString("type"))) {
+   return contact == null && ActionJournal.sameJson(operation, new JSONObject().put("type", "sms_send").put("recipients", recipients)
+     .put("body", body).put("subscriptionId", draft.getInt("subscriptionId")));
+  }
+  if (!"sms_compose".equals(operation.optString("type")) || operation.has("draft") || operation.has("replyThreadId")
+    || !operation.getString("body").equals(body) || recipients.length() != 1) return false;
+  String number = recipients.getString(0);
+  JSONObject target = operation.optJSONObject("target");
+  if (target != null && "number".equals(target.optString("kind"))) {
+   return contact == null && number.equals(PhoneNumberUtils.normalizeNumber(target.getString("number")));
+  }
+  if (contact == null || contact.length() != 3 || (target == null ? !operation.has("query") : !"contact".equals(target.optString("kind")))) return false;
+  JSObject current = new ContactsEditor(getContext()).get(contact.getString("id"), new CancellationSignal());
+  if (!contact.getString("lookup").equals(current.getString("lookup")) || !contact.getString("version").equals(current.getString("version"))) return false;
+  JSONArray numbers = current.getJSONArray("phoneNumbers");
+  for (int i = 0; i < numbers.length(); i++) {
+   if (number.equals(PhoneNumberUtils.normalizeNumber(numbers.getJSONObject(i).getString("number")))) return true;
+  }
+  return false;
  }
 
  private boolean composerCurrent(MainActivity activity, WebView view, long visit, BooleanSupplier active, boolean requireClearCall) {

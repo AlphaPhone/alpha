@@ -12,14 +12,16 @@ import { changeCard } from "../../gen/app__files.effect.vibe"
 import * as Prefs from "../../gen/app__settings__preferences.effect.vibe"
 import type { FileActionReport, FileReview, FilesReadContext } from "../files/agent.vibe"
 import { latestSenderResult, sameVoicemail, selectedVoicemail, type VoicemailReadContext, type VoicemailTarget } from "../contacts/reads.vibe"
-import { composeRecipient, reviewedCompose, type MessageDraftTarget } from "../messages/agent.vibe"
-import { readAgentSms } from "../messages/agent-send.vibe"
+import { sendShowing } from "../contacts/requests.vibe"
+import { composeDraftOnly, composeRecipient, reviewedCompose, type MessageDraftTarget } from "../messages/agent.vibe"
+import { composeLine, readAgentSms, type ComposeLine } from "../messages/agent-send.vibe"
 import { activeSmsSelection, currentSmsSelection, type MessageSmsRequest, type SmsSelection, type SmsSelectionContext } from "../messages/agent-sim.vibe"
 import { notesOperation, notesOperationWords } from "../notes/device-actions.vibe"
 import type { ReviewedVoicemailDeletion } from "../phone/agent.vibe"
 import { phoneContactChoices, phoneQuery, pickPhoneContact, type NamedPhoneReview, type ReviewedPhoneContact } from "../phone/named-review.vibe"
 import { displayNumber } from "../phone/words.ts"
 import { Agent, type Runtime } from "../platform/agent.vibe"
+import type { SmsApproval } from "../platform/composerPort.vibe"
 import { Device, registered } from "../platform/device.vibe"
 import { ownerAt } from "../platform/owner.vibe"
 import { Telephony } from "../platform/telephony.vibe"
@@ -42,6 +44,8 @@ export interface ReviewAuthority {
   readonly voicemail?: VoicemailTarget
   readonly voicemailDeletion?: ReviewedVoicemailDeletion
   readonly sms?: SmsSelection
+  readonly approvedText?: Omit<SmsApproval, "attemptId">
+  readonly composeLine?: ComposeLine
   readonly files?: FileReview
   readonly reportFiles?: (outcome: FileActionReport) => void
   readonly phone?: ReviewedPhoneContact
@@ -55,6 +59,8 @@ interface ApprovalScope {
   readonly voicemail?: VoicemailTarget
   readonly voicemailDeletion?: ReviewedVoicemailDeletion
   readonly sms?: SmsSelection
+  readonly approvedText?: Omit<SmsApproval, "attemptId">
+  readonly composeLine?: ComposeLine
   readonly files?: FileReview
   readonly reportFiles?: (outcome: FileActionReport) => void
   readonly phone?: ReviewedPhoneContact
@@ -191,6 +197,7 @@ interface ForegroundFiles {
 /** The Talk session and exact owner, chat and request guard for a spoken review. */
 export interface SpokenReview {
   readonly session: number
+  readonly turn: number
   readonly current: Effect.Effect<boolean>
 }
 
@@ -319,7 +326,7 @@ function spokenOperation(proposal: Proposal, opened: Session, message: string, r
   if (request !== undefined && request !== message) return undefined
   if (reviewedRead(op)) return acceptsRead(opened, op) && exactReadOrigin(proposal, message, reply) !== undefined ? op : undefined
   if (op.type === "voicemail_delete_selected" && (reply.voicemail?.witness === undefined ||
-    !opened.capabilities.has("voicemail.delete.v1") || !reviewFromReply(proposal, opened, actions))) return undefined
+    !opened.capabilities.has("voicemail.delete.v1"))) return undefined
   return request === message || commsReview(op) || op.type.startsWith("files_") ? op : undefined
 }
 
@@ -346,6 +353,7 @@ export interface MediaCard {
   readonly target?: MessageDraftTarget
   readonly voicemail?: VoicemailTarget
   readonly sms?: SmsSelection
+  readonly composeLine?: ComposeLine
   readonly read?: BoundRead
   readonly files?: FileReview
   readonly reviewRequest?: string
@@ -355,6 +363,13 @@ export interface MediaCard {
   readonly phone?: NamedPhoneReview
   /** Why the card can only be declined here: a Files change waiting for Files to be opened. */
   readonly notice?: string
+}
+
+/** Only a spoken text with its exact, chosen recipient has a spoken confirmation. */
+export function spokenText(card: MediaCard): SpokenReview | undefined {
+  if (card.decision !== undefined) return undefined
+  if (card.spokenSms !== undefined) return card.spokenSms
+  return card.composeLine !== undefined && (namedReviewQuery(card.operation) === undefined || card.phone?.tag === "Exact") ? card.spoken : undefined
 }
 
 const openFilesNotice = "Open Files to review this action."
@@ -431,8 +446,7 @@ function operation(raw: unknown) {
 }
 
 function composeDetails(value: Extract<DeviceOperation, { type: "sms_compose" }>, recipient: string): string {
-  const draftOnly = "draft" in value && value.draft === true
-  return `${recipient}\n${value.body}${draftOnly ? "" : "\nTap Send in Messages when you’re ready."}`
+  return `${recipient}\n${value.body}`
 }
 
 function words(value: NonNullable<ReturnType<typeof operation>>): { title: string; detail: string } {
@@ -450,11 +464,11 @@ function words(value: NonNullable<ReturnType<typeof operation>>): { title: strin
     case "sms_latest_sender": return { title: "Share the latest SMS sender", detail: "includeAddress" in value
       ? "Share the latest incoming SMS sender’s number and Android thread ID with the agent."
       : "Share the last four digits of the latest incoming SMS sender’s number with the agent." }
-    case "sms_send": return { title: "Review this text on your phone", detail: `${value.recipients.join(", ")}\n${value.body}\nConfirm the text and SIM in Android to send it.` }
+    case "sms_send": return { title: "Review this text on your phone", detail: `${value.recipients.join(", ")}\n${value.body}` }
     case "sms_compose": {
       const recipient = composeRecipient(value)
       const label = recipient.kind === "number" ? displayNumber(recipient.number) : recipient.query
-      return { title: "Open an editable text draft", detail: composeDetails(value, label) }
+      return { title: composeDraftOnly(value) ? "Open an editable text draft" : "Review this text on your phone", detail: composeDetails(value, label) }
     }
     case "camera_capture_photo": return { title: "Take a photo", detail: value.lens === undefined ? "Open the viewfinder to review the shot" : `Open the ${value.lens === "front" ? "front" : "rear"} camera to review the shot` }
     case "photos_filter": return { title: "Filter Photos", detail: value.text ?? "Show the requested photos in your library" }
@@ -488,7 +502,7 @@ export service MediaReview {
   voicemailTarget(): (VoicemailTarget | undefined)!!
   pending(session: Session, message: string, conversation: number, revision: number, target: MessageDraftTarget | undefined, reply: DeviceActionReply): readonly MediaCard[]!!Conversation
   choosePhone(card: MediaCard, choice: number): void!!(Talk | Conversation | Chats)
-  decide(card: MediaCard, approve: boolean): void!!(Talk | Conversation | Chats)
+  decide(card: MediaCard, approve: boolean, confirmation?: "Tap" | "Speech"): void!!(Talk | Conversation | Chats)
   /** Builds, for Files as it now shows, the card of each Files change that waited for Files to be opened. */
   reviewInFiles(): void!!(Talk | Conversation | Chats)
   /** Same enrollment and custody as the cards, without exposing its tokens or action payloads. */
@@ -566,7 +580,9 @@ function filesCompletion(outcome: FileActionReport, synced: boolean): string {
 function completion(op: DeviceOperation, synced: boolean): string {
   switch (op.type) {
     case "sms_send": return synced ? "Android accepted the text request." : "Android accepted the text request. Agent receipt pending."
-    case "sms_compose": return synced ? "Your editable draft is ready in Messages." : "Your draft is ready in Messages. Agent receipt pending."
+    case "sms_compose": return composeDraftOnly(op)
+      ? (synced ? "Your editable draft is ready in Messages." : "Your draft is ready in Messages. Agent receipt pending.")
+      : (synced ? "Android accepted the text request." : "Android accepted the text request. Agent receipt pending.")
     case "messages_read_selected": return synced ? "Shared the open messages with the agent." : "Open messages prepared. Agent receipt pending."
     case "voicemail_delete_selected": return synced ? "Voicemail deleted." : "Voicemail deleted. Agent receipt pending."
     case "photos_album_create":
@@ -817,9 +833,15 @@ function pendingProposals(context: PendingReviewContext): MediaReview.Shape["pen
       const voicemail = op.type === "voicemail_read_selected" || deletion ? reply.voicemail : undefined
       if ((op.type === "voicemail_read_selected" || deletion) && !sameVoicemail(voicemail, try voicemailTarget())) return undefined
       if (deletion && (voicemail?.witness === undefined || !opened.capabilities.has("voicemail.delete.v1")
-        || !currentReview || !reviewFromReply(proposal, opened, actions))) return undefined
-      const sms = op.type === "sms_send" ? reply.sms?.selection : undefined
+        || actions.get(proposal.id) !== "Review" || !fromThisEnrollment(proposal, opened)
+        || !(try reviewContext(revision, view)) || !(try enrollmentIsCurrent(opened)) || !(try reviewContext(revision, view)))) return undefined
+      const sendsCompose = op.type === "sms_compose" && !composeDraftOnly(op)
+      const sms = op.type === "sms_send" || sendsCompose ? reply.sms?.selection : undefined
       if (op.type === "sms_send" && reply.sms !== undefined && (sms === undefined || sms.subscription.id !== op.subscriptionId || !(try sameSms(sms)))) return undefined
+      if (sendsCompose && (actions.get(proposal.id) !== "Review" || !fromThisEnrollment(proposal, opened)
+        || !(try reviewContext(revision, view)) || (sms !== undefined && !(try sameSms(sms))))) return undefined
+      const line = sendsCompose ? try Effect.provideService(composeLine(reply.sms !== undefined, sms), Telephony, telephony) : undefined
+      if (sendsCompose && (line === undefined || !(try enrollmentIsCurrent(opened)) || !isLatest(opened) || !(try reviewContext(revision, view)))) return undefined
       const named = op.type === "files_open" || op.type === "files_share" || op.type === "files_move" || op.type === "files_trash" || op.type === "files_folder_create"
       let files: FileReview | undefined
       let notice: string | undefined
@@ -852,6 +874,7 @@ function pendingProposals(context: PendingReviewContext): MediaReview.Shape["pen
         ...(selected && bound !== undefined ? { target: bound } : {}),
         ...(voicemail === undefined ? {} : { voicemail }),
         ...(sms === undefined ? {} : { sms }),
+        ...(line === undefined ? {} : { composeLine: line }),
         ...(spoken !== undefined || request === undefined || origin !== undefined || filesOperation || phone !== undefined || op.type === "sms_compose" || op.type === "sms_send" || deletion ? { reviewRequest: reply.clientMessageId } : {}),
         ...(spoken === undefined ? {} : { spoken }),
         ...(origin === undefined ? {} : { read: { origin, pageTicket: reply.pageTicket } }),
@@ -907,6 +930,8 @@ export const mediaReview = Layer.effect(MediaReview, effect {
       ...(scope.voicemail === undefined ? {} : { voicemail: scope.voicemail }),
       ...(scope.voicemailDeletion === undefined ? {} : { voicemailDeletion: scope.voicemailDeletion }),
       ...(scope.sms === undefined ? {} : { sms: scope.sms }), ...(files === undefined ? {} : { files }),
+      ...(scope.approvedText === undefined ? {} : { approvedText: scope.approvedText }),
+      ...(scope.composeLine === undefined ? {} : { composeLine: scope.composeLine }),
       ...(scope.reportFiles === undefined ? {} : { reportFiles: scope.reportFiles }), ...(scope.phone === undefined ? {} : { phone: scope.phone }) })
   })
   const readBack = (operation: DeviceOperation, call: ExecutorCall) => operation.type === "sms_send"
@@ -1133,7 +1158,7 @@ export const mediaReview = Layer.effect(MediaReview, effect {
         }) })
       })
     },
-    effect decide(card: MediaCard, approve: boolean) {
+    effect decide(card: MediaCard, approve: boolean, confirmation) {
       const { board } = try Talk
       const conversation = try Conversation
       const chats = try Chats
@@ -1188,14 +1213,15 @@ export const mediaReview = Layer.effect(MediaReview, effect {
       try lock.withPermits(1)(effect {
         if (card.decision !== undefined || !board.snapshot().media.includes(card) || (approve && card.notice !== undefined)
           || (approve && namedReviewQuery(card.operation) !== undefined && card.phone?.tag !== "Exact")) return
+        const held = try session()
+        const live = held !== undefined && (try current(held))
+        if (!board.snapshot().media.includes(card) || (confirmation === "Speech" && !sendShowing(card.id))) return
         const deciding: MediaCard | undefined = spoken === undefined ? undefined : { ...card, decision: "Deciding" }
         if (deciding !== undefined) board.change({ media: board.snapshot().media.map((one) => one === card ? deciding : one) })
         const replace = (before: MediaCard, after?: MediaCard) => {
           const media = board.snapshot().media
           if (media.includes(before)) board.change({ media: media.flatMap((item) => item !== before ? [item] : after === undefined ? [] : [after]) })
         }
-        const held = try session()
-        const live = held !== undefined && (try current(held))
         if ((card.phone !== undefined || deciding !== undefined) && !board.snapshot().media.includes(deciding ?? card)) return
         if (deciding === undefined) replace(card)
         const report = (text: string) => board.change({ mediaNote: { conversation: card.conversation, text } })
@@ -1232,8 +1258,12 @@ export const mediaReview = Layer.effect(MediaReview, effect {
         let filesOutcome: FileActionReport | undefined
         const voicemailDeletion = card.operation.type === "voicemail_delete_selected" && card.voicemail?.witness !== undefined
           ? { id: card.voicemail.id, opening: card.voicemail.opening, witness: card.voicemail.witness, expiresAt: card.expiresAt } : undefined
+        const approvedText = confirmation !== undefined && ((card.operation.type === "sms_send" && card.sms !== undefined) || card.composeLine !== undefined)
+          ? { digest: card.digest, expiresAt: card.expiresAt } : undefined
         scopes.set(card.id, { active: current(held), ...(card.voicemail === undefined ? {} : { voicemail: card.voicemail }), reportFiles: (outcome) => { filesOutcome = outcome }, ...(card.operation.type === "sms_compose" ? { continueDraft: continueDraft(held) } : {}), ...(card.target === undefined ? {} : { target: card.target }), ...(card.files === undefined ? {} : { files: card.files }),
           ...(voicemailDeletion === undefined ? {} : { voicemailDeletion }),
+          ...(approvedText === undefined ? {} : { approvedText }),
+          ...(card.composeLine === undefined ? {} : { composeLine: card.composeLine }),
           ...(card.sms === undefined ? {} : { sms: card.sms }), ...(card.phone?.tag === "Exact" ? { phone: card.phone.selected } : {}) })
         const { id, digest, expiresAt, operation } = card
         const result = (tryPromise(() => held.execute.approve({ id, digest, expiresAt, operation }, { live: true, nonsensitive: true, exact: true, forceReview: true, requestEligible: true, reviewed: true }))
