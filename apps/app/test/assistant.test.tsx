@@ -14,7 +14,7 @@ import { Machine as Shell } from "../gen/app__shell.effect.vibe";
 import type { Mount } from "../src/areas.ts";
 import assistant from "../src/assistant/index.tsx";
 import { untimed } from "../src/runtime/reactor.vibe";
-import { button, closeAll, drawn, fill, hardware, later, open, press, pressOnTop, seen, underAct, until } from "./alpha.tsx";
+import { button, chatAction, closeAll, drawn, fill, hardware, later, open, press, pressOnTop, seen, underAct, until } from "./alpha.tsx";
 import { draftKey } from "./fakes/ask.ts";
 import { scene } from "./fakes/scene.ts";
 
@@ -47,20 +47,6 @@ function onMessage(text: string, item: string) {
   act(() => {
     const chosen = [...document.querySelectorAll("[role=menuitem]")].find((one) => one.textContent === item);
     if (!(chosen instanceof HTMLElement)) throw new Error(`no ${item} for ${text}`);
-    chosen.click();
-  });
-}
-
-/** Choose `item` from the chat actions beside the composer, as the owner does with the keyboard. */
-function chatAction(item: string) {
-  act(() => {
-    const trigger = document.querySelector("button[aria-label='Chat actions']");
-    if (!(trigger instanceof HTMLButtonElement)) throw new Error("no chat actions");
-    trigger.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
-  });
-  act(() => {
-    const chosen = [...document.querySelectorAll("[role=menuitem]")].find((one) => one.textContent === item);
-    if (!(chosen instanceof HTMLElement)) throw new Error(`no chat action ${item}`);
     chosen.click();
   });
 }

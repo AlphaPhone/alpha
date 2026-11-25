@@ -101,6 +101,20 @@ export const press = (name: string | RegExp) => drawn(() => {
   found.click();
 });
 
+/** Choose an item from Chat actions as a keyboard user does. */
+export function chatAction(item: string) {
+  act(() => {
+    const trigger = button("Chat actions");
+    if (!trigger) throw new Error("no chat actions");
+    trigger.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+  });
+  act(() => {
+    const chosen = [...document.querySelectorAll("[role=menuitem]")].find((one) => one.textContent === item);
+    if (!(chosen instanceof HTMLElement)) throw new Error(`no chat action ${item}`);
+    chosen.click();
+  });
+}
+
 /** Press the button named `name` on the sheet or dialog on top, where the page behind it may hold one of the same name. */
 export const pressOnTop = (name: string) => drawn(() => {
   const top = [...document.querySelectorAll("[role=dialog], [role=alertdialog]")].at(-1);

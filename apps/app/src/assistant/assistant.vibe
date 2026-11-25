@@ -15,6 +15,7 @@ import * as Search from "../../gen/app__assistant__search.effect.vibe"
 import * as Alarms from "../../gen/app__clock__alarms.effect.vibe"
 import * as Timers from "../../gen/app__clock__timers.effect.vibe"
 import * as World from "../../gen/app__clock__world.effect.vibe"
+import * as Contacts from "../../gen/app__contacts.effect.vibe"
 import * as Reminders from "../../gen/app__reminders.effect.vibe"
 import * as Comms from "../../gen/app__phone__comms.effect.vibe"
 import * as Voice from "../../gen/app__voice.effect.vibe"
@@ -1098,13 +1099,17 @@ function carryComposer(fx: Composer.Effect): Job<Composer.Event, Agent | KeyValu
 }
 
 // spec/app/assistant/search.md, "Only the newest asking's hits are shown, a page at a time, after those already shown"; spec/app/assistant/reply.md, "The agent's turn tag is never drawn, copied, quoted, emailed or spoken, and a reply still being written holds back what may become one"
-effect function found(words: string, from: number, ticket: number): Search.Event!!(Agent | Talk) {
+effect function found(words: string, from: number, ticket: number): Search.Event!!(Agent | Talk | Search.Machine | Shell | Contacts.Machine) {
   return effect {
     const { board } = try Talk
     const seat = board.draftSeat
     if (!(try ownsSeat(board, seat))) return { type: "found", ticket, ok: false, count: 0, further: false }
     const { results } = try ask(Agent, HttpClientRequest.get("/api/conversations/messages/search", { urlParams: { q: words, offset: String(from), limit: String(pageSize) } }), hits())
     if (!(try ownsSeat(board, seat))) return { type: "found", ticket, ok: false, count: 0, further: false }
+    const searching = try (try Search.Machine).get()
+    if (!Search.canFound(searching, ticket, results.length) || searching.origin.tag === "ContactDock" && !(try contactSearchCurrent(searching.origin))) {
+      return { type: "found", ticket, ok: false, count: 0, further: false }
+    }
     const shown = results.map((one) => ({ conversation: board.numberOf({ id: one.conversationId, roomId: one.roomId } as ConversationRecord), message: board.messageNumber(one.messageId), text: one.role === "assistant" ? withoutTurnTags(one.text) : one.text }))
     board.change({ hits: [...(from === 0 ? [] : board.snapshot().hits.slice(0, from)), ...shown] })
     return { type: "found", ticket, ok: true, count: results.length, further: results.length === pageSize }
@@ -1112,16 +1117,24 @@ effect function found(words: string, from: number, ticket: number): Search.Event
 }
 
 // spec/app/assistant/search.md, "Opening a hit closes search and opens its conversation around its message, and another conversation only while the turn and the composer are free"
-effect function opened(conversation: number, message: number): void!!(Chats.Machine | Conversation.Machine | Composer.Machine) {
+effect function opened(conversation: number, message: number, origin: Search.Origin): void!!(Chats.Machine | Conversation.Machine | Composer.Machine | Shell | Contacts.Machine) {
   const chats = try Chats.Machine
   const free = freedom(try (try Conversation.Machine).get(), try (try Composer.Machine).get(), (try chats.get()).chosen)
-  try contained(chats.send({ type: "openHit", conversation, message, ...free }), "opening a hit")
+  const hit = { type: "openHit", conversation, message, ...free } as const
+  if (!Chats.enabled(try chats.get(), hit)) return
+  if (origin.tag === "ContactDock") {
+    if (!(try contactSearchCurrent(origin))) return
+    const shell = try Shell
+    const raised = shell.send({ type: "raise", detent: "Full" }, (where) => where.route === origin.route && where.assistant === "Bar") catch () => undefined
+    if (raised === undefined || (try shell.get()).route !== raised.route) return
+  }
+  try contained(chats.send(hit), "opening a hit")
 }
 
-function carrySearch(fx: Search.Effect): Job<Search.Event, Agent | Talk | Chats.Machine | Conversation.Machine | Composer.Machine, []> {
+function carrySearch(fx: Search.Effect): Job<Search.Event, Agent | Talk | Search.Machine | Chats.Machine | Conversation.Machine | Composer.Machine | Shell | Contacts.Machine, []> {
   return match (fx) {
     when { tag: "Find", let words, let from, let ticket }: answer("find", found(words, from, ticket), { type: "found", ticket, ok: false, count: 0, further: false });
-    when { tag: "Open", let conversation, let message }: run("open", opened(conversation, message));
+    when { tag: "Open", let conversation, let message, let origin }: run("open", opened(conversation, message, origin));
   }
 }
 
@@ -1384,6 +1397,41 @@ export effect function openChatSearch(route: number): void!!(Shell | Search.Mach
   }
 }
 
+type ContactSearch = Extract<Search.Origin, { tag: "ContactDock" }>
+
+effect function contactSearchCurrent(origin: ContactSearch): boolean!!(Shell | Contacts.Machine) {
+  const where = try (try Shell).get()
+  const card = try (try Contacts.Machine).get()
+  return where.route === origin.route && where.assistant === "Bar" && showing(where, "Contacts")
+    && card.front && Contacts.shown(card) && card.contact === origin.person && card.form === "Shut"
+}
+
+// spec/app/assistant/search.md, "Search from a closed Contact remembers the card that opened it"
+export effect function openContactChatSearch(route: number, person: string): void!!(Shell | Contacts.Machine | Search.Machine | Chats.Machine) {
+  const origin = { tag: "ContactDock", route, person } as const
+  if (!(try contactSearchCurrent(origin))) return
+  const search = try Search.Machine
+  if (try contained(search.send({ type: "openContactSearch", route, person }), "opening chat search over the contact")) {
+    if (!(try contactSearchCurrent(origin))) {
+      try contained(search.send({ type: "closeSearch" }, (finding) => finding.open && finding.origin.tag === "ContactDock" && finding.origin.route === route && finding.origin.person === person), "leaving the contact's search")
+      return
+    }
+    try ignore((try Chats.Machine).send({ type: "browse" }))
+  }
+}
+
+const retireContactSearch = started(effect {
+  const shell = try Shell
+  const contacts = try Contacts.Machine
+  const search = try Search.Machine
+  try Stream.runForEach(Stream.zipLatest(shell.changes, contacts.changes), effect () => {
+    const finding = try search.get()
+    if (finding.open && finding.origin.tag === "ContactDock" && !(try contactSearchCurrent(finding.origin))) {
+      try contained(search.send({ type: "closeSearch" }), "leaving the contact's search")
+    }
+  })
+}, "retiring search after leaving its contact")
+
 // spec/app/assistant/index.md, "Back closes a review, then search, then a quote or an edit, one at a time; with none of them open Back is the shell's"
 export const assistantBack = effect {
   const summary = (try Talk).board.snapshot().recordingSummary
@@ -1429,7 +1477,7 @@ export const assisting = Layer.provideMerge(
     reacting(Dock, { carry: carryDock }),
     picker,
     reacting(Locator, { carry: carryLocator }),
-    reached, looked, opening, saving, bound, requested, reviewedInFiles, submitted, allowing, forgetting, rested, keyboardRest, steppingBack, carried, carriedAloud, agentWarmUp,
+    reached, looked, opening, saving, bound, requested, reviewedInFiles, submitted, allowing, forgetting, rested, keyboardRest, steppingBack, retireContactSearch, carried, carriedAloud, agentWarmUp,
   ),
   Layer.mergeAll(Layer.fresh(turns), talk, handoffs),
 )

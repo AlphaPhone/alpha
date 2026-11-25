@@ -45,6 +45,7 @@ import { Documents } from "../platform/documents.vibe";
 import { AttachmentSources, type AttachmentSourceRow } from "./AttachmentSources.tsx";
 import { AttachmentPicker, choosePickerRow, clearPickerChoice, importPickerFiles, openAttachmentPicker, pickSystemDocument, upPickerFolder, usePickerVolume } from "./attachment-picker.vibe";
 import { askComms, freedom, openChatSearch, restTyping } from "./assistant.vibe";
+import { contactChatActionsId } from "./contact-search.ts";
 import { acceptedFiles, acceptedPhotos, attachmentAuthority, previewFile, removeFile, retireTranscript, sameBinding } from "./attachments.vibe";
 import { chip, type MessageActions, useHistorySheets, useMessageRows } from "./history.tsx";
 import { barHeight, ChatScrim, useSheetFollow } from "./follow.tsx";
@@ -453,7 +454,13 @@ export function Assistant({ runtime, messageActions, speech, canReadAloud = fals
   const free = talking && shown && writing ? freedom(talking, writing, shown.chosen) : { replying: true, holding: true };
   const searchRoute = shell.state?.route;
   const beginSearch = searchRoute === undefined ? undefined : () => void runtime.runPromiseExit(openChatSearch(searchRoute));
-  const history = useHistorySheets(chats, search, layers, seen, free, beginSearch, () => focusChatActions(composerRef.current));
+  const returnChatFocus = () => focusChatActions(composerRef.current);
+  const returnSearchFocus = () => {
+    const origin = finding?.origin;
+    if (origin?.tag !== "ContactDock") returnChatFocus();
+    else if (origin.route === searchRoute) document.getElementById(contactChatActionsId(origin.route, origin.person))?.focus();
+  };
+  const history = useHistorySheets(chats, search, layers, seen, free, beginSearch, returnChatFocus, returnSearchFocus);
   const page = shown === undefined || (shown.page.status === "Idle" && shown.chosen === 0) ? undefined : seen.pages.get(shown.page.ticket);
   const lines = page?.lines ?? emptyLines;
   const canPreview = attachments.can({ type: "preview", attachment: 1 });
