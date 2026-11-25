@@ -25,7 +25,7 @@ const holdMovement = 10;
 export interface CommsBarProps {
   runtime: DockRuntime;
   /** What the owner can write or do while the sheet is closed. */
-  closed?: ReactNode | ((ask: (query: string) => void) => ReactNode);
+  closed?: ReactNode | ((ask: (query: string) => void, talk: (() => void) | undefined) => ReactNode);
   /** The person this view is about. */
   person?: { label: string; initials: string };
 }
@@ -103,7 +103,7 @@ export function CommsBar({ runtime, closed, person }: CommsBarProps) {
           if (event.detail === 0 || !skipTap.current) void open();
           skipTap.current = false;
         }}><Mark className="size-[118%]" aria-hidden /></Button>
-      {typeof closed === "function" ? closed((query) => void open(query)) : closed ?? <CommsQuery runtime={runtime} phone={phone && !ending} placeholder={placeholder} onAsk={(query) => void open(query)} onTalk={ending ? undefined : talk} />}
+      {typeof closed === "function" ? closed((query) => void open(query), ending ? undefined : talk) : closed ?? <CommsQuery runtime={runtime} phone={phone && !ending} placeholder={placeholder} onAsk={(query) => void open(query)} onTalk={ending ? undefined : talk} />}
       {ending && <Button variant="destructive" size="icon" className="size-11 shrink-0" aria-label="End call" onClick={() => void bar.send(end)}><PhoneOff /></Button>}
     </div>
   );

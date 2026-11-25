@@ -1,0 +1,58 @@
+// spec/app/contacts/agent.md, "Only the owner approves, only what is shown as it is now, and only when the phone has ruled out an emergency call"; spec/app/messages/sending.md, "The journal read back settles an unknown outcome: sent, or never sent"
+import { NOT_DISPATCHED, type ExecutorCall } from "@elizaos/agent"
+import type { DeviceOperation } from "@elizaos/agent"
+import { operationIdOf, type DirectSmsReview, type SmsSendResult } from "@elizaos/os-bridges"
+import { normalizePhoneNumber } from "@elizaos/os-bridges"
+import { Machine as Phone, clear } from "../../gen/app__phone.effect.vibe"
+import { Device } from "../platform/device.vibe"
+import { Telephony, TelephonyAbsent, TelephonyRefused, telephony } from "../platform/telephony.vibe"
+
+type Sms = Extract<DeviceOperation, { type: "sms_send" }>
+const refused = { kind: "refused", code: NOT_DISPATCHED } as const
+
+function binding(op: Sms, call: ExecutorCall) {
+  if (call.proposalId !== call.operationId || !Number.isSafeInteger(call.attemptId) || call.attemptId <= 0) return undefined
+  const id = operationIdOf(call.operationId)
+  const recipients = op.recipients.map(normalizePhoneNumber)
+  if (id === null || recipients.some((number, at) => number !== op.recipients[at])) return undefined
+  const review: DirectSmsReview = {
+    recipients: recipients.filter((number) => number !== null), body: op.body, subscriptionId: op.subscriptionId,
+  }
+  return { id, review }
+}
+
+function resultOf(receipt: SmsSendResult | undefined) {
+  if (receipt === undefined) return undefined
+  if (receipt.status === "submitted" || receipt.status === "sent" || receipt.status === "delivered") return { kind: "applied", result: receipt } as const
+  if (receipt.status === "denied" || receipt.status === "cancelled") return { ...refused, result: receipt }
+  return undefined
+}
+
+/** A reviewed agent request uses the exact native SMS confirmation, never a fallback composer or a fresh send ID. */
+export effect function reviewAgentSms(op: Sms, call: ExecutorCall, current: () => Promise<boolean>) {
+  const wanted = binding(op, call)
+  const device = try Device
+  const phone = try Phone
+  if (wanted === undefined || !(try device.capabilities()).image || !(try device.showing()) || !clear(try phone.get())) return refused
+  if (!(tryPromise(current) catch () => false)) return refused
+  const status = telephony("reviewed SMS status", (client) => client.messages.status()) catch () => undefined
+  if (status?.sendMode !== "direct" || status.permissions.sendSms !== "granted" || !status.subscriptions?.some((sim) => sim.id === wanted.review.subscriptionId)) return refused
+  if (!(tryPromise(current) catch () => false) || !(try device.showing()) || !clear(try phone.get())) return refused
+  const receipt = telephony("sendSms", (client) => client.messages.sendSms(wanted.review, wanted.id)) catch (failure) => {
+    if (failure instanceof TelephonyAbsent || (failure instanceof TelephonyRefused &&
+      (failure.tag === "BridgeUnavailable" || failure.tag === "InvalidMessageRequest" || failure.tag === "SmsSendNotAttempted"))) return null
+    return undefined
+  }
+  return receipt === null ? refused : resultOf(receipt)
+}
+
+/** Recovery only reads the phone's receipt for the same body, recipients, operation ID and subscription. */
+export effect function readAgentSms(op: Sms, call: ExecutorCall): unknown!!(Device | Telephony) {
+  const wanted = binding(op, call)
+  const device = try Device
+  if (wanted === undefined || !(try device.capabilities()).image || !(try device.showing())) return undefined
+  const receipt = telephony("smsSendResult", (client) => client.messages.smsSendResult(wanted.review, wanted.id)) catch () => undefined
+  if (!(try device.showing())) return undefined
+  const result = resultOf(receipt)
+  return result?.kind === "applied" ? { kind: "found", result: result.result } : result
+}

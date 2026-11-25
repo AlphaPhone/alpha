@@ -8,10 +8,12 @@ import { Machine as Messages } from "../../gen/app__messages.effect.vibe"
 import { Machine as Shell, showing } from "../../gen/app__shell.effect.vibe"
 import type { FileReview } from "../files/agent.vibe"
 import type { MessageDraftTarget } from "../messages/agent.vibe"
+import { readAgentSms } from "../messages/agent-send.vibe"
 import { notesOperation, notesOperationWords } from "../notes/device-actions.vibe"
 import { Agent, type Runtime } from "../platform/agent.vibe"
 import { Device, registered } from "../platform/device.vibe"
 import { ownerAt } from "../platform/owner.vibe"
+import { Telephony } from "../platform/telephony.vibe"
 import { Talk } from "./talk.vibe"
 
 /** Area-owned equipment and approved executors. The resident protocol never receives a media bridge handle. */
@@ -106,7 +108,7 @@ const outcomes: Readonly<Partial<Record<string, string>>> = {
 const cameraCapabilities = ["camera.capture-photo.v1", "camera.capture-lens.v1", "camera.capture-library-id.v1"]
 const photosCapabilities = ["photos.library.v1", "photos.view.v1"]
 const filesCapabilities = ["files.browser.v1", "files.shown-target.v1"]
-const phoneCapabilities = ["phone.keypad.v1", "phone.dial.v1", "phone.call.v1", "views.telephony.v1", "sms.compose.v1", "sms.compose.v2", "messages.read.v1"]
+const phoneCapabilities = ["phone.keypad.v1", "phone.dial.v1", "phone.call.v1", "views.telephony.v1", "sms.compose.v1", "sms.compose.v2", "sms.send.v1", "messages.read.v1"]
 
 const needsMessage = (operation: DeviceOperation): boolean => operation.type === "sms_reply_selected" || operation.type === "messages_read_selected"
 
@@ -140,6 +142,7 @@ function operation(raw: unknown) {
   switch (value.type) {
     case "phone_keypad":
     case "sms_reply_selected":
+    case "sms_send":
     case "messages_read_selected":
       return value
     case "phone_dial":
@@ -181,6 +184,7 @@ function words(value: NonNullable<ReturnType<typeof operation>>): { title: strin
     case "phone_call": return { title: "Call", detail: value.target.kind === "number" ? value.target.number : "Phone" }
     case "sms_reply_selected": return { title: "Draft a reply in Messages", detail: value.body }
     case "messages_read_selected": return { title: "Share open messages", detail: "Share up to 20 recent messages from the open conversation with the agent." }
+    case "sms_send": return { title: "Review this text on your phone", detail: `${value.recipients.join(", ")}\n${value.body}\nConfirm the text and SIM in Android to send it.` }
     case "sms_compose": return { title: `Draft a text to ${"target" in value && value.target.kind === "number" ? value.target.number : "the recipient"}`, detail: value.body }
     case "camera_capture_photo": return { title: "Take a photo", detail: value.lens === undefined ? "Open the viewfinder to review the shot" : `Open the ${value.lens === "front" ? "front" : "rear"} camera to review the shot` }
     case "photos_filter": return { title: "Filter Photos", detail: value.text ?? "Show the requested photos in your library" }
@@ -232,7 +236,9 @@ function routes(runtime: Runtime, headers: RuntimeRequestHeaders): DeviceAgent {
 
 error EnrollmentRefused { reason: string }
 
-effect function enrolled(epoch: number, owner: string, image: boolean, runtime: Runtime, executeAction: (op: DeviceOperation, call: ExecutorCall) => Promise<unknown>): Session!unknown {
+type Action = (op: DeviceOperation, call: ExecutorCall) => Promise<unknown>
+
+effect function enrolled(epoch: number, owner: string, image: boolean, runtime: Runtime, executeAction: Action, readBack: Action): Session!unknown {
   const offer = try Schema.decodeUnknownEffect(protocol)(try tryPromise(() => runtime.request(`${prefix}/capabilities`)))
   if (offer.identityId !== owner) throw new EnrollmentRefused({ reason: "Device owner changed" })
   const origin = "https://device.alpha.invalid"
@@ -261,13 +267,14 @@ effect function enrolled(epoch: number, owner: string, image: boolean, runtime: 
   const execute = new DeviceExecution<DeviceOperation>({
     identity, agent, journal: journal(), validate: operation,
     execute: executeAction,
-    readBack: () => Promise.resolve(undefined),
+    readBack,
   })
   return { epoch, identity, headers, execute, decide: agent.decide }
 }
 
 function completion(op: DeviceOperation, synced: boolean): string {
   switch (op.type) {
+    case "sms_send": return synced ? "Android accepted the text request." : "Android accepted the text request. Agent receipt pending."
     case "messages_read_selected": return synced ? "Shared the open messages with the agent." : "Open messages prepared. Agent receipt pending."
     case "photos_album_create":
     case "photos_share":
@@ -288,6 +295,7 @@ export const mediaReview = Layer.effect(MediaReview, effect {
   const { runtime, life } = agent
   const executors = try MediaExecutors
   const device = try Device
+  const telephony = try Telephony
   const messages = try Messages
   const shell = try Shell
   const lock = try Semaphore.make(1)
@@ -299,6 +307,9 @@ export const mediaReview = Layer.effect(MediaReview, effect {
     if (scope === undefined || !(try scope.active)) return { kind: "refused", code: NOT_DISPATCHED }
     return try executors.execute(operation, call, { current: () => runPromise(scope.active), ...(scope.target === undefined ? {} : { target: scope.target }), ...(scope.files === undefined ? {} : { files: scope.files }) })
   })
+  const readBack = (operation: DeviceOperation, call: ExecutorCall) => operation.type === "sms_send"
+    ? runPromise(readAgentSms(operation, call) |> Effect.provideService(%, Device, device) |> Effect.provideService(%, Telephony, telephony))
+    : Promise.resolve(undefined)
   effect function messageTarget(): (MessageDraftTarget | undefined)!! {
     if (!(try device.showing()) || !showing(try shell.get(), "Messages")) return undefined
     const state = try messages.get()
@@ -312,7 +323,7 @@ export const mediaReview = Layer.effect(MediaReview, effect {
     pinnedFiles.clear()
     const owner = Effect.provideService(ownerAt(), Agent, agent) catch () => undefined
     const { image } = try device.capabilities()
-    latest = owner === undefined ? undefined : (enrolled(status.epoch, owner, image, runtime, guarded) catch () => undefined)
+    latest = owner === undefined ? undefined : (enrolled(status.epoch, owner, image, runtime, guarded, readBack) catch () => undefined)
     const fresh = latest
     if (fresh !== undefined) try ignore(tryPromise(() => fresh.execute.sync()))
     return latest
@@ -339,6 +350,14 @@ export const mediaReview = Layer.effect(MediaReview, effect {
   }
   const readyToDecline = (proposal: Proposal, at: number) => proposal.state === "pending" && Date.parse(proposal.expiresAt) > at
   const toSettle = (proposal: Proposal) => proposal.state === "executing" || proposal.state === "reconciliation_required"
+  effect function recoverText(opened: Session, proposal: Proposal) {
+    const attempt = proposal.execution?.attemptId
+    if (attempt === undefined || !(try enrollmentIsCurrent(opened))) return undefined
+    const recovered = tryPromise(() => opened.execute.recover(proposal.id, { attemptId: 1, agentAttemptId: attempt })) catch () => undefined
+    return recovered?.kind === "settled" && recovered.synced && recovered.result.tag !== "Unknown"
+      ? recovered.result.tag === "Applied" ? "Phone confirmed the text request" : "The phone did not send the text"
+      : undefined
+  }
   return {
     session,
     effect history() {
@@ -353,7 +372,10 @@ export const mediaReview = Layer.effect(MediaReview, effect {
         if (outcome === undefined) return undefined
         const visible = operation(proposal.payload.operation)
         const labelled = visible === undefined ? { title: "Phone action", detail: "" } : words(visible)
-        return { proposal: proposal.id, ...labelled, outcome, declinable: readyToDecline(proposal, at), unsettled: toSettle(proposal) && (try hasReceipt(opened, proposal)) }
+        const unsettled = toSettle(proposal) && (try hasReceipt(opened, proposal))
+        const text = visible?.type === "sms_send"
+        const recovered = text && unsettled ? try recoverText(opened, proposal) : undefined
+        return { proposal: proposal.id, ...labelled, outcome: recovered ?? outcome, declinable: readyToDecline(proposal, at), unsettled: unsettled && !text }
       }, { concurrency: 4 })
       if (!(try enrollmentIsCurrent(opened))) return undefined
       return rows.filter((row) => row !== undefined)
@@ -370,6 +392,7 @@ export const mediaReview = Layer.effect(MediaReview, effect {
           return result !== undefined
         }
         if (!toSettle(found) || !(try hasReceipt(opened, found))) return false
+        if (operation(found.payload.operation)?.type === "sms_send") return (try recoverText(opened, found)) !== undefined
         const result = tryPromise(() => opened.execute.confirmReview(found.id, action === "happened" ? "ReviewedApplied" : "ReviewedNotApplied")) catch () => "refused"
         return result === "sent"
       })

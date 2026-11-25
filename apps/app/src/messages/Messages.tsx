@@ -1,8 +1,9 @@
 // spec/app/messages/index.md, "Story: See my conversations"; spec/app/messages/index.md, "Story: Read a conversation"; spec/app/messages/index.md, "Story: Act on a message"; spec/app/messages/index.md, "Story: Start a new message"; spec/app/messages/composer.md, "Story: Keep my draft"; spec/app/messages/composer.md, "Story: Send a message"
-import { MMS_ATTACHMENT_TYPES, MMS_MAX_BODY, MMS_MAX_RECIPIENTS, type MessageRow, type ThreadRow, normalizePhoneNumber } from "@elizaos/os-bridges";
-import { Alert, Avatar, Banner, Button, Chip, ConfirmDialog, SearchField, Spinner, Textarea } from "@repo/ui";
+import { MMS_ATTACHMENT_TYPES, MMS_MAX_BODY, MMS_MAX_RECIPIENTS } from "@elizaos/os-bridges";
+import type { MessageRow, ThreadRow } from "@elizaos/os-bridges";
+import { Alert, Avatar, Banner, Button, Chip, ConfirmDialog, Input, Menu, MenuContent, MenuItem, MenuTrigger, SearchField, Spinner, Textarea } from "@repo/ui";
 import type { Layer, ManagedRuntime } from "effect";
-import { Camera, ChevronDown, ChevronLeft, ChevronUp, CircleAlert, Copy, Image as PictureIcon, ImagePlus, Mic, Phone as Call, Plus, RefreshCw, Search, Send, Sparkles, Square, SquarePen, Trash2, X } from "lucide-react";
+import { ArrowUp, Camera, ChevronDown, ChevronLeft, ChevronUp, CircleAlert, Copy, Image as PictureIcon, ImagePlus, Mic, Pencil, Phone as Call, Plus, RefreshCw, Search, Send, Sparkles, Square, Trash2, X } from "lucide-react";
 import { memo, useCallback, useMemo, useRef, useState, type MouseEvent, type PointerEvent } from "react";
 import { clear } from "../../gen/app__phone.ts";
 import { useMachine as usePhone } from "../../gen/app__phone.react.ts";
@@ -64,11 +65,12 @@ function clearChoice(runtime: MessagesProps["runtime"]) {
  */
 export function Messages({ runtime, onBack, onOpenLink }: MessagesProps) {
   const messages = useMessages(runtime);
+  const dock = useCommsDock(runtime);
   if (messages.cause) return <Alert variant="destructive" className="m-4">Alpha could not open Messages</Alert>;
   const { state } = messages;
   if (!state) return null;
   return (
-    <section data-alpha-messages aria-label="Messages" className="flex h-full min-h-0 flex-col overflow-hidden">
+    <section data-alpha-messages data-sheet={dock.open ? "open" : "closed"} aria-label="Messages" className="group/messages flex h-full min-h-0 flex-col overflow-hidden data-[sheet=closed]:pt-2">
       {state.pane === "Threads" && <Threads runtime={runtime} messages={messages} onBack={onBack} />}
       {state.pane === "Conversation" && <Conversation key={state.thread} runtime={runtime} messages={messages} onOpenLink={onOpenLink} />}
       {state.pane === "Picker" && <Picker runtime={runtime} messages={messages} />}
@@ -113,7 +115,7 @@ function Threads({ runtime, messages: { state, can, send }, onBack }: MessagesPr
           {can({ type: "newMessage" }) && <Button variant="ghost" size="icon" aria-label="New message" data-alpha-messages-new onClick={() => {
             runtime.runSync(Inbox.use((inbox) => inbox.set({ typed: "" })));
             void send({ type: "newMessage" });
-          }}><SquarePen /></Button>}
+          }}><Pencil /></Button>}
         </header>
       )}
       {smsNeeded(state) && (can(allow) || can(settings)) && (
@@ -123,10 +125,10 @@ function Threads({ runtime, messages: { state, can, send }, onBack }: MessagesPr
       )}
       {!smsNeeded(state) && (
         <>
-          <div className="flex shrink-0 flex-wrap items-center gap-2 px-5" role="group" aria-label="Filter conversations">
+          <div className="flex shrink-0 flex-wrap items-center gap-2 px-5 empty:hidden" role="group" aria-label="Filter conversations">
             {state.chip === "UnreadThreads"
               ? <Chip onClear={can(all) ? () => void send(all) : undefined} clearLabel="Show all conversations">Unread</Chip>
-              : can(unread) && <Button size="sm" variant="ghost" onClick={() => void send(unread)}>Unread</Button>}
+              : searching && can(unread) && <Button size="sm" variant="ghost" onClick={() => void send(unread)}>Unread</Button>}
             {!searching && state.sought && <Chip onClear={() => search("")} clearLabel="Clear the search">{sought}</Chip>}
           </div>
           <div data-alpha-messages-threads className="min-h-0 flex-1 touch-pan-y overflow-y-auto overscroll-contain py-1">
@@ -161,9 +163,11 @@ function Threads({ runtime, messages: { state, can, send }, onBack }: MessagesPr
           </div>
         </>
       )}
-      <CommsBar runtime={runtime} closed={smsNeeded(state) ? undefined : (ask) => (
-        <form className="min-w-0 flex-1" onSubmit={(event) => { event.preventDefault(); ask(sought.trim()); }}>
-          <SearchField data-alpha-composer aria-label="Search or ask" placeholder="Search or ask" value={sought} onValueChange={search} />
+      <CommsBar runtime={runtime} closed={smsNeeded(state) ? undefined : (ask, talk) => (
+        <form className="flex min-w-0 flex-1 items-center gap-1" onSubmit={(event) => { event.preventDefault(); ask(sought.trim()); }}>
+          <Input data-alpha-composer aria-label="Search or ask" placeholder="Search or ask" value={sought} onChange={(event) => search(event.target.value)} className="min-w-0 flex-1 border-0 bg-transparent pl-2 shadow-none" />
+          {sought.trim() !== "" ? <Button size="icon" variant="ghost" type="submit" aria-label="Ask Alpha"><ArrowUp /></Button>
+            : talk && <Button size="icon" variant="ghost" type="button" aria-label="Talk" onClick={talk}><Mic /></Button>}
         </form>
       )} />
     </>
@@ -312,7 +316,7 @@ function Conversation({ runtime, messages: { state, can, send }, onOpenLink }: M
     <>
       <header className={`${header} pb-2`} data-alpha-navigation-header data-alpha-stage-header>
         {can({ type: "back" }) && <Button variant="ghost" size="icon" aria-label="Back" onClick={() => { clearChoice(runtime); void send({ type: "back" }); }}><ChevronLeft /></Button>}
-        <Avatar name={title} aria-hidden size="sm" data-alpha-stage-avatar />
+        <Avatar name={title} aria-hidden size="sm" data-alpha-stage-avatar className="group-data-[sheet=closed]/messages:size-9" />
         <h1 data-alpha-messages-title className="min-w-0 flex-1 truncate pl-1.5 text-lg font-bold">{title}</h1>
         {addresses.length === 1 && can({ type: "call" }) && <Button variant="ghost" size="icon" aria-label={`Call ${title}`} onClick={() => void send({ type: "call" })}><Call /></Button>}
       </header>
@@ -347,6 +351,8 @@ function Compose({ runtime, title, addresses, thread }: MessagesProps & { title:
   const dock = useCommsDock(runtime);
   const voice = useVoice(runtime);
   const field = useRef<HTMLTextAreaElement>(null);
+  const picturesInput = useRef<HTMLInputElement>(null);
+  const cameraInput = useRef<HTMLInputElement>(null);
   const focus = useRef(false);
   const { state, can, send } = composer;
   if (!state || !phone || state.thread !== thread || addresses.length === 0) return <CommsBar runtime={runtime} />;
@@ -382,6 +388,8 @@ function Compose({ runtime, title, addresses, thread }: MessagesProps & { title:
   const draft = text && (alpha || dock.open);
   const editable = can({ type: "typeText", empty: text.length === 0 });
   const attachment = { type: "attach", fits: true } as const;
+  const canPicture = runtime.runSync(supported(state.recipients, 1)) && can(attachment);
+  const canSuggest = can({ type: "suggest" });
   const handoff = { type: "handOff", supported: sendNow.supported } as const;
   const recorder = voice.state?.recorder;
   const recording = recorder?.field === "MessagesBar" && recorder.stage !== "Closed";
@@ -397,24 +405,29 @@ function Compose({ runtime, title, addresses, thread }: MessagesProps & { title:
     </div>
   ) : (
     <div data-alpha-composer data-alpha-messages-composer className="flex min-w-0 flex-1 items-end gap-1">
-      {([["Attach a picture", ImagePlus, false], ["Take a picture", Camera, true]] as const).map(([label, Icon, camera]) => (
-        <label key={label} className="relative flex size-11 shrink-0 items-center justify-center rounded-full text-muted-foreground focus-within:outline-2 focus-within:outline-ring has-disabled:opacity-50" aria-label={label}>
-          <Icon className="size-5" aria-hidden />
-          <input type="file" aria-label={label} multiple={!camera} capture={camera ? "environment" : undefined} accept={MMS_ATTACHMENT_TYPES.join(",")} disabled={!can(attachment)}
-            className="absolute inset-0 size-full cursor-pointer opacity-0 disabled:cursor-default" onChange={(event) => {
-              const files = [...(event.target.files ?? [])];
-              event.target.value = "";
-              if (files.length > 0) void runtime.runPromise(attachAll(files));
-            }} />
-        </label>
-      ))}
-      <Textarea className="max-h-[min(10.5rem,28dvh)] min-w-0 flex-1 overflow-y-auto" aria-label="Message" placeholder={`Text ${firstName(title)}`} value={text} maxLength={MMS_MAX_BODY} readOnly={!editable}
+      <Textarea className="max-h-[min(10.5rem,28dvh)] min-w-0 flex-1 overflow-y-auto border-0 bg-transparent pl-2 shadow-none" aria-label="Message" placeholder={`Text ${firstName(title)}`} rows={1} value={text} maxLength={MMS_MAX_BODY} readOnly={!editable}
         ref={(element) => {
           field.current = element;
           if (element && focus.current) { focus.current = false; element.focus(); }
         }}
         onChange={(event) => write(event.target.value)} />
-      {can({ type: "suggest" }) && <Button variant="ghost" size="icon" aria-label="Let Alpha suggest a reply" onClick={() => void send({ type: "suggest" })}><Sparkles /></Button>}
+      {(canPicture || canSuggest) && <Menu>
+        <MenuTrigger asChild><Button variant="ghost" size="icon" aria-label="Message actions"><Plus /></Button></MenuTrigger>
+        <MenuContent aria-label="Message actions" side="top" sideOffset={8}>
+          {canPicture && <>
+            <MenuItem onSelect={() => cameraInput.current?.click()}><Camera />Camera</MenuItem>
+            <MenuItem onSelect={() => picturesInput.current?.click()}><ImagePlus />Add media</MenuItem>
+          </>}
+          {canSuggest && <MenuItem onSelect={() => void send({ type: "suggest" })}><Sparkles />Let Alpha suggest a reply</MenuItem>}
+        </MenuContent>
+      </Menu>}
+      {([["Attach a picture", picturesInput, false], ["Take a picture", cameraInput, true]] as const).map(([label, input, camera]) => (
+        <input key={label} ref={input} hidden type="file" aria-label={label} multiple={!camera} capture={camera ? "environment" : undefined} accept={MMS_ATTACHMENT_TYPES.join(",")} disabled={!canPicture} onChange={(event) => {
+          const files = [...(event.target.files ?? [])];
+          event.target.value = "";
+          if (files.length > 0) void runtime.runPromise(attachAll(files));
+        }} />
+      ))}
       {editable && phone.telecom === "NoCall" && voice.can({ type: "openRecorder", target: "MessagesBar" }) && <Button variant="ghost" size="icon" aria-label={`Dictate a text to ${firstName(title)}`} onClick={() => void runtime.runPromise(dictateMessage(thread))}><Mic /></Button>}
       {sendable && <Button size="icon" aria-label={sendLabel} data-alpha-bar-send onClick={submit}>{checking ? <RefreshCw /> : <Send />}</Button>}
     </div>

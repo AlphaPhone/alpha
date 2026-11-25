@@ -70,7 +70,8 @@ describe("Settings", () => {
     await hardware("back");
     expect(await page(alpha)).toBe("General");
     await hardware("back");
-    // spec/app/settings/index.md, "Each page links to what another area owns there": the Account sheet reads the signed-in account and Back returns to Settings.
+    // spec/app/settings/index.md, "Each page links to what another area owns there": the Account row and sheet read the signed-in account and Back returns to Settings.
+    await vi.waitFor(() => expect(button("Account")?.textContent).toContain(account.email));
     await press("Account");
     await until(alpha, alpha.runtime, Layers.Machine, (state) => Layers.listed(state, "account"));
     await vi.waitFor(() => expect(document.querySelector('[role="dialog"]')?.textContent).toContain(account.email));
@@ -85,6 +86,7 @@ describe("Settings", () => {
     expect(document.querySelector('[role="dialog"]')?.textContent).not.toContain(account.email);
     await press("Close Account");
     await until(alpha, alpha.runtime, Layers.Machine, (state) => !Layers.listed(state, "account"));
+    await vi.waitFor(() => expect(button("Account")?.textContent).toContain("Signed out"));
     world.signedIn = true;
 
     // spec/app/settings/index.md, "Each page links to what another area owns there": Agent activity offers the conversations, which the shell opens over the app.
@@ -140,7 +142,10 @@ describe("Settings", () => {
   describe.each([["a browser", false], ["a phone", true]])("in %s", (_where, phone) => {
     it("Change what only Android can change (spec/app/settings/android.md, \"Story: Change what only Android can change\")", async () => {
       const { alpha, machines, world } = await settingsOpen({ ...scene(), phone });
+      await until(alpha, machines, Facts.Machine, (state) => state.read.read.status === "Loaded");
+      expect(Boolean(button("Refresh"))).toBe(phone);
       await press("General");
+      expect(Boolean(button("Refresh"))).toBe(phone);
       // spec/app/settings/android.md, "Android says whether it opened that page, a nearby one, or none"
       await tap("Wi-Fi");
       await until(alpha, machines, Android.Machine, (s) => s.start.read.status !== "Loading");

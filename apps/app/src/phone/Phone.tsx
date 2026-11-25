@@ -171,7 +171,7 @@ export function Phone({ runtime, alpha }: PhoneProps) {
               ))}
             </div>
             <div className="grid shrink-0 grid-cols-3 items-center justify-items-center gap-x-[min(5.825vw,1.5rem)] px-[min(10.68vw,2.75rem)] pt-[min(3.88vw,1rem)]">
-              <Button className="col-start-2 size-(--dial-key) bg-call text-alpha-foreground hover:bg-call/90 active:bg-call/80 disabled:opacity-100"
+              <Button className="col-start-2 size-(--dial-key) bg-dial text-dial-foreground hover:bg-dial/90 active:bg-dial/80 disabled:opacity-100"
                 size="icon" data-alpha-phone-call="" aria-label="Call" disabled={!can({ type: "dialTyped" }) || !dialable(state)}
                 onClick={() => void send({ type: "dialTyped" })}><Call className="size-7.5" /></Button>
               {dialer.digits !== "" && <Button variant="ghost" size="icon" aria-label="Delete digit" className="col-start-3 size-14"
