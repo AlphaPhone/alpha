@@ -127,8 +127,13 @@ public final class AlphaHostedDigestDeliveryPlugin extends Plugin {
    call.reject("Invalid digest notice");
    return;
   }
+  String lease = call.getString("questionLease");
+  if (lease != null && !lease.matches("[a-f0-9-]{36}")) {
+   call.reject("Invalid digest question lease");
+   return;
+  }
   execute(call, () -> {
-   delivery.settleNotice(token);
+   delivery.settleNotice(token, lease);
    return new JSObject();
   });
  }
