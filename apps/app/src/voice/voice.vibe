@@ -260,7 +260,7 @@ export const interimLiveness = started(effect {
     sync(() => board.subscribe(() => { Queue.offerUnsafe(queue, undefined) })),
     (off) => sync(off),
   ))
-  const changes = Stream.mergeAll([
+  const sources: ReadonlyArray<Stream.Stream<void | boolean>> = [
     boardChanges,
     Stream.as(chats.changes, undefined),
     Stream.as(conversation.changes, undefined),
@@ -268,7 +268,8 @@ export const interimLiveness = started(effect {
     Stream.as(shell.changes, undefined),
     Stream.as(layers.changes, undefined),
     Stream.filter(device.visible, (shown) => !shown),
-  ], { concurrency: "unbounded" })
+  ]
+  const changes = Stream.mergeAll(sources, { concurrency: "unbounded" })
   try Stream.runForEach(changes, effect (visible) => {
     const capture = memory.interimCapture
     if (capture === undefined) return
