@@ -1,0 +1,43 @@
+// spec/app/inbox/message.md, "An attachment is reviewed before it is opened or saved, and one use is in flight at a time"; spec/app/inbox/message.md, "An attachment use ends as its own answer says, or unknown"
+import type { OpaqueMailAttachment } from "@elizaos/plugin-inbox-client"
+import { registered } from "./device.vibe"
+
+module android {
+  import { registerPlugin } from "@capacitor/core"
+  import type { OpaqueMailAttachment } from "@elizaos/plugin-inbox-client"
+
+  interface Plugin {
+    saveReviewed(copy: OpaqueMailAttachment & { readonly attempt: string }): Promise<unknown>
+    cancelReviewed(review: { readonly attempt: string }): Promise<void>
+  }
+
+  let plugin: Plugin | undefined
+  /** @throws {never} */
+  export const client = () => (plugin ??= registerPlugin<Plugin>("AlphaInboxAttachments"))
+}
+import { client } from android
+
+const SavedCopy = Schema.Struct({ status: Schema.Literals(["saved", "refused", "unknown"]) })
+type SaveResult = typeof SavedCopy.Type["status"]
+
+/** Android's document picker and verified storage write, scoped to one review. */
+export service InboxAttachmentFiles {
+  save(attempt: number, file: OpaqueMailAttachment): SaveResult!!
+  cancel(attempt: number): void!!
+}
+
+export const canSaveOnPhone = () => registered("AlphaInboxAttachments")
+
+export const inboxAttachmentFiles = Layer.sync(InboxAttachmentFiles, () => {
+  const host = canSaveOnPhone() ? client() : undefined
+  return {
+    effect save(attempt: number, file: OpaqueMailAttachment): SaveResult!! {
+      if (!host) return "refused"
+      return effect {
+        const reply = try tryPromise(() => host.saveReviewed({ ...file, attempt: String(attempt) }))
+        return (try Schema.decodeUnknownEffect(SavedCopy)(reply)).status
+      } catch () => "unknown"
+    },
+    cancel: (attempt) => host === undefined ? Effect.void : ignore(tryPromise(() => host.cancelReviewed({ attempt: String(attempt) }))),
+  }
+})

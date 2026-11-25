@@ -2,6 +2,7 @@ import { alphaAssistantDraft } from "./ask.ts";
 import { elizaCalendar } from "./calendar.ts";
 import { cameraKeys, elizaCamera } from "./camera.ts";
 import { elizaFiles, selectedDocuments } from "./files.ts";
+import { alphaInboxAttachments } from "./inbox.ts";
 import { alphaMapsTransport, elizaLocation } from "./maps.ts";
 import { alphaNotes } from "./notes.ts";
 import { type Faked, elizaAgent, elizaCloud, elizaSecureStore } from "./phone.ts";
@@ -49,6 +50,7 @@ export function plugins(world: Scene, services: { readonly agent: Answering; rea
     ElizaCloudSpeech: elizaCloudSpeech(world.voice),
     ElizaSignIn: elizaSignIn(world.voice, () => world.signedIn, world.mailLease),
     AlphaBrowser: alphaBrowser(world.browser),
+    AlphaInboxAttachments: alphaInboxAttachments(world.inbox),
     AlphaNotes: alphaNotes(world.notes),
     ...(world.workflows.nativeDigests === undefined ? {} : { AlphaHostedDigestDelivery: alphaHostedDigests(world.workflows.nativeDigests) }),
   };

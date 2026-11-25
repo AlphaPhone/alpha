@@ -13,6 +13,7 @@ import { reviewMailContext, MailContextRefused } from "@elizaos/plugin-inbox-cli
 import { Agent } from "../platform/agent.vibe"
 import { InboxBrowserLinks } from "../platform/browser.vibe"
 import { native, registered } from "../platform/device.vibe"
+import { type InboxAttachmentFiles, inboxAttachmentFiles } from "../platform/inboxAttachments.vibe"
 import { say, type Said } from "../notices/toasts.vibe"
 import { MailQuestions, sourceOf, type MailQuestion } from "./mail-context.vibe"
 import { Cloud } from "../platform/cloud.vibe"
@@ -141,7 +142,7 @@ const questionAbout = (account: number, message: number, revision: number) => ef
   try ignore(shell.send({ type: "raise", detent: "Sheet" }))
 }
 
-function carry(fx: Out): Job<Event, Cloud | Agent | MailQuestions | Mail | Inbox.Machine | Marking.Machine | Message.Machine | Shell | ThreadPages | AttachmentPreviews | InboxBrowserLinks | Toasts | Said, []> {
+function carry(fx: Out): Job<Event, Cloud | Agent | MailQuestions | Mail | Inbox.Machine | Marking.Machine | Message.Machine | Shell | ThreadPages | AttachmentPreviews | InboxAttachmentFiles | InboxBrowserLinks | Toasts | Said, []> {
   return match (fx) {
     when { tag: "ReadMessage", let ticket, let account, let message, let position, let place }:
       stream("read", Stream.filter(Stream.fromEffect(read(ticket, account, message, position, place)), (event): event is Event => event !== undefined),
@@ -242,7 +243,7 @@ const viewing = reacting(Message, { keep: 1, open: [{ type: "restart" }], carry 
 const marking = reacting(Marking, { keep: 1, open: [{ type: "restart" }, "World"], carry: carryMark })
 
 /** A message opened from the list, and its marks: kept across restarts, read through the owner's cloud, and told what the list knows of access. */
-export const reading = together(viewing, marking, access, sessions, afresh, openedUnread, threadPosition, threadPages, attachmentPreviews, forgetPreview)
+export const reading = together(viewing, marking, access, sessions, afresh, openedUnread, threadPosition, threadPages, attachmentPreviews, inboxAttachmentFiles, forgetPreview)
 
 // spec/app/inbox/message.md, "Closing the message, losing read access to its account, a new cloud session, or a restart leaves nothing open and no read that could still answer"
 /** Back from a message: a review open closes first, then the message, and the list is Inbox's own last step. */
