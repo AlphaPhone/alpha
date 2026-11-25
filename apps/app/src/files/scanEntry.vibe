@@ -1,0 +1,17 @@
+// spec/app/camera/index.md, "Story: Scan a document"; spec/app/files/scan.md, "Story: Arrange the pages"
+/** The owner opened the scanner, for the active or next Files view alone. */
+export service ScanEntry {
+  readonly requests: Stream.Stream<boolean>
+  ask(): void!!
+  take(): boolean!!
+}
+
+/** A single handoff is consumed while Files is visible. */
+export const scanEntry = Layer.effect(ScanEntry, effect {
+  const waiting = try SubscriptionRef.make(false)
+  return {
+    requests: SubscriptionRef.changes(waiting),
+    ask: () => SubscriptionRef.set(waiting, true),
+    take: () => SubscriptionRef.getAndSet(waiting, false),
+  }
+})

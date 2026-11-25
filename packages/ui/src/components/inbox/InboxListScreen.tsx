@@ -16,6 +16,8 @@ export type InboxListScreenProps = Pick<InboxListProps, "rows" | "loading" | "on
   Pick<InboxSelectionBarProps, "onArchive" | "onTrash" | "onRestore" | "onChooseAll"> & {
     /** The address of the account whose mail is shown. */
     account?: string;
+    /** Returns from Inbox to the apps. */
+    onBack?: () => void;
     /** Whether the list header holds its search field. */
     searching?: boolean;
     /** What is typed in the search field. */
@@ -63,21 +65,21 @@ export type InboxListScreenProps = Pick<InboxListProps, "rows" | "loading" | "on
  * @model spec/app/inbox/index.md
  */
 export function InboxListScreen({
-  account, folder, unavailable, onChooseFolder, searching = false, search, onSearchChange, onSearch, onOpenSearch, onCloseSearch,
+  account, onBack, folder, unavailable, onChooseFolder, searching = false, search, onSearchChange, onSearch, onOpenSearch, onCloseSearch,
   notice, onNoticeAction, state, onStateAction, chosen = 0, onStartSelection, onFinishSelection, onClearSelection,
   onArchive, onTrash, onRestore, onChooseAll, aside = 0, onShelf, onRefresh, onCompose, onAccount, rows, loading, onLoadMore, loadingMore,
 }: InboxListScreenProps) {
-  const focusSearchAfterClose = useRef(false);
+  const focusSearchAfterCloseRef = useRef(false);
   const closeSearch = () => {
-    focusSearchAfterClose.current = true;
+    focusSearchAfterCloseRef.current = true;
     onCloseSearch?.();
   };
   const actions = (
     <>
       {onRefresh || loading ? <Button variant="ghost" size="icon" aria-label="Refresh" loading={loading} disabled={!onRefresh} onClick={onRefresh}><RefreshCw /></Button> : null}
       <Button variant="ghost" size="icon" aria-label="Search email" disabled={!onOpenSearch} onClick={onOpenSearch} ref={(button) => {
-        if (button && focusSearchAfterClose.current) {
-          focusSearchAfterClose.current = false;
+        if (button && focusSearchAfterCloseRef.current) {
+          focusSearchAfterCloseRef.current = false;
           button.focus();
         }
       }}><Search /></Button>
@@ -100,10 +102,10 @@ export function InboxListScreen({
   return (
     <Screen
       title={chosen > 0 ? `${chosen} selected` : inboxFolders[folder]}
-      leading={searching ? <Button variant="ghost" size="icon" aria-label="Back to inbox" onClick={closeSearch}><ChevronLeft /></Button> : undefined}
+      leading={searching || onBack ? <Button variant="ghost" size="icon" aria-label={searching ? "Back to inbox" : "Back to apps"} className="ml-1" onClick={searching ? closeSearch : onBack}><ChevronLeft className="size-5" /></Button> : undefined}
       titleControl={searching ? <InboxSearchBar value={search} onValueChange={onSearchChange} onSearch={onSearch} onClose={closeSearch} focusOnOpen /> : undefined}
       actions={searching ? undefined : actions}
-      className="[&_main>div]:gap-2 [&_main>div]:pt-1"
+      className="[&_header>h1]:font-sans [&_header>h1]:text-xl [&_header>h1]:font-semibold [&_header>h1]:pl-0.5 [&_main>div]:gap-2 [&_main>div]:pt-1"
     >
       {searching ? null : <InboxFolderBar folder={folder} unavailable={unavailable} onChoose={onChooseFolder} />}
       {notice ? <InboxNotice kind={notice} onAction={onNoticeAction} /> : null}

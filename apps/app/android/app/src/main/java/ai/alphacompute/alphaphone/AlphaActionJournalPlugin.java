@@ -6,7 +6,11 @@ import ai.eliza.plugins.actionjournal.ActionJournalConfiguration;
 import ai.eliza.plugins.actionjournal.ActionJournalPlugin;
 import ai.eliza.plugins.actionjournal.deletion.DeferredDeletionCoordinator;
 import android.content.Context;
+import com.getcapacitor.JSObject;
+import com.getcapacitor.PluginCall;
+import com.getcapacitor.PluginMethod;
 import com.getcapacitor.annotation.CapacitorPlugin;
+import java.util.concurrent.Callable;
 import org.json.JSONObject;
 
 @CapacitorPlugin(name = "ElizaActionJournal")
@@ -27,6 +31,57 @@ public final class AlphaActionJournalPlugin extends ActionJournalPlugin {
  }
 
  @Override protected ActionJournal createJournal() { return journal(getContext()); }
+
+ private static final double MAX_REVISION = 9_007_199_254_740_991d;
+
+ private void deviceWork(PluginCall call, Callable<JSObject> operation) {
+  Runnable refused = () -> call.reject(refusal());
+  PluginWorkers.submit(worker(), () -> {
+   if (destroyed()) {
+    refused.run();
+    return;
+   }
+   try {
+    call.resolve(operation.call());
+   } catch (Exception error) {
+    refused.run();
+   }
+  }, refused);
+ }
+
+ @Override @PluginMethod public void get(PluginCall call) {
+  if (call.getData().has("scope")) {
+   super.get(call);
+   return;
+  }
+  deviceWork(call, () -> {
+   JSONObject entry = DeviceExecutionJournal.of(getContext()).get(call.getString("proposalId"));
+   JSObject reply = entryResponse(entry);
+   if (entry != null) reply.put("digest", entry.getString("digest"));
+   return reply;
+  });
+ }
+
+ @Override @PluginMethod public void list(PluginCall call) {
+  if (call.getData().has("scope")) {
+   super.list(call);
+   return;
+  }
+  deviceWork(call, () -> new JSObject().put("entries", DeviceExecutionJournal.of(getContext()).list()));
+ }
+
+ @PluginMethod public void edit(PluginCall call) {
+  deviceWork(call, () -> {
+   Object raw = call.getData().opt("expectedRevision");
+   if (call.getData().has("scope") || !(raw instanceof Number revision) || revision.doubleValue() < 0
+     || revision.doubleValue() >= MAX_REVISION || revision.doubleValue() != Math.floor(revision.doubleValue())) {
+    throw new IllegalArgumentException("Invalid journal revision");
+   }
+   JSONObject payload = call.getData().getJSONObject("next");
+   boolean kept = DeviceExecutionJournal.of(getContext()).edit(call.getString("proposalId"), revision.longValue(), new JSONObject(payload.toString()));
+   return new JSObject().put("kept", kept);
+  });
+ }
 
  @Override protected DeferredDeletionCoordinator deletions() {
   if (!AlphaImageCapability.verified(getContext()) || !AlphaDevicePlugin.shareForeground(getActivity())) {

@@ -4,7 +4,7 @@ import type { ListedVoicemail, VoicemailId, VoicemailListing } from "@elizaos/os
 import { Machine as PhoneMachine, liveCall } from "../../gen/app__phone.effect.vibe"
 import * as Voicemail from "../../gen/app__phone__voicemail.effect.vibe"
 import type { Effect as Out, Event } from "../../gen/app__phone__voicemail.effect.vibe"
-import { Telephony, TelephonyRefused, namesOf, telephony } from "../platform/telephony.vibe"
+import { type Telephony, TelephonyRefused, namesOf, telephony } from "../platform/telephony.vibe"
 import { type Job, answer, applying, contained, following, hearing, reacting, run, started, together } from "../runtime/reactor.vibe"
 import { Time } from "../runtime/time.vibe"
 
@@ -167,8 +167,8 @@ const carrierChanged = started(effect {
   const phone = try PhoneMachine
   const voicemail = try Voicemail.Machine
   const front = Stream.changesWith(Stream.map(phone.changes, (state) => state.front), (a, b) => a === b)
-  const first = Stream.fromEffect(effect { return telephony("refreshVoicemail", (c) => c.phone.refreshVoicemail("AutomaticRead")) catch () => undefined })
-  const changed = Stream.mapEffect(observations, effect (listing) => tryPromise(() => listing) catch () => undefined)
+  const first = Stream.fromEffect(Effect.orElseSucceed(telephony("refreshVoicemail", (c) => c.phone.refreshVoicemail("AutomaticRead")), () => undefined))
+  const changed = Stream.mapEffect(observations, (listing) => Effect.orElseSucceed(tryPromise(() => listing), () => undefined))
   const watched = Stream.switchMap(front, (showing) => showing ? Stream.concat(first, changed) : Stream.empty)
   try Stream.runForEach(watched, effect (listing) => {
     if (listing === undefined || !(try phone.get()).front) return
@@ -194,20 +194,21 @@ module audio {
     position(): number
     seek(seconds: number): void
   }
+
   /** Create the one audio element for voicemail playback. @throws {never} */
   export function makeAudio(): HTMLAudioElement {
     return new Audio()
   }
   /** Listen only while a playback control is mounted. @throws {never} */
-  export function positionOf(element: HTMLAudioElement): PlaybackPosition {
+  export function positionOf(element: HTMLAudioElement): { subscribe(wake: () => void): () => void; position(): number; seek(seconds: number): void } {
     const events = ["timeupdate", "seeking", "seeked", "ended", "emptied"]
     return {
-      subscribe: (wake) => {
+      subscribe: (wake: () => void) => {
         for (const kind of events) element.addEventListener(kind, wake)
         return () => { for (const kind of events) element.removeEventListener(kind, wake) }
       },
       position: () => Math.floor(element.currentTime),
-      seek: (seconds) => {
+      seek: (seconds: number) => {
         if (!Number.isFinite(element.duration) || !Number.isFinite(seconds)) return
         element.currentTime = Math.max(0, Math.min(seconds, element.duration))
       },

@@ -3,8 +3,8 @@ import { MMS_ATTACHMENT_TYPES, MMS_MAX_BODY, MMS_MAX_RECIPIENTS } from "@elizaos
 import type { MessageRow, ThreadRow } from "@elizaos/os/bridges/messages";
 import { Alert, Avatar, Banner, Button, Chip, ConfirmDialog, SearchField, Spinner, Textarea } from "@repo/ui";
 import type { ManagedRuntime } from "effect";
-import { Camera, ChevronDown, ChevronLeft, ChevronUp, CircleAlert, Copy, Image as PictureIcon, ImagePlus, Phone as Call, Plus, Search, Send, Sparkles, SquarePen, Trash2 } from "lucide-react";
-import { memo, useCallback, useRef, useState, type MouseEvent, type PointerEvent } from "react";
+import { Camera, ChevronDown, ChevronLeft, ChevronUp, CircleAlert, Copy, Image as PictureIcon, ImagePlus, Phone as Call, Plus, RefreshCw, Search, Send, Sparkles, SquarePen, Trash2 } from "lucide-react";
+import { memo, useCallback, useMemo, useRef, useState, type MouseEvent, type PointerEvent } from "react";
 import type { Machine as PhoneMachine } from "../../gen/app__phone.effect.vibe";
 import { clear } from "../../gen/app__phone.ts";
 import { useMachine as usePhone } from "../../gen/app__phone.react.ts";
@@ -32,6 +32,7 @@ type MessagesUI = ReturnType<typeof useMessages>;
 const header = "flex min-h-12 shrink-0 items-center gap-1 px-2";
 const contactRow = "flex min-h-15 w-full items-center gap-3 px-5 py-1.5 text-left hover:bg-accent focus-visible:outline-2 focus-visible:outline-ring";
 const messageURL = /\bhttps?:\/\/[^\s<>"']+/giu;
+const noMessages: ReadonlyArray<MessageRow> = [];
 
 function firstName(title: string) {
   return /^[+(\d]/.test(title) || title.includes(",") ? title : (title.split(/\s+/, 1)[0] ?? title);
@@ -228,7 +229,7 @@ const Bubble = memo(function Bubble({ row, choose, actions }: { row: MessageRow;
         {!complete ? <p className="rounded-tile bg-muted px-4 py-2.5 text-base">{label}</p> : (
           <>
             {complete.attachments > 0 && <span className="flex items-center gap-1.5 text-sm text-muted-foreground"><PictureIcon className="size-4" aria-hidden />{complete.attachments === 1 ? "1 picture" : `${complete.attachments} pictures`}</span>}
-            {complete.body && <p data-alpha-message-body className={`rounded-tile px-4 py-2.5 text-base whitespace-pre-wrap wrap-anywhere ${outgoing ? "bg-primary text-primary-foreground" : "bg-secondary text-secondary-foreground"}`}><MessageText text={complete.body} /></p>}
+            {complete.body && <p data-alpha-message-body className={`rounded-tile px-4 py-2.5 text-md whitespace-pre-wrap wrap-anywhere ${outgoing ? "bg-foreground text-background" : "bg-secondary text-secondary-foreground"}`}><MessageText text={complete.body} /></p>}
           </>
         )}
         <span data-alpha-message-meta className="px-1.5 text-xs text-muted-foreground">{[when(row.date), status].filter(Boolean).join(" · ")}</span>
@@ -256,11 +257,21 @@ function Conversation({ runtime, messages: { state, can, send } }: MessagesProps
   const scroll = useRef<HTMLDivElement>(null);
   const nearEnd = useRef(true);
   const held = runtime.runSync(Inbox.use((inbox) => inbox.get()));
-  const rows = state?.shown.rows ? held.messages : [];
+  const rows = state?.shown.rows && held.messagesThread === state.thread ? held.messages : noMessages;
+  const chronological = useMemo(() => rows.toReversed(), [rows]);
   const latest = rows[0]?.id;
   const anchor = useCallback((element: HTMLDivElement | null) => {
     if (element && latest && nearEnd.current && scroll.current) scroll.current.scrollTop = scroll.current.scrollHeight;
   }, [latest]);
+  const viewport = useCallback((element: HTMLDivElement | null) => {
+    scroll.current = element;
+    if (!element || typeof ResizeObserver === "undefined") return;
+    const resize = new ResizeObserver(() => {
+      if (nearEnd.current) element.scrollTop = element.scrollHeight;
+    });
+    resize.observe(element);
+    return () => { resize.disconnect(); scroll.current = null; };
+  }, []);
   const choose = useCallback((id: string) => {
     runtime.runSync(Inbox.use((inbox) => inbox.set({ chosen: id })));
     setSelected(id);
@@ -287,7 +298,7 @@ function Conversation({ runtime, messages: { state, can, send } }: MessagesProps
         <h1 data-alpha-messages-title className="min-w-0 flex-1 truncate pl-1.5 text-lg font-bold">{title}</h1>
         {addresses.length === 1 && can({ type: "call" }) && <Button variant="ghost" size="icon" aria-label={`Call ${title}`} onClick={() => void send({ type: "call" })}><Call /></Button>}
       </header>
-      <div ref={scroll} data-alpha-messages-thread className="min-h-0 flex-1 touch-pan-y overflow-y-auto overscroll-contain px-4 pb-3" onScroll={(event) => {
+      <div ref={viewport} data-alpha-messages-thread className="min-h-0 flex-1 touch-pan-y overflow-y-auto overscroll-contain px-4 pb-3" onScroll={(event) => {
         const viewport = event.currentTarget;
         nearEnd.current = viewport.scrollHeight - viewport.scrollTop - viewport.clientHeight < 64;
       }}>
@@ -296,7 +307,7 @@ function Conversation({ runtime, messages: { state, can, send } }: MessagesProps
           {state.page.status === "Failed" && <Banner variant="destructive">The conversation could not be read</Banner>}
           {can({ type: "earlierMessages" }) && <Button className="self-center" size="icon" variant="secondary" aria-label="Earlier messages" onClick={() => void send({ type: "earlierMessages" })}><ChevronUp /></Button>}
           <div role="log" aria-label="Messages" className="mt-auto flex flex-col gap-1.5">
-            {rows.toReversed().map((row) => <Bubble key={row.id} row={row} choose={choose} actions={row.id === selected && (actions?.copy || actions?.remove) ? actions : undefined} />)}
+            {chronological.map((row) => <Bubble key={row.id} row={row} choose={choose} actions={row.id === selected && (actions?.copy || actions?.remove) ? actions : undefined} />)}
           </div>
           {selectedRow && "incomplete" in selectedRow && can({ type: "openElsewhere" }) && <Button size="sm" variant="outline" className="self-start" onClick={() => void send({ type: "openElsewhere" })}>Open in messaging app</Button>}
           <div ref={anchor} aria-hidden />
@@ -345,6 +356,8 @@ function Compose({ runtime, title, addresses, thread }: MessagesProps & { title:
   };
   const outgoing = state.outgoing;
   const here = outgoing.thread === thread;
+  const checking = here && uncertain(outgoing);
+  const sendLabel = checking ? "Check send status" : "Send";
   const alpha = state.slot.author === "AlphaWrote";
   const addressed = title === addresses.join(", ") ? title : `${title} · ${addresses.join(", ")}`;
   const draft = text && (alpha || dock.open);
@@ -371,7 +384,7 @@ function Compose({ runtime, title, addresses, thread }: MessagesProps & { title:
         }}
         onChange={(event) => write(event.target.value)} />
       {can({ type: "suggest" }) && <Button variant="ghost" size="icon" aria-label="Let Alpha suggest a reply" onClick={() => void send({ type: "suggest" })}><Sparkles /></Button>}
-      {sendable && <Button size="icon" aria-label="Send" data-alpha-bar-send onClick={submit}><Send /></Button>}
+      {sendable && <Button size="icon" aria-label={sendLabel} data-alpha-bar-send onClick={submit}>{checking ? <RefreshCw /> : <Send />}</Button>}
     </div>
   );
   return (
@@ -386,7 +399,7 @@ function Compose({ runtime, title, addresses, thread }: MessagesProps & { title:
           <div className="flex shrink-0 flex-wrap justify-end gap-1 py-1">
             {can({ type: "undo" }) && <Button size="sm" variant="ghost" onClick={() => void send({ type: "undo" })}>Don't send</Button>}
             {editable && <Button size="sm" variant="outline" data-alpha-draft-edit onClick={edit}>Edit</Button>}
-            {dock.open && <Button size="sm" data-alpha-draft-send disabled={!sendable} onClick={submit}>Send</Button>}
+            {dock.open && <Button size="sm" data-alpha-draft-send disabled={!sendable} onClick={submit}>{sendLabel}</Button>}
           </div>
         </div>
       )}
@@ -397,7 +410,7 @@ function Compose({ runtime, title, addresses, thread }: MessagesProps & { title:
             {can({ type: "takeSaved" }) && <Button size="sm" variant="outline" onClick={() => void send({ type: "takeSaved" })}>Use the saved draft</Button>}
           </>}>Another draft was saved for this conversation</Banner>
         )}
-        {here && uncertain(outgoing) && <Banner variant="warn">Check whether your message went before attempting another send.</Banner>}
+        {checking && <Banner variant="warn">Alpha is still waiting for the send result</Banner>}
         {here && outgoing.denied && <Banner variant="destructive">The phone did not send the message</Banner>}
         {here && outgoing.op.outcome === "Refused" && !outgoing.denied && outgoing.failed > 0 && <Banner variant="destructive">The message did not reach everyone</Banner>}
         {here && sentAll(outgoing) && <p role="status" className="basis-full text-xs text-muted-foreground">{`${delivered(outgoing) ? "Delivered" : "Sent"} to ${title}`}</p>}
