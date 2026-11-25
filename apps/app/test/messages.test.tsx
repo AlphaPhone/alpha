@@ -1,4 +1,5 @@
 // @vitest-environment happy-dom
+import { NOT_DISPATCHED } from "@elizaos/agent/client";
 import { type Context, Effect, type ManagedRuntime, Stream } from "effect";
 import { act } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -10,6 +11,7 @@ import { Machine as Voice } from "../gen/app__voice.effect.vibe";
 import { Machine as Tabs } from "../gen/app__browser.effect.vibe";
 import { Machine as Page } from "../gen/app__browser__address.effect.vibe";
 import { Machine as Home } from "../gen/app__home.effect.vibe";
+import { executeMedia } from "../src/assistant/media-executors.ts";
 import { Pages } from "../src/browser/browser.vibe";
 import browser from "../src/browser/index.tsx";
 import home from "../src/home/index.tsx";
@@ -251,6 +253,32 @@ describe("Messages on an Alpha image", () => {
     await ready(restarted.alpha.runtime, Composer, "original picture send confirmed", (state) => state.outgoing.op.outcome === "Confirmed");
     expect([world.telephony.mmsAttempts, world.telephony.mmsQueries.slice(priorReads), world.telephony.sent.map((send) => send.operationId)])
       .toEqual([[operation], [operation], [operation]]);
+  });
+
+  it("Shares only the reviewed open conversation (spec/app/contacts/agent.md, \"The agent reads only the conversation, voicemail or contact open on screen, as the phone last read it\")", async () => {
+    const world = image();
+    world.telephony.texts.push({ id: 2, thread: 2, address: "+14155550122", box: "inbox", date: 1_700_000_060_000, body: "A different conversation", read: false });
+    const { alpha } = await openImage(world);
+    await openMessages(alpha);
+    await ready(alpha.runtime, Messages, "two conversations available", (state) => state.list.status === "Loaded" && state.threads === 2);
+    await press("Maya Chen");
+    await ready(alpha.runtime, Messages, "Maya conversation loaded", (state) => state.pane === "Conversation" && state.page.status === "Loaded");
+    const original = await alpha.runtime.runPromise(Messages.use((machine) => machine.get()));
+    const read = (approved = true) => executeMedia(alpha,
+      { type: "messages_read_selected" }, { proposalId: "review-sms", operationId: "review-sms", attemptId: 1 },
+      { target: { thread: original.thread, ticket: original.page.ticket }, current: () => Promise.resolve(approved) });
+    const refusal = { kind: "refused", code: NOT_DISPATCHED };
+    expect(await read(false)).toEqual(refusal);
+    expect(await read()).toEqual({ kind: "applied", result: { kind: "messages-read", status: "read", participant: "Maya Chen", messages: [{ direction: "in", date: 1_700_000_050_000, body: "See you at five" }], truncated: false } });
+
+    world.telephony.sms = "denied";
+    expect(await read()).toEqual(refusal);
+    world.telephony.sms = "granted";
+    await press("Back");
+    await ready(alpha.runtime, Messages, "conversation list restored", (state) => state.pane === "Threads" && state.list.status === "Loaded");
+    await press("Ben Ortiz");
+    await ready(alpha.runtime, Messages, "another conversation selected", (state) => state.pane === "Conversation" && state.thread !== original.thread && state.page.status === "Loaded");
+    expect([await read(), world.telephony.sent]).toEqual([refusal, []]);
   });
 
   it("Opens the exact notified conversation and follows an owner's safe link tap (spec/app/messages/index.md, \"A message notification opens its exact conversation once access is available\"; spec/app/messages/index.md, \"Story: Read a conversation\")", async () => {

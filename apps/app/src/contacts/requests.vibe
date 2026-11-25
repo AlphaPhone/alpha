@@ -84,15 +84,21 @@ export function isAsking(operation: DeviceOperation): operation is Asking {
 /** Hand the agent's operation to the phone as a request; `written` says the owner wrote the number it names. Answers whether the request was taken. */
 export effect function propose(operation: Asking, written: boolean): boolean!!(Requested | Agent.Machine | Telephony) {
   const machine = try Agent.Machine
-  const before = try machine.get()
-  if (Agent.open(before)) return false
+  if (Agent.open(try machine.get())) return false
+  const store = try Requested
+  const before = try store.get()
   const { ask, number, search, text, pictures } = askOf(operation)
   const dial = ask === "Dial" && number !== ""
   const kind = dial ? try classifyDialNumber(number) : "NumberUnknown"
-  if ((dial && kind === "NumberUnknown") || (try machine.get()) !== before) return false
-  try (try Requested).set({ ...quiet, operation })
+  if ((dial && kind === "NumberUnknown") || Agent.open(try machine.get()) || (try store.get()) !== before) return false
+  try store.set({ ...quiet, operation })
   const event: Event = { type: "asked", ask, byName: number === "" && search !== "", emergency: kind === "EmergencyNumber", written, pictures, number, text }
   return try contained(machine.send(event, "Agent"), "the agent's request")
+}
+
+function sameChoice(current: Request, before: Request): boolean {
+  return current.stage === "Choosing" && current.ask === before.ask &&
+    current.lookup.ticket === before.lookup.ticket && current.review.revision === before.review.revision
 }
 
 // spec/app/contacts/agent.md, "The owner picks the exact number or the one contact, and that one is shown"
@@ -100,10 +106,10 @@ export effect function propose(operation: Asking, written: boolean): boolean!!(R
 export effect function chooseNumber(state: Request, review: Asked, contact: string, number: string): boolean!!(Requested | Agent.Machine | Telephony) {
   const machine = try Agent.Machine
   const store = try Requested
-  if (state.stage !== "Choosing" || (try machine.get()) !== state || (try store.get()) !== review) return false
+  if (state.stage !== "Choosing" || !sameChoice(try machine.get(), state) || (try store.get()) !== review) return false
   if (!review.matches.some((found) => found.id === contact && found.phones.includes(number))) return false
   const kind = state.ask === "Dial" ? try classifyDialNumber(number) : "OrdinaryNumber"
-  if (kind === "NumberUnknown" || (try machine.get()) !== state || (try store.get()) !== review) return false
+  if (kind === "NumberUnknown" || !sameChoice(try machine.get(), state) || (try store.get()) !== review) return false
   return try contained(machine.send({ type: "choose", number, contact, emergency: kind === "EmergencyNumber", unchanged: false }, "Owner"), "choosing the reviewed number")
 }
 
@@ -250,7 +256,9 @@ effect function acted(id: number, ask: Ask, number: string, text: string, contac
       const approval = try Agent.Machine
       const before = try approval.get()
       if (!Agent.canActed(before, id, "Device") || before.number !== number || (try classifyDialNumber(number)) !== "OrdinaryNumber") return refused
-      if ((try approval.get()) !== before || (try store.get()) !== held || !clear(try (try PhoneMachine).get())) return refused
+      const after = try approval.get()
+      if (!Agent.canActed(after, id, "Device") || after.number !== number || after.contact !== contact ||
+        (try store.get()) !== held || !clear(try (try PhoneMachine).get())) return refused
       const report = try telephony("dial", (c) => c.phone.dial(number))
       return { type: "acted", id, done: report.dialStatus === "DialHandedOff", known: true } satisfies Event
     }
