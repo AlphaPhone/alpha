@@ -73,7 +73,7 @@ function carry(result: Access.Effect): Job<Access.Event, AccessWorld, [Actor]> {
     when { tag: "Save", let ticket }: answer("save access", savedAccess(ticket), { type: "saved", ticket, ok: false, now: untimed }, "Owner" as Actor);
     when { tag: "GoHome" }: run("access home", effect {
       try ignore((try Shell).send({ type: "goHome" }))
-    });
+    }, "Owner" as Actor);
   }
 }
 
