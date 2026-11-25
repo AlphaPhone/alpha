@@ -1,11 +1,12 @@
 // spec/app/assistant/dock.md, "Story: Drag Ask Alpha where I want it"; spec/app/assistant/dock.md, "A drag released asks the shell once for where it landed, and keeps a sheet's height"; spec/app/assistant/dock.md, "A keyboard closed while typing puts Ask Alpha back on the bar"
-import type { AssistantDrag, AssistantRelease } from "@repo/ui";
+import type { AssistantPull, AssistantRelease } from "@repo/ui";
 import { type RefObject, useRef, useState } from "react";
 import { isOpen } from "../../gen/app__assistant__dock.ts";
 import type { useMachine as useDock } from "../../gen/app__assistant__dock.react.ts";
 import { untimed } from "../runtime/reactor.vibe";
 
-const barHeight = 102;
+/** The bar's height, the floor a drag lands against. */
+export const barHeight = 102;
 const scrimSlop = 6;
 
 type Dock = ReturnType<typeof useDock>;
@@ -23,7 +24,7 @@ export function useSheetFollow(dock: Dock, detent: Detent, section: RefObject<HT
     gestureRef.current = undefined;
     setFollowing(undefined);
   };
-  const gesture: AssistantDrag = {
+  const gesture: AssistantPull = {
     onPress: ({ y }) => {
       const shown = section.current?.getBoundingClientRect().height ?? 0;
       gestureRef.current = { y, height: isOpen(detent) ? Math.max(shown, barHeight) : barHeight, moved: false };

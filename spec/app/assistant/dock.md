@@ -170,6 +170,23 @@ pure def canLift(d: Dock, now: int): bool = d.gesture == Pressed and now >= d.at
 pure def lift(d: Dock, now: int): Moved = { state: { ...d, gesture: Idle, at: now, quiet: now + clickWindow }, out: List(Tap) }
 ```
 
+### An empty Browser composer can start a drag without taking focus
+
+At rest, the empty and editable Browser field can start the same drag as
+the mark. A drag leaves the field unfocused. A press and lift in the field
+leaves the tap to the field, so a touch can focus it and open the keyboard.
+An open composer or one that holds text uses normal field gestures.
+
+```quint
+pure def browserFieldPull(s: S::Shell, blank: bool, editable: bool): bool =
+  s.assistant == S::Bar and S::showing(s, S::Browser) and blank and editable
+
+pure def canFieldLift(d: Dock, now: int): bool = canLift(d, now) and d.start == S::Bar
+
+pure def fieldLift(d: Dock, now: int): Dock =
+  { ...d, gesture: Idle, at: now, quiet: now + clickWindow }
+```
+
 ### A click of a control taps it, unless it is the late click of a gesture just ended
 
 ```quint
@@ -271,32 +288,17 @@ pure def lawTheKeyboardLiftsNothingElse(keyboard: int, navigation: int): bool =
   composerLift(false, keyboard, navigation) == navigation
 ```
 
-### Focusing the composer on the bar raises it to typing: the bar grows above the keyboard and the page stays in view
+### Focusing or tapping the composer on the bar opens Ask Alpha as a sheet
 
-The field on the bar is typed in where it is, as in Alpha before
-VibeStack: focusing it never opens the conversation over the page. An open
-sheet or the full screen stays where it is.
-
-```quint
-pure def focused(detent: S::Detent): List[Effect] = if (detent == S::Bar) List(Raise({ detent: S::Typing })) else List()
-
-pure def lawFocusingTheBarRaisesTyping(phone: S::Shell): bool =
-  applied(focused(phone.assistant), phone).assistant == (if (phone.assistant == S::Bar) S::Typing else phone.assistant)
-```
-
-### Alpha's mark, a send from the bar, or a tap on the handle opens Ask Alpha as a sheet
-
-From the bar or from typing the conversation opens at once as the
-half-screen sheet, without an upward drag; an open sheet or the full screen
-stays where it is. A swipe up that starts on one of the pill's buttons opens
-it too, as the pill in Alpha before VibeStack did; a press there that does
-not move stays that button's tap.
+Tapping or focusing the input bar from rest opens the half-screen conversation
+sheet immediately without requiring an upward drag, while leaving an already
+open sheet or full screen where it is.
 
 ```quint
-pure def opened(detent: S::Detent): List[Effect] = if (not(isOpen(detent))) List(Raise({ detent: S::Sheet })) else List()
+pure def focused(detent: S::Detent): List[Effect] = if (not(isOpen(detent))) List(Raise({ detent: S::Sheet })) else List()
 
-pure def lawOpeningFromTheBarOpensSheet(phone: S::Shell): bool =
-  applied(opened(phone.assistant), phone).assistant == (if (not(isOpen(phone.assistant))) S::Sheet else phone.assistant)
+pure def lawFocusingTheBarOpensSheet(phone: S::Shell): bool =
+  applied(focused(phone.assistant), phone).assistant == (if (not(isOpen(phone.assistant))) S::Sheet else phone.assistant)
 ```
 
 ### A keyboard closed while typing puts Ask Alpha back on the bar
@@ -320,11 +322,14 @@ pure def lawAClosedKeyboardLeavesTypingForTheBar(phone: S::Shell): bool =
 > bottom edge with Alpha's mark, Type and Talk, while Home and the Browser
 > keep the whole bar to type in.
 
-### Inside an app other than the Browser, Ask Alpha at rest is the pill; Type raises it to typing, where the whole bar shows
+### Inside an app other than the Browser, Ask Alpha at rest is the pill; Type raises it to typing, where the whole bar shows, and a swipe up from it opens the sheet
 
 The pill is how the bar is drawn in an app, not another height: Back,
 gestures and every guard treat it as the bar. Alpha's mark opens the sheet,
-Type focuses the composer, and Talk starts a spoken turn.
+Type focuses the composer, and Talk starts a spoken turn. A swipe up that
+starts on one of the pill's buttons opens the sheet, as the pill in Alpha
+before VibeStack did; a press there that does not move stays that button's
+tap.
 
 ```quint
 pure def pill(phone: S::Shell): bool = phone.assistant == S::Bar and phone.trail.length() > 0 and not(S::showing(phone, S::Browser))

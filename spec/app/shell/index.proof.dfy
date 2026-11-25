@@ -34,6 +34,14 @@ lemma agentOpenView_ensures(s: Shell, view: View)
   }
 }
 
+lemma agentOpenSpoken_ensures(s: Shell, view: View, route: int)
+  ensures (inv(s) ==> canAgentOpenSpoken(s, view, route) ==> alwaysHomeDrawsAskAlpha(agentOpenSpoken(s, view, route)))
+  ensures (inv(s) ==> canAgentOpenSpoken(s, view, route) ==> alwaysTrailIsBounded(agentOpenSpoken(s, view, route)))
+  ensures (inv(s) ==> canAgentOpenSpoken(s, view, route) ==> alwaysTrailIsAdmitted(agentOpenSpoken(s, view, route)))
+{
+  agentOpenView_ensures(s, view);
+}
+
 lemma goBack_ensures(s: Shell)
   ensures (inv(s) ==> canGoBack(s) ==> alwaysHomeDrawsAskAlpha(goBack(s)))
   ensures (inv(s) ==> canGoBack(s) ==> alwaysTrailIsBounded(goBack(s)))

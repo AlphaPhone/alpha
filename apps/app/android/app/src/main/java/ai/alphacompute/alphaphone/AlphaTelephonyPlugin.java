@@ -25,15 +25,23 @@ import java.util.function.Consumer;
 public final class AlphaTelephonyPlugin extends TelephonyPlugin {
  @Override protected SmsTelephonyConfiguration configuration() { return AlphaTelephony.CONFIGURATION; }
 
+ @Override protected void checkSmsDispatch() {
+  if (!AlphaCallState.read(getContext()).clearForMessages()) {
+   throw new IllegalStateException("The phone has not ruled out an emergency call");
+  }
+ }
+
  void sendComposed(MainActivity activity, WebView view, PluginCall call, boolean mms, BooleanSupplier active, Consumer<Runnable> queue) {
   long visit = activity.composerVisit();
-  BooleanSupplier current = () -> composerCurrent(activity, view, visit, active);
+  BooleanSupplier current = () -> composerCurrent(activity, view, visit, active, true);
   if (!current.getAsBoolean()) {
    call.reject("Open and unlock Messages to send this draft.", "composer-not-started");
    return;
   }
   SmsTelephony.DispatchGuard guard = () -> {
-   if (!current.getAsBoolean()) throw new IllegalStateException("The Messages composer is no longer current");
+   if (!composerCurrent(activity, view, visit, active, mms)) {
+    throw new IllegalStateException("The Messages composer is no longer current");
+   }
   };
   queue.accept(() -> {
    try {
@@ -49,12 +57,12 @@ public final class AlphaTelephonyPlugin extends TelephonyPlugin {
   });
  }
 
- private boolean composerCurrent(MainActivity activity, WebView view, long visit, BooleanSupplier active) {
+ private boolean composerCurrent(MainActivity activity, WebView view, long visit, BooleanSupplier active, boolean requireClearCall) {
   if (!active.getAsBoolean() || getActivity() != activity || activity.composerVisit() != visit
     || activity.isAssistantSurface() || !view.isShown() || !admitted() || !unlockedForeground()
     || !AlphaDevicePlugin.shareForeground(activity)) return false;
-  AlphaCallState.Reading call = AlphaCallState.read(getContext());
-  return call.inCall != null && !call.emergencyLive() && activity.composerVisit() == visit && active.getAsBoolean();
+  return (!requireClearCall || AlphaCallState.read(getContext()).clearForMessages())
+    && activity.composerVisit() == visit && active.getAsBoolean();
  }
 
  @Override protected DeletionWindow deletionWindow() {

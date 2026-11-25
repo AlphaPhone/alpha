@@ -58,8 +58,8 @@ describe("Ask Alpha dock and shell navigation", () => {
     expect(document.querySelector<HTMLTextAreaElement>("textarea[data-alpha-composer]")?.value).toBe("");
   });
 
-  // spec/app/assistant/dock.md, "Focusing the composer on the bar raises it to typing: the bar grows above the keyboard and the page stays in view"
-  it("focusing the composer on the Browser bar raises it to typing without reparenting and marks host chrome (spec/app/assistant/dock.md, \"Focusing the composer on the bar raises it to typing: the bar grows above the keyboard and the page stays in view\")", async () => {
+  // spec/app/assistant/dock.md, "Focusing or tapping the composer on the bar opens Ask Alpha as a sheet"
+  it("focusing the composer on the Browser bar opens half-open Sheet without reparenting and marks host chrome (spec/app/assistant/dock.md, \"Focusing or tapping the composer on the bar opens Ask Alpha as a sheet\")", async () => {
     const { runtime } = await mountDock({ view: "Browser", withToast: true, flush: underAct });
     const section = document.querySelector<HTMLElement>("section[aria-label='Ask Alpha']");
     const textarea = document.querySelector<HTMLTextAreaElement>("textarea[data-alpha-composer]");
@@ -69,7 +69,7 @@ describe("Ask Alpha dock and shell navigation", () => {
 
     await act(async () => {
       textarea?.focus();
-      await runtime.runPromise(Effect.flatMap(Shell, (m) => Stream.runHead(Stream.filter(m.changes, (s) => s.assistant === "Typing"))));
+      await runtime.runPromise(Effect.flatMap(Shell, (m) => Stream.runHead(Stream.filter(m.changes, (s) => s.assistant === "Sheet"))));
     });
     await act(async () => {
       await runtime.runPromise(Effect.flatMap(Canvas, (m) => Stream.runHead(Stream.filter(m.changes, (s) => s.field === "Composer"))));
@@ -77,16 +77,7 @@ describe("Ask Alpha dock and shell navigation", () => {
 
     expect(document.querySelector("textarea[data-alpha-composer]")).toBe(textarea);
     expect(document.activeElement).toBe(textarea);
-    expect(section?.getAttribute("data-alpha-detent")).toBe("bar");
-
-    // spec/app/assistant/dock.md, "A keyboard closed while typing puts Ask Alpha back on the bar": a field left with no keyboard report rests it once, and the reported close after it takes no step Back out of the Browser.
-    await act(async () => {
-      textarea?.blur();
-      await runtime.runPromise(Effect.flatMap(Shell, (m) => Stream.runHead(Stream.filter(m.changes, (s) => s.assistant === "Bar"))));
-      await runtime.runPromise(Effect.flatMap(Canvas, (m) => m.send({ type: "keyboardReported", shown: true, voice: false })));
-      await runtime.runPromise(Effect.flatMap(Canvas, (m) => m.send({ type: "keyboardReported", shown: false, voice: false })));
-    });
-    expect(await runtime.runPromise(Effect.flatMap(Shell, (m) => m.get()))).toMatchObject({ trail: ["Browser"], assistant: "Bar" });
+    expect(section?.getAttribute("data-alpha-detent")).toBe("sheet");
   });
 
   // spec/app/shell/index.md, "Ask Alpha rises to typing, a sheet or the full screen, never over the drawer"
@@ -123,8 +114,8 @@ describe("Ask Alpha dock and shell navigation", () => {
     expect(document.querySelector("section[aria-label='Ask Alpha']")?.getAttribute("data-alpha-detent")).toBe("sheet");
   });
 
-  // spec/app/assistant/dock.md, "Alpha's mark, a send from the bar, or a tap on the handle opens Ask Alpha as a sheet"; spec/app/assistant/dock.md, "Ask Alpha put away forgets the height its sheet was left at"
-  it("tapping Open conversation focuses the composer and Back lowers Sheet to Bar clearing kept height (spec/app/assistant/dock.md, \"Alpha's mark, a send from the bar, or a tap on the handle opens Ask Alpha as a sheet\")", async () => {
+  // spec/app/assistant/dock.md, "Focusing or tapping the composer on the bar opens Ask Alpha as a sheet"; spec/app/assistant/dock.md, "Ask Alpha put away forgets the height its sheet was left at"
+  it("tapping Open conversation focuses the composer and Back lowers Sheet to Bar clearing kept height (spec/app/assistant/dock.md, \"Focusing or tapping the composer on the bar opens Ask Alpha as a sheet\")", async () => {
     const { runtime } = await mountDock({ view: "Home", withToast: true, flush: underAct });
     const openBtn = document.querySelector<HTMLButtonElement>("button[aria-label='Open conversation']");
     expect(openBtn).not.toBeNull();
@@ -212,12 +203,13 @@ describe("Ask Alpha dock and shell navigation", () => {
 
   // spec/app/assistant/dock.md, "A keyboard closed while typing puts Ask Alpha back on the bar": typing in an app, a tap beside the bar only leaves the field, so Ask Alpha rests once and the app stays
   it("a tap beside the bar being typed in rests it without leaving the app (spec/app/assistant/dock.md, \"A keyboard closed while typing puts Ask Alpha back on the bar\")", async () => {
-    const { runtime } = await mountDock({ view: "Browser", flush: underAct });
-    const textarea = document.querySelector<HTMLTextAreaElement>("textarea[data-alpha-composer]");
+    const { runtime } = await mountDock({ view: "Calendar", flush: underAct });
     await act(async () => {
-      textarea?.focus();
+      document.querySelector<HTMLButtonElement>("[data-alpha-compact-dock] button[aria-label='Type']")?.click();
       await runtime.runPromise(Effect.flatMap(Shell, (m) => Stream.runHead(Stream.filter(m.changes, (s) => s.assistant === "Typing"))));
     });
+    const textarea = document.querySelector<HTMLTextAreaElement>("textarea[data-alpha-composer]");
+    await act(async () => { textarea?.focus(); });
     const scrim = document.querySelector("[data-alpha-chat-scrim]");
     expect(scrim).not.toBeNull();
     await act(async () => {
@@ -226,7 +218,25 @@ describe("Ask Alpha dock and shell navigation", () => {
       await runtime.runPromise(Effect.flatMap(Shell, (m) => Stream.runHead(Stream.filter(m.changes, (s) => s.assistant === "Bar"))));
     });
     await act(async () => { await Effect.runPromise(Effect.sleep("50 millis")); });
-    expect(await runtime.runPromise(Effect.flatMap(Shell, (m) => m.get()))).toMatchObject({ trail: ["Browser"], assistant: "Bar" });
+    expect(await runtime.runPromise(Effect.flatMap(Shell, (m) => m.get()))).toMatchObject({ trail: ["Calendar"], assistant: "Bar" });
+  });
+
+  // spec/app/assistant/dock.md, "A keyboard closed while typing puts Ask Alpha back on the bar": a field left with no keyboard report rests it once, and the reported close after it takes no step Back out of the app
+  it("leaving the field being typed in rests Ask Alpha once (spec/app/assistant/dock.md, \"A keyboard closed while typing puts Ask Alpha back on the bar\")", async () => {
+    const { runtime } = await mountDock({ view: "Calendar", flush: underAct });
+    await act(async () => {
+      document.querySelector<HTMLButtonElement>("[data-alpha-compact-dock] button[aria-label='Type']")?.click();
+      await runtime.runPromise(Effect.flatMap(Shell, (m) => Stream.runHead(Stream.filter(m.changes, (s) => s.assistant === "Typing"))));
+    });
+    const textarea = document.querySelector<HTMLTextAreaElement>("textarea[data-alpha-composer]");
+    await act(async () => { textarea?.focus(); });
+    await act(async () => {
+      textarea?.blur();
+      await runtime.runPromise(Effect.flatMap(Shell, (m) => Stream.runHead(Stream.filter(m.changes, (s) => s.assistant === "Bar"))));
+      await runtime.runPromise(Effect.flatMap(Canvas, (m) => m.send({ type: "keyboardReported", shown: true, voice: false })));
+      await runtime.runPromise(Effect.flatMap(Canvas, (m) => m.send({ type: "keyboardReported", shown: false, voice: false })));
+    });
+    expect(await runtime.runPromise(Effect.flatMap(Shell, (m) => m.get()))).toMatchObject({ trail: ["Calendar"], assistant: "Bar" });
   });
 
   // spec/app/shell/index.md, "Agent navigation shows an admitted app or Home without lowering Ask Alpha"

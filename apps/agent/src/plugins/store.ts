@@ -11,6 +11,8 @@ import type {
 /** Default list identifier always present in Reminders. */
 export const DEFAULT_LIST_ID = "default";
 
+/** Snooze length for an alarm whose owner picked none: `defaultSnooze` in spec/app/clock/alarms.md (v121's ten minutes). */
+export const DEFAULT_SNOOZE_MINUTES = 10;
 const MAX_ALARMS = 64;
 const MAX_TIMERS = 16;
 const MAX_WORLD_CITIES = 24;
@@ -346,7 +348,7 @@ export class AlphaAppsStore {
       sound: normalizeSound(input.sound),
       vibrate: input.vibrate ?? true,
       enabled,
-      snoozeMinutes: clampInt(input.snoozeMinutes ?? 9, 1, 60),
+      snoozeMinutes: clampInt(input.snoozeMinutes ?? DEFAULT_SNOOZE_MINUTES, 1, 60),
       phase: "idle",
       fireAtMs: enabled ? computeNextAlarmFireAtMs(hour, minute, daysMask, nowMs, input.timeZone) : null,
       snoozeUntilMs: null,

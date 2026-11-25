@@ -1,6 +1,6 @@
 import { Effect, Stream } from "effect";
 import { afterEach, describe, expect, it } from "vitest";
-import { page } from "vitest/browser";
+import { page, userEvent } from "vitest/browser";
 import { Machine as Shell } from "../gen/app__shell.effect.vibe";
 import { Machine as Canvas } from "../gen/app__shell__keyboard.effect.vibe";
 import { closeAllDocks, mountDock } from "./dock-support.tsx";
@@ -9,8 +9,8 @@ import "../src/main.css";
 afterEach(closeAllDocks);
 
 describe("Ask Alpha dock", () => {
-  // spec/app/assistant/dock.md, "Focusing the composer on the bar raises it to typing: the bar grows above the keyboard and the page stays in view"; spec/app/shell/index.md, "Agent navigation shows an admitted app or Home without lowering Ask Alpha"
-  it("Browser input tap raises the bar to typing with focus (spec/app/assistant/dock.md, \"Focusing the composer on the bar raises it to typing: the bar grows above the keyboard and the page stays in view\")", async () => {
+  // spec/app/assistant/dock.md, "Focusing or tapping the composer on the bar opens Ask Alpha as a sheet"; spec/app/shell/index.md, "Agent navigation shows an admitted app or Home without lowering Ask Alpha"
+  it("Drag the Browser composer (spec/app/assistant/dock.md, \"An empty Browser composer can start a drag without taking focus\")", async () => {
     await page.viewport(390, 844);
     const { runtime } = await mountDock({ view: "Browser" });
 
@@ -30,6 +30,7 @@ describe("Ask Alpha dock", () => {
     try {
       beforeTextarea?.dispatchEvent(new Event("touchstart", { bubbles: true, cancelable: true }));
       beforeTextarea?.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true, cancelable: true, pointerType: "touch", pointerId: 1 }));
+      beforeTextarea?.dispatchEvent(new PointerEvent("pointercancel", { bubbles: true, pointerType: "touch", pointerId: 1 }));
     } finally {
       document.removeEventListener("touchstart", onTouchStart);
       document.removeEventListener("pointerdown", onPointerDown);
@@ -38,28 +39,43 @@ describe("Ask Alpha dock", () => {
 
     const textarea = page.getByRole("textbox", { name: "Message Alpha" });
     await expect.element(textarea).toBeVisible();
+    const bounds = textarea.element().getBoundingClientRect();
+    const x = bounds.x + bounds.width / 2;
+    const y = bounds.y + bounds.height / 2;
+    await userEvent.pointer([
+      { keys: "[MouseLeft>]", target: textarea },
+      { coords: { x, y: y - 45 } },
+      { keys: "[/MouseLeft]", coords: { x, y: y - 180 } },
+    ]);
+    const assistant = page.getByRole("region", { name: "Ask Alpha" });
+    await expect.element(assistant).toHaveAttribute("data-alpha-detent", "sheet");
+    await expect.element(textarea).not.toHaveFocus();
+    expect(textarea.element()).toBe(beforeTextarea);
+
+    await runtime.runPromise(Effect.flatMap(Shell, (m) => m.send({ type: "goBack" })));
+    await expect.element(assistant).toHaveAttribute("data-alpha-detent", "bar");
     await textarea.click();
 
-    await runtime.runPromise(Effect.flatMap(Shell, (m) => Stream.runHead(Stream.filter(m.changes, (s) => s.assistant === "Typing"))));
+    await runtime.runPromise(Effect.flatMap(Shell, (m) => Stream.runHead(Stream.filter(m.changes, (s) => s.assistant === "Sheet"))));
     await runtime.runPromise(Effect.flatMap(Canvas, (m) => Stream.runHead(Stream.filter(m.changes, (s) => s.field === "Composer"))));
 
     const afterTextarea = document.querySelector<HTMLTextAreaElement>("textarea[data-alpha-composer]");
     expect(afterTextarea).toBe(beforeTextarea);
     expect(document.activeElement).toBe(beforeTextarea);
-    expect(section?.getAttribute("data-alpha-detent")).toBe("bar");
+    expect(section?.getAttribute("data-alpha-detent")).toBe("sheet");
 
     // spec/app/shell/index.md, "Agent navigation shows an admitted app or Home without lowering Ask Alpha"
     await runtime.runPromise(Effect.flatMap(Shell, (m) => m.send({ type: "agentOpenView", view: "Calendar" })));
     const afterAgentNav = await runtime.runPromise(Effect.flatMap(Shell, (m) => m.get()));
-    expect([afterAgentNav.trail.at(-1), afterAgentNav.assistant]).toEqual(["Calendar", "Typing"]);
+    expect([afterAgentNav.trail.at(-1), afterAgentNav.assistant]).toEqual(["Calendar", "Sheet"]);
 
     await runtime.runPromise(Effect.flatMap(Shell, (m) => m.send({ type: "agentGoHome" })));
     const afterAgentHome = await runtime.runPromise(Effect.flatMap(Shell, (m) => m.get()));
-    expect([afterAgentHome.trail, afterAgentHome.assistant]).toEqual([[], "Typing"]);
+    expect([afterAgentHome.trail, afterAgentHome.assistant]).toEqual([[], "Sheet"]);
   });
 
-  // spec/app/assistant/dock.md, "Alpha's mark, a send from the bar, or a tap on the handle opens Ask Alpha as a sheet"; spec/app/assistant/dock.md, "A press that did not move taps its control once"
-  it("The dock mark opens and focuses Sheet on click and touch (spec/app/assistant/dock.md, \"Alpha's mark, a send from the bar, or a tap on the handle opens Ask Alpha as a sheet\")", async () => {
+  // spec/app/assistant/dock.md, "Focusing or tapping the composer on the bar opens Ask Alpha as a sheet"; spec/app/assistant/dock.md, "A press that did not move taps its control once"
+  it("The dock mark opens and focuses Sheet on click and touch (spec/app/assistant/dock.md, \"Focusing or tapping the composer on the bar opens Ask Alpha as a sheet\")", async () => {
     await page.viewport(390, 844);
     const { runtime } = await mountDock({ view: "Browser" });
 
@@ -79,8 +95,8 @@ describe("Ask Alpha dock", () => {
     expect(document.activeElement).toBe(document.querySelector("textarea[data-alpha-composer]"));
   });
 
-  // spec/app/assistant/dock.md, "Alpha's mark, a send from the bar, or a tap on the handle opens Ask Alpha as a sheet": as v121's pill, a swipe up that starts on Type opens the sheet without typing
-  it("a swipe up from Type on the pill opens Sheet without typing (spec/app/assistant/dock.md, \"Alpha's mark, a send from the bar, or a tap on the handle opens Ask Alpha as a sheet\")", async () => {
+  // spec/app/assistant/dock.md, "Inside an app other than the Browser, Ask Alpha at rest is the pill; Type raises it to typing, where the whole bar shows, and a swipe up from it opens the sheet": as v121's pill, a swipe up that starts on Type opens the sheet without typing
+  it("a swipe up from Type on the pill opens Sheet without typing (spec/app/assistant/dock.md, \"Inside an app other than the Browser, Ask Alpha at rest is the pill; Type raises it to typing, where the whole bar shows, and a swipe up from it opens the sheet\")", async () => {
     await page.viewport(390, 844);
     const { runtime } = await mountDock({ view: "Calendar" });
     const type = document.querySelector<HTMLButtonElement>("[data-alpha-compact-dock] button[aria-label='Type']");

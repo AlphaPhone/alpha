@@ -50,7 +50,7 @@ export interface AskScene {
 export interface Kept {
   readonly roomId: string;
   readonly title: string;
-  readonly messages: { id: string; role: "user" | "assistant"; text: string }[];
+  readonly messages: { id: string; role: "user" | "assistant"; text: string; failureKind?: string; cloudCode?: string }[];
 }
 
 export function askScene(): AskScene {
@@ -214,6 +214,7 @@ export function askRoutes(scene: AskScene): Route[] {
         scene.said.push(body.text);
         keep("user", body.text);
         Object.assign(messages.at(-1) ?? {}, { clientMessageId: (body as { clientMessageId?: string }).clientMessageId });
+        if (scene.refusal !== undefined) messages.push({ id: `m${scene.said.length}a`, role: "assistant", text: "", failureKind: scene.refusal.failureKind, ...(scene.refusal.cloudCode === undefined ? {} : { cloudCode: scene.refusal.cloudCode }) });
         return reply(scene, `r${found[1]}`, body.text, (said) => keep("assistant", said), body.metadata);
       });
     },
