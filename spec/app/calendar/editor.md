@@ -37,8 +37,8 @@ import read as R from "../../kit/read"
 type Form = NoForm | NewEvent | EditEvent | EditReminder
 type Scope = Unchosen | ThisOne | ThisAndFollowing | WholeSeries
 type Banner = NoBanner | Available | Conflict | Failed
-type Write = Create | CreateReminder | Update | UpdateReminder | Remove | Reply
-type Confirm = NoConfirm | ConfirmDiscard | ConfirmReplace
+type Write = Create | CreateReminder | Update | UpdateReminder | RescheduleReminder | Remove | Reply
+type Confirm = NoConfirm | ConfirmDiscard | ConfirmReplace | ConfirmReschedule
 
 type Editor = {
   owner: int, form: Form, shown: bool, target: int, day: int, revision: int, titled: bool,
@@ -228,6 +228,23 @@ pure def saveReminder(s: Editor): Composed =
   sent(if (s.form == EditReminder) UpdateReminder else CreateReminder, s.target, { ...s, draft: D::save(s.draft) })
 ```
 
+### Moving a completed reminder keeps its edited draft on screen until the owner approves rescheduling
+
+Cancel leaves the draft and the completed reminder as they were. Approval
+saves the edited fields and reopens the same reminder in one write.
+
+```quint
+pure def canAskReschedule(s: Editor): bool = s.form == EditReminder and canSaveReminder(s)
+
+pure def askReschedule(s: Editor): Editor = { ...s, confirming: ConfirmReschedule }
+
+pure def canReschedule(s: Editor): bool =
+  s.confirming == ConfirmReschedule and s.form == EditReminder and canSaveReminder({ ...s, confirming: NoConfirm })
+
+pure def reschedule(s: Editor): Composed =
+  sent(RescheduleReminder, s.target, { ...s, draft: D::save(s.draft), confirming: NoConfirm })
+```
+
 ### A write in flight for the form is the shown form's own save: a create for a new event, a change for an existing one
 
 While a delete or an answer is in flight, no form waits on a save.
@@ -236,11 +253,11 @@ was in doubt, with neither holding the other.
 
 ```quint
 pure def alwaysASaveInFlightIsTheShownForm(s: Editor): bool =
-  ((inFlight(s) and (s.kind == Create or s.kind == CreateReminder or s.kind == Update or s.kind == UpdateReminder))
+  ((inFlight(s) and (s.kind == Create or s.kind == CreateReminder or s.kind == Update or s.kind == UpdateReminder or s.kind == RescheduleReminder))
     implies (s.shown and s.draft.sync == D::Saving and s.writing == s.target and s.banner == NoBanner))
     and ((inFlight(s) and (s.kind == Create or s.kind == CreateReminder)) implies s.form == NewEvent)
     and ((inFlight(s) and s.kind == Update) implies s.form == EditEvent)
-    and ((inFlight(s) and s.kind == UpdateReminder) implies s.form == EditReminder)
+    and ((inFlight(s) and (s.kind == UpdateReminder or s.kind == RescheduleReminder)) implies s.form == EditReminder)
     and ((inFlight(s) and (s.kind == Remove or s.kind == Reply)) implies s.draft.sync != D::Saving)
 ```
 
@@ -276,7 +293,7 @@ pure def canWritten(s: Editor, attempt: int, filed: bool): bool = A::canConclude
 pure def written(s: Editor, attempt: int, confirmed: bool, known: bool, filed: bool): Editor =
   val w = A::conclude(s.write, confirmed, known)
   val told = { ...s, write: w, filed: filed and w.outcome == A::Confirmed }
-  if (s.kind == CreateReminder or s.kind == UpdateReminder) (
+  if (s.kind == CreateReminder or s.kind == UpdateReminder or s.kind == RescheduleReminder) (
     if (w.outcome == A::Confirmed) withoutForm(w, told)
     else { ...told, draft: D::keepMine(s.draft) })
   else if (told.filed) (if (s.kind == Create or s.kind == Update) withoutForm(w, told) else told)
@@ -456,7 +473,7 @@ changed, deleted or answered.
 
 ```quint
 pure def alwaysNothingIsSentOverAChangeInDoubt(s: Editor): bool =
-  (inFlight(s) and s.kind != Create and s.kind != CreateReminder and s.kind != UpdateReminder) implies not(s.latched.contains(s.writing))
+  (inFlight(s) and s.kind != Create and s.kind != CreateReminder and s.kind != UpdateReminder and s.kind != RescheduleReminder) implies not(s.latched.contains(s.writing))
 
 pure def sometimesAnotherEventChangedBesideOneInDoubt(s: Editor): bool =
   inFlight(s) and s.kind != Create and s.latched.size() > 0
@@ -549,7 +566,7 @@ pure def restart(s: Editor): Editor =
     ...s, write: w, separate: false, confirming: NoConfirm,
     receipts: if (s.receipts.status == R::Loading) R::answer(s.receipts, false) else s.receipts,
     unknownCreate: s.unknownCreate or (flying and s.kind == Create),
-    latched: if (flying and s.kind != Create and s.kind != CreateReminder and s.kind != UpdateReminder) s.latched.union(Set(s.writing)) else s.latched,
+    latched: if (flying and s.kind != Create and s.kind != CreateReminder and s.kind != UpdateReminder and s.kind != RescheduleReminder) s.latched.union(Set(s.writing)) else s.latched,
   }
   val draft = if (s.draft.sync == D::Saving) D::keepMine(s.draft) else s.draft
   if (s.form != NoForm and s.kept and D::unsaved(draft)) { ...doubted, draft: draft, shown: false, banner: Available }
@@ -628,6 +645,7 @@ pure def callOff(s: Editor): Editor = { ...s, confirming: NoConfirm }
 
 pure def alwaysAConfirmationBelongsToItsBanner(s: Editor): bool =
   (s.confirming == ConfirmDiscard implies discardable(s)) and (s.confirming == ConfirmReplace implies s.banner == Conflict)
+    and (s.confirming == ConfirmReschedule implies s.form == EditReminder and s.shown and s.banner == NoBanner)
 
 pure def sometimesAskedToConfirm(s: Editor): bool = s.confirming == ConfirmReplace and D::unsaved(s.draft)
 ```

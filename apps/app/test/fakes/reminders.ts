@@ -276,7 +276,10 @@ export function remindersRoutes(scene: RemindersScene, now: () => number): Route
             return Response.json({ error: "reminder_revision_changed" }, { status: 409 });
           }
           const ts = now();
-          return commitItem(index, { ...existing, ...(body as Partial<FakeReminderItem>), id: existing.id, revision: existing.revision + 1, updatedAtMs: ts }, ts);
+          const reschedule = body.rescheduleCompleted === true;
+          if (reschedule && !existing.completed) return Response.json({ error: "reminder_revision_changed" }, { status: 409 });
+          const reopened = reschedule ? { completed: false, completedAtMs: null, agentTaskId: null } : {};
+          return commitItem(index, { ...existing, ...(body as Partial<FakeReminderItem>), ...reopened, id: existing.id, revision: existing.revision + 1, updatedAtMs: ts }, ts);
         });
       }
       if (request.method === "POST" && sub === "complete") {

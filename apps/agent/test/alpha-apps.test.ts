@@ -518,4 +518,25 @@ describe("Alpha product plugin: Reminders actions, provider, recurrence, and rou
     expect(tasks.find((task) => task.taskId === record.agentTaskId)?.status).toBe("Dismissed");
     expect(tasks.filter((task) => task.metadata.alphaReminderId === id && task.status === "Scheduled")).toHaveLength(0);
   });
+
+  it("applies an approved Calendar reschedule to the exact completed reminder and task", async () => {
+    const store = new AlphaAppsStore({ now: () => Date.UTC(2026, 10, 24, 15) });
+    const { runtime, tasks } = makeFakeRuntime();
+    const routes = createAlphaAppsPlugin({ store, timeZone: "UTC", runtime }).plugin.routes!;
+    const due = { title: "Pick up keys", dueDate: "2026-11-24", dueMinute: 18 * 60, alertMinutes: 0, recurrence: "none" };
+    const create = () => callRoute(routes, "POST", "/api/alpha/reminders/items", { body: due });
+    const selected = (await create()).body.item as ReminderItemRecord;
+    const other = (await create()).body.item as ReminderItemRecord;
+    const record = (await callRoute(routes, "POST", "/api/alpha/reminders/items/{id}/complete", { params: { id: selected.id } })).body.item as ReminderItemRecord;
+    const fields = { ...due, dueMinute: 19 * 60, expectedRevision: record.revision };
+    const edit = (body: unknown) => callRoute(routes, "PATCH", "/api/alpha/reminders/items/{id}", { params: { id: record.id }, body });
+    expect((await edit(fields)).status).toBe(409);
+    expect((await edit({ ...fields, expectedRevision: record.revision - 1, rescheduleCompleted: true })).status).toBe(409);
+    expect(store.getReminders().items.find((item) => item.id === record.id)?.completed).toBe(true);
+    const saved = await edit({ ...fields, rescheduleCompleted: true });
+    expect(saved.status).toBe(200);
+    expect(saved.body.item).toMatchObject({ id: record.id, completed: false, completedAtMs: null, dueMinute: 19 * 60, alertMinutes: 0 });
+    expect(tasks.find((task) => task.taskId === record.agentTaskId)).toMatchObject({ status: "Scheduled", trigger: { atIso: "2026-11-24T19:00:00.000Z" } });
+    expect(store.getReminders().items.find((item) => item.id === other.id)).toEqual(other);
+  });
 });

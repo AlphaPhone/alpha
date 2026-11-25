@@ -1,5 +1,5 @@
 // spec/app/calendar/index.md, "Story: See reminders among my events"; spec/app/reminders/index.md, "Story: Create, update, flag, move, complete and delete reminders with Undo"
-import { Button, CalendarEventMenu, CalendarEventPage, CalendarEventRow, CalendarEventRows, Dialog, DialogContent, DialogDescription, DialogTitle, cn } from "@repo/ui";
+import { Button, CalendarEventMenu, CalendarEventPage, CalendarEventRow, CalendarEventRows, cn } from "@repo/ui";
 import { Effect } from "effect";
 import { Bell, Repeat } from "lucide-react";
 import { useRef } from "react";
@@ -11,6 +11,7 @@ import { remindersStore, type ReminderItemRecord } from "../reminders/store.ts";
 import type { Alpha } from "../runtime/area.tsx";
 import type { CalendarProps } from "./Calendar.tsx";
 import { startReminderEdit } from "./editor.vibe";
+import { ReminderReview } from "./ReminderReview.tsx";
 import { confirmReopening, reviewReopening } from "./reopen.vibe";
 import type { DatedReminder } from "./reminders.ts";
 
@@ -71,24 +72,8 @@ export function ReminderPage({ alpha, runtime, row, onBack }: { alpha: Alpha; ru
         </div> : null}
       </div>
       {record.alertMinutes !== null ? <CalendarEventRows><CalendarEventRow icon={<Bell />} text={alertCaption(record.alertMinutes)} /></CalendarEventRows> : null}
-      <Dialog open={reviewing} onOpenChange={(open) => { if (!open) cancel(); }}>
-        <DialogContent className="inset-x-3 top-1/2 bottom-auto max-w-110 -translate-y-1/2 gap-0 rounded-action border border-border bg-background p-0 motion-safe:animate-fade"
-          overlayClassName="bg-foreground/53 dark:bg-background/53" onCloseAutoFocus={(event) => {
-            if (reviewTriggerRef.current === null) return;
-            event.preventDefault();
-            reviewTriggerRef.current.focus();
-          }}>
-          <div className="px-4 py-4">
-            <DialogTitle className="font-sans text-xl leading-normal font-bold">Reopen?</DialogTitle>
-            <DialogDescription className="mt-3 text-md leading-normal text-foreground">No alert</DialogDescription>
-          </div>
-          <div className="flex flex-wrap gap-2 border-t border-border px-4 py-3">
-            <Button size="sm" variant="secondary" className="h-auto min-h-11 min-w-11 rounded-sm border border-border px-3.5 py-2.5 text-md leading-normal font-normal" disabled={sending} onClick={cancel}>Cancel</Button>
-            <Button size="sm" variant="secondary" className="h-auto min-h-11 min-w-11 rounded-sm border border-border px-3.5 py-2.5 text-md leading-normal font-normal" loading={sending}
-              onClick={() => void runtime.runPromise(confirmReopening())}>Reopen</Button>
-          </div>
-        </DialogContent>
-      </Dialog>
+      <ReminderReview open={reviewing} title="Reopen?" details="No alert" action="Reopen" sending={sending}
+        onApprove={() => void runtime.runPromise(confirmReopening())} onCancel={cancel} returnFocus={() => reviewTriggerRef.current} />
     </CalendarEventPage>
   );
 }

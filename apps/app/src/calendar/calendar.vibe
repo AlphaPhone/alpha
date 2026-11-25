@@ -282,4 +282,4 @@ const reminders = started(effect {
 export const calendar = together(kept, told, fronted, returned, widened, writing, reminders)
 
 /** Every machine of the Calendar area, which its screen reads, and Alpha's time. */
-export type Calendared = View.Machine | Writes.Machine | Changes.Machine | Linking.Machine | Held.Machine | Canvas.Machine | Reopen.Machine | Cloud | Device | Time | KeyValueStore.KeyValueStore | Toasts | Said
+export type Calendared = View.Machine | Writes.Machine | Changes.Machine | Linking.Machine | Held.Machine | Canvas.Machine | Reopen.Machine | Shell.Machine | Cloud | Device | Time | KeyValueStore.KeyValueStore | Toasts | Said

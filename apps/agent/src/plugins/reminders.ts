@@ -126,6 +126,13 @@ async function followTask(
   return { item: after, followed: true };
 }
 
+/** Drop the completed task before reopening a reminder without an alert. */
+async function detachCompletedTask(store: AlphaAppsStore, runtime: AgentRuntimeLike | undefined, before: ReminderItemRecord, timeZone: string): Promise<Followed> {
+  if (before.agentTaskId === null) return { item: before, followed: true };
+  if (scheduledTasksOf(runtime) === undefined) return { item: before, followed: false };
+  return followTask(store, runtime, before, before, timeZone, false);
+}
+
 async function notifyReminder(runtime: AgentRuntimeLike | undefined, title: string, body: string, itemId: string): Promise<void> {
   const notifier = notificationsOf(runtime);
   if (notifier === undefined) return;
@@ -587,7 +594,7 @@ export function remindersRoutes(store: AlphaAppsStore, runtime: AgentRuntimeLike
       handler: async (input) => {
         const body = asRecord(input.body);
         const id = input.parameters.get("id") ?? "";
-        const before = itemNamed(store, id);
+        let before = itemNamed(store, id);
         const expectedRevision = readNumber(body, "expectedRevision");
         if (body.expectedRevision !== undefined && (expectedRevision === undefined || !Number.isSafeInteger(expectedRevision) || expectedRevision < 1)) {
           return { status: 400, body: { error: "invalid_reminder_revision" } };
@@ -596,23 +603,55 @@ export function remindersRoutes(store: AlphaAppsStore, runtime: AgentRuntimeLike
           if (before === undefined) return { status: 404, body: { error: "reminder_not_found" } };
           if (before.revision !== expectedRevision) return { status: 409, body: { error: "reminder_revision_changed" } };
         }
+        const dueDate = parseDueDateParam(body, store.now(), timeZone);
+        const dueMinute = parseDueMinuteParam(body);
+        const alertMinutes = body.alertMinutes === null ? null : readNumber(body, "alertMinutes");
+        const recurrence = body.recurrence === undefined ? undefined : normalizeRecurrence(body.recurrence);
+        const reschedule = body.rescheduleCompleted === true;
+        const changedTiming = before !== undefined && ((dueDate !== undefined && dueDate !== before.dueDate)
+          || (dueMinute !== undefined && dueMinute !== before.dueMinute) || (alertMinutes !== undefined && alertMinutes !== before.alertMinutes)
+          || (recurrence !== undefined && recurrence !== before.recurrence));
+        if (!reschedule && expectedRevision !== undefined && before?.completed && changedTiming) {
+          return { status: 409, body: { error: "reminder_reschedule_needs_review" } };
+        }
+        if (reschedule) {
+          if (before === undefined || !before.completed || before.dueDate === null || expectedRevision === undefined || !changedTiming) {
+            return { status: 409, body: { error: "reminder_revision_changed" } };
+          }
+          const dueAt = dueDate && dueMinute !== undefined ? civilToEpochMs(dueDate, dueMinute, timeZone) : null;
+          if (!dueAt || alertMinutes === undefined || (alertMinutes ?? 0) < 0 || recurrence === undefined || dueAt - (alertMinutes ?? 0) * 60_000 <= store.now()) {
+            return { status: 400, body: { error: "invalid_reminder_reschedule" } };
+          }
+          if (recurrence === "weekdays" && [0, 6].includes(new Date(`${dueDate}T00:00Z`).getUTCDay())) {
+            return { status: 400, body: { error: "invalid_reminder_reschedule" } };
+          }
+          if (alertMinutes === null) {
+            const detached = await detachCompletedTask(store, runtime, before, timeZone);
+            if (!detached.followed) return taskAnswer(store, detached);
+            before = itemNamed(store, id);
+            if (before === undefined || before.revision !== detached.item?.revision || !before.completed) {
+              return { status: 409, body: { error: "reminder_revision_changed" } };
+            }
+          }
+        }
         const updated = store.updateItem(id, {
           listId: readString(body, "listId"),
           title: readString(body, "title"),
           notes: readRawString(body, "notes"),
-          dueDate: parseDueDateParam(body, store.now(), timeZone),
-          dueMinute: parseDueMinuteParam(body),
-          alertMinutes: body.alertMinutes === null ? null : readNumber(body, "alertMinutes"),
-          recurrence: body.recurrence === undefined ? undefined : normalizeRecurrence(body.recurrence),
+          dueDate,
+          dueMinute,
+          alertMinutes,
+          recurrence,
           priority: body.priority === undefined ? undefined : normalizePriority(body.priority),
           flagged: readBoolean(body, "flagged"),
           subtasks: parseSubtasksParam(body.subtasks),
-          completed: readBoolean(body, "completed"),
-          snoozedUntilMs: body.snoozedUntilMs === null ? null : readNumber(body, "snoozedUntilMs"),
-          notifiedAtMs: body.notifiedAtMs === null ? null : readNumber(body, "notifiedAtMs"),
+          completed: reschedule ? false : readBoolean(body, "completed"),
+          completedAtMs: reschedule ? null : undefined,
+          snoozedUntilMs: reschedule || body.snoozedUntilMs === null ? null : readNumber(body, "snoozedUntilMs"),
+          notifiedAtMs: reschedule || body.notifiedAtMs === null ? null : readNumber(body, "notifiedAtMs"),
         });
         if (updated === undefined) return { status: 404, body: { error: "reminder_not_found" } };
-        return taskAnswer(store, await followTask(store, runtime, before, updated, timeZone));
+        return taskAnswer(store, await followTask(store, runtime, before, updated, timeZone, !reschedule || alertMinutes !== null));
       },
     },
     {
@@ -655,10 +694,7 @@ export function remindersRoutes(store: AlphaAppsStore, runtime: AgentRuntimeLike
           if (before.revision !== expectedRevision || !before.completed || before.recurrence !== "none" || before.dueDate === null) {
             return { status: 409, body: { error: "reminder_revision_changed" } };
           }
-          if (before.agentTaskId !== null && scheduledTasksOf(runtime) === undefined) {
-            return taskAnswer(store, { item: before, followed: false });
-          }
-          const detached = await followTask(store, runtime, before, before, timeZone, false);
+          const detached = await detachCompletedTask(store, runtime, before, timeZone);
           if (!detached.followed) return taskAnswer(store, detached);
           const current = itemNamed(store, id);
           if (current === undefined || current.revision !== detached.item?.revision || !current.completed) {

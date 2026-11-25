@@ -10,7 +10,7 @@ import type { ManagedRuntime } from "effect";
 import {
   Bell, Calendar as CalendarIcon, CalendarDays, ChevronRight, MapPin, Plus, Repeat, Search, Settings, TextAlignStart, Trash2, Undo2, UserRound, Video, X,
 } from "lucide-react";
-import { type ReactNode, useCallback, useState, useSyncExternalStore } from "react";
+import { type ReactNode, useCallback, useRef, useState, useSyncExternalStore } from "react";
 import * as View from "../../gen/app__calendar.ts";
 import { useMachine as useView } from "../../gen/app__calendar.react.ts";
 import { daysFor } from "../../gen/app__shell__keyboard.ts";
@@ -36,11 +36,12 @@ import { type Deletions, type Reach, rowHidden } from "../../gen/app__calendar__
 import { type RequestStatus, requestStatus } from "../../gen/app__calendar__agent.ts";
 import { type Request, requests } from "./requests.ts";
 import type { Calendared } from "./calendar.vibe";
-import { type Fields, kept, startForm, typed } from "./editor.vibe";
+import { type Fields, confirmCalendarReschedule, kept, saveCalendarReminder, startForm, typed } from "./editor.vibe";
 import { type Row, onDay, shown } from "./shown.ts";
 import { type CalendarRow, type DatedReminder, calendarRowKey, datedReminders } from "./reminders.ts";
 import { remindersStore } from "../reminders/store.ts";
 import { ReminderPage } from "./ReminderPage.tsx";
+import { ReminderReview } from "./ReminderReview.tsx";
 import { allows } from "../../gen/kit__permission.ts";
 import { civilDay, dateOf, dayStart, monthStart, readWindow, weekStart } from "./time.ts";
 
@@ -705,10 +706,12 @@ function Form({ runtime, day, today, connected }: CalendarProps & { day: number;
   const editor = useEditor(runtime);
   const [fields, setFields] = useState<Fields>(() => runtime.runSync(kept(day, editor.state?.owner ?? 0)));
   const [picking, setPicking] = useState<string | undefined>(undefined);
+  const saveButtonRef = useRef<HTMLElement | null>(null);
   const e = editor.state;
   if (!e) return null;
   const reminder = fields.calendar === "Reminders";
   const saving = e.draft.sync === "Saving";
+  const reviewingReschedule = e.confirming === "ConfirmReschedule";
   const discard = reminder && e.form === "NewEvent" && (e.confirming === "ConfirmDiscard" || editor.can({ type: "askDiscard" }));
   const save = reminder ? { type: "saveReminder" } as const : { type: "save" } as const;
   const blank = fields.title.trim() === "";
@@ -770,9 +773,19 @@ function Form({ runtime, day, today, connected }: CalendarProps & { day: number;
   if (e.form === "NewEvent" && shown.present()) destinations.push({ name: "This phone's calendar", value: "Phone" });
   const destination = fields.calendar ?? (connected ? "Agent" : "Phone");
   const close = () => (editor.can({ type: "close" }) ? void editor.send({ type: "close" }) : undefined);
+  const submit = () => {
+    if (!reminder) { void editor.send(save); return; }
+    saveButtonRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    void runtime.runPromise(saveCalendarReminder());
+  };
   return (
     <CalendarFormPage className={reminder ? "[&>[data-host-chrome]]:pr-2" : undefined} onBack={close} saving={saving}
-      onSave={(reminder || !e.extras) && editor.can(save) ? () => void editor.send(save) : undefined}>
+      onSave={(reminder || !e.extras) && (editor.can(save) || reviewingReschedule) ? submit : undefined}>
+      {reminder && e.form === "EditReminder" ? (
+        <ReminderReview open={reviewingReschedule} title="Reschedule?" action="Reschedule"
+          onApprove={() => void runtime.runPromise(confirmCalendarReschedule())} onCancel={() => void editor.send({ type: "callOff" })}
+          returnFocus={() => saveButtonRef.current} />
+      ) : null}
       {e.form === "EditEvent" && e.repeats ? (
         <div role="group" aria-label="Save changes to" className="mx-6 my-1 flex flex-wrap items-center gap-2">
           <span className="text-meta text-muted-foreground">Save changes to</span>

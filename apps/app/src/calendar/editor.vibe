@@ -9,12 +9,13 @@ import * as View from "../../gen/app__calendar.effect.vibe"
 import * as Held from "../../gen/app__calendar__deletions.effect.vibe"
 import { type Readback, type WriteKind, agentCalendarAccepts, answerReadback, defaultStart, deviceRoute, newEventTarget, readbackSeen } from "../../gen/app__calendar__writing.effect.vibe"
 import { Agent } from "../platform/agent.vibe"
+import { Device } from "../platform/device.vibe"
 import { ask, attemptedWith } from "../platform/remote.vibe"
 import type { AndroidCalendarDeletionScope, AndroidCalendarEditorFields, CalendarPick } from "@elizaos/os-bridges"
 import { PhoneCalendar, type Written } from "../platform/calendar.vibe"
 import { Attempts, fresh } from "../runtime/attempts.vibe"
 import { civilDateAt, formatCivilDate } from "../reminders/recurrence.ts"
-import { type DatedReminderFields, createReminderItem, editDatedReminder } from "../reminders/reminders.vibe"
+import { type DatedReminderFields, createReminderItem, editDatedReminder, needsReschedule } from "../reminders/reminders.vibe"
 import { DEFAULT_LIST_ID, type ReminderItemRecord, remindersStore } from "../reminders/store.ts"
 import { answer, contained, hearing, reacting, run, started, together } from "../runtime/reactor.vibe"
 import { Time } from "../runtime/time.vibe"
@@ -82,6 +83,7 @@ effect function owner(): number!!Editor.Machine {
 /** The owner typed into the form: keep it on the phone, then count the edit; a store that refuses says so. */
 export effect function typed(fields: Fields, edit: Event) {
   const editor = try Editor.Machine
+  if (!Editor.enabled(try editor.get(), edit)) return
   if (!(try keep(fields, try owner()))) try contained(editor.send({ type: "keepFailed" }), "saying the draft was not kept")
   try contained(editor.send(edit), "counting an edit of the event")
 }
@@ -152,6 +154,49 @@ function reminderFields(fields: Fields): DatedReminderFields {
   }
 }
 
+effect function calendarShown() {
+  return (try (try Device).showing()) && Shell.showing(try (try Shell.Machine).get(), "Calendar")
+}
+
+/** Save active reminders normally and review an edit that would reopen a completed reminder. */
+export effect function saveCalendarReminder() {
+  const editor = try Editor.Machine
+  const state = try editor.get()
+  if (!Editor.canSaveReminder(state)) return
+  const fields = try kept(state.day, state.owner)
+  const item = fields.reminderId === undefined ? undefined : remindersStore.findItem(fields.reminderId)
+  if (state.form === "EditReminder" && item !== undefined && item.revision === fields.reminderRevision && needsReschedule(item, reminderFields(fields))) {
+    if (!(try calendarShown())) return
+    if (fields.reminderRepeat === "weekdays" && [0, 6].includes(new Date(fields.begin).getDay())) {
+      try say("Pick a weekday", true)
+      return
+    }
+    const now = try (try Time).now()
+    if (fields.begin - (fields.reminderAlert ?? 0) * 60_000 <= now) {
+      try say("Time passed", true)
+      return
+    }
+    try contained(editor.send({ type: "askReschedule" }), "reviewing the new reminder time")
+    return
+  }
+  try contained(editor.send({ type: "saveReminder" }), "saving the Calendar reminder")
+}
+
+/** Dispatch an approved reschedule while its retained edit is still visible. */
+export effect function confirmCalendarReschedule() {
+  const editor = try Editor.Machine
+  const state = try editor.get()
+  if (!Editor.canReschedule(state) || !(try calendarShown())) return
+  const fields = try kept(state.day, state.owner)
+  const now = try (try Time).now()
+  if (fields.begin - (fields.reminderAlert ?? 0) * 60_000 <= now) {
+    try contained(editor.send({ type: "callOff" }), "retiring the expired reschedule")
+    try say("Time passed", true)
+    return
+  }
+  try contained(editor.send({ type: "reschedule" }), "rescheduling the completed reminder")
+}
+
 /** One retained Calendar form creates at most one reminder with these reviewed fields. */
 effect function createCalendarReminder(fields: Fields, owning: number) {
   if (fields.calendar !== "Reminders" || fields.title.trim() === "") return refused
@@ -169,10 +214,11 @@ effect function createCalendarReminder(fields: Fields, owning: number) {
   return saved === undefined ? refused : { confirmed: true, known: true }
 }
 
-effect function updateCalendarReminder(fields: Fields, owning: number, id: number, attempt: number) {
+effect function updateCalendarReminder(fields: Fields, owning: number, id: number, attempt: number, reschedule: boolean) {
   if (fields.calendar !== "Reminders" || fields.reminderId === undefined || fields.reminderRevision === undefined
     || fields.reminderSpecId !== id || (try owner()) !== owning) return refused
-  const saved = try editDatedReminder(fields.reminderId, fields.reminderRevision, reminderFields(fields), attempt)
+  const saved = try editDatedReminder(fields.reminderId, fields.reminderRevision, reminderFields(fields), attempt, reschedule)
+  if (saved && reschedule) try say(fields.reminderAlert === null ? "Saved · No alert" : "Reminder rescheduled")
   return { confirmed: saved, known: true }
 }
 
@@ -286,7 +332,7 @@ effect function sendAgent(attempt: number, kind: "Update" | "Remove" | "Reply", 
 // spec/app/calendar/editor.md, "Saving sends the form once, as a new numbered write built on the revision its edits began from"; spec/app/calendar/editor.md, "No create is sent while an earlier one is in doubt, unless the owner asked for a separate event"
 // spec/app/calendar/writing.md, "Guests, alerts and video rooms go to Android Calendar; zones, all-day and repeats use the direct save for a new event"; "The agent's own calendar holds no repeats, alerts or video rooms"
 /** Carry out write `attempt`: a create under its own creation identity, a change or a deletion through the phone's review. */
-effect function send(attempt: number, kind: Exclude<Write, "CreateReminder" | "UpdateReminder">, id: number, scope: Scope, going: boolean): Written!!(PhoneCalendar | Agent | KeyValueStore.KeyValueStore | Attempts | Time | Editor.Machine | View.Machine) {
+effect function send(attempt: number, kind: Exclude<Write, "CreateReminder" | "UpdateReminder" | "RescheduleReminder">, id: number, scope: Scope, going: boolean): Written!!(PhoneCalendar | Agent | KeyValueStore.KeyValueStore | Attempts | Time | Editor.Machine | View.Machine) {
   const phone = try PhoneCalendar
   const fields = try kept(0, try owner())
   if ((kind === "Create" || kind === "Update") && fields.calendar === "Reminders") return refused
@@ -355,11 +401,12 @@ effect function handOff() {
 effect function written(attempt: number, kind: Write, id: number, scope: Scope, going: boolean) {
   const owning = try owner()
   const fields = try kept(0, owning)
+  const changingReminder = kind === "UpdateReminder" || kind === "RescheduleReminder"
   const outcome: Written = kind === "CreateReminder" ? try createCalendarReminder(fields, owning)
-    : kind === "UpdateReminder" ? try updateCalendarReminder(fields, owning, id, attempt)
+    : changingReminder ? try updateCalendarReminder(fields, owning, id, attempt, kind === "RescheduleReminder")
     : try send(attempt, kind, id, scope, going)
   const view = try View.Machine
-  if (kind !== "CreateReminder" && kind !== "UpdateReminder") try contained(view.send({ type: "changeCommitted" }), "reading the day again after a write")
+  if (kind !== "CreateReminder" && !changingReminder) try contained(view.send({ type: "changeCommitted" }), "reading the day again after a write")
   if ((kind === "Create" || kind === "CreateReminder" || kind === "Update") && outcome.confirmed && !("filed" in outcome)) try contained(view.send({ type: "pickDay", day: civilDay(fields.begin) }), "showing the saved day")
   if (kind === "Remove") try contained((try Held.Machine).send({ type: "ended", id, done: outcome.confirmed && !("filed" in outcome) }), "telling the deletions how one ended")
   return { type: "written", attempt, confirmed: outcome.confirmed, known: outcome.known, filed: "filed" in outcome && outcome.filed === true } satisfies Event
@@ -431,10 +478,24 @@ const scanned = started(effect {
   })
 }, "opening a scanned Calendar draft")
 
+const retireReschedule = started(effect {
+  const device = try Device
+  const shell = try Shell.Machine
+  const editor = try Editor.Machine
+  const visible = Stream.concat(Stream.fromEffect(device.showing()), device.visible)
+  const foreground = Stream.zipLatestWith(shell.changes, visible, (where, shown) => shown && Shell.showing(where, "Calendar"))
+  try Stream.runForEach(Stream.filter(Stream.changes(foreground), (shown) => !shown), () => effect {
+    if ((try editor.get()).confirming === "ConfirmReschedule") {
+      try contained(editor.send({ type: "callOff" }), "retiring the reschedule review")
+    }
+  })
+}, "retiring the hidden Calendar reschedule")
+
 /** The editor: kept on the phone across restarts, which ends what was in flight; its writes go to the phone's calendar once. */
 export const editor = together(
   reacting(Editor, { keep: 1, open: [{ type: "restart" }], carry }),
   reread,
   elsewhere,
   scanned,
+  retireReschedule,
 )

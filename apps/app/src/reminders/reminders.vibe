@@ -446,25 +446,32 @@ function replaceItemInSnapshot(current: RemindersSnapshot, updated: ReminderItem
 }
 
 function sameDatedFields(item: ReminderItemRecord, fields: DatedReminderFields): boolean {
-  return item.title === fields.title && item.notes === fields.notes && item.dueDate === fields.dueDate
-    && item.dueMinute === fields.dueMinute && item.alertMinutes === fields.alertMinutes && item.recurrence === fields.recurrence
+  return item.title === fields.title && item.notes === fields.notes && !changedTiming(item, fields)
+}
+
+function changedTiming(item: ReminderItemRecord, fields: DatedReminderFields): boolean {
+  return item.dueDate !== fields.dueDate || item.dueMinute !== fields.dueMinute || item.alertMinutes !== fields.alertMinutes || item.recurrence !== fields.recurrence
+}
+
+/** Changing a completed reminder's timing reopens it and needs a review. */
+export function needsReschedule(item: ReminderItemRecord, fields: DatedReminderFields): boolean {
+  return item.completed && changedTiming(item, fields)
 }
 
 /** Save Calendar's edits to the selected resident reminder without taking over the standalone reminder editor. */
-export effect function editDatedReminder(id: string, revision: number, fields: DatedReminderFields, attempt: number): boolean!!(Agent | Attempts | Alerts.Machine | KeyValueStore.KeyValueStore | PhoneReminders | Time) {
+export effect function editDatedReminder(id: string, revision: number, fields: DatedReminderFields, attempt: number, reschedule: boolean): boolean!!(Agent | Attempts | Alerts.Machine | KeyValueStore.KeyValueStore | PhoneReminders | Reminders.Machine | Time) {
   const seen = remindersStore.snapshot()
   const item = seen.snapshot.items.find((row) => row.id === id)
   if (fields.title === "" || item === undefined || item.dueDate === null || seen.hiddenIds.has(id)) return false
-  if (item.revision !== revision) return false
+  if (item.revision !== revision || needsReschedule(item, fields) !== reschedule) return false
   if (sameDatedFields(item, fields)) return true
-  const changedTiming = item.dueDate !== fields.dueDate || item.dueMinute !== fields.dueMinute || item.alertMinutes !== fields.alertMinutes || item.recurrence !== fields.recurrence
-  const timing = changedTiming ? { snoozedUntilMs: null, notifiedAtMs: null } : {}
+  const timing = changedTiming(item, fields) ? { snoozedUntilMs: null, notifiedAtMs: null } : {}
   const key = try (try Attempts).key(attempt)
   const agent = try Agent
   const outcome = effect {
     const body = try agent.call(HttpClientRequest.bodyJsonUnsafe(
       HttpClientRequest.patch(`/api/alpha/reminders/items/${encodeURIComponent(id)}`),
-      { ...fields, ...timing, expectedRevision: revision, idempotencyKey: key },
+      { ...fields, ...timing, ...(reschedule ? { rescheduleCompleted: true } : {}), expectedRevision: revision, idempotencyKey: key },
     ))
     const decoded = Schema.decodeUnknownOption(ItemReplySchema)(body)
     return { kept: true, item: Option.isSome(decoded) ? decoded.value.item : undefined }
@@ -477,9 +484,14 @@ export effect function editDatedReminder(id: string, revision: number, fields: D
   const latest = view.snapshot.items.find((row) => row.id === id)
   if (!outcome.kept || latest?.revision !== revision || view.hiddenIds.has(id)) return false
   const saved = outcome.item
-  const updated = saved?.id === id && saved.revision > revision && sameDatedFields(saved, fields)
-    ? saved : { ...latest, ...fields, ...timing, revision: revision + 1, updatedAtMs: now }
-  try persistAndBroadcast(replaceItemInSnapshot(view.snapshot, updated, now), now)
+  const accepted = saved?.id === id && saved.revision > revision && sameDatedFields(saved, fields)
+    && (!reschedule || (!saved.completed && (fields.alertMinutes !== null || saved.agentTaskId === null))) ? saved : undefined
+  if (reschedule && accepted === undefined && latest.agentTaskId !== null) return false
+  const reopened = reschedule ? { completed: false, completedAtMs: null, agentTaskId: null } : {}
+  const updated = accepted ?? { ...latest, ...fields, ...timing, ...reopened, revision: revision + 1, updatedAtMs: now }
+  const snapshot = replaceItemInSnapshot(view.snapshot, updated, now)
+  if (reschedule) try syncMachineFromSnapshot(snapshot, now)
+  else try persistAndBroadcast(snapshot, now)
   return true
 }
 
