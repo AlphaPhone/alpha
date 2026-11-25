@@ -427,3 +427,102 @@ it("shows the authorized first page of unread Inbox mail on Home", async () => {
   await press("Open Inbox, 1+ unread");
   await until(alpha, alpha.runtime, Shell, (state) => state.trail.at(-1) === "Inbox");
 });
+
+/** Begin a new message to `to` about `subject`, and wait until the phone keeps it. */
+async function drafting(alpha: Parameters<typeof inbox.runtime>[0], to: string, subject: string) {
+  const runtime = inbox.runtime(alpha);
+  await press("Compose");
+  await until(alpha, runtime, Writing, (s) => s.open && s.letter.kind === "Fresh");
+  await fill("To", to);
+  await drawn(() => document.querySelector("input[aria-label='To']")?.closest("form")?.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true })));
+  await until(alpha, runtime, Writing, (s) => s.letter.recipients === 1);
+  await write("Subject", subject);
+  await later(alpha, 10);
+  await until(alpha, runtime, Writing, (s) => s.stored && !s.pending && s.write.status === "Loaded");
+}
+
+/** Send the draft open, as the owner reviews and confirms it. */
+async function sending(alpha: Parameters<typeof inbox.runtime>[0]) {
+  const runtime = inbox.runtime(alpha);
+  await press("Send email");
+  await until(alpha, runtime, Changes, (s) => s.review.showing && s.kind === "Send");
+  await confirm("Send");
+}
+
+it("Find out whether a send went (spec/app/inbox/drafts.md, \"Story: Find out whether a send went\"; spec/app/inbox/letter.md, \"Story: Know what was sent\")", async () => {
+  const world = { ...scene(), phone: false };
+  const { alpha } = await open(world);
+  const runtime = inbox.runtime(alpha);
+  await tile("Inbox");
+  await until(alpha, runtime, List, (s) => s.list.status === "Loaded");
+
+  // spec/app/inbox/sending.md, "The answer to the request in flight ends it; a reply that does not match it, or none, leaves it unknown"; spec/app/inbox/drafts.md, "Every other end of the operation a draft was handed to: an unknown send is remembered with its revision; a save lands or leaves the draft unsure of Gmail's copy; a deletion forgets the draft; anything refused or stopped leaves it as it was"
+  await drafting(alpha, "friend@mail.test", "Plans");
+  world.inbox.lost = "unsent";
+  await sending(alpha);
+  await until(alpha, runtime, Changes, (s) => s.attempt.outcome === "Unknown" && !s.noticed);
+  await until(alpha, runtime, Writing, (s) => s.open && s.letter.doubt.attempt !== 0);
+  // spec/app/inbox/sending.md, "A draft already sent, or whose send is unknown, is never sent again without the owner choosing to"
+  expect([told(), button("Send email")?.disabled, button("Send again")]).toEqual([expect.stringContaining("Alpha cannot tell whether it was sent"), true, undefined]);
+
+  // spec/app/inbox/drafts.md, "An unknown send is checked once, by reading Gmail's Sent for it, while its account may be read and no new send of the draft is handed over"; spec/app/inbox/letter.md, "A send found in Gmail's Sent counts as sent and is a change to what the draft shows; one not found is known not to have gone"
+  await press("Check Sent");
+  await until(alpha, runtime, Writing, (s) => s.check.status === "Loaded" && s.letter.doubt.attempt === 0);
+  expect([told(), button("Check Sent")]).toEqual([expect.stringContaining("It was not sent"), undefined]);
+
+  // spec/app/inbox/sending.md, "An outcome that is unknown or confirmed is never sent again, and a later operation never hides an unknown one the owner has not seen"
+  await press("Dismiss");
+  await until(alpha, runtime, Changes, (s) => s.noticed);
+  world.inbox.lost = undefined;
+  await sending(alpha);
+  await until(alpha, runtime, Changes, (s) => s.attempt.outcome === "Confirmed");
+  await until(alpha, runtime, Writing, (s) => !s.open);
+  expect(world.inbox.changes).toEqual(["send friend@mail.test Plans"]);
+
+  // spec/app/inbox/drafts.md, "A send that went leaves its draft forgotten, or marked with the revision sent"
+  await drafting(alpha, "friend@mail.test", "Tickets");
+  world.inbox.lost = "sent";
+  await sending(alpha);
+  await until(alpha, runtime, Writing, (s) => s.open && s.letter.doubt.attempt !== 0);
+  await press("Check Sent");
+  await until(alpha, runtime, Writing, (s) => !s.open && s.shelf.shelved.length === 0);
+  expect(world.inbox.changes).toEqual(["send friend@mail.test Plans", "send friend@mail.test Tickets"]);
+});
+
+it("Stay safe with what a message carries (spec/app/inbox/message.md, \"Story: Stay safe with what a message carries\"; spec/app/inbox/message.md, \"Story: Read a saved message offline\")", async () => {
+  const world = { ...scene(), phone: false };
+  const standup = world.inbox.mail.find((stored) => stored.card.subject === "Standup notes");
+  if (standup) standup.html = "<p>Build 0.9 goes to beta testers Thursday.</p><img src=\"https://track.test/pixel.png\">";
+  const first = await open(world);
+  const runtime = inbox.runtime(first.alpha);
+  const policy = () => document.querySelector("iframe[title='Formatted email']")?.getAttribute("srcdoc") ?? "";
+  await tile("Inbox");
+  await until(first.alpha, runtime, List, (s) => s.list.status === "Loaded");
+  await row("Standup notes");
+  await until(first.alpha, runtime, Shown, (s) => s.body.status === "Loaded");
+
+  // spec/app/inbox/message.md, "Remote images load only after Show images, or when the owner turned on loading them in Settings"
+  expect([policy(), Boolean(button("Show images"))]).toEqual([expect.stringContaining("img-src data:;"), true]);
+  await press("Show images");
+  await until(first.alpha, runtime, Shown, (s) => s.images);
+  expect([policy(), Boolean(button("Show images"))]).toEqual([expect.stringContaining("img-src data: https:"), false]);
+  expect(world.inbox.changes).toEqual([]);
+  await first.close();
+
+  // spec/app/inbox/message.md, "While the list shows its saved copy and access is being checked, a message saved on the phone opens from there, marked as saved"; spec/app/inbox/message.md, "A saved copy is shown only with nothing read for it"
+  localStorage.setItem("alpha.preferences", JSON.stringify({ askFirst: true, images: true, shares: [] }));
+  world.inbox.stalled = true;
+  const second = await open(world);
+  const again = inbox.runtime(second.alpha);
+  await tile("Inbox");
+  await until(second.alpha, again, List, (s) => s.saved && s.accounts.status === "Loading");
+  await row("Standup notes");
+  await until(second.alpha, again, Shown, (s) => s.fromPhone && s.message !== 0);
+  expect([told(), policy(), button("Show images")]).toEqual([expect.stringContaining("Saved copy"), "", undefined]);
+
+  // spec/app/inbox/message.md, "Remote images load only after Show images, or when the owner turned on loading them in Settings"
+  world.inbox.stalled = false;
+  await again.runPromise(List.use((list) => list.send({ type: "checkAccess" })));
+  await until(second.alpha, again, Shown, (s) => !s.fromPhone && s.body.status === "Loaded");
+  expect([policy(), button("Show images")]).toEqual([expect.stringContaining("img-src data: https:"), undefined]);
+});

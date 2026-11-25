@@ -26,6 +26,7 @@ import { useMachine as useShell } from "../../gen/app__shell.react.ts";
 import type { Machine as Preferences } from "../../gen/app__settings__preferences.effect.vibe";
 import { useMachine as usePreferences } from "../../gen/app__settings__preferences.react.ts";
 import type { Alpha } from "../runtime/area.tsx";
+import { loadsImages } from "../../gen/app__settings__preferences.ts";
 import { useTimed } from "../runtime/react.ts";
 import type { Cloud } from "../platform/cloud.vibe";
 import { untimed } from "../runtime/reactor.vibe";
@@ -167,12 +168,19 @@ function Body({ read, images, onReview }: { read: MailMessage; images: boolean; 
   </>;
 }
 
+// spec/app/inbox/message.md, "Remote images load only after Show images, or when the owner turned on loading them in Settings"
+/** Whether the owner turned on loading images in Inbox, as Settings last read it. */
+function useRemote(runtime: Runtime): boolean {
+  const preferences = usePreferences(runtime).state;
+  return preferences !== undefined && loadsImages(preferences);
+}
+
 /** The message open: its body, links and attachments each reviewed before use, its marks, Archive and Trash, Retry and Ask Alpha. */
 function Opened({ runtime, list, onRefresh, onBegin }: { runtime: Runtime; list: Mailbox; onRefresh: (() => void) | undefined; onBegin: (beginning: Beginning) => (() => void) | undefined }) {
   const { state, can, send } = useMessage(runtime);
   const marking = useMarks(runtime);
   const changes = useTimed(runtime, useChanges);
-  const remote = usePreferences(runtime).state?.images ?? false;
+  const remote = useRemote(runtime);
   const read = state ? mailOf(runtime, (mail) => mail.body(state.body.ticket)) : undefined;
   const reviewLink = useCallback((at: number) => {
     const link = read === undefined ? undefined : prepareMessage(read).links.at(at - 1);
@@ -287,7 +295,7 @@ export function Inbox({ runtime, alpha }: InboxProps & { alpha: Alpha }) {
   const changes = useTimed(runtime, useChanges);
   const drafts = useDrafts(runtime);
   const shell = useShell(runtime);
-  const remote = usePreferences(runtime).state?.images ?? false;
+  const remote = useRemote(runtime);
   const [typed, setTyped] = useState<{ text: string; over: string; folder: string } | undefined>();
   const [selection, setSelection] = useState<string>();
   const [choosing, setChoosing] = useState(false);

@@ -46,6 +46,10 @@ export interface InboxScene {
   readonly attachmentReads: string[];
   /** How Gmail stands on a request the earlier Alpha sent, by its request id; one not here is unknown to the cloud. */
   readonly receipts: Map<string, MailOperation["receipt"]["state"]>;
+  /** The answer to a send's dispatch is lost on the way: after Gmail sent it, or before it reached Gmail. */
+  lost?: "sent" | "unsent";
+  /** Google's answer about the owner's access never comes, as on a network that hangs. */
+  stalled?: boolean;
 }
 
 const everything: GoogleStatus["grantedCapabilities"] = ["google.basic_identity", "google.gmail.triage", "google.gmail.send", "google.gmail.manage"];
@@ -151,8 +155,16 @@ export function inboxRoutes(scene: InboxScene): Route[] {
       }
       return undefined;
     },
+    (request, url) => (scene.stalled && [`${google}/status`, `${google}/accounts`].includes(url.pathname) ? new Promise<Response>(() => undefined) : undefined),
     (request, url) => (request.method === "GET" && url.pathname === `${google}/status` ? Response.json(status(scene)) : undefined),
     (request, url) => (request.method === "GET" && url.pathname === `${google}/accounts` ? Response.json(scene.google === undefined ? [] : [status(scene)]) : undefined),
+    (request, url) => {
+      const [, to, subject] = /^in:sent to:(\S*) subject:"(.*)"$/u.exec(url.searchParams.get("query") ?? "") ?? [];
+      if (request.method !== "GET" || url.pathname !== `${google}/gmail/search` || to === undefined || subject === undefined) return;
+      const sent = scene.mail.filter((stored) => stored.card.labels.includes("SENT") && stored.card.to.includes(to) && stored.card.subject === subject);
+      const page: MailSearch = { messages: sent.map((stored) => stored.card), nextPageToken: null, syncedAt: "2026-11-01T00:00:00Z", mailboxHistoryId: String(scene.history), supportsSpamTrash: true };
+      return Response.json(page);
+    },
     (request, url) => {
       if (request.method !== "GET" || url.pathname !== `${google}/gmail/search`) return;
       const size = Number(url.searchParams.get("maxResults") ?? "25");
@@ -229,6 +241,16 @@ export function inboxRoutes(scene: InboxScene): Route[] {
       return request.json().then(({ requestId, proposal }: { requestId: string; proposal: { kind: MailOperation["receipt"]["kind"]; messageId: string } }) => {
         asked.set(requestId, proposal);
         return Response.json(operation(requestId, proposal.kind, "prepared"));
+      });
+    },
+    (request, url) => {
+      const requestId = new RegExp(`^${operations}/([^/]+)/dispatch$`, "u").exec(url.pathname)?.[1];
+      if (scene.lost === undefined || request.method !== "POST" || requestId === undefined || asked.get(requestId)?.kind !== "send") return;
+      if (scene.lost === "unsent") return lost();
+      return request.json().then(({ proposal }: { proposal: { to: string[]; subject: string; bodyText: string } }) => {
+        scene.changes.push(`send ${proposal.to.join(",")} ${proposal.subject}`);
+        scene.mail.push({ ...letter(scene.mail.length + 100, proposal.subject, ["SENT"], proposal.bodyText), card: { ...letter(scene.mail.length + 100, proposal.subject, ["SENT"]).card, to: proposal.to } });
+        return lost();
       });
     },
     (request, url) => {
