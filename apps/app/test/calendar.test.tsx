@@ -41,13 +41,16 @@ function morning(phone: boolean): Scene & { at: (day: number, hours: number) => 
   return Object.assign(world, { at, today });
 }
 
+/** The timeline and list rows, separate from the invitation banner above them. */
+const events = () => [...document.querySelectorAll("[data-alpha-subview=calendar-list] [role=region] button")];
+
 /** The titles of the events the days show, in order: each event's button is named by its title and time. */
-const titles = () => [...document.querySelectorAll("[data-alpha-subview=calendar-list] button")].map((found) => (found.getAttribute("aria-label") ?? "").split(", "))
+const titles = () => events().map((found) => (found.getAttribute("aria-label") ?? "").split(", "))
   .map((names) => ["Standup", "Team lunch", "Dentist", "Gym", "Coffee"].find((title) => names.includes(title)) ?? "").filter((title) => title !== "");
 
 /** Tap the row or block with `text` as the event title. */
 async function tap(text: string) {
-  const found = [...document.querySelectorAll("button")].find((candidate) => (candidate.getAttribute("aria-label") ?? "").split(", ").includes(text));
+  const found = events().find((candidate) => (candidate.getAttribute("aria-label") ?? "").split(", ").includes(text));
   if (!found) throw new Error(`no row ${text}`);
   await press(found.getAttribute("aria-label") ?? "");
 }
