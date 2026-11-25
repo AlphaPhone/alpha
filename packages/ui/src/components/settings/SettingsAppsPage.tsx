@@ -16,8 +16,6 @@ export type SettingsAppsPageProps = SettingsPlaceProps & {
   onOpen?: (page: SettingsPageName) => void;
   /** Opens the app itself, through the shell. */
   onOpenApp?: (app: AppView) => void;
-  /** Passwords is available on a phone. */
-  onPhone?: boolean;
   /** Messages is available on an Alpha image. */
   image?: boolean;
 };
@@ -40,12 +38,12 @@ const apps: AppRow[] = [
  * Apps shows the phone's app catalog. Apps with their own settings open them and the rest open the app itself.
  * @model spec/app/settings/index.md
  */
-export function SettingsAppsPage({ onBack, onOpen, onOpenApp, onPhone = true, image = false, place, onPlace }: SettingsAppsPageProps) {
+export function SettingsAppsPage({ onBack, onOpen, onOpenApp, image = false, place, onPlace }: SettingsAppsPageProps) {
   const open = (app: AppRow) => {
     if ("page" in app) return onOpen && (() => onOpen(app.page));
     return onOpenApp && (() => onOpenApp(app.view));
   };
-  const shown = apps.filter((app) => "view" in app ? app.view !== "messages" || image : app.page !== "passwords" || onPhone);
+  const shown = apps.filter((app) => !("view" in app) || app.view !== "messages" || image);
   return (
     <SettingsPage title="Apps" onBack={onBack} backLabel="Back to Settings">
       <ListGroup>

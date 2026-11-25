@@ -1,6 +1,7 @@
 // spec/app/calendar/index.md, "Story: See reminders among my events"
+import type { ReminderItemRecord } from "@repo/launcher-records";
 import { dueInstantMs } from "../reminders/recurrence.ts";
-import type { ReminderItemRecord, RemindersStoreView } from "../reminders/store.ts";
+import type { RemindersStoreView } from "../reminders/store.ts";
 import type { Row } from "./shown.ts";
 import { civilDay, dayStart } from "./time.ts";
 

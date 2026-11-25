@@ -453,11 +453,13 @@ pure def sometimesATileWaitsForItsApp(h: Home): bool =
 
 ### Add to Home adds one of Alpha's own apps it lists
 
+Wallet is available through Add to Home and is kept when saved on Home.
+
 ```quint
 pure def holdsView(tiles: List[T::Tile], view: S::View): bool = tiles.some(t => T::shows(t, view))
 
 pure def hiddenApps(h: Home, shell: S::Shell): List[S::View] =
-  T::homeOrder.select(view => S::available(shell, view) and not(holdsView(h.tiles.favourites, view)))
+  T::homeCatalog.select(view => S::available(shell, view) and not(holdsView(h.tiles.favourites, view)))
 
 pure def offered(h: Home, tile: T::Tile, shell: S::Shell): bool =
   h.adding and hiddenApps(h, shell).some(v => T::shows(tile, v))

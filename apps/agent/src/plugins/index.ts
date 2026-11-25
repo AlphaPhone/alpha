@@ -28,7 +28,10 @@ export function createAlphaAppsPlugin(options: {
   return { plugin, store };
 }
 
-/** Hosted module factory for `runAgentCli`'s `hostModules`, binding the Alpha product plugin to the agent's state directory and timezone. */
+/**
+ * Hosted module factory for `runAgentCli`'s `hostModules`, binding the Alpha product plugin to the agent's state directory and timezone.
+ * @public
+ */
 export const alphaAppsModule: ModuleFactory<never> = (context: ModuleContext) => {
   const { plugin } = createAlphaAppsPlugin({
     stateDirectory: context.stateDirectory,
@@ -39,3 +42,4 @@ export const alphaAppsModule: ModuleFactory<never> = (context: ModuleContext) =>
 };
 
 export { AlphaAppsStore } from "./store.ts";
+export { makeNativeNotesCleanup } from "./notes-cleanup.vibe";

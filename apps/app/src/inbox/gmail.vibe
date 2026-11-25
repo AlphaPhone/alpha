@@ -4,8 +4,10 @@ import { gmailReadable, type GmailAccount, type GmailDraftSummary } from "@eliza
 import * as KeyValueStore from "effect/persistence/KeyValueStore"
 import type { Failure, Folder, Linked, Mailbox, Selection } from "../../gen/app__inbox.ts"
 import type { Fault } from "../../gen/app__inbox__message.ts"
+import { Machine as Operations } from "../../gen/app__inbox__sending.effect.vibe"
 import { Cloud, type CloudClient } from "../platform/cloud.vibe"
-import { Attempts } from "../runtime/attempts.vibe"
+import { Attempts, type Install } from "../runtime/attempts.vibe"
+import { keptAttempts } from "../runtime/reactor.vibe"
 import { provider } from "./provider.vibe"
 
 module pure {
@@ -449,16 +451,34 @@ const refusedBefore: Changed = { done: false, known: true, expired: false }
 
 /** What Gmail is asked to do in one operation, as eliza's cloud client names it. */
 export type Proposal = Parameters<CloudClient["gmailPrepare"]>[0]["proposal"]
+export const operationStoreVersion = 1
+
+/** The receipt of the original Gmail operation, under its original installation, grant and attempt. */
+export effect function operationReceipt(account: number, attempt: number, kind: Proposal["kind"]): (MailOperation["receipt"] | undefined)!!(Cloud | Mail | Install) {
+  const { client } = try Cloud
+  const mail = try Mail
+  const grantId = mail.grant(account)
+  if (grantId === undefined) return undefined
+  const generation = mail.generation(account)
+  const requestId = try (try keptAttempts(Operations, operationStoreVersion)).key(attempt)
+  const receipt = (Effect.map(asked((signal) => client.gmailReceipt({ grantId, requestId }, { signal })), (reply) => reply.receipt) catch () => undefined)
+  return receipt?.requestId === requestId && receipt.kind === kind && mail.generation(account) === generation && mail.grant(account) === grantId
+    ? receipt : undefined
+}
 
 /**
  * Ask Gmail for `proposal` once, as attempt `id` of the machine whose job this is: prepared under the attempt's own
  * key (the `at`th request of the attempt under a key of its own), then dispatched as Gmail reviewed it. A refusal
  * before the dispatch is known; any failure of the dispatch itself leaves it unknown.
  */
-export effect function operate(id: number, account: number, proposal: Proposal, at = 0): Changed!!(Cloud | Mail | Attempts) {
+export effect function operate(id: number, account: number, proposal: Proposal, options?: {
+  readonly at?: number
+  readonly matches?: (review: MailOperation["review"]) => boolean
+}): Changed!!(Cloud | Mail | Attempts) {
   const { client } = try Cloud
   const ledger = try Mail
   const key = try (try Attempts).key(id)
+  const at = options?.at ?? 0
   const requestId = at === 0 ? key : `${key.slice(0, -4)}${at.toString(16).padStart(4, "0")}`
   const grantId = ledger.grant(account)
   if (grantId === undefined || !ledger.canOperate(account, proposal.kind)) return refusedBefore
@@ -470,6 +490,7 @@ export effect function operate(id: number, account: number, proposal: Proposal, 
   const receipt = prepared.operation.receipt
   if (ledger.generation(account) !== generation || !ledger.canOperate(account, proposal.kind) || receipt.requestId !== requestId || receipt.kind !== proposal.kind) return refusedBefore
   if (receipt.state !== "prepared") return endedAs(prepared.operation)
+  if (options?.matches !== undefined && !options.matches(prepared.operation.review)) return refusedBefore
   const reviewDigest = receipt.reviewDigest
   const dispatched = effect {
     return { operation: try asked((signal) => client.gmailDispatch({ grantId, requestId, reviewDigest, proposal }, { signal })) }
@@ -485,5 +506,5 @@ export effect function relabel(id: number, account: number, message: number, kin
   const ledger = try Mail
   const messageId = ledger.gmailId(message, account)
   if (messageId === undefined) return refusedBefore
-  return try operate(id, account, { kind, messageId, expectedHistoryId: ledger.card(message)?.metadata.historyId ?? "" }, at)
+  return try operate(id, account, { kind, messageId, expectedHistoryId: ledger.card(message)?.metadata.historyId ?? "" }, { at })
 }

@@ -47,3 +47,19 @@ export function AssistantCardFrame({ icon, title, detail, children, actions, onO
     </Card>
   );
 }
+
+/** A reply's list of rows, openable as a whole while the card is live. */
+export function AssistantCardRows({ title, children, onOpen, settled }: Pick<AssistantCardFrameProps, "title" | "children" | "onOpen" | "settled">) {
+  const list = (
+    <span className="flex w-full flex-col">
+      <span className="sr-only">{title}</span>
+      {children}
+    </span>
+  );
+  const surface = "w-full overflow-hidden rounded-tile bg-secondary text-left text-secondary-foreground";
+  return onOpen && !settled ? (
+    <button type="button" onClick={onOpen} className={cn(focusRing, surface, "active:bg-accent")}>{list}</button>
+  ) : (
+    <div className={surface}>{list}</div>
+  );
+}

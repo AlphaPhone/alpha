@@ -1,4 +1,5 @@
-// spec/app/reminders/editor.md, "Story: Create or edit a reminder with safe validation and draft recovery"
+// spec/app/reminders/editor.md, "Story: Create and edit a reminder safely"
+import type { ReminderListRecord, ReminderPriority, ReminderRecurrence, ReminderSubtaskRecord } from "@repo/launcher-records";
 import { Button, Checkbox, Chip, Input, Label, Select, SelectContent, SelectItem, SelectTrigger, Sheet, SheetContent, Switch, Textarea } from "@repo/ui";
 import type { ManagedRuntime } from "effect";
 import type * as KeyValueStore from "effect/persistence/KeyValueStore";
@@ -9,7 +10,6 @@ import { useMachine as useEditorMachine } from "../../gen/app__reminders__editor
 import { Time } from "../runtime/time.vibe";
 import { editorDraftStore, type ReminderEditorFields, updateEditorDraft } from "./editor.vibe";
 import { inputTimeToMinute, minuteToInputTime, quickDatePresets } from "./recurrence.ts";
-import type { ReminderListRecord, ReminderPriority, ReminderRecurrence, ReminderSubtaskRecord } from "./store.ts";
 
 const RECURRENCE_OPTIONS: readonly { readonly value: ReminderRecurrence; readonly label: string }[] = [
   { value: "none", label: "Never" },

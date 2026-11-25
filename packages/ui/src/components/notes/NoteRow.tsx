@@ -1,5 +1,5 @@
 import type { ComponentProps } from "react";
-import { AudioLines } from "lucide-react";
+import { AudioLines, Check } from "lucide-react";
 import { cn, focusRing } from "../../lib/cn.ts";
 
 export type NoteRowProps = Omit<ComponentProps<"button">, "title"> & {
@@ -17,12 +17,16 @@ export type NoteRowProps = Omit<ComponentProps<"button">, "title"> & {
 
 /** One note in the Notes list: its title, then its date and the first two lines of what it holds. */
 export function NoteRow({ title, date, preview, voice = false, aside, className, ...props }: NoteRowProps) {
+  const chosen = props["aria-pressed"];
   return (
     <button
       type="button"
       className={cn(focusRing, "flex w-full items-start gap-3 border-b border-border px-2 py-3 text-left text-foreground focus-visible:-outline-offset-focus active:bg-accent", className)}
       {...props}
     >
+      {typeof chosen === "boolean" && <span aria-hidden className={cn("mt-0.5 grid size-6 shrink-0 place-items-center rounded-check", chosen ? "bg-alpha text-alpha-foreground" : "inset-ring-[1.5px] inset-ring-muted-foreground")}>
+        {chosen && <Check className="size-3.75" />}
+      </span>}
       {voice && <AudioLines aria-hidden className="mt-0.5 size-4.5 shrink-0 text-primary" />}
       <span className="block min-w-0 flex-auto">
         <span className="block truncate text-body leading-row font-semibold">{title}</span>

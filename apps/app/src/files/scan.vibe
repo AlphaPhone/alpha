@@ -142,27 +142,33 @@ const visible = started(effect {
   })
 }, "Files scanner foreground")
 
+effect function readSelectedImage(blob: Blob) {
+  const accepted = tryPromise(() => scanImage(blob)) catch () => undefined
+  if (accepted === undefined) try say("Choose a JPEG, PNG or WebP image under 16 MB.", true)
+  return accepted
+}
+
+effect function documentFits(held: ScanAssets.Shape, state: Scan.Scan, replacing: number, image: ScanImage) {
+  let total = image.blob.size
+  for (const page of state.pages) {
+    if (page.image !== replacing) total += (try held.read(page.image))?.blob.size ?? 0
+  }
+  if (total <= 64_000_000) return true
+  try say("This document exceeds 64 MB.", true)
+  return false
+}
+
 /** An image selected by the owner is admitted once, and the scanner's generated model gets a new page identity. */
 export effect function addScanImage(blob: Blob, replacing: number, camera: boolean) {
-  const accepted = tryPromise(() => scanImage(blob)) catch () => undefined
-  if (accepted === undefined) {
-    try say("Choose a JPEG, PNG or WebP image under 16 MB.", true)
-    return
-  }
+  const accepted = try readSelectedImage(blob)
+  if (accepted === undefined) return
   const held = try ScanAssets
   const model = try Scan.Machine
   try Semaphore.withPermit(held.turn, effect {
     const state = try model.get()
     const next = state.images + 1
     if (!Scan.canAdd(state, next, replacing, camera, "Phone")) return
-    let total = accepted.blob.size
-    for (const page of state.pages) {
-      if (page.image !== replacing) total += (try held.read(page.image))?.blob.size ?? 0
-    }
-    if (total > 64_000_000) {
-      try say("This document exceeds 64 MB.", true)
-      return
-    }
+    if (!(try documentFits(held, state, replacing, accepted))) return
     try held.hold(next, accepted)
     try contained(model.send({ type: "add", frame: next, replacing, camera }, "Phone"), "adding the scanned page")
   })
@@ -175,11 +181,8 @@ export effect function scanSelectedImage(blob: Blob) {
   const device = try Device
   const origin = try photos.get()
   if (!(try (try PhotoChooser).finish()) || !origin.visible || origin.secure || !showing(try shell.get(), "Photos")) return
-  const accepted = tryPromise(() => scanImage(blob)) catch () => undefined
-  if (accepted === undefined) {
-    try say("Choose a JPEG, PNG or WebP image under 16 MB.", true)
-    return
-  }
+  const accepted = try readSelectedImage(blob)
+  if (accepted === undefined) return
   const held = try ScanAssets
   const model = try Scan.Machine
   try Semaphore.withPermit(held.turn, effect {
@@ -698,14 +701,7 @@ effect function useCorrection(image: number) {
   try Semaphore.withPermit(held.turn, effect {
     const state = try model.get()
     if (!Scan.canCorrected(state, image, "Phone")) return
-    let total = corrected.blob.size
-    for (const page of state.pages) {
-      if (page.image !== image) total += (try held.read(page.image))?.blob.size ?? 0
-    }
-    if (total > 64_000_000) {
-      try say("This document exceeds 64 MB.", true)
-      return
-    }
+    if (!(try documentFits(held, state, image, corrected))) return
     try held.hold(state.images + 1, corrected)
     try contained(model.send({ type: "corrected", image }, "Phone"), "replacing the corrected page")
   })

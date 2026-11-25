@@ -1,7 +1,7 @@
 // spec/app/reminders/index.md, "Story: Organize reminders across smart views and custom lists"
+import type { ReminderListColor, ReminderListIcon, ReminderPriority } from "@repo/launcher-records";
 import { cn } from "@repo/ui";
 import { Bookmark, BriefcaseBusiness, Heart, House, ListChecks, ShoppingCart, Star, Zap } from "lucide-react";
-import type { ReminderListColor, ReminderListIcon, ReminderPriority } from "./store.ts";
 
 /** All selectable semantic colors for custom reminder lists. */
 export const LIST_COLORS: readonly ReminderListColor[] = ["accent", "blue", "green", "amber", "rose", "violet"];

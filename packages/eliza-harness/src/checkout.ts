@@ -36,11 +36,12 @@ export function checkout(): Checkout {
 
 const stamp = (at: Checkout) => path.join(at.root, ".alpha/ready.json");
 
-const clientPackages = [
+const preparedPackages = [
   { name: "@elizaos/plugin-files-client", entry: "packages/plugin-files-client/dist/src/index.js" },
   { name: "@elizaos/plugin-inbox-client", entry: "packages/plugin-inbox-client/dist/src/index.js" },
   { name: "@elizaos/plugin-maps-client", entry: "packages/plugin-maps-client/dist/src/index.js" },
   { name: "@elizaos/plugin-notes-client", entry: "packages/plugin-notes-client/dist/src/index.js" },
+  { name: "@elizaos/plugin-notes", entry: "packages/plugin-notes/dist/src/agent.js" },
   { name: "@elizaos/plugin-wallet-client", entry: "packages/plugin-wallet-client/dist/src/index.js" },
   { name: "@elizaos/plugin-workflow-client", entry: "packages/plugin-workflow-client/dist/src/index.js" },
 ];
@@ -55,8 +56,8 @@ function readStamp(at: Checkout): ReadyStamp {
   return fs.existsSync(file) ? JSON.parse(fs.readFileSync(file, "utf8")) as ReadyStamp : {};
 }
 
-function missingClients(at: Checkout, before: ReadyStamp) {
-  return clientPackages.filter(({ name, entry }) =>
+function missingPackages(at: Checkout, before: ReadyStamp) {
+  return preparedPackages.filter(({ name, entry }) =>
     before.commit !== at.commit || before.clients?.includes(name) !== true || !fs.existsSync(path.join(at.root, entry)));
 }
 
@@ -78,7 +79,7 @@ function linked(at: Checkout) {
 
 export function ready(at: Checkout = checkout()): boolean {
   const before = readStamp(at);
-  return before.commit === at.commit && missingClients(at, before).length === 0;
+  return before.commit === at.commit && missingPackages(at, before).length === 0;
 }
 
 /** The checkout, or the command that makes it. */
@@ -120,11 +121,11 @@ export async function prepare() {
 
 async function build(at: Checkout) {
   const before = readStamp(at);
-  const clients = missingClients(at, before);
+  const packages = missingPackages(at, before);
   if (before.commit !== at.commit) await buildBase(at);
-  else if (clients.length === 0) return;
-  for (const { name } of clients) run(at.root, "pnpm", "--filter", name, "build");
-  fs.writeFileSync(stamp(at), JSON.stringify({ commit: at.commit, clients: clientPackages.map(({ name }) => name) }));
+  else if (packages.length === 0) return;
+  for (const { name } of packages) run(at.root, "pnpm", "--filter", name, "build");
+  fs.writeFileSync(stamp(at), JSON.stringify({ commit: at.commit, clients: preparedPackages.map(({ name }) => name) }));
 }
 
 async function buildBase(at: Checkout) {

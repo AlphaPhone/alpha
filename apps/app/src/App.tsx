@@ -1,11 +1,13 @@
 // spec/app/shell/index.md, "Story: Move between Home and the apps"; spec/app/shell/index.md, "On Phone, Messages and Contacts the app's own bar stands in for Ask Alpha at rest, until Ask Alpha rises"; spec/app/shell/gestures.md, "A swipe travels at least 46 points; a sideways one from within 30 points of a side edge, towards the middle, is Back"; spec/app/shell/gestures.md, "On the launcher a pull down that Home allows opens Android's shade, and a swipe up from the bottom bar goes Home; nothing else is a swipe"; spec/app/shell/layers.md, "The page under a layer or a hold takes no touch, and a covering layer or a hold takes none for Ask Alpha either"; spec/app/update/page.md, "A page that was not mounted mounts its editors only once no update is pending"
 import { Alert, AppHeader, StartupFailureScreen, StartupMark, cn } from "@repo/ui";
-import { type PointerEvent, type TouchEvent, useCallback, useRef, useSyncExternalStore } from "react";
+import { type PointerEvent, type TouchEvent, useCallback, useEffect, useRef, useSyncExternalStore } from "react";
 import { useMachine } from "../gen/app__shell.react.ts";
 import { askAlphaDrawn } from "../gen/app__shell.ts";
 import { useMachine as useCanvas } from "../gen/app__shell__keyboard.react.ts";
 import { useMachine as useLayers } from "../gen/app__shell__layers.react.ts";
 import { assistantInert, pageInert, takesBack } from "../gen/app__shell__layers.ts";
+import { useMachine as useAccess } from "../gen/app__startup__access.react.ts";
+import { completed as accessCompleted, panel as accessPanel } from "../gen/app__startup__access.ts";
 import { barHeight, edge, swipe } from "../gen/app__shell__gestures.ts";
 import { useMachine as usePage } from "../gen/app__update__page.react.ts";
 import { dialogShown, editorsMounted } from "../gen/app__update__page.ts";
@@ -17,7 +19,10 @@ import { AppBack } from "./shell/AppBack.tsx";
 import { measureChrome, watchChrome } from "./shell/chrome.vibe";
 import { home } from "./shell/shell.vibe";
 import { isCommsView, viewHasHeader, views } from "./shell/views.tsx";
+import { canLeaveSignInStep, SignIn, useFirstRun } from "./startup/SignIn.tsx";
+import { AccessWalkthrough } from "./startup/SettingsAccess.tsx";
 import { reloadBeforeMount } from "./startup/recovery.vibe";
+import { openStartupAccess } from "./startup/settingsAccess.vibe";
 
 export interface AppProps {
   /** Alpha as boot.tsx opened it: the root runtime, and every screen at its place. */
@@ -86,6 +91,17 @@ export function App({ alpha }: AppProps) {
     if (node) return watchChrome(node, (event) => { void alpha.runtime.runPromise(measureChrome(event)); });
   }, [alpha]);
   const updating = page !== undefined && dialogShown(page);
+  const { read: signedIn, flow: signInFlow } = useFirstRun(alpha, state !== undefined && cause === undefined && page !== undefined && editorsMounted(page) && !updating);
+  const signingIn = alpha.requiresSignIn && signedIn?.stage !== "Admitted";
+  const access = useAccess(alpha.runtime).state;
+  const enrolled = alpha.requiresSignIn && signedIn?.accountConfirmed === true;
+  const accessCovered = !state || cause !== undefined || updating || (layers !== undefined && pageInert(layers))
+    || state.assistant === "Sheet" || state.assistant === "Full" || state.textAsk.tag === "TextAskVisit";
+  useEffect(() => {
+    if (enrolled) alpha.runtime.runFork(openStartupAccess(accessCovered));
+  }, [alpha, enrolled, accessCovered]);
+  const accessHolding = enrolled && !accessCovered && (!access || !access.begun || !accessCompleted(access));
+  const accessShowing = accessHolding && access !== undefined && accessPanel(access) === "Walkthrough";
   if (!state) {
     if (updating) return <>{alpha.slot("overlay")}</>;
     return cause
@@ -94,9 +110,9 @@ export function App({ alpha }: AppProps) {
   }
   const shellFailed = cause !== undefined;
   const showing = state.trail.at(-1);
-  const owner = `${showing ?? "home"}:${state.assistant}:${launcher}`;
+  const owner = `${showing ?? "home"}:${state.assistant}:${launcher}:${state.textAskThrough}`;
   const beginSwipe = (event: PointerEvent<HTMLElement>) => {
-    if (shellFailed || !event.isPrimary || event.button !== 0 || event.defaultPrevented) return;
+    if (shellFailed || signingIn || accessHolding || state.textAsk.tag === "TextAskVisit" || !event.isPrimary || event.button !== 0 || event.defaultPrevented) return;
     startedRef.current = undefined;
     const target = event.target;
     if (target instanceof Element && target.closest("input, textarea, select, [contenteditable]:not([contenteditable=false]), [data-alpha-own-gesture]")) return;
@@ -165,11 +181,12 @@ export function App({ alpha }: AppProps) {
   };
   const inert = shellFailed || (layers !== undefined && pageInert(layers));
   const comms = isCommsView(showing);
-  const side = showing === undefined && canvas?.landscape === true && coarsePointer;
+  const side = state.textAsk.tag === "NoTextAsk" && showing === undefined && canvas?.landscape === true && coarsePointer;
   const fullScreen = state.assistant === "Full" && !side;
   const strip = comms && fullScreen;
   const back = !shellFailed && can({ type: "goBack" });
-  const canGoBack = String(!shellFailed && (back || (layers !== undefined && takesBack(layers))));
+  const canGoBack = String(!shellFailed && (accessHolding || (signingIn ? canLeaveSignInStep(signedIn, signInFlow)
+    : back || state.textAsk.tag === "TextAskVisit" || (layers !== undefined && takesBack(layers)))));
   const frameStyle = preview
     ? { left: preview.left, top: preview.top, width: preview.width, height: preview.height, transform: `scale(${preview.scale})`, transformOrigin: "top left" }
     : canvas?.covered ? { height: canvas.visible } : undefined;
@@ -196,10 +213,12 @@ export function App({ alpha }: AppProps) {
           if (document && document.dataset.alphaCanGoBack !== canGoBack) document.dataset.alphaCanGoBack = canGoBack;
         }}
         className={cn("relative flex min-h-0 min-w-0 flex-1 flex-col", showing !== undefined && "overflow-auto overscroll-contain", strip && "overflow-hidden")}
-        inert={inert || fullScreen}
+        inert={signingIn ? updating : inert || fullScreen}
       >
-        {comms && alpha.slot("phone/stage")}
-        {page === undefined || !editorsMounted(page) ? null : showing === undefined
+        {signingIn && !updating ? <SignIn alpha={alpha} read={signedIn} state={signInFlow} /> : null}
+        {accessHolding && !accessShowing ? <StartupMark /> : null}
+        {!signingIn && !accessHolding && comms && alpha.slot("phone/stage")}
+        {signingIn || accessHolding || page === undefined || !editorsMounted(page) ? null : showing === undefined
           ? alpha.slot("home")
           : (
             <div key={showing} className="flex min-h-0 flex-1 flex-col motion-safe:animate-rise">
@@ -213,9 +232,10 @@ export function App({ alpha }: AppProps) {
           )}
         {!phone && <BrowserFrames alpha={alpha} preview={preview} />}
       </div>
+      {accessShowing ? <AccessWalkthrough runtime={alpha.runtime} /> : null}
       <div
         data-alpha-assistant-host=""
-        hidden={!askAlphaDrawn(state)}
+        hidden={signingIn || accessHolding || !askAlphaDrawn(state)}
         className={cn(
           "in-[body:has([data-alpha-notes-trash-sheet])]:invisible",
           "in-[body:has([data-alpha-subview=photos-clip-editor])]:invisible",
@@ -230,7 +250,7 @@ export function App({ alpha }: AppProps) {
         )}
         inert={shellFailed || (layers !== undefined && assistantInert(layers))}
       >
-        {alpha.slot("assistant")}
+        {!signingIn && !accessHolding && alpha.slot("assistant")}
       </div>
       {alpha.slot("overlay")}
       {alpha.slot("notice")}

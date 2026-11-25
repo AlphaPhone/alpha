@@ -1,5 +1,6 @@
 // spec/app/photos/viewer.md, "Story: Edit a photo or trim a video"
 module clips {
+  import * as Effect from "effect/Effect"
   import type { BrowserEditFrame } from "./photoCanvas.vibe"
 
   export type ClipTransform = { readonly start: number; readonly end: number; readonly turns: number; readonly crop: boolean }
@@ -54,7 +55,7 @@ module clips {
     return { canvas, draw }
   }
 
-  function waitFor(video: HTMLVideoElement, name: "loadeddata" | "seeked", start: () => void, signal: AbortSignal): Promise<void> {
+  function waitFor(video: HTMLVideoElement, name: "loadedmetadata" | "loadeddata" | "seeked", start: () => void, signal: AbortSignal): Promise<void> {
     return new Promise((resolve, reject) => {
       const clean = () => {
         signal.removeEventListener("abort", aborted)
@@ -72,6 +73,21 @@ module clips {
     })
   }
 
+  /** Read the pixel dimensions from the encoded video. */
+  export async function readVideoSize(file: Blob, signal: AbortSignal): Promise<{ width: number; height: number }> {
+    const video = document.createElement("video")
+    video.preload = "metadata"
+    const source = URL.createObjectURL(file)
+    try {
+      await waitFor(video, "loadedmetadata", () => { video.src = source; video.load() }, signal)
+      return { width: video.videoWidth, height: video.videoHeight }
+    } finally {
+      video.removeAttribute("src")
+      video.load()
+      URL.revokeObjectURL(source)
+    }
+  }
+
   function resume(audio: AudioContext, signal: AbortSignal): Promise<void> {
     return new Promise((resolve, reject) => {
       const aborted = () => reject(signal.reason)
@@ -85,11 +101,11 @@ module clips {
     const recorder = new MediaRecorder(stream)
     return new Promise((resolve, reject) => {
       const chunks: Blob[] = []
-      let bytes = 0, frame = 0, stopped = false, finished = false
+      let bytes = 0, stopped = false, finished = false
+      let cancelFrame: (() => void) | undefined
       let reached = edit.start
       const cleanup = () => {
-        if (typeof video.cancelVideoFrameCallback === "function") video.cancelVideoFrameCallback(frame)
-        else cancelAnimationFrame(frame)
+        cancelFrame?.()
         video.pause()
         video.onended = null
         video.onerror = null
@@ -117,7 +133,12 @@ module clips {
         if (recorder.state !== "inactive") recorder.stop()
       }
       const next = () => {
-        frame = typeof video.requestVideoFrameCallback === "function" ? video.requestVideoFrameCallback(paint) : requestAnimationFrame(paint)
+        if (typeof video.requestVideoFrameCallback === "function") {
+          const frame = video.requestVideoFrameCallback(paint)
+          cancelFrame = () => video.cancelVideoFrameCallback(frame)
+        } else {
+          cancelFrame = Effect.runCallback(Effect.andThen(Effect.sleep("16 millis"), Effect.sync(paint)))
+        }
       }
       const paint = () => {
         if (stopped || finished) return
@@ -189,6 +210,6 @@ module clips {
     }
   }
 }
-import { clipRefusal, renderBrowserClip, type ClipSource } from clips
-export { clipRefusal, renderBrowserClip }
+import { clipRefusal, readVideoSize, renderBrowserClip, type ClipSource } from clips
+export { clipRefusal, readVideoSize, renderBrowserClip }
 export type { ClipSource }

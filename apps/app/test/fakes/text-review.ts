@@ -1,4 +1,5 @@
 import type { DeviceOperation, JournalEntry } from "@elizaos/agent";
+import type { WorkflowDeviceBinding } from "@elizaos/plugin-workflow-client";
 import { type Faked, plugin } from "./phone.ts";
 import { readJsonBody, type Route } from "./routes.ts";
 
@@ -7,7 +8,7 @@ const key = "a".repeat(64);
 const attemptId = "device-attempt-1";
 
 type Sms = Extract<DeviceOperation, { type: "sms_send" }>;
-type ReviewOperation = Extract<DeviceOperation, { type: "sms_send" | "sms_compose" | "sms_latest_sender" | "messages_read_selected" | "voicemail_read_selected" | "voicemail_delete_selected" | "files_filter" | "files_open" | "files_move" | "files_share" | "files_trash" | "files_folder_create" | "browser_navigate" }>;
+type ReviewOperation = Extract<DeviceOperation, { type: "sms_send" | "sms_compose" | "sms_latest_sender" | "messages_read_selected" | "voicemail_read_selected" | "voicemail_delete_selected" | "files_filter" | "files_open" | "files_move" | "files_share" | "files_trash" | "files_folder_create" | "browser_navigate" | "camera_capture_photo" | "create_note" }>;
 interface ReadOrigin { readonly version: 1; readonly requestId: string; readonly conversationId: string; readonly inReplyTo: string }
 
 type Confirmation = Pick<Sms, "recipients" | "body" | "subscriptionId"> & { operationId: string; confirm(): void };
@@ -19,6 +20,9 @@ export function textReview(agentId: string, id: string, operation: ReviewOperati
       id, digest: "b".repeat(64), state: "pending", expiresAt: new Date(Date.now() + 60_000).toISOString(),
       payload: { installationId: agentId, enrollmentId, operation, requestMessageId },
     },
+    cameraLibraryId: false,
+    attemptId,
+    workflow: undefined as { binding: WorkflowDeviceBinding; offered(): boolean; answered?(): void } | undefined,
     pendingReads: 0,
     readOrigin: undefined as ReadOrigin | undefined,
     senderReads: [] as boolean[],
@@ -58,6 +62,8 @@ export function textReviewRoute(review: TextReviewScene, subjectUserId: string):
     files_trash: files,
     files_folder_create: files,
     browser_navigate: files,
+    camera_capture_photo: ["camera.capture-photo.v1", ...(review.cameraLibraryId ? ["camera.capture-library-id.v1"] : [])],
+    create_note: files,
   }[operation.type];
   const prefix = "/api/client-devices/";
   const reject = (status: number) => Response.json({ error: "review refused" }, { status });
@@ -73,9 +79,16 @@ export function textReviewRoute(review: TextReviewScene, subjectUserId: string):
     if (request.method === "GET" && resource === "context") {
       return Response.json({ agentId, installationId: agentId, enrollmentId, subjectUserId });
     }
+    if (request.method === "POST" && resource === "register" && review.workflow !== undefined) {
+      return readJsonBody(request).then((body) => body.workflowProtocol === 1
+        ? Response.json({ installationId: agentId, enrollmentId }) : reject(409));
+    }
     if (request.method === "GET" && resource === "proposals") {
       review.pendingReads += 1;
-      return Response.json({ proposals: [{ ...proposal, ...(review.readOrigin === undefined ? {} : { readReplyOrigin: review.readOrigin }) }] });
+      if (review.workflow !== undefined && !review.workflow.offered()) return Response.json({ proposals: [] });
+      const payload = { ...proposal.payload, ...(review.workflow === undefined ? {} : { workflow: review.workflow.binding }) };
+      const execution = ["executing", "reconciliation_required", "done"].includes(proposal.state) ? { attemptId } : undefined;
+      return Response.json({ proposals: [{ ...proposal, payload, execution, ...(review.readOrigin === undefined ? {} : { readReplyOrigin: review.readOrigin }) }] });
     }
     if (request.method !== "POST" || !resource.startsWith(`proposals/${proposal.id}/`)) return reject(404);
     const step = resource.split("/").at(-1);
@@ -99,7 +112,9 @@ export function textReviewRoute(review: TextReviewScene, subjectUserId: string):
       }
       if (step === "receipt" && proposal.state === "executing" && body.attemptId === attemptId) {
         review.receipts.push(body.receipt);
-        proposal.state = "done";
+        proposal.state = typeof body.receipt === "object" && body.receipt !== null && "outcome" in body.receipt && body.receipt.outcome === "unknown"
+          ? "reconciliation_required" : "done";
+        review.workflow?.answered?.();
         return Response.json({ digest: proposal.digest, proposal });
       }
       const origin = review.readOrigin;

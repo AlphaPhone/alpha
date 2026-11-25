@@ -37,14 +37,16 @@ through the [shell](../shell/). Messages is listed on an Alpha image.
 General holds Display, Sound, Notifications, Battery and, on a phone,
 Network and Carrier & SIM setup, and on an Alpha image, Phone. Privacy
 holds Permissions. Apps holds a page for each app with something to set:
-Inbox, Workflows, Calendar, Camera, Photos, Maps, Notes and, on a phone, Passwords. About holds
+Inbox, Workflows, Calendar, Camera, Photos, Maps, Notes and Passwords. About holds
 Agent activity and the Licences. Developer and its Problem log hang from
 the first page.
 
 ```quint
 import facts as F from "./facts"
 
-type Page = Top | General | Display | Sound | Notifications | Battery | NetworkPage | CarrierPage | PhonePage | Privacy | Permissions | Apps | InboxApp | WorkflowsApp | CalendarApp | CameraApp | PhotosApp | MapsApp | NotesApp | PasswordsPage | About | Activity | Licences | Developer | Problems
+type Page = Top | General | Display | Sound | Notifications | Battery | NetworkPage | CarrierPage | PhonePage | Privacy | Permissions | Apps | InboxApp | WorkflowsApp | CalendarApp | CameraApp | PhotosApp | MapsApp | NotesApp | PasswordsPage | BrowserPasswordsPage | About | Activity | Licences | Developer | Problems
+
+pure def passwordPage(page: Page): bool = page == PasswordsPage or page == BrowserPasswordsPage
 
 pure def parent(page: Page): Page =
   if (page == Display or page == Sound or page == Notifications or page == Battery or page == NetworkPage or page == CarrierPage or page == PhonePage) General
@@ -90,7 +92,7 @@ pure def refocused(places: List[int], focused: int): List[int] =
 ### The build says once whether it is a development build, and the phone whether Alpha runs on a phone and on an Alpha image
 
 The Developer page and its Problem log exist only in a development build,
-Network, Carrier & SIM setup and Passwords only on a phone, which a browser is not,
+Network and Carrier & SIM setup only on a phone, which a browser is not,
 and the Phone page only on an Alpha image, which is a phone. What the build
 and the phone are never changes while Alpha runs. A development build is
 the development server or a build that allows test mocks
@@ -103,7 +105,7 @@ never shows the developer pages or their controls.
 ```quint
 pure def admitted(s: Settings, page: Page): bool =
   if (page == Developer or page == Problems) s.development
-  else if (page == NetworkPage or page == CarrierPage or page == PasswordsPage) s.phone
+  else if (page == NetworkPage or page == CarrierPage) s.phone
   else if (page == PhonePage) s.image
   else true
 
@@ -132,9 +134,31 @@ pure def alwaysEveryPageShownIsAdmitted(s: Settings): bool = admitted(s, s.page)
 ### A row opens only an admitted page that hangs from the page showing, at its top
 
 ```quint
-pure def canOpen(s: Settings, page: Page): bool = page != Top and parent(page) == s.page and admitted(s, page)
+pure def canOpen(s: Settings, page: Page): bool =
+  page != Top and page != BrowserPasswordsPage and parent(page) == s.page and admitted(s, page)
 
 pure def open(s: Settings, page: Page): Settings = { ...s, page: page, places: s.places.append(0) }
+```
+
+### The owner can open Password manager from the Browser menu
+
+The shortcut opens the same Password manager as the Apps row. Its Back
+goes to the first Settings page. Back from the Apps row returns to Apps.
+In a browser build the page shows the provider information alone.
+
+```quint
+pure def canOpenBrowserPasswords(s: Settings): bool = s.page == Top
+
+pure def openBrowserPasswords(s: Settings): Settings =
+  { ...s, page: BrowserPasswordsPage, places: s.places.append(0) }
+```
+
+### The Browser shortcut opens Password manager at its top
+
+```quint
+pure def stepTheBrowserShortcutReturnsToSettings(before: Settings, via: str, after: Settings): bool =
+  via == "openBrowserPasswords" implies
+    (before.page == Top and after.page == BrowserPasswordsPage and parent(after.page) == Top)
 ```
 
 ### A notice or Ask Alpha may open a section directly, at its top, and Back from it goes to its parent
@@ -226,12 +250,12 @@ pure def sometimesPhonePageShowing(s: Settings): bool = s.page == PhonePage
 
 ### Carrier & SIM setup and Phone are sensitive screens, only on a phone
 
-While either page shows, phone numbers and identifiers stay on the phone. Passwords is also a sensitive page only on a phone, where it reports Android's autofill choice and takes the owner to Android's own provider selection.
+While either page shows, phone numbers and identifiers stay on the phone. Password manager is also sensitive on a phone, where it reports Android's autofill choice and takes the owner to Android's own provider selection.
 The assistant is told only that the screen is sensitive and admits
 nothing that acts on it ([assistant](../assistant/index.md)).
 
 ```quint
-pure def sensitive(s: Settings): bool = s.page == CarrierPage or s.page == PhonePage or s.page == PasswordsPage
+pure def sensitive(s: Settings): bool = s.page == CarrierPage or s.page == PhonePage or (s.phone and passwordPage(s.page))
 
 pure def alwaysASensitivePageIsOnAPhone(s: Settings): bool = sensitive(s) implies s.phone
 ```

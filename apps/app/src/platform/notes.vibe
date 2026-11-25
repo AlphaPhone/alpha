@@ -34,7 +34,6 @@ export service NoteStore {
   recover(id: string, expectedRevision: number): NotesInteractResult!NotesFailed
   erase(review: NotesTrashErase): { readonly erased: number; readonly recordingCleanup: readonly NotesTrashRecordingCleanup[]; readonly state: NotesSnapshot }!NotesFailed
   cleanup(): readonly NotesTrashRecordingCleanup[]!NotesFailed
-  cleaned(receipt: NotesTrashRecordingCleanup): boolean!NotesFailed
 }
 
 function failed(cause: unknown): NotesFailed {
@@ -56,6 +55,5 @@ export const noteStore = Layer.effect(NoteStore, effect {
       tryPromise({ try: (signal) => client.interact("restore-note", { id, expectedRevision }, signal), catch: failed }),
     erase: (review: NotesTrashErase) => tryPromise({ try: (signal) => client.eraseTrash(review, signal), catch: failed }),
     cleanup: () => tryPromise({ try: (signal) => client.readTrashRecordingCleanup(signal), catch: failed }),
-    cleaned: (receipt: NotesTrashRecordingCleanup) => tryPromise({ try: (signal) => client.completeTrashRecordingCleanup(receipt, signal), catch: failed }),
   }
 })

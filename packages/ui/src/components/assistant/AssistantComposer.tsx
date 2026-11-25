@@ -1,9 +1,9 @@
-import type { ComponentProps, PointerEvent, ReactNode, Ref } from "react";
-import { ArrowUp, Clock, Keyboard, Mic, Paperclip, Plus, Search } from "lucide-react";
+import { type ComponentProps, type PointerEvent, type ReactNode, type Ref, useRef } from "react";
+import { ArrowUp, Keyboard, Mic } from "lucide-react";
 import { cn } from "../../lib/cn.ts";
 import { Button } from "../Button.tsx";
 import { Mark } from "../Mark.tsx";
-import { Menu, MenuContent, MenuItem, MenuTrigger } from "../Menu.tsx";
+import { AssistantChatActions } from "./AssistantChatActions.tsx";
 import { Textarea } from "../Textarea.tsx";
 import { AssistantDraftNotice, type AssistantDraftNoticeProps } from "./AssistantDraftNotice.tsx";
 import type { AssistantAttachment } from "./AssistantAttachmentChip.tsx";
@@ -64,6 +64,8 @@ export type AssistantComposerProps = Omit<ComponentProps<"div">, "children" | "o
   onOpen?: () => void;
   /** Presents the resting controls as a pill with a separate Type button. */
   onType?: () => void;
+  /** A swipe up that starts on one of the pill's buttons, as v121's pill took one from anywhere on it; its mark and its background are the dock's own drag. */
+  onSwipeUp?: () => void;
   /** The other target when Ask Alpha is open above a call or a conversation. */
   leading?: ReactNode;
   /** The mark in the closed dock when it also acts as the gesture handle. */
@@ -86,6 +88,40 @@ export type AssistantComposerProps = Omit<ComponentProps<"div">, "children" | "o
 
 const reasons = { away: "Alpha cannot be reached", sensitive: "This screen is private and is never sent" };
 
+const swipeSlop = 6;
+
+/**
+ * v121's pillSw on the pill's buttons: nothing is taken until the finger moves past a few pixels, so a still tap stays
+ * the button's; once it moves the finger is held, and a release above where it started is a swipe up. The press is seen
+ * on its way down, before Talk keeps it for the field.
+ */
+function usePillSwipe(onSwipeUp: (() => void) | undefined) {
+  const swipeRef = useRef<{ pointer: number; y: number; moved: boolean } | undefined>(undefined);
+  if (!onSwipeUp) return {};
+  return {
+    onPointerDownCapture: (event: PointerEvent<HTMLDivElement>) => {
+      const on = event.target instanceof Element ? event.target.closest("button") : null;
+      swipeRef.current = on && !on.matches("[data-alpha-grabber]") && event.isPrimary && event.button === 0 ? { pointer: event.pointerId, y: event.clientY, moved: false } : undefined;
+    },
+    onPointerMove: (event: PointerEvent<HTMLDivElement>) => {
+      const swipe = swipeRef.current;
+      if (!swipe || swipe.pointer !== event.pointerId || swipe.moved || Math.abs(event.clientY - swipe.y) <= swipeSlop) return;
+      swipe.moved = true;
+      try {
+        event.currentTarget.setPointerCapture(event.pointerId);
+      } catch {
+        return;
+      }
+    },
+    onPointerUp: (event: PointerEvent<HTMLDivElement>) => {
+      const swipe = swipeRef.current;
+      swipeRef.current = undefined;
+      if (swipe?.moved && swipe.pointer === event.pointerId && event.clientY < swipe.y - swipeSlop) onSwipeUp();
+    },
+    onPointerCancel: () => { swipeRef.current = undefined; },
+  };
+}
+
 function keepComposerFocus(event: PointerEvent<HTMLButtonElement>) {
   event.stopPropagation();
   if (event.button === 0 && event.currentTarget.ownerDocument.activeElement?.matches("textarea[data-alpha-composer]")) event.preventDefault();
@@ -99,16 +135,19 @@ function keepComposerFocus(event: PointerEvent<HTMLButtonElement>) {
  */
 export function AssistantComposer({
   variant = "sheet", value, onValueChange, closed = false, notice, unavailable, attachments = [], limit = 4, quote, editing = false, lift,
-  onSend, onStop, stopping = false, onAttach, onSearch, onNew, making = false, onHistory, onTalk, onDictate, showUnavailableTalk = false, voice, voiceNotice, onOpen, onType, leading, opener, placeholder, onFocusField, fieldRef, fieldPull, onRemoveAttachment, onPreviewAttachment, onUnquote, className, style, ...props
+  onSend, onStop, stopping = false, onAttach, onSearch, onNew, making = false, onHistory, onTalk, onDictate, showUnavailableTalk = false, voice, voiceNotice, onOpen, onType, onSwipeUp, leading, opener, placeholder, onFocusField, fieldRef, fieldPull, onRemoveAttachment, onPreviewAttachment, onUnquote, className, style, ...props
 }: AssistantComposerProps) {
   const written = value.trim() !== "" || attachments.length > 0;
+  // spec/app/assistant/dock.md, "A press does one thing: a tap is never also a drag, and a late click never taps"
+  const draggable = value.length === 0;
   const bar = variant === "bar";
   const compact = bar && onType !== undefined;
+  const swiping = usePillSwipe(compact ? onSwipeUp : undefined);
   const targeting = !bar && placeholder !== undefined;
+  const frame = bar ? "mx-4 [--alpha-composer-rest:1.75rem]" : "mx-3 [--alpha-composer-rest:1.875rem]";
   const pull = useAssistantPull<HTMLTextAreaElement>(fieldPull, true);
-  const acting = Boolean(onAttach || onSearch || onNew || making || onHistory) && !closed;
   return (
-    <div role={compact ? "group" : undefined} aria-label={compact ? "Assistant controls" : undefined} data-alpha-compact-dock={compact ? "" : undefined} data-host-chrome={bar ? "" : undefined} className={cn("flex shrink-0 flex-col gap-2", bar ? "mx-4 mb-[max(1.75rem,calc(max(var(--alpha-native-inset-bottom,0px),env(safe-area-inset-bottom))_+_0.75rem))]" : "mx-3 mb-[max(1.875rem,calc(max(var(--alpha-native-inset-bottom,0px),env(safe-area-inset-bottom))_+_0.75rem))]", className)} style={lift ? { marginBottom: lift, ...style } : style} {...props}>
+    <div role={compact ? "group" : undefined} aria-label={compact ? "Assistant controls" : undefined} data-alpha-compact-dock={compact ? "" : undefined} data-host-chrome={bar ? "" : undefined} className={cn("flex shrink-0 flex-col gap-2", frame, !compact && !targeting && !voice && "not-in-data-[alpha-native]:[--alpha-composer-fit:clamp(0px,calc((412px_-_100vw)_/_11),2px)]", "mb-[max(calc(var(--alpha-composer-rest)_-_var(--alpha-composer-fit,0px)),calc(max(var(--alpha-native-inset-bottom,0px),env(safe-area-inset-bottom))_+_0.75rem))]", className)} style={lift ? { marginBottom: lift, ...style } : style} {...props}>
       {notice ? <AssistantDraftNotice {...notice} /> : null}
       {unavailable ? <span role="status" className="sr-only">{reasons[unavailable]}</span> : null}
       {!compact && attachments.length ? <AssistantPendingAttachments attachments={attachments} limit={limit} onRemove={onRemoveAttachment} onPreview={onPreviewAttachment} /> : null}
@@ -116,24 +155,13 @@ export function AssistantComposer({
       {!compact && editing ? <AssistantQuoteBar kind="editing" /> : null}
       {voiceNotice}
       {voice}
-      <div hidden={Boolean(voice)} className={cn("items-center bg-secondary", voice ? "hidden" : "flex", compact ? "touch-none gap-0.5 self-center rounded-dock-compact p-1.25 shadow-dock-compact dark:shadow-dock-compact-dark" : bar ? "min-h-18.5 touch-pan-y gap-1 rounded-dock py-1.5 pr-2 pl-2.25 shadow-dock dark:shadow-dock-dark" : cn("min-h-17 touch-pan-y gap-1.5 rounded-sheet py-1.5 pr-1.5", targeting ? "pl-1.5 ring-[1.5px] ring-primary ring-inset" : "pl-5"))}>
+      <div {...swiping} hidden={Boolean(voice)} className={cn("items-center bg-secondary", voice ? "hidden" : "flex", compact ? "touch-none gap-0.5 self-center rounded-dock-compact p-1.25 shadow-dock-compact dark:shadow-dock-compact-dark" : bar ? cn("min-h-[calc(--spacing(18.5)_-_2_*_var(--alpha-composer-fit,0px))] gap-1 rounded-dock py-1.5 pr-2 pl-2.25 shadow-dock dark:shadow-dock-dark", draggable ? "touch-none" : "touch-pan-y") : cn("min-h-[calc(--spacing(17)_-_2_*_var(--alpha-composer-fit,0px))] touch-pan-y gap-1.5 rounded-sheet py-1.5 pr-1.5", targeting ? "pl-1.5 ring-[1.5px] ring-primary ring-inset" : "pl-5"))}>
         {leading}
         {bar ? opener ?? (onOpen ? (
-          <Button size="icon" aria-label="Open conversation" className="overflow-hidden bg-alpha text-alpha-foreground hover:bg-alpha/90" onClick={onOpen}><Mark aria-hidden className="size-[118%]" /></Button>
+          <Button size="icon" aria-label="Open conversation" data-alpha-input-drag-alpha="" className="overflow-hidden bg-alpha text-alpha-foreground hover:bg-alpha/90" onClick={onOpen}><Mark aria-hidden className="size-[118%]" /></Button>
         ) : null) : null}
         {compact ? <Button variant="ghost" size="icon" aria-label="Type" disabled={closed} onClick={onType}><Keyboard /></Button> : (
-          <Menu>
-            <MenuTrigger asChild>
-              <Button variant="ghost" size="icon" aria-label="Chat actions" disabled={!acting} className="hover:bg-transparent disabled:opacity-40"><Plus /></Button>
-            </MenuTrigger>
-            <MenuContent side="top" align="start" alignOffset={bar ? -57 : -16} sideOffset={bar ? 4 : 20}
-              className="min-w-55 rounded-tile border-0 bg-background p-2 shadow-dock-compact dark:shadow-dock-compact-dark [&>[role=menuitem]]:min-h-12 [&>[role=menuitem]]:rounded-md [&>[role=menuitem]]:px-3">
-              {onAttach ? <MenuItem onSelect={onAttach}><Paperclip aria-hidden />Attach media</MenuItem> : null}
-              {onSearch ? <MenuItem onSelect={onSearch}><Search aria-hidden />Search chat</MenuItem> : null}
-              {onNew || making ? <MenuItem disabled={making} onSelect={onNew}><Plus aria-hidden />New chat</MenuItem> : null}
-              {onHistory ? <MenuItem onSelect={onHistory}><Clock aria-hidden />Chat history</MenuItem> : null}
-            </MenuContent>
-          </Menu>
+          <AssistantChatActions placement={bar ? "bar" : "sheet"} disabled={closed} onAttach={onAttach} onSearch={onSearch} onNew={onNew} making={making} onHistory={onHistory} />
         )}
         <Textarea
           ref={fieldRef}
@@ -146,13 +174,14 @@ export function AssistantComposer({
           disabled={closed}
           onChange={(event) => onValueChange(event.target.value)}
           onFocus={onFocusField}
+          data-alpha-pull={fieldPull ? "" : undefined}
           {...pull}
           onKeyDown={(event) => {
             if (event.key !== "Enter" || event.shiftKey || event.nativeEvent.isComposing) return;
             event.preventDefault();
             if (!event.repeat && !closed && !onStop && !stopping) onSend?.();
           }}
-          className={cn("max-h-[min(10.5rem,28dvh)] min-h-11 min-w-0 flex-1 rounded-full bg-transparent py-2.75 text-body leading-field", cn("border-0 pr-0.5 focus-visible:outline-none", bar ? "pl-2" : "pl-0.5"), fieldPull ? "touch-none" : "touch-auto", compact && "hidden")}
+          className={cn("max-h-[min(10.5rem,28dvh)] min-h-11 min-w-0 flex-1 rounded-full bg-transparent py-2.75 text-body leading-field", cn("border-0 pr-0.5 focus-visible:outline-none", bar ? "pl-2" : "pl-0.5"), fieldPull || (bar && draggable) ? "touch-none" : bar ? "touch-pan-y" : "touch-auto", compact && "hidden")}
         />
         {onStop || stopping ? (
           <Button variant={compact ? "ghost" : undefined} size="icon" aria-label="Stop reply" loading={stopping} className={compact ? undefined : "bg-foreground text-background hover:bg-foreground/90"} onClick={onStop}><svg aria-hidden viewBox="0 0 24 24" className="size-5.5"><rect x="7" y="7" width="10" height="10" rx="2" fill="currentColor" /></svg></Button>

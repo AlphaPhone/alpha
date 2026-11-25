@@ -7,11 +7,13 @@ import { Machine as Runs } from "../gen/app__workflows__runs.effect.vibe";
 import { Machine as Sheet } from "../gen/app__workflows__sheet.effect.vibe";
 import { Machine as Clock } from "../gen/app__workflows__clock.effect.vibe";
 import { Machine as Approvals } from "../gen/app__workflows__approvals.effect.vibe";
+import { Machine as Builder } from "../gen/app__workflows__builder.effect.vibe";
 import workflows from "../src/workflows/index.tsx";
 import home from "../src/home/index.tsx";
 import { Machine as Home } from "../gen/app__home.effect.vibe";
 import { button, closeAll, drawn, fill, later, only, open, press, pressOnTop, seen, underAct, until } from "./alpha.tsx";
 import { type Scene, scene } from "./fakes/scene.ts";
+import { workflowNoteOffer } from "./fakes/workflows.ts";
 
 underAct();
 afterEach(closeAll);
@@ -24,6 +26,33 @@ const choose = (name: string) => drawn(() => {
   row.click();
 });
 
+/** Open the workflow actions disclosure and choose its visible action. */
+const pressWorkflowAction = (name: string) => drawn(() => {
+  const opener = document.querySelector<HTMLElement>("summary[aria-label='Workflow actions']");
+  const menu = opener?.parentElement;
+  if (opener === null || !(menu instanceof HTMLDetailsElement)) throw new Error("no workflow actions disclosure");
+  expect(menu.open).toBe(false);
+  opener.click();
+  expect(menu.open).toBe(true);
+  const action = [...menu.querySelectorAll("button")].find((one) => one.textContent === name);
+  if (action === undefined) throw new Error(`no workflow action ${name}`);
+  action.click();
+});
+
+/** Press a button inside the open workflow change review. */
+const pressInReview = (name: string) => drawn(() => {
+  const found = [...document.querySelectorAll("[aria-label='Review workflow change'] button")].find((one) => one.textContent === name);
+  if (!(found instanceof HTMLButtonElement)) throw new Error(`no button ${name} in the review`);
+  found.click();
+});
+/** Type into the field a visible label wraps, as the builder's Name and Text are drawn. */
+const write = (name: string, text: string) => drawn(() => {
+  const label = [...document.querySelectorAll("label")].find((one) => one.firstChild?.textContent?.trim() === name);
+  const found = label?.querySelector<HTMLInputElement | HTMLTextAreaElement>("input, textarea");
+  if (!found) throw new Error(`no field ${name}`);
+  Object.getOwnPropertyDescriptor(Object.getPrototypeOf(found) as object, "value")?.set?.call(found, text);
+  found.dispatchEvent(new Event("input", { bubbles: true }));
+});
 
 async function openWorkflows(world: Scene) {
   const { alpha } = await open(world, only("home", "view:Workflows", "notice"));
@@ -114,6 +143,39 @@ describe("Workflows", () => {
     });
   });
 
+  it('Reviews the exact prompt before changing whether its schedule runs (spec/app/workflows/automations.md, "Turning a prompt on or off, removing an automation, and running it now require confirmation of the row and action shown")', async () => {
+    const world = scene();
+    const alpha = await openWorkflows(world);
+    const area = workflows.runtime(alpha);
+    await until(alpha, area, Listing, (state) => state.list.status === "Loaded" && state.complete);
+    await choose("Desk check");
+    await until(alpha, area, Automations, (state) => state.present && state.list.status === "Loaded");
+    const toggle = "Turn Desk check on or off";
+
+    await press(toggle);
+    expect(document.querySelector('[aria-label="Review workflow action"]')?.textContent).toContain('Pause “Desk check”?');
+    expect(world.workflows.promptEdits).toEqual([]);
+    await press("Cancel");
+    expect(document.querySelector('[aria-label="Review workflow action"]')).toBeNull();
+    expect(button(toggle)?.getAttribute("aria-checked")).toBe("true");
+    expect(world.workflows.promptEdits).toEqual([]);
+
+    await press(toggle);
+    await press("Confirm Pause");
+    await until(alpha, area, Automations, (state) => state.change.attempt.outcome === "Confirmed" && state.list.status === "Loaded" && !state.on);
+    expect(world.workflows.promptEdits).toEqual([{ enabled: false, expectedRevision: 1 }]);
+    expect(world.workflows.prompts.get("desk-check")).toMatchObject({ enabled: false, revision: 2 });
+
+    await press(toggle);
+    const changed = world.workflows.prompts.get("desk-check");
+    if (changed === undefined) throw new Error("No Desk check prompt");
+    world.workflows.prompts.set("desk-check", { ...changed, instructions: "Edited elsewhere", revision: 3 });
+    await press("Confirm Enable");
+    await until(alpha, area, Automations, (state) => state.change.attempt.outcome === "Refused");
+    expect(world.workflows.promptEdits).toEqual([{ enabled: false, expectedRevision: 1 }, { enabled: true, expectedRevision: 2 }]);
+    expect(world.workflows.prompts.get("desk-check")).toMatchObject({ enabled: false, instructions: "Edited elsewhere", revision: 3 });
+  });
+
   it('Keeps the saved schedule while editing prompt instructions (spec/app/workflows/automations.md, "Story: Create or edit an automation on a schedule")', async () => {
     const world = scene();
     const existing = [
@@ -168,8 +230,12 @@ describe("Workflows", () => {
     expect(world.workflows.prompts.get("weekly-prompt")?.instructions).toBe("Changed in another session.");
   });
 
-  it('Runs the reviewed version, follows its approval and opens its output (spec/app/workflows/runs.md, "Story: Run a workflow now"; spec/app/workflows/sheet.md, "Story: Read a run\'s sheet"; spec/app/workflows/approvals.md, "Story: Answer a run\'s approval on the phone")', async () => {
+  it('Runs the reviewed version, follows its approval and opens its output (spec/app/workflows/runs.md, "Story: Run a workflow now"; spec/app/workflows/sheet.md, "Story: Read a run\'s sheet"; spec/app/workflows/approvals.md, "Story: Answer a run\'s approval on the phone"; spec/app/workflows/approvals.md, "Story: Confirm exactly what this workflow does on my phone")', async () => {
     const world = scene();
+    world.phone = true;
+    world.image = true;
+    const device = await workflowNoteOffer(world.workflows, world.notes.owner);
+    world.telephony.textReview = device;
     world.workflows.stage = "Running";
     const alpha = await openWorkflows(world);
     const area = workflows.runtime(alpha);
@@ -207,8 +273,20 @@ describe("Workflows", () => {
     await until(alpha, area, Approvals, (state) => state.approval === "Waiting" && state.sheet);
     expect(document.querySelector('[aria-label="Workflow approval"]')?.textContent).toContain("Review the revised statement preview");
     await press("Approve");
-    await until(alpha, area, Approvals, (state) => state.approval === "Approved");
+    await vi.waitFor(() => expect(world.workflows.stage).toBe("Device"));
     expect(world.workflows.decisions).toEqual([{ version: "monthly-statement-v3", digest: "a".repeat(64), approved: true }]);
+    expect(world.notes.creations.size).toBe(0);
+    await later(alpha, 4_000);
+    await until(alpha, area, Approvals, (state) => state.device.phase === "DeviceShown");
+    expect(document.querySelector('[aria-label="Review device action"]')?.textContent).toContain("Statement saved by Workflows");
+    await press("Approve device action");
+    await until(alpha, area, Approvals, (state) => state.device.phase === "DeviceAnswered");
+    await until(alpha, area, Approvals, (state) => state.approval === "Approved");
+    expect({ notes: world.notes.notes.filter(({ title }) => title === "Statement saved by Workflows"), claims: device.claims, sent: device.receipts }).toMatchObject({
+      notes: [{ title: "Statement saved by Workflows" }], claims: [device.proposal.id],
+      sent: [{ outcome: "applied", operationId: device.proposal.id }],
+    });
+    world.workflows.stage = "Done";
 
     await later(alpha, 4_000);
     await until(alpha, area, Sheet, (state) => state.output.status === "Loaded" && state.status === "Done");
@@ -228,5 +306,84 @@ describe("Workflows", () => {
         activity: [{ at: "2026-11-24T07:02:00.000Z", node: undefined }, { at: "2026-11-24T07:01:00.000Z", node: "preview" }],
       });
     });
+  });
+
+  it('Writes a workflow, reviews it and saves it on the agent once (spec/app/workflows/builder.md, "Story: Write a workflow step by step"; "Story: Save a workflow on the agent once")', async () => {
+    const world = scene();
+    const { alpha } = await open(world);
+    await press("Workflows");
+    const area = workflows.runtime(alpha);
+    await until(alpha, area, Listing, (state) => state.list.status === "Loaded");
+    await press("Add to Workflows");
+    await until(alpha, area, Listing, (state) => state.place.tag === "ListingAdd");
+    await press("More options");
+    await press(/^Steps/);
+    await until(alpha, area, Builder, (state) => state.offer.status === "Loaded");
+
+    await write("Name", "Water the plants");
+    await write("Text", "Water the plants by the window.");
+    await press("Add step");
+    await until(alpha, area, Builder, (state) => state.steps.length === 1 && state.name > 0 && state.draft.sync === "Kept");
+    await press("Review workflow");
+    expect(document.querySelector("[role=alertdialog]")?.textContent).toContain("Runs only when you start it. It starts turned off.");
+    await pressOnTop("Cancel");
+    await until(alpha, area, Builder, (state) => !state.review.showing);
+    expect(world.workflows.created).toEqual([]);
+
+    await press("Review workflow");
+    await pressOnTop("Save workflow");
+    await until(alpha, area, Builder, (state) => state.saved === 1);
+    expect(world.workflows.created.map((one) => ({ name: one.name, active: one.active }))).toEqual([{ name: "Water the plants", active: false }]);
+    expect(world.workflows.saves.size).toBe(1);
+
+    await drawn(() => alpha.back());
+    await until(alpha, area, Listing, (state) => state.list.status === "Loaded" && state.place.tag === "ListingRows");
+    await vi.waitFor(async () => {
+      await drawn(() => undefined);
+      expect(visible("Monthly statement", "Water the plants")).toEqual(["Monthly statement", "Water the plants"]);
+    }, { timeout: 15_000 });
+  });
+
+  it('Removes a workflow only after its review, keeps its history, and restores it (spec/app/workflows/index.md, "Story: Change a workflow")', async () => {
+    const world = scene();
+    const { alpha } = await open(world);
+    await press("Workflows");
+    const area = workflows.runtime(alpha);
+    await until(alpha, area, Listing, (state) => state.list.status === "Loaded");
+    await choose("Monthly statement");
+    await until(alpha, area, Definition, (state) => state.detail.status === "Loaded");
+    await until(alpha, area, Sheet, (state) => state.history.status === "Loaded");
+
+    await pressWorkflowAction("Remove workflow");
+    expect(document.querySelector("[aria-label='Review workflow change']")?.textContent).toContain("Keeps history; stops future runs.");
+    await pressInReview("Cancel");
+    await until(alpha, area, Definition, (state) => !state.review.showing);
+    expect(world.workflows.changes).toEqual([]);
+
+    await pressWorkflowAction("Remove workflow");
+    await pressInReview("Remove");
+    await until(alpha, area, Definition, (state) => state.removed && state.detail.status === "Loaded" && !state.change.live);
+    expect(world.workflows.changes).toEqual([{ operation: "remove", version: "monthly-statement-v3" }]);
+    expect(button("Run now")).toBeUndefined();
+
+    await drawn(() => alpha.back());
+    await until(alpha, area, Listing, (state) => state.list.status === "Loaded");
+    expect(visible("Monthly statement")).toEqual([]);
+    await press("Filter workflows");
+    await pressOnTop("Removed");
+    await pressOnTop("Done");
+    expect(visible("Monthly statement", "Retired brief")).toEqual(["Monthly statement", "Retired brief"]);
+
+    await choose("Monthly statement");
+    await until(alpha, area, Definition, (state) => state.detail.status === "Loaded" && state.removed);
+    await pressWorkflowAction("Restore workflow");
+    expect(document.querySelector("[aria-label='Review workflow change']")?.textContent).toContain("Restore paused; review before enabling.");
+    await pressInReview("Confirm restore");
+    await until(alpha, area, Definition, (state) => !state.removed && state.detail.status === "Loaded" && !state.change.live);
+    expect(world.workflows.changes).toEqual([
+      { operation: "remove", version: "monthly-statement-v3" },
+      { operation: "restore", version: "monthly-statement-v4" },
+    ]);
+    expect(world.workflows.statement).toMatchObject({ removed: false, active: false });
   });
 });

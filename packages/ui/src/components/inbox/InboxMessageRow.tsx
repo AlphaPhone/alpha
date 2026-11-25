@@ -68,6 +68,7 @@ export function InboxMessageRow({ sender, initial, subject, snippet, time, unrea
         onPointerDown={start} onPointerUp={end} onPointerCancel={() => { swipeFromRef.current = undefined; }}
         className={cn(focusRing, "relative flex w-full touch-pan-y items-start gap-3.5 bg-background px-5 py-3.25 text-left focus-visible:-outline-offset-focus")}
       >
+        {unread ? <span className="sr-only">Unread</span> : null}
         {selecting ? (
           <span aria-hidden className={cn("mt-2 grid size-6 flex-none place-items-center rounded-box border text-background", chosen ? "border-foreground bg-foreground" : "border-muted-foreground")}>
             {chosen ? <Check className="size-4" /> : null}
@@ -82,12 +83,11 @@ export function InboxMessageRow({ sender, initial, subject, snippet, time, unrea
             <span className="shrink-0 text-xs whitespace-nowrap text-muted-foreground">{time}</span>
           </span>
           <span className="mt-0.5 flex h-4.25 items-center gap-2">
-            <span data-inbox-subject="" className={cn("min-w-0 flex-1 truncate text-subject", unread && "font-semibold")}>{subject}</span>
+            <span data-inbox-subject="" className="min-w-0 flex-1 truncate text-subject">{subject}</span>
             <span aria-hidden className={cn("size-2 shrink-0 rounded-full", unread && "bg-primary")} />
           </span>
           <span className="mt-0.5 block h-4 truncate text-snippet text-muted-foreground">{snippet}</span>
         </span>
-        {unread ? <span className="sr-only">Unread</span> : null}
         {attachment ? <span className="sr-only">Has attachments</span> : null}
       </button>
     </div>

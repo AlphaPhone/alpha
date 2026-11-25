@@ -1,6 +1,6 @@
 // spec/app/notes/index.md, "Story: See my notes"; spec/app/notes/index.md, "Story: Organise my notes"; spec/app/notes/editor.md, "Story: Write a note"; spec/app/notes/trash.md, "Story: Delete a note and get it back"
-import { Alert, AppHeader, Button, Chip, Dialog, DialogClose, DialogContent, DialogDescription, DialogTitle, Input, LinkNoteView, Menu, MenuContent, MenuItem, MenuTrigger, NoteEditor as NoteForm, NoteMenu, NoteRow, cn, focusRing, noteMenuItem, noteMenuPanel, NotesList as NoteRows, Spinner, VoiceNoteView } from "@repo/ui";
-import { Copy, Download, Ellipsis, FileDown, Folder, FolderInput, Mail, MessageSquare, Mic, Pin, Plus, Share2, Trash2, X } from "lucide-react";
+import { Alert, AppHeader, Button, Chip, ConfirmDialog, Dialog, DialogClose, DialogContent, DialogDescription, DialogTitle, Input, LinkNoteView, Menu, MenuContent, MenuItem, MenuTrigger, NoteEditor as NoteForm, NoteMenu, NoteRow, cn, focusRing, noteMenuItem, noteMenuPanel, NotesList as NoteRows, Spinner, VoiceNoteView } from "@repo/ui";
+import { Copy, Download, Ellipsis, FileDown, Folder, FolderInput, ListChecks, Mail, MessageSquare, Mic, Pin, Plus, Share2, Trash2, X } from "lucide-react";
 import { useRef, useState, useSyncExternalStore, type CSSProperties, type FormEvent } from "react";
 import * as Notes from "../../gen/app__notes.ts";
 import * as Editor from "../../gen/app__notes__editor.ts";
@@ -24,7 +24,7 @@ import { AppBack } from "../shell/AppBack.tsx";
 import { desktopPreview } from "../shell/canvas.vibe";
 import { type Collection, type DraftWords, NoteContent, audioIdOf, hasContent, savedVoice } from "./content.vibe";
 import { type Fields, NoteEditor } from "./editor.vibe";
-import { enter } from "./notes.vibe";
+import { deleteSelection, enter } from "./notes.vibe";
 import { record } from "./recording.vibe";
 import { Previous } from "./Previous.tsx";
 import { clock, dated, preview, titleOf } from "./present.ts";
@@ -384,15 +384,27 @@ function NotesList({ alpha, runtime }: { readonly alpha: Alpha; readonly runtime
   const rescueDraft = { type: "rescueDraft", note: writing.note, unreadable: writing.unreadable } as const;
   const reopen = { type: "reopenDraft", covered: false } as const;
   const shown = Notes.shown(state).filter((item) => item.id !== writing.note || writing.showing || !Editor.waiting(writing));
+  const selecting = state.selection !== "NoSelection";
+  const busy = state.selection === "Deleting";
+  const selected = state.selected.length;
+  const startSelection = { type: "beginSelection", covered: Editor.waiting(writing) } as const;
+  const reviewSelection = { type: "reviewSelection", available: bin.state !== undefined && Trash.ready(bin.state) } as const;
+  const closeSelection = () => listEvent({ type: "back" });
+  const selectionNotice = state.selectionResult === "UnknownSelection" ? "Alpha couldn’t confirm every deletion. Check Recently deleted before trying again."
+    : state.selectionResult === "RefusedSelection" ? "The remaining notes couldn’t be moved to Recently deleted." : undefined;
   const first = shown[0];
   const canOpen = first !== undefined && can({ type: "openRow", id: first.id, covered: Editor.waiting(writing) });
   const row = (entry: Notes.Row) => {
     const note = collection.noteByNumber.get(entry.id);
     if (note === undefined) return null;
     const open = { type: "openRow", id: entry.id, covered: Editor.waiting(writing) } as const;
-    return <NoteRow key={entry.id} className="[contain-intrinsic-size:auto_4rem] [content-visibility:auto]" title={titleOf(note)} aria-label={`Open ${titleOf(note)}`}
+    const toggle = { type: "toggleSelection", id: entry.id } as const;
+    return <NoteRow key={entry.id} className="[contain-intrinsic-size:auto_4rem] [content-visibility:auto]" title={titleOf(note)}
+      aria-label={`${selecting ? "Select" : "Open"} ${titleOf(note)}`}
+      aria-pressed={selecting ? state.selected.includes(entry.id) : undefined}
       date={dated(note, collection.readAt)} preview={preview(note)} voice={entry.kind === "Voice"}
-      onClick={canOpen ? () => listEvent(open) : undefined} />;
+      disabled={selecting && !can(toggle)}
+      onClick={selecting ? () => listEvent(toggle) : canOpen ? () => listEvent(open) : undefined} />;
   };
   const folder = state.folders.find((item) => item.id === state.filter);
   const folderChange = (op: "AddFolder" | "RenameFolder" | "RemoveFolder", key: number, name: string): Notes.Event =>
@@ -407,26 +419,33 @@ function NotesList({ alpha, runtime }: { readonly alpha: Alpha; readonly runtime
   const rest = shown.filter((item) => !item.pinned);
   return (
     <section aria-label="Notes" data-alpha-subview="notes-list" className="flex min-h-0 flex-1 flex-col">
-      <AppHeader title="Notes" leading={<AppBack alpha={alpha} />}>
+      {selecting ? <AppHeader detail title={selected === 0 ? "Select notes" : `${selected} selected`}>
+        <Button size="icon" variant="ghost" aria-label="Delete selected notes" disabled={!can(reviewSelection)} onClick={() => listEvent(reviewSelection)}><Trash2 /></Button>
+        <Button variant="ghost" className="h-11 px-3 font-semibold" disabled={busy} onClick={closeSelection}>Done</Button>
+      </AppHeader> : <AppHeader title="Notes" leading={<AppBack alpha={alpha} />}>
         {available && hasMic && !Editor.waiting(writing) && <Button size="icon" variant="ghost" aria-label="Record voice note" onClick={() => void runtime.runPromise(record)}><Mic className="size-5" /></Button>}
         {editor.can(newNote, "Owner") && <Button size="icon" variant="ghost" aria-label="New note" onClick={() => void runtime.runPromise(writer.newNote("Text", available, state.filter, false))}><Plus className="size-5" /></Button>}
-        {bin.can(openTrash, "Owner") && <Menu>
+        {(bin.can(openTrash, "Owner") || can(startSelection)) && <Menu>
           <MenuTrigger asChild><Button size="icon" variant="ghost" aria-label="Notes options"><Ellipsis /></Button></MenuTrigger>
           <MenuContent align="end" sideOffset={4} alignOffset={2} className={noteMenuPanel}>
-            <MenuItem className={notesOption} onSelect={() => void bin.send(openTrash, "Owner")}><Trash2 /> Recently deleted</MenuItem>
+            {can(startSelection) && <MenuItem className={notesOption} onSelect={() => listEvent(startSelection)}><ListChecks /> Select</MenuItem>}
+            {bin.can(openTrash, "Owner") && <MenuItem className={notesOption} onSelect={() => void bin.send(openTrash, "Owner")}><Trash2 /> Recently deleted</MenuItem>}
             {previous.can(showPrevious, "Owner") && <MenuItem className={notesOption} onSelect={() => void previous.send(showPrevious, "Owner")}><Folder /> On this phone</MenuItem>}
             {available && <MenuItem className={notesOption} onSelect={() => { setForm({ op: "AddFolder" }); setFolderName(""); }}><Folder /> New folder</MenuItem>}
             {folder && <MenuItem className={notesOption} onSelect={() => { setForm({ op: "RenameFolder", folder }); setFolderName(folder.name); }}>Rename folder</MenuItem>}
             {folder && can(folderChange("RemoveFolder", folder.id, "")) && <MenuItem className={notesOption} onSelect={() => listEvent(folderChange("RemoveFolder", folder.id, ""))}>Delete folder</MenuItem>}
           </MenuContent>
         </Menu>}
-      </AppHeader>
+      </AppHeader>}
       <div className="flex min-h-0 flex-col px-4">
         <TransferNotice runtime={runtime} />
-        {state.folders.length > 0 && <nav aria-label="Note folders" className="flex flex-wrap gap-2 pb-2">
+        {selectionNotice && <Alert variant="warn">
+          {state.removed > 0 ? `Moved ${state.removed} of the selected notes. ` : ""}{selectionNotice}
+        </Alert>}
+        {!selecting && state.folders.length > 0 && <nav aria-label="Note folders" className="flex flex-wrap gap-2 pb-2">
           {state.folders.filter((item) => item.id !== state.filter).map((item) => <Chip key={item.id} onClick={() => listEvent({ type: "filterBy", folder: item.id })}>{item.name}</Chip>)}
         </nav>}
-        {form && <form onSubmit={submit} className="flex flex-wrap items-center gap-2 pb-2">
+        {!selecting && form && <form onSubmit={submit} className="flex flex-wrap items-center gap-2 pb-2">
           <Input aria-label="Folder name" className="min-w-32 flex-1" value={folderName} maxLength={40} onChange={(event) => setFolderName(event.currentTarget.value)} autoFocus />
           <Button type="submit" disabled={!can(folderChange(form.op, form.op === "RenameFolder" ? form.folder.id : 0, folderName.trim()))}>Save</Button>
           <Button type="button" variant="ghost" onClick={() => setForm(undefined)}>Cancel</Button>
@@ -452,7 +471,11 @@ function NotesList({ alpha, runtime }: { readonly alpha: Alpha; readonly runtime
         onClearFilter={can({ type: "clearFilter" }) ? () => listEvent({ type: "clearFilter" }) : undefined}
         onRetry={() => void runtime.runPromise(enter())}
       />
-      {hasDocuments && transfer.can(importText, "Owner") && <Button size="sm" aria-label="Import text note" className="mb-5 ml-4 h-12 self-start px-3.5 text-sm font-normal" variant="secondary" onClick={() => void transfer.send(importText, "Owner")}><Download /> Import</Button>}
+      {!selecting && hasDocuments && transfer.can(importText, "Owner") && <Button size="sm" aria-label="Import text note" className="mb-5 ml-4 h-12 self-start px-3.5 text-sm font-normal" variant="secondary" onClick={() => void transfer.send(importText, "Owner")}><Download /> Import</Button>}
+      <ConfirmDialog open={state.selection === "Reviewing"} title={selected === 1 ? "Delete this note?" : `Delete ${selected} notes?`}
+        destructive confirmLabel="Delete" onCancel={closeSelection} onConfirm={() => void runtime.runPromise(deleteSelection())}>
+        The selected {selected === 1 ? "note will" : "notes will"} move to Recently deleted.
+      </ConfirmDialog>
     </section>
   );
 }

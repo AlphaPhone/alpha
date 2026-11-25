@@ -7,7 +7,7 @@ const known = new Set(["state", "code", "error", "error_description"])
 
 // spec/app/shell/landing.md, "The landing holds the return it was handed, summarised, whether its address still holds it, where it is in deciding, the way back it offers and what it says"
 /** The counts and shapes of a return's query, from its raw search string. */
-export function queryOf(search: string): Query {
+function queryOf(search: string): Query {
   const params = new URLSearchParams(search)
   const rawCodes = params.getAll("code")
   const rawErrors = params.getAll("error")

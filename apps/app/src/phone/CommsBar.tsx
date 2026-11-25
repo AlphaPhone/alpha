@@ -34,6 +34,8 @@ export interface CommsBarProps {
   filter?: QueryFilter;
   /** What the owner can write or do while the sheet is closed. */
   closed?: ReactNode | ((ask: (query: string) => void, talk: (() => void) | undefined) => ReactNode);
+  /** An app's actions beside the closed Ask Alpha field. */
+  actions?: ReactNode;
   /** The person this view is about. */
   person?: { label: string; initials: string };
 }
@@ -54,7 +56,7 @@ export function useCommsDock(runtime: ManagedRuntime.ManagedRuntime<ShellMachine
  * The owner side of the dock. While the sheet is open, Ask Alpha supplies the only composer.
  * @model spec/app/phone/comms.md
  */
-export function CommsBar({ runtime, closed, filter, person }: CommsBarProps) {
+export function CommsBar({ runtime, closed, filter, person, actions }: CommsBarProps) {
   const comms = useComms(runtime);
   const bar = useBar(runtime);
   const shell = useShell(runtime);
@@ -117,6 +119,7 @@ export function CommsBar({ runtime, closed, filter, person }: CommsBarProps) {
           if (event.detail === 0 || !skipTapRef.current) void open();
           skipTapRef.current = false;
         }}><Mark className="size-[118%]" aria-hidden /></Button>
+      {opening && !ending && actions}
       {typeof closed === "function" ? closed((query) => void open(query), ending ? undefined : talk) : closed ?? <CommsQuery runtime={runtime} phone={phone && !ending} filter={ending ? undefined : filter} placeholder={placeholder} onAsk={(query) => void open(query)} onTalk={ending ? undefined : talk} />}
       {ending && <Button size="icon" className={cn("size-11 shrink-0", hangupButton)} aria-label="End call" onClick={() => void bar.send(end)}><Handset aria-hidden className="size-5 rotate-135" /></Button>}
     </div>

@@ -1,7 +1,8 @@
 // spec/agent/index.md, "Story: Run Alpha's agent on the phone"
 // eslint-disable-next-line @typescript-eslint/consistent-type-imports -- ConversationRecord is the schema `schema Created` decodes with, a value the projection ESLint reads does not show
-import { ConversationRecord, TurnController, createRuntimeJsonClient } from "@elizaos/agent"
+import { ConversationRecord, TurnController, createRuntimeJsonClient, defineRoutes } from "@elizaos/agent"
 import { describe, expect, it } from "@effect/vitest"
+import { CleanupReceipt } from "@elizaos/plugin-notes-client"
 import { configurationExit, coreActions, entryCarried, launchViews, packedPlugins, productPluginName, refusedActions, workerAdmitted } from "../gen/agent.effect.vibe"
 import { type Running, call, launchFor, listed, manifest, pinnedWorker, policy, ready, socketBridge, startPhoneAgent, startRun } from "./phone.ts"
 
@@ -43,9 +44,16 @@ const answerOf = (status: number, body: string) => {
 
 schema Created { conversation: ConversationRecord }
 schema Listed { conversations: { id: string }[] }
+schema History { messages: { id: string; timestamp: Schema.Int }[] }
+error MissingHistoryMessages { expected: number; received: number }
 schema Replied { fullText: string }
 schema Interacted { success: boolean; result: { state?: { notes: { title: string; body: string }[] } } }
 schema Approvals { approvals: Schema.Unknown[] }
+schema ResidentScope { userId: string; organizationId: string; agentId: string; epoch: Schema.Int }
+schema CleanupQueue { success: boolean; data: CleanupReceipt[] }
+schema VoiceCreated { success: boolean; result: { data: { note: { id: string } }; state: { revision: Schema.Int } } }
+schema NoteRevision { success: boolean; data: { revision: Schema.Int } }
+schema CleanupStatus { status: string }
 schema RouteTasks { tasks: { taskId: string; promptInstructions: string }[] }
 schema SavedTrigger { trigger: { id: string } }
 
@@ -69,8 +77,9 @@ describe("Build the pack only from the pinned eliza", () => {
       { method: "GET", path: "/api/workflow/hosted/results", stream: false,
         query: [{ key: "clientId", accepts: { kind: "pattern", pattern: "[A-Za-z0-9][A-Za-z0-9_-]{0,127}" } }] },
       { method: "POST", path: "/api/workflow/hosted/results/ack", stream: false, maxBodyBytes: 1024 },
+      { method: "POST", path: "/api/alpha-runtime/notes-recording-cleanup", stream: false, maxBodyBytes: 2048 },
     ])
-    expect(listed().some(({ path }) => ["/api/alpha-speech/scope", "/api/asr/local-inference/live", "/api/alpha-runtime/scope"].includes(path))).toBe(false)
+    expect(listed().some(({ path }) => ["/api/alpha-speech/scope", "/api/asr/local-inference/live", "/api/alpha-runtime/scope", "/api/alpha-runtime/notes-recording-cleanup", "/api/notes/trash/recordings/complete"].includes(path))).toBe(false)
     expect(plugins.product).toBe(productPluginName)
     expect(entryCarried(built.packages.map(({ name }) => name))).toBe(true)
     expect(built.packages.filter(({ name }) => name.startsWith("@repo/") || name.startsWith("@alphacompute/") || name === productPluginName).map(({ name }) => name).sort())
@@ -102,6 +111,31 @@ describe("Run Alpha's agent on the phone", () => {
       try promise(() => controller.bind(opened))
       const result = try promise(() => controller.send({ text: "Remember the word heron." }, { stream: { onPreview: () => {} } }))
       try Effect.try(() => expect(result.kind === "Replied" ? result.reply.text : result.kind).toContain("You said: Remember the word heron."))
+      // spec/agent/index.md, "The page names the query values each gated route can receive"
+      const history = `/api/conversations/${opened.id}/messages`
+      const latest = try promise(() => call(first, "GET", history))
+      const { messages } = try Schema.decodeUnknownEffect(Schema.fromJsonString(History))(latest.body)
+      const anchor = messages.at(-1)
+      const prior = messages.at(-2)
+      if (anchor === undefined || prior === undefined) throw new MissingHistoryMessages({ expected: 2, received: messages.length })
+      const id = encodeURIComponent(anchor.id)
+      const centered = `${history}?around=${id}`
+      const cursor = `${history}?before=${anchor.timestamp}&beforeId=${id}`
+      const older = `${cursor}&limit=1`
+      try Effect.try(() => {
+        const gate = defineRoutes(listed())
+        const admitted = (target: string) => gate.admit({ method: "GET", target, streamed: false, body: undefined }).tag === "Admitted"
+        expect([history, centered, older, `${older}&beforeId=${id}`, `${cursor}&limit=2`, `${history}?before=01&beforeId=${id}&limit=1`].map(admitted))
+          .toEqual([true, true, true, false, false, false])
+      })
+      const near = try promise(() => call(first, "GET", centered))
+      const edge = try promise(() => call(first, "GET", older))
+      const nearPage = try Schema.decodeUnknownEffect(Schema.fromJsonString(History))(near.body)
+      const edgePage = try Schema.decodeUnknownEffect(Schema.fromJsonString(History))(edge.body)
+      try Effect.try(() => expect([
+        latest.status, near.status, edge.status, nearPage.messages.some((message) => message.id === anchor.id), edgePage.messages.map(({ id }) => id),
+      ]).toEqual([200, 200, 200, true, [prior.id]]))
+
       const title = "Route admission check"
       const routine = try promise(() => call(first, "POST", "/api/personal-assistant/routines", { title, idempotencyKey: "route-admission", times: ["14:20"] }))
       const listing = try promise(() => call(first, "GET", "/api/scheduled-tasks?ownerVisibleOnly=1"))
@@ -145,6 +179,37 @@ describe("Run Alpha's agent on the phone", () => {
         shown[id] = prepared.status
       }
       try Effect.try(() => expect(shown).toEqual(Object.fromEntries(["notes", ...launchViews.map((view) => view.id)].map((id) => [id, 200]))))
+      // spec/agent/index.md, "Only the phone's native channel can verify that a reviewed recording was erased"
+      const audioId = "retained-voice-at-home"
+      const captured = try promise(() => call(first, "POST", "/api/notes/interact", {
+        capability: "create-note", params: { content: "Recording to erase", color: "yellow", forceNew: true,
+          format: { kind: "voice", data: { recordingId: audioId, audio: { audioId, durationMs: 3000 } } } },
+      }))
+      const { result: voice } = try Schema.decodeUnknownEffect(Schema.fromJsonString(VoiceCreated))(captured.body)
+      const noteId = voice.data.note.id
+      const movedToTrash = try promise(() => call(first, "POST", "/api/notes/interact", {
+        capability: "delete-note", params: { id: noteId, expectedRevision: voice.state.revision },
+      }))
+      const state = try promise(() => call(first, "GET", "/api/notes/state"))
+      const { data: { revision } } = try Schema.decodeUnknownEffect(Schema.fromJsonString(NoteRevision))(state.body)
+      const erased = try promise(() => call(first, "POST", "/api/notes/trash/erase", { scope: "all", expectedRevision: revision }))
+      const pendingRecordings = () => call(first, "GET", "/api/notes/trash/recordings")
+      const beforePurge = try promise(pendingRecordings)
+      const { data: [receipt] } = try Schema.decodeUnknownEffect(Schema.fromJsonString(CleanupQueue))(beforePurge.body)
+      try Effect.try(() => expect({ status: [captured.status, movedToTrash.status, erased.status], ids: [receipt?.noteId, receipt?.audioId] })
+        .toEqual({ status: [200, 200, 200], ids: [noteId, audioId] }))
+      const answerScope = try promise(() => call(first, "GET", "/api/alpha-runtime/scope"))
+      const scope = try Schema.decodeUnknownEffect(Schema.fromJsonString(ResidentScope))(answerScope.body)
+      const cleanup = "/api/alpha-runtime/notes-recording-cleanup"
+      const wrongEpoch = try promise(() => call(first, "POST", cleanup, { phase: "prepare", receipt, scope: { ...scope, epoch: scope.epoch - 1 } }))
+      const prepared = try promise(() => call(first, "POST", cleanup, { phase: "prepare", receipt, scope }))
+      const readyToErase = try Schema.decodeUnknownEffect(Schema.fromJsonString(CleanupStatus))(prepared.body)
+      const proven = try promise(() => call(first, "POST", cleanup, { phase: "confirm", receipt, scope }))
+      const confirmed = try Schema.decodeUnknownEffect(Schema.fromJsonString(CleanupStatus))(proven.body)
+      const afterPurge = try promise(pendingRecordings)
+      const { data: remaining } = try Schema.decodeUnknownEffect(Schema.fromJsonString(CleanupQueue))(afterPurge.body)
+      try Effect.try(() => expect({ statuses: [wrongEpoch.status, prepared.status, proven.status], receipts: [readyToErase.status, confirmed.status], remaining })
+        .toEqual({ statuses: [403, 200, 200], receipts: ["pending", "confirmed"], remaining: [] }))
       const proposals = try promise(() => call(first, "GET", "/api/approvals"))
       const pending = try Schema.decodeUnknownEffect(Schema.fromJsonString(Approvals))(proposals.body)
       try Effect.try(() => expect({ status: proposals.status, approvals: pending.approvals }).toEqual({ status: 200, approvals: [] }))

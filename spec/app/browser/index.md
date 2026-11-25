@@ -34,7 +34,7 @@ the record on the device; the writer carries one copy of it at a time.
 import read as R from "../../kit/read"
 
 type Kind = Normal | Private
-type Layer = Uncovered | Address | Switcher | Menu | Library
+type Layer = Uncovered | Address | Switcher | Menu | Library | ReadingReview
 type Erasing = Kept | Asked | Running
 type Effect = Restore({ ticket: int }) | Create({ tab: int, kind: Kind }) | Close({ tab: int }) | Save({ write: int }) | Erase | Halt({ driven: int })
 type Browser = {
@@ -162,7 +162,7 @@ pure def popup(s: Browser, opener: int): Step =
 ### One layer at a time covers the page, and Back uncovers it
 
 The address being edited with its suggestions, the tab switcher, the menu
-or the library. The find bar, page history and leaving the Browser come
+the library or the reading review. The find bar, page history and leaving the Browser come
 after, in [Address](./address.md) and the [Shell](../shell/).
 
 ```quint
