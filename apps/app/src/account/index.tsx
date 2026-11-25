@@ -8,7 +8,7 @@ import { useMachine as useBilling } from "../../gen/app__account__billing.react.
 import { useMachine } from "../../gen/app__shell__layers.react.ts";
 import { listed, top } from "../../gen/app__shell__layers.ts";
 import { area, type Alpha, type Area, type Resident, type Shown } from "../runtime/area.tsx";
-import { checkout, choosePurchase, recheckPlan, tierOf } from "./billing.vibe";
+import { checkout, choosePurchase, purchaseVisibility, recheckPlan, tierOf } from "./billing.vibe";
 import { accountLayer, closeCatalog, openCatalog, type Profile, profileLive, profileShelf } from "./profile.vibe";
 
 const usd = new Intl.NumberFormat(undefined, { style: "currency", currency: "USD" });
@@ -100,7 +100,7 @@ function Plans({ runtime, shelf, canSubscribe }: { runtime: Shown<Resident | Che
           <p className="text-sm font-medium">{shown.name} · {price(shown.amountCents)}/month</p>
           <div className="grid grid-cols-2 gap-2">
             <Button variant="secondary" onClick={() => void send(closeReview)}>Not now</Button>
-            <Button onClick={() => runtime.runFork(choosePurchase(catalog, shown, selected.number))}>Continue to Stripe</Button>
+            <Button onClick={() => runtime.runFork(choosePurchase(catalog, shown, selected.number, shelf.refresh))}>Continue to Stripe</Button>
           </div>
         </section>
       ) : null}
@@ -176,12 +176,12 @@ export default {
             <span aria-hidden className="absolute inset-x-0 top-3 mx-auto h-1 w-8 rounded-full bg-border" />
             <Button variant="ghost" size="icon" aria-label="Close Account" className="absolute top-9 right-6.5 size-12" onClick={onClose}><X /></Button>
             <AccountDetails profile={shown} />
-            {shown.tag === "Read" ? <PurchaseStatus runtime={runtime} /> : null}
+            {shown.tag === "Read" && shown.purchase === "Matches" ? <PurchaseStatus runtime={runtime} /> : null}
             {shown.tag === "Read" ? <Plans runtime={runtime} shelf={profile} canSubscribe={shown.plan?.tag === "PlanRead" && shown.plan.name === "No plan"} /> : null}
           </SheetContent>
         </Sheet>
       );
     }
-    return area(Layer.provideMerge(profileLive(profile.publish, profile.publishCatalog, profile.refreshed), checkout(profile.refresh, profile.publishCatalog)), AccountSheet).open(alpha, place);
+    return area(Layer.provideMerge(profileLive(profile.publish, profile.publishCatalog, profile.refreshed, purchaseVisibility), checkout(profile.refresh, profile.publishCatalog)), AccountSheet).open(alpha, place);
   },
 } satisfies Area;

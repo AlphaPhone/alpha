@@ -24,11 +24,14 @@ type Plan =
     readonly expiresAt: number | null
   }
 
+export type PurchaseVisibility = "Matches" | "Changed" | "Unconfirmed"
+
 type ReadProfile = {
   readonly tag: "Read"
   readonly contact: string
   readonly name: string
   readonly plan?: Plan
+  readonly purchase?: PurchaseVisibility
 }
 
 /** What Cloud says about the account for this request. The page never holds a credential. */
@@ -196,15 +199,15 @@ function untilExpiry(profile: Profile): Stream.Stream<Profile> {
   })
 }
 
-function visit(cloud: Account, place: "Account" | "Settings"): Stream.Stream<Profile> {
+function visit<R>(cloud: Account, place: "Account" | "Settings", checkPurchase: (owner: CloudProfile) => PurchaseVisibility!!R): Stream.Stream<Profile, never, R> {
   return Stream.unwrap(effect {
     const opened = try exit(readAccount(cloud))
     if (Exit.isFailure(opened)) return Stream.succeed(profileFailure(Cause.squash(opened.cause)))
     const owner = opened.value
     const profile = profileOf(owner)
-    return place === "Account"
-      ? Stream.concat(Stream.succeed<Profile>({ ...profile, plan: { tag: "CheckingPlan" } }), Stream.flatMap(Stream.fromEffect(readPlan(cloud, owner, profile)), untilExpiry))
-      : Stream.succeed<Profile>(profile)
+    if (place !== "Account") return Stream.succeed<Profile>(profile)
+    const current = { ...profile, purchase: try checkPurchase(owner) }
+    return Stream.concat(Stream.succeed<Profile>({ ...current, plan: { tag: "CheckingPlan" } }), Stream.flatMap(Stream.fromEffect(readPlan(cloud, owner, current)), untilExpiry))
   })
 }
 
@@ -250,7 +253,7 @@ export effect function readCatalog(ticket: number, publish: (catalog: Catalog | 
 }
 
 /** Reads the account while Settings or its Account sheet is visible. Leaving interrupts the read and drops its answer. */
-export function profileLive(publish: (value: Profile) => void, publishCatalog: (catalog: Catalog | undefined) => void, refreshed: Stream.Stream<void>) {
+export function profileLive<R>(publish: (value: Profile) => void, publishCatalog: (catalog: Catalog | undefined) => void, refreshed: Stream.Stream<void>, checkPurchase: (owner: CloudProfile) => PurchaseVisibility!!R) {
   return started(effect {
     const { changes } = try Layers.Machine
     const cloud = try Cloud
@@ -270,7 +273,7 @@ export function profileLive(publish: (value: Profile) => void, publishCatalog: (
       return place === "Away"
         ? Stream.succeed<Profile>(reading)
         : Stream.switchMap(Stream.concat(Stream.succeed(undefined), refreshed), () =>
-          Stream.concat(Stream.succeed<Profile>(reading), visit(cloud, place)))
+          Stream.concat(Stream.succeed<Profile>(reading), visit(cloud, place, checkPurchase)))
     }))
     try Stream.runForEach(watched, (value) => sync(() => publish(value)))
   }, "reading Account")
