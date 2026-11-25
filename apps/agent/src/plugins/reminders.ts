@@ -460,6 +460,11 @@ export function remindersProvider(store: AlphaAppsStore, timeZone: string): Agen
         lines.push("## Due today");
         for (const item of dueToday.slice(0, 8)) lines.push(`- [${item.id}] ${item.title}${formatDueSummary(item)}`);
       }
+      const later = open.filter((item) => !overdue.includes(item) && !dueToday.includes(item));
+      if (later.length > 0) {
+        lines.push("## Other open reminders");
+        for (const item of later.slice(0, 8)) lines.push(`- [${item.id}] ${item.title}${formatDueSummary(item)}`);
+      }
       lines.push("## Lists");
       for (const list of snapshot.lists) {
         const count = open.filter((item) => item.listId === list.id).length;
