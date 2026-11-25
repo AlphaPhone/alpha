@@ -338,6 +338,8 @@ export function checkApk(file: string, mode: "debug" | "release", env: NodeJS.Pr
   const debuggable = badging.includes("application-debuggable");
   if (debuggable !== (mode === "debug")) throw new Error(`${name} is ${debuggable ? "" : "not "}debuggable`);
   const entries = execFileSync(aapt, ["list", file], { encoding: "utf8", maxBuffer: 256 * 1024 * 1024 }).split("\n").filter((entry) => entry !== "");
+  const bunLibraries = entries.filter((entry) => /^lib\/[^/]+\/libeliza_bun\.so$/.test(entry));
+  if (bunLibraries.length > 0) throw new Error(`${name} carries the Bun runtime: ${bunLibraries.join(", ")}`);
   const abiList = entries.flatMap((entry) => /^lib\/([^/]+)\/libeliza_node\.so$/.exec(entry)?.slice(1) ?? []);
   const wantedAbis = mode === "release" ? ["arm64-v8a"] : [...abis];
   if (abiList.slice().sort().join() !== wantedAbis.slice().sort().join()) throw new Error(`${name} carries libeliza_node.so for ${abiList.join(", ") || "no ABI"}, not ${wantedAbis.join(", ")}`);
