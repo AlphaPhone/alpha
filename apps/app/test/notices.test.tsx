@@ -10,8 +10,10 @@ import { scene } from "./fakes/scene.ts";
 underAct();
 afterEach(closeAll);
 
-const toast = () => document.querySelector("[role=status]")?.textContent;
-const live = () => document.querySelector("[role=status]")?.getAttribute("aria-live");
+/** The toast region: the shell's one live status region, never another screen's quiet status such as Ask Alpha's composer while it connects. */
+const region = () => document.querySelector("[role=status][aria-live]");
+const toast = () => region()?.textContent;
+const live = () => region()?.getAttribute("aria-live");
 
 describe("the toasts", () => {
   // spec/app/notices/toasts.md, "Story: Read a toast before it goes"; spec/app/notices/toasts.md, "Story: Keep an Undo in reach"; spec/app/notices/toasts.md, "Story: Keep what I must not miss"
