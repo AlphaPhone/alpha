@@ -230,6 +230,12 @@ function asRecord(value: unknown): Record<string, unknown> | undefined {
   return typeof value === "object" && value !== null ? (value as Record<string, unknown>) : undefined
 }
 
+/** Whether the native speech request says a call owns the audio path. */
+export function interruptedByCall(cause: unknown): boolean {
+  const data = asRecord(cause)
+  return data?.code === "call-active" || data?.reason === "call-active"
+}
+
 function asString(value: unknown): string {
   return typeof value === "string" ? value : ""
 }
@@ -443,7 +449,7 @@ export const phoneVoiceBridge = Layer.effect(VoiceBridge, effect {
           onSegment: (text) => {
             if (text !== null && text !== "") publish({ kind: "speechEnd", session: currentSession, text })
           },
-          onEnd: (cause) => publish({ kind: "ended", session: currentSession, reason: cause === undefined ? "ended" : "error" }),
+          onEnd: (cause) => publish({ kind: "ended", session: currentSession, reason: cause === undefined ? "ended" : interruptedByCall(cause) ? "call-active" : "error" }),
         }),
         catch: (cause) => new VoiceBridgeFailed({ method: "startCloudSpeech", cause }),
       }) catch effect (failure) => {
