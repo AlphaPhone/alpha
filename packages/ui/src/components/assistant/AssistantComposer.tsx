@@ -1,5 +1,5 @@
-import type { ComponentProps, ReactNode, Ref } from "react";
-import { ArrowUp, Mic, Plus, Square } from "lucide-react";
+import type { ComponentProps, PointerEvent, ReactNode, Ref } from "react";
+import { ArrowUp, AudioLines, Mic, Plus, Square } from "lucide-react";
 import { cn } from "../../lib/cn.ts";
 import { Banner } from "../Banner.tsx";
 import { Button } from "../Button.tsx";
@@ -45,6 +45,12 @@ export type AssistantComposerProps = Omit<ComponentProps<"div">, "children" | "o
   onAttach?: () => void;
   /** Starts a spoken turn; the voice area owns it. */
   onTalk?: () => void;
+  /** Records a transcript the owner can edit before it enters the draft. */
+  onDictate?: () => void;
+  /** Takes the field's place while a voice conversation owns the composer. */
+  voice?: ReactNode;
+  /** What the voice area tells the owner when Talk could not continue. */
+  voiceNotice?: ReactNode;
   /** Opens the conversation from the bar. */
   onOpen?: () => void;
   /** The other target when Ask Alpha is open above a call or a conversation. */
@@ -67,6 +73,11 @@ export type AssistantComposerProps = Omit<ComponentProps<"div">, "children" | "o
 
 const reasons = { away: "Alpha cannot be reached", sensitive: "This screen is private and is never sent" };
 
+function keepComposerFocus(event: PointerEvent<HTMLButtonElement>) {
+  event.stopPropagation();
+  if (event.button === 0 && event.currentTarget.ownerDocument.activeElement?.matches("textarea[data-alpha-composer]")) event.preventDefault();
+}
+
 /**
  * The composer: the draft's field with what waits to go with it, and Send, Stop reply or Talk at its end. It keeps no
  * rule; each control is shown as its handler is given.
@@ -74,20 +85,22 @@ const reasons = { away: "Alpha cannot be reached", sensitive: "This screen is pr
  */
 export function AssistantComposer({
   variant = "sheet", value, onValueChange, closed = false, notice, unavailable, attachments = [], attachmentNotice, limit = 4, quote, editing = false, lift,
-  onSend, onStop, stopping = false, onAttach, onTalk, onOpen, leading, opener, placeholder, onFocusField, fieldRef, onRemoveAttachment, onPreviewAttachment, onUnquote, className, style, ...props
+  onSend, onStop, stopping = false, onAttach, onTalk, onDictate, voice, voiceNotice, onOpen, leading, opener, placeholder, onFocusField, fieldRef, onRemoveAttachment, onPreviewAttachment, onUnquote, className, style, ...props
 }: AssistantComposerProps) {
   const written = value.trim() !== "" || attachments.length > 0;
   const bar = variant === "bar";
   const targeting = !bar && placeholder !== undefined;
   return (
-    <div data-host-chrome={bar ? "" : undefined} className={cn("flex shrink-0 flex-col gap-2", bar ? "mx-4 mb-[max(1.75rem,calc(env(safe-area-inset-bottom)_+_0.75rem))]" : "mx-3 mb-[max(1.875rem,calc(env(safe-area-inset-bottom)_+_0.75rem))]", className)} style={lift ? { marginBottom: lift, ...style } : style} {...props}>
+    <div data-host-chrome={bar ? "" : undefined} className={cn("flex shrink-0 flex-col gap-2", bar ? "mx-4 mb-[max(1.75rem,calc(max(var(--alpha-native-inset-bottom,0px),env(safe-area-inset-bottom))_+_0.75rem))]" : "mx-3 mb-[max(1.875rem,calc(max(var(--alpha-native-inset-bottom,0px),env(safe-area-inset-bottom))_+_0.75rem))]", className)} style={lift ? { marginBottom: lift, ...style } : style} {...props}>
       {notice ? <AssistantDraftNotice {...notice} /> : null}
       {unavailable ? <Banner variant="warn">{reasons[unavailable]}</Banner> : null}
       {attachmentNotice ? <Banner variant="warn">{attachmentNotice}</Banner> : null}
       {attachments.length ? <AssistantPendingAttachments attachments={attachments} limit={limit} onRemove={onRemoveAttachment} onPreview={onPreviewAttachment} /> : null}
       {quote ? <AssistantQuoteBar kind="quote" text={quote} onRemove={onUnquote} /> : null}
       {editing ? <AssistantQuoteBar kind="editing" /> : null}
-      <div className={cn("flex touch-pan-y items-center bg-secondary", bar ? "min-h-18.5 gap-1 rounded-full py-1.5 pr-2 pl-2.25 shadow-lg" : "min-h-17 gap-1.5 rounded-sheet py-1.5 pr-1.5 pl-5")}>
+      {voiceNotice}
+      {voice}
+      <div hidden={Boolean(voice)} className={cn("touch-pan-y items-center bg-secondary", voice ? "hidden" : "flex", bar ? "min-h-18.5 gap-1 rounded-full py-1.5 pr-2 pl-2.25 shadow-lg" : "min-h-17 gap-1.5 rounded-sheet py-1.5 pr-1.5 pl-5")}>
         {leading}
         {bar ? opener ?? (onOpen ? (
           <Button size="icon" aria-label="Open conversation" className="overflow-hidden bg-alpha text-alpha-foreground hover:bg-alpha/90" onClick={onOpen}><Mark aria-hidden className="size-[118%]" /></Button>
@@ -110,6 +123,7 @@ export function AssistantComposer({
           }}
           className={cn("max-h-[min(10.5rem,28dvh)] min-h-11 min-w-0 flex-1 touch-auto rounded-full bg-transparent py-2.75", targeting ? "border border-alpha px-3" : "border-0 px-1")}
         />
+        {onDictate && <Button variant="ghost" size="icon" aria-label="Dictate" onClick={onDictate}><AudioLines /></Button>}
         {onStop || stopping ? (
           <Button size="icon" aria-label="Stop reply" loading={stopping} className="bg-foreground text-background hover:bg-foreground/90" onClick={onStop}><Square className="size-2.5" fill="currentColor" /></Button>
         ) : written ? (
@@ -118,14 +132,11 @@ export function AssistantComposer({
             aria-label="Send"
             className="bg-alpha text-alpha-foreground hover:bg-alpha/90"
             disabled={closed || !onSend}
-            onPointerDown={(event) => {
-              event.stopPropagation();
-              if (event.button === 0 && event.currentTarget.ownerDocument.activeElement?.matches("textarea[data-alpha-composer]")) event.preventDefault();
-            }}
+            onPointerDown={keepComposerFocus}
             onClick={onSend}
           ><ArrowUp /></Button>
         ) : onTalk ? (
-          <Button variant="ghost" size="icon" aria-label="Talk" className={bar ? undefined : "bg-foreground text-background hover:bg-foreground/90"} onClick={onTalk}><Mic /></Button>
+          <Button variant="ghost" size="icon" aria-label="Talk" className={bar ? undefined : "bg-foreground text-background hover:bg-foreground/90"} onPointerDown={keepComposerFocus} onClick={onTalk}><Mic /></Button>
         ) : null}
       </div>
     </div>

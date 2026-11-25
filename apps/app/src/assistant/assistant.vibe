@@ -11,10 +11,13 @@ import * as Reply from "../../gen/app__assistant__reply.effect.vibe"
 import * as Pages from "../../gen/app__settings.effect.vibe"
 import * as Search from "../../gen/app__assistant__search.effect.vibe"
 import * as Comms from "../../gen/app__phone__comms.effect.vibe"
+import * as Voice from "../../gen/app__voice.effect.vibe"
+import { Machine as Speaker } from "../../gen/app__voice__output.effect.vibe"
 import { Machine as Shell, canReturnCommsView } from "../../gen/app__shell.effect.vibe"
 import { stepping } from "../shell/shell.vibe"
 import { Agent } from "../platform/agent.vibe"
 import { Device } from "../platform/device.vibe"
+import type { VoiceBridge } from "../platform/voice.vibe"
 import { ask, outcomeOf } from "../platform/remote.vibe"
 import { Attempts, fresh } from "../runtime/attempts.vibe"
 import { CommsPrompts, type CommsPrompt, commsViewOf } from "../phone/comms.vibe"
@@ -22,6 +25,7 @@ import { MailQuestions, withMail } from "../inbox/mail-context.vibe"
 import { type Job, answer, contained, following, reacting, run, started, stream, tell, together, untimed } from "../runtime/reactor.vibe"
 import { type Board, type Line, Talk, talk } from "./talk.vibe"
 import { dropFiles, readFiles, rememberFiles, sameBinding, stageFiles } from "./attachments.vibe"
+import { readMessage } from "./read-aloud.vibe"
 
 service Turns {
   readonly controller: TurnController
@@ -401,13 +405,13 @@ effect function forked(conversation: number, message: number, ticket: number): C
   return try making(ticket, HttpClientRequest.bodyJsonUnsafe(HttpClientRequest.post(`/api/conversations/${encodeURIComponent(known.record.id)}/fork`), { messageId: line.id, requestId: key, expectedText: line.text }))
 }
 
-function carryChats(fx: Chats.Effect): Job<Chats.Event, Agent | Talk | Chats.Machine | Composer.Machine, []> {
+function carryChats(fx: Chats.Effect): Job<Chats.Event, Agent | Talk | Chats.Machine | Composer.Machine | Voice.Machine | VoiceBridge | Speaker, []> {
   return match (fx) {
     when { tag: "ReadList", let ticket }: answer("list", listed(ticket), { type: "listed", ticket, ok: false, ids: [] });
     when { tag: "ReadPage", let conversation, let around, let ticket }: answer("page", paged(conversation, around, ticket), { type: "paged", ticket, ok: false, messages: 0 });
     when { tag: "Create", let ticket }: answer("make", making(ticket, HttpClientRequest.bodyJsonUnsafe(HttpClientRequest.post("/api/conversations"), { title: "Ask Alpha" })), { type: "made", ticket, confirmed: false, known: false, conversation: 1 });
     when { tag: "Fork", let conversation, let message, let ticket }: answer("make", forked(conversation, message, ticket), { type: "made", ticket, confirmed: false, known: false, conversation: conversation + 1 });
-    when { tag: "Speak" }: run("speak", Effect.void);
+    when { tag: "Speak", let conversation, let message }: run("speak", readMessage(conversation, message));
   }
 }
 
@@ -652,6 +656,10 @@ const resting = following(Shell, (shell) => shell.assistant === "Bar", Dock.Mach
 export const assistantBack = effect {
   const attachments = try Attachments.Machine
   if (Attachments.canClosePreview(try attachments.get())) return try contained(attachments.send({ type: "closePreview" }), "closing the attachment preview")
+  const voice = try Voice.Machine
+  const speech = try voice.get()
+  if (Voice.canCloseRecorder(speech)) return try contained(voice.send({ type: "closeRecorder" }), "closing dictation")
+  if (Voice.canStop(speech, false)) return try contained(voice.send({ type: "stop", keyboard: false }), "stopping Talk")
   const mail = try MailQuestions
   if (mail.snapshot().question) {
     mail.show({})
