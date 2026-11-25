@@ -262,6 +262,18 @@ describe("The Browser on a phone", () => {
     expect(runtime.runSync(Effect.flatMap(Site, (m) => m.get())).clear).toBe(0);
   });
 
+  it("Explains unavailable Android page reading (spec/app/browser/reading.md, \"An explicit reading starts from the current committed HTTPS page\")", async () => {
+    const world = { ...scene(), phone: true, image: true };
+    world.browser.readingAvailable = false;
+    const { alpha, runtime } = await onBrowser(world);
+    await until(alpha, runtime, Tabs, (state) => state.hydrated);
+    await press("Menu");
+    await drawn(() => vi.waitFor(() => expect(document.querySelector("[role='note'][aria-label='Page reading unavailable']")).not.toBeNull()));
+    await pressOnTop("Read aloud");
+    await until(alpha, runtime, Reader, (state) => state.phase === "Unavailable");
+    expect(world.voice.spokenPages).toEqual([]);
+  });
+
   it.each(["normal", "private"] as const)("Reads the selected page aloud through the phone's opaque approval (spec/app/browser/reading.md, \"Story: Hear the page read aloud\") on a %s tab", async (kind) => {
     const world = { ...scene(), phone: true, image: true };
     let reviewOwner: string | undefined;

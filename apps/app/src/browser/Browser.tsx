@@ -27,7 +27,7 @@ import type { ManagedRuntime } from "effect";
 import { Reviewing, approve, decline } from "./agent.vibe";
 import { Pages, type PageRuntime, addressOf, idOf, inputOf, openDownloads, openPasswords, placed } from "./browser.vibe";
 import { LibraryRows, editHistory, markPage, setMark } from "./library.vibe";
-import { reviewPage, cancelReading, confirmQuestion, editPageExcerpt, editQuestion, PageReading, readPageExcerpt, sensitiveReadingText, SENSITIVE_READING_MESSAGE } from "./reading.vibe";
+import { reviewPage, cancelReading, confirmQuestion, editPageExcerpt, editQuestion, PageReading, readPageExcerpt, sensitiveReadingText, READING_UNSUPPORTED_MESSAGE, SENSITIVE_READING_MESSAGE } from "./reading.vibe";
 import { SharePages, cancelExternal, confirmExternal, mailTarget, offerNativeHandoff, offerShare } from "./share.vibe";
 import { type SitePage, type SiteRows, clearSiteShown, siteShown } from "./site.vibe";
 
@@ -78,6 +78,8 @@ function Tab({ runtime, alpha, tabs, page }: BrowserProps & { tabs: State; page:
   const [refusal, setRefusal] = useState<string>();
   const [finding, setFinding] = useState("");
   const [clearingSite, setClearingSite] = useState<SitePage>();
+  const { review, support } = runtime.runSync(PageReading);
+  const cannotRead = useSyncExternalStore(support.subscribe, support.snapshot, support.snapshot) === "unavailable";
   if (!state) return null;
   const tab = tabs.selected;
   const tabHost = runtime.runSync(TabHost);
@@ -148,9 +150,9 @@ function Tab({ runtime, alpha, tabs, page }: BrowserProps & { tabs: State; page:
       : library.state?.notice === "Failed" ? "Could not change the bookmark."
         : library.state?.notice === "HistoryFailed" ? "Could not change Browser history." : undefined;
   const clearable = native && tabs.layer === "Menu" ? runtime.runSync(siteShown()) : undefined;
-  const readingPage = runtime.runSync(PageReading).review.held;
+  const readingPage = review.held;
   const readingNotice = readingPage?.purpose === "Aloud" ? undefined : reader.state?.phase === "Blocked" ? SENSITIVE_READING_MESSAGE : reader.state?.phase === "Unavailable"
-    ? readingPage === undefined && reader.state.purpose === "Ask" ? "Load a public HTTPS page before asking about it." : "Page reading unavailable" : undefined;
+    ? cannotRead ? READING_UNSUPPORTED_MESSAGE : readingPage === undefined && reader.state.purpose === "Ask" ? "Load a public HTTPS page before asking about it." : "Page reading unavailable" : undefined;
   const question = reader.state?.phase === "Reviewing" && readingPage?.purpose === "Ask" ? readingPage : undefined;
   const aloud = readingPage?.purpose === "Aloud" && tabs.layer === "ReadingReview" ? readingPage : undefined;
   const speechPurpose = native ? "OnPhone" : "Aloud";
@@ -167,6 +169,7 @@ function Tab({ runtime, alpha, tabs, page }: BrowserProps & { tabs: State; page:
     canMail && { label: "Email", name: "Email this page", icon: <Mail />, onSelect: () => void runtime.runPromise(offerShare("Email", binding)) },
     (native || binding !== undefined) && reader.can({ type: "request", purpose: "Ask", secure: state.secure, supported: true }) && { label: "Ask", name: "Ask about page", icon: <Mark aria-hidden />, onSelect: () => void runtime.runPromise(reviewPage(tab, "Ask")) },
     (native || binding !== undefined) && reader.can({ type: "request", purpose: speechPurpose, secure: state.secure, supported: true }) && { label: "Read aloud", icon: <AudioLines />, onSelect: () => void runtime.runPromise(reviewPage(tab, speechPurpose)) },
+    native && cannotRead && { label: "Read aloud", name: "Page reading unavailable", icon: <AudioLines />, reason: READING_UNSUPPORTED_MESSAGE },
     { label: "Passwords", name: "Password manager", icon: <Lock />, onSelect: () => void runtime.runPromise(openPasswords) },
     canHandoff && { label: "Open externally", name: "Open externally, passkeys unsupported here", icon: <ExternalLink />, onSelect: () => void runtime.runPromise(offerNativeHandoff(nativePage)) },
     native && can({ type: "openFind" }) && { label: "Find", name: "Find in page", icon: <Search />, onSelect: () => { setFinding(""); void browser.send({ type: "uncover" }).then(() => send({ type: "openFind" })); } },
