@@ -1,7 +1,7 @@
 import { cn, focusRing } from "./cn.ts";
 
 /** Leave the last scrolling content clear of Ask Alpha and the bottom system inset. */
-export const dockClearance = "pb-[calc(var(--alpha-dock-overlap,5.75rem)+--spacing(4)+env(safe-area-inset-bottom))] scroll-pb-[calc(var(--alpha-dock-overlap,5.75rem)+--spacing(4)+env(safe-area-inset-bottom))]";
+export const dockClearance = "pb-[calc(--spacing(4)+max(var(--alpha-dock-overlap,5.75rem),var(--alpha-native-inset-bottom,0px),env(safe-area-inset-bottom)))] scroll-pb-[calc(--spacing(4)+max(var(--alpha-dock-overlap,5.75rem),var(--alpha-native-inset-bottom,0px),env(safe-area-inset-bottom)))]";
 
 /** The look of a field a person types or chooses in; a single-line one is 48px, as tall as a `Button`. */
 export const field = cn(

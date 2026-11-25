@@ -104,7 +104,7 @@ export function AppsDrawer({
           else onClose();
         }
       }}
-      className={cn("flex min-h-0 flex-col bg-background pt-[max(--spacing(14),calc(env(safe-area-inset-top)+--spacing(3)))] text-foreground motion-safe:animate-fade", className)}
+      className={cn("flex min-h-0 flex-col bg-background pt-[max(--spacing(14),calc(max(var(--alpha-native-inset-top,0px),env(safe-area-inset-top))+--spacing(3)))] text-foreground motion-safe:animate-fade", className)}
     >
       <AppHeader title="Apps" className="min-h-11 shrink-0 px-3 [&_h1]:py-0 [&_h1]:pl-2">
         <Button variant="ghost" size="icon" aria-label="Close apps" onClick={onClose}><X className="size-5" /></Button>

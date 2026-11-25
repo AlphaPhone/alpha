@@ -18,7 +18,7 @@ function Toasts({ runtime }: Shown<Resident>) {
     <ToastRegion
       aria-live={words?.failure ? "assertive" : "polite"}
       data-dialog={state.shownIn || undefined}
-      className={dialog ? undefined : "absolute top-[max(--spacing(2),min(max(calc(env(safe-area-inset-top)+--spacing(3)),calc(var(--alpha-header-clearance,0px)+--spacing(2))),calc(100%_-_var(--alpha-dock-overlap,0px)_-_--spacing(16))))]"}
+      className={dialog ? undefined : "absolute top-[max(--spacing(2),min(max(calc(max(var(--alpha-native-inset-top,0px),env(safe-area-inset-top))+--spacing(3)),calc(var(--alpha-header-clearance,0px)+--spacing(2))),calc(100%_-_var(--alpha-dock-overlap,0px)_-_--spacing(16))))]"}
     >
       {state.showing && words ? (
         <Toast

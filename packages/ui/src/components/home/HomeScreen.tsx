@@ -60,7 +60,7 @@ export function HomeScreen({
   return (
     <div inert={covered || undefined} className={cn("flex h-full min-h-0 flex-1 flex-col bg-background text-base text-foreground", className)}>
       <div ref={scrollRef} className={cn(dockClearance, "flex min-h-0 flex-1 flex-col overflow-x-hidden overflow-y-auto overscroll-y-contain")}>
-        <div className="min-h-[calc(env(safe-area-inset-top)+--spacing(3))] shrink-0">
+        <div className="min-h-[calc(max(var(--alpha-native-inset-top,0px),env(safe-area-inset-top))+--spacing(3))] shrink-0">
           <h1 className="sr-only">Home</h1>
         </div>
         {editing ? <HomeEditBar onShowHidden={onShowHidden} onDone={onDone} notice={notice} className="pb-3" /> : null}

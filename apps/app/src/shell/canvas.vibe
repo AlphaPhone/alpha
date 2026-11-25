@@ -6,7 +6,7 @@ import { Launcher } from "../platform/launcher.vibe"
 import { applying, contained, reacting, started, together } from "../runtime/reactor.vibe"
 
 module page {
-  export type Heard = "resize" | "focus" | "front" | number
+  export type Heard = "resize" | "focus" | "front" | number | { readonly keyboard: boolean }
 
   /** The window as measured: its width, its height, and the height left to the page above the keyboard. @throws {never} */
   export function measured(): { width: number; height: number; visible: number } {
@@ -22,11 +22,23 @@ module page {
     if (active.closest("[data-alpha-composer]")) return "Composer"
     return active.matches("input, textarea, [contenteditable=true]") ? "OtherField" : "NoField"
   }
+
+  /** Android's most recent IME report, if this page has received one. @throws {never} */
+  export function nativeKeyboard(): boolean | undefined {
+    if (typeof document === "undefined") return undefined
+    const kept = document.documentElement.dataset.alphaNativeKeyboard
+    return kept === "true" ? true : kept === "false" ? false : undefined
+  }
+
   /** Each change of the window, of the space above the keyboard and of focus. @throws {never} */
   export function watched(heard: (what: Heard) => void): () => void {
     const resize = () => heard("resize")
     const focus = () => heard("focus")
     const front = () => heard("front")
+    const insets = (event: Event) => {
+      const detail: unknown = event instanceof CustomEvent ? event.detail : undefined
+      if (typeof detail === "object" && detail !== null && "keyboard" in detail && typeof detail.keyboard === "boolean") heard({ keyboard: detail.keyboard })
+    }
     const probe = document.createElement("span")
     probe.setAttribute("aria-hidden", "true")
     probe.style.cssText = "position:absolute;inset:0 auto auto 0;width:0;overflow:hidden;visibility:hidden;pointer-events:none;font-size:6.25rem;line-height:1;white-space:nowrap;contain:layout"
@@ -38,12 +50,16 @@ module page {
     text()
     window.addEventListener("resize", resize)
     window.addEventListener("focus", front)
+    window.addEventListener("alpha-insets", insets)
     window.visualViewport?.addEventListener("resize", resize)
     document.addEventListener("focusin", focus)
     document.addEventListener("focusout", focus)
+    const keyboard = nativeKeyboard()
+    if (keyboard !== undefined) heard({ keyboard })
     return () => {
       window.removeEventListener("resize", resize)
       window.removeEventListener("focus", front)
+      window.removeEventListener("alpha-insets", insets)
       window.visualViewport?.removeEventListener("resize", resize)
       document.removeEventListener("focusin", focus)
       document.removeEventListener("focusout", focus)
@@ -66,7 +82,17 @@ module page {
     }
   }
 }
-import { type Heard, focused, measured, paged, releaseComposer, sized, watched } from page
+import { type Heard, focused, measured, nativeKeyboard, paged, releaseComposer, sized, watched } from page
+
+// spec/app/shell/keyboard.md, "Where Android reports the keyboard, the keyboard hiding puts the composer away, unless it hid to hand the composer to voice"
+/** Preserve the focused composer during a voice handoff on a phone reporting its keyboard. */
+export effect function keyboardVoice(voice: boolean): void!!Canvas.Machine {
+  const shown = nativeKeyboard()
+  if (shown === undefined) return
+  const canvas = try Canvas.Machine
+  const state = try canvas.get()
+  if (state.voice !== voice && Canvas.canKeyboardReported(state, shown, voice)) try contained(canvas.send({ type: "keyboardReported", shown, voice }), "the keyboard")
+}
 
 // spec/app/shell/keyboard.md, "At the same width, a shorter window while a field has focus is the keyboard; a new width while a field has focus, within a fifth of the height kept, is a rotation, and the width kept stands in for the new height; any other change takes the height measured"
 const followed = started(effect {
@@ -87,6 +113,11 @@ const followed = started(effect {
       return
     }
     const state = try canvas.get()
+    if (typeof what === "object") {
+      const shown = what.keyboard
+      if (state.keyboard !== (shown || state.voice ? "Shown" : "Hidden")) try tell({ type: "keyboardReported", shown, voice: state.voice })
+      return
+    }
     if (typeof what === "number") {
       if (Canvas.canMeasureText(state, what)) try tell({ type: "measureText", scale: what })
       return
