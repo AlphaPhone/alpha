@@ -100,6 +100,7 @@ export function HomePage({ runtime, alpha }: Shown<HomeMachines | Resident>) {
     <HomeScreen
       launcher={h.host === "AsLauncher"}
       cards={Home.showsCards(h) ? day : []}
+      appCards={Home.showsCards(h) && alpha.slot("home/cards")}
       tiles={ready(h.tiles) ? Home.tilesShown(h, s).map((tile) => tileItem(tile, known.apps, tile.tag === "Own" ? waits.get(tile.view) : undefined, h.editing)) : undefined}
       editing={h.editing}
       onOpenTile={(id) => {
@@ -131,7 +132,6 @@ export function HomePage({ runtime, alpha }: Shown<HomeMachines | Resident>) {
     <>
       <div inert={showingApps || undefined} className="contents">
         {deck}
-        {Home.showsCards(h) && alpha.slot("home/cards")}
       </div>
       {showingApps && (
         <AppsDrawer apps={catalogApps} query={drawer.state?.query ?? ""}
