@@ -26,11 +26,6 @@ afterEach(closeAll);
 const opens = () => [...document.querySelectorAll<HTMLButtonElement>("ul[aria-label='Email messages'] button")];
 const subjectOf = (button: HTMLButtonElement) => button.querySelector("[data-inbox-subject]")?.textContent;
 const rows = () => opens().map(subjectOf);
-const tile = (view: string) => drawn(() => {
-  const found = document.querySelector<HTMLButtonElement>(`[data-home-tile='view:${view}']`);
-  if (!found) throw new Error(`no tile ${view}`);
-  found.click();
-});
 const row = (subject: string) => drawn(() => {
   const found = opens().find((open) => subjectOf(open) === subject);
   if (!found) throw new Error(`no message ${subject}`);
