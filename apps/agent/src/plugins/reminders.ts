@@ -101,8 +101,11 @@ async function followTask(
     if (step === "MakeTask" && after !== undefined && fireAtMs !== null) return { item: await makeTask(store, tasksApi, after, fireAtMs), followed: true };
     if (taskId === null) break;
     if (step === "DismissTask") {
-      if ((await answered(tasksApi, taskId, { kind: "verb", verb: { tag: "Dismiss" } }, "Dismissed")) === "refused") return { item: after, followed: false };
-      return { item: after === undefined ? undefined : store.updateItem(after.id, { agentTaskId: null }) ?? after, followed: true };
+      const detached = after === undefined ? undefined : store.updateItem(after.id, { agentTaskId: null }) ?? after;
+      if ((await answered(tasksApi, taskId, { kind: "verb", verb: { tag: "Dismiss" } }, "Dismissed")) === "refused") {
+        return { item: after === undefined ? undefined : store.updateItem(after.id, { agentTaskId: taskId }) ?? after, followed: false };
+      }
+      return { item: detached, followed: true };
     }
     if (step === "CompleteTask") {
       return { item: after, followed: (await answered(tasksApi, taskId, { kind: "verb", verb: { tag: "Complete" } }, "Completed")) !== "refused" };
@@ -112,10 +115,11 @@ async function followTask(
       : { kind: "edit", edit: { trigger: { kind: "once", atIso: new Date(fireAtMs ?? 0).toISOString() } } };
     const answer = await answered(tasksApi, taskId, request, "Scheduled");
     if (answer !== "applied" && after !== undefined && fireAtMs !== null) {
+      const detached = store.updateItem(after.id, { agentTaskId: null }) ?? after;
       if (answer === "refused" && (await answered(tasksApi, taskId, { kind: "verb", verb: { tag: "Dismiss" } }, "Dismissed")) === "refused") {
-        return { item: after, followed: false };
+        return { item: store.updateItem(after.id, { agentTaskId: taskId }) ?? after, followed: false };
       }
-      return { item: await makeTask(store, tasksApi, store.updateItem(after.id, { agentTaskId: null }) ?? after, fireAtMs), followed: true };
+      return { item: await makeTask(store, tasksApi, detached, fireAtMs), followed: true };
     }
   }
   return { item: after, followed: true };
