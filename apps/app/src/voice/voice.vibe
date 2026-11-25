@@ -99,6 +99,7 @@ export interface VoiceMemory {
   readonly playLock: Semaphore.Semaphore
   dictatedText: string
   dictatedDurationMs: number | undefined
+  transcriptReading: { readonly review: number; readonly scene: string; readonly words: string } | undefined
   fillTarget: { readonly field: Field; readonly filling: number; readonly apply: (words: string) => void!! } | undefined
   spokenNavigation: SpokenNavigation | undefined
   /** The observation and the open Files document a turn sent now from `shown` takes with it, read as Ask Alpha reads them. */
@@ -147,6 +148,7 @@ export const voiceWords = Layer.effect(VoiceWords, effect {
     playLock,
     dictatedText: "",
     dictatedDurationMs: undefined,
+    transcriptReading: undefined,
     fillTarget: undefined,
     spokenNavigation: undefined,
     screen: undefined,
@@ -1039,6 +1041,7 @@ const discardedDictation = applying(Voice.Machine, (voice) => voice.recorder, ef
   memory.fillTarget = undefined
   memory.dictatedText = ""
   memory.dictatedDurationMs = undefined
+  memory.transcriptReading = undefined
 })
 
 const bridgeEvents = hearing(

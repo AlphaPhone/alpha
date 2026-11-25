@@ -5,6 +5,7 @@ import { Check, Mic, X } from "lucide-react";
 import { useState, useSyncExternalStore } from "react";
 import type { Machine as Voice } from "../../gen/app__voice.effect.vibe";
 import { useMachine } from "../../gen/app__voice.react.ts";
+import type { Machine as Speaker } from "../../gen/app__voice__output.effect.vibe";
 import { closeDictationForKeyboard, dictationReturnedToKeyboard, editDictation } from "../assistant/dictation.vibe";
 import type { VoiceBridge } from "../platform/voice.vibe";
 import { untimed } from "../runtime/reactor.vibe";
@@ -16,9 +17,10 @@ import type { DictationKeyboard } from "./useTalkKeyboard.ts";
 const recordingMarks = Array.from({ length: 44 }, (_, index) => index);
 
 /** The controls and confirmed time of the current composer recording, including transcript review. */
-export function DictationControls({ runtime, onKeyboard }: {
-  runtime: ManagedRuntime.ManagedRuntime<Voice | VoiceWords | DictationClock | VoiceBridge, unknown>;
+export function DictationControls({ runtime, onKeyboard, playback }: {
+  runtime: ManagedRuntime.ManagedRuntime<Voice | VoiceWords | DictationClock | VoiceBridge | Speaker, unknown>;
   onKeyboard: DictationKeyboard;
+  playback?: { readonly playing: boolean; readonly failed: boolean; toggle(ticket: number): void };
 }) {
   const { state, can, send } = useMachine(runtime);
   const clock = runtime.runSync(DictationClock);
@@ -86,11 +88,17 @@ export function DictationControls({ runtime, onKeyboard }: {
           </div>}
         </div>
       )}
+      {playback?.failed && <p role="status" className="text-sm leading-voice-status text-muted-foreground">Playback failed</p>}
       <Button className="min-h-14 gap-2.5 rounded-sheet px-4" disabled={pending || !primary.enabled} onClick={() => void send(primary.event)}>
         <PrimaryIcon aria-hidden="true" className="size-6" />{primary.label}
       </Button>
-      {can(another) && <Button variant="secondary" className="h-11 rounded-tile px-4 font-normal" disabled={pending} onClick={() => void send(another)}>
-        <Mic aria-hidden className="size-5" />Record again
+      {(playback || can(another)) && <Button variant="secondary" className="h-11 px-4 font-normal"
+        disabled={pending || (playback !== undefined && dictatedText.trim() === "")}
+        onClick={() => playback ? playback.toggle(recorder.ticket) : void send(another)}>
+        {playback?.playing ? <><VoiceStopIcon className="size-5" />Stop audio</> : playback ? <>
+          <svg aria-hidden="true" className="size-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinejoin="round"><path d="M8 5l11 7-11 7z" /></svg>
+          Listen to transcript
+        </> : <><Mic aria-hidden className="size-5" />Record again</>}
       </Button>}
     </section>
   );

@@ -15,6 +15,7 @@ import { Machine as Messages } from "../gen/app__messages.effect.vibe";
 import { Machine as Phone } from "../gen/app__phone.effect.vibe";
 import { Machine as Composer } from "../gen/app__assistant__composer.effect.vibe";
 import { Machine as Dock } from "../gen/app__assistant__dock.effect.vibe";
+import { Machine as Speaker } from "../gen/app__voice__output.effect.vibe";
 import { Machine as Locator } from "../gen/app__assistant__context.effect.vibe";
 import { Machine as Files } from "../gen/app__files.effect.vibe";
 import { Machine as FilePreview } from "../gen/app__files__preview.effect.vibe";
@@ -1135,6 +1136,47 @@ describe("Talk from Ask Alpha's composer (spec/app/voice/index.md, \"Story: Hold
     } else {
       expect(document.activeElement).not.toBe(editor);
     }
+    expect(world.ask.said).toEqual([]);
+  });
+
+  // spec/app/voice/output.md, "Stopping, or losing what is read (another conversation, another screen, a hidden page, a closed chat), stops the reading"
+  it("listens to the current reviewed words on the phone and never plays words edited during preparation", async () => {
+    const world = { ...scene(), phone: true, signedIn: false };
+    const { alpha } = await open(world, talkMounts);
+    const area = assistant.runtime(alpha);
+    await drawnUntil(alpha, area, Composer, (state) => state.slot === "Open");
+    await drawn(() => alpha.runtime.runPromise(Effect.flatMap(Shell.Machine, (machine) => machine.send({ type: "raise", detent: "Sheet" }))));
+    await drawn(() => area.runPromise(dictate()));
+    await drawnUntil(alpha, area, Voice.Machine, (state) => state.recorder.stage === "Ready");
+    await press("Start recording");
+    await drawnUntil(alpha, area, Voice.Machine, (state) => state.recorder.stage === "Recording");
+    await press("Stop recording");
+    await drawnUntil(alpha, area, Voice.Machine, (state) => state.recorder.stage === "Review");
+
+    const preparing = Promise.withResolvers<void>();
+    const settled = Promise.withResolvers<void>();
+    world.voice.synthesisGate = async () => {
+      preparing.resolve();
+      await settled.promise;
+    };
+    try {
+      await press("Listen to transcript");
+      await preparing.promise;
+      await drawnUntil(alpha, area, Speaker, (state) => state.stage === "Preparing");
+      expect(button("Stop audio")).toBeDefined();
+      await fill("Review transcript", "My revised words");
+      await drawnUntil(alpha, area, Speaker, (state) => state.stage === "Silent" && state.outcome === "Stopped");
+    } finally {
+      world.voice.synthesisGate = undefined;
+      settled.resolve();
+    }
+    expect(world.voice.speakerMutedAtPlayback).toEqual([]);
+    await press("Listen to transcript");
+    await drawnUntil(alpha, area, Speaker, (state) => state.stage === "Silent" && state.outcome === "Finished");
+    expect(world.voice.spoken.map(({ text, channel }) => ({ text, channel }))).toEqual([
+      { text: "Dictated note", channel: "local" }, { text: "My revised words", channel: "local" },
+    ]);
+    expect(world.voice.speakerMutedAtPlayback).toEqual([false]);
     expect(world.ask.said).toEqual([]);
   });
 });

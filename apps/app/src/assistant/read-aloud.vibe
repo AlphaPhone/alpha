@@ -1,11 +1,12 @@
 // spec/app/voice/output.md, "Story: Listen to a message, a note or a page"; spec/app/voice/output.md, "Stopping, or losing what is read (another conversation, another screen, a hidden page, a closed chat), stops the reading"
 import * as Chats from "../../gen/app__assistant__chats.effect.vibe"
-import { Machine as Shell } from "../../gen/app__shell.effect.vibe"
+import { Machine as Shell, type Shell as ShellState } from "../../gen/app__shell.effect.vibe"
 import * as Voice from "../../gen/app__voice.effect.vibe"
 import * as Speaker from "../../gen/app__voice__output.effect.vibe"
 import { Device } from "../platform/device.vibe"
 import { VoiceBridge } from "../platform/voice.vibe"
 import { type Job, answer, contained, hearing, reacting, started, stream, together } from "../runtime/reactor.vibe"
+import { VoiceWords } from "../voice/voice.vibe"
 import { Talk } from "./talk.vibe"
 import { wordsOf } from "./words.ts"
 
@@ -19,19 +20,76 @@ export effect function readMessage(conversation: number, message: number): void!
   try contained((try Speaker.Machine).send({ type: "read", text: "Message", which: message }), "reading the settled message")
 }
 
-type Inputs = Speaker.Machine | Chats.Machine | Talk | VoiceBridge
+function sceneOf(shell: ShellState, chosen: number): string {
+  return JSON.stringify([shell.trail, shell.assistant, chosen])
+}
 
-function prepare(ticket: number, item: number): Stream.Stream<Speaker.Event, never, Inputs> {
+// spec/app/voice/output.md, "Stopping, or losing what is read (another conversation, another screen, a hidden page, a closed chat), stops the reading"
+export effect function readTranscript(review: number): void!!(Speaker.Machine | Voice.Machine | VoiceWords | VoiceBridge | Shell | Chats.Machine | Device) {
+  const voice = try (try Voice.Machine).get()
+  if (!Voice.quiet(voice) || voice.recorder.field !== "ComposerField" || voice.recorder.stage !== "Review" || voice.recorder.ticket !== review) return
+  const speaker = try Speaker.Machine
+  const reading = try speaker.get()
+  if (reading.text === "Transcript" && reading.item === review && Speaker.canStop(reading)) {
+    try stopTranscript(review)
+    return
+  }
+  const { memory } = try VoiceWords
+  const words = memory.dictatedText
+  if (words.trim() === "" || !(try (try VoiceBridge).canRead()) || !(try (try Device).showing())) return
+  const shell = try (try Shell).get()
+  const { chosen } = try (try Chats.Machine).get()
+  const selection = { review, scene: sceneOf(shell, chosen), words }
+  memory.transcriptReading = selection
+  const accepted = try contained(speaker.send({ type: "read", text: "Transcript", which: review }), "reading the reviewed transcript")
+  if (!accepted && memory.transcriptReading === selection) memory.transcriptReading = undefined
+}
+
+export effect function stopTranscript(review: number): void!!(Speaker.Machine | VoiceWords) {
+  const { memory } = try VoiceWords
+  if (memory.transcriptReading?.review === review) memory.transcriptReading = undefined
+  const speaker = try Speaker.Machine
+  const reading = try speaker.get()
+  if (reading.text !== "Transcript" || reading.item !== review || !Speaker.canStop(reading)) return
+  try contained(speaker.send({ type: "stop" }, (state) => state.ticket === reading.ticket), "stopping the reviewed transcript")
+}
+
+type Inputs = Speaker.Machine | Chats.Machine | Talk | VoiceBridge | Voice.Machine | VoiceWords | Shell | Device
+
+function prepare(ticket: number, text: Speaker.Text, item: number): Stream.Stream<Speaker.Event, never, Inputs> {
   return Stream.unwrap(effect {
     const speaker = try Speaker.Machine
     const state = try speaker.get()
     if (state.ticket !== ticket || state.stage !== "Preparing") return Stream.empty
-    const { board } = try Talk
     const conversation = (try (try Chats.Machine).get()).chosen
-    const line = board.line(conversation, item)
+    let words: string | undefined
+    let stillCurrent: (() => boolean!!) | undefined
+    if (text === "Transcript") {
+      const { memory } = try VoiceWords
+      const held = memory.transcriptReading
+      if (held?.review === item) {
+        memory.transcriptReading = undefined
+        const voice = try Voice.Machine
+        const shell = try Shell
+        const chats = try Chats.Machine
+        const device = try Device
+        stillCurrent = effect () => {
+          const reading = try speaker.get()
+          const { recorder } = try voice.get()
+          return reading.ticket === ticket && reading.stage === "Preparing" && recorder.stage === "Review" &&
+            recorder.field === "ComposerField" && recorder.ticket === item &&
+            held.scene === sceneOf(try shell.get(), (try chats.get()).chosen) && held.words === memory.dictatedText && (try device.showing())
+        }
+        if (try stillCurrent()) words = held.words
+      }
+    } else if (text === "Message") {
+      const { board } = try Talk
+      const line = board.line(conversation, item)
+      if (line !== undefined && !line.mine) words = wordsOf(line, true)
+    }
     const bridge = try VoiceBridge
-    const audio = line === undefined || line.mine ? Stream.succeed<Speaker.Event>({ type: "ready", ticket, ok: false })
-      : Stream.map(bridge.readAloud(ticket, wordsOf(line, true)), (event): Speaker.Event => ({ type: event.kind, ticket, ok: event.ok }))
+    const audio = words === undefined ? Stream.succeed<Speaker.Event>({ type: "ready", ticket, ok: false })
+      : Stream.map(bridge.readAloud(ticket, words, stillCurrent), (event): Speaker.Event => ({ type: event.kind, ticket, ok: event.ok }))
     return Stream.concat(audio, Stream.fromEffect(effect {
       const confirmed = try bridge.silenceReading(ticket)
       return { type: "cleaned", confirmed } as Speaker.Event
@@ -41,7 +99,7 @@ function prepare(ticket: number, item: number): Stream.Stream<Speaker.Event, nev
 
 function carry(fx: Speaker.Effect): Job<Speaker.Event, Inputs, []> {
   return match (fx) {
-    when { tag: "Prepare", let ticket, let item }: stream(`read ${ticket}`, prepare(ticket, item), { type: "ready", ticket, ok: false });
+    when { tag: "Prepare", let ticket, let text, let item }: stream(`read ${ticket}`, prepare(ticket, text, item), { type: "ready", ticket, ok: false });
     when { tag: "Silence", let reading }: answer(`silence ${reading}`, effect {
       const confirmed = try (try VoiceBridge).silenceReading(reading)
       return { type: "cleaned", confirmed };
@@ -58,7 +116,10 @@ const left = started(effect {
   const reading = Stream.zipLatest(Stream.zipLatest(chat.changes, shell.changes), voice.changes)
   try Stream.runForEach(reading, effect ([[chat, shell], voice]) => {
     const key = `${chat.chosen}/${shell.trail.at(-1) ?? "home"}/${shell.assistant === "Bar"}/${Voice.quiet(voice)}/${voice.recorder.stage === "Closed"}`
-    if (previous !== undefined && key !== previous && Speaker.canStop(try speaker.get())) try contained(speaker.send({ type: "stop" }), "stopping Read aloud")
+    const reading = try speaker.get()
+    if (reading.text === "Transcript") {
+      if (voice.recorder.stage !== "Review" || voice.recorder.ticket !== reading.item || (previous !== undefined && key !== previous)) try stopTranscript(reading.item)
+    } else if (previous !== undefined && key !== previous && Speaker.canStop(reading)) try contained(speaker.send({ type: "stop" }), "stopping Read aloud")
     previous = key
   })
 }, "following the reading's screen")
