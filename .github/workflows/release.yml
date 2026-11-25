@@ -64,6 +64,8 @@ jobs:
           pnpm eliza
           pnpm --filter @repo/eliza-harness build
       - run: pnpm --filter @repo/app android build --release
+        env:
+          ELIZAOS_VERSION_CODE: ${{ github.run_number }}
       - name: Build the candidate, mirror it and plan its signing
         working-directory: apps/app
         run: |
