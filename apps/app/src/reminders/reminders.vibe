@@ -4,7 +4,7 @@ import * as Reminders from "../../gen/app__reminders.effect.vibe"
 import type { DeleteMode, Effect as Out, Event } from "../../gen/app__reminders.effect.vibe"
 import * as Alerts from "../../gen/app__reminders__alerts.effect.vibe"
 import * as Editor from "../../gen/app__reminders__editor.effect.vibe"
-import { agendaFrom } from "../home/cards.vibe"
+import { fromAreas } from "../home/cards.vibe"
 import * as Toasts from "../../gen/app__notices__toasts.effect.vibe"
 import { Said, offer, say, withdraw } from "../notices/toasts.vibe"
 import { Agent } from "../platform/agent.vibe"
@@ -129,7 +129,7 @@ function pushToHomeAgenda(snapshot: RemindersSnapshot, hiddenIds: ReadonlySet<st
       done: item.completed,
       title: item.title,
     }))
-  agendaFrom.reminders(dated)
+  fromAreas.reminders(dated)
 }
 
 effect function persistAndBroadcast(snapshot: RemindersSnapshot, nowMs: number): void!!(KeyValueStore.KeyValueStore | Alerts.Machine | PhoneReminders) {

@@ -34,8 +34,11 @@ export function SettingsPage({ title, top = false, leading, onBack, told, action
       leading={leading ?? (onBack ? <Button variant="ghost" size="icon" aria-label="Back" onClick={onBack}><ChevronLeft /></Button> : undefined)}
       actions={actions}
       className={cn(
-        "in-data-alpha-launcher:pt-[max(--spacing(11),env(safe-area-inset-top))] [&>main]:touch-pan-y [&>main]:pb-[calc(--spacing(32.5)+env(safe-area-inset-bottom))] [&>main>div]:gap-3 [&>main>div]:pt-1",
-        top ? "in-data-alpha-launcher:[&>header]:pl-5 in-data-alpha-launcher:[&>header>h1]:pl-0" : "in-data-alpha-launcher:[&>header]:pr-4 in-data-alpha-launcher:[&>header>h1]:text-home-display",
+        "[&>main]:touch-pan-y [&>main]:pb-[calc(--spacing(32.5)+env(safe-area-inset-bottom))] [&>header>h1]:truncate",
+        "in-data-[alpha-launcher]:pt-[max(--spacing(11),env(safe-area-inset-top))] in-data-[alpha-launcher]:[&>header]:min-h-14 in-data-[alpha-launcher]:[&>header>h1]:font-display in-data-[alpha-launcher]:[&>header>h1]:font-light",
+        top
+          ? "in-data-[alpha-launcher]:[&>header]:pl-5 in-data-[alpha-launcher]:[&>header>h1]:pl-0 in-data-[alpha-launcher]:[&>header>h1]:text-3xl"
+          : "in-data-[alpha-launcher]:[&>header]:pr-4 in-data-[alpha-launcher]:[&>header>h1]:text-home-display",
       )}
     >
       {told ? <SettingsAndroidNotice told={told} /> : null}

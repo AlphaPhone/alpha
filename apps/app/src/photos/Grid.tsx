@@ -70,11 +70,11 @@ export function MediaGrid({ rows, selection, grouped, open, start, more }: Media
     if (pane.scrollHeight - pane.scrollTop - pane.clientHeight < pane.clientHeight / 2) more?.();
   }
   return (
-    <div data-alpha-app-scroll="photos" className="min-h-0 flex-1 touch-pan-y overflow-y-auto pb-28 [container-type:inline-size]" onScroll={scrolled}
+    <div data-alpha-app-scroll="photos" className="min-h-0 flex-1 touch-pan-y overflow-y-auto px-3 pb-28 [container-type:inline-size]" onScroll={scrolled}
       onClick={(event) => choose(event, open)} onContextMenu={(event) => choose(event, start)}>
       {groups.map(([label, items]) => (
         <section key={label} aria-label={label || "Photos"}>
-          {label && <header className="sticky top-0 z-10 flex items-baseline justify-between bg-background px-4 py-2 text-sm font-semibold"><h2>{label}</h2><span className="text-xs font-normal text-muted-foreground">{items.length}</span></header>}
+          {label && <header className="sticky top-0 z-10 flex items-baseline justify-between bg-background px-1 py-2 text-sm font-semibold"><h2>{label}</h2><span className="text-xs font-normal text-muted-foreground">{items.length}</span></header>}
           {Array.from({ length: Math.ceil(items.length / 4) }, (_, index) => {
             const line = items.slice(index * 4, index * 4 + 4);
             return <div key={line[0]?.number ?? index} className="mb-0.5 grid grid-cols-4 gap-0.5 [content-visibility:auto] [contain-intrinsic-block-size:auto_24cqw]">{line.map(({ number, row }) => (

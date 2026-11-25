@@ -171,6 +171,25 @@ pure def restart(c: Chats): Moved =
   if (c.chosen > 0) { state: paging.state, out: listing.out.concat(paging.out) } else listing
 ```
 
+### A conversation the agent says it does not have is forgotten, and a new chat shows in its place
+
+The agent answers a read of a conversation's latest messages with 404 when
+it has no such conversation, as after its store was reset or the phone
+paired with another agent. That is not a read that failed, and nothing is
+said about it: the conversation leaves the list and none shows, so the next
+message starts a new one. A draft written in it stays in its slot on the
+phone. A 404 to a read around a message says only that the message is
+unknown, and like any other failed read keeps the conversation showing, to
+be read again.
+
+```quint
+pure def canGone(c: Chats, ticket: int): bool = R::canAnswer(c.page, ticket) and c.around == 0
+
+pure def gone(c: Chats, ticket: int): Chats =
+  { ...c, ids: c.ids.select(i => i != c.chosen), chosen: 0, origin: 0,
+    page: X::dropped(c.page), around: 0, messages: 0 }
+```
+
 ### Another owner or agent session leaves every conversation behind
 
 The list, the page and the conversation showing are dropped, and a
@@ -352,4 +371,23 @@ pure def stepOnlyAMessageOfTheConversationShowingIsReadAloud(before: Chats, via:
         and 1 <= s.message and s.message <= before.messages
     | _ => true
   })
+```
+
+## Story: Reuse words from a message
+
+> As the owner, I want to copy a recorded message and review Alpha's
+> answer before using it in an email draft.
+
+### Only text in the recorded message showing can be copied; only an answer from Alpha can be offered to Inbox
+
+The offer carries text only. Inbox displays it with its destination
+before the owner chooses whether it goes into a draft.
+
+```quint
+pure def copyableText(recorded: bool, blank: bool): bool = recorded and not(blank)
+
+pure def textForEmail(recorded: bool, blank: bool, mine: bool): bool = copyableText(recorded, blank) and not(mine)
+
+pure def lawOnlyRecordedTextCanBeReused(blank: bool, mine: bool): bool =
+  not(copyableText(false, blank)) and not(textForEmail(false, blank, mine)) and not(textForEmail(true, blank, true))
 ```

@@ -21,7 +21,7 @@ export function AppHeader({ title, leading, titleControl, className, children, .
   return (
     <header data-host-chrome="" className={cn("flex min-h-13 items-center gap-0.5 px-2 [&_button[aria-label]]:size-13 [&_button[aria-label]]:min-w-13", className)} {...props}>
       {leading}
-      <h1 className={titleControl ? "sr-only" : "min-w-0 flex-1 text-xl font-semibold break-words focus-visible:outline-none in-data-alpha-launcher:font-display in-data-alpha-launcher:text-3xl in-data-alpha-launcher:font-light"}>{title}</h1>
+      <h1 className={titleControl ? "sr-only" : "min-w-0 flex-1 text-xl font-semibold break-words focus-visible:outline-none in-data-[alpha-launcher]:font-display in-data-[alpha-launcher]:text-3xl in-data-[alpha-launcher]:font-light"}>{title}</h1>
       {titleControl}
       {children}
     </header>

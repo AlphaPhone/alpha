@@ -5,7 +5,7 @@ import { StatusDot } from "../StatusDot.tsx";
 import { SettingsAndroidRow } from "./SettingsAndroidRow.tsx";
 import { SettingsNavRow } from "./SettingsNavRow.tsx";
 import { SettingsPage } from "./SettingsPage.tsx";
-import type { SettingsPageLink } from "./SettingsPageLinks.tsx";
+import { type SettingsPageLink, SettingsPageLinks } from "./SettingsPageLinks.tsx";
 import { type AndroidTold, type Neighbour, placed, type SettingsAndroidProps, type SettingsPageName, type SettingsPlaceProps } from "./vocabulary.ts";
 
 export type SettingsTopPageProps = SettingsAndroidProps &
@@ -35,8 +35,8 @@ const links: SettingsPageLink[] = [
 
 /**
  * The first page of Settings: the account, General, Privacy, Apps and About, Android's own settings, and in a
- * development build the Developer page, each on a card of its own. Rows are numbered by slot, so a row keeps its place
- * whether or not the ones above it are shown.
+ * development build the Developer page. Rows are numbered by slot, so a row keeps its place whether or not the ones
+ * above it are shown.
  * @model spec/app/settings/index.md
  */
 export function SettingsTopPage({ developer = false, micMayBeOn = false, told, onOpen, onHandOver, starting, onAndroid, place, onPlace, children, leading }: SettingsTopPageProps) {
@@ -52,9 +52,9 @@ export function SettingsTopPage({ developer = false, micMayBeOn = false, told, o
       <ListGroup>
         <SettingsNavRow title="Account" icon={<UserRound />} onOpen={onHandOver && (() => onHandOver("account-and-plan"))} {...at(1)} />
       </ListGroup>
-      {links.map(({ page, title, icon }, index) => (
-        <ListGroup key={page}>
-          <SettingsNavRow title={title} icon={icon} onOpen={onOpen && (() => onOpen(page))} {...at(2 + index)} />
+      {links.map((link, index) => (
+        <ListGroup key={link.page}>
+          <SettingsPageLinks links={[link]} first={2 + index} onOpen={onOpen} place={place} onPlace={onPlace} />
         </ListGroup>
       ))}
       {developer ? (
@@ -64,8 +64,6 @@ export function SettingsTopPage({ developer = false, micMayBeOn = false, told, o
       ) : null}
       <ListGroup>
         <SettingsAndroidRow target="android-home" title="Android settings" icon={<Settings />} {...android} {...at(7)} />
-      </ListGroup>
-      <ListGroup>
         <SettingsAndroidRow target="accounts-sync" title="Accounts and sync" icon={<RefreshCw />} {...android} {...at(8)} />
       </ListGroup>
       {children}

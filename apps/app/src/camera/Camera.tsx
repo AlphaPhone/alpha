@@ -34,6 +34,7 @@ function Viewfinder({ state, native, zoom, focusAt, bind }: {
   const pointers = useRef(new Map<number, Point>());
   const pinch = useRef<{ distance: number; zoom: number } | undefined>(undefined);
   const pinched = useRef(false);
+  const target = useRef<Point | undefined>(undefined);
   const input = (event: PointerEvent<HTMLButtonElement>) => ({ x: event.clientX, y: event.clientY });
   function spread() {
     const [a, b] = pointers.current.values();
@@ -75,12 +76,14 @@ function Viewfinder({ state, native, zoom, focusAt, bind }: {
         const x = event.detail === 0 ? box.left + box.width / 2 : event.clientX;
         const y = event.detail === 0 ? box.top + box.height / 2 : event.clientY;
         const page = event.currentTarget.ownerDocument.documentElement;
-        focusAt({
+        const point = {
           x: Math.max(0, Math.min(1, (x - box.left) / box.width)),
           y: Math.max(0, Math.min(1, (y - box.top) / box.height)),
           viewportX: Math.max(0, Math.min(1, x / page.clientWidth)),
           viewportY: Math.max(0, Math.min(1, y / page.clientHeight)),
-        });
+        };
+        target.current = point;
+        focusAt(point);
       }}
     >
       <video
@@ -91,6 +94,15 @@ function Viewfinder({ state, native, zoom, focusAt, bind }: {
         aria-hidden
         className={cn("pointer-events-none absolute inset-0 size-full object-cover", state.lens === "Front" && "-scale-x-100", native && "invisible")}
       />
+      {state.focus > 0 && target.current && (
+        <span
+          key={state.focus}
+          role="status"
+          aria-label={state.confirmed === state.focus ? "Camera focus applied" : "Focus target"}
+          className={cn("pointer-events-none absolute z-10 size-10 -translate-1/2 rounded-sm border-2 shadow-sm", state.confirmed === state.focus ? "border-ok" : "border-warn")}
+          style={{ left: `${target.current.x * 100}%`, top: `${target.current.y * 100}%` }}
+        />
+      )}
       {state.grid && ready(state) && (
         <span aria-hidden className="pointer-events-none absolute inset-0 grid grid-cols-3 grid-rows-3">
           {Array.from({ length: 9 }, (_, cell) => <span key={cell} className={cn(cell % 3 > 0 && "border-l border-foreground/40", cell >= 3 && "border-t border-foreground/40")} />)}
@@ -114,7 +126,7 @@ function Access({ state, present, native, can, fire, takeSilent }: {
   const noCamera = !allows(state.permission);
   const failed = state.phase === "Failed" || !present;
   const noMic = !noCamera && !failed && video && !allows(state.mic) && state.film.stage !== "Running";
-  if (!noCamera && !failed && !noMic) return null;
+  if (!state.showing || !noCamera && !failed && !noMic) return null;
   const Icon = noMic ? MicOff : CameraOff;
   const title = failed ? "Can’t start camera" : noCamera ? "Camera off" : "Mic off";
   const ask = { type: noCamera ? "askAccess" : "askMicrophone" } as const;

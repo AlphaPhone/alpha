@@ -11,16 +11,20 @@ import * as Prefs from "../gen/app__settings__preferences.effect.vibe";
 import * as Reset from "../gen/app__settings__reset.effect.vibe";
 import * as Pages from "../gen/app__settings.effect.vibe";
 import { Machine as Shell } from "../gen/app__shell.effect.vibe";
+import * as Layers from "../gen/app__shell__layers.effect.vibe";
 import settings from "../src/settings/index.tsx";
-import { button, closeAll, fill, hardware, later, open, press, seen, underAct, until } from "./alpha.tsx";
+import { button, closeAll, fill, hardware, later, only, open as openAlpha, press, seen, underAct, until } from "./alpha.tsx";
+import { account } from "./fakes/cloud.ts";
 import { notices } from "./fakes/settings.ts";
-import { scene } from "./fakes/scene.ts";
+import { type Scene, scene } from "./fakes/scene.ts";
 
 underAct();
 afterEach(closeAll);
 
 const shipped = vi.fn(() => Promise.resolve(Response.json(notices)));
 vi.stubGlobal("fetch", ((input: RequestInfo | URL, init?: RequestInit) => (String(input).endsWith("licenses/third-party-notices.json") ? shipped() : fetch(input, init))) as typeof fetch);
+
+const open = (world: Scene) => openAlpha(world, only("home", "view:Settings", "settings/phone", "overlay"));
 
 /** The row, switch or choice whose title is `title`, as a person reads it: a row's title, never its value beside it. */
 const titled = (title: string) => [...document.querySelectorAll<HTMLElement>("button, label")].find((found) => found.querySelector("span > span")?.textContent === title);
@@ -66,6 +70,23 @@ describe("Settings", () => {
     await hardware("back");
     expect(await page(alpha)).toBe("General");
     await hardware("back");
+    // spec/app/settings/index.md, "Each page links to what another area owns there": the Account sheet reads the signed-in account and Back returns to Settings.
+    await press("Account");
+    await until(alpha, alpha.runtime, Layers.Machine, (state) => Layers.listed(state, "account"));
+    await vi.waitFor(() => expect(document.querySelector('[role="dialog"]')?.textContent).toContain(account.email));
+    await hardware("back");
+    await until(alpha, alpha.runtime, Layers.Machine, (state) => !Layers.listed(state, "account"));
+    expect(await page(alpha)).toBe("Top");
+
+    world.signedIn = false;
+    await press("Account");
+    await until(alpha, alpha.runtime, Layers.Machine, (state) => Layers.listed(state, "account"));
+    await vi.waitFor(() => expect(document.querySelector('[role="dialog"]')?.textContent).toContain("Sign-in required"));
+    expect(document.querySelector('[role="dialog"]')?.textContent).not.toContain(account.email);
+    await press("Close Account");
+    await until(alpha, alpha.runtime, Layers.Machine, (state) => !Layers.listed(state, "account"));
+    world.signedIn = true;
+
     // spec/app/settings/index.md, "Each page links to what another area owns there": Agent activity offers the conversations, which the shell opens over the app.
     await press("About");
     await press("Agent activity");
@@ -147,7 +168,7 @@ describe("Settings", () => {
     await press("General");
     await press("Display");
     // spec/app/settings/preferences.md, "A choice shows at once and is kept on the phone, one at a time, with ten seconds to be kept"
-    await tap("Light");
+    await press("Light");
     await until(first.alpha, first.alpha.runtime, Prefs.Machine, (s) => s.kept === "Light" && s.keeping.read.status === "Loaded");
     // spec/app/settings/preferences.md, "Legible text is turned on or off by the owner and kept with the appearance, the same way"
     await tap("Legible text");
@@ -195,7 +216,7 @@ describe("Settings", () => {
   it("Read the licences (spec/app/settings/licences.md, \"Story: Read the licences\")", async () => {
     const { alpha, machines } = await settingsOpen();
     await press("About");
-    await press("Licences");
+    await press("Licenses");
     await until(alpha, machines, Licences.Machine, (s) => s.load.read.status === "Loaded" && s.found === 3);
     // spec/app/settings/licences.md, "Searching narrows the loaded list to the licences that match, from its top, and an empty search shows them all"
     await fill("Search licences", "mpl");
@@ -207,7 +228,7 @@ describe("Settings", () => {
     await until(alpha, machines, Licences.Machine, (s) => s.licence < 0 && s.query === "mpl");
     // spec/app/settings/licences.md, "Opening the page clears the search, and loads the licences unless they are loading or loaded with some found"
     await hardware("back");
-    await press("Licences");
+    await press("Licenses");
     await until(alpha, machines, Licences.Machine, (s) => s.query === "" && s.shown === 3);
     expect(shipped).toHaveBeenCalledTimes(1);
   });

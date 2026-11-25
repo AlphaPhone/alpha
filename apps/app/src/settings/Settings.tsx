@@ -33,6 +33,7 @@ import {
   SettingsPage,
 } from "@repo/ui";
 import type { ManagedRuntime } from "effect";
+import { RotateCw } from "lucide-react";
 import { type ReactNode, useState } from "react";
 import type * as AndroidGen from "../../gen/app__settings__android.ts";
 import { useMachine as useAndroid } from "../../gen/app__settings__android.react.ts";
@@ -208,10 +209,11 @@ function Top({ runtime, alpha, common }: PageProps) {
 }
 
 // spec/app/settings/reset.md, "Erase all data, on the phone, asks the phone to show its disclosure and check the device credential, one review at a time"; spec/app/settings/facts.md, "Set as Home is offered when the newest answer reported a Home role that Alpha can take and does not hold, one request at a time"
-function General({ runtime, common }: PageProps) {
+function General({ runtime, alpha, common }: PageProps) {
   const pages = usePages(runtime).state;
   const { state: facts, can, send } = useTimed(runtime, useFacts);
   const reset = useTimed(runtime, useReset);
+  const prefs = useTimed(runtime, usePrefs).state;
   const request = { type: "requestHome", at: untimed } as const;
   const onPhone = pages?.phone ?? false;
   const erase = { type: "erase", at: untimed, onPhone } as const;
@@ -221,6 +223,8 @@ function General({ runtime, common }: PageProps) {
       wifi={reading(facts, "Wifi")}
       bluetooth={reading(facts, "Bluetooth")}
       mobileData={reading(facts, "MobileData")}
+      theme={prefs && themeNames[prefs.theme]}
+      alerts={reading(facts, "Alerts")}
       image={pages?.image ?? false}
       onPhone={onPhone}
       reviewing={reset.state !== undefined && loading(reset.state.review)}
@@ -228,6 +232,7 @@ function General({ runtime, common }: PageProps) {
       said={reset.state && saidNames[reset.state.said]}
       requestingHome={facts !== undefined && loading(facts.request)}
       onRequestHome={can(request) ? () => void send(request) : undefined}
+      updates={alpha.slot("settings/update")}
     />
   );
 }
@@ -345,7 +350,6 @@ function About({ runtime, alpha, common }: PageProps) {
   return (
     <SettingsAboutPage {...common} alphaVersion={reading(facts, "Versions")} androidVersion={done ? { word: "unavailable" } : { word: "waiting" }} storage={reading(facts, "Storage")}>
       {alpha.slot("settings/about")}
-      {alpha.slot("settings/update")}
     </SettingsAboutPage>
   );
 }
@@ -443,10 +447,12 @@ export function Settings({ runtime, alpha, further }: { runtime: SettingsRuntime
   const Shown = further[page] ?? drawn[page];
   const refresh = { type: "refresh", at: untimed } as const;
   return (
-    <section aria-label="Settings" className="flex h-full flex-col">
+    <section aria-label="Settings" className="relative flex h-full flex-col">
       {facts.state && facts.state.read.read.status === "Failed" ? <Banner variant="warn">The phone did not answer</Banner> : null}
-      {facts.can(refresh) && page !== "Licences" && page !== "Top" ? <Button variant="ghost" size="sm" className="self-end" onClick={() => void facts.send(refresh)}>Refresh</Button> : null}
       {Shown ? <Shown runtime={runtime} alpha={alpha} common={common} /> : null}
+      {facts.can(refresh) && page !== "Licences" && page !== "Activity" && page !== "NetworkPage" ? (
+        <Button variant="ghost" size="icon" aria-label="Refresh" className="absolute top-1 right-2 in-data-[alpha-launcher]:top-12 text-muted-foreground" onClick={() => void facts.send(refresh)}><RotateCw /></Button>
+      ) : null}
     </section>
   );
 }

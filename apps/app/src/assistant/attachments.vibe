@@ -1,112 +1,226 @@
-// spec/app/assistant/composer.md, "Files chosen are added up to the upload limit of four"; spec/app/assistant/attachments.md, "Each file is checked against its limits: an image is made to fit, audio and video never go, and the message's files fit together"
+// spec/app/assistant/attachments.md, "Each file is checked against its limits: an image is made to fit, audio and video never go, and the message's files fit together"; spec/app/assistant/composer.md, "Files chosen are added up to the upload limit of four"; spec/app/assistant/index.md, "Stored attachments are posted with their message, and a message whose attachments could not be stored never left"
+import * as Picker from "../../gen/app__assistant__attachments.effect.vibe"
+import { batchFits, fileBase64Cap, fits, imageBase64Cap, nameLimit, reencoded } from "../../gen/app__assistant__attachments.effect.vibe"
 import * as Composer from "../../gen/app__assistant__composer.effect.vibe"
-import * as Limits from "../../gen/app__assistant__attachments.effect.vibe"
 import { Machine as Conversation } from "../../gen/app__assistant.effect.vibe"
 import { Machine as Shell } from "../../gen/app__shell.effect.vibe"
+import { fresh } from "../runtime/attempts.vibe"
 import { contained } from "../runtime/reactor.vibe"
 import { reencodeImage } from "./image-encode.ts"
-import { Talk } from "./talk.vibe"
+import { type Attached, Talk } from "./talk.vibe"
 
-/** The owner's explicitly selected file. `data` contains raw base64. */
-export interface Attachment {
-  readonly id: string
-  readonly name: string
-  readonly mimeType: string
-  readonly data: string
-}
+const images = ["image/jpeg", "image/png", "image/gif", "image/webp"]
+const documents = ["application/pdf", "text/plain", "text/csv", "text/markdown", "application/json"]
+export const acceptedFiles = [...images, ...documents, "image/heic", "image/tiff", "image/svg+xml"].join(",")
+const base64 = /^[A-Za-z0-9+/]+={0,2}$/
 
-/** The owner's handoff to the existing Ask Alpha composer from one of the apps. */
+/** The owner sends a file reviewed in another app to the existing Ask Alpha draft. */
 export service MediaHandoff {
-  attach(file: Attachment): boolean!!
+  attach(file: Attached): boolean!!
 }
 
-export effect function attachToAlpha(file: Attachment): boolean!!MediaHandoff {
+export effect function attachToAlpha(file: Attached): boolean!!MediaHandoff {
   return try (try MediaHandoff).attach(file)
 }
 
 module web {
-  /** Convert already selected bytes to a JPEG accepted by the agent. */
-  export async function jpeg(file: Attachment, cap: number): Promise<string | undefined> {
-    const bytes = Uint8Array.fromBase64(file.data)
-    return reencodeImage(new Blob([bytes], { type: file.mimeType }), [2048, 1600, 1280, 1024], [85, 72, 60], cap)
+  /** The file's base64 payload without the data URL wrapper. */
+  export function read(file: Blob): Promise<string> {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader()
+      reader.addEventListener("load", () => {
+        const url = reader.result
+        if (typeof url === "string") resolve(url.slice(url.indexOf(",") + 1))
+        else reject(new Error("The file has no readable contents"))
+      }, { once: true })
+      reader.addEventListener("error", () => reject(reader.error), { once: true })
+      reader.readAsDataURL(file)
+    })
   }
 
-  /** Store one message's files before the turn is sent. A later turn replaces the staging record. */
-  export async function keepFiles(files: ReadonlyArray<Attachment>): Promise<void> {
-    const db = await new Promise<IDBDatabase>((resolve, reject) => {
-      const open = indexedDB.open("alpha-chat-attachments", 1)
-      open.onupgradeneeded = () => { open.result.createObjectStore("pending") }
-      open.onsuccess = () => { resolve(open.result) }
-      open.onerror = () => { reject(open.error) }
+  /** A byte-for-byte File for the normal intake path, when an app hands Alpha a reviewed document. */
+  export function selected(data: string, name: string, mimeType: string): File {
+    const bytes = Uint8Array.from(atob(data), (value) => value.charCodeAt(0))
+    return new File([bytes], name, { type: mimeType })
+  }
+
+  function open(): Promise<IDBDatabase> {
+    return new Promise((resolve, reject) => {
+      const opened = indexedDB.open("alpha-assistant-attachments", 1)
+      opened.onupgradeneeded = () => { opened.result.createObjectStore("files") }
+      opened.onsuccess = () => resolve(opened.result)
+      opened.onerror = () => reject(opened.error)
     })
+  }
+
+  /** Keep or remove the batch in the installation's document store, which can hold more than localStorage. */
+  export async function store(key: string, files?: readonly unknown[]): Promise<void> {
+    const database = await open()
     try {
       await new Promise<void>((resolve, reject) => {
-        const tx = db.transaction("pending", "readwrite")
-        const store = tx.objectStore("pending")
-        if (files.length === 0) store.delete("turn")
-        else store.put(files, "turn")
-        tx.oncomplete = () => { resolve() }
-        tx.onabort = () => { reject(tx.error) }
+        const transaction = database.transaction("files", "readwrite")
+        transaction.oncomplete = () => resolve()
+        transaction.onabort = () => reject(transaction.error)
+        const bucket = transaction.objectStore("files")
+        if (files === undefined) bucket.delete(key)
+        else bucket.put(files, key)
       })
     } finally {
-      db.close()
+      database.close()
+    }
+  }
+
+  /** Read each of a conversation page's files in the same readonly transaction. */
+  export async function stored(keys: readonly string[]): Promise<readonly unknown[]> {
+    const database = await open()
+    try {
+      const bucket = database.transaction("files", "readonly").objectStore("files")
+      return await Promise.all(keys.map((key) => new Promise<unknown>((resolve, reject) => {
+        const request = bucket.get(key)
+        request.onsuccess = () => resolve(request.result)
+        request.onerror = () => reject(request.error)
+      })))
+    } finally {
+      database.close()
     }
   }
 }
-import { jpeg, keepFiles } from web
+import { read, selected, store, stored } from web
 
-const images = new Set(["image/jpeg", "image/png", "image/gif", "image/webp"])
-const documents = new Set(["application/pdf", "text/plain", "text/csv", "text/markdown", "application/json"])
-const base64 = /^[A-Za-z0-9+/]+={0,2}$/
-
-function rawLength(data: string): number {
-  return data.length / 4 * 3 - (data.endsWith("==") ? 2 : data.endsWith("=") ? 1 : 0)
+effect function encoded(file: File, id: string): (Attached | undefined)!! {
+  const mimeType = file.type.toLowerCase()
+  const image = mimeType.startsWith("image/")
+  if ((!image && !documents.includes(mimeType)) || !fits(image ? "Image" : "Document", file.size, file.name.length)) return undefined
+  const convert = reencoded(image ? "Image" : "Document", file.size, images.includes(mimeType))
+  return effect {
+    const data = convert ? try tryPromise(() => reencodeImage(file, [2048, 1600, 1280, 1024], [85, 72, 60], imageBase64Cap)) : try tryPromise(() => read(file))
+    if (data === undefined || data === "") return undefined
+    return { id, data, mimeType: convert ? "image/jpeg" : mimeType, name: convert ? `${file.name.replace(/\.[^.]+$/, "").slice(0, 251)}.jpg` : file.name }
+  } catch () => undefined
 }
 
-export effect function stageAttachment(file: Attachment): boolean!!(Talk | Composer.Machine | Conversation | Shell) {
+export function sameBinding(left: Composer.Binding | undefined, right: Composer.Binding): boolean {
+  return left?.owner === right.owner && left.conversation === right.conversation
+}
+
+// spec/app/assistant/attachments.md, "An attachment opens in place over the conversation and closes back to it, never opening a view"
+export effect function previewFile(file: Attached): void!!(Talk | Picker.Machine) {
+  if (!images.includes(file.mimeType)) return
+  const picker = try Picker.Machine
+  if (!Picker.canPreview(try picker.get(), 1)) return
+  const { board } = try Talk
+  try ignore(picker.send({ type: "preview", attachment: board.previewFile(file) }))
+}
+
+interface FileTarget { readonly binding: Composer.Binding; readonly slot: number; readonly revision: number }
+
+effect function added(target: FileTarget, candidates: readonly { readonly name: string; readonly file: Attached | undefined }[]): boolean!!(Talk | Composer.Machine | Conversation) {
+  const { board, attachmentLock } = try Talk
   const composer = try Composer.Machine
   const conversation = try Conversation
-  const before = try composer.get()
-  const context = (try conversation.get()).context
-  if (context.sensitive || !Composer.canAttach(before, 1) || file.id === "" || file.data.length % 4 !== 0) return false
-  const type = file.mimeType.toLowerCase()
-  const image = type.startsWith("image/")
-  if (!image && !documents.has(type)) return false
-  if (!Limits.fits(image ? "Image" : "Document", rawLength(file.data), file.name.length) || !base64.test(file.data)) return false
-  const convert = image && Limits.reencoded("Image", rawLength(file.data), images.has(type))
-  const data = convert ? tryPromise(() => jpeg(file, Limits.imageBase64Cap)) catch () => undefined : file.data
-  if (data === undefined || data === "") return false
-  const { board, attachmentLock } = try Talk
   return try attachmentLock.withPermits(1)(effect {
     const current = try composer.get()
-    const seen = (try conversation.get()).context
-    if (seen.sensitive || seen.revision !== context.revision || current.binding.owner !== before.binding.owner || current.binding.conversation !== before.binding.conversation) return false
-    const files = board.snapshot().files
-    const present = files.some((item) => item.id === file.id)
-    if (!present) {
-      const next = [...files, { ...file, data, mimeType: convert ? "image/jpeg" : type }]
-      if (Composer.attachments(current.editor) >= Composer.maxFiles || !Limits.batchFits(next.length, next.reduce((sum, item) => sum + item.data.length, 0))) return false
-      if (!(try contained(composer.send({ type: "attach", count: 1 }), "attaching the selected file"))) return false
-      board.change({ files: next })
+    const context = (try conversation.get()).context
+    if (context.sensitive || context.revision !== target.revision || !sameBinding(current.binding, target.binding) || current.read.ticket !== target.slot || current.slot !== "Open" || current.away !== "Free") return false
+    const prior = board.snapshot()
+    const before = sameBinding(prior.filesBinding, target.binding) ? prior.files : []
+    const chosen: Attached[] = [...before]
+    const room = Composer.maxFiles - Composer.attachments(current.editor)
+    let bytes = before.reduce((size, file) => size + file.data.length, 0)
+    const refused: string[] = []
+    for (const candidate of candidates) {
+      const next = candidate.file
+      if (next !== undefined && chosen.some((file) => file.id === next.id)) continue
+      if (next === undefined || chosen.length - before.length >= room || !batchFits(chosen.length + 1, bytes + next.data.length)) refused.push(candidate.name)
+      else {
+        chosen.push(next)
+        bytes += next.data.length
+      }
     }
-    const shell = try Shell
-    if ((try shell.get()).assistant === "Bar") try contained(shell.send({ type: "raise", detent: "Sheet" }), "opening Ask Alpha")
-    return true
+    const count = chosen.length - before.length
+    if (count > 0) {
+      const event: Composer.Event = { type: "attach", count }
+      if (!Composer.enabled(current, event)) return false
+      board.change({ files: chosen, filesBinding: target.binding })
+      const taken = composer.send(event) catch () => undefined
+      if (taken === undefined) {
+        if (board.snapshot().files === chosen) board.change({ files: prior.files, filesBinding: prior.filesBinding })
+        return false
+      }
+    }
+    board.change({ attachmentNotice: refused.length === 0 ? "" : `Could not attach ${refused.join(", ")}` })
+    return refused.length < candidates.length
   })
 }
 
-export effect function removeAttachment(id: string): void!!(Talk | Composer.Machine) {
+export effect function insertFiles(binding: Composer.Binding, slot: number, files: readonly File[]): void!!(Talk | Composer.Machine | Conversation) {
+  const context = (try (try Conversation).get()).context
+  if (context.sensitive) return
+  const picked = try Effect.forEach(files.slice(0, Composer.maxFiles), (file) => encoded(file, fresh()))
+  try added({ binding, slot, revision: context.revision }, files.map((file, index) => ({ name: file.name, file: picked[index] })))
+}
+
+export effect function stageAttachment(file: Attached): boolean!!(Talk | Composer.Machine | Conversation | Shell) {
+  const composer = try (try Composer.Machine).get()
+  const context = (try (try Conversation).get()).context
+  if (context.sensitive || file.id === "" || file.data.length % 4 !== 0 || file.data.length > Picker.base64Of(Picker.imageIntakeBytes) || !base64.test(file.data)) return false
+  const given = Effect.try(() => selected(file.data, file.name, file.mimeType)) catch () => undefined
+  if (given === undefined) return false
+  const accepted = try added({ binding: composer.binding, slot: composer.read.ticket, revision: context.revision }, [{ name: file.name, file: try encoded(given, file.id) }])
+  if (!accepted) return false
+  const shell = try Shell
+  if ((try shell.get()).assistant === "Bar") try contained(shell.send({ type: "raise", detent: "Sheet" }), "opening Ask Alpha")
+  return true
+}
+
+export effect function removeFile(id: string): void!!(Talk | Composer.Machine) {
   const { board, attachmentLock } = try Talk
   const composer = try Composer.Machine
   try attachmentLock.withPermits(1)(effect {
-    const files = board.snapshot().files
-    if (!files.some((file) => file.id === id)) return
-    if (try contained(composer.send({ type: "removeFile" }), "removing the selected file")) {
-      board.change({ files: files.filter((file) => file.id !== id) })
-    }
+    const current = try composer.get()
+    const shown = board.snapshot()
+    if (!sameBinding(shown.filesBinding, current.binding) || !Composer.canRemoveFile(current)) return
+    const before = shown.files
+    const files = before.filter((file) => file.id !== id)
+    if (files.length === before.length) return
+    board.change({ files, attachmentNotice: "" })
+    const taken = composer.send({ type: "removeFile" }) catch () => undefined
+    if (taken === undefined && board.snapshot().files === files) board.change({ files: before })
   })
 }
 
-export effect function storeAttachments(files: ReadonlyArray<Attachment>): boolean!! {
-  return tryPromise(() => keepFiles(files)) |> as(%, true) catch () => false
+export effect function stageFiles(key: string, files: readonly Attached[]): boolean!! {
+  return effect { try tryPromise(() => store(key, files)); return true } catch () => false
+}
+
+export const dropFiles = (key: string) => ignore(tryPromise(() => store(key)))
+
+export interface AttachmentHistory {
+  readonly owner: number
+  readonly conversation: string
+  readonly room: string
+}
+
+const sentKey = ({ owner, conversation, room }: AttachmentHistory, message: string) => JSON.stringify(["sent", owner, conversation, room, message])
+
+export const rememberFiles = (history: AttachmentHistory, message: string, files: readonly Attached[]) =>
+  stageFiles(sentKey(history, message), files)
+
+const savedFiles = Schema.Array(Schema.Struct({
+  id: Schema.NonEmptyString, name: Schema.String, mimeType: Schema.String, data: Schema.String,
+}).check(Schema.makeFilter(({ name, mimeType, data }) =>
+  name.length > 0 && name.length <= nameLimit && /^[A-Za-z0-9+/]+={0,2}$/.test(data) &&
+  (images.includes(mimeType) ? data.length <= imageBase64Cap : documents.includes(mimeType) && data.length <= fileBase64Cap),
+))).check(Schema.makeFilter((files) => batchFits(files.length, files.reduce((total, file) => total + file.data.length, 0))))
+
+export effect function readFiles(history: AttachmentHistory, messages: readonly string[]): ReadonlyMap<string, readonly Attached[]>!! {
+  if (messages.length === 0) return new Map()
+  const saved = tryPromise(() => stored(messages.map((message) => sentKey(history, message)))) catch () => []
+  const files = new Map<string, readonly Attached[]>()
+  for (const [index, raw] of saved.entries()) {
+    const message = messages[index]
+    const decoded = Schema.decodeUnknownOption(savedFiles)(raw)
+    if (message !== undefined && Option.isSome(decoded)) files.set(message, decoded.value)
+  }
+  return files
 }
