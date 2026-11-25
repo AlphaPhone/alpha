@@ -137,11 +137,22 @@ describe.each([["a browser", false], ["a phone", true]])("in %s", (_where, phone
     const visited = vi.spyOn(window, "open").mockReturnValue(null);
     await press("https://northpoint.test/room");
     await until(alpha, runtime, Shown, (s) => s.link === 1);
+    expect([world.browser.tabs.size, visited.mock.calls.length]).toEqual([0, 0]);
     step("8");
     await confirm("Open link");
     await until(alpha, runtime, Shown, (s) => s.link === 0);
     step("9");
-    expect(visited).toHaveBeenCalledWith("https://northpoint.test/room", "_blank", "noopener,noreferrer");
+    if (phone) {
+      await until(alpha, alpha.runtime, Shell, (state) => showing(state, "Browser"));
+      await vi.waitFor(() => {
+        const places = [...world.browser.tabs.values()].filter((tab) => tab.committed && !tab.private).map((tab) => tab.history.at(-1));
+        expect([places, visited.mock.calls.length]).toEqual([["https://northpoint.test/room"], 0]);
+      }, { timeout: 12_000 });
+      await hardware("back");
+      await until(alpha, alpha.runtime, Shell, (state) => showing(state, "Inbox"));
+    } else {
+      expect(visited).toHaveBeenCalledWith("https://northpoint.test/room", "_blank", "noopener,noreferrer");
+    }
 
     // spec/app/inbox/message.md, "An attachment is reviewed before it is opened or saved, and one use is in flight at a time"
     await action("Open agenda.txt");

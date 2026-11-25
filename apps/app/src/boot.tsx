@@ -8,7 +8,7 @@ import { Machine as Layers, pageInert } from "../gen/app__shell__layers.effect.v
 import { MediaExecutors } from "./assistant/media-review.vibe";
 import { type Mount, type Place, mounts as every } from "./areas.ts";
 import { ScanExports } from "./files/scanEntry.vibe";
-import { AgentPages, BrowserDownloadsHandoff } from "./platform/browser.vibe";
+import { AgentPages, BrowserDownloadsHandoff, InboxBrowserLinks } from "./platform/browser.vibe";
 import { Device } from "./platform/device.vibe";
 import type { Platform } from "./platform/platform.vibe";
 import { resident } from "./resident.vibe";
@@ -77,13 +77,19 @@ export function boot(platform: Layer.Layer<Platform>, mounts: readonly Mount[] =
       return browser.runtime(alpha).runPromise(openAgentPage({ ...page, current }));
     }).pipe(Effect.orElseSucceed(() => false)),
   });
+  const inboxLinks = Layer.succeed(InboxBrowserLinks, {
+    open: (href, current) => Effect.tryPromise(async (signal) => {
+      const [{ default: browser }, { openMessageLink }] = await Promise.all([import("./browser/index.tsx"), import("./browser/browser.vibe")]);
+      return browser.runtime(alpha).runPromise(openMessageLink(href, "Inbox", current), { signal });
+    }).pipe(Effect.orElseSucceed(() => false)),
+  });
   const scans = Layer.succeed(ScanExports, {
     record: (selection) => Effect.tryPromise(async () => {
       const [{ default: files }, { retainScanExport }] = await Promise.all([import("./files/index.tsx"), import("./files/scan.vibe")]);
       await files.runtime(alpha).runPromise(retainScanExport(selection));
     }).pipe(Effect.orElseSucceed(() => undefined)),
   });
-  const root = rooted(Layer.provideMerge(resident, Layer.mergeAll(platform, media, executors, fileContext, downloads, agentPages, scans)));
+  const root = rooted(Layer.provideMerge(resident, Layer.mergeAll(platform, media, executors, fileContext, downloads, agentPages, inboxLinks, scans)));
   const placed = new Map<Place, ReactElement[]>();
   const alpha: Alpha = {
     runtime: root.runtime,

@@ -5,11 +5,15 @@ import * as Message from "../../gen/app__inbox__message.effect.vibe"
 import type { Effect as Out, Event } from "../../gen/app__inbox__message.effect.vibe"
 import * as Marking from "../../gen/app__inbox__marking.effect.vibe"
 import type { Effect as MarkOut, Event as MarkEvent } from "../../gen/app__inbox__marking.effect.vibe"
-import { Machine as Shell } from "../../gen/app__shell.effect.vibe"
+import { Machine as Shell, showing } from "../../gen/app__shell.effect.vibe"
 import { Machine as Preferences } from "../../gen/app__settings__preferences.effect.vibe"
+import type { Machine as Toasts } from "../../gen/app__notices__toasts.effect.vibe"
 import type { Actor } from "../../gen/app__inbox__access.ts"
 import { reviewMailContext, MailContextRefused } from "@elizaos/plugin-inbox-client"
 import { Agent } from "../platform/agent.vibe"
+import { InboxBrowserLinks } from "../platform/browser.vibe"
+import { native, registered } from "../platform/device.vibe"
+import { say, type Said } from "../notices/toasts.vibe"
 import { MailQuestions, sourceOf, type MailQuestion } from "./mail-context.vibe"
 import { Cloud } from "../platform/cloud.vibe"
 import { Attempts } from "../runtime/attempts.vibe"
@@ -59,11 +63,28 @@ effect function read(ticket: number, account: number, message: number, position:
 
 // spec/app/inbox/message.md, "Only an https link without credentials in it can be reviewed and opened; any other link stays text"
 const opened = (message: number, link: number) => effect {
-  const state = try (try Message.Machine).get()
-  if (state.message !== message || state.body.status !== "Loaded") return
-  const found = (try Mail).body(state.body.ticket)
+  const reader = try Message.Machine
+  const list = try Inbox.Machine
+  const mail = try Mail
+  const state = try reader.get()
+  const { account, body: { ticket } } = state
+  const generation = mail.generation(account)
+  const current = effect {
+    const view = try reader.get()
+    const mailbox = try list.get()
+    return view.message === message && view.account === account && view.body.ticket === ticket && view.body.status === "Loaded"
+      && mail.generation(account) === generation && mailbox.selected.account === account && accessOf(mailbox, account).grant.read
+  }
+  if (!showing(try (try Shell).get(), "Inbox") || !(try current)) return
+  const found = mail.body(ticket)
   const destination = found === undefined ? undefined : prepareMessage(found).links.at(link - 1)
-  if (destination?.secure) visit(destination.url)
+  if (!destination?.secure) return
+  if (!native()) {
+    visit(destination.url)
+    return
+  }
+  if (registered("AlphaBrowser") && (try (try InboxBrowserLinks).open(destination.url, current))) return
+  if (try current) try say("Browser could not open that link", true)
 }
 
 // spec/app/inbox/message.md, "Only the newest read's answer is shown, while its account may still be read; a read that fails says why": a message no longer in Gmail has the list read again.
@@ -120,7 +141,7 @@ const questionAbout = (account: number, message: number, revision: number) => ef
   try ignore(shell.send({ type: "raise", detent: "Sheet" }))
 }
 
-function carry(fx: Out): Job<Event, Cloud | Agent | MailQuestions | Mail | Inbox.Machine | Marking.Machine | Message.Machine | Shell | ThreadPages | AttachmentPreviews, []> {
+function carry(fx: Out): Job<Event, Cloud | Agent | MailQuestions | Mail | Inbox.Machine | Marking.Machine | Message.Machine | Shell | ThreadPages | AttachmentPreviews | InboxBrowserLinks | Toasts | Said, []> {
   return match (fx) {
     when { tag: "ReadMessage", let ticket, let account, let message, let position, let newest }:
       stream("read", Stream.filter(Stream.fromEffect(read(ticket, account, message, position, newest)), (event): event is Event => event !== undefined),
