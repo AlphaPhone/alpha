@@ -21,6 +21,8 @@ export interface AskScene {
   holdLists: boolean;
   readonly heldLists: (() => void)[];
   acknowledgment?: string;
+  /** The next reply holds after its acknowledgment and tool frames, before any text, until the test runs its entry in `turns`. */
+  holdAfterTools?: boolean;
   metadata?: unknown[];
   spokenFiles?: { readonly channel: unknown; readonly images: readonly unknown[] | undefined }[];
   /** The failure fields of the resident's terminal reply. */
@@ -69,19 +71,31 @@ function reply(scene: AskScene, room: string, text: string, keep: (said: string)
         scene.turns.set(room, () => controller.close());
         return;
       }
-      if (custom !== undefined && custom.length > 0) {
-        for (const piece of custom) controller.enqueue(frame({ type: "token", text: piece, ...(provisional ? { provisional } : {}) }));
-        const full = custom.join("");
-        keep(full);
-        controller.enqueue(frame({ type: "done", fullText: full, ...named(scene.said.length), actionResults: actions }));
+      const answer = () => {
+        if (custom !== undefined && custom.length > 0) {
+          for (const piece of custom) controller.enqueue(frame({ type: "token", text: piece, ...(provisional ? { provisional } : {}) }));
+          const full = custom.join("");
+          keep(full);
+          controller.enqueue(frame({ type: "done", fullText: full, ...named(scene.said.length), actionResults: actions }));
+          controller.close();
+          return;
+        }
+        controller.enqueue(frame({ type: "token", text: "You said: " }));
+        controller.enqueue(frame({ type: "token", text }));
+        keep(`You said: ${text}`);
+        controller.enqueue(frame({ type: "done", fullText: `You said: ${text}`, ...named(scene.said.length) }));
         controller.close();
+      };
+      if (scene.holdAfterTools) {
+        scene.holdAfterTools = false;
+        controller.enqueue(frame({ type: "status", activity: "Working" }));
+        scene.turns.set(room, () => {
+          scene.turns.delete(room);
+          answer();
+        });
         return;
       }
-      controller.enqueue(frame({ type: "token", text: "You said: " }));
-      controller.enqueue(frame({ type: "token", text }));
-      keep(`You said: ${text}`);
-      controller.enqueue(frame({ type: "done", fullText: `You said: ${text}`, ...named(scene.said.length) }));
-      controller.close();
+      answer();
     },
     cancel: () => void scene.turns.delete(room),
   });
