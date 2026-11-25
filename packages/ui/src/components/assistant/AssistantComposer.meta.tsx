@@ -7,8 +7,6 @@ const onSend = fn();
 const onStop = fn();
 const onAttach = fn();
 const onFocusField = fn();
-const onDragRelease = fn();
-const onDragLift = fn();
 
 export const meta: ComponentMeta<AssistantComposerProps> = {
   args: {
@@ -32,7 +30,7 @@ export const meta: ComponentMeta<AssistantComposerProps> = {
     "Send not offered": { value: "What is on my calendar on Friday?" },
     "Reply in flight": { value: "", onStop },
     Stopping: { value: "", stopping: true },
-    Bar: { variant: "bar", value: "", onOpen: fn(), drag: { onPress: fn(), onDrag: fn(), onRelease: onDragRelease, onLift: onDragLift } },
+    Bar: { variant: "bar", value: "", onOpen: fn() },
     "Files and a quote": {
       value: "Summarise these",
       onSend,
@@ -72,19 +70,6 @@ export const meta: ComponentMeta<AssistantComposerProps> = {
     },
     Stopping: async ({ canvasElement }: { canvasElement: HTMLElement }) => {
       await expect(within(canvasElement).getByRole("button", { name: "Stop reply" })).toHaveAttribute("aria-busy", "true");
-    },
-    Bar: async ({ canvasElement }: { canvasElement: HTMLElement }) => {
-      onDragRelease.mockClear();
-      onDragLift.mockClear();
-      const background = canvasElement.querySelector<HTMLElement>("[data-alpha-bar-drag]");
-      if (!background) throw new Error("no drag background on the bar");
-      await userEvent.pointer([
-        { keys: "[MouseLeft>]", target: background, coords: { clientX: 20, clientY: 400 } },
-        { coords: { clientX: 20, clientY: 300 } },
-        { keys: "[/MouseLeft]", coords: { clientX: 20, clientY: 200 } },
-      ]);
-      await userEvent.pointer([{ keys: "[MouseLeft]", target: background, coords: { clientX: 20, clientY: 400 } }]);
-      await expect([onDragRelease.mock.calls.length, onDragRelease.mock.calls[0]?.[0].direction, onDragLift.mock.calls.length]).toEqual([1, "up", 1]);
     },
     Closed: async ({ canvasElement }: { canvasElement: HTMLElement }) => {
       await expect(within(canvasElement).getByRole("textbox", { name: "Message Alpha" })).toBeDisabled();

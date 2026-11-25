@@ -1,7 +1,7 @@
 // spec/app/assistant/index.md, "Story: Ask Alpha something"; spec/app/assistant/index.md, "Story: Stop a reply"; spec/app/assistant/chats.md, "Story: Find my conversations"; spec/app/assistant/composer.md, "Story: Send what I wrote"; spec/app/assistant/dock.md, "Focusing the composer on the bar raises it to typing: the bar grows above the keyboard and the page stays in view"; spec/app/assistant/dock.md, "Alpha's mark, a send from the bar, or a tap on the handle opens Ask Alpha as a sheet"; spec/app/assistant/dock.md, "Inside an app other than the Browser, Ask Alpha at rest is the pill; Type raises it to typing, where the whole bar shows"; spec/app/assistant/search.md, "Story: Search my conversations"; spec/app/assistant/reply.md, "Story: Hear a brief acknowledgment and still get the whole answer"; spec/app/assistant/reply.md, "A recognized tool block outside a fence becomes its card; inside a fence every line stays code"
 import {
   Alert, AssistantCard, Button, AssistantConversation, AssistantGrabber, AssistantPhotoPreview, ConfirmDialog,
-  type AssistantAttachment, type AssistantDrag, type AssistantRelease, type AssistantComposerProps, type AssistantDraftNoticeProps, type AssistantTurnNoteProps,
+  type AssistantAttachment, type AssistantDrag, type AssistantComposerProps, type AssistantDraftNoticeProps, type AssistantTurnNoteProps,
 } from "@repo/ui";
 import { Effect, type ManagedRuntime } from "effect";
 import { type ReactNode, type RefObject, useCallback, useMemo, useRef, useState, useSyncExternalStore } from "react";
@@ -25,7 +25,6 @@ import type { Machine as SearchMachine } from "../../gen/app__assistant__search.
 import { useMachine as useSearch } from "../../gen/app__assistant__search.react.ts";
 import { Machine as CommsMachine } from "../../gen/app__phone__comms.effect.vibe";
 import { useMachine as useComms } from "../../gen/app__phone__comms.react.ts";
-import { Machine as SettingsPages } from "../../gen/app__settings.effect.vibe";
 import { Machine as ShellMachine, showing } from "../../gen/app__shell.effect.vibe";
 import type { Machine as LayersMachine } from "../../gen/app__shell__layers.effect.vibe";
 import { useMachine as useShell } from "../../gen/app__shell.react.ts";
@@ -40,8 +39,8 @@ import { AttachmentSources } from "./AttachmentSources.tsx";
 import { askComms, freedom, restTyping } from "./assistant.vibe";
 import { acceptedFiles, acceptedPhotos, attachmentAuthority, chooseDocument, type FileTarget, insertFiles, previewFile, readChosenDocument, removeFile, retireTranscript, sameBinding } from "./attachments.vibe";
 import { chip, type MessageActions, useHistorySheets, useMessageRows } from "./history.tsx";
+import { ChatScrim, useSheetFollow } from "./follow.tsx";
 import { ReplyFailure } from "./ReplyFailure.tsx";
-import { shownReply } from "./shown.ts";
 import { type Attached, type Line, Talk } from "./talk.vibe";
 import { CommsTarget, type CommsTargetServices } from "../phone/CommsTarget.tsx";
 import { CommsBriefing } from "../phone/comms.vibe";
@@ -52,7 +51,7 @@ import type { MapsCard } from "@elizaos/plugin-maps-client";
 import { type TalkStopReceipt, type VoiceKeyboard, useTalkKeyboard } from "../voice/useTalkKeyboard.ts";
 
 export interface AssistantProps {
-  runtime: ManagedRuntime.ManagedRuntime<ConversationMachine | AttachmentMachine | ChatsMachine | ComposerMachine | SearchMachine | ReplyMachine | DockMachine | ShellMachine | SettingsPages | CommsMachine | CommsTargetServices | CommsBriefing | Talk | MailQuestions | LayersMachine | MediaReview | Documents | Agent, unknown>;
+  runtime: ManagedRuntime.ManagedRuntime<ConversationMachine | AttachmentMachine | ChatsMachine | ComposerMachine | SearchMachine | ReplyMachine | DockMachine | ShellMachine | CommsMachine | CommsTargetServices | CommsBriefing | Talk | MailQuestions | LayersMachine | MediaReview | Documents | Agent, unknown>;
   messageActions?: MessageActions;
   speech?: Pick<AssistantComposerProps, "onTalk" | "onDictate" | "showUnavailableTalk" | "voiceNotice"> & {
     voicePanel?: ReactNode;
@@ -102,18 +101,10 @@ function waiting(writing: Writing, files: readonly Attached[], transcriptTitle: 
 
 const detached = { mail: "Mail", shown: "Shown" } as const;
 
-const barHeight = 102;
 const emptyLines: readonly Line[] = [];
 const settings = { type: "openView", view: "Settings" } as const;
 const maps = { type: "openView", view: "Maps" } as const;
 const back = { type: "goBack" } as const;
-// spec/app/assistant/chats.md, "Story: Find my conversations": as v121's chat-tools-adapter.ts did, Chat history opens Settings > About > Agent activity, where the conversations are listed.
-const chatHistory = Effect.ignore(Effect.flatMap(ShellMachine, (shell) => shell.send(settings))).pipe(
-  Effect.andThen(Effect.flatMap(SettingsPages, (pages) => pages.send({ type: "openSection", page: "About" }))),
-  Effect.andThen(Effect.flatMap(SettingsPages, (pages) => pages.send({ type: "open", page: "Activity" }))),
-);
-/** A press on v121's chat scrim that moves this far is a drag: it lowers Ask Alpha on release, wherever it ends. */
-const scrimSlop = 6;
 
 function DeviceReview({ runtime, card }: { runtime: AssistantProps["runtime"]; card: MediaCard }) {
   const decide = (approve: boolean) => void runtime.runPromise(Effect.flatMap(MediaReview, (review) => review.decide(card, approve)));
@@ -272,10 +263,7 @@ export function Assistant({ runtime, messageActions, speech, canReadAloud = fals
   const mail = useMemo(() => runtime.runSync(MailQuestions), [runtime]);
   const mailStore = useMemo(() => ({ subscribe: (listener: () => void) => mail.subscribe(listener), snapshot: () => mail.snapshot() }), [mail]);
   const reviewed = useSyncExternalStore(mailStore.subscribe, mailStore.snapshot);
-  const [following, setFollowing] = useState<number | undefined>(undefined);
-  const gestureRef = useRef<{ y: number; height: number; moved: boolean } | undefined>(undefined);
   const sectionRef = useRef<HTMLElement>(null);
-  const scrimRef = useRef<{ pointer: number; x: number; y: number; moved: boolean } | undefined>(undefined);
   const composerRef = useRef<HTMLTextAreaElement>(null);
   const focusOnRevealRef = useRef(false);
   const { voice: renderVoice, voicePanel, keyboard, ...speechProps } = speech ?? {};
@@ -398,7 +386,7 @@ export function Assistant({ runtime, messageActions, speech, canReadAloud = fals
   // spec/app/assistant/chats.md, "Older or newer messages are read around a message of the conversation showing"
   const earlier = { type: "scroll", around: board.numbered(lines[0]?.id ?? "") } as const;
   const later = { type: "scroll", around: board.numbered(lines.at(-1)?.id ?? "") } as const;
-  const replyWords = replyBlocks(shownReply(seen.reply), true).words;
+  const replyWords = replyBlocks(seen.reply, true).words;
   const writingReply = replyWords !== "" ? [{ id: "reply", author: "alpha", text: replyWords } as const] : [];
   // spec/app/assistant/reply.md, "A failed reply offers the fix the agent named, and a limit reached shows its live wait, never sending the message again"; spec/app/assistant/reply.md, "Out of funds is refused before any output, is never spoken, and offers only Manage plan"
   const mediaCards = seen.media.filter((card) => !talking.context.sensitive && card.conversation === shown.chosen && card.revision === talking.context.revision).map((card) => ({
@@ -413,6 +401,7 @@ export function Assistant({ runtime, messageActions, speech, canReadAloud = fals
   const open = dockOpen(assistantDetent);
   const full = assistantDetent === "Full";
   const keptHeight = assistantDetent === "Sheet" && dock.state && dock.state.kept > 0 ? dock.state.kept : undefined;
+  const { following, gesture, done } = useSheetFollow(dock, assistantDetent, sectionRef);
   const carry = (asks: readonly Ask[]) => {
     for (const ask of asks) {
       if (ask.tag === "Raise" && shell.can({ type: "raise", detent: ask.detent })) void shell.send({ type: "raise", detent: ask.detent });
@@ -434,38 +423,8 @@ export function Assistant({ runtime, messageActions, speech, canReadAloud = fals
       if (sent._tag === "Failure") focusOnRevealRef.current = false;
     });
   };
-  // spec/app/assistant/dock.md, "Story: Drag Ask Alpha where I want it": the sheet follows the finger, and the release lands where the dock's rules say
-  const begin = (y: number) => {
-    const shown = sectionRef.current?.getBoundingClientRect().height ?? 0;
-    gestureRef.current = { y, height: open ? Math.max(shown, barHeight) : barHeight, moved: false };
-    void dock.send({ type: "press", detent: assistantDetent, now: untimed });
-  };
-  const follow = (y: number) => {
-    const g = gestureRef.current;
-    if (!g) return;
-    if (!g.moved) {
-      if (!dock.can({ type: "drag" })) return;
-      g.moved = true;
-      void dock.send({ type: "drag" });
-    }
-    setFollowing(Math.min(window.innerHeight, Math.max(barHeight, Math.round(g.height + g.y - y))));
-  };
-  const settle = ({ direction, flick, y }: AssistantRelease) => {
-    const g = gestureRef.current;
-    gestureRef.current = undefined;
-    setFollowing(undefined);
-    const height = g ? Math.max(0, Math.round(g.height + g.y - y)) : Math.max(0, Math.round(window.innerHeight - y));
-    void dock.send({ type: "release", direction: direction === "up" ? "Up" : "Down", flick, height, floor: barHeight, full: window.innerHeight, now: untimed });
-  };
-  const letGo = () => {
-    gestureRef.current = undefined;
-    setFollowing(undefined);
-    void dock.send({ type: "shift", now: untimed });
-  };
-  const gesture: AssistantDrag = { onPress: ({ y }) => begin(y), onDrag: ({ y }) => follow(y), onRelease: settle, onCancel: letGo };
-  const grabber = shell.state ? <DockHandle dock={dock} detent={assistantDetent} compact={compact} gesture={gesture} done={() => { gestureRef.current = undefined; setFollowing(undefined); }}
+  const grabber = shell.state ? <DockHandle dock={dock} detent={assistantDetent} compact={compact} gesture={gesture} done={done}
     focusOnPointerOpen={currentView !== undefined && !compact} field={composerRef} /> : undefined;
-  const barDrag = !open && !onComms ? { onPress: ({ y }: { y: number }) => begin(y), onDrag: ({ y }: { y: number }) => follow(y), onRelease: settle, onLift: letGo, onCancel: letGo } : undefined;
   const live = following !== undefined;
   const scrim = !onComms && !live && !dock.state?.voice && currentView !== "Camera" && (assistantDetent === "Sheet" || assistantDetent === "Typing");
 
@@ -473,43 +432,19 @@ export function Assistant({ runtime, messageActions, speech, canReadAloud = fals
     <>
       <AssistantAttachments runtime={runtime} attachments={attachments} preview={previewed} targetRef={fileTargetRef} composerRef={composerRef} />
       {onComms && full && <CommsTarget runtime={runtime} placement="strip" />}
-      {scrim ? (
-        <div
-          aria-hidden
-          data-alpha-chat-scrim=""
-          className="fixed inset-0 z-dock touch-none"
-          onPointerDown={(event) => {
-            event.preventDefault();
-            if (event.isPrimary === false) return;
-            scrimRef.current = { pointer: event.pointerId, x: event.clientX, y: event.clientY, moved: false };
-          }}
-          onPointerMove={(event) => {
-            // v121's scrimSw: once a press moves it is a drag, captured so its release lowers Ask Alpha even over the sheet.
-            const press = scrimRef.current;
-            if (!press || press.pointer !== event.pointerId || press.moved || Math.hypot(event.clientX - press.x, event.clientY - press.y) < scrimSlop) return;
-            press.moved = true;
-            try { event.currentTarget.setPointerCapture(event.pointerId); } catch { return; }
-          }}
-          onPointerUp={(event) => {
-            if (scrimRef.current?.pointer !== event.pointerId) return;
-            scrimRef.current = undefined;
-            if (assistantDetent === "Typing") composerRef.current?.blur();
-            if (shell.can(back)) void shell.send(back);
-          }}
-          onPointerCancel={() => { scrimRef.current = undefined; }}
-        />
-      ) : null}
+      {scrim ? <ChatScrim typing={assistantDetent === "Typing"} field={composerRef} onLower={() => { if (shell.can(back)) void shell.send(back); }} /> : null}
       {(!onComms || open) && <AssistantConversation
         ref={sectionRef}
         voicePanel={voicePanel}
         detent={live && !onComms ? "sheet" : assistantDetent === "Full" ? "full" : assistantDetent === "Sheet" ? "sheet" : "bar"}
         className={onComms ? "relative w-full motion-safe:transition-[height] motion-safe:duration-[420ms]" : open || live ? "fixed inset-x-0 bottom-0 mx-auto max-w-md" : "sticky bottom-0"}
         style={onComms
-          ? { height: live ? following : assistantDetent === "Full" ? "calc(100dvh - 52px)" : `clamp(38dvh, ${keptHeight === undefined ? "50dvh" : `${keptHeight}px`}, 60dvh)`, transition: live ? "none" : undefined }
+          ? live ? { height: following, transition: "none" } : assistantDetent === "Full" ? { height: "calc(100dvh - 52px)" } : keptHeight === undefined ? undefined : { height: `clamp(38dvh, ${keptHeight}px, 60dvh)` }
           : live ? { height: following, borderRadius: following >= window.innerHeight ? 0 : undefined } : keptHeight ? { height: keptHeight } : undefined}
         header={{
           title: seen.titles.get(shown.chosen) ?? "Ask Alpha",
           context: { view, selected: talking.context.selected, sensitive: talking.context.sensitive },
+          subtitle: onComms ? <CommsTarget runtime={runtime} placement="context" /> : undefined,
           onHome: () => void runtime.runPromise(home()),
           onClose: open && shell.can({ type: "goBack" }) ? () => void shell.send({ type: "goBack" }).then((lowered) => { if (full && lowered._tag === "Success" && shell.can({ type: "goBack" })) void shell.send({ type: "goBack" }); }) : undefined,
           expanded: assistantDetent === "Full",
@@ -566,9 +501,9 @@ export function Assistant({ runtime, messageActions, speech, canReadAloud = fals
           quote: onComms ? undefined : quoted,
           editing: !onComms && writing.editor.editing > 0,
           opener: !open ? grabber : undefined,
-          drag: barDrag,
           onOpen: !open && !grabber ? () => openWithFocus(!compact) : undefined,
           onType: compact ? revealComposer : undefined,
+          onSwipeUp: compact ? () => openWithFocus(false) : undefined,
           onSend: sendable && !inFlight(talking.turn) ? () => {
             if (assistantDetent === "Typing") openWithFocus(false);
             send();
@@ -594,7 +529,7 @@ export function Assistant({ runtime, messageActions, speech, canReadAloud = fals
             if (next instanceof Element && (event.currentTarget.contains(next) || next.closest("[role='menu']"))) return;
             void runtime.runPromise(restTyping);
           } : undefined,
-          onHistory: () => void runtime.runPromiseExit(chatHistory),
+          onHistory: history.browse,
           onSearch: history.search,
           onNew: chats.can(start) ? () => void chats.send(start) : undefined,
           making: making(shown),

@@ -1,4 +1,4 @@
-import { type ComponentProps, type PointerEvent, useRef } from "react";
+import { type ComponentProps, type PointerEvent, useLayoutEffect, useRef } from "react";
 import { cn, focusRing } from "../../lib/cn.ts";
 import { Mark } from "../Mark.tsx";
 
@@ -8,7 +8,7 @@ type Press = { now: number; y: number };
 /** Where a released drag ended, which way it went, whether it was a flick, and when. */
 export type AssistantRelease = { direction: "up" | "down"; flick: boolean; y: number; now: number };
 
-/** What a finger on Ask Alpha's handle, bar or pill reports: plain facts with their time. */
+/** What a finger on Ask Alpha's handle reports: plain facts with their time. */
 export type AssistantDrag = {
   /** A finger came down on the handle. */
   onPress?: (press: Press) => void;
@@ -22,7 +22,7 @@ export type AssistantDrag = {
   onCancel?: (press: Omit<Press, "y">) => void;
 };
 
-export type AssistantGrabberProps = Omit<ComponentProps<"button">, "children" | "disabled" | "onClick" | "onPointerDown" | "onPointerMove" | "onPointerUp" | "onPointerCancel" | "onLostPointerCapture"> & AssistantDrag & {
+export type AssistantGrabberProps = Omit<ComponentProps<"button">, "children" | "disabled" | "onClick" | "onDrag" | "onPointerDown" | "onPointerMove" | "onPointerUp" | "onPointerCancel" | "onLostPointerCapture"> & AssistantDrag & {
   /** The resting dock opens by its mark. The sheet uses a resize handle. */
   variant?: "mark" | "handle";
   /** The click a button receives, which may be the late click of a gesture just ended. */
@@ -44,33 +44,21 @@ const capture = (element: Element, pointer: number) => {
 
 const fast = (t: Track) => t.moved && Math.abs(t.last.y - t.prev.y) >= (t.last.at - t.prev.at) * flickPixelsPerMillisecond;
 
-/** A click that lands right after a drag ended is the drag's own, never a tap on what it ended over; the next press forgets it. */
-function swallowNextClick(view: Window) {
-  const swallow = (event: MouseEvent) => {
-    event.stopPropagation();
-    event.preventDefault();
-  };
-  view.addEventListener("click", swallow, { capture: true, once: true });
-  const forget = () => view.removeEventListener("click", swallow, { capture: true });
-  for (const next of ["pointerdown", "keydown"] as const) view.addEventListener(next, forget, { capture: true, once: true });
-}
-
 /**
- * The pointer handlers of a surface that moves Ask Alpha, as v121's grabber, input bar and pill did: a press, a drag
- * that follows the finger, a release with its flick, a lift that did not move. Once pressed, the finger is followed on
- * the window, so the gesture lives on when the surface it started on is redrawn as the sheet it opens, or unmounted;
- * its listeners go with the release.
- * `captureOnPress` keeps the finger on the handle from the first touch; on another surface a tap on a button inside it
- * stays that button's click.
+ * The pointer handlers of Ask Alpha's handle, as v121's grabber: a press, a drag that follows the finger, a release
+ * with its flick, a lift that did not move. The finger is held from the first touch and followed on the window, so the
+ * gesture lives on when the handle it started on is redrawn in the sheet it opens; its listeners go with the release.
  */
-export function useAssistantDrag(callbacks: AssistantDrag, captureOnPress = false) {
-  const latest = useRef(callbacks);
-  latest.current = callbacks;
+function useAssistantDrag(callbacks: AssistantDrag) {
+  const latestRef = useRef(callbacks);
+  useLayoutEffect(() => {
+    latestRef.current = callbacks;
+  });
   const trackRef = useRef<{ track: Track; stop: () => void } | undefined>(undefined);
   return {
     onPointerDown: (event: PointerEvent<HTMLElement>) => {
       if (event.button !== 0 || trackRef.current) return;
-      if (captureOnPress) capture(event.currentTarget, event.pointerId);
+      capture(event.currentTarget, event.pointerId);
       const view = event.currentTarget.ownerDocument.defaultView ?? window;
       const sample = { y: event.clientY, at: event.timeStamp };
       const t: Track = { pointer: event.pointerId, start: event.clientY, prev: sample, last: sample, moved: false };
@@ -81,20 +69,19 @@ export function useAssistantDrag(callbacks: AssistantDrag, captureOnPress = fals
         if (!t.moved && Math.abs(y - t.start) > slop) t.moved = true;
         t.prev = t.last;
         t.last = { y, at: e.timeStamp };
-        if (t.moved) latest.current.onDrag?.({ y });
+        if (t.moved) latestRef.current.onDrag?.({ y });
       };
       const up = (e: globalThis.PointerEvent) => {
         if (!mine(e)) return;
         stop();
-        if (!t.moved) return latest.current.onLift?.({ now: e.timeStamp });
-        if (!captureOnPress) swallowNextClick(view);
+        if (!t.moved) return latestRef.current.onLift?.({ now: e.timeStamp });
         const y = e.clientY;
-        latest.current.onRelease?.({ direction: y < t.start ? "up" : "down", flick: fast(t), y, now: e.timeStamp });
+        latestRef.current.onRelease?.({ direction: y < t.start ? "up" : "down", flick: fast(t), y, now: e.timeStamp });
       };
       const cancel = (e: globalThis.PointerEvent) => {
         if (!mine(e)) return;
         stop();
-        latest.current.onCancel?.({ now: e.timeStamp });
+        latestRef.current.onCancel?.({ now: e.timeStamp });
       };
       const stop = () => {
         trackRef.current = undefined;
@@ -106,7 +93,7 @@ export function useAssistantDrag(callbacks: AssistantDrag, captureOnPress = fals
       view.addEventListener("pointermove", move);
       view.addEventListener("pointerup", up);
       view.addEventListener("pointercancel", cancel);
-      latest.current.onPress?.({ now: event.timeStamp, y: event.clientY });
+      latestRef.current.onPress?.({ now: event.timeStamp, y: event.clientY });
     },
   };
 }
@@ -117,7 +104,7 @@ export function useAssistantDrag(callbacks: AssistantDrag, captureOnPress = fals
  * @model spec/app/assistant/dock.md
  */
 export function AssistantGrabber({ variant = "handle", onPress, onDrag, onRelease, onLift, onCancel, onTap, className, ...props }: AssistantGrabberProps) {
-  const handlers = useAssistantDrag({ onPress, onDrag, onRelease, onLift, onCancel }, true);
+  const handlers = useAssistantDrag({ onPress, onDrag, onRelease, onLift, onCancel });
   return (
     <button
       type="button"

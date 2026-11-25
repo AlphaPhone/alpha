@@ -23,6 +23,18 @@ describe("a reply's words as the owner reads and hears them", () => {
     expect(replyBlocks("```\n[FORM]x[/FORM]\n```").words).toBe("```\n[FORM]x[/FORM]\n```");
     expect(replyBlocks("[MAPSCARD]\nnot json\n[/MAPSCARD]").words).toBe("[MAPSCARD]\nnot json\n[/MAPSCARD]");
   });
+
+  it("takes out a tool call written as text outside a fence, holds back an unclosed one only while streaming, and keeps fenced lines exactly", () => {
+    expect(replyBlocks("<function=get_weather>{}</function>\nIt is sunny today.").words).toBe("It is sunny today.");
+    expect(replyBlocks("Open Maps <tool_call>\n<function=phone_use() {}</function>\n</tool_call>").words).toBe("Open Maps");
+    expect(replyBlocks("Sure. <function=a>{}</function> Done. <function=b>{}</function>  ").words).toBe("Sure. Done.");
+    expect(replyBlocks("```\nkept  \n<function=x>{}</function>\n```\nSee <tool_call>x</tool_call>  ").words).toBe("```\nkept  \n<function=x>{}</function>\n```\nSee");
+    expect(replyBlocks("Looking.\n<tool_call>\n<function=search>{\"q\":", true).words).toBe("Looking.");
+    expect(replyBlocks("Looking. <tool_c", true).words).toBe("Looking.");
+    expect(replyBlocks("Use the <function=search> tag to look.").words).toBe("Use the <function=search> tag to look.");
+    expect(wordsOf({ mine: false, text: "Hi <tool_call>x</tool_call>" })).toBe("Hi");
+    expect(wordsOf({ mine: true, text: "Hi <tool_call>x</tool_call>" })).toBe("Hi <tool_call>x</tool_call>");
+  });
 });
 
 describe("a Maps card's search handed to Maps", () => {

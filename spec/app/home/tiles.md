@@ -55,13 +55,13 @@ pure def there(apps: Set[str], shell: S::Shell, tile: Tile): bool =
 ```quint
 pure val homeOrder: List[S::View] = List(
   S::Phone, S::Messages, S::Inbox, S::Calendar, S::Browser, S::Camera, S::Photos,
-  S::Maps, S::Notes, S::Contacts, S::Files, S::Workflows, S::Settings)
+  S::Maps, S::Notes, S::Contacts, S::Files, S::Workflows, S::Wallet, S::Settings)
 
 pure val defaults: List[Tile] = List(
   Own({ view: S::Phone }), Own({ view: S::Messages }), Own({ view: S::Inbox }), Own({ view: S::Calendar }),
   Own({ view: S::Browser }), Own({ view: S::Camera }), Own({ view: S::Photos }), Own({ view: S::Maps }),
   Own({ view: S::Notes }), Own({ view: S::Contacts }), Own({ view: S::Files }), Own({ view: S::Workflows }),
-  Own({ view: S::Settings }))
+  Own({ view: S::Wallet }), Own({ view: S::Settings }))
 
 pure val maxTiles = 4096
 

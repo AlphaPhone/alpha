@@ -13,11 +13,11 @@ which a stray click is ignored, and the height a sheet was left at.
 > away, with one press doing one thing, and the composer never hidden by
 > the keyboard.
 
-As in Alpha before VibeStack, the sheet follows the finger while it is
-dragged, and the handle, the background of the bar and the whole pill can
-be dragged; a press on the bar or the pill that does not move is the tap of
-the control under it. A tap or a drag on the page outside an open sheet, or
-outside the bar being typed in, lowers Ask Alpha when it ends.
+As in Alpha before VibeStack, the sheet follows the finger while its
+handle or Alpha's mark is dragged, and lands where the release says. A tap
+or a drag on the page outside an open sheet lowers Ask Alpha when it ends;
+outside the bar being typed in, it only leaves the field, which rests the
+bar once.
 
 ### A released drag lands on the bar, a sheet at a height, or the full screen
 
@@ -288,7 +288,9 @@ pure def lawFocusingTheBarRaisesTyping(phone: S::Shell): bool =
 
 From the bar or from typing the conversation opens at once as the
 half-screen sheet, without an upward drag; an open sheet or the full screen
-stays where it is.
+stays where it is. A swipe up that starts on one of the pill's buttons opens
+it too, as the pill in Alpha before VibeStack did; a press there that does
+not move stays that button's tap.
 
 ```quint
 pure def opened(detent: S::Detent): List[Effect] = if (not(isOpen(detent))) List(Raise({ detent: S::Sheet })) else List()

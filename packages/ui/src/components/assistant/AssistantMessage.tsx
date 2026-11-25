@@ -54,7 +54,7 @@ function roam(event: KeyboardEvent<HTMLDivElement>, close: () => void) {
 }
 
 /**
- * One message of the conversation: the owner's in a blue bubble at the end, Alpha's as plain text under its mark
+ * One message of the conversation: the owner's in a quiet bubble at the end, Alpha's as plain text under its mark
  * with the cards of its reply. Pressing the text opens a row of what can be done with it under the message, each
  * action only where it is offered.
  * @model spec/app/assistant/chats.md

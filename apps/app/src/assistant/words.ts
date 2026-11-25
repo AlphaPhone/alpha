@@ -15,6 +15,10 @@ const formClose = /\[\/FORM\]\s*$/;
 const cardOpen = /^\s*\[[ \t]*MAPSCARD[ \t]*\][ \t]*$/;
 const cardClose = /^\s*\[[ \t]*\/[ \t]*MAPSCARD[ \t]*\][ \t]*$/;
 const option = /^([^=\n]{1,500})=([^=\n]{1,80})$/;
+const callOpen = /<tool_call>|<function=/;
+const callClose = /<\/function>(?:\s*<\/tool_call>)?|<\/tool_call>/;
+const strayClose = /^\s*(?:<\/function>|<\/tool_call>)\s*$/;
+const partialCall = /<(?:t(?:o(?:o(?:l(?:_(?:c(?:a(?:l(?:l)?)?)?)?)?)?)?)?|f(?:u(?:n(?:c(?:t(?:i(?:o(?:n)?)?)?)?)?)?)?)?$/;
 const partialOpener = /^\s*\[(?:M(?:A(?:P(?:S(?:C(?:A(?:R(?:D)?)?)?)?)?)?)?|C(?:H(?:O(?:I(?:C(?:E(?::[^\]\n]*)?)?)?)?)?)?|F(?:O(?:R(?:M)?)?)?)?$/;
 
 interface Blocks {
@@ -23,10 +27,11 @@ interface Blocks {
 }
 
 /**
- * A reply read for the owner: its Maps cards (eliza's recognizer), its Maps share questions and its forms taken out of the
- * words, outside a code fence only, with each share question's answers kept. Any other block reads as text. While the reply
- * is still `streaming`, a block that has not closed, and a last line that may still become one, are held back; in a finished
- * reply an unclosed block stays as text. @throws {never}
+ * A reply read for the owner: its Maps cards (eliza's recognizer), its Maps share questions, its forms and any tool call the
+ * model wrote out as text (`<tool_call>` or `<function=` to its closing tag) taken out of the words, outside a code fence
+ * only, with each share question's answers kept; a line a tool call is taken from loses only its own trailing blanks. Any
+ * other block reads as text. While the reply is still `streaming`, a block that has not closed, and a last line that may
+ * still become one, are held back; in a finished reply an unclosed block stays as text. @throws {never}
  */
 export function replyBlocks(text: string, streaming = false): Blocks {
   const lines = withoutMapsCards(text).split(/\r?\n/);
@@ -43,6 +48,40 @@ export function replyBlocks(text: string, streaming = false): Blocks {
     if (fenced) {
       kept.push(line);
       continue;
+    }
+    const call = callOpen.exec(line);
+    if (call !== null) {
+      const before = line.slice(0, call.index);
+      let end = at;
+      let after: string | undefined;
+      for (; end < lines.length; end++) {
+        const from = end === at ? call.index + call[0].length : 0;
+        const rest = (lines[end] ?? "").slice(from);
+        const closed = callClose.exec(rest);
+        if (closed !== null) {
+          after = rest.slice(closed.index + closed[0].length);
+          break;
+        }
+      }
+      if (after === undefined) {
+        if (!streaming) {
+          kept.push(line);
+          continue;
+        }
+        if (before.trim() !== "") kept.push(before.trimEnd());
+        break;
+      }
+      // The prose around the call is read again, as one line, in case it holds another call or a block.
+      const joined = (/(^|\s)$/.test(before) ? before + after.trimStart() : before + after).trimEnd();
+      lines.splice(at, end - at + 1, ...(joined.trim() === "" ? [] : [joined]));
+      at--;
+      continue;
+    }
+    if (strayClose.test(line)) continue;
+    if (streaming && at === lines.length - 1 && partialCall.test(line)) {
+      const head = line.replace(partialCall, "").trimEnd();
+      if (head.trim() !== "") kept.push(head);
+      break;
     }
     if (streaming && at === lines.length - 1 && partialOpener.test(line)) break;
     const share = shareOpen.exec(line);

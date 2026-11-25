@@ -11,7 +11,6 @@ import type { MessageSelection } from "./message-actions.vibe";
 import { MapsCardView, mapsCardsOf } from "./maps-cards.tsx";
 import { replyBlocks, wordsOf } from "./words.ts";
 import { ReplyFailure } from "./ReplyFailure.tsx";
-import { shownReply } from "./shown.ts";
 import type { Attached, Board, Line } from "./talk.vibe";
 
 export interface MessageActions {
@@ -55,9 +54,8 @@ export function useMessageRows({ runtime, board, lines, chats, writing, replying
     const chat = (event: Chats.Event) => void runtime.runPromiseExit(Effect.flatMap(Chats.Machine, (machine) => machine.send(event)));
     const compose = (event: Composer.Event) => void runtime.runPromiseExit(Effect.flatMap(Composer.Machine, (machine) => machine.send(event)));
     return lines.flatMap((line): HistoryRow[] => {
-      const reply = line.mine ? line.text : shownReply(line.text);
-      const cards = line.mine ? [] : mapsCardsOf(reply).cards;
-      const { words: text, choices } = line.mine ? { words: line.text, choices: [] } : replyBlocks(reply);
+      const cards = line.mine ? [] : mapsCardsOf(line.text).cards;
+      const { words: text, choices } = line.mine ? { words: line.text, choices: [] } : replyBlocks(line.text);
       if (!line.mine && text.trim() === "" && cards.length === 0 && choices.length === 0 && line.failure === undefined && !line.attachments?.length) return [];
       const message = board.numbered(line.id);
       const live = !line.mine && message > 0 && message === chats.messages && !replying;

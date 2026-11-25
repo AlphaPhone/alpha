@@ -78,4 +78,17 @@ describe("Ask Alpha dock", () => {
     await runtime.runPromise(Effect.flatMap(Shell, (m) => Stream.runHead(Stream.filter(m.changes, (s) => s.assistant === "Sheet"))));
     expect(document.activeElement).toBe(document.querySelector("textarea[data-alpha-composer]"));
   });
+
+  // spec/app/assistant/dock.md, "Alpha's mark, a send from the bar, or a tap on the handle opens Ask Alpha as a sheet": as v121's pill, a swipe up that starts on Type opens the sheet without typing
+  it("a swipe up from Type on the pill opens Sheet without typing (spec/app/assistant/dock.md, \"Alpha's mark, a send from the bar, or a tap on the handle opens Ask Alpha as a sheet\")", async () => {
+    await page.viewport(390, 844);
+    const { runtime } = await mountDock({ view: "Calendar" });
+    const type = document.querySelector<HTMLButtonElement>("[data-alpha-compact-dock] button[aria-label='Type']");
+    expect(type).not.toBeNull();
+    type?.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true, clientY: 780, pointerId: 3, pointerType: "touch", isPrimary: true }));
+    type?.dispatchEvent(new PointerEvent("pointermove", { bubbles: true, clientY: 740, pointerId: 3, pointerType: "touch", isPrimary: true }));
+    type?.dispatchEvent(new PointerEvent("pointerup", { bubbles: true, clientY: 700, pointerId: 3, pointerType: "touch", isPrimary: true }));
+    await runtime.runPromise(Effect.flatMap(Shell, (m) => Stream.runHead(Stream.filter(m.changes, (s) => s.assistant === "Sheet"))));
+    expect(document.querySelector("section[aria-label='Ask Alpha']")?.getAttribute("data-alpha-detent")).toBe("sheet");
+  });
 });

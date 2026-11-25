@@ -12,13 +12,6 @@ it is the [composer's](./composer.md).
 > As the owner, I want to see my conversations, open any of them where I
 > left it, start a new one, and find the one I was in after a restart.
 
-As in Alpha before VibeStack, the conversations live in Settings, on the
-Agent activity page: New to start one, History to read the agent's list,
-and one row per conversation, under its own name, that opens it in Ask
-Alpha. The composer's `+` menu holds Attach media, Search chat, New chat
-and Chat history, and Chat history opens that page. Neither is in the
-sheet's header.
-
 ### Chats know the conversations the agent listed, which one is showing, which one a fork came from, and the messages of the one showing
 
 A conversation is named by the agent's number for it; none showing is 0.

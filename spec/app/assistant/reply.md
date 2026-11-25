@@ -268,10 +268,11 @@ markup, a map choice, a workflow block, a Calendar approval of exactly its
 approve and reject lines, or a calendar or email result. Any other bracket
 tag is never a card: outside a fence it reads as text. A form block, a
 broken workflow block and a tool call the model wrote out as text (from
-`<tool_call>` or `<function=` to its closing tag, or to the end of a reply
-that never closes it) are hidden, never shown raw, as in Alpha before
-VibeStack; nothing else is dropped, so the prose after a card is kept, and
-a reply left with nothing to show leaves no bubble.
+`<tool_call>` or `<function=` to its closing tag) are hidden, never shown,
+copied or spoken raw. A call still open is held back while the reply
+streams, like any unclosed block, and a finished reply keeps it as text.
+Nothing else is dropped, so the prose after a card is kept, and a reply
+left with nothing to show leaves no bubble.
 
 ```quint
 type CardOf = MapsCard | CalendarCard | EmailCard | WorkflowCard | ChoiceCard | BrowserCard

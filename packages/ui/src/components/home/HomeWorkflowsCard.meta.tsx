@@ -3,9 +3,9 @@ import type { HomeWorkflowsCardProps } from "./HomeWorkflowsCard.tsx";
 
 export const meta: ComponentMeta<HomeWorkflowsCardProps> = {
   args: {
-    lines: [{ title: "Morning brief", detail: "Ran at 7:00 AM" }, { title: "Receipts to Files", detail: "Waiting for mail" }],
+    lines: [{ title: "Morning brief", detail: "Enabled" }, { title: "Receipts to Files", detail: "Enabled" }],
     more: 3,
     freshness: "UpToDate",
   },
-  examples: { One: { lines: [{ title: "Morning brief", detail: "Ran at 7:00 AM" }], more: 0 } },
+  examples: { One: { lines: [{ title: "Morning brief", detail: "Enabled" }], more: 0 } },
 };

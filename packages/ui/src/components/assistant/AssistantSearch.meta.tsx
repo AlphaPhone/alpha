@@ -37,6 +37,6 @@ export const meta: ComponentMeta<AssistantSearchProps> = {
       await userEvent.click(canvas.getByRole("button", { name: /Lunch with Ana/ }));
       await expect(onOpenHit.mock.calls).toEqual([["1"]]);
     },
-    "More hits": presses("More", onMore),
+    "More hits": presses("More results", onMore),
   },
 };
