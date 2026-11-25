@@ -6,7 +6,7 @@ import * as Drafts from "../../gen/app__inbox__drafts.effect.vibe"
 import { canAttach } from "../../gen/app__inbox__letter.effect.vibe"
 import { Machine as Shell } from "../../gen/app__shell.effect.vibe"
 import { type Job, answer, contained, reacting, run, started, together, untimed } from "../runtime/reactor.vibe"
-import { type Attached, Letters, policy } from "./composer.vibe"
+import { type Attached, Letters, mibOf, policy } from "./composer.vibe"
 import { ownerChanges } from "./mailbox.vibe"
 
 module web {
@@ -36,11 +36,6 @@ module web {
   }
 }
 import { base64Of, chooseFile } from web
-
-/** How many MiB a file of `size` bytes counts for against an account's limits: at least one. */
-export function mibOf(size: number): number {
-  return Math.max(1, Math.ceil(size / 1_048_576))
-}
 
 /**
  * The file on its way into a draft: the one the picker gave, or the one another part of Alpha handed over under

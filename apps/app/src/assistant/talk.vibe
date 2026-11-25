@@ -9,6 +9,7 @@ import type { MailQuestion } from "../inbox/mail-context.vibe"
 import type { Sighting } from "../platform/location.vibe"
 import type { CommsPrompt } from "../phone/comms.vibe"
 import type { NoteTranscript } from "../notes/selection.vibe"
+import type { RecordingSummary } from "./recording-summary.vibe"
 
 /** One file selected by the owner, with the bytes admitted by the Ask Alpha attachment policy. */
 export interface Attached {
@@ -84,6 +85,7 @@ export interface Seen {
   readonly transcript: TranscriptAttachment | undefined
   readonly attachmentNotice: string
   readonly preview: { readonly ticket: number; readonly file: Attached } | undefined
+  readonly recordingSummary: RecordingSummary | undefined
   readonly media: ReadonlyArray<MediaCard>
   readonly mediaNote: { readonly conversation: number; readonly text: string } | undefined
   /** The text of a message the slot marks as sending, under review; or the saved copy of a conflict. */
@@ -194,7 +196,7 @@ export const talk = Layer.effect(Talk, effect {
   const listeners = new Set<() => void>()
   let position: { readonly ticket: number; readonly sighting: Sighting } | undefined
   let seen: Seen = {
-    pages: new Map(), reply: "", label: "", failure: undefined, typed: "", files: [], filesBinding: undefined, filesAuthority: undefined, transcript: undefined, attachmentNotice: "", preview: undefined, media: [], mediaNote: undefined, saved: "", hits: [],
+    pages: new Map(), reply: "", label: "", failure: undefined, typed: "", files: [], filesBinding: undefined, filesAuthority: undefined, transcript: undefined, attachmentNotice: "", preview: undefined, recordingSummary: undefined, media: [], mediaNote: undefined, saved: "", hits: [],
     titles: new Map(),
   }
   const keep = () => {
@@ -230,7 +232,9 @@ export const talk = Layer.effect(Talk, effect {
     waitingRequest: undefined,
     postingRequest: undefined,
     change: (patch) => {
+      const previous = seen.recordingSummary
       seen = { ...seen, ...patch }
+      if (previous !== undefined && previous !== seen.recordingSummary) runFork(previous.runtime.disposeEffect)
       for (const listener of listeners) listener()
     },
     numberOf: (record, title) => {
@@ -349,7 +353,7 @@ export const talk = Layer.effect(Talk, effect {
     board.change({
       pages: new Map(), reply: "", label: "", failure: undefined, typed: "", saved: "",
       files: [], filesBinding: undefined, filesAuthority: undefined, transcript: undefined, attachmentNotice: "", preview: undefined,
-      hits: [], media: [], mediaNote: undefined, titles: new Map(records.map((one, at) => [at + 1, one.title])),
+      hits: [], recordingSummary: undefined, media: [], mediaNote: undefined, titles: new Map(records.map((one, at) => [at + 1, one.title])),
     })
     return key !== undefined && preceding === key && remembered.length > 0
   }

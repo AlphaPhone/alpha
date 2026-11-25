@@ -1,4 +1,4 @@
-import { expect, fn, screen, userEvent, within } from "storybook/test";
+import { expect, fn, screen, userEvent, waitFor, within } from "storybook/test";
 import type { ComponentMeta } from "vibestack/stories";
 import type { InboxAttachmentReviewProps } from "./InboxAttachmentReview.tsx";
 
@@ -13,7 +13,7 @@ export const meta: ComponentMeta<InboxAttachmentReviewProps> = {
     Opened: { outcome: "done" },
     "Reviewed image": {
       name: "Receipt.png", outcome: "done",
-      preview: { kind: "image", url: "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jC0cAAAAASUVORK5CYII=", digest: "e5701bba84550b9c8ff2846fb86b8f60900431456546808fc0d38fc8d9f4c2dc" },
+      preview: { kind: "image", url: "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABgAAAAYCAIAAABvFaqvAAAAH0lEQVR4nGMwTz1AFcQwatCoQaMGjRo0atCoQQNvEADDgg8uFeV++AAAAABJRU5ErkJggg==", digest: "48413e11daa0a33f83d16530aad6d1fb7fd41fe2f3c61f2588f4962191db77e8" },
     },
     Saved: { handling: "save", outcome: "done" },
     Refused: { handling: "save", outcome: "refused" },
@@ -29,7 +29,10 @@ export const meta: ComponentMeta<InboxAttachmentReviewProps> = {
     },
     "Reviewed image": async () => {
       const sheet = await screen.findByRole("dialog", { name: "Receipt.png" });
-      await expect(within(sheet).getByRole("img", { name: "Receipt.png" })).toBeVisible();
+      const preview = within(sheet).getByRole("img", { name: "Receipt.png" });
+      if (!(preview instanceof HTMLImageElement)) throw new Error("Expected a rendered attachment image");
+      await preview.decode();
+      await waitFor(() => expect(preview).toBeVisible());
     },
     "Save not confirmed": async () => {
       const sheet = await screen.findByRole("dialog", { name: "Save this file?" });

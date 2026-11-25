@@ -48,7 +48,7 @@ export async function shareCopy(name: string, blob: Blob): Promise<DocumentHando
 }
 
 /** Read the chosen file into the format of the local library. @throws {never} */
-export async function bytesOf(file: File): Promise<Uint8Array<ArrayBuffer>> {
+export async function bytesOf(file: Blob): Promise<Uint8Array<ArrayBuffer>> {
   return new Uint8Array(await file.arrayBuffer());
 }
 

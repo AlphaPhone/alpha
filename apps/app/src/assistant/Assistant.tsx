@@ -1,11 +1,11 @@
 // spec/app/assistant/index.md, "Story: Ask Alpha something"; spec/app/assistant/index.md, "Story: Stop a reply"; spec/app/assistant/chats.md, "Story: Find my conversations"; spec/app/assistant/composer.md, "Story: Send what I wrote"; spec/app/assistant/dock.md, "Focusing or tapping the composer on the bar opens Ask Alpha as a sheet"; spec/app/assistant/search.md, "Story: Search my conversations"; spec/app/assistant/reply.md, "Story: Hear a brief acknowledgment and still get the whole answer"
 import {
-  Alert, AssistantCard, AssistantCardFrame, Button, AssistantConversation, AssistantGrabber, AssistantPhotoPreview, ConfirmDialog,
+  Alert, AssistantCard, AssistantCardFrame, Button, AssistantConversation, AssistantGrabber, AssistantPhotoPreview, ConfirmDialog, Sheet, SheetContent, Textarea,
   type AssistantAttachment, type AssistantComposerProps, type AssistantDraftNoticeProps, type AssistantTurnNoteProps,
 } from "@repo/ui";
 import { Effect, type ManagedRuntime } from "effect";
-import { ClipboardCheck } from "lucide-react";
-import { type ReactNode, type RefObject, useCallback, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import { ClipboardCheck, FileText } from "lucide-react";
+import { type FormEvent, type ReactNode, type RefObject, useCallback, useId, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { type Conversation as Talking, Machine as ConversationMachine } from "../../gen/app__assistant.effect.vibe";
 import { askable, inFlight, pending } from "../../gen/app__assistant.ts";
 import { useMachine as useConversation } from "../../gen/app__assistant.react.ts";
@@ -13,6 +13,7 @@ import type { Machine as AttachmentMachine } from "../../gen/app__assistant__att
 import { useMachine as useAttachments } from "../../gen/app__assistant__attachments.react.ts";
 import type { Machine as ChatsMachine } from "../../gen/app__assistant__chats.effect.vibe";
 import { making } from "../../gen/app__assistant__chats.ts";
+import { useMachine as useCards } from "../../gen/app__assistant__cards.react.ts";
 import { useMachine as useChats } from "../../gen/app__assistant__chats.react.ts";
 import { type Composer as Writing, Machine as ComposerMachine } from "../../gen/app__assistant__composer.effect.vibe";
 import { attachments as attachmentCount, content, maxFiles, textLimit } from "../../gen/app__assistant__composer.ts";
@@ -37,6 +38,9 @@ import { home } from "../shell/shell.vibe";
 import { isCommsView } from "../shell/views.tsx";
 import { type MediaCard, MediaReview, namedReviewQuery, spokenText } from "./media-review.vibe";
 import type { Agent } from "../platform/agent.vibe";
+import type { Device } from "../platform/device.vibe";
+import type { NoteStore } from "../platform/notes.vibe";
+import type { Machine as NotesMachine } from "../../gen/app__notes.effect.vibe";
 import { Documents } from "../platform/documents.vibe";
 import { AttachmentSources } from "./AttachmentSources.tsx";
 import { askComms, freedom } from "./assistant.vibe";
@@ -44,6 +48,9 @@ import { acceptedFiles, acceptedPhotos, attachmentAuthority, chooseDocument, typ
 import { chip, type MessageActions, useHistorySheets, useMessageRows } from "./history.tsx";
 import { holdMessagePress } from "./message-actions.vibe";
 import { ReplyFailure } from "./ReplyFailure.tsx";
+import {
+  actionsOf, actionUnits, type RecordingSummary, reviewRecordingSummary, saveRecordingSummary, summaryActions, summaryUnits,
+} from "./recording-summary.vibe";
 import { type Attached, type Line, Talk } from "./talk.vibe";
 import { CommsTarget, type CommsTargetServices } from "../phone/CommsTarget.tsx";
 import { CommsBriefing } from "../phone/comms.vibe";
@@ -54,7 +61,7 @@ import type { MapsCard } from "@elizaos/plugin-maps-client";
 import { type DictationKeyboard, type TalkStopReceipt, type VoiceKeyboard, useTalkKeyboard } from "../voice/useTalkKeyboard.ts";
 
 export interface AssistantProps {
-  runtime: ManagedRuntime.ManagedRuntime<ConversationMachine | AttachmentMachine | ChatsMachine | ComposerMachine | SearchMachine | ReplyMachine | DockMachine | ShellMachine | CommsMachine | CommsTargetServices | CommsBriefing | Talk | MailQuestions | LayersMachine | MediaReview | Documents | Agent, unknown>;
+  runtime: ManagedRuntime.ManagedRuntime<ConversationMachine | AttachmentMachine | ChatsMachine | ComposerMachine | SearchMachine | ReplyMachine | DockMachine | ShellMachine | CommsMachine | CommsTargetServices | CommsBriefing | Talk | MailQuestions | LayersMachine | MediaReview | Documents | Agent | Device | NoteStore | NotesMachine, unknown>;
   messageActions?: MessageActions;
   speech?: Pick<AssistantComposerProps, "onTalk" | "onDictate" | "showUnavailableTalk" | "voiceNotice"> & {
     voicePanel?: (onKeyboard: DictationKeyboard) => ReactNode;
@@ -231,6 +238,74 @@ function MailReviewDialogs({ open, review, attach, dismiss }: MailReviewDialogsP
         confirmLabel="OK" onConfirm={dismiss} onCancel={dismiss} />
     </>
   );
+}
+
+// spec/app/assistant/cards.md, "The owner reviews the summary before it can be saved"
+function RecordingSummaryReview({ runtime, offer }: { runtime: AssistantProps["runtime"]; offer: RecordingSummary }) {
+  const card = useCards(offer.runtime);
+  const form = useId();
+  const heading = useId();
+  const actionItems = useId();
+  const dismiss = { type: "dismissSummary" } as const;
+  const dismissReview = () => { if (card.can(dismiss)) void card.send(dismiss); };
+  const outcome = card.state?.save.outcome;
+  const message = card.state?.settled ? "Recording is unavailable. Ask about its current transcript again."
+    : outcome === "Confirmed" ? "Recording summary saved. No reminders scheduled."
+    : outcome === "Unknown" ? "Save is unconfirmed. Check Notes before trying again."
+    : outcome === "Sent" ? "Saving recording summary…"
+    : outcome === "Refused" ? "Recording summary could not be saved." : undefined;
+  const submit = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (!card.can({ type: "saveToNotes" })) return;
+    const values = new FormData(event.currentTarget);
+    const summary = values.get("summary");
+    const actions = values.get("actions");
+    if (typeof summary !== "string" || typeof actions !== "string") return;
+    if (summary.trim() === "") {
+      const field = event.currentTarget.elements.namedItem("summary");
+      if (field instanceof HTMLTextAreaElement) {
+        field.setCustomValidity("Enter a summary.");
+        field.reportValidity();
+      }
+      return;
+    }
+    const field = event.currentTarget.elements.namedItem("actions");
+    const items = actionsOf(actions);
+    if (items.length > summaryActions || items.some((item) => item.length > actionUnits)) {
+      if (field instanceof HTMLTextAreaElement) {
+        field.setCustomValidity(`Use up to ${summaryActions} lines of ${actionUnits} characters each.`);
+        field.reportValidity();
+      }
+      return;
+    }
+    void runtime.runPromise(saveRecordingSummary(offer, summary, actions));
+  };
+  return <>
+    {card.state && <AssistantCardFrame icon={<FileText />} title="Review summary note" detail={offer.source.title}
+      settled={card.state.settled || outcome === "Confirmed" || outcome === "Unknown"}
+      onOpen={card.can({ type: "reviewSummary" }) ? () => void runtime.runPromise(reviewRecordingSummary(offer)) : undefined}>
+      {message && <p role="status" className="text-sm text-muted-foreground">{message}</p>}
+    </AssistantCardFrame>}
+    <Sheet open={card.state?.reviewing === true} onOpenChange={(open) => { if (!open) dismissReview(); }}>
+      <SheetContent title="Review recording summary" description={offer.source.title} actions={<>
+        <Button variant="secondary" onClick={dismissReview}>Cancel</Button>
+        <Button type="submit" form={form} disabled={!card.can({ type: "saveToNotes" })}>Save recording summary</Button>
+      </>}>
+        <form id={form} onSubmit={submit} className="grid gap-3">
+          <label htmlFor={heading} className="grid gap-1.5 text-sm font-medium">
+            Summary
+            <Textarea id={heading} aria-label="Summary" name="summary" defaultValue={offer.words} maxLength={summaryUnits} required
+              onInput={(event) => event.currentTarget.setCustomValidity("")} />
+          </label>
+          <label htmlFor={actionItems} className="grid gap-1.5 text-sm font-medium">
+            Action items
+            <Textarea id={actionItems} aria-label="Action items" name="actions" placeholder="One action per line" maxLength={summaryActions * (actionUnits + 1)}
+              onInput={(event) => event.currentTarget.setCustomValidity("")} />
+          </label>
+        </form>
+      </SheetContent>
+    </Sheet>
+  </>;
 }
 
 interface DockHandleProps {
@@ -434,6 +509,11 @@ export function Assistant({ runtime, messageActions, speech, canReadAloud = fals
   const mediaCards = seen.media.filter((card) => !talking.context.sensitive && card.conversation === shown.chosen && card.revision === talking.context.revision).map((card) => ({
     id: `media ${card.id}`, author: "alpha" as const, text: "", children: <DeviceReview runtime={runtime} card={card} />,
   }));
+  const offer = seen.recordingSummary;
+  const recordingSummary = offer !== undefined && !talking.context.sensitive && offer.conversation === shown.chosen
+    && lines.some((line) => !line.mine && line.id === offer.message)
+    ? [{ id: `recording summary ${offer.message}`, author: "alpha" as const, text: "",
+      children: <RecordingSummaryReview runtime={runtime} offer={offer} /> }] : [];
   const mediaNote = talking.context.sensitive || seen.mediaNote?.conversation !== shown.chosen
     ? [] : [{ id: "media result", author: "alpha" as const, text: seen.mediaNote.text, onOpenLink }];
   const failure = seen.failure;
@@ -492,7 +572,7 @@ export function Assistant({ runtime, messageActions, speech, canReadAloud = fals
         transcript={{
           messages,
           holdMessage: open ? holdMessage : undefined,
-          liveMessages: [...(brief === "" ? [] : [{ id: `briefing:${subject}`, author: "alpha" as const, text: brief, onOpenLink }]), ...writingReply, ...failed, ...mediaCards, ...mediaNote],
+          liveMessages: [...(brief === "" ? [] : [{ id: `briefing:${subject}`, author: "alpha" as const, text: brief, onOpenLink }]), ...writingReply, ...failed, ...mediaCards, ...mediaNote, ...recordingSummary],
           interim: open && shown.around === 0 && !talking.context.sensitive ? interim : undefined,
           position: { page: `${shown.chosen}/${shown.page.ticket}`, around: board.messageId(shown.around) },
           visible: open,

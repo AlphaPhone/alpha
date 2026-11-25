@@ -226,7 +226,11 @@ function Opened({ runtime, list, onRefresh, onBegin }: { runtime: Runtime; list:
     : undefined;
   const contents = loaded ? prepareMessage(read) : undefined;
   const link = state.link > 0 ? contents?.links.at(state.link - 1) : undefined;
-  const answered = card === undefined ? undefined : { id: card.id, from: card.from, others: [...card.to, ...card.cc], subject: card.subject, body: read?.bodyText, files: files.length };
+  const original = read?.message;
+  const answered = original === undefined || read === undefined ? undefined : {
+    id: original.id, from: original.from, others: [...original.to, ...original.cc], subject: original.subject,
+    body: read.bodyText, historyId: original.metadata.historyId, files,
+  };
   return (
     <>
       <InboxMessageScreen
