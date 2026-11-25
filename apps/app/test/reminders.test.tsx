@@ -134,7 +134,7 @@ function makeFakeAgentReminders(initialNowMs: number): { readonly recorder: Agen
             };
           }
         } else if (action === "snooze") {
-          const untilMs = Number(parsed.snoozedUntilMs ?? 0);
+          const untilMs = Number(parsed.untilMs ?? parsed.snoozedUntilMs ?? 0);
           recorder.snapshot = {
             ...recorder.snapshot,
             version: recorder.snapshot.version + 1,

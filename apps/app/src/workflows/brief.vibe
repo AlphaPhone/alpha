@@ -1,0 +1,75 @@
+// spec/app/digests/index.md, "Home shows the newest kept result of the owner that ran, finished or failed, through a restart; a result that did not run never replaces it, and a page of another owner never reaches it"
+import { digestInbox, latestRetainedBrief } from "@elizaos/plugin-workflow-client"
+import { Machine as Shell } from "../../gen/app__shell.effect.vibe"
+import { Machine as WorkflowList } from "../../gen/app__workflows__list.effect.vibe"
+import { fromAreas, type ToldBrief } from "../home/cards.vibe"
+import { Agent } from "../platform/agent.vibe"
+import { Device } from "../platform/device.vibe"
+import { ownerAt } from "../platform/owner.vibe"
+import { started, together } from "../runtime/reactor.vibe"
+import { Rows } from "./list.vibe"
+
+export function digestScope(owner: string): string {
+  return `alpha/workflows/digests/${encodeURIComponent(owner)}`
+}
+
+/** A notice within Alpha to re-read durable results after the digest inbox has settled a round. */
+export service DigestHistory {
+  readonly changes: Stream.Stream<void>
+  changed(): void!!
+}
+
+const history = Layer.effect(DigestHistory, effect {
+  const changed = try PubSub.sliding<void>(1)
+  return {
+    changes: Stream.fromPubSub(changed),
+    changed: () => sync(() => { PubSub.publishUnsafe(changed, undefined) }),
+  }
+})
+
+/** Project the current owner's saved digest onto Home. This observer only reads the inbox history. */
+const brief = started(effect {
+  const list = try WorkflowList
+  const shell = try Shell
+  const rows = try Rows
+  const device = try Device
+  const { life } = try Agent
+  const history = try DigestHistory
+  const accounts = Stream.as(Stream.changes(Stream.map(list.changes, (state) => state.owner)), undefined)
+  const home = Stream.filter(Stream.changes(Stream.map(shell.changes, (state) => state.trail.length === 0)), (shown) => shown)
+  const foreground = Stream.filter(device.visible, (shown) => shown)
+  const agent = Stream.catch(Stream.changes(Stream.map(life.changes, (state) => state.available && state.state === "running")), () => Stream.empty)
+  const refresh = Stream.merge(Stream.as(Stream.merge(home, foreground), undefined), Stream.merge(accounts, history.changes))
+  const signals = Stream.merge(refresh, agent)
+  let bound: string | undefined
+
+  const read = effect (available: boolean | void) => {
+    const owner = (try list.get()).owner
+    const identity = available !== false && owner > 0 ? (ownerAt() catch () => "") : ""
+    const scope = identity !== "" && (try rows.sameOwner(identity, owner)) ? digestScope(identity) : undefined
+    if (scope !== bound) {
+      bound = scope
+      fromAreas.brief(undefined)
+    }
+    if (scope === undefined) return
+    const inbox = try digestInbox(scope)
+    const saved = inbox.history() catch () => undefined
+    if (saved === undefined || (ownerAt() catch () => "") !== identity || (try list.get()).owner !== owner) return
+    const latest = latestRetainedBrief(saved)
+    const current: ToldBrief | undefined = latest === undefined ? undefined
+      : latest.status === "failed" || latest.status === "cancelled"
+        ? { outcome: "RunFailed", at: Date.parse(latest.ranAt) }
+        : { outcome: "Finished", at: Date.parse(latest.ranAt), summary: latest.summary }
+    const previous = fromAreas.snapshot().brief
+    if (current?.outcome !== previous?.outcome || current?.at !== previous?.at ||
+      (current?.outcome === "Finished" && previous?.outcome === "Finished" && current.summary !== previous.summary)) {
+      fromAreas.brief(current)
+    }
+  }
+
+  fromAreas.brief(undefined)
+  try Effect.ensuring(Stream.runDrain(Stream.switchMap(signals, (available) => Stream.fromEffectDrain(read(available)))),
+    sync(() => fromAreas.brief(undefined)))
+}, "showing the owner's retained digest on Home")
+
+export const digestBrief = together(history, brief)

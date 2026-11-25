@@ -4,8 +4,8 @@ import type { Answer, Effect as Out, Event } from "../../gen/app__settings__rese
 import { type Job, answer, due, reacting, stop, untimed } from "../runtime/reactor.vibe"
 
 module held {
-  import { resetPlugin, reviewDataReset } from "@elizaos/os/bridges/reset"
-  import type { ReviewNotice } from "@elizaos/os/bridges/reset"
+  import { resetPlugin, reviewDataReset } from "@elizaos/os-bridges"
+  import type { ReviewNotice } from "@elizaos/os-bridges"
 
   /** Android's own review of erasing all data, through eliza's client of the `ElizaReset` plugin: what it says when nothing was reset. A confirmed reset never answers: the phone erases and stops Alpha. */
   export async function reviewed(): Promise<ReviewNotice> {

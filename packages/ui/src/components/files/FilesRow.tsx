@@ -21,6 +21,7 @@ export type FilesRowProps = Omit<ComponentProps<"button">, "children" | "title">
 
 /** One place, folder or file in Files: pressed to open it, or, while choosing, to choose it. */
 export function FilesRow({ name, detail, icon, count, layout = "row", size = "item", chosen, className, ...props }: FilesRowProps) {
+  const place = size === "place";
   const mark = chosen === undefined ? null : (
     <span aria-hidden className={cn("flex size-6 shrink-0 items-center justify-center rounded-full", chosen ? "bg-alpha text-alpha-foreground" : "inset-ring-[1.5px] inset-ring-muted-foreground", layout === "tile" && "absolute top-3 right-3", layout === "tile" && (chosen ? "ring-2 ring-background" : "bg-background"))}>
       {chosen ? <Check className="size-3.75" /> : null}
@@ -36,11 +37,11 @@ export function FilesRow({ name, detail, icon, count, layout = "row", size = "it
     );
   }
   return (
-    <button type="button" aria-pressed={chosen} className={cn(focusRing, "flex min-h-15 w-full items-center gap-3.5 rounded-drawer-icon px-2 text-left active:bg-accent disabled:opacity-40 aria-pressed:bg-secondary", size === "place" ? "py-2" : "py-2.5", className)} {...props}>
+    <button type="button" aria-pressed={chosen} className={cn(focusRing, "flex min-h-15 w-full items-center gap-3.5 rounded-drawer-icon px-2 text-left active:bg-accent disabled:opacity-40 aria-pressed:bg-secondary", place ? "py-2" : "py-2.5", className)} {...props}>
       <span aria-hidden className="flex size-11 shrink-0 items-center justify-center rounded-md bg-secondary text-foreground [&_svg]:size-5">{icon}</span>
       <span className="flex min-w-0 flex-1 flex-col">
-        <span className={cn("truncate leading-tight font-medium", size === "place" ? "text-body" : "text-base")}>{name}</span>
-        {detail ? <span className="mt-0.5 text-meta leading-tight text-muted-foreground">{detail}</span> : null}
+        <span className={cn("truncate font-medium", place ? "text-md" : "text-base leading-tight")}>{name}</span>
+        {detail ? <span className={cn("mt-0.5 text-muted-foreground", place ? "text-caption" : "text-meta leading-tight")}>{detail}</span> : null}
       </span>
       {count === undefined ? null : <span className="text-sm leading-tight text-muted-foreground">{count}</span>}
       {mark}

@@ -33,9 +33,11 @@ import permission as P from "../../kit/permission"
 
 type Phase = Idle | Starting | Listening | Transcribing | Thinking | Speaking | Paused | Stopping | Failed
 type Mic = Off | Asking | Opening | On | Closing
+type Output = SpeakerUnknown | SpeakerChecking | SpeakerUnavailable | SpeakerOn | SpeakerMuting | SpeakerOff | SpeakerUnmuting
 
 type Voice = {
   phase: Phase, session: int, turn: int, sent: int, mic: Mic, muted: bool, heard: bool,
+  speaker: Output, speakerTicket: int,
   network: bool, disclosing: bool, retries: int, retryAt: int,
   queued: int, played: int, replied: bool, playing: int,
   failure: D::Failure, latched: bool, claim: int, followed: int,
@@ -45,6 +47,7 @@ type Voice = {
 
 pure val initial: Voice = {
   phase: Idle, session: 0, turn: 0, sent: 0, mic: Off, muted: false, heard: false,
+  speaker: SpeakerUnknown, speakerTicket: 0,
   network: false, disclosing: false, retries: 0, retryAt: 0,
   queued: 0, played: 0, replied: false, playing: 0,
   failure: D::NoFailure, latched: false, claim: 0, followed: 0,
@@ -53,6 +56,7 @@ pure val initial: Voice = {
 }
 
 pure val sessionValues = Set(1, 2, 3, 4, 5)
+pure val speakerTicketValues = Set(1, 2, 3, 4)
 pure val turnValues = Set(1, 2, 3, 4, 5)
 pure val placeValues = Set(1, 2)
 pure val keyValues = Set(0, 1, 2)
@@ -89,9 +93,9 @@ pure val weight_openRecorder = 3
 Prewarm speech output and status without opening the microphone, hold or
 release the native speech engine across an active conversation, ask for the
 microphone, open app settings, listen or record, close the microphone, send
-a turn, play a sentence of the reply, hush the reply, shut the conversation
-down, open a screen, transcribe a clip, abandon a recording, or fill a field
-with dictated text.
+a turn, play a sentence of the reply, set the speaker output, hush the reply,
+shut the conversation down, open a screen, transcribe a clip, abandon a
+recording, or fill a field with dictated text.
 
 ```quint
 type Effect =
@@ -104,11 +108,12 @@ type Effect =
   | CloseMicrophone({ session: int })
   | Send({ session: int, turn: int, network: bool })
   | Play({ session: int, turn: int })
+  | SetSpeakerOutput({ session: int, speakerTicket: int, muted: bool })
   | Hush({ turn: int })
   | Shut({ session: int, keyboard: bool })
   | Navigate({ place: int })
   | Record({ ticket: int })
-  | Transcribe({ ticket: int, network: bool })
+  | Transcribe({ ticket: int, network: bool, automatic: bool })
   | Abandon({ recording: int })
   | Fill({ field: D::Field, filling: int })
 
@@ -271,8 +276,13 @@ pure def sometimesListeningAfterTheFirstGrant(v: Voice): bool =
 ```quint
 pure def canMicOpened(v: Voice, session: int): bool = v.mic == Opening and session == v.session and talking(v)
 
-pure def micOpened(v: Voice, session: int): Voice =
-  { ...v, mic: On, phase: if (v.phase == Starting) Listening else v.phase }
+pure def micOpened(v: Voice, session: int): Change =
+  val listening = { ...v, mic: On, phase: if (v.phase == Starting) Listening else v.phase }
+  val ticket = v.speakerTicket + 1
+  if (v.speaker != SpeakerUnknown) { state: listening, out: List() }
+  else
+    { state: { ...listening, speaker: SpeakerChecking, speakerTicket: ticket },
+      out: List(SetSpeakerOutput({ session: session, speakerTicket: ticket, muted: false })) }
 
 pure def canMicFailed(v: Voice, session: int): bool = v.mic == Opening and session == v.session and talking(v)
 
@@ -552,6 +562,37 @@ pure def alwaysMutedMeansTheMicrophoneIsOff(v: Voice): bool = v.muted implies (v
 pure def sometimesMutedWhileSpeaking(v: Voice): bool = v.muted and v.phase == Speaking
 ```
 
+### Speaker mute is offered after the current speech bridge confirms gain control
+
+The owner can silence Alpha without changing the microphone or interrupting
+the answer. The button waits for a receipt owned by the current session and
+request. The receipt says which gain the bridge confirmed. The phone retires
+its Talk gain before another conversation or reading can use local playback.
+
+```quint
+pure def canSetSpeakerMuted(v: Voice, muted: bool): bool =
+  talking(v) and v.phase != Paused
+    and (if (muted) v.speaker == SpeakerOn else v.speaker == SpeakerOff)
+
+pure def setSpeakerMuted(v: Voice, muted: bool): Change =
+  val ticket = v.speakerTicket + 1
+  { state: { ...v, speaker: if (muted) SpeakerMuting else SpeakerUnmuting, speakerTicket: ticket },
+    out: List(SetSpeakerOutput({ session: v.session, speakerTicket: ticket, muted: muted })) }
+
+pure def canSpeakerSet(v: Voice, session: int, speakerTicket: int, muted: bool, confirmed: bool): bool =
+  talking(v) and v.session == session and v.speakerTicket == speakerTicket
+    and (if (muted) v.speaker == SpeakerMuting else v.speaker == SpeakerUnmuting or v.speaker == SpeakerChecking)
+
+pure def speakerSet(v: Voice, session: int, speakerTicket: int, muted: bool, confirmed: bool): Voice =
+  { ...v, speaker: if (not(confirmed)) SpeakerUnavailable else if (muted) SpeakerOff else SpeakerOn }
+
+pure def alwaysSpeakerControlsBelongToTalk(v: Voice): bool =
+  v.speaker == SpeakerUnknown or talking(v)
+
+pure def stepChangingOutputKeepsTheMicrophone(before: Voice, via: str, after: Voice, out: List[Effect]): bool =
+  (via == "setSpeakerMuted" or via == "speakerSet") implies (before.mic == after.mic and before.muted == after.muted)
+```
+
 ### The owner speaking over Alpha interrupts it and starts the next turn, but Alpha's own voice never does
 
 Everything Alpha is saying, streamed sentences included, is the reference
@@ -590,7 +631,7 @@ A stop is settled once the microphone and speech are confirmed off.
 ```quint
 pure def shutDown(failure: D::Failure, keyboard: bool, v: Voice): Change =
   { state: { ...v, phase: Stopping, failure: failure, mic: closedMic(v.mic), disclosing: false, retryAt: 0,
-      queued: 0, played: 0, replied: false, playing: 0, claim: 0, engineHeld: false, reviewPending: false },
+      queued: 0, played: 0, replied: false, playing: 0, claim: 0, engineHeld: false, reviewPending: false, speaker: SpeakerUnknown },
     out: List(Shut({ session: v.session, keyboard: keyboard })).concat(releaseOut(v)) }
 
 pure def canStop(v: Voice, keyboard: bool): bool = talking(v)
@@ -684,7 +725,7 @@ pure def canSpeechFailed(v: Voice, session: int, fault: R::Fault, wait: int, dev
 pure def speechFailed(v: Voice, session: int, fault: R::Fault, wait: int, deviceReady: bool, now: int): Change =
   val route = if (deviceReady) R::noteFailure(v.route, fault, wait, now) else R::clearHold(v.route)
   val transient = fault == R::Brief or fault == R::RateLimited
-  val base = { ...v, route: route, queued: 0, played: 0, replied: false, playing: 0, claim: 0 }
+  val base = { ...v, route: route, queued: 0, played: 0, replied: false, playing: 0, claim: 0, speaker: SpeakerUnknown }
   val shut = List(Shut({ session: v.session, keyboard: false }))
   val onPhone = begin(false, { ...base, phase: Starting, session: v.session + 1, turn: v.turn + 1, heard: false, mic: Off })
   if (v.network and R::fallsBack(fault) and v.played == 0 and v.queued == 0 and deviceReady)
@@ -876,23 +917,49 @@ pure def recordingFailed(v: Voice, ticket: int, failure: D::Failure): Voice =
 
 ### A clip is transcribed on the route speech takes now
 
+When Android finalizes the current recording, the recorder takes that exact
+clip as stopped. Automatic transcription runs while the phone and its
+recording's screen are in front. Otherwise the finished clip waits for the
+owner to retry. An unconfirmed manual stop has no clip to transcribe or
+retry. Late answers and duplicate stops have no effect.
+
 ```quint
 pure def canStopRecording(v: Voice, now: int): bool = D::canStopRecording(v.recorder)
 
-pure def stopRecording(v: Voice, now: int): Change =
+pure def transcribingDictation(now: int, automatic: bool, v: Voice): Change =
   { state: { ...v, recorder: D::stopRecording(v.recorder) },
-    out: List(Transcribe({ ticket: v.recorder.ticket, network: onNetwork(v.route, now) })) }
+    out: List(Transcribe({ ticket: v.recorder.ticket, network: onNetwork(v.route, now), automatic: automatic })) }
+
+pure def stopRecording(v: Voice, now: int): Change = transcribingDictation(now, false, v)
+
+pure def canRecordingStopped(v: Voice, ticket: int, showing: bool, now: int): bool =
+  not(v.prompting) and D::acceptsNativeStop(v.recorder, ticket)
+
+pure def recordingStopped(v: Voice, ticket: int, showing: bool, now: int): Change =
+  if (showing) transcribingDictation(now, true, v)
+  else { state: { ...v, recorder: D::transcribed(D::stopRecording(v.recorder), ticket, D::AgentUnavailable) }, out: List() }
 
 pure def canTranscribed(v: Voice, ticket: int, failure: D::Failure): bool = D::canTranscribed(v.recorder, ticket, failure)
 
 pure def transcribed(v: Voice, ticket: int, failure: D::Failure): Voice =
   { ...v, recorder: D::transcribed(v.recorder, ticket, failure) }
 
+pure def canClipLost(v: Voice, ticket: int): bool = D::canClipLost(v.recorder, ticket)
+
+pure def clipLost(v: Voice, ticket: int): Voice = { ...v, recorder: D::clipLost(v.recorder, ticket) }
+
+pure def stepHiddenNativeStopKeepsTheClipWithoutAsking(before: Voice, via: str, after: Voice, out: List[Effect]): bool =
+  (via == "recordingStopped" and after.recorder.stage == D::Recorded) implies
+    (out == List() and after.recorder.clip and after.recorder.ticket == before.recorder.ticket)
+
+pure def stepMissingClipOffersNoRetry(before: Voice, via: str, after: Voice): bool =
+  via == "clipLost" implies (after.recorder.stage == D::Ready and not(D::canTranscribeAgain(after.recorder)))
+
 pure def canTranscribeAgain(v: Voice, now: int): bool = D::canTranscribeAgain(v.recorder)
 
 pure def transcribeAgain(v: Voice, now: int): Change =
   val r = D::transcribeAgain(v.recorder)
-  { state: { ...v, recorder: r }, out: List(Transcribe({ ticket: r.ticket, network: onNetwork(v.route, now) })) }
+  { state: { ...v, recorder: r }, out: List(Transcribe({ ticket: r.ticket, network: onNetwork(v.route, now), automatic: false })) }
 
 pure def canRecordAgain(v: Voice): bool = D::canRecordAgain(v.recorder)
 
@@ -908,6 +975,9 @@ pure def edit(v: Voice, words: bool): Voice = { ...v, recorder: D::edit(v.record
 
 A messaging bar's dictation fills that bar, never Ask Alpha. The fill names
 its own number, so a late delivery cannot fill the field of a newer recording.
+In a Messages conversation, stopping a recording puts a successful transcript
+straight into that conversation's editable draft. Leaving the conversation
+before it arrives discards it.
 
 ```quint
 pure def canFill(v: Voice): bool = D::canFill(v.recorder)

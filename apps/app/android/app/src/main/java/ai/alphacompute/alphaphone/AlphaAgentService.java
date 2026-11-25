@@ -14,14 +14,26 @@ public final class AlphaAgentService extends AgentService {
   /** The consent the owner's Settings last gave, in place of the host file's; none until Settings first read the owner's choice. */
   @Override protected AgentConfig.GoogleConsent googleConsent() { return kept(this); }
 
-  /** Keeps {@code consent} for every launch from now on, restarting an agent that runs or is starting with another. Whether it is kept. */
+  /**
+   * Keeps {@code consent} for every launch from now on, restarting an agent that runs or is starting with another. Whether it is kept:
+   * where it cannot be saved, or a running agent cannot be restarted with it, what was kept before stays, so the agent and Settings agree.
+   */
   static boolean keep(Context context, AgentConfig.GoogleConsent consent) {
-    if (consent.equals(kept(context))) return true;
-    if (!context.getSharedPreferences(STORE, Context.MODE_PRIVATE).edit()
-      .putBoolean(GMAIL, consent.gmailChanges()).putBoolean(CALENDAR, consent.calendarEdits()).commit()) return false;
+    AgentConfig.GoogleConsent before = kept(context);
+    if (consent.equals(before)) return true;
+    if (!save(context, consent)) return false;
     String state = AgentService.status(context).optString("state");
-    if (state.equals("running") || state.equals("starting")) AgentService.restart(context);
-    return true;
+    if (!state.equals("running") && !state.equals("starting")) return true;
+    try { AgentService.restart(context); return true; }
+    catch (IllegalStateException refused) { save(context, before); return false; }
+  }
+
+  /** Saves {@code consent}, or forgets the one saved where it is null. */
+  private static boolean save(Context context, AgentConfig.GoogleConsent consent) {
+    SharedPreferences.Editor edit = context.getSharedPreferences(STORE, Context.MODE_PRIVATE).edit();
+    if (consent == null) edit.remove(GMAIL).remove(CALENDAR);
+    else edit.putBoolean(GMAIL, consent.gmailChanges()).putBoolean(CALENDAR, consent.calendarEdits());
+    return edit.commit();
   }
 
   private static AgentConfig.GoogleConsent kept(Context context) {

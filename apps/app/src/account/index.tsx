@@ -1,10 +1,10 @@
 // spec/app/settings/index.md, "Each page links to what another area owns there"; spec/app/shell/layers.md, "Story: Keep a sheet or a dialog above the phone"; spec/kit/read.md, "Story: Read from outside"
-import { Button, Sheet, SheetContent, Spinner } from "@repo/ui";
+import { Button, Sheet, SheetContent, Spinner, StatusDot } from "@repo/ui";
 import { X } from "lucide-react";
 import { useSyncExternalStore } from "react";
 import { useMachine } from "../../gen/app__shell__layers.react.ts";
 import { listed, top } from "../../gen/app__shell__layers.ts";
-import { area, type Area, type Resident, type Shown } from "../runtime/area.tsx";
+import { area, type Alpha, type Area, type Resident, type Shown } from "../runtime/area.tsx";
 import { accountLayer, type Profile, profileLive, profileShelf } from "./profile.vibe";
 
 /** The account read in the open sheet, in the form Cloud confirmed. */
@@ -20,10 +20,31 @@ function AccountDetails({ profile }: { profile: Profile }) {
   );
 }
 
+const profiles = new WeakMap<Alpha, ReturnType<typeof profileShelf>>();
+
+function profileFor(alpha: Alpha) {
+  const known = profiles.get(alpha);
+  if (known) return known;
+  const made = profileShelf();
+  profiles.set(alpha, made);
+  return made;
+}
+
+/** The verified account shown below the Account row in Settings. */
+export function AccountStatus({ alpha }: { alpha: Alpha }) {
+  const profile = profileFor(alpha);
+  const current = useSyncExternalStore(profile.subscribe, profile.snapshot, profile.snapshot);
+  if (current.tag === "Reading") return null;
+  const label = current.tag === "Read" ? current.contact || "Signed in"
+    : current.tag === "SignInRequired" ? "Signed out" : "Account unavailable";
+  return <StatusDot status={current.tag === "Read" ? "ok" : "off"} label={label} showLabel
+    className="gap-1.5 text-caption text-muted-foreground [&_svg]:size-1.5 [&_circle]:fill-current" />;
+}
+
 /** The account sheet above Settings, drawing only the details the authenticated account read returned. */
 export default {
   open(alpha, place) {
-    const profile = profileShelf();
+    const profile = profileFor(alpha);
     function AccountSheet({ runtime }: Shown<Resident>) {
       const { state, can, send } = useMachine(runtime);
       const shown = useSyncExternalStore(profile.subscribe, profile.snapshot, profile.snapshot);

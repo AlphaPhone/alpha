@@ -1,6 +1,6 @@
 // spec/app/inbox/message.md, "An attachment is reviewed before it is opened or saved, and one use is in flight at a time"; spec/app/inbox/message.md, "An attachment use ends as its own answer says, or unknown"
-import type { MailMessage } from "@elizaos/cloud/client"
-import type { ReviewedMailAttachment } from "@elizaos/plugin-inbox/mailbox"
+import type { MailMessage } from "@elizaos/cloud"
+import type { ReviewedMailAttachment } from "@elizaos/plugin-inbox-client"
 import * as Inbox from "../../gen/app__inbox.effect.vibe"
 import * as Message from "../../gen/app__inbox__message.effect.vibe"
 import { Machine as Shell, showing } from "../../gen/app__shell.effect.vibe"
@@ -42,7 +42,7 @@ export const forgetPreview = started(effect {
 }, "clearing an attachment preview")
 
 module web {
-  import type { OpaqueMailAttachment } from "@elizaos/plugin-inbox/mailbox"
+  import type { OpaqueMailAttachment } from "@elizaos/plugin-inbox-client"
 
   /** Whether this browser has an ordinary link download destination. @throws {never} */
   export function downloads(): boolean {

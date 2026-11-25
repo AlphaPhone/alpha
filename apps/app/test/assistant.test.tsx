@@ -14,7 +14,7 @@ import { Machine as Shell } from "../gen/app__shell.effect.vibe";
 import type { Mount } from "../src/areas.ts";
 import assistant from "../src/assistant/index.tsx";
 import { untimed } from "../src/runtime/reactor.vibe";
-import { button, closeAll, fill, hardware, later, open, press, underAct, until } from "./alpha.tsx";
+import { button, closeAll, drawn, fill, hardware, later, open, press, pressOnTop, underAct, until } from "./alpha.tsx";
 import { scene } from "./fakes/scene.ts";
 
 underAct();
@@ -149,6 +149,7 @@ describe.each([["a browser", false], ["a phone", true]])("in %s", (_where, phone
     chatsList();
     await until(alpha, runtime, Chats, (s) => s.list.status === "Loaded");
     expect(rows("Chats")).toBe(2);
+    await drawn(() => document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true })));
 
     // spec/app/assistant/index.md, "A sensitive screen is never sent, and no reply is awaited over one": Settings showing carrier identifiers is a sensitive screen (on a phone).
     if (phone) {
@@ -156,14 +157,18 @@ describe.each([["a browser", false], ["a phone", true]])("in %s", (_where, phone
       await alpha.runtime.runPromise(Effect.flatMap(Pages.Machine, (pages) => pages.send({ type: "open", page: "General" })));
       await alpha.runtime.runPromise(Effect.flatMap(Pages.Machine, (pages) => pages.send({ type: "open", page: "CarrierPage" })));
       await until(alpha, runtime, Conversation, (s) => s.context.sensitive && s.context.showing.tag === "App");
-      write("my password is hunter2");
+      await press("Type");
+      await until(alpha, alpha.runtime, Shell, (s) => s.assistant === "Typing");
+      await fill("Message Alpha", "my password is hunter2");
       expect([button("Send")?.disabled, world.ask.said.length]).toEqual([true, 2]);
       // spec/app/assistant/index.md, "A sensitive screen says only that it is sensitive: no selection and no day"
       await alpha.runtime.runPromise(Effect.flatMap(Pages.Machine, (pages) => pages.send({ type: "goBack" })));
       await until(alpha, runtime, Conversation, (s) => !s.context.sensitive);
       expect(button("Send")?.disabled).toBe(false);
-      await alpha.runtime.runPromise(Effect.flatMap(Shell, (shell) => shell.send({ type: "goBack" })));
+      await hardware("home");
       await until(alpha, runtime, Conversation, (s) => s.context.showing.tag === "Home");
+      await press("Open conversation");
+      await until(alpha, alpha.runtime, Shell, (s) => s.assistant === "Sheet");
     }
 
     // spec/app/assistant/reply.md, "Out of funds is refused before any output, is never spoken, and offers only Manage plan"
@@ -323,6 +328,20 @@ describe.each([["a browser", false], ["a phone", true]])("in %s", (_where, phone
     await until(fifth.alpha, runtime, Chats, (s) => s.chosen === 0 && s.list.status === "Loaded" && s.page.status === "Idle");
     expect([document.querySelector("[role=log] [aria-busy]"), document.body.textContent?.includes("Messages did not load")]).toEqual([null, false]);
     for (const release of world.ask.heldLists.splice(0)) release();
+
+    // spec/app/assistant/chats.md, "A list asked before a conversation was made is left behind, so its answer never takes that conversation away": the list read asked before New chat answers after the conversation was made.
+    world.ask.holdLists = true;
+    chatsList();
+    await vi.waitFor(() => expect(world.ask.heldLists.length).toBe(1));
+    await pressOnTop("New chat");
+    await until(fifth.alpha, runtime, Chats, (s) => s.chosen > 0 && s.make.outcome === "Confirmed" && s.page.status === "Loaded");
+    const chats = () => runtime.runPromise(Effect.flatMap(Chats, (machine) => machine.get()));
+    const made = (await chats()).chosen;
+    world.ask.holdLists = false;
+    for (const release of world.ask.heldLists.splice(0)) release();
+    await until(fifth.alpha, runtime, Chats, (s) => s.list.status === "Loaded");
+    const after = await chats();
+    expect([after.chosen, after.ids.includes(made)]).toEqual([made, true]);
   });
 
   // spec/app/assistant/index.md, "Story: Stop a reply"

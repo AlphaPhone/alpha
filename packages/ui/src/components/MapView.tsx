@@ -276,7 +276,7 @@ export function MapView(props: MapViewProps) {
   return (
     <div className={cn("relative h-72 w-full overflow-hidden rounded-lg bg-muted", className)}>
       <span ref={repaint} hidden />
-      <div key={styleKey} ref={mount} role="application" aria-label={label} className="size-full" />
+      <div key={styleKey} ref={mount} role="application" aria-label={label} data-alpha-own-gesture="" className="size-full" />
       {map && (
         <div className="absolute top-2 right-2 flex flex-col gap-1">
           {zoomControls && <Button size="icon" variant="outline" aria-label="Zoom in" onClick={() => map.zoomIn()}><Plus /></Button>}

@@ -78,17 +78,20 @@ pure val weight_transcribed = 3
 pure val weight_written = 3
 ```
 
-### The owner opens a voice note with its audio, the transcript it holds and its summary, when nothing else of Notes is open
+### The owner opens a voice note with its audio, the transcript it holds and its summary, when nothing else of Notes is open; the agent opens only the one the owner just named
 
 Nothing being written to another voice note may be on its way, and nothing
-may still be playing.
+may still be playing. The agent opens only the one note the owner just
+named, as Notes lets it (Notes, "The agent opens the one note the owner
+named, as the list last read it, once for the owner's current request, and
+is told whether it opened"); an owner's tap carries no request.
 
 ```quint
-pure def canOpenVoice(v: VoiceNote, note: int, revision: int, segments: int, heard: int, summary: int, covered: bool, by: Actor): bool =
-  mayOpen(covered, by) and isOwner(v.owner) and not(busy(v)) and not(v.showing) and silent(v) and note > 0 and revision > 0
+pure def canOpenVoice(v: VoiceNote, note: int, revision: int, segments: int, heard: int, summary: int, covered: bool, req: Request, by: Actor): bool =
+  mayOpenNote(covered, by, req) and isOwner(v.owner) and not(busy(v)) and not(v.showing) and silent(v) and note > 0 and revision > 0
     and segments > 0 and 0 <= summary and summary <= heard and heard <= segments
 
-pure def openVoice(v: VoiceNote, note: int, revision: int, segments: int, heard: int, summary: int, covered: bool, by: Actor): VoiceNote =
+pure def openVoice(v: VoiceNote, note: int, revision: int, segments: int, heard: int, summary: int, covered: bool, req: Request, by: Actor): VoiceNote =
   { ...v, note: note, revision: revision, segments: segments, showing: true,
     listen: dropped(v.listen), asked: heard, heard: heard, deaf: false, quiet: false, added: heard,
     review: V::dismiss(v.review), summarising: dropped(v.summarising), upTo: 0, summary: summary, writeUpTo: 0,

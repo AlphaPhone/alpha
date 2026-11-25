@@ -1,6 +1,4 @@
-import type { ExecutorCall } from "@elizaos/agent/client";
-import { NOT_DISPATCHED } from "@elizaos/agent/client";
-import type { DeviceOperation } from "@elizaos/agent/operations";
+import { type ExecutorCall, NOT_DISPATCHED, type DeviceOperation } from "@elizaos/agent";
 import type { Alpha } from "../runtime/area.tsx";
 import type { ReviewAuthority } from "./media-review.vibe";
 
@@ -10,11 +8,19 @@ const refused = { kind: "refused", code: NOT_DISPATCHED } as const;
 export async function executeMedia(alpha: Alpha, operation: DeviceOperation, call: ExecutorCall, authority: ReviewAuthority): Promise<unknown> {
   if (operation.type === "phone_keypad" || operation.type === "phone_dial" || operation.type === "phone_call") {
     const { phoneAction } = await import("../phone/agent.vibe");
-    return alpha.runtime.runPromise(phoneAction(operation, authority.current));
+    return alpha.runtime.runPromise(phoneAction(operation, authority.current, authority.phone));
   }
   if (operation.type === "sms_reply_selected" || operation.type === "sms_compose") {
     const { messageAction } = await import("../messages/agent.vibe");
-    return alpha.runtime.runPromise(messageAction(operation, authority.target, authority.current));
+    return alpha.runtime.runPromise(messageAction(operation, authority.target, authority.current, authority.continueDraft, authority.phone));
+  }
+  if (operation.type === "sms_send") {
+    const { reviewAgentSms } = await import("../messages/agent-send.vibe");
+    return alpha.runtime.runPromise(reviewAgentSms(operation, call, authority.current, authority.sms));
+  }
+  if (operation.type === "messages_read_selected") {
+    const { shareSelectedMessage } = await import("../messages/agent.vibe");
+    return alpha.runtime.runPromise(shareSelectedMessage(authority.target, authority.current));
   }
   if (operation.type === "camera_capture_photo") {
     const [{ default: camera }, { requestCapture }] = await Promise.all([import("../camera/index.tsx"), import("../camera/camera.vibe")]);
@@ -28,7 +34,7 @@ export async function executeMedia(alpha: Alpha, operation: DeviceOperation, cal
   }
   if (operation.type.startsWith("files_")) {
     const [{ default: files }, { fileAction }] = await Promise.all([import("../files/index.tsx"), import("../files/agent.vibe")]);
-    return files.runtime(alpha).runPromise(fileAction(operation, call));
+    return files.runtime(alpha).runPromise(fileAction(operation, call, authority.files, authority.current));
   }
   if (operation.type.startsWith("notes_")) {
     const { executeNotes, notesOperation } = await import("../notes/device-actions.vibe");

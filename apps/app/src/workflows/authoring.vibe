@@ -1,12 +1,12 @@
 // spec/app/workflows/builder.md, "Story: Write a workflow step by step"; spec/app/workflows/builder.md, "Story: Keep the draft on the phone"; spec/app/workflows/builder.md, "Story: Save a workflow on the agent once"; spec/app/workflows/generate.md, "Story: Have the agent draft a workflow"
 import * as KeyValueStore from "effect/persistence/KeyValueStore"
-import { type PhoneStep, type PhoneWorkflowCatalog, type PhoneWorkflowSaveExpectation, type PhoneWorkflowSpec, type PhoneWorkflowTrigger, WorkflowHttpError, WorkflowTypedRejected, validatePhoneWorkflowSpec, workflowUuid } from "@elizaos/plugin-workflow/client"
+import { type PhoneStep, type PhoneWorkflowCatalog, type PhoneWorkflowSaveExpectation, type PhoneWorkflowSpec, type PhoneWorkflowTrigger, WorkflowHttpError, WorkflowTypedRejected, validatePhoneWorkflowSpec, workflowUuid } from "@elizaos/plugin-workflow-client"
 import * as Build from "../../gen/app__workflows__builder.effect.vibe"
 import * as Generate from "../../gen/app__workflows__generate.effect.vibe"
 import * as List from "../../gen/app__workflows__list.effect.vibe"
 import type { When } from "../../gen/app__workflows__schedule.effect.vibe"
 import type { Operation, Step } from "../../gen/app__workflows__steps.effect.vibe"
-import { Agent } from "../platform/agent.vibe"
+import type { Agent } from "../platform/agent.vibe"
 import { ownerAt } from "../platform/owner.vibe"
 import { type Job, answer, applying, following, reacting, run, together } from "../runtime/reactor.vibe"
 import { WorkflowsApi } from "./api.vibe"
@@ -339,7 +339,7 @@ export effect function describeDraft(prompt: string): void!!(Generate.Machine | 
   try ignore(machine.send({ type: "generate", chars: text.length, supported: true, edits: built.draft.edits }))
 }
 
-export effect function useDraft(): void!!(Generate.Machine | Build.Machine | DraftWords) {
+export effect function adoptGeneratedDraft(): void!!(Generate.Machine | Build.Machine | DraftWords) {
   const build = try Build.Machine
   const generate = try Generate.Machine
   const writing = try build.get()

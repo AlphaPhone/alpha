@@ -3,7 +3,10 @@
 A file a page offers: shown to the owner first, fetched and saved to the
 phone's Downloads only once approved, and listed in the Browser's
 downloads. One download, from offer to file. The page and its tab come
-from the [Browser](./index.md) and its [page](./address.md).
+from the [Browser](./index.md) and its [page](./address.md). The Browser's
+menu opens the phone's Downloads list. Choosing Show in Files there for
+the current Browser session opens [Files](../files/) at Downloads. Back
+from that place returns to the Browser.
 
 ## Story: Download a file
 
