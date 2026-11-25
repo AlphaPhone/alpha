@@ -1,7 +1,7 @@
 // spec/app/workflows/automations.md, "Story: Act on an automation"; spec/app/workflows/automations.md, "Story: Create or edit an automation on a schedule"
 import { Effect } from "effect";
 import { Alert, Button, ConfirmDialog, Input, ListRow, Switch, Textarea } from "@repo/ui";
-import { ChevronRight, Clock } from "lucide-react";
+import { ChevronRight, Repeat } from "lucide-react";
 import { useState } from "react";
 import { type Event, type Change, maxText } from "../../gen/app__workflows__automations.ts";
 import { useMachine } from "../../gen/app__workflows__automations.react.ts";
@@ -66,7 +66,7 @@ export function Automation({ runtime, row, owner }: AutomationProps) {
   return (
     <section aria-label={row === undefined ? "Automation" : "Automation controls"} className="flex flex-col gap-3">
       {row === undefined && !editing && model.can({ type: "openEditor", kind: "PromptTask", zone: 0 }) && (
-        <ListRow title="Automation" leading={<Clock />} trailing={<ChevronRight aria-hidden />} onClick={editor} />
+        <ListRow title="Automation" leading={<Repeat />} trailing={<ChevronRight aria-hidden />} onClick={editor} />
       )}
       {row?.kind === "Prompt" && model.can(eventFor(toggle)) && (
         <label className="flex items-center justify-between gap-3">

@@ -1,7 +1,7 @@
 // spec/app/workflows/list.md, "Story: Find a workflow"; spec/app/workflows/index.md, "Story: Open a workflow"
 import { Effect } from "effect";
 import { Button, EmptyState, ListRow, Screen, Spinner, Switch } from "@repo/ui";
-import { Bell, ChevronRight, Clock as ClockIcon, Info, ListFilter, Plus, RotateCw, Sun, Workflow } from "lucide-react";
+import { Bell, Calendar, ChevronDown, ChevronRight, Clock as ClockIcon, Info, Phone, Plus, Repeat, Sparkles, Sun, Workflow } from "lucide-react";
 import { useMemo, useRef, useState } from "react";
 import { useMachine } from "../../gen/app__workflows__list.react.ts";
 import { type Event, badge, passes } from "../../gen/app__workflows__list.ts";
@@ -43,20 +43,26 @@ function listLabel(kind: keyof typeof kinds, status: keyof typeof statuses) {
   return status === "AnyStatus" ? type : `${type} · ${statuses[status]}`;
 }
 
+/** Each kind of row's icon, as v121 drew the row (automations.css .workflow-row). */
+const kindIcons = { Reminder: Bell, Prompt: Sparkles, Schedule: Calendar, Routine: Workflow } as const;
+
+/** A row as v121 drew it: the kind's icon, the title, the summary and state in quieter type, a chevron, and the switch beside it. */
 function WorkflowListRow({ row, open }: { row: WorkflowRow; open: () => void }) {
   const canManage = !row.removed && (row.kind === "Routine" || row.kind === "Prompt");
+  const Kind = kindIcons[row.kind];
   return (
-    <li className="flex items-center gap-3">
-      <ListRow
-        className="min-h-23 min-w-0 flex-1 px-1 py-3.5"
-        title={row.title}
-        detail={row.summary || row.removed ? <span className="block line-clamp-2 whitespace-normal break-words">
-          {row.removed ? labels.HistoryKept : row.summary}
-        </span> : undefined}
-        trailing={<ChevronRight aria-hidden className="size-5" />}
-        onClick={open}
-      />
-      {canManage && <Switch aria-label={`Review whether ${row.title} is on`} checked={row.on} onCheckedChange={open} />}
+    <li className="flex items-center gap-3 border-b border-border">
+      <button type="button" onClick={open}
+        className="flex min-h-18 min-w-0 flex-1 items-center gap-3 px-1 py-4 text-left focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-primary">
+        <Kind aria-hidden className="size-5.5 shrink-0" />
+        <span className="flex min-w-0 flex-1 flex-col gap-1">
+          <span className="text-lg leading-snug break-words">{row.title}</span>
+          {row.summary !== "" && <span className="line-clamp-2 text-sm leading-normal break-words text-muted-foreground">{row.summary}</span>}
+          <span className="text-xs leading-normal text-muted-foreground">{labels[badge(row.on, row.removed, false)]}</span>
+        </span>
+        <ChevronRight aria-hidden className="ml-auto size-5.5 shrink-0 text-muted-foreground" />
+      </button>
+      {canManage && <Switch aria-label={`Turn ${row.title} on or off`} checked={row.on} onCheckedChange={open} />}
     </li>
   );
 }
@@ -102,33 +108,35 @@ export function Workflows({ runtime, alpha }: Shown<Resident | Rows | Machine | 
   const filter = { type: "openFilters" } as const;
   const add = { type: "openAdd" } as const;
   const screen = (
-    <Screen title={title} leading={<AppBack alpha={alpha} />} actions={<>
-      {can(filter) && <Button variant="ghost" size="icon" aria-label="Filter workflows" aria-haspopup="dialog" onClick={() => dispatch(filter)}>
-        <ListFilter aria-hidden />
-      </Button>}
-      {can(add) && <Button variant="ghost" size="icon" aria-label="Add to Workflows" onClick={() => dispatch(add)}><Plus aria-hidden /></Button>}
-    </>}>
+    <Screen title={title} leading={<AppBack alpha={alpha} />} actions={can(add) &&
+      <Button variant="ghost" size="icon" aria-label="Add to Workflows" onClick={() => dispatch(add)}><Plus aria-hidden /></Button>}>
       {state === undefined && <Spinner aria-label="Refreshing workflows" />}
       {state !== undefined && place?.tag === "ListingRows" && <>
-        {(state.kind !== "AllKinds" || state.status !== "AnyStatus") && (
-          <p className="text-sm text-muted-foreground">{listLabel(state.kind, state.status)}</p>
-        )}
+        <div className="flex items-center justify-between gap-3 px-1 pb-3">
+          <button type="button" aria-label="Filter workflows" aria-haspopup="dialog" disabled={!can(filter)} onClick={() => dispatch(filter)}
+            className="flex min-h-12 min-w-0 items-center gap-1.5 rounded-md text-left text-sm focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary">
+            <span className="min-w-0 break-words">{listLabel(state.kind, state.status)}</span><ChevronDown aria-hidden className="size-4 shrink-0" />
+          </button>
+          {state.list.status === "Loaded" && <span className="text-xs whitespace-nowrap text-muted-foreground">{`${rows.length} ${rows.length === 1 ? "item" : "items"}`}</span>}
+        </div>
         {(state.list.status === "Loading" || (state.owner > 0 && state.list.status === "Idle")) && (
-          <div role="status" className="flex items-center gap-2 text-sm text-muted-foreground"><Spinner size="sm" aria-hidden />Refreshing workflows…</div>
+          <div role="status" className="px-1 text-sm text-muted-foreground"><Spinner size="sm" aria-hidden /><span className="sr-only">Refreshing workflows…</span></div>
         )}
         {(state.list.status === "Failed" || state.owner === 0) && (
-          <div className="flex items-center gap-2 text-sm text-muted-foreground" role="status">
-            <Info aria-hidden className="size-4" /><span>Workflows couldn’t be read.</span>
-            <Button variant="ghost" size="icon" aria-label="Retry workflows" onClick={read}><RotateCw aria-hidden /></Button>
+          <div className="flex items-center gap-2 px-1 text-sm text-muted-foreground" role="status">
+            <Info aria-hidden className="size-4 shrink-0" /><span>Workflows couldn’t be read.</span>
+            <Button variant="ghost" size="icon" aria-label="Retry workflows" onClick={read}><Repeat aria-hidden /></Button>
           </div>
         )}
-        {snapshot?.problems.map((source) => <p key={source} role="status" className="text-sm text-muted-foreground">{source} couldn’t be read.</p>)}
+        {snapshot?.problems.map((source) => <p key={source} role="alert" className="px-1 text-sm text-foreground">{source} couldn’t be read.</p>)}
         {state.list.status === "Loaded" && rows.length === 0 && (
-          <EmptyState title={state.complete ? "No workflows here" : "No workflows could be listed"} icon={<Workflow />} />
+          <p className="flex items-center gap-2 px-1 text-sm text-muted-foreground"><Repeat aria-hidden className="size-4.5 shrink-0" />
+            <span>{!state.complete ? "No workflows could be listed" : state.status === "Removed" ? "No removed workflows" : state.kind === "AllKinds" && state.status === "AnyStatus" ? "No workflows yet" : "No matches"}</span>
+          </p>
         )}
-        <ul aria-label="Workflows" className="mx-1.5 divide-y divide-border border-b border-border">
+        <ul aria-label="Workflows" className="mx-1.5 flex flex-col">
           {rows.map((row) => <WorkflowListRow key={row.number} row={row} open={() => dispatch({ type: "openRow", row: row.number })} />)}
-          {hasClock && <li>{alarms()}</li>}
+          {hasClock && <li className="border-b border-border">{alarms()}</li>}
         </ul>
         <Filters listing={state} can={can} send={dispatch} refresh={read} />
       </>}
@@ -136,7 +144,7 @@ export function Workflows({ runtime, alpha }: Shown<Resident | Rows | Machine | 
         {!editingWorkflow && <Automation runtime={runtime} owner={state.owner} />}
         {!editingAutomation && <Authoring runtime={runtime} owner={state.owner} />}
         {!editingAutomation && !editingWorkflow && <>
-          <ListRow className="min-h-18 px-1" title="Phone reminder" leading={<Bell />} trailing={<ChevronRight aria-hidden className="size-5" />}
+          <ListRow className="min-h-18 px-1" title="Phone reminder" leading={<Phone />} trailing={<ChevronRight aria-hidden className="size-5" />}
             onClick={() => void runtime.runPromiseExit(newPhoneReminder())} />
           {digestLink}
           {alarms(true)}
