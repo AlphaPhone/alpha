@@ -2,6 +2,7 @@
 package ai.alphacompute.alphaphone;
 
 import android.Manifest;
+import android.app.KeyguardManager;
 import android.app.Notification;
 import android.app.NotificationChannel;
 import android.app.NotificationChannelGroup;
@@ -13,6 +14,7 @@ import android.content.pm.PackageManager;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
+import android.os.UserManager;
 import android.service.notification.StatusBarNotification;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
@@ -30,6 +32,10 @@ final class HostedDigestNotices {
  static final String CHANNEL = "alpha-hosted-results";
  private static final String ACTION = "ai.alphacompute.alphaphone.OPEN_HOSTED_RESULT";
  private static final String PREFIX = "alpha-hosted-result:";
+ private static final String ASK_ACTION = "ai.alphacompute.alphaphone.ASK_HOSTED_RESULT";
+ private static final String ASK_PREFIX = "alpha-hosted-question:";
+ private static final String OPEN = "open";
+ private static final String ASK = "ask";
  private static final String PROOF = "ai.alphacompute.alphaphone.DIGEST_NOTICE_FINGERPRINT";
  private static final String LEDGER = "hosted-notices:v1";
  private static final String PENDING = "hosted-notices:pending:v1";
@@ -52,11 +58,32 @@ final class HostedDigestNotices {
 
  /** Matching the shape permits attempting encrypted capture. It grants no route. */
  static boolean accepts(Intent intent) {
-  if (intent == null || !ACTION.equals(intent.getAction()) || intent.getComponent() == null
-    || !MainActivity.class.getName().equals(intent.getComponent().getClassName())) return false;
+  return accepts(intent, ACTION, PREFIX, MainActivity.class);
+ }
+
+ static boolean acceptsQuestion(Intent intent) {
+  return accepts(intent, ASK_ACTION, ASK_PREFIX, HostedDigestQuestionActivity.class);
+ }
+
+ private static boolean accepts(Intent intent, String action, String prefix, Class<?> target) {
+  if (intent == null || !action.equals(intent.getAction()) || intent.getComponent() == null
+      || !target.getName().equals(intent.getComponent().getClassName())) return false;
   String data = intent.getDataString();
-  return data != null && data.length() == PREFIX.length() + 36 && data.startsWith(PREFIX)
-    && TOKEN.matcher(data.substring(PREFIX.length())).matches();
+  return data != null && data.length() == prefix.length() + 36 && data.startsWith(prefix)
+    && TOKEN.matcher(data.substring(prefix.length())).matches();
+ }
+
+ private static boolean questionSupported(Context context) {
+  if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) return false;
+  KeyguardManager lock = context.getSystemService(KeyguardManager.class);
+  return lock != null && lock.isDeviceSecure();
+ }
+
+ static boolean questionUnlocked(Context context) {
+  if (!questionSupported(context)) return false;
+  KeyguardManager lock = context.getSystemService(KeyguardManager.class);
+  UserManager users = context.getSystemService(UserManager.class);
+  return users != null && users.isUserUnlocked() && lock != null && !lock.isDeviceLocked() && !lock.isKeyguardLocked();
  }
 
  /** Clearing authority fences the journal before removing any visible notification. */
@@ -119,6 +146,9 @@ final class HostedDigestNotices {
     .put("workflowId", id(row.getString("workflowId"))).put("workflowVersionId", id(row.getString("workflowVersionId")))
     .put("digest", digest).put("dispatchId", dispatch).put("opaqueVersion", 2).put("createdAt", now)
     .put("phase", allowed ? "dispatching" : "denied");
+  if (allowed && "finished".equals(row.optString("status")) && questionSupported(context)) {
+   record.put("askDispatchId", UUID.randomUUID().toString());
+  }
   JSONObject pending = read(PENDING);
   String pendingKey = pending.optString("key");
   List<JSONObject> withdrawn = new ArrayList<>();
@@ -161,17 +191,26 @@ final class HostedDigestNotices {
 
  /** Cold capture persists only an exact dispatch receipt. Whole results remain behind current custody. */
  synchronized boolean capture(Intent intent) throws Exception {
-  if (!accepts(intent)) return false;
-  String dispatch = intent.getDataString().substring(PREFIX.length());
+  return accepts(intent) && capture(OPEN, intent.getDataString().substring(PREFIX.length()));
+ }
+
+ synchronized boolean captureQuestion(Intent intent) throws Exception {
+  return acceptsQuestion(intent) && questionUnlocked(context)
+    && capture(ASK, intent.getDataString().substring(ASK_PREFIX.length()));
+ }
+
+ private boolean capture(String mode, String dispatch) throws Exception {
   JSONObject owner = storedOwner();
   JSONObject ledger = ledger();
   for (String key : keys(ledger)) {
    JSONObject row = ledger.getJSONObject(key);
-   if (row.optInt("opaqueVersion") != 2 || !dispatch.equals(row.optString("dispatchId"))
+   if (row.optInt("opaqueVersion") != 2 || !dispatch.equals(row.optString(dispatchKey(mode)))
      || !matches(owner, row) || !LIVE.contains(row.optString("phase")) || expired(row)) continue;
    JSONObject pending = read(PENDING);
-   if (key.equals(pending.optString("key")) && dispatch.equals(pending.optString("dispatchId"))) return true;
-   write(PENDING, new JSONObject().put("key", key).put("dispatchId", dispatch).put("token", UUID.randomUUID().toString()));
+   if (key.equals(pending.optString("key")) && dispatch.equals(pending.optString("dispatchId"))
+       && mode.equals(pending.optString("mode", OPEN))) return true;
+   write(PENDING, new JSONObject().put("key", key).put("mode", mode)
+     .put("dispatchId", dispatch).put("token", UUID.randomUUID().toString()));
    return true;
   }
   return false;
@@ -188,14 +227,14 @@ final class HostedDigestNotices {
   fence.check();
   return new JSONObject().put("token", pending.getString("token")).put("runId", record.getString("runId"))
     .put("workflowId", record.getString("workflowId")).put("workflowVersionId", record.getString("workflowVersionId"))
-    .put("cursor", retained.getLong("cursor"));
+    .put("cursor", retained.getLong("cursor")).put("mode", pending.optString("mode", OPEN));
  }
 
- synchronized boolean consume(ResidentDigestChannel.Scope scope, String token, HostedInbox inbox, HostedInbox.Fence fence) throws Exception {
+ synchronized boolean consume(ResidentDigestChannel.Scope scope, String token, boolean ask, HostedInbox inbox, HostedInbox.Fence fence) throws Exception {
   fence.check();
   if (token == null || !TOKEN.matcher(token).matches() || !current(scope)) return false;
   JSONObject pending = read(PENDING);
-  if (!token.equals(pending.optString("token"))) return false;
+  if (!token.equals(pending.optString("token")) || !(ask ? ASK : OPEN).equals(pending.optString("mode", OPEN))) return false;
   JSONObject ledger = ledger();
   JSONObject record = pendingRecord(scope, pending, ledger);
   if (record == null || exactRetained(scope, record, inbox, fence) == null) return false;
@@ -218,11 +257,17 @@ final class HostedDigestNotices {
   if (!KEY.matcher(key).matches() || !TOKEN.matcher(pending.optString("token")).matches() || pending.optBoolean("question")) return null;
   JSONObject record = ledger.optJSONObject(key);
   if (!matches(owner(scope), record) || expired(record)) return null;
+  String mode = pending.optString("mode", OPEN);
+  if (!OPEN.equals(mode) && (!ASK.equals(mode) || !questionUnlocked(context))) return null;
   if (record.optInt("opaqueVersion") == 2) {
-   if (!LIVE.contains(record.optString("phase")) || !record.optString("dispatchId").equals(pending.optString("dispatchId"))) return null;
-  } else if (!Set.of("legacy-withdrawn", "posted").contains(record.optString("phase"))) return null;
+   String dispatch = pending.optString("dispatchId");
+   if (!TOKEN.matcher(dispatch).matches() || !LIVE.contains(record.optString("phase"))
+       || !record.optString(dispatchKey(mode)).equals(dispatch)) return null;
+  } else if (!OPEN.equals(mode) || !Set.of("legacy-withdrawn", "posted").contains(record.optString("phase"))) return null;
   return record;
  }
+
+ private static String dispatchKey(String mode) { return ASK.equals(mode) ? "askDispatchId" : "dispatchId"; }
 
  private boolean current(ResidentDigestChannel.Scope scope) throws Exception {
   return scope != null && scope.equals(authorised) && matches(storedOwner(), owner(scope));
@@ -339,10 +384,17 @@ final class HostedDigestNotices {
   Notification redacted = base(R.string.alpha_notice_public_title).build();
   Bundle extras = new Bundle();
   extras.putString(PROOF, hash(dispatch));
-  Notification notice = base(title(status)).setVisibility(Notification.VISIBILITY_PRIVATE).setPublicVersion(redacted)
+  Notification.Builder notice = base(title(status)).setVisibility(Notification.VISIBILITY_PRIVATE).setPublicVersion(redacted)
     .setContentIntent(tap).setOnlyAlertOnce(true).setAutoCancel(true).setTimeoutAfter(LIFETIME_MS)
-    .setCategory(Notification.CATEGORY_STATUS).addExtras(extras).build();
-  manager.notify(record.getString("key"), 0, notice);
+    .setCategory(Notification.CATEGORY_STATUS).addExtras(extras);
+  String askDispatch = record.optString("askDispatchId");
+  if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S && questionSupported(context) && TOKEN.matcher(askDispatch).matches()) {
+   PendingIntent question = PendingIntent.getActivity(context, 0, questionIntent(askDispatch),
+     PendingIntent.FLAG_IMMUTABLE | PendingIntent.FLAG_UPDATE_CURRENT);
+   notice.addAction(new Notification.Action.Builder(null, context.getString(R.string.alpha_digest_notice_ask), question)
+     .setAuthenticationRequired(true).build());
+  }
+  manager.notify(record.getString("key"), 0, notice.build());
  }
 
  private Notification.Builder base(int title) {
@@ -367,6 +419,11 @@ final class HostedDigestNotices {
     .addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP | Intent.FLAG_ACTIVITY_SINGLE_TOP);
  }
 
+ private Intent questionIntent(String dispatch) {
+  return new Intent(context, HostedDigestQuestionActivity.class).setAction(ASK_ACTION)
+    .setData(Uri.parse(ASK_PREFIX + dispatch));
+ }
+
  private void cancel(JSONObject record) {
   String key = record.optString("key");
   if (!KEY.matcher(key).matches()) return;
@@ -375,9 +432,15 @@ final class HostedDigestNotices {
   if (record.optInt("opaqueVersion") == 2) {
    String token = record.optString("dispatchId");
    if (TOKEN.matcher(token).matches()) cancelIntent(ACTION, token);
+   String ask = record.optString("askDispatchId");
+   if (TOKEN.matcher(ask).matches()) {
+    PendingIntent pending = PendingIntent.getActivity(context, 0, questionIntent(ask),
+      PendingIntent.FLAG_IMMUTABLE | PendingIntent.FLAG_NO_CREATE);
+    if (pending != null) pending.cancel();
+   }
   } else {
    cancelIntent(ACTION, key);
-   cancelIntent("ai.alphacompute.alphaphone.ASK_HOSTED_RESULT", key);
+   cancelIntent(ASK_ACTION, key);
   }
  }
 

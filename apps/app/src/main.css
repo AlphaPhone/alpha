@@ -1,3 +1,14 @@
 @import "@repo/design-system/fonts.css";
 @import "@repo/design-system/theme.css";
 @import "@repo/ui/styles.css";
+
+body:has([data-alpha-desktop-preview]) {
+  min-height: 100dvh;
+  overflow: hidden;
+  overscroll-behavior: none;
+  background: #fff;
+}
+
+[data-alpha-desktop-preview] {
+  box-shadow: 0 12px 60px #0002;
+}

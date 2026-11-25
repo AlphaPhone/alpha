@@ -10,9 +10,11 @@ import { Drafts, type PickedSubscription, sameSubscription } from "./composer.vi
 
 export type SmsSelectionContext = Device | Shell | Messages | Composer | Drafts
 
+type ThreadScope = { readonly pane: "Conversation"; readonly thread: number; readonly ticket: number }
+type SimScope = ThreadScope | { readonly pane: "Threads"; readonly ticket: number }
+
 interface VisibleSim {
-  readonly thread: number
-  readonly ticket: number
+  readonly scope: SimScope
   readonly subscription: TelephonySubscription
   readonly picked: PickedSubscription | undefined
 }
@@ -26,25 +28,38 @@ export interface MessageSmsRequest {
   readonly selection: SmsSelection | undefined
 }
 
-effect function selectedSim(): (VisibleSim | undefined)!!SmsSelectionContext {
+effect function visibleScope(): (SimScope | undefined)!!(Device | Shell | Messages) {
   if (!(try (try Device).showing()) || !showing(try (try Shell).get(), "Messages")) return undefined
   const current = try (try Messages).get()
+  if (!current.front || current.sms.grant !== "Granted" || current.confirming) return undefined
+  if (current.pane === "Threads" && current.list.status === "Loaded") return { pane: "Threads", ticket: current.list.ticket }
+  if (current.pane === "Conversation" && current.page.status === "Loaded") {
+    return { pane: "Conversation", thread: current.thread, ticket: current.page.ticket }
+  }
+  return undefined
+}
+
+function sameScope(one: SimScope, other: SimScope): boolean {
+  return one.pane === other.pane && one.ticket === other.ticket
+    && (one.pane === "Threads" || other.pane === "Conversation" && one.thread === other.thread)
+}
+
+effect function selectedSim(scope: ThreadScope): (VisibleSim | undefined)!!(Composer | Drafts) {
   const composer = try (try Composer).get()
-  if (!current.front || current.pane !== "Conversation" || current.page.status !== "Loaded" || current.sms.grant !== "Granted"
-    || current.confirming || composer.thread !== current.thread || composer.simInfo.grant !== "Granted") return undefined
+  if (composer.thread !== scope.thread || composer.simInfo.grant !== "Granted") return undefined
   const drafts = try Drafts
   const stored = drafts.subscriptionChoice.get()
-  const picked = stored?.thread === current.thread ? stored : undefined
+  const picked = stored?.thread === scope.thread ? stored : undefined
   const active = try drafts.subscriptions()
   const subscription = picked === undefined
     ? (active.length === 1 ? active[0] : undefined)
     : active.find((sim) => sameSubscription(sim, picked.subscription))
   if (subscription === undefined) return undefined
-  return { thread: current.thread, ticket: current.page.ticket, subscription, picked }
+  return { scope, subscription, picked }
 }
 
 function sameSelection(expected: VisibleSim, actual: VisibleSim | undefined): boolean {
-  return actual !== undefined && actual.thread === expected.thread && actual.ticket === expected.ticket && actual.picked === expected.picked
+  return actual !== undefined && sameScope(expected.scope, actual.scope) && actual.picked === expected.picked
     && sameSubscription(actual.subscription, expected.subscription)
 }
 
@@ -55,15 +70,23 @@ export function activeSmsSelection(selection: SmsSelection, subscriptions: reado
 }
 
 export effect function currentSmsSelection(selection: SmsSelection): boolean!!SmsSelectionContext {
-  return sameSelection(selection, try selectedSim())
+  const now = try visibleScope()
+  if (now === undefined || !sameScope(selection.scope, now)) return false
+  return now.pane === "Threads" || sameSelection(selection, try selectedSim(now))
 }
 
 export effect function captureSmsSelection(): (SmsSelection | undefined)!!(SmsSelectionContext | Telephony) {
-  const selected = try selectedSim()
-  if (selected === undefined) return undefined
+  const from = try visibleScope()
+  if (from === undefined) return undefined
+  const chosen = from.pane === "Conversation" ? try selectedSim(from) : undefined
+  if (from.pane === "Conversation" && chosen === undefined) return undefined
   const status = timeout(telephony("selected SMS SIM", (c) => c.messages.status()), "350 millis") catch () => undefined
-  if (status?.permissions.sms !== "granted" || status.permissions.phoneState !== "granted" || status.sendMode !== "direct"
-    || !sameSelection(selected, try selectedSim())) return undefined
+  const now = try visibleScope()
+  if (status?.permissions.sms !== "granted" || status.permissions.phoneState !== "granted" || status.permissions.sendSms !== "granted"
+    || status.sendMode !== "direct" || now === undefined || !sameScope(from, now)) return undefined
+  const sole = status.subscriptions?.length === 1 ? status.subscriptions[0] : undefined
+  const selected = now.pane === "Threads" && sole !== undefined ? { scope: now, subscription: sole, picked: undefined } : chosen
+  if (selected === undefined || (now.pane === "Conversation" && !sameSelection(selected, try selectedSim(now)))) return undefined
   const selection: SmsSelection = { ...selected, observation: { kind: "sms-subscription", id: String(selected.subscription.id), revision: fresh() } }
   return activeSmsSelection(selection, status.subscriptions) ? selection : undefined
 }
