@@ -483,16 +483,17 @@ pure def zoomTo(s: Camera, level: int, by: Actor): Done = emit(List(SetZoom({ le
 
 ### Photo mode offers 4:3 or 16:9 on a lens that lists both, and a new ratio starts the preview again with it
 
-The phone says which lenses list 16:9 photos: on Android each camera lists
-its photo ratios, and the browser lists none, so it offers no choice. The
-ratio is chosen like a flip, over a ready Photo preview while nothing is
-being taken: the preview stops and starts again on the same lens at the new
-ratio, with the flash off and at one time. The choice is kept across lenses,
-and a preview starts at 16:9 only on a lens that lists it; on any other it
-starts at 4:3.
+While Camera shows, the phone says when a lens lists 16:9 photos or no
+longer does: on Android each camera lists its photo ratios, and the browser
+lists none, so it offers no choice. The ratio is chosen like a flip, over a
+ready Photo preview while nothing is being taken: the preview stops and
+starts again on the same lens at the new ratio, with the flash off and at
+one time. The choice is kept across lenses, and a preview starts at 16:9
+only on a lens that lists it; on any other it starts at 4:3.
 
 ```quint
-pure def canRatiosListed(s: Camera, lens: Lens, wide: bool, by: Actor): bool = by == Phone
+pure def canRatiosListed(s: Camera, lens: Lens, wide: bool, by: Actor): bool =
+  by == Phone and s.showing and wide != s.wide.contains(lens)
 
 pure def ratiosListed(s: Camera, lens: Lens, wide: bool, by: Actor): Camera =
   { ...s, wide: if (wide) s.wide.union(Set(lens)) else s.wide.exclude(Set(lens)) }
