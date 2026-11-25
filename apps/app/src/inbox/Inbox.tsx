@@ -68,9 +68,6 @@ const operationNames = {
 type Change = keyof typeof operationNames;
 const isChange = (kind: Kind): kind is Change => kind in operationNames;
 
-/** What Mail holds, read at the state the screen shows. */
-const mailOf = <A,>(runtime: Runtime, read: (mail: Mail["Service"]) => A): A => read(runtime.runSync(Mail));
-
 const mailTime = new Intl.DateTimeFormat(undefined, { hour: "numeric", minute: "2-digit" });
 const mailDate = new Intl.DateTimeFormat(undefined, { month: "short", day: "numeric" });
 
@@ -141,7 +138,10 @@ function ChangeReview({ runtime, list, cards }: { runtime: Runtime; list: Mailbo
       <InboxChangeReview
         open={state.review.showing}
         operation={operation}
-        messages={state.messages.map((message) => ({ id: String(message), sender: senderName(cards(message)?.from ?? ""), subject: cards(message)?.subject ?? "" }))}
+        messages={state.messages.map((message) => {
+          const card = cards(message);
+          return { id: String(message), sender: senderName(card?.from ?? ""), subject: card?.subject ?? "" };
+        })}
         changed={state.changed}
         onConfirm={can(confirm, "Owner") ? () => void send(confirm, "Owner").then(() => {
           if (!checksSelection(state.kind) && listed.can({ type: "held" })) void listed.send({ type: "held" });
@@ -201,7 +201,8 @@ function Opened({ runtime, list, onRefresh, onBegin }: { runtime: Runtime; list:
   const changes = useTimed(runtime, useChanges);
   const remote = usePreferences(runtime).state?.images ?? false;
   const today = new Date(runtime.runSync(Effect.flatMap(Time, (time) => time.latest()))).toDateString();
-  const read = state ? mailOf(runtime, (mail) => mail.body(state.body.ticket)) : undefined;
+  const mail = runtime.runSync(Mail);
+  const read = state ? mail.body(state.body.ticket) : undefined;
   const reviewLink = useCallback((at: number) => {
     const link = read === undefined ? undefined : prepareMessage(read).links.at(at - 1);
     if (!link || at < 1) return;
@@ -210,7 +211,7 @@ function Opened({ runtime, list, onRefresh, onBegin }: { runtime: Runtime; list:
   }, [can, read, send]);
   if (!state || state.message === 0) return null;
   const access = accessOf(list, state.account);
-  const card = mailOf(runtime, (mail) => mail.card(state.message)) ?? read?.message;
+  const card = mail.card(state.message) ?? read?.message;
   const loaded = state.body.status === "Loaded" && read !== undefined;
   const unread = card?.isUnread ?? false;
   const mark = { type: "mark", access, account: state.account, message: state.message, unread: !unread } as const;
@@ -349,8 +350,9 @@ export function Inbox({ runtime, alpha }: InboxProps & { alpha: Alpha }) {
       ? () => void runtime.runPromise(begin(beginning))
       : undefined;
   };
-  if (drafts.state.open) return <><Compose runtime={runtime} list={state} /><ChangeReview runtime={runtime} list={state} cards={(number) => mailOf(runtime, (mail) => mail.card(number))} /><FileOffer runtime={runtime} /><Suggested runtime={runtime} /></>;
-  const cards = (number: number) => mailOf(runtime, (mail) => mail.card(number));
+  const mail = runtime.runSync(Mail);
+  const cards = (number: number) => mail.card(number);
+  if (drafts.state.open) return <><Compose runtime={runtime} list={state} /><ChangeReview runtime={runtime} list={state} cards={cards} /><FileOffer runtime={runtime} /><Suggested runtime={runtime} /></>;
   const refresh = can({ type: "refresh" }) ? () => void send({ type: "refresh" }) : undefined;
   const retryList = refresh ?? (can({ type: "checkAccess" }) ? () => void send({ type: "checkAccess" }) : undefined);
   const review = <ChangeReview runtime={runtime} list={state} cards={cards} />;
@@ -358,7 +360,7 @@ export function Inbox({ runtime, alpha }: InboxProps & { alpha: Alpha }) {
   const settings = shell.can({ type: "openView", view: "Settings" }) ? () => void shell.send({ type: "openView", view: "Settings" }) : undefined;
   const signIn = settings ? () => void runtime.runPromise(Effect.flatMap(MailSignIn, (mail) => mail.signIn(settings))) : undefined;
   const hidden = new Set(changes.state ? aside(changes.state) : []);
-  const letters = mailOf(runtime, (mail) => mail.shown(state)).filter(({ message: number }) => !hidden.has(number));
+  const letters = mail.shown(state).filter(({ message: number }) => !hidden.has(number));
   const { account, folder, query } = state.selected;
   const draftsFolder = folder === "DraftsFolder";
   const shelf = drafts.state.shelfSelection;
@@ -422,7 +424,7 @@ export function Inbox({ runtime, alpha }: InboxProps & { alpha: Alpha }) {
     setSelection(undefined);
     clearSelection();
   };
-  const accounts = state.connected.map((linked) => ({ id: String(linked.account), email: mailOf(runtime, (mail) => mail.email(linked.account)), grant: linked.grant }));
+  const accounts = state.connected.map((linked) => ({ id: String(linked.account), email: mail.email(linked.account), grant: linked.grant }));
   const chooseAccount = (id: string) => {
     const event = { type: "chooseAccount", account: Number(id) } as const;
     if (can(event)) {
@@ -439,8 +441,9 @@ export function Inbox({ runtime, alpha }: InboxProps & { alpha: Alpha }) {
   const chooseLocal = { type: "pickAllShelfDrafts", picks: shelfPicks } as const;
   const clearLocal = { type: "pickAllShelfDrafts" as const, picks: [] };
   const allLocalChosen = shelfPicks.every(({ draft, revision }) => shelf.picks.some((pick) => pick.draft === draft && pick.revision === revision));
+  const localLetters = runtime.runSync(Letters);
   const shelved: InboxListRow[] = localIds.map((id) => {
-    const words = runtime.runSync(Letters).words(id);
+    const words = localLetters.words(id);
     const resume = { type: "resume", draft: id } as const;
     const pick = { type: "pickShelfDraft", draft: id } as const;
     return {
@@ -456,7 +459,7 @@ export function Inbox({ runtime, alpha }: InboxProps & { alpha: Alpha }) {
     <>
       <InboxListScreen
         onBack={shell.can({ type: "goBack" }) ? () => void alpha.back() : undefined}
-        account={account === 0 ? undefined : mailOf(runtime, (mail) => mail.email(account))}
+        account={account === 0 ? undefined : mail.email(account)}
         folder={folderNames[folder]}
         unavailable={!state.searchable}
         onChooseFolder={readable(state) ? (name) => {
@@ -524,13 +527,13 @@ export function Inbox({ runtime, alpha }: InboxProps & { alpha: Alpha }) {
         loadingMore={state.list.status === "Loading" && state.further}
       />
       <InboxDiscardDialog open={selectingDrafts && shelf.reviewing}
-        drafts={shelf.picks.map(({ draft }) => ({ id: draft, subject: runtime.runSync(Letters).words(draft).subject || "(No subject)" }))}
+        drafts={shelf.picks.map(({ draft }) => ({ id: draft, subject: localLetters.words(draft).subject || "(No subject)" }))}
         gmailCopy={shelf.picks.some(({ draft }) => held(composing.shelf, draft).gmail !== 0)}
         onDiscard={drafts.can(deleteDrafts, "Owner") ? () => void drafts.send(deleteDrafts, "Owner") : undefined}
         onKeep={() => void drafts.send({ type: "closeShelfReview" }, "Owner")} />
       {draftsFolder && unopenedDraft === account && drafts.state.notice === "NotEditable" ? (
         <InboxNotice kind="notEditable" onAction={() => {
-          const email = mailOf(runtime, (mail) => mail.email(account));
+          const email = mail.email(account);
           window.open(`https://mail.google.com/mail/?authuser=${encodeURIComponent(email)}#drafts`, "_blank", "noopener,noreferrer");
         }} />
       ) : null}
