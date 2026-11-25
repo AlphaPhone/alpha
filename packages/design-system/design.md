@@ -38,7 +38,7 @@ do next.
   `text-title` a document's name over its preview and Notes' Recently deleted header on the launcher, and `text-figure` and `text-figure-sm` a route's time, `text-figure-lg` the distance to Maps guidance's next turn.
   `leading-row` sets `text-body` as a note's or a routine's title in a list, and `leading-transcript` a transcript read back, such as a voicemail's.
   `text-badge` is a video's length over a thumbnail and `text-tile-name` an album's name under its cover.
-  `text-headline` is an open voice or link note's title and `text-quote` a clip kept from a page.
+  `text-headline` is an open voice or link note's title and `text-quote` a clip kept from a page; `text-panel-title` heads a panel that covers Ask Alpha, such as its chat search.
   On Camera, `text-camera-badge` is the timer and flash badge, `text-camera-countdown` the self-timer digit and
   `leading-detail` the line under its access notice.
   `text-tab-count` in a `rounded-tab-count` outline is the Browser's count of open tabs.
@@ -217,6 +217,8 @@ this prose into tokens. To change the design, describe it, and have the change w
 | `text.quote.leading` | 1.35 |
 | `text.surface.size` | 1.625rem |
 | `text.surface.leading` | 1.15 |
+| `text.panel-title.size` | 1.375rem |
+| `text.panel-title.leading` | 1.2 |
 | `text.home-display.size` | 1.625rem |
 | `text.home-display.leading` | 1.1 |
 | `text.title.size` | 1.75rem |
