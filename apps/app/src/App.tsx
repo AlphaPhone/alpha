@@ -42,6 +42,7 @@ export function App({ alpha }: AppProps) {
   const inert = layers !== undefined && pageInert(layers);
   const showing = state.trail.at(-1);
   const comms = isCommsView(showing);
+  const bounded = comms || showing === "Camera" || showing === "Photos" || showing === "Files";
   const strip = comms && state.assistant === "Full";
   const back = can({ type: "goBack" });
   return (
@@ -50,7 +51,7 @@ export function App({ alpha }: AppProps) {
       ref={(page) => { if (page) page.ownerDocument.documentElement.dataset.alphaCanGoBack = String(back || (layers !== undefined && takesBack(layers))); }}
       onPointerDown={(event) => { startedRef.current = { x: event.clientX - event.currentTarget.getBoundingClientRect().left, y: event.clientY }; }}
       onPointerUp={swiped}
-      className={cn("relative mx-auto flex w-full flex-col bg-background has-[[data-alpha-camera-native]]:bg-transparent font-sans text-base text-foreground sm:pointer-fine:max-w-103", comms ? "h-dvh overflow-hidden" : "min-h-dvh")}
+      className={cn("relative mx-auto flex w-full flex-col bg-background has-[[data-alpha-camera-native]]:bg-transparent font-sans text-base text-foreground sm:pointer-fine:max-w-103", bounded ? "h-dvh overflow-hidden" : "min-h-dvh")}
     >
       <div className={cn("relative flex min-h-0 flex-1 flex-col", comms && "overflow-auto overscroll-contain", strip && "overflow-hidden")} data-alpha-comms-stage={comms ? "" : undefined} inert={inert || strip}>
         {comms && alpha.slot("phone/stage")}
@@ -66,7 +67,7 @@ export function App({ alpha }: AppProps) {
             </div>
           )}
       </div>
-      <div className={comms ? "shrink-0" : undefined} inert={layers !== undefined && assistantInert(layers)}>{alpha.slot("assistant")}</div>
+      <div className={bounded ? "shrink-0" : undefined} inert={layers !== undefined && assistantInert(layers)}>{alpha.slot("assistant")}</div>
       {alpha.slot("overlay")}
       {alpha.slot("notice")}
     </main>

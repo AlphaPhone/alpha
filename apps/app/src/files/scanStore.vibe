@@ -173,7 +173,7 @@ module web {
       return { confirmed: false, known: false }
     } finally {
       link.remove()
-      requestAnimationFrame(() => release(uri))
+      release(uri)
     }
   }
 

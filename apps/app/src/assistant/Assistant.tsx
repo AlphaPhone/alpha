@@ -29,7 +29,7 @@ import type { Machine as LayersMachine } from "../../gen/app__shell__layers.effe
 import { useMachine as useShell } from "../../gen/app__shell.react.ts";
 import { untimed } from "../runtime/reactor.vibe";
 import { MailQuestions } from "../inbox/mail-context.vibe";
-import { useInEmail, type Offers } from "../inbox/suggestion.vibe";
+import { useInEmail as handToEmail, type Offers } from "../inbox/suggestion.vibe";
 import type { Machine as InboxList } from "../../gen/app__inbox.effect.vibe";
 import { useMachine as useInboxList } from "../../gen/app__inbox.react.ts";
 import type { Machine as InboxSuggestions } from "../../gen/app__inbox__suggestion.effect.vibe";
@@ -225,7 +225,7 @@ export function Assistant({ runtime }: AssistantProps) {
       onQuote: composer.can(quote) ? () => void composer.send(quote) : undefined,
       onEditAgain: composer.can(editAgain) ? () => { board.type(line.text); void composer.send(editAgain); } : undefined,
       onReadAloud: message > 0 && chats.can(readAloud) ? () => void chats.send(readAloud) : undefined,
-      onUseInEmail: canOfferMail ? () => void runtime.runPromise(useInEmail(line.text, "Ask Alpha", { target: "NewEmail", account, message: 0 })) : undefined,
+      onUseInEmail: canOfferMail ? () => void runtime.runPromise(handToEmail(line.text, "Ask Alpha", { target: "NewEmail", account, message: 0 })) : undefined,
     };
   });
   // spec/app/assistant/chats.md, "Older or newer messages are read around a message of the conversation showing"

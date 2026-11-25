@@ -195,6 +195,16 @@ effect function enrolled(epoch: number, runtime: Runtime, executors: MediaExecut
   return { epoch, identity, headers, execute, decide: agent.decide }
 }
 
+function completion(op: DeviceOperation, synced: boolean): string {
+  switch (op.type) {
+    case "photos_album_create":
+    case "photos_share":
+    case "photo_library_review": return "Continue the review in Photos."
+    case "files_share": return "Choose where to share in Android."
+    default: return synced ? "Done" : "Done. Agent receipt pending."
+  }
+}
+
 const notStarted = "Alpha couldn’t start that action."
 
 export const mediaReview = Layer.effect(MediaReview, effect {
@@ -260,7 +270,7 @@ export const mediaReview = Layer.effect(MediaReview, effect {
         scopes.set(card.id, current(held))
         const result = (tryPromise(() => held.execute.approve(card, { live: true, nonsensitive: true, exact: true, forceReview: true, requestEligible: true, reviewed: true }))
           |> ensuring(%, sync(() => { scopes.delete(card.id) }))) catch () => undefined
-        const note = result?.kind !== "settled" ? notStarted : result.result.tag === "Applied" ? (result.synced ? "Done" : "Done. Agent receipt pending.")
+        const note = result?.kind !== "settled" ? notStarted : result.result.tag === "Applied" ? completion(card.operation, result.synced)
           : result.result.tag === "Unknown" ? "The result could not be confirmed. Check before trying again." : "Nothing changed."
         board.change({ mediaNote: note })
       })

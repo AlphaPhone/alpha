@@ -15,7 +15,7 @@ import type { Machine as Toasts } from "../../gen/app__notices__toasts.effect.vi
 import { type Said, say } from "../notices/toasts.vibe"
 import { adopt, keptAt } from "../platform/adoption.vibe"
 import { Documents, previewUrl } from "../platform/documents.vibe"
-import { Files, called } from "../platform/files.vibe"
+import { type Files, called } from "../platform/files.vibe"
 import { type Job, answer, following, reacting, run, started, stop, together } from "../runtime/reactor.vibe"
 import { Handles } from "./handles.vibe"
 

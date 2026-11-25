@@ -55,3 +55,5 @@
 { "method": "GET", "path": "/api/workflow/removed-workflows" }
 { "method": "GET", "path": "/api/triggers" }
 { "method": "GET", "path": "/api/triggers/{id}/runs" }
+{ "method": "GET", "path": "/api/notes/state" }
+{ "method": "POST", "path": "/api/notes/interact" }

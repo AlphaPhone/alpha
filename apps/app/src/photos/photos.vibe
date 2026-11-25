@@ -4,7 +4,7 @@ import * as Library from "../../gen/app__photos.effect.vibe"
 import type { Actor } from "../../gen/app__photos__actor.effect.vibe"
 import * as Viewer from "../../gen/app__photos__viewer.effect.vibe"
 import * as Trash from "../../gen/app__photos__trash.effect.vibe"
-import * as Change from "../../gen/app__photos__changes.effect.vibe"
+import type { Change } from "../../gen/app__photos__changes.effect.vibe"
 import type { Grant } from "../../gen/kit__permission.effect.vibe"
 import { Machine as Shell, showing } from "../../gen/app__shell.effect.vibe"
 import { Device } from "../platform/device.vibe"
@@ -109,7 +109,7 @@ export effect function targets(items: readonly number[]): Array<{ number: number
 const operations = { Favorite: "favorite", Unfavorite: "unfavorite", Trash: "trash", Restore: "restore" } as const
 
 /** The native system-confirmed rows, with lost or unverified results never claimed as complete. */
-export effect function changedItems(change: Change.Change, items: readonly number[]) {
+export effect function changedItems(change: Change, items: readonly number[]) {
   const { phone } = try PhotosPort
   const rows = try targets(items)
   if (Option.isNone(phone) || rows.length !== items.length) return { done: [], stale: items, declined: false, known: true }
@@ -144,7 +144,7 @@ export effect function changedItems(change: Change.Change, items: readonly numbe
   return { done, stale, declined: false, known: reply !== undefined && !reply.outcomes.some((row) => row.status === "unverified") }
 }
 
-effect function changed(attempt: number, change: Change.Change, items: readonly number[]): Library.Event!!(PhotosPort | Catalog) {
+effect function changed(attempt: number, change: Change, items: readonly number[]): Library.Event!!(PhotosPort | Catalog) {
   const outcome = try changedItems(change, items)
   if (outcome.done.length > 0 && change !== "Share") try (try Catalog).changed()
   return { type: "changed", attempt, ...outcome }

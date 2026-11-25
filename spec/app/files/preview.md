@@ -328,10 +328,10 @@ pure def useInEmail(s: Preview, account: int, by: Actor): Moved =
   { state: { ...s, attempt: attempt, offered: { item: s.item, revision: s.revision } },
     out: List(OfferEmail({ ticket: attempt.id, viewer: s.viewer, item: s.item, revision: s.revision, account: account })) }
 
-pure def stepAnEmailOfferNamesTheFileShown(before: Preview, out: List[Effect]): bool =
+pure def stepAnEmailOfferNamesTheFileShown(before: Preview, via: str, after: Preview, out: List[Effect]): bool =
   out.every(e => match e {
-    | OfferEmail(x) => loaded(before) and x.viewer == before.viewer and x.item == before.item
-        and x.revision == before.revision and x.account > 0
+    | OfferEmail(x) => via == "useInEmail" and x.ticket == after.attempt.id and loaded(before)
+        and x.viewer == before.viewer and x.item == before.item and x.revision == before.revision and x.account > 0
     | _ => true
   })
 ```

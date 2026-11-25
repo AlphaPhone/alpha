@@ -82,7 +82,7 @@ export function Preview({ runtime }: PreviewProps) {
         </div>
         <div className="min-h-0 flex-1 touch-pan-y overflow-y-auto px-6 pb-12">
           <DialogTitle className="mb-2 font-display text-3xl font-light break-words">{name}</DialogTitle>
-          {file && <p className="mb-4 flex items-center gap-2 text-sm text-muted-foreground"><FileText aria-hidden className="size-4.5" />{file.mimeType === "application/pdf" ? "PDF" : { Media: "Media", Photo: "Image", Text: "Text", Archive: "Archive", Pdf: "PDF", Receipt: "Receipt" }[state.kind]}</p>}
+          {file !== undefined && <p className="mb-4 flex items-center gap-2 text-sm text-muted-foreground"><FileText aria-hidden className="size-4.5" />{file.mimeType === "application/pdf" ? "PDF" : { Media: "Media", Photo: "Image", Text: "Text", Archive: "Archive", Pdf: "PDF", Receipt: "Receipt" }[state.kind]}</p>}
           {state.attempt.outcome === "Unknown" && state.offered.item === state.item && state.offered.revision === state.revision && <Alert variant="warn">Check Inbox before offering this file again</Alert>}
           {!usable(state) && <Alert variant="warn">Alpha can no longer read this file</Alert>}
           {state.content.status === "Loading" && <Spinner label="Opening the file" />}
