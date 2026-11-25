@@ -607,6 +607,11 @@ describe("Notes", () => {
     await drawn(() => vi.waitFor(() => expect(results()).toHaveLength(5)));
     expect(world.notes.views.at(-2)).toMatchObject({ path: "claim", body: { viewId: "home" } });
     expect([results()[4], (await shell()).trail, (await shell()).assistant]).toEqual([{ switched: true }, [], panel]);
+    // spec/app/assistant/index.md, "A complete reply may open one view, once, while the screen it was asked from still shows": "Open the browser." from Home, which VIEWS answers with the browser view, brings Browser forward.
+    await ask("Open the browser.", true, "browser");
+    await drawn(() => vi.waitFor(() => expect(results()).toHaveLength(6)));
+    expect(world.notes.views.at(-2)).toMatchObject({ path: "claim", body: { viewId: "browser" } });
+    expect([results()[5], showing(await shell(), "Browser")]).toEqual([{ switched: true }, true]);
   });
 
   it("The agent opens the note I named aloud (spec/app/assistant/context.md, \"A spoken turn carries what a typed turn sent at that moment would, the view claim included\"; spec/app/notes/index.md, \"The agent opens the one note the owner named, as the list last read it, once for the owner's current request, and is told whether it opened\")", async () => {
