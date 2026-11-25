@@ -251,7 +251,7 @@ effect function restarted(): Event!!Time {
   return { type: "restart", day: civilDay(try (try Time).now()) }
 }
 
-// spec/app/home/cards.md, "An item stays on the card until it ends; an all-day item stays all day, and a reminder stays until it is done"
+// spec/app/home/cards.md, "An item stays on the card until it ends: a timed item through its last minute, an all-day item until its day is over, an overdue reminder until it is handled"
 const advancing = started(Effect.scoped(effect {
   const device = try Device
   const shell = try Shell.Machine
@@ -269,8 +269,9 @@ const advancing = started(Effect.scoped(effect {
     for (;;) {
       const now = try time.now()
       const ends = [...state.calendar.items, ...state.agent.items]
-        .filter((item) => !item.allDay && item.end > now)
-        .map((item) => item.end)
+        .filter((item) => !item.overdue)
+        .map((item) => (item.allDay ? item.end : item.end + 1))
+        .filter((at) => at > now)
       if (ends.length === 0) return
       try time.until(Math.min(...ends))
       bump()

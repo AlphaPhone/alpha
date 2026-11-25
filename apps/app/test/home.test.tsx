@@ -530,6 +530,9 @@ describe("Home on a phone", () => {
         { id: "a", calendarId: "1", title: "Standup", startHour: 10, endHour: 11 },
       ],
     );
+    world.calendar.phoneEvents.push({
+      id: "c", calendarId: "1", title: "Holiday", begin: day + 11 * hour, end: day + 12 * hour, allDay: true, recurring: false,
+    });
     world.calendar.feedState = "complete";
     world.calendar.events = [
       agentEvent("Design Review", day + 38 * hour, day + 39 * hour),
@@ -540,15 +543,18 @@ describe("Home on a phone", () => {
     await until(alpha, homes, Cards.Machine, (c) => c.calendar.source === "Ready" && c.agent.source === "Ready");
     expect(agenda()?.getAttribute("aria-label")).toMatch(/^Open calendar event: Dentist,/);
 
-    await later(alpha, 2.5 * hour);
-    await seen(false);
-    await seen(true);
-    expect(agenda()?.getAttribute("aria-label")).toMatch(/^Open calendar event: Standup,/);
+    await later(alpha, 2 * hour);
+    expect(agenda()?.getAttribute("aria-label")).toMatch(/^Open calendar event: Dentist,/);
+    await later(alpha, 1);
+    await vi.waitFor(() => expect(agenda()?.getAttribute("aria-label")).toMatch(/^Open calendar event: Standup,/));
 
     await later(alpha, 1 * hour);
-    await seen(false);
-    await seen(true);
-    expect(agenda()?.getAttribute("aria-label")).toMatch(/^Open calendar event: Design Review,/);
+    await vi.waitFor(() => expect(agenda()?.getAttribute("aria-label")).toMatch(/^Open calendar event: Holiday,/));
+
+    await later(alpha, 1 * hour - 2);
+    expect(agenda()?.getAttribute("aria-label")).toMatch(/^Open calendar event: Holiday,/);
+    await later(alpha, 1);
+    await vi.waitFor(() => expect(agenda()?.getAttribute("aria-label")).toMatch(/^Open calendar event: Design Review,/));
 
     world.calendar.feedState = "partial";
     world.calendar.events = [

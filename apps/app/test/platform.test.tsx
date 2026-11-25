@@ -8,7 +8,7 @@ import { at } from "../src/areas.ts";
 import { adopt, earlierSlot, keptAt, vaulted } from "../src/platform/adoption.vibe";
 import { Agent, type Reached } from "../src/platform/agent.vibe";
 import { CameraPort, browserCamera } from "../src/platform/camera.vibe";
-import { Cloud } from "../src/platform/cloud.vibe";
+import { Cloud, cloudAsked, cloudJsonBody } from "../src/platform/cloud.vibe";
 import { testMocks } from "../src/platform/device.vibe";
 import { pageSpeechBase } from "../src/platform/pageSpeech.ts";
 import { Telegram, telegramAt } from "../src/platform/telegram.vibe";
@@ -386,4 +386,19 @@ it("Telegram signIn handles 200 SESSION_PASSWORD_NEEDED responses (spec/app/plat
   const result = await Effect.runPromise(Effect.flatMap(Telegram, (telegram) => telegram.signIn("+15551234567", "hash-1", "12345"))
     .pipe(Effect.provide(Layer.provide(telegramAt("http://telegram.test"), client))));
   expect(result).toEqual({ kind: "PasswordRequired", hint: "pet", pendingAuthId: "pa-1" });
+});
+
+it("Cloud fetch preserves Request metadata and parses empty or non-JSON bodies without throwing (spec/kit/read.md, \"Story: Read from outside\")", () => {
+  const controller = new AbortController();
+  const parsed = cloudAsked(new Request("https://cloud.invalid/api/v1/user", {
+    method: "POST",
+    headers: { "x-alpha-probe": "yes" },
+    signal: controller.signal,
+  }));
+  expect([parsed.method, parsed.headers["x-alpha-probe"], parsed.signal]).toEqual(["POST", "yes", controller.signal]);
+  expect([cloudJsonBody(""), cloudJsonBody("{bad"), cloudJsonBody('{"ok":true}')]).toEqual([
+    { ok: true, value: undefined },
+    { ok: false },
+    { ok: true, value: { ok: true } },
+  ]);
 });

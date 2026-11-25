@@ -76,6 +76,22 @@ module web {
 }
 import { answer, asked, jsonBody, unauthorized } from web
 
+/** What fetch was asked for, as its parts, preserving Request method, headers and signal. */
+export function cloudAsked(input: RequestInfo | URL, init?: RequestInit): {
+  readonly url: URL
+  readonly method: string
+  readonly headers: Record<string, string>
+  readonly signal: AbortSignal | undefined
+  readonly body: { readonly text: string } | { readonly bytes: Uint8Array } | { readonly form: FormData } | undefined | false
+} {
+  return asked(input, init)
+}
+
+/** Parse a JSON string body for the cloud plugin, treating empty text as no body. */
+export function cloudJsonBody(text: string): { readonly ok: true; readonly value: unknown } | { readonly ok: false } {
+  return jsonBody(text)
+}
+
 /** eliza's client takes an origin and a fetch: this origin is never reached, since each platform's fetch below sends by its own way. */
 const placeholder = "https://cloud.invalid"
 
