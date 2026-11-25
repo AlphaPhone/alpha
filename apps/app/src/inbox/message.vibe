@@ -62,7 +62,7 @@ effect function read(ticket: number, account: number, message: number, position:
   }
   const found = place === "SelectedMessage" || anchor === undefined
     ? (Effect.map(effect { return (try prepared) ?? (try body(account, message)) }, (loaded) => ({ body: loaded, position: 0, thread: 1 })) catch (cause) => faultOf(cause))
-    : (threadMessage(account, anchor, position, place === "NewestMessage") catch (cause) => threadFault(cause))
+    : (threadMessage(account, anchor, position, place) catch (cause) => threadFault(cause))
   const mailbox = try list.get()
   if (!current(try view.get()) || mailbox.selected.account !== account || ledger.generation(account) !== generation) return undefined
   const access = accessOf(mailbox, account)
@@ -246,9 +246,9 @@ const threadPosition = started(effect {
     if (state.body.ticket !== ticket) return
     const { account, message } = state
     const generation = mail.generation(account)
-    const card = mail.body(ticket)?.message
-    if (!card) return
-    const found = locateThread(account, card) catch () => undefined
+    const original = mail.body(ticket)
+    if (!original) return
+    const found = locateThread(account, original) catch () => undefined
     const mailbox = try list.get()
     if (!found || mail.generation(account) !== generation || mailbox.selected.account !== account) return
     try contained(reader.send({ type: "threadLocated", ticket, message, access: accessOf(mailbox, account), ...found }), "finding the message in its thread")

@@ -1,7 +1,7 @@
 // spec/app/inbox/message.md, "Story: Read a message"
 import type { MailCard, MailMessage } from "@elizaos/cloud"
 import { type GmailReadResult, type GmailThreadPage, type MailFailure, protocolFailure } from "@elizaos/plugin-inbox-client"
-import type { Fault } from "../../gen/app__inbox__message.ts"
+import type { Fault, ReadPlace } from "../../gen/app__inbox__message.ts"
 import { Cloud } from "../platform/cloud.vibe"
 import { Mail } from "./gmail.vibe"
 import { provider } from "./provider.vibe"
@@ -14,11 +14,18 @@ interface Source {
 
 interface Snapshot extends Source {
   readonly pages: ReadonlyArray<GmailThreadPage>
+  readonly earlier: ReadonlyMap<number, number>
+  readonly original?: MailMessage
+}
+
+interface PageContext {
+  readonly earlier?: number
+  readonly original?: MailMessage
 }
 
 export service ThreadPages {
   get(source: Source): Snapshot | undefined
-  keep(source: Source, page: GmailThreadPage): void
+  keep(source: Source, page: GmailThreadPage, context?: PageContext): void
 }
 
 const same = (source: Source, saved: Snapshot): boolean =>
@@ -29,9 +36,13 @@ export const threadPages = Layer.sync(ThreadPages, () => {
   let snapshot: Snapshot | undefined
   return {
     get: (source: Source) => snapshot !== undefined && same(source, snapshot) ? snapshot : undefined,
-    keep(source: Source, page: GmailThreadPage) {
-      const previous = snapshot !== undefined && same(source, snapshot) && snapshot.pages[0]?.historyId === page.historyId ? snapshot.pages : []
-      snapshot = { ...source, pages: [page, ...previous.filter((one) => one.offset !== page.offset)].slice(0, 3) }
+    keep(source: Source, page: GmailThreadPage, context?: PageContext) {
+      const previous = snapshot !== undefined && same(source, snapshot) && snapshot.pages[0]?.historyId === page.historyId ? snapshot : undefined
+      const earlier = new Map(previous?.earlier)
+      if (context?.earlier !== undefined) earlier.set(page.offset, context.earlier)
+      const original = context?.original ?? previous?.original
+      snapshot = { ...source, pages: [page, ...(previous?.pages ?? []).filter((one) => one.offset !== page.offset)].slice(0, 3), earlier,
+        ...(original === undefined ? {} : { original }) }
     },
   }
 })
@@ -82,8 +93,9 @@ function messageOf(found: GmailReadResult, original: MailCard): MailMessage {
 const at = (page: GmailThreadPage, position: number) => position < page.offset ? undefined : page.messages[position - page.offset]
 
 // spec/app/inbox/message.md, "Opening a row reads the exact message chosen while its account may be read"
-/** Find the selected message's position after its body is shown, using one provider revision across all pages. */
-export effect function locateThread(account: number, anchor: MailCard): ({ readonly position: number; readonly thread: number } | undefined)!ThreadFault!(Cloud | Mail | ThreadPages) {
+/** Read the first conversation page after showing the exact selected body. Further pages are read on request. */
+export effect function locateThread(account: number, original: MailMessage): ({ readonly position: number; readonly thread: number } | undefined)!ThreadFault!(Cloud | Mail | ThreadPages) {
+  const anchor = original.message
   if (anchor.threadId === "") return undefined
   const ledger = try Mail
   const grant = ledger.grant(account)
@@ -92,44 +104,38 @@ export effect function locateThread(account: number, anchor: MailCard): ({ reado
   const source = { account, generation: ledger.generation(account), threadId: anchor.threadId }
   const client = provider(try Cloud)
   const initial = try client.gmailThread(grant, source.threadId)
-  if (initial.total < 2) return undefined
-  let page = initial
-  while (ledger.generation(account) === source.generation) {
-    const offset = page.messages.findIndex((item) => item.message.id === anchor.id)
-    if (offset >= 0) {
-      cache.keep(source, initial)
-      if (page.offset !== initial.offset) cache.keep(source, page)
-      return { position: page.offset + offset, thread: initial.total }
-    }
-    if (page.nextOffset === null || page.nextOffset <= page.offset) return undefined
-    page = try client.gmailThread(grant, source.threadId, { offset: page.nextOffset, historyId: initial.historyId })
-    if (page.total !== initial.total) return undefined
-  }
-  return undefined
+  if (initial.total < 2 || initial.offset !== 0 || ledger.generation(account) !== source.generation) return undefined
+  cache.keep(source, initial, { original })
+  return { position: initial.messages.findIndex((item) => item.message.id === anchor.id), thread: initial.total }
 }
 
 /** Resolve a position within the frozen provider revision, or discover the latest position on open. */
-export effect function threadMessage(account: number, anchor: MailCard, position: number, newest: boolean): Position!ThreadFault!(Cloud | Mail | ThreadPages) {
+export effect function threadMessage(account: number, anchor: MailCard, position: number, place: ReadPlace): Position!ThreadFault!(Cloud | Mail | ThreadPages) {
   const ledger = try Mail
   const cache = try ThreadPages
   const grant = ledger.grant(account)
   if (grant === undefined) throw new RejectedThread({ fault: "Revoked" })
   const client = provider(try Cloud)
   const source = { account, generation: ledger.generation(account), threadId: anchor.threadId }
+  const newest = place === "NewestMessage"
   const known = newest ? undefined : cache.get(source)
   const established = known?.pages[0]
+  if (!newest && established === undefined) throw new RejectedThread({ fault: "Moved" })
   const initial = established ?? (try client.gmailThread(grant, source.threadId))
   if (initial.total === 0) throw new RejectedThread({ fault: "Gone" })
   const target = newest ? initial.total - 1 : position
   if (target < 0 || target >= initial.total) throw new RejectedThread({ fault: "Moved" })
-  const existing = (known?.pages ?? [initial]).find((page) => at(page, target) !== undefined)
-  const nearby = Math.max(0, target - 8)
-  const page = existing ?? (try client.gmailThread(grant, source.threadId, { offset: nearby, historyId: initial.historyId }))
-  const read = at(page, target) !== undefined ? page : try client.gmailThread(grant, source.threadId, { offset: target, historyId: initial.historyId })
+  const paging = place === "ThreadPage"
+  const forward = paging && initial.nextOffset === target
+  if (paging && !forward && known?.earlier.get(initial.offset) !== target) throw new RejectedThread({ fault: "Moved" })
+  const existing = paging ? undefined : (known?.pages ?? [initial]).find((page) => at(page, target) !== undefined)
+  const read = existing ?? (try client.gmailThread(grant, source.threadId, { offset: target, historyId: initial.historyId }))
   if (read.total !== initial.total || read.historyId !== initial.historyId || ledger.generation(account) !== source.generation) throw new RejectedThread({ fault: "Moved" })
+  if (paging && read.offset !== target) throw new RejectedThread({ fault: "Moved" })
   const found = at(read, target)
   if (found === undefined) throw new RejectedThread({ fault: "Gone" })
-  if (existing === undefined) cache.keep(source, initial)
-  cache.keep(source, read)
-  return { position: target, thread: initial.total, body: messageOf(found, anchor) }
+  if (newest) cache.keep(source, initial)
+  cache.keep(source, read, forward ? { earlier: initial.offset } : undefined)
+  const original = known?.original
+  return { position: target, thread: initial.total, body: original?.message.id === found.message.id ? original : messageOf(found, anchor) }
 }
