@@ -2,9 +2,13 @@
 import { afterEach, expect, it } from "vitest";
 import { Machine as Library } from "../gen/app__photos.effect.vibe";
 import { Machine as Viewer } from "../gen/app__photos__viewer.effect.vibe";
+import { Machine as Messages } from "../gen/app__messages.effect.vibe";
+import { Machine as MessageComposer } from "../gen/app__messages__composer.effect.vibe";
+import { Drafts as MessageDrafts } from "../src/messages/composer.vibe";
 import { photosArea } from "../src/photos/index.tsx";
-import { button, closeAll, drawn, hardware, only, open, press, underAct, until } from "./alpha.tsx";
+import { button, closeAll, drawn, fill, hardware, only, open, press, underAct, until } from "./alpha.tsx";
 import { scene } from "./fakes/scene.ts";
+import type { FixturePicture } from "./fakes/photos.ts";
 
 underAct();
 afterEach(closeAll);
@@ -47,6 +51,62 @@ it("Allow Photos and browse the library (spec/app/photos/index.md, \"Story: Give
   expect([Boolean(button("Camera.jpg")), Boolean(button("Park.jpg")), world.photos.promptCount]).toEqual([true, false, 1]);
   await hardware("back");
   await until(alpha, runtime, Library, (state) => !state.visible);
+});
+
+it('Use a photo in Messages from its still-open viewer (spec/app/photos/viewer.md, "Use in Messages offers the exact readable original of a permitted photo"; spec/app/messages/index.md, "A picture from Files is offered in a new recipient picker and can join only its chosen empty draft")', async () => {
+  const world = { ...scene(), phone: true, image: true };
+  world.photos.access = { scope: "full", images: "full", videos: "denied" };
+  const source = world.photos.rows[0];
+  if (!source) throw new Error("No fixture picture");
+  const dataBase64 = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jP1sAAAAASUVORK5CYII=";
+  const binary = atob(dataBase64);
+  source.name = "Original fixture.png";
+  source.size = binary.length;
+  source.mutationRevision = source.revision;
+  const received: FixturePicture = { name: source.name, mimeType: "image/png", size: binary.length, dataBase64 };
+  const started = Promise.withResolvers<void>();
+  const late = Promise.withResolvers<FixturePicture>();
+  world.photos.messagePicture = () => { started.resolve(); return late.promise; };
+  const { alpha } = await open(world, only("home", "view:Photos", "view:Messages", "notice"));
+  const runtime = photosArea.runtime(alpha);
+  await press("Photos");
+  await until(alpha, runtime, Library, (state) => state.library.status === "Loaded");
+  const openPicture = async () => {
+    await press(source.name);
+    await until(alpha, runtime, Viewer, (state) => state.read.status === "Loaded");
+  };
+  const offerPicture = async () => {
+    await drawn(() => {
+      const menu = button("Photo actions");
+      if (!menu) throw new Error("No Photo actions menu");
+      menu.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true }));
+    });
+    await drawn(() => {
+      const item = [...document.querySelectorAll<HTMLElement>("[role=menuitem]")].find((option) => option.textContent === "Use in Messages");
+      if (!item) throw new Error("No Use in Messages action");
+      item.click();
+    });
+  };
+  await openPicture();
+  await offerPicture();
+  await started.promise;
+  await press("Back to photos");
+  await until(alpha, runtime, Viewer, (state) => state.open === 0);
+  await openPicture();
+  await drawn(async () => { late.resolve(received); await late.promise; });
+  expect(alpha.runtime.runSync(Messages.use((messages) => messages.get())).offeredPicture).toBe(0);
+
+  world.photos.messagePicture = () => Promise.resolve(received);
+  await offerPicture();
+  await until(alpha, alpha.runtime, Messages, (state) => state.pane === "Picker" && state.offeredPicture > 0);
+  expect(document.querySelector("[aria-label='Picture for this message']")?.textContent).toContain(source.name);
+  await fill("To", "+15550123456");
+  await press("Text +15550123456");
+  await until(alpha, alpha.runtime, MessageComposer, (state) => state.pictures === 1);
+  expect(alpha.runtime.runSync(MessageDrafts.use((drafts) => drafts.pictures()))).toEqual([
+    { name: source.name, wireName: "picture-1.png", contentType: "image/png", bytes: Uint8Array.from(binary, (byte) => byte.charCodeAt(0)) },
+  ]);
+  expect(world.telephony.sent).toEqual([]);
 });
 
 it("Resume an already-sent photo edit from an older viewer record (spec/app/photos/viewer.md, \"A restart forgets the viewer but keeps the save; a save still on its way is no longer trusted, and is looked up\")", async () => {

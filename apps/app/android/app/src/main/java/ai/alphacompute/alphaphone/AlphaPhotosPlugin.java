@@ -11,18 +11,28 @@ import ai.eliza.plugins.media.PermittedMediaCatalog;
 import ai.eliza.plugins.media.PermittedPhotosPlugin;
 import ai.eliza.plugins.media.PhotoCrop;
 import ai.eliza.plugins.media.PhotoLibraryAccess;
+import ai.eliza.plugins.media.SelectedPhotoCopy;
 import ai.eliza.plugins.media.TrashDeleteRequest;
+import ai.eliza.plugins.messages.SmsSendJournal;
+import android.app.Activity;
+import android.content.ContentResolver;
 import ai.eliza.plugins.media.VideoCopyEdits;
 import android.content.ClipData;
 import android.content.Intent;
 import android.net.Uri;
 import android.os.Build;
+import android.os.Handler;
+import android.os.Looper;
+import android.util.Base64;
 import com.getcapacitor.JSArray;
 import com.getcapacitor.JSObject;
 import com.getcapacitor.PluginCall;
 import com.getcapacitor.PluginMethod;
 import com.getcapacitor.annotation.CapacitorPlugin;
 import com.getcapacitor.annotation.Permission;
+import java.io.FilterInputStream;
+import java.io.IOException;
+import java.io.InputStream;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
@@ -43,7 +53,7 @@ import java.util.concurrent.RejectedExecutionException;
  * <p>Access is requested only from {@code requestLibraryAccess}; list, read and resume never
  * prompt. Every read holds the catalog's ticket and is published only while it is still current.
  * {@code pixels}/{@code thumbnails} choose bounded previews; the original bytes never cross the
- * bridge except through the explicit share and playback grants. Pausing the activity cancels
+ * bridge except through explicit share, playback and picture-draft grants. Pausing the activity cancels
  * running video copies, stops observation and marks the catalog background; destroying it closes
  * every engine and answers queued calls. Changes to other apps' media (trash, favorite, permanent
  * removal) go through the native review, never a URI-only request. The refusal sentences are the
@@ -415,6 +425,60 @@ public class AlphaPhotosPlugin extends PermittedPhotosPlugin {
         return null;
       }
     }, () -> diagnostic(Diagnostic.READ_SUCCEEDED));
+  }
+
+  @PluginMethod
+  public void readMessagePicture(PluginCall call) {
+    submitRead(call, () -> {
+      String id = call.getString("id", "");
+      String revision = call.getString("revision", "");
+      if (!PhotoLibraryAccess.permitted(id) || revision.isBlank()) throw new SecurityException();
+      MediaLibraryKey key = MediaLibraryKey.parse(id);
+      if (key.video) throw new SecurityException();
+      ContentResolver resolver = getContext().getContentResolver();
+      Uri uri = permitted.uri(key);
+      PermittedMediaCatalog.Fence fence = permitted.fence();
+      SelectedPhotoCopy.Guard current = () -> {
+        Activity activity = getActivity();
+        if (activity == null || activity.isFinishing() || activity.isDestroyed() || !activity.hasWindowFocus())
+          throw new SecurityException();
+        permitted.requireCurrent(fence);
+      };
+      SelectedPhotoCopy.Copy picture = SelectedPhotoCopy.read(new SelectedPhotoCopy.Source() {
+        @Override public SelectedPhotoCopy.Metadata inspect() throws Exception {
+          current.check();
+          JSObject item = permitted.read(id, revision, false);
+          String mime = resolver.getType(uri);
+          long size = item.getLong("size");
+          if (!("image/jpeg".equals(mime) || "image/png".equals(mime)) || size <= 0 || size > SmsSendJournal.MAX_MMS_BYTES)
+            throw new IOException("The selected photo is not an MMS picture");
+          return new SelectedPhotoCopy.Metadata(item.getString("name"), mime, size,
+              item.getString("revision"), item.getString("identity"));
+        }
+
+        @Override public InputStream open() throws IOException {
+          InputStream bytes = resolver.openInputStream(uri);
+          if (bytes == null) throw new IOException("Photo unavailable");
+          Handler main = new Handler(Looper.getMainLooper());
+          Runnable timeout = () -> { try { bytes.close(); } catch (IOException ignored) {} };
+          main.postDelayed(timeout, 5000);
+          return new FilterInputStream(bytes) {
+            @Override public void close() throws IOException {
+              main.removeCallbacks(timeout);
+              super.close();
+            }
+          };
+        }
+      }, current);
+      if (picture.bytes.length > SmsSendJournal.MAX_MMS_BYTES) throw new IOException("MMS picture exceeds its limit");
+      current.check();
+      JSObject result = new JSObject();
+      result.put("name", picture.metadata.name);
+      result.put("mimeType", picture.metadata.mime);
+      result.put("size", picture.bytes.length);
+      result.put("dataBase64", Base64.encodeToString(picture.bytes, Base64.NO_WRAP));
+      return result;
+    });
   }
 
   /**

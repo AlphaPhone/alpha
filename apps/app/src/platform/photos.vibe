@@ -1,17 +1,40 @@
 // spec/app/photos/index.md, "Story: Browse the library"; spec/app/photos/viewer.md, "Story: Look at a photo or video"
-import type { DeviceLibraryClient, PhotosClient } from "@elizaos/os-bridges"
+import type { DeviceLibraryClient, PhotosClient, Reviewed } from "@elizaos/os-bridges"
 import { registered } from "./device.vibe"
 
 module native {
-  import { deviceLibraryClient, deviceLibraryPlugin, photosClient, photosPlugin } from "@elizaos/os-bridges"
-  import type { DeviceLibraryClient, PhotosClient } from "@elizaos/os-bridges"
+  import { registerPlugin } from "@capacitor/core"
+  import { Schema } from "effect"
+  import { MMS_MAX_TOTAL_BYTES } from "@elizaos/os-bridges"
+  import { deviceLibraryClient, deviceLibraryPlugin, photosClient } from "@elizaos/os-bridges"
+  import type { DeviceLibraryClient, PhotosClient, PhotosPlugin, Reviewed } from "@elizaos/os-bridges"
+
+  const MessagePicture = Schema.Struct({
+    name: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(120)),
+    mimeType: Schema.Literals(["image/png", "image/jpeg"]),
+    size: Schema.Int.check(Schema.isGreaterThan(0), Schema.isLessThanOrEqualTo(MMS_MAX_TOTAL_BYTES)),
+    dataBase64: Schema.String.check(Schema.isMaxLength(Math.ceil(MMS_MAX_TOTAL_BYTES / 3) * 4)),
+  })
+  export type PhotoMessagePicture = typeof MessagePicture.Type
+  interface NativePictures {
+    readMessagePicture(input: Reviewed): Promise<unknown>
+  }
+  let nativePictures: (PhotosPlugin & NativePictures) | undefined
+
+  function selectedPhotos(name: string): PhotosPlugin & NativePictures {
+    return (nativePictures ??= registerPlugin<PhotosPlugin & NativePictures>(name))
+  }
+
+  export async function readMessagePicture(pluginName: string, picture: Reviewed): Promise<PhotoMessagePicture> {
+    return Schema.decodeUnknownSync(MessagePicture)(await selectedPhotos(pluginName).readMessagePicture(picture))
+  }
 
   let library: PhotosClient | undefined
   let reviewed: DeviceLibraryClient | undefined
 
   /** @throws {never} */
   export function phoneLibrary(name: string): PhotosClient {
-    return (library ??= photosClient(photosPlugin(name), name))
+    return (library ??= photosClient(selectedPhotos(name), name))
   }
 
   /** @throws {never} */
@@ -19,7 +42,7 @@ module native {
     return (reviewed ??= deviceLibraryClient(deviceLibraryPlugin(name), name))
   }
 }
-import { phoneLibrary, reviewedLibrary } from native
+import { phoneLibrary, readMessagePicture, reviewedLibrary, type PhotoMessagePicture } from native
 
 module browser {
   import { browserPhotoThumbnail, type BrowserEditFrame } from "./photoCanvas.vibe"
@@ -721,6 +744,7 @@ export service PhotosPort {
   readonly changes: Stream.Stream<void>
   readonly browser: Option.Option<BrowserLibrary>
   original(id: string): (Blob | undefined)!PhotosFailed
+  messagePicture(picture: Reviewed): (PhotoMessagePicture | undefined)!PhotosFailed
   capture(id: string): (BrowserSource | undefined)!PhotosFailed
   saveEdit(request: BrowserEditSave): BrowserEditReceipt!PhotosFailed
   editResult(operation: string): BrowserEditReceipt!PhotosFailed
@@ -752,7 +776,10 @@ export const phonePhotos = Layer.sync(PhotosPort, () => {
     Effect.orElseSucceed(tryPromise(() => phone.value.onLibraryChanged((): void => { Queue.offerUnsafe(queue, undefined) })), () => undefined),
     (handle) => handle === undefined ? Effect.void : ignore(tryPromise(() => handle.remove())),
   )))
-  return { phone, reviewed, changes, browser: Option.none<BrowserLibrary>(), original: () => succeed(undefined), capture: () => succeed(undefined),
+  return { phone, reviewed, changes, browser: Option.none<BrowserLibrary>(), original: () => succeed(undefined),
+    messagePicture: (picture: Reviewed) => Option.isNone(phone) ? succeed(undefined) : tryPromise({
+      try: () => readMessagePicture(photosName, picture), catch: (cause) => new PhotosFailed({ cause }),
+    }), capture: () => succeed(undefined),
     saveEdit: () => succeed({ status: "not-started" } as const), editResult: () => succeed({ status: "not-started" } as const), ...entry() }
 })
 
@@ -762,6 +789,7 @@ export const browserPhotos = Layer.sync(PhotosPort, () => ({
   reviewed: Option.none(),
   changes: Stream.suspend(() => Stream.as(Stream.fromEventListener(page(), captureEvent()), undefined)),
   browser: Option.some(browserLibrary),
+  messagePicture: () => succeed(undefined),
   original: (id: string) => tryPromise({ try: () => browserOriginal(id), catch: (cause) => new PhotosFailed({ cause }) }),
   capture: (id: string) => tryPromise({ try: () => browserCapture(id), catch: (cause) => new PhotosFailed({ cause }) }),
   saveEdit: (request: BrowserEditSave) => tryPromise({ try: () => saveBrowserEdit(request), catch: (cause) => new PhotosFailed({ cause }) }),

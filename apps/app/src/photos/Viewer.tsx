@@ -1,4 +1,4 @@
-import { Album, ChevronLeft, ChevronRight, Crop, Ellipsis, Heart, Info, Mail, Pause, Pencil, Play, RotateCcw, Share2, Sparkles, Trash2, Undo2, Volume2, VolumeX, X } from "lucide-react";
+import { Album, ChevronLeft, ChevronRight, Crop, Ellipsis, Heart, Info, Mail, MessageCircle, Pause, Pencil, Play, RotateCcw, Share2, Sparkles, Trash2, Undo2, Volume2, VolumeX, X } from "lucide-react";
 import { Effect, type ManagedRuntime } from "effect";
 import { useCallback, useRef, type PointerEvent } from "react";
 import { Button, Menu, MenuContent, MenuItem, MenuTrigger, Sheet, SheetContent, Slider, cn, dockClearance } from "@repo/ui";
@@ -6,11 +6,12 @@ import { useMachine } from "../../gen/app__photos__viewer.react.ts";
 import { maxZoom, panUnits, type Event, type Look, type Pan } from "../../gen/app__photos__viewer.ts";
 import type { Machine } from "../../gen/app__photos__viewer.effect.vibe";
 import { taken, type Row } from "./catalog.vibe";
-import { OpenedPhoto, photoLook } from "./viewer.vibe";
+import { OpenedPhoto, photoLook, photoMessageType } from "./viewer.vibe";
 import { photoLooks } from "../platform/photoCanvas.vibe";
 import { CropFrame } from "./CropFrame.tsx";
 import { headingOf, trashDaysLabel, trashDaysLeft } from "./Grid.tsx";
 import { Time } from "../runtime/time.vibe";
+import { Device } from "../platform/device.vibe";
 
 const filters: readonly Look[] = ["Original", "Vivid", "Warm", "Cool", "Mono", "Fade", "Noir"];
 const messages = {
@@ -48,7 +49,7 @@ function imageTransform(zoom: number, pan: Pan): string {
 }
 
 interface Props {
-  readonly runtime: ManagedRuntime.ManagedRuntime<Machine | OpenedPhoto | Time, unknown>;
+  readonly runtime: ManagedRuntime.ManagedRuntime<Machine | OpenedPhoto | Time | Device, unknown>;
   readonly before?: number;
   readonly after?: number;
   readonly row?: Row;
@@ -201,10 +202,13 @@ export function MediaViewer({ runtime, before, after, row, inTrash, onBack, back
     returnCropFocusRef.current = state?.open ?? 0;
     action(beginCrop);
   }
+  const useInMessages = !inTrash && showing && allows({ type: "useInMessages" }) && photoMessageType(current.item) !== undefined
+    && runtime.runSync(Effect.flatMap(Device, (device) => device.capabilities())).image;
   const photosMenu = [
     !inTrash && state.kind === "Still" && allows({ type: "askAlpha" }) && { label: "Ask Alpha", icon: <Sparkles />, select: () => action({ type: "askAlpha" }) },
     onAddToAlbum && { label: "Add to album", icon: <Album />, select: onAddToAlbum },
     !inTrash && state.kind === "Still" && allows({ type: "email" }) && { label: "Email", icon: <Mail />, select: () => action({ type: "email" }) },
+    useInMessages && { label: "Use in Messages", icon: <MessageCircle />, select: () => action({ type: "useInMessages" }) },
     !inTrash && allows({ type: "share" }) && { label: "Share", icon: <Share2 />, select: () => action({ type: "share" }) },
     !inTrash && allows({ type: "trashOpen", neighbour: after ?? before ?? 0 }) && { label: "Delete", icon: <Trash2 />, select: () => action({ type: "trashOpen", neighbour: after ?? before ?? 0 }) },
     onRecover && { label: "Recover", icon: <Undo2 />, select: onRecover },
