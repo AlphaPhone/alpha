@@ -66,7 +66,6 @@ const cellLabel = new Intl.DateTimeFormat(undefined, { weekday: "long", month: "
 const views: ReadonlyArray<{ layout: View.Layout; label: string }> = [
   { layout: "Timeline", label: "Day" },
   { layout: "Agenda", label: "Schedule" },
-  { layout: "Columns", label: "Days" },
 ];
 
 const changes: Readonly<Record<Changes.Change, string>> = { Create: "Create an event", Update: "Change an event", Delete: "Delete an event", Respond: "Answer an invitation" };
@@ -491,7 +490,7 @@ function Month({ runtime, reminders }: CalendarProps & { reminders: ReadonlyArra
     await view.send({ type: "closeOverlay" });
     await view.send({ type: "openCalendars" });
   };
-  const offered = views.filter(({ layout }) => layout !== "Columns" || s.wide);
+  const selected = s.layout === "Columns" ? "Timeline" : s.layout;
   return (
     <CalendarMonthPanel wide={s.wide} month={firstDate.getMonth()} year={firstDate.getFullYear()}
       months={Array.from({ length: 12 }, (_, at) => ({ value: at, label: monthOnly.format(new Date(2000, at, 1)) }))}
@@ -504,9 +503,9 @@ function Month({ runtime, reminders }: CalendarProps & { reminders: ReadonlyArra
         onPick: view.can({ type: "pickDay", day }) ? () => void view.send({ type: "pickDay", day }) : day === s.anchor ? close : undefined,
       }))}>
       <div role="group" aria-label="Calendar view" className="mt-3 flex flex-wrap gap-2">
-        {offered.map(({ layout, label }) => (
-          <CalendarPill key={layout} pressed={s.layout === layout} disabled={s.layout !== layout && !(s.overlay === "LayoutMenu" ? view.can({ type: "chooseLayout", layout }) : view.can({ type: "closeOverlay" }))}
-            onClick={s.layout === layout ? undefined : () => void choose(layout)()}>{label}</CalendarPill>
+        {views.map(({ layout, label }) => (
+          <CalendarPill key={layout} pressed={selected === layout} disabled={selected !== layout && !(s.overlay === "LayoutMenu" ? view.can({ type: "chooseLayout", layout }) : view.can({ type: "closeOverlay" }))}
+            onClick={selected === layout ? undefined : () => void choose(layout)()}>{label}</CalendarPill>
         ))}
         <CalendarPill onClick={() => void calendars()}>Calendars</CalendarPill>
       </div>

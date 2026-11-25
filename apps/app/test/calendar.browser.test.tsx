@@ -48,6 +48,13 @@ it("Shows the selected day across a wide canvas and at large text (spec/app/cale
   expect(columns()[1]?.querySelector('button[aria-label^="Current source,"]')).not.toBeNull();
   expect(columns()[1]?.querySelector('button[aria-label^="Agenda reminder,"]')).not.toBeNull();
   await expect.element(page.getByRole("button", { name: "All-day source, All day" })).toBeVisible();
+  const chooseDate = page.getByRole("button", { name: /^Choose date:/ });
+  await chooseDate.click();
+  const views = page.getByRole("group", { name: "Calendar view" });
+  await expect.element(views.getByRole("button", { name: "Day", exact: true })).toHaveAttribute("aria-pressed", "true");
+  await expect.element(views.getByRole("button", { name: "Schedule", exact: true })).toBeVisible();
+  await expect.element(views.getByRole("button", { name: "Days", exact: true })).not.toBeInTheDocument();
+  await chooseDate.click();
   const dates = columns().map((column) => column.getAttribute("aria-label"));
   await page.getByRole("group", { name: dates[2] ?? undefined, exact: true }).getByRole("button", { name: /^Overnight source,/ }).click();
   await expect.element(page.getByRole("heading", { name: "Overnight source", exact: true })).toBeVisible();
