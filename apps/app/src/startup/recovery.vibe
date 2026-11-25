@@ -1,0 +1,8 @@
+// spec/app/startup/recovery.md, "Story: See that something went wrong, and get out of it"; spec/app/startup/recovery.md, "Story: Keep my drafts through a rebuild"
+module page {
+  /** Reloads after the owner's press before a shell or any editor opened. The failed shell's runtime is never needed for this. @throws {never} */
+  export function reloadBeforeMount(): void {
+    window.location.reload()
+  }
+}
+export { reloadBeforeMount } from page
