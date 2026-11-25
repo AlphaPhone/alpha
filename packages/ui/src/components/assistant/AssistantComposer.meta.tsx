@@ -1,4 +1,4 @@
-import { expect, fn, userEvent, within } from "storybook/test";
+import { expect, fn, userEvent, waitFor, within } from "storybook/test";
 import type { ComponentMeta } from "vibestack/stories";
 import type { AssistantComposerProps } from "./AssistantComposer.tsx";
 
@@ -51,6 +51,7 @@ export const meta: ComponentMeta<AssistantComposerProps> = {
       await userEvent.click(within(canvasElement).getByRole("button", { name: "Chat actions" }));
       await expect((await within(canvasElement.ownerDocument.body).findAllByRole("menuitem")).map((item) => item.textContent)).toEqual(["Attach media", "Search chat", "New chat", "Chat history"]);
       await userEvent.keyboard("{Escape}");
+      await waitFor(() => expect(canvasElement.ownerDocument.querySelector("[data-aria-hidden]")).toBeNull());
     },
     Writing: async ({ canvasElement }: { canvasElement: HTMLElement }) => {
       onSend.mockClear();
