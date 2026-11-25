@@ -60,8 +60,9 @@ function Tab({ runtime, alpha, tabs, page }: BrowserProps & { tabs: State; page:
   if (!state) return null;
   const tab = tabs.selected;
   const tabHost = runtime.runSync(TabHost);
-  const shown = tabHost.session.info(idOf(tab));
-  const { host, path } = addressParts(shown?.url);
+  const shown = tabHost.web === undefined ? tabHost.session.info(idOf(tab)) : tabHost.web.info(idOf(tab));
+  const shownAddress = shown?.url;
+  const { host, path } = addressParts(shownAddress);
   const editing = tabs.layer === "Address";
   const native = Option.isSome(tabHost.plugin);
   const privateTab = state.kind === "Private";
@@ -85,7 +86,7 @@ function Tab({ runtime, alpha, tabs, page }: BrowserProps & { tabs: State; page:
   const openLibrary = () => void browser.send({ type: "cover", layer: "Library" }).then(() => loadLibrary(runtime));
   const edit = () => {
     setRefusal(undefined);
-    setTyped(shown?.url ?? "");
+    setTyped(shownAddress ?? "");
     void browser.send({ type: "cover", layer: "Address" }).then(readSuggestions);
   };
   const others = tabs.open.filter((one) => one !== tab);
@@ -116,7 +117,7 @@ function Tab({ runtime, alpha, tabs, page }: BrowserProps & { tabs: State; page:
     native && { label: booked ? "Bookmarked" : "Bookmark", icon: <Star fill={booked ? "currentColor" : "none"} />, disabled: !canBookmark, onSelect: chooseBookmark },
     native && { label: "Library", name: "Library, bookmarks and history", icon: <History />, onSelect: openLibrary },
     native && { label: "Downloads", icon: <Download />, onSelect: () => void runtime.runPromise(openDownloads) },
-    can({ type: "openFind" }) && { label: "Find", name: "Find in page", icon: <Search />, onSelect: () => { setFinding(""); void browser.send({ type: "uncover" }).then(() => send({ type: "openFind" })); } },
+    native && can({ type: "openFind" }) && { label: "Find", name: "Find in page", icon: <Search />, onSelect: () => { setFinding(""); void browser.send({ type: "uncover" }).then(() => send({ type: "openFind" })); } },
     canAskErase(tabs) && { label: "Clear all", name: "Clear all browsing data", icon: <Trash2 />, onSelect: () => void browser.send({ type: "askErase" }) },
   ];
   const stood = runtime.runSync(Effect.flatMap(Pages, (pages) => pages.sought(tab)));
@@ -126,11 +127,13 @@ function Tab({ runtime, alpha, tabs, page }: BrowserProps & { tabs: State; page:
   };
   const findStatus = finding === "" ? "" : state.find.status === "Loading" ? "Searching…" : state.matches > 0 ? `${Math.max(1, stood.index)} of ${state.matches}` : "No matches";
   const cards = tabs.open.map((one) => {
-    const known = tabHost.session.info(idOf(one));
+    const known = tabHost.web === undefined ? tabHost.session.info(idOf(one)) : tabHost.web.info(idOf(one));
+    const address = known?.url;
     const privateTab = tabs.privates.includes(one);
     const blank = privateTab ? "New private tab" : "New tab";
-    return { id: one, title: known?.title || known?.url || blank, where: `${privateTab ? "Private · " : ""}${known?.url ?? ""}`, current: one === tab, private: privateTab };
+    return { id: one, title: known?.title || address || blank, where: `${privateTab ? "Private · " : ""}${address ?? ""}`, current: one === tab, private: privateTab };
   });
+  const privateNotice = tabHost.web === undefined ? undefined : "This tab is not saved in Alpha history. Website cookies and sign-ins are managed by your browser.";
   return (
     <div className="relative flex min-h-0 flex-1 flex-col">
       {editing
@@ -152,10 +155,10 @@ function Tab({ runtime, alpha, tabs, page }: BrowserProps & { tabs: State; page:
       {state.phase === "Loading" && <div role="progressbar" aria-label="Loading website" className="h-0.75 shrink-0 overflow-hidden bg-secondary"><div className="h-full w-1/3 bg-primary" /></div>}
       <div inert={tabs.layer !== "Uncovered"} className="relative flex min-h-0 flex-1 flex-col overflow-y-auto">
         {state.phase === "Blank"
-          ? <BrowserNewTab private={privateTab} onSearch={cover("Address") && edit} />
+          ? <BrowserNewTab private={privateTab} privateNotice={privateNotice} onSearch={cover("Address") && edit} />
           : <div data-alpha-browser-page="" aria-hidden ref={(place) => { if (place) void runtime.runPromise(placed); }} className="absolute inset-0" />}
       </div>
-      {editing && <AddressChoices runtime={runtime} query={typed} privateTab={privateTab} refusal={state.refused ? refusal : undefined} onOpen={submit} />}
+      {editing && <AddressChoices runtime={runtime} query={typed} privateTab={privateTab} privateNotice={privateNotice} refusal={state.refused ? refusal : undefined} onOpen={submit} />}
       {state.finding && tabs.layer === "Uncovered" && (
         <BrowserFindBar value={finding} onValueChange={seek} status={findStatus}
           onPrevious={can({ type: "findNext", forward: false }) ? () => void send({ type: "findNext", forward: false }) : undefined}
@@ -178,15 +181,16 @@ function Tab({ runtime, alpha, tabs, page }: BrowserProps & { tabs: State; page:
       <ConfirmDialog open={tabs.erasing === "Asked"} title="Clear browsing data?" confirmLabel="Clear" destructive
         onConfirm={() => { if (canConfirmErase(tabs)) void browser.send({ type: "confirmErase" }); }}
         onCancel={() => { if (canCancelErase(tabs)) void browser.send({ type: "cancelErase" }); }}>
-        Clears history, cookies and tabs.
+        {native ? "Clears history, cookies and tabs." : "Clears Alpha's history and tabs. Your browser manages website cookies."}
       </ConfirmDialog>
     </div>
   );
 }
 
-function AddressChoices({ runtime, query, privateTab, refusal, onOpen }: Pick<BrowserProps, "runtime"> & {
+function AddressChoices({ runtime, query, privateTab, privateNotice, refusal, onOpen }: Pick<BrowserProps, "runtime"> & {
   query: string;
   privateTab: boolean;
+  privateNotice?: string;
   refusal?: string;
   onOpen: (url: string) => void;
 }) {
@@ -201,7 +205,7 @@ function AddressChoices({ runtime, query, privateTab, refusal, onOpen }: Pick<Br
       if (!address) return [];
       return [{ url, kind: saved.has(url) ? "bookmark" : "history", title: address.hostname, detail: address.pathname + address.search + address.hash }];
     });
-  return <BrowserAddressChoices choices={choices} privateTab={privateTab} refusal={refusal} onOpen={onOpen} />;
+  return <BrowserAddressChoices choices={choices} privateTab={privateTab} privateNotice={privateNotice} refusal={refusal} onOpen={onOpen} />;
 }
 
 function Library({ runtime, onBack, onOpen }: Pick<BrowserProps, "runtime"> & { onBack: () => void; onOpen: (url: string) => void }) {
