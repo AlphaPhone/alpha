@@ -663,7 +663,9 @@ export const mediaReview = Layer.effect(MediaReview, effect {
         const files = try Effect.raceFirst(executors.readyFiles(), retired)
         if (files === undefined || !(try arrived)) return undefined
         effect function current(): boolean!! {
-          return (try arrived) && (try enrollmentIsCurrent(opened)) && (try arrived) && sameFiles(files, try filesContext())
+          if (!(try arrived) || !(try enrollmentIsCurrent(opened)) || !(try arrived)) return false
+          const now = try filesContext()
+          return now !== undefined && files !== undefined && sameFiles(files, now)
         }
         const reviewed = operation.type === "files_open" && (try current()) ? try executors.reviewFiles(operation) : undefined
         if ((operation.type === "files_open" && reviewed === undefined) || !(try current())) return undefined
