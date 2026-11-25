@@ -63,10 +63,16 @@ const search = (text: string) => fill("Search mail", text).then(() => document.q
 describe.each([["a browser", false], ["a phone", true]])("in %s", (_where, phone) => {
   it("See my mail (spec/app/inbox/index.md, \"Story: See my mail\")", async () => {
     const world = { ...scene(), phone };
+    const attachmentText = '<strong data-attachment-fixture>Review agenda</strong>';
     for (let at = 10; at <= 30; at += 1) world.inbox.mail.push(letter(at, `Newsletter ${at}`, ["INBOX"]));
-    const termSheet = world.inbox.mail.find((stored) => stored.card.id === "g1");
-    if (termSheet) termSheet.body += "\n\nThe data room is at https://northpoint.test/room";
-    const earlierLunch = letter(0, "Earlier lunch plan", ["SENT"], "Could you make it Friday?");
+    const termSheet = world.inbox.mail.find(({ card }) => card.id === "g1");
+    if (!termSheet) throw new Error("Missing term sheet fixture");
+    termSheet.body += "\n\nThe data room is at https://northpoint.test/room";
+    termSheet.files = [...termSheet.files, {
+      partId: "2", name: "agenda.txt", mimeType: "text/plain", size: new TextEncoder().encode(attachmentText).byteLength, supported: true,
+    }];
+    termSheet.attachmentText = { "2": attachmentText };
+    const earlierLunch = letter(0, "Earlier lunch plan", ["SENT"], "Could you make it Friday?", undefined, Date.parse(termSheet.card.receivedAt) - 3_600_000);
     world.inbox.mail.push({ ...earlierLunch, card: { ...earlierLunch.card, threadId: "t1" } });
     const first = await open(world);
     const { alpha } = first;
@@ -129,6 +135,17 @@ describe.each([["a browser", false], ["a phone", true]])("in %s", (_where, phone
     await until(alpha, runtime, Shown, (s) => s.link === 0);
     step("9");
     expect(visited).toHaveBeenCalledWith("https://northpoint.test/room", "_blank", "noopener,noreferrer");
+
+    // spec/app/inbox/message.md, "An attachment is reviewed before it is opened or saved, and one use is in flight at a time"
+    await action("Open agenda.txt");
+    await until(alpha, runtime, Shown, (s) => s.attachment === 2);
+    expect([world.inbox.attachmentReads, document.querySelector("[aria-label='Attachment contents']")]).toEqual([[], null]);
+    await confirm("Open");
+    await until(alpha, runtime, Shown, (s) => s.file.outcome === "Confirmed");
+    const preview = document.querySelector("[aria-label='Attachment contents']");
+    expect([world.inbox.attachmentReads, preview?.textContent, preview?.querySelector("strong")]).toEqual([["g1/2"], attachmentText, null]);
+    await confirm("Close");
+    await until(alpha, runtime, Shown, (s) => s.attachment === 0);
 
     // spec/app/inbox/marking.md, "The owner marks a message read or unread; while another mark is in flight the owner is told it is still in progress, and a message whose last mark was unconfirmed is marked again only after the list was read afresh"
     await menu("Mark as unread");
