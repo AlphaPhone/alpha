@@ -270,7 +270,7 @@ describe(`Alpha's own cloud waits, ready, for the cutover (spec/cloud/index.md, 
 })
 
 describe(`Alpha's screens reach the cloud through eliza's policy (spec/cloud/index.md, "Story: Reach my account's services from the app")`, () => {
-  it.effect("loads every route of Alpha's table, refuses a sign-in or session route, and covers eliza's managed Gmail client", () => effect {
+  it.effect("loads every route of Alpha's table, refuses a sign-in or fresh-session route, and covers eliza's managed Gmail client", () => effect {
     try holds(() => assert.deepStrictEqual(tableProblems(), []))
     const [group] = elizaCloudRoutes
     try holds(() => assert.deepStrictEqual(group?.routes.find((route) => route.path === "/api/v1/eliza/google/status"), { method: "GET", path: "/api/v1/eliza/google/status", query: [{ key: "side", accepts: { kind: "any" } }, { key: "grantId", accepts: { kind: "any" } }] }))
@@ -281,7 +281,7 @@ describe(`Alpha's screens reach the cloud through eliza's policy (spec/cloud/ind
     ])
     try holds(() => assert.deepStrictEqual(refused, [
       "GET /api/public/service: belongs to sign-in",
-      "POST /api/v1/subscriptions/cancel: needs an account session",
+      "POST /api/v1/subscriptions/cancel: needs a fresh or stepped-up session",
       "GET /api/v1/nowhere: matches 0 of eliza's device routes",
     ]))
     const files = try FileSystem.FileSystem
