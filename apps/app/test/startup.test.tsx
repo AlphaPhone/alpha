@@ -4,15 +4,14 @@ import { act } from "react";
 import { createRoot } from "react-dom/client";
 import { expect, it, vi } from "vitest";
 import { App } from "../src/App.tsx";
-import type { Alpha, Resident } from "../src/runtime/area.tsx";
-import { rooted } from "../src/runtime/root.vibe";
+import { boot } from "../src/boot.tsx";
+import type { Platform } from "../src/platform/platform.vibe";
 
 const react = globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean };
 
 it("Shows recovery before the shell opens (spec/app/startup/recovery.md, \"Story: See that something went wrong, and get out of it\")", async () => {
-  const unavailable: Layer.Layer<Resident> = Layer.effectDiscard(Effect.die("unavailable startup service"));
-  const runtime = rooted(unavailable);
-  const alpha: Alpha = { ...runtime, slot: () => null, back: () => runtime.runtime.runPromiseExit(Effect.void), taking: () => undefined };
+  const unavailable = Layer.effectContext<Platform, never, never>(Effect.die("unavailable startup service"));
+  const alpha = boot(unavailable, []);
   const host = document.body.appendChild(document.createElement("div"));
   const root = createRoot(host);
   const reload = vi.spyOn(window.location, "reload").mockImplementation(() => undefined);
