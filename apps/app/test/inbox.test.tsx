@@ -156,7 +156,11 @@ describe.each([["a browser", false], ["a phone", true]])("in %s", (_where, phone
     }
 
     // spec/app/inbox/message.md, "An attachment is reviewed before it is opened or saved, and one use is in flight at a time"
-    await action("Open agenda.txt");
+    await drawn(() => {
+      const attachment = document.querySelector<HTMLButtonElement>('button[aria-label^="Open agenda.txt "]');
+      if (!attachment) throw new Error("no attachment preview");
+      attachment.click();
+    });
     await until(alpha, runtime, Shown, (s) => s.attachment === 2);
     expect([world.inbox.attachmentReads, document.querySelector("[aria-label='Attachment contents']")]).toEqual([[], null]);
     await confirm("Open");
