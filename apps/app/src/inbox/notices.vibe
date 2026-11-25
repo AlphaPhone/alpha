@@ -94,8 +94,7 @@ const watching = started(effect {
     (a, b) => a.signedIn === b.signedIn && a.status === b.status && a.grant === b.grant)
   const active = Stream.map(Stream.filter(device.visible, (showing) => showing), () => undefined)
   const selections = Stream.merge(Stream.map(choices, () => undefined), active)
-  const permission = Stream.changes(Stream.mapEffect(panel.background.notices, () => Effect.map(published(), (status) => status.notificationsAllowed)))
-  try Stream.runForEach(Stream.merge(selections, Stream.map(permission, () => undefined)), () => reconcile())
+  try Stream.runForEach(Stream.merge(selections, panel.background.notices), () => reconcile())
 }, "watching the selected Gmail account")
 
 export const signals = (background: MailBackground) => Stream.unwrap(effect {

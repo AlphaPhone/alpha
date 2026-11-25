@@ -129,13 +129,24 @@ it("Choose a phone contact for the email I’m writing (spec/app/inbox/adding.md
   await until(alpha, runtime, List, (state) => state.list.status === "Loaded");
   await press("Compose");
   await until(alpha, runtime, Writing, (state) => state.open && state.letter.kind === "Fresh");
-  await press("Choose contacts");
-  await until(alpha, runtime, Adding, (state) => state.people.status === "Loaded" && state.addresses === 1);
-  await drawn(() => vi.waitFor(() => {
+  const show = async () => {
+    await press("Choose contacts");
+    await until(alpha, runtime, Adding, (state) => state.people.status === "Loaded" && state.addresses === 1);
+  };
+  const choose = () => drawn(() => vi.waitFor(() => {
     const choice = document.querySelector<HTMLButtonElement>('[aria-label="Contact addresses"] button');
-    expect(choice?.textContent).toContain(email);
+    expect(choice?.textContent ?? "").toContain(email);
     choice?.click();
   }));
+  await show();
+  expect(world.telephony.contacts).toBe(true);
+  world.telephony.contacts = false;
+  await choose();
+  await until(alpha, runtime, Adding, (state) => state.contactDraft === 0);
+  expect(await runtime.runPromise(Effect.flatMap(Writing, (writing) => Effect.map(writing.get(), (state) => state.letter.recipients)))).toBe(0);
+  world.telephony.contacts = true;
+  await show();
+  await choose();
   await until(alpha, runtime, Writing, (state) => state.letter.recipients === 1);
   const added = await runtime.runPromise(Effect.flatMap(Writing, (writing) => Effect.flatMap(writing.get(), (state) =>
     Effect.map(Letters, (letters) => letters.words(state.letter.id).to))));
