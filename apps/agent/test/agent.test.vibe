@@ -22,9 +22,10 @@ function phoneAgent(run: Run, state: string) {
 const client = (running: Running) => createRuntimeJsonClient({ bridge: () => socketBridge(running), startupTimeoutMs: 120_000, pollMs: 100, requestTimeoutMs: 60_000 })
 
 /** A concrete path that probes route admission without targeting an existing record outside the test conversation. */
-const filled = (route: string, conversation: ConversationRecord) => {
+const filled = (route: string, conversation: ConversationRecord, taskId: string, triggerId: string) => {
+  const id = route.startsWith("/api/scheduled-tasks/") ? taskId : route.startsWith("/api/triggers/") ? triggerId : conversation.id
   const path = route
-    .replace("{id}", conversation.id)
+    .replace("{id}", id)
     .replace("{roomId}", conversation.roomId)
     .replace("{eventId}", "no-such-event")
     .replace("{nodeId}", "review")
@@ -45,6 +46,8 @@ schema Listed { conversations: { id: string }[] }
 schema Replied { fullText: string }
 schema Interacted { success: boolean; result: { state?: { notes: { title: string; body: string }[] } } }
 schema Approvals { approvals: Schema.Unknown[] }
+schema RouteTasks { tasks: { taskId: string; promptInstructions: string }[] }
+schema SavedTrigger { trigger: { id: string } }
 
 describe("Build the pack only from the pinned eliza", () => {
   // spec/agent/index.md, "A pack is admitted only when its manifest names the pinned commit, Node 26, the local speech module, the plugins it carries, the Alpha product plugin, a pinned workflow worker and every allowed action"
@@ -98,9 +101,20 @@ describe("Run Alpha's agent on the phone", () => {
       try promise(() => controller.bind(opened))
       const result = try promise(() => controller.send({ text: "Remember the word heron." }, { stream: { onPreview: () => {} } }))
       try Effect.try(() => expect(result.kind === "Replied" ? result.reply.text : result.kind).toContain("You said: Remember the word heron."))
+      const title = "Route admission check"
+      const routine = try promise(() => call(first, "POST", "/api/personal-assistant/routines", { title, idempotencyKey: "route-admission", times: ["14:20"] }))
+      const listing = try promise(() => call(first, "GET", "/api/scheduled-tasks?ownerVisibleOnly=1"))
+      const saved = try Schema.decodeUnknownEffect(Schema.fromJsonString(RouteTasks))(listing.body)
+      const task = saved.tasks.find((one) => one.promptInstructions === title)
+      const queued = try promise(() => call(first, "POST", "/api/triggers", {
+        kind: "prompt", displayName: title, instructions: "Review the receipt", timezone: "UTC",
+        triggerType: "event", eventKind: "alpha.test.route-admission", wakeMode: "inject_now", enabled: false,
+      }))
+      const { trigger } = try Schema.decodeUnknownEffect(Schema.fromJsonString(SavedTrigger))(queued.body)
+      try Effect.try(() => expect({ routine: routine.status, task: task !== undefined, trigger: queued.status }).toEqual({ routine: 201, task: true, trigger: 201 }))
+      const taskId = task?.taskId ?? ""
       for (const route of try Effect.try(() => listed())) {
-        if (route.path === "/api/triggers/{id}/runs") continue
-        const target = filled(route.path, opened)
+        const target = filled(route.path, opened, taskId, trigger.id)
         const status = route.stream === true
           ? try promise(async () => {
             const streamed = await runtime.stream(target, { text: "Again." })
@@ -109,7 +123,10 @@ describe("Run Alpha's agent on the phone", () => {
             return { status: streamed.status, body: chunks.length as unknown }
           })
           : try promise(async () => {
-            const answer = await call(first, route.method, target, route.method === "GET" || route.method === "DELETE" ? undefined : target.endsWith("/messages") ? { text: "Again." } : {})
+            const body = route.method === "GET" || route.method === "DELETE" ? undefined
+              : target.endsWith("/messages") ? { text: "Again." }
+              : route.path === "/api/triggers/{id}/execute" || route.path === "/api/scheduled-tasks/{id}/fire" ? { probe: true } : {}
+            const answer = await call(first, route.method, target, body)
             return answerOf(answer.status, answer.body)
           })
         try Effect.try(() => expect({ route: route.path, answer: status }).not.toEqual({ route: route.path, answer: unserved }))

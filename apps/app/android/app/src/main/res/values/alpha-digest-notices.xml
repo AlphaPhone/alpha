@@ -11,4 +11,5 @@
     <string name="alpha_digest_notice_unavailable">Brief source unavailable</string>
     <string name="alpha_digest_notice_cancelled">Your brief was cancelled</string>
     <string name="alpha_digest_notice_update">Brief update</string>
+    <string name="alpha_digest_notice_ask">Ask Alpha</string>
 </resources>
