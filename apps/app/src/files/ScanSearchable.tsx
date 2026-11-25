@@ -6,7 +6,7 @@ import type { Scan } from "../../gen/app__files__scan.ts";
 import { native } from "../platform/device.vibe";
 import type { Shown, Resident } from "../runtime/area.tsx";
 import { ScanAssets, confirmSearch, searchWords, type SearchLine, type scan } from "./scan.vibe";
-import { scanPanel, scanTitle } from "./scan-dialog.ts";
+import { scanButton, scanPanel, scanPrimary, scanTitle } from "./scan-dialog.ts";
 
 type Runtime = Layer.Success<typeof scan> | Resident;
 const saveProblems = {
@@ -63,9 +63,9 @@ export function ScanSearchable({ runtime, state, close }: Pick<Shown<Runtime>, "
             </section>
           );
         })}
-        <div className="flex justify-end gap-2">
-          <Button variant="secondary" aria-label="Keep reviewed text" disabled={!ready} onClick={() => submit(false)}>Keep text</Button>
-          <Button aria-label={`${saveLabel} reviewed searchable PDF`} disabled={!ready} loading={saving} onClick={() => submit(true)}>{saveLabel} PDF</Button>
+        <div className="flex flex-wrap gap-2">
+          <Button variant="secondary" className={scanButton} aria-label="Keep reviewed text" disabled={!ready} onClick={() => submit(false)}>Keep text</Button>
+          <Button className={cn(scanPrimary, "basis-full")} aria-label={`${saveLabel} reviewed searchable PDF`} disabled={!ready} loading={saving} onClick={() => submit(true)}>{saveLabel} PDF</Button>
         </div>
       </DialogContent>
     </Dialog>
