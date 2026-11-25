@@ -35,6 +35,8 @@ export type InboxListScreenProps = Pick<InboxListProps, "rows" | "loading" | "on
     onMarkRead?: () => void;
     /** Reviews marking the chosen messages as unread. */
     onMarkUnread?: () => void;
+    /** Reviews deleting selected local drafts, only in Drafts. */
+    onDeleteDrafts?: () => void;
     /** Chooses every message the list shows; offered while some shown are not chosen. */
     onChooseAll?: () => void;
     /** The address of the account whose mail is shown. */
@@ -90,7 +92,7 @@ export type InboxListScreenProps = Pick<InboxListProps, "rows" | "loading" | "on
 export function InboxListScreen({
   account, onBack, folder, unavailable, onChooseFolder, searching = false, search, onSearchChange, onSearch, onOpenSearch, onCloseSearch,
   notice, onNoticeAction, state, onStateAction, chosen = 0, onStartSelection, onFinishSelection, onClearSelection,
-  onArchive, onTrash, onRestore, labelChanges = false, onStar, onMarkRead, onMarkUnread, onChooseAll, onRefresh, onCompose, accounts = [], onChooseAccount, aside = [], rows, loading, onLoadMore, loadingMore,
+  onArchive, onTrash, onRestore, labelChanges = false, onStar, onMarkRead, onMarkUnread, onDeleteDrafts, onChooseAll, onRefresh, onCompose, accounts = [], onChooseAccount, aside = [], rows, loading, onLoadMore, loadingMore,
 }: InboxListScreenProps) {
   const focusSearchAfterCloseRef = useRef(false);
   const closeSearch = () => {
@@ -112,15 +114,17 @@ export function InboxListScreen({
         <Menu>
           <MenuTrigger asChild><Button variant="ghost" size="icon" aria-label="Mail options"><Ellipsis /></Button></MenuTrigger>
           <MenuContent className="min-w-52">
-            <MenuItem onSelect={onFinishSelection ?? onStartSelection}><Check className="size-5.5" />{onFinishSelection ? "Finish selection" : "Select emails"}</MenuItem>
+            <MenuItem onSelect={onFinishSelection ?? onStartSelection}><Check className="size-5.5" />{onFinishSelection ? "Finish selection" : folder === "drafts" ? "Select drafts" : "Select emails"}</MenuItem>
             {onFinishSelection ? (
               <>
                 <MenuItem disabled={!onChooseAll && !onClearSelection} onSelect={onChooseAll ?? onClearSelection}><Check className="size-5.5" />{onChooseAll || !onClearSelection ? "Select all shown" : "Deselect all"}</MenuItem>
-                {folder === "archived" || folder === "trashed"
+                {folder === "drafts" ? (
+                  <MenuItem disabled={!onDeleteDrafts} onSelect={onDeleteDrafts}><Trash2 className="size-5.5" />Delete drafts</MenuItem>
+                ) : folder === "archived" || folder === "trashed"
                   ? <MenuItem disabled={!onRestore} onSelect={onRestore}><Archive className="size-5.5" />{folder === "trashed" ? "Restore from Trash" : "Restore to Inbox"}</MenuItem>
                   : <MenuItem disabled={!onArchive} onSelect={onArchive}><Archive className="size-5.5" />Archive</MenuItem>}
-                {folder === "trashed" ? null : <MenuItem disabled={!onTrash} onSelect={onTrash}><Trash2 className="size-5.5" />Move to Trash</MenuItem>}
-                {labelChanges ? <>
+                {folder === "trashed" || folder === "drafts" ? null : <MenuItem disabled={!onTrash} onSelect={onTrash}><Trash2 className="size-5.5" />Move to Trash</MenuItem>}
+                {labelChanges && folder !== "drafts" ? <>
                   <MenuItem disabled={!onStar} onSelect={onStar}><Star className="size-5.5" />{folder === "starred" ? "Remove stars" : "Star"}</MenuItem>
                   <MenuItem disabled={!onMarkRead} onSelect={onMarkRead}><MailOpen className="size-5.5" />Mark as read</MenuItem>
                   <MenuItem disabled={!onMarkUnread} onSelect={onMarkUnread}><Mail className="size-5.5" />Mark as unread</MenuItem>
