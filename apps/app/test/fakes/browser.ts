@@ -1,5 +1,5 @@
 // spec/app/browser/index.md, "Story: Open, pick and close tabs"; spec/app/browser/address.md, "Story: Watch a page load"
-import type { BrowserBookmarkList, BrowserSavedState, BrowserTabHostPlugin, BrowserTabState } from "@elizaos/os-bridges";
+import type { BrowserBookmarkList, BrowserPageGuard, BrowserSavedState, BrowserTabHostPlugin, BrowserTabState } from "@elizaos/os-bridges";
 import { type Faked, plugin, rejection } from "./phone.ts";
 
 interface TabEvents {
@@ -34,6 +34,7 @@ export interface BrowserScene {
   shown: { id: string; x: number; y: number; width: number; height: number } | undefined;
   /** Every call the page made, by method. */
   readonly calls: string[];
+  readonly shared: BrowserPageGuard[];
   showInFiles: (() => void) | undefined;
 }
 
@@ -135,6 +136,7 @@ export function browserScene(): BrowserScene {
     tabs: new Map(),
     shown: undefined,
     calls: [],
+    shared: [],
     showInFiles: undefined,
   };
 }
@@ -293,7 +295,14 @@ export function alphaBrowser(world: BrowserScene): Faked {
       reviewQuestion: () => Promise.reject(rejection("Reading unavailable")),
       reviewReading: () => Promise.reject(rejection("Reading unavailable")),
       cancelReading: () => Promise.resolve(),
-      share: (options) => Promise.resolve(stateOf(held(options))),
+      share: (options) => {
+        const tab = stateOf(held(options));
+        if (!tab.committed || tab.loading || tab.url !== options.url || tab.navigation !== options.navigation) {
+          return Promise.reject(rejection("The Browser page changed"));
+        }
+        world.shared.push(options);
+        return Promise.resolve(tab);
+      },
       openExternalBrowser: () => Promise.resolve(),
       downloads: ({ session: requested }) => {
         world.calls.push("downloads");
