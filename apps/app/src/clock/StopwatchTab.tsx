@@ -1,7 +1,7 @@
 // spec/app/clock/stopwatch.md, "Story: Time laps with the stopwatch"
 import { Button, Card } from "@repo/ui";
 import type { ManagedRuntime } from "effect";
-import { Flag, Pause, Play, RotateCcw } from "lucide-react";
+import { Pause, Play, Undo2 } from "lucide-react";
 import { useSyncExternalStore } from "react";
 import type { Machine as StopwatchMachine } from "../../gen/app__clock__stopwatch.effect.vibe";
 import { useMachine as useStopwatch } from "../../gen/app__clock__stopwatch.react.ts";
@@ -39,12 +39,12 @@ export function StopwatchTab({ runtime }: StopwatchTabProps) {
 
   return (
     <section aria-label="Stopwatch" className="flex flex-col gap-5">
-      <Card className="items-center gap-2 py-8">
-        <span aria-label="Stopwatch elapsed time" className="font-mono text-4xl font-light tracking-tight tabular-nums text-foreground">
+      <Card className="items-center gap-2 py-8 rounded-tile border-0 bg-secondary">
+        <span aria-label="Stopwatch elapsed time" className="font-display text-5xl font-light tabular-nums text-foreground">
           {formatStopwatch(totalElapsed)}
         </span>
         {state.laps.length > 0 && (
-          <span className="font-mono text-sm tabular-nums text-muted-foreground">
+          <span className="text-sm tabular-nums text-muted-foreground">
             {`Lap ${state.laps.length + 1} · ${formatStopwatch(currentSplit)}`}
           </span>
         )}
@@ -53,12 +53,11 @@ export function StopwatchTab({ runtime }: StopwatchTabProps) {
       <div className="grid grid-cols-2 gap-3">
         {state.status === "Paused" ? (
           <Button variant="secondary" disabled={!sw.can(resetEvent)} onClick={() => void sw.send(resetEvent)}>
-            <RotateCcw aria-hidden className="size-4" />
+            <Undo2 aria-hidden className="size-4" />
             Reset
           </Button>
         ) : (
           <Button variant="secondary" disabled={!sw.can(lapEvent)} onClick={() => void sw.send(lapEvent)}>
-            <Flag aria-hidden className="size-4" />
             Lap
           </Button>
         )}
@@ -84,7 +83,7 @@ export function StopwatchTab({ runtime }: StopwatchTabProps) {
       </div>
 
       {reversedLaps.length > 0 && (
-        <Card className="gap-2 p-0">
+        <Card className="gap-2 p-0 rounded-tile border-0 bg-secondary">
           <div className="grid grid-cols-3 border-b border-border px-4 py-2 text-xs font-semibold text-muted-foreground">
             <span>Lap</span>
             <span className="text-right">Split</span>
@@ -101,8 +100,8 @@ export function StopwatchTab({ runtime }: StopwatchTabProps) {
                   <span className={toneClass}>
                     {`Lap ${entry.number}${isBest ? " · Fastest" : isWorst ? " · Slowest" : ""}`}
                   </span>
-                  <span className={`text-right font-mono tabular-nums ${toneClass}`}>{formatStopwatch(entry.splitMs)}</span>
-                  <span className="text-right font-mono tabular-nums text-muted-foreground">{formatStopwatch(entry.totalMs)}</span>
+                  <span className={`text-right tabular-nums ${toneClass}`}>{formatStopwatch(entry.splitMs)}</span>
+                  <span className="text-right tabular-nums text-muted-foreground">{formatStopwatch(entry.totalMs)}</span>
                 </li>
               );
             })}
