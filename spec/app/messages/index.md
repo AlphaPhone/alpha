@@ -436,6 +436,13 @@ pure def sometimesMarkedReadAsSmsApp(s: Messages): bool = s.smsApp and content(s
 > the messaging app what Alpha cannot show, and delete a message only after
 > I confirm it.
 
+### A tap toggles message actions and a stationary hold opens them
+
+A tap on a message opens or closes its actions. A stationary primary
+press opens the actions while held and releasing it keeps them open.
+Moving to scroll or cancelling the press opens no actions. Following an
+inline link or selecting text leaves the message menu alone.
+
 ### Copy puts a message's text on the clipboard, Call opens Phone with the number, and a message Alpha cannot show opens in the messaging app; none changes anything here
 
 ```quint
