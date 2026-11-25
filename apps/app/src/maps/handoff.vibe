@@ -1,6 +1,6 @@
 // spec/maps/cards.md, "A card's Map button runs one flow, chosen from what the card carries"; spec/maps/screen.md, "Call is offered only for a dialable number on the build that has Phone, and Copy number only for a place that is not Google's"; spec/maps/cards.md, "Only the newest agent message offers its choice and its card, in the session and conversation that showed them"; spec/maps/cards.md, "A tap sends one answer while the composer is quiet; a draft or an edit says why it waits; a failed send asks again"; spec/maps/eventReturn.md, "One check per tap, and only its reply for the current origin returns, once"; spec/maps/notificationOpen.md, "A read starts only when Maps can be shown and none is in flight, and opens Maps at most once per tap"
-import type { MapsCard, MapsCardPlace } from "@elizaos/plugin-maps/cards"
-import type { Place } from "@elizaos/plugin-maps/client/contracts"
+import type { MapsCard, MapsCardPlace } from "@elizaos/plugin-maps-client"
+import type { Place } from "@elizaos/plugin-maps-client"
 import { type CardFacts, type Composer, Machine as CardsMachine, flowOf, searchZoom } from "../../gen/maps__cards.effect.vibe"
 import { Machine as ReturnMachine, offered, type ReturnReply } from "../../gen/maps__eventReturn.effect.vibe"
 import { Machine as OpenMachine } from "../../gen/maps__notificationOpen.effect.vibe"

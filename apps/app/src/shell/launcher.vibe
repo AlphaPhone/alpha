@@ -2,7 +2,7 @@
 import {
   appKey, createLauncher, describeLauncherApps, filterLauncherApps,
   type InstalledApp, type LauncherBridge, type LauncherError, type LauncherSnapshot, type LauncherAppsChange, type Launcher as InstalledLauncher,
-} from "@elizaos/os/bridges/system"
+} from "@elizaos/os-bridges"
 import { Machine as FavoritesMachine, type Event as FavoritesEvent, type Legacy } from "../../gen/shell__favorites.effect.vibe"
 import { Machine as GesturesMachine, type Outcome, type Surface } from "../../gen/shell__gestures.effect.vibe"
 import { Machine as AppInfoMachine, type InfoReply } from "../../gen/shell__appInfo.effect.vibe"

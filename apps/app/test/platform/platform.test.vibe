@@ -22,9 +22,9 @@ import { nativePlugins } from "../../src/platform/native-plugins.ts"
 
 module device {
   import type { CapacitorPort } from "../../src/platform/native-capacitor.ts"
-  import type { AgentEvents, AgentRequest, AgentStatus, AgentStreamEnd, AgentStreamRequest, ElizaAgentPlugin } from "@elizaos/os/bridges/definitions/agent"
+  import type { AgentEvents, AgentRequest, AgentStatus, AgentStreamEnd, AgentStreamRequest, ElizaAgentPlugin } from "@elizaos/os-bridges"
   import type { PageWatch } from "../../src/platform/page-events.ts"
-  import type { CloudClient as NativeCloud, CloudRequest } from "@elizaos/os/bridges/definitions/cloud"
+  import type { CloudClient as NativeCloud, CloudRequest } from "@elizaos/os-bridges"
 
   /** A Capacitor bridge with the listed plugins and methods; `calls` records each call. @throws {never} */
   export function bridge(plugins: Readonly<Record<string, Readonly<Record<string, (args: unknown) => unknown>>>>, calls: string[] = []): CapacitorPort {

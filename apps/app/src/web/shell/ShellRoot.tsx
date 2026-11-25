@@ -16,7 +16,7 @@ import { initial as permissionsStart } from "../../../gen/shell__permissions.ts"
 import { initial as recoveryStart } from "../../../gen/shell__recovery.ts";
 import { initial as appInfoStart } from "../../../gen/shell__appInfo.ts";
 import { emptyHome, pullOpensShade, swipe } from "../../../gen/shell__gestures.ts";
-import { appKey, type InstalledApp } from "@elizaos/os/bridges/system";
+import { appKey, type InstalledApp } from "@elizaos/os-bridges";
 import { appOfKey } from "../../shell/apps.vibe";
 import { Launcher, addableViews, appInfoText, homeKeys, inventory, launchErrorText, libraryKeys } from "../../shell/launcher.vibe";
 import { Foreground } from "../../shell/foreground.vibe";

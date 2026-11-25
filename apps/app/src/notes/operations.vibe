@@ -1,10 +1,10 @@
 // spec/notes/organize.md, "Story: Let the agent start and stop a voice note"; spec/notes/organize.md, "A recording receipt says what the recorder did"; spec/notes/organize.md, "A move applies only to the note revision the owner reviewed, into a folder that exists"; spec/notes/organize.md, "A folder is created once by name, and only a folder that reads back counts"; spec/notes/organize.md, "A restore brings back the newest Recently deleted copy of that note through the Trash restore"; spec/notes/listFilter.md, "The filter is shown only on the list the turn named, checked again at commit"; spec/notes/organize.md, "A workflow read shares the selected notes only while each still holds the text the owner reviewed"; spec/notes/organize.md, "A workflow's note is saved once, into the agent's collection, only from the open run in front"
 import {
   NOTES_LIST_FILTER_CAPABILITY, decodeNotesOrganizeOperation, describeNotesOrganizeOperation, notesOrganizeOffered, type NotesDeviceContext, type NotesOrganizeOperation,
-} from "@elizaos/plugin-notes/organize"
-import { NOT_DISPATCHED, type ExecutorCall } from "@elizaos/agent/client"
-import { readOperation, readResult, type DeviceOperation } from "@elizaos/agent/operations"
-import { projectNoteForModel } from "@elizaos/plugin-notes/types"
+} from "@elizaos/plugin-notes-client"
+import { NOT_DISPATCHED, type ExecutorCall } from "@elizaos/agent"
+import { readOperation, readResult, type DeviceOperation } from "@elizaos/agent"
+import { projectNoteForModel } from "@elizaos/plugin-notes-client"
 import { noteSaveResult, notesReadResult } from "../../gen/notes__organize.effect.vibe"
 import { AssistantHost } from "../assistant/host.vibe"
 import { AdvertisedCapabilities, type WorkflowStepRef } from "../assistant/ports.vibe"

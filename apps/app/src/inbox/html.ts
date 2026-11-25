@@ -1,6 +1,6 @@
 // spec/inbox/reader.md, "Formatted mail is sanitized, isolated and shown whole or not at all"; spec/inbox/reader.md, "A mail link opens only over HTTPS, only in Alpha's Browser, after the owner reviews it"
 import createDOMPurify from "dompurify";
-import { linkTextMismatch } from "@elizaos/plugin-inbox/mailbox";
+import { linkTextMismatch } from "@elizaos/plugin-inbox-client";
 import type { MailLink } from "../../gen/inbox__reader.ts";
 
 /** Formatted mail ready for an isolated frame: the document, how many remote images it holds, and its inline links. */

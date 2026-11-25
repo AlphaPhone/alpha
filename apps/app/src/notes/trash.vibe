@@ -1,5 +1,5 @@
 // spec/notes/trash.md, "Story: Recover a deleted note"; spec/notes/trash.md, "Recently deleted opens while it has rows, one action runs at a time, and it closes once empty"; spec/notes/trash.md, "A restore needs the exact deletion and the current revision, and a delete's Undo the exact deletion"; spec/notes/trash.md, "Erase needs the three-day choice, a review of that exact deletion at the current revision, and no shared recording"; spec/notes/trash.md, "A saved erase leaves its recordings' cleanup pending, a conflict changes nothing, and an unknown outcome reopens the store"
-import type { NotesSnapshot, NotesTrashRecordingCleanup, StickyNote } from "@elizaos/plugin-notes/types"
+import type { NotesSnapshot, NotesTrashRecordingCleanup, StickyNote } from "@elizaos/plugin-notes-client"
 import { type EraseCommit, type Event as TrashEvent, Machine as TrashMachine, type TrashView, daysLeft, machine as trashMachine } from "../../gen/notes__trash.effect.vibe"
 import { NotesClient, NotesRefused, TrashRetentionOff } from "./client.vibe"
 import { NotesCollection } from "./collection.vibe"

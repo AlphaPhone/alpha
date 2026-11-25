@@ -3,7 +3,7 @@ import {
   SpeechAttemptFailed, SpeechBusy, SpeechRoutingMachine, SpeechUnavailable as NoRouteSpoke, deviceSpeechUnavailable, nextSpeechRoute,
   serviceLimitOf, speakOnRoute, speechFailureOf, speechKeyChanged, speechLimitChanged,
   type MisroutedSpeech, type NetworkKey, type ObservedLimit, type SpeechRoute, type SpeechRouting,
-} from "@elizaos/plugin-local-inference/speech-route"
+} from "@elizaos/plugin-local-inference-client"
 import { Native } from "../platform/native.vibe"
 import { privacyOf, sendsOf, type Route, type Sends } from "../../gen/voice__route.effect.vibe"
 import { newId } from "../platform/ids.ts"

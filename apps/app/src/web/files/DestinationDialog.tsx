@@ -1,5 +1,5 @@
 // spec/files/mutations.md, "A row is done only when its answer is the operation's result and names the result"; spec/files/storage.md, "A row names one file or folder of one volume by a key unique in its listing"
-import { breadcrumbs, parentOf, within } from "@elizaos/plugin-files/client";
+import { breadcrumbs, parentOf, within } from "@elizaos/plugin-files-client";
 import { ArrowUp, Folder, FolderPlus } from "lucide-react";
 import type { Row } from "../../../gen/files__storage.ts";
 import { Button, Dialog, DialogContent, DialogTitle, ListRow, Skeleton } from "../components/ui/index.ts";

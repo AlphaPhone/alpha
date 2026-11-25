@@ -2,7 +2,7 @@
 import {
   AlbumList, AlbumWritten, BatchReport, ChangedItem, EditPreview, EditReceipt, LibraryAccess, LibraryPage, LibraryScope, LibrarySummary,
   MediaItem, MediaPage, PreparedTrash, SharedMany, ShareOpened, Thumbnails, TrashReceipt, Validated, VideoEditSession,
-} from "@elizaos/os/bridges/media.schema"
+} from "@elizaos/os-bridges"
 import { Native } from "../platform/native.vibe"
 import { StatusReply } from "./bridge.schema.vibe"
 

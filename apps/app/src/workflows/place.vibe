@@ -1,5 +1,5 @@
 // spec/workflows/place.md, "Story: Move inside Workflows and come back with Back"; spec/workflows/place.md, "Story: Have a notice reread when the run view moves"; spec/workflows/runs.md, "A notice opens exactly the run it names"; spec/workflows/digestSources.md, "Removing a grant Account names needs only Alpha in front, and clears this session's grant only once confirmed"; spec/workflows/deviceSteps.md, "Story: Approve a phone step only as I reviewed it"
-import { parseWorkflowRunDeepLink } from "@elizaos/plugin-workflow/client"
+import { parseWorkflowRunDeepLink } from "@elizaos/plugin-workflow-client"
 import { Machine, type Overlay, type PlaceView, machine } from "../../gen/workflows__place.effect.vibe"
 import { Machine as ClockDraftMachine } from "../../gen/workflows__clockDraft.effect.vibe"
 import { Machine as RunsMachine } from "../../gen/workflows__runs.effect.vibe"

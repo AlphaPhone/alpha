@@ -1,6 +1,6 @@
 // spec/notes/collection.md, "Earlier notes are part of the collection once the agent imported them, and an unreadable earlier file needs review"; spec/notes/collection.md, "A collection is bound to one owner, and a new owner or a retirement starts over"; spec/notes/collection.md, "Refreshes and change events coalesce, and a mutation in flight defers them"; spec/notes/collection.md, "A read publishes only for its own ticket and owner, and never an older revision"; spec/notes/collection.md, "One mutation runs at a time and cancels a read in flight"; spec/notes/collection.md, "A mutation is confirmed only by its own reply, and an uncertain one stays under review"; spec/notes/collection.md, "The editor can raise a review, and a confirmed save or a discard settles it"
-import type { NotesInteractResult } from "@elizaos/plugin-notes/client"
-import type { NotesSnapshot } from "@elizaos/plugin-notes/types"
+import type { NotesInteractResult } from "@elizaos/plugin-notes-client"
+import type { NotesSnapshot } from "@elizaos/plugin-notes-client"
 import { type Collection, type Event as CollectionEvent, Machine as CollectionMachine, machine as collectionMachine } from "../../gen/notes__collection.effect.vibe"
 import { NotesClient, NotesRefused, type NotesCapability, type NotesFailure } from "./client.vibe"
 

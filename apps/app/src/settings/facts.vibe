@@ -1,5 +1,5 @@
 // spec/settings/facts.md, "Story: Read my phone's state truthfully"; spec/settings/facts.md, "Story: Make Alpha my Home app"; spec/settings/facts.md, "Story: Go to Android's own page"; spec/settings/vocabulary.md, "A browser's permission answer is allowed, asks or denied, and no answer is unread"
-import { parseRoleStatuses, parseSystemFacts } from "@elizaos/os/bridges/system"
+import { parseRoleStatuses, parseSystemFacts } from "@elizaos/os-bridges"
 import { type DeviceRead, type SettingsPage, type ShadeAnswer, Machine, pickedOnly, unread } from "../../gen/settings__facts.effect.vibe"
 import { type Access, type BrowserAnswer, type RoleHold, accessOf, accessOfBrowser, dndOf, roleOf, switchOf, wifiOf } from "../../gen/settings__vocabulary.effect.vibe"
 import { StorageUsage } from "../files/usage.vibe"

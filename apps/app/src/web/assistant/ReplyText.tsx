@@ -1,5 +1,5 @@
 // spec/assistant/reply.md, "A recognized tool block outside a fence becomes its card; inside a fence it stays code"
-import type { MapsCard } from "@elizaos/plugin-maps/cards";
+import type { MapsCard } from "@elizaos/plugin-maps-client";
 import { CalendarClock, Workflow } from "lucide-react";
 import { render } from "../../../gen/assistant__reply.ts";
 import type { Segment } from "../../assistant/reply-lines.vibe";

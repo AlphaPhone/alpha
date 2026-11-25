@@ -1,5 +1,5 @@
 // spec/assistant/context.md, "Story: Let my agent know where I am when I allow it"; spec/assistant/context.md, "A turn carries the location only with the setting on, the permission granted, a screen that is not private and a peer that takes it"; spec/assistant/context.md, "The network answer is looked up only off the messaging path, when GPS has nothing, and is reused before it is asked again"
-import type { LocationObservation } from "@elizaos/agent/client"
+import type { LocationObservation } from "@elizaos/agent"
 import { Machine as LocatorMachine, type Event as LocatorEvent, canLookUp, gpsCurrent, needsRead, networkUnchangedS, platformMaxAgeMs, platformTimeoutMs, precision, sendsLocation, usesNetwork } from "../../gen/assistant__context.effect.vibe"
 import { Native } from "../platform/native.vibe"
 import { Preferences } from "../settings/preferences.vibe"

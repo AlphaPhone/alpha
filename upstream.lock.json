@@ -1,13 +1,13 @@
 {
   "url": "https://github.com/elizaOS/eliza.git",
   "branch": "develop",
-  "commit": "ecac5fca19c3104af0aab40f0d4c55a97d5f5223",
+  "commit": "fa87f138ceb52d5ff0344e0c35c7ddc165572672",
   "appSource": "apps/app",
   "osSource": "packages/os",
   "androidSource": "packages/os/android",
   "aospSource": "packages/os/aosp",
   "agentSource": "packages/agent",
-  "agentBundle": "@elizaos/agent/bundle",
+  "agentBundle": "@elizaos/agent-host",
   "cloudSource": "packages/cloud",
   "vibestackSource": "vibestack"
 }

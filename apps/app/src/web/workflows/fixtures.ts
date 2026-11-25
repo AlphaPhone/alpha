@@ -1,5 +1,5 @@
 // States the Workflows components reach, for their stories (`*.meta.tsx`).
-import type { MissedRunNow } from "@elizaos/plugin-workflow/digests";
+import type { MissedRunNow } from "@elizaos/plugin-workflow-client";
 import type { Authoring } from "../../../gen/workflows__authoring.ts";
 import { initial as authoringInitial } from "../../../gen/workflows__authoring.ts";
 import type { Steps } from "../../../gen/workflows__deviceSteps.ts";

@@ -1,5 +1,5 @@
 // spec/shell/navigation.md, "An approved open_view shows Home or an admitted app, and is applied only once it is in front"; spec/shell/index.md, "An app is offered only where its availability admits it"
-import { operationOf } from "@elizaos/agent/operations"
+import { operationOf } from "@elizaos/agent"
 import { viewShown } from "../../gen/shell__navigation.effect.vibe"
 import { copy } from "../assistant/presentation.vibe"
 import type { OperationPorts } from "../assistant/review.vibe"

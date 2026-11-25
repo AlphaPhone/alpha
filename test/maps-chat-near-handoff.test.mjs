@@ -4,7 +4,7 @@
 // around it once. Provider, location and share ports are scripted; no live provider or device GPS.
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import {SavedPlaces} from '@elizaos/plugin-maps/client/saved-places';
+import {SavedPlaces} from '@elizaos/plugin-maps-client';
 import {MapsScreenController} from '../apps/app/src/ui/maps/maps-screen.ts';
 import {MapsController} from '../apps/app/src/ui/maps/state.ts';
 

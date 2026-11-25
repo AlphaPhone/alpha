@@ -1,5 +1,5 @@
 // spec/voice/acknowledgement.md, "Story: Hear that Alpha is working on it, never over its answer"; spec/assistant/reply.md, "A spoken cue starts at once and a reply ready before it is audible drops it; an audible cue finishes before the reply, within 2.5 s"
-import type { ReplyStreamHooks } from "@elizaos/agent/client"
+import type { ReplyStreamHooks } from "@elizaos/agent"
 import { spokenCue } from "../assistant/cue.vibe"
 import { Machine, machine, type Event } from "../../gen/voice__acknowledgement.effect.vibe"
 import { Speech } from "./speech.vibe"

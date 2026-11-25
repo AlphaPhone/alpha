@@ -1,7 +1,7 @@
 // The two pure helpers of @elizaos/plugin-calendar's model that the renderer uses. The package root is the agent plugin:
 // importing it loads the agent runtime and its Node-only modules into the page. Copied from the pinned upstream
 // packages/plugin-calendar/src/model.vibe until upstream exports them from a client entry; keep them identical.
-import type { CalendarSourceKey } from "@elizaos/plugin-calendar"
+import type { CalendarSourceKey } from "@elizaos/plugin-calendar-client"
 
 const canonicalInstant = /^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d{3}Z$/
 

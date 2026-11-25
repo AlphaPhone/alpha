@@ -173,9 +173,15 @@ importers:
       '@elizaos/agent':
         specifier: workspace:*
         version: link:vendor/eliza/packages/agent
+      '@elizaos/agent-host':
+        specifier: workspace:*
+        version: link:vendor/eliza/packages/agent-host
       '@elizaos/os':
         specifier: workspace:*
         version: link:vendor/eliza/packages/os
+      '@elizaos/os-bridges':
+        specifier: workspace:*
+        version: link:vendor/eliza/packages/os-bridges
       '@elizaos/plugin-browser':
         specifier: workspace:*
         version: link:vendor/eliza/packages/plugin-browser
@@ -194,6 +200,9 @@ importers:
       '@elizaos/plugin-maps':
         specifier: workspace:*
         version: link:vendor/eliza/packages/plugin-maps
+      '@elizaos/plugin-maps-client':
+        specifier: workspace:*
+        version: link:vendor/eliza/packages/plugin-maps-client
       '@elizaos/plugin-notes':
         specifier: workspace:*
         version: link:vendor/eliza/packages/plugin-notes
@@ -203,6 +212,12 @@ importers:
       '@elizaos/plugin-workflow':
         specifier: workspace:*
         version: link:vendor/eliza/packages/plugin-workflows
+      '@elizaos/plugin-workflow-client':
+        specifier: workspace:*
+        version: link:vendor/eliza/packages/plugin-workflow-client
+      '@elizaos/plugin-workflow-worker':
+        specifier: workspace:*
+        version: link:vendor/eliza/packages/plugin-workflow-worker
       '@playwright/test':
         specifier: 1.65.0
         version: 1.65.0
@@ -212,6 +227,9 @@ importers:
       effect:
         specifier: 4.1.1
         version: 4.1.1
+      eslint:
+        specifier: 'catalog:'
+        version: 10.14.0(jiti@2.7.0)
       json5:
         specifier: 2.2.3
         version: 2.2.3
@@ -221,6 +239,9 @@ importers:
       typescript:
         specifier: 'catalog:'
         version: 6.0.3
+      typescript-eslint:
+        specifier: 'catalog:'
+        version: 8.72.2(eslint@10.14.0(jiti@2.7.0))(typescript@6.0.3)
       vibelang:
         specifier: 0.0.13
         version: 0.0.13(patch_hash=84f6bd90a8ff37080f66a93718a62ff76b42541194e36701abb285d694f59ee8)(@babel/core@7.29.13)(effect@4.1.1)(typescript@6.0.3)
@@ -257,36 +278,33 @@ importers:
       '@elizaos/core':
         specifier: workspace:*
         version: link:../../vendor/eliza/packages/core
-      '@elizaos/os':
+      '@elizaos/os-bridges':
         specifier: workspace:*
-        version: link:../../vendor/eliza/packages/os
+        version: link:../../vendor/eliza/packages/os-bridges
       '@elizaos/plugin-browser':
         specifier: workspace:*
         version: link:../../vendor/eliza/packages/plugin-browser
       '@elizaos/plugin-calendar':
         specifier: workspace:*
         version: link:../../vendor/eliza/packages/plugin-calendar
-      '@elizaos/plugin-files':
+      '@elizaos/plugin-files-client':
         specifier: workspace:*
-        version: link:../../vendor/eliza/packages/plugin-files
-      '@elizaos/plugin-inbox':
+        version: link:../../vendor/eliza/packages/plugin-files-client
+      '@elizaos/plugin-inbox-client':
         specifier: workspace:*
-        version: link:../../vendor/eliza/packages/plugin-inbox
-      '@elizaos/plugin-local-inference':
+        version: link:../../vendor/eliza/packages/plugin-inbox-client
+      '@elizaos/plugin-local-inference-client':
         specifier: workspace:*
-        version: link:../../vendor/eliza/packages/plugin-localinference
-      '@elizaos/plugin-maps':
+        version: link:../../vendor/eliza/packages/plugin-localinference-client
+      '@elizaos/plugin-maps-client':
         specifier: workspace:*
-        version: link:../../vendor/eliza/packages/plugin-maps
-      '@elizaos/plugin-notes':
+        version: link:../../vendor/eliza/packages/plugin-maps-client
+      '@elizaos/plugin-notes-client':
         specifier: workspace:*
-        version: link:../../vendor/eliza/packages/plugin-notes
-      '@elizaos/plugin-personal-assistant':
+        version: link:../../vendor/eliza/packages/plugin-notes-client
+      '@elizaos/plugin-workflow-client':
         specifier: workspace:*
-        version: link:../../vendor/eliza/packages/plugin-assistant
-      '@elizaos/plugin-workflow':
-        specifier: workspace:*
-        version: link:../../vendor/eliza/packages/plugin-workflows
+        version: link:../../vendor/eliza/packages/plugin-workflow-client
       '@fontsource/atkinson-hyperlegible':
         specifier: 5.2.8
         version: 5.2.8
@@ -486,6 +504,9 @@ importers:
       '@elizaos/cloud':
         specifier: workspace:*
         version: link:../vendor/eliza/packages/cloud
+      '@elizaos/cloud-worker':
+        specifier: workspace:*
+        version: link:../vendor/eliza/packages/cloud-worker
       effect:
         specifier: 4.1.1
         version: 4.1.1
@@ -571,7 +592,7 @@ importers:
         version: 4.11.0(eslint@10.14.0(jiti@2.7.0))(tailwindcss@4.3.5)(typescript@6.0.3)
       eslint-plugin-boundaries:
         specifier: 'catalog:'
-        version: 7.4.4(eslint-import-resolver-typescript@4.4.5(eslint@10.14.0(jiti@2.7.0)))(eslint@10.14.0(jiti@2.7.0))
+        version: 7.4.4(@typescript-eslint/parser@8.72.2(eslint@10.14.0(jiti@2.7.0))(typescript@6.0.3))(eslint-import-resolver-typescript@4.4.5(eslint@10.14.0(jiti@2.7.0)))(eslint@10.14.0(jiti@2.7.0))
       eslint-plugin-react-hooks:
         specifier: 'catalog:'
         version: 7.1.1(eslint@10.14.0(jiti@2.7.0))
@@ -623,6 +644,44 @@ importers:
 
   vendor/eliza/packages/agent:
     dependencies:
+      '@elizaos/core':
+        specifier: workspace:*
+        version: link:../core
+      effect:
+        specifier: 4.1.1
+        version: 4.1.1
+      vibelang-runtime:
+        specifier: 0.0.13
+        version: 0.0.13(@effect/platform-browser@4.1.1(effect@4.1.1))(@effect/platform-node@4.1.1(effect@4.1.1)(redis@6.3.1(@opentelemetry/api@1.10.0)))(effect@4.1.1)
+    devDependencies:
+      '@effect/vitest':
+        specifier: 4.1.1
+        version: 4.1.1(effect@4.1.1)(vitest@5.1.0)
+      '@types/node':
+        specifier: 'catalog:'
+        version: 26.6.6
+      typescript:
+        specifier: 'catalog:'
+        version: 6.0.3
+      vibelang:
+        specifier: 0.0.13
+        version: 0.0.13(patch_hash=84f6bd90a8ff37080f66a93718a62ff76b42541194e36701abb285d694f59ee8)(@babel/core@7.29.13)(effect@4.1.1)(typescript@6.0.3)
+      vibelang-vite:
+        specifier: 0.0.13
+        version: 0.0.13(vibelang@0.0.13(patch_hash=84f6bd90a8ff37080f66a93718a62ff76b42541194e36701abb285d694f59ee8)(@babel/core@7.29.13)(effect@4.1.1)(typescript@6.0.3))(vite@8.3.5(@types/node@26.6.6)(esbuild@0.28.2)(jiti@2.7.0)(yaml@2.9.1))
+      vibestack:
+        specifier: workspace:*
+        version: link:../..
+      vite:
+        specifier: 'catalog:'
+        version: 8.3.5(@types/node@26.6.6)(esbuild@0.28.2)(jiti@2.7.0)(yaml@2.9.1)
+      vitest:
+        specifier: 'catalog:'
+        version: 5.1.0(@opentelemetry/api@1.10.0)(@types/node@26.6.6)(@vitest/browser-playwright@5.1.0)(@vitest/ui@5.1.0)(happy-dom@21.0.4(bufferutil@4.2.0)(utf-8-validate@6.1.0))(jsdom@31.0.1(@napi-rs/canvas@1.2.0)(@noble/hashes@1.8.0))(vite@8.3.5(@types/node@26.6.6)(esbuild@0.28.2)(jiti@2.7.0)(yaml@2.9.1))
+    publishDirectory: dist
+
+  vendor/eliza/packages/agent-host:
+    dependencies:
       '@effect/platform-node':
         specifier: 4.1.1
         version: 4.1.1(bufferutil@4.2.0)(effect@4.1.1)(redis@6.3.1(@opentelemetry/api@1.10.0))(utf-8-validate@6.1.0)
@@ -632,12 +691,18 @@ importers:
       '@electric-sql/pglite':
         specifier: 'catalog:'
         version: 0.4.6
+      '@elizaos/agent':
+        specifier: workspace:*
+        version: link:../agent
       '@elizaos/cloud':
         specifier: workspace:*
         version: link:../cloud
       '@elizaos/core':
         specifier: workspace:*
         version: link:../core
+      '@elizaos/core-node':
+        specifier: workspace:*
+        version: link:../core-node
       effect:
         specifier: 4.1.1
         version: 4.1.1
@@ -673,6 +738,47 @@ importers:
 
   vendor/eliza/packages/cloud:
     dependencies:
+      effect:
+        specifier: 4.1.1
+        version: 4.1.1
+      vibelang-runtime:
+        specifier: 0.0.13
+        version: 0.0.13(@effect/platform-browser@4.1.1(effect@4.1.1))(@effect/platform-node@4.1.1(effect@4.1.1)(redis@6.3.1(@opentelemetry/api@1.10.0)))(effect@4.1.1)
+    devDependencies:
+      '@effect/vitest':
+        specifier: 4.1.1
+        version: 4.1.1(effect@4.1.1)(vitest@5.1.0)
+      '@types/node':
+        specifier: 'catalog:'
+        version: 26.6.6
+      '@types/react':
+        specifier: 'catalog:'
+        version: 19.3.0
+      react:
+        specifier: 'catalog:'
+        version: 19.3.1
+      typescript:
+        specifier: 'catalog:'
+        version: 6.0.3
+      vibelang:
+        specifier: 0.0.13
+        version: 0.0.13(patch_hash=84f6bd90a8ff37080f66a93718a62ff76b42541194e36701abb285d694f59ee8)(@babel/core@7.29.13)(effect@4.1.1)(typescript@6.0.3)
+      vibelang-vite:
+        specifier: 0.0.13
+        version: 0.0.13(vibelang@0.0.13(patch_hash=84f6bd90a8ff37080f66a93718a62ff76b42541194e36701abb285d694f59ee8)(@babel/core@7.29.13)(effect@4.1.1)(typescript@6.0.3))(vite@8.3.5(@types/node@26.6.6)(esbuild@0.28.2)(jiti@2.7.0)(yaml@2.9.1))
+      vibestack:
+        specifier: workspace:*
+        version: link:../..
+      vite:
+        specifier: 'catalog:'
+        version: 8.3.5(@types/node@26.6.6)(esbuild@0.28.2)(jiti@2.7.0)(yaml@2.9.1)
+      vitest:
+        specifier: 'catalog:'
+        version: 5.1.0(@opentelemetry/api@1.10.0)(@types/node@26.6.6)(@vitest/browser-playwright@5.1.0)(@vitest/ui@5.1.0)(happy-dom@21.0.4(bufferutil@4.2.0)(utf-8-validate@6.1.0))(jsdom@31.0.1(@napi-rs/canvas@1.2.0)(@noble/hashes@1.8.0))(vite@8.3.5(@types/node@26.6.6)(esbuild@0.28.2)(jiti@2.7.0)(yaml@2.9.1))
+    publishDirectory: dist
+
+  vendor/eliza/packages/cloud-worker:
+    dependencies:
       '@effect/platform-node':
         specifier: 4.1.1
         version: 4.1.1(bufferutil@4.2.0)(effect@4.1.1)(redis@6.3.1(@opentelemetry/api@1.10.0))(utf-8-validate@6.1.0)
@@ -682,6 +788,9 @@ importers:
       '@electric-sql/pglite':
         specifier: 'catalog:'
         version: 0.4.6
+      '@elizaos/cloud':
+        specifier: workspace:*
+        version: link:../cloud
       '@types/pg':
         specifier: ^8.23.1
         version: 8.23.1
@@ -759,12 +868,6 @@ importers:
 
   vendor/eliza/packages/core:
     dependencies:
-      '@effect/platform-node':
-        specifier: 4.1.1
-        version: 4.1.1(bufferutil@4.2.0)(effect@4.1.1)(redis@6.3.1(@opentelemetry/api@1.10.0))(utf-8-validate@6.1.0)
-      '@effect/platform-node-shared':
-        specifier: 4.1.1
-        version: 4.1.1(bufferutil@4.2.0)(effect@4.1.1)(utf-8-validate@6.1.0)
       adze:
         specifier: ^2.2.5
         version: 2.3.0
@@ -793,6 +896,9 @@ importers:
       '@biomejs/biome':
         specifier: 2.6.6
         version: 2.6.6
+      '@effect/platform-node':
+        specifier: 4.1.1
+        version: 4.1.1(bufferutil@4.2.0)(effect@4.1.1)(redis@6.3.1(@opentelemetry/api@1.10.0))(utf-8-validate@6.1.0)
       '@effect/vitest':
         specifier: 4.1.1
         version: 4.1.1(effect@4.1.1)(vitest@5.1.0)
@@ -818,6 +924,46 @@ importers:
         specifier: 'catalog:'
         version: 5.1.0(@opentelemetry/api@1.10.0)(@types/node@26.6.6)(@vitest/browser-playwright@5.1.0)(@vitest/ui@5.1.0)(happy-dom@21.0.4(bufferutil@4.2.0)(utf-8-validate@6.1.0))(jsdom@31.0.1(@napi-rs/canvas@1.2.0)(@noble/hashes@1.8.0))(vite@8.3.5(@types/node@26.6.6)(esbuild@0.28.2)(jiti@2.7.0)(yaml@2.9.1))
     publishDirectory: dist
+
+  vendor/eliza/packages/core-node:
+    dependencies:
+      '@effect/platform-node':
+        specifier: 4.1.1
+        version: 4.1.1(bufferutil@4.2.0)(effect@4.1.1)(redis@6.3.1(@opentelemetry/api@1.10.0))(utf-8-validate@6.1.0)
+      '@effect/platform-node-shared':
+        specifier: 4.1.1
+        version: 4.1.1(bufferutil@4.2.0)(effect@4.1.1)(utf-8-validate@6.1.0)
+      '@elizaos/core':
+        specifier: workspace:*
+        version: link:../core
+      effect:
+        specifier: 4.1.1
+        version: 4.1.1
+      vibelang-runtime:
+        specifier: 0.0.13
+        version: 0.0.13(@effect/platform-browser@4.1.1(effect@4.1.1))(@effect/platform-node@4.1.1(effect@4.1.1)(redis@6.3.1(@opentelemetry/api@1.10.0)))(effect@4.1.1)
+      zod:
+        specifier: ^4.6.5
+        version: 4.6.7
+    devDependencies:
+      '@effect/vitest':
+        specifier: 4.1.1
+        version: 4.1.1(effect@4.1.1)(vitest@5.1.0)
+      '@types/node':
+        specifier: 'catalog:'
+        version: 26.6.6
+      typescript:
+        specifier: 'catalog:'
+        version: 6.0.3
+      vibelang:
+        specifier: 0.0.13
+        version: 0.0.13(patch_hash=84f6bd90a8ff37080f66a93718a62ff76b42541194e36701abb285d694f59ee8)(@babel/core@7.29.13)(effect@4.1.1)(typescript@6.0.3)
+      vibestack:
+        specifier: workspace:*
+        version: link:../..
+      vitest:
+        specifier: 'catalog:'
+        version: 5.1.0(@opentelemetry/api@1.10.0)(@types/node@26.6.6)(@vitest/browser-playwright@5.1.0)(@vitest/ui@5.1.0)(happy-dom@21.0.4(bufferutil@4.2.0)(utf-8-validate@6.1.0))(jsdom@31.0.1(@napi-rs/canvas@1.2.0)(@noble/hashes@1.8.0))(vite@8.3.5(@types/node@26.6.6)(esbuild@0.28.2)(jiti@2.7.0)(yaml@2.9.1))
 
   vendor/eliza/packages/design-system:
     devDependencies:
@@ -861,9 +1007,6 @@ importers:
         specifier: 0.0.13
         version: 0.0.13(@effect/platform-browser@4.1.1(effect@4.1.1))(@effect/platform-node@4.1.1(bufferutil@4.2.0)(effect@4.1.1)(redis@6.3.1(@opentelemetry/api@1.10.0))(utf-8-validate@6.1.0))(effect@4.1.1)
     devDependencies:
-      '@capacitor/core':
-        specifier: 8.5.2
-        version: 8.5.2
       '@effect/vitest':
         specifier: 4.1.1
         version: 4.1.1(effect@4.1.1)(vitest@5.1.0)
@@ -891,6 +1034,40 @@ importers:
       vite:
         specifier: 'catalog:'
         version: 8.3.5(@types/node@26.6.6)(esbuild@0.28.2)(jiti@2.7.0)(yaml@2.9.1)
+      vitest:
+        specifier: 'catalog:'
+        version: 5.1.0(@opentelemetry/api@1.10.0)(@types/node@26.6.6)(@vitest/browser-playwright@5.1.0)(@vitest/ui@5.1.0)(happy-dom@21.0.4(bufferutil@4.2.0)(utf-8-validate@6.1.0))(jsdom@31.0.1(@napi-rs/canvas@1.2.0)(@noble/hashes@1.8.0))(vite@8.3.5(@types/node@26.6.6)(esbuild@0.28.2)(jiti@2.7.0)(yaml@2.9.1))
+
+  vendor/eliza/packages/os-bridges:
+    dependencies:
+      effect:
+        specifier: 4.1.1
+        version: 4.1.1
+      vibelang-runtime:
+        specifier: 0.0.13
+        version: 0.0.13(@effect/platform-browser@4.1.1(effect@4.1.1))(@effect/platform-node@4.1.1(effect@4.1.1)(redis@6.3.1(@opentelemetry/api@1.10.0)))(effect@4.1.1)
+    devDependencies:
+      '@capacitor/core':
+        specifier: 8.5.2
+        version: 8.5.2
+      '@effect/platform-node':
+        specifier: 4.1.1
+        version: 4.1.1(bufferutil@4.2.0)(effect@4.1.1)(redis@6.3.1(@opentelemetry/api@1.10.0))(utf-8-validate@6.1.0)
+      '@effect/vitest':
+        specifier: 4.1.1
+        version: 4.1.1(effect@4.1.1)(vitest@5.1.0)
+      '@types/node':
+        specifier: 'catalog:'
+        version: 26.6.6
+      typescript:
+        specifier: 'catalog:'
+        version: 6.0.3
+      vibelang:
+        specifier: 0.0.13
+        version: 0.0.13(patch_hash=84f6bd90a8ff37080f66a93718a62ff76b42541194e36701abb285d694f59ee8)(@babel/core@7.29.13)(effect@4.1.1)(typescript@6.0.3)
+      vibestack:
+        specifier: workspace:*
+        version: link:../..
       vitest:
         specifier: 'catalog:'
         version: 5.1.0(@opentelemetry/api@1.10.0)(@types/node@26.6.6)(@vitest/browser-playwright@5.1.0)(@vitest/ui@5.1.0)(happy-dom@21.0.4(bufferutil@4.2.0)(utf-8-validate@6.1.0))(jsdom@31.0.1(@napi-rs/canvas@1.2.0)(@noble/hashes@1.8.0))(vite@8.3.5(@types/node@26.6.6)(esbuild@0.28.2)(jiti@2.7.0)(yaml@2.9.1))
@@ -941,6 +1118,9 @@ importers:
       '@elizaos/agent':
         specifier: workspace:*
         version: link:../agent
+      '@elizaos/agent-host':
+        specifier: workspace:*
+        version: link:../agent-host
       '@elizaos/core':
         specifier: workspace:*
         version: link:../core
@@ -1009,9 +1189,9 @@ importers:
       '@elizaos/core':
         specifier: workspace:*
         version: link:../core
-      '@elizaos/os':
+      '@elizaos/os-bridges':
         specifier: workspace:*
-        version: link:../os
+        version: link:../os-bridges
       effect:
         specifier: 4.1.1
         version: 4.1.1
@@ -1049,9 +1229,9 @@ importers:
       '@elizaos/core':
         specifier: workspace:*
         version: link:../core
-      '@elizaos/os':
+      '@elizaos/os-bridges':
         specifier: workspace:*
-        version: link:../os
+        version: link:../os-bridges
       effect:
         specifier: 4.1.1
         version: 4.1.1
@@ -1124,6 +1304,9 @@ importers:
       '@elizaos/core':
         specifier: workspace:*
         version: link:../core
+      '@elizaos/core-node':
+        specifier: workspace:*
+        version: link:../core-node
       discord.js:
         specifier: ^14.26.4
         version: 14.28.1(bufferutil@4.2.0)(utf-8-validate@6.1.0)
@@ -1146,9 +1329,9 @@ importers:
 
   vendor/eliza/packages/plugin-elizacloud:
     dependencies:
-      '@elizaos/agent':
+      '@elizaos/agent-host':
         specifier: workspace:*
-        version: link:../agent
+        version: link:../agent-host
       '@elizaos/cloud':
         specifier: workspace:*
         version: link:../cloud
@@ -1202,9 +1385,52 @@ importers:
       '@elizaos/core':
         specifier: workspace:*
         version: link:../core
-      '@elizaos/os':
+      '@elizaos/core-node':
         specifier: workspace:*
-        version: link:../os
+        version: link:../core-node
+      '@elizaos/plugin-files-client':
+        specifier: workspace:*
+        version: link:../plugin-files-client
+      effect:
+        specifier: 4.1.1
+        version: 4.1.1
+      vibelang-runtime:
+        specifier: 0.0.13
+        version: 0.0.13(@effect/platform-browser@4.1.1(effect@4.1.1))(@effect/platform-node@4.1.1(effect@4.1.1)(redis@6.3.1(@opentelemetry/api@1.10.0)))(effect@4.1.1)
+    devDependencies:
+      '@effect/platform-node':
+        specifier: 4.1.1
+        version: 4.1.1(bufferutil@4.2.0)(effect@4.1.1)(redis@6.3.1(@opentelemetry/api@1.10.0))(utf-8-validate@6.1.0)
+      '@effect/vitest':
+        specifier: 4.1.1
+        version: 4.1.1(effect@4.1.1)(vitest@5.1.0)
+      '@elizaos/os-bridges':
+        specifier: workspace:*
+        version: link:../os-bridges
+      '@types/node':
+        specifier: 'catalog:'
+        version: 26.6.6
+      typescript:
+        specifier: 'catalog:'
+        version: 6.0.3
+      vibelang:
+        specifier: 0.0.13
+        version: 0.0.13(patch_hash=84f6bd90a8ff37080f66a93718a62ff76b42541194e36701abb285d694f59ee8)(@babel/core@7.29.13)(effect@4.1.1)(typescript@6.0.3)
+      vibestack:
+        specifier: workspace:*
+        version: link:../..
+      vitest:
+        specifier: 'catalog:'
+        version: 5.1.0(@opentelemetry/api@1.10.0)(@types/node@26.6.6)(@vitest/browser-playwright@5.1.0)(@vitest/ui@5.1.0)(happy-dom@21.0.4(bufferutil@4.2.0)(utf-8-validate@6.1.0))(jsdom@31.0.1(@napi-rs/canvas@1.2.0)(@noble/hashes@1.8.0))(vite@8.3.5(@types/node@26.6.6)(esbuild@0.28.2)(jiti@2.7.0)(yaml@2.9.1))
+
+  vendor/eliza/packages/plugin-files-client:
+    dependencies:
+      '@elizaos/core':
+        specifier: workspace:*
+        version: link:../core
+      '@elizaos/os-bridges':
+        specifier: workspace:*
+        version: link:../os-bridges
       effect:
         specifier: 4.1.1
         version: 4.1.1
@@ -1218,9 +1444,6 @@ importers:
       '@capacitor/core':
         specifier: 8.5.2
         version: 8.5.2
-      '@effect/platform-node':
-        specifier: 4.1.1
-        version: 4.1.1(bufferutil@4.2.0)(effect@4.1.1)(redis@6.3.1(@opentelemetry/api@1.10.0))(utf-8-validate@6.1.0)
       '@effect/vitest':
         specifier: 4.1.1
         version: 4.1.1(effect@4.1.1)(vitest@5.1.0)
@@ -1368,12 +1591,15 @@ importers:
 
   vendor/eliza/packages/plugin-inbox:
     dependencies:
-      '@elizaos/agent':
+      '@elizaos/agent-host':
         specifier: workspace:*
-        version: link:../agent
+        version: link:../agent-host
       '@elizaos/core':
         specifier: workspace:*
         version: link:../core
+      '@elizaos/plugin-inbox-client':
+        specifier: workspace:*
+        version: link:../plugin-inbox-client
       effect:
         specifier: 4.1.1
         version: 4.1.1
@@ -1384,6 +1610,34 @@ importers:
       '@effect/platform-node':
         specifier: 4.1.1
         version: 4.1.1(bufferutil@4.2.0)(effect@4.1.1)(redis@6.3.1(@opentelemetry/api@1.10.0))(utf-8-validate@6.1.0)
+      '@effect/vitest':
+        specifier: 4.1.1
+        version: 4.1.1(effect@4.1.1)(vitest@5.1.0)
+      '@types/node':
+        specifier: 'catalog:'
+        version: 26.6.6
+      typescript:
+        specifier: 'catalog:'
+        version: 6.0.3
+      vibelang:
+        specifier: 0.0.13
+        version: 0.0.13(patch_hash=84f6bd90a8ff37080f66a93718a62ff76b42541194e36701abb285d694f59ee8)(@babel/core@7.29.13)(effect@4.1.1)(typescript@6.0.3)
+      vibestack:
+        specifier: workspace:*
+        version: link:../..
+      vitest:
+        specifier: 'catalog:'
+        version: 5.1.0(@opentelemetry/api@1.10.0)(@types/node@26.6.6)(@vitest/browser-playwright@5.1.0)(@vitest/ui@5.1.0)(happy-dom@21.0.4(bufferutil@4.2.0)(utf-8-validate@6.1.0))(jsdom@31.0.1(@napi-rs/canvas@1.2.0)(@noble/hashes@1.8.0))(vite@8.3.5(@types/node@26.6.6)(esbuild@0.28.2)(jiti@2.7.0)(yaml@2.9.1))
+
+  vendor/eliza/packages/plugin-inbox-client:
+    dependencies:
+      effect:
+        specifier: 4.1.1
+        version: 4.1.1
+      vibelang-runtime:
+        specifier: 0.0.13
+        version: 0.0.13(@effect/platform-browser@4.1.1(effect@4.1.1))(@effect/platform-node@4.1.1(effect@4.1.1)(redis@6.3.1(@opentelemetry/api@1.10.0)))(effect@4.1.1)
+    devDependencies:
       '@effect/vitest':
         specifier: 4.1.1
         version: 4.1.1(effect@4.1.1)(vitest@5.1.0)
@@ -1427,9 +1681,9 @@ importers:
       '@effect/platform-node':
         specifier: 4.1.1
         version: 4.1.1(bufferutil@4.2.0)(effect@4.1.1)(redis@6.3.1(@opentelemetry/api@1.10.0))(utf-8-validate@6.1.0)
-      '@elizaos/agent':
+      '@elizaos/agent-host':
         specifier: workspace:*
-        version: link:../agent
+        version: link:../agent-host
       '@elizaos/core':
         specifier: workspace:*
         version: link:../core
@@ -1439,6 +1693,40 @@ importers:
       vibelang-runtime:
         specifier: 0.0.13
         version: 0.0.13(@effect/platform-browser@4.1.1(effect@4.1.1))(@effect/platform-node@4.1.1(bufferutil@4.2.0)(effect@4.1.1)(redis@6.3.1(@opentelemetry/api@1.10.0))(utf-8-validate@6.1.0))(effect@4.1.1)
+    devDependencies:
+      '@effect/vitest':
+        specifier: 4.1.1
+        version: 4.1.1(effect@4.1.1)(vitest@5.1.0)
+      '@elizaos/agent':
+        specifier: workspace:*
+        version: link:../agent
+      '@elizaos/plugin-local-inference-client':
+        specifier: workspace:*
+        version: link:../plugin-localinference-client
+      '@types/node':
+        specifier: 'catalog:'
+        version: 26.6.6
+      typescript:
+        specifier: 'catalog:'
+        version: 6.0.3
+      vibelang:
+        specifier: 0.0.13
+        version: 0.0.13(patch_hash=84f6bd90a8ff37080f66a93718a62ff76b42541194e36701abb285d694f59ee8)(@babel/core@7.29.13)(effect@4.1.1)(typescript@6.0.3)
+      vibestack:
+        specifier: workspace:*
+        version: link:../..
+      vitest:
+        specifier: 'catalog:'
+        version: 5.1.0(@opentelemetry/api@1.10.0)(@types/node@26.6.6)(@vitest/browser-playwright@5.1.0)(@vitest/ui@5.1.0)(happy-dom@21.0.4(bufferutil@4.2.0)(utf-8-validate@6.1.0))(jsdom@31.0.1(@napi-rs/canvas@1.2.0)(@noble/hashes@1.8.0))(vite@8.3.5(@types/node@26.6.6)(esbuild@0.28.2)(jiti@2.7.0)(yaml@2.9.1))
+
+  vendor/eliza/packages/plugin-localinference-client:
+    dependencies:
+      effect:
+        specifier: 4.1.1
+        version: 4.1.1
+      vibelang-runtime:
+        specifier: 0.0.13
+        version: 0.0.13(@effect/platform-browser@4.1.1(effect@4.1.1))(@effect/platform-node@4.1.1(effect@4.1.1)(redis@6.3.1(@opentelemetry/api@1.10.0)))(effect@4.1.1)
     devDependencies:
       '@effect/vitest':
         specifier: 4.1.1
@@ -1464,12 +1752,18 @@ importers:
       '@elizaos/agent':
         specifier: workspace:*
         version: link:../agent
+      '@elizaos/agent-host':
+        specifier: workspace:*
+        version: link:../agent-host
       '@elizaos/cloud':
         specifier: workspace:*
         version: link:../cloud
       '@elizaos/core':
         specifier: workspace:*
         version: link:../core
+      '@elizaos/plugin-maps-client':
+        specifier: workspace:*
+        version: link:../plugin-maps-client
       effect:
         specifier: 4.1.1
         version: 4.1.1
@@ -1480,6 +1774,37 @@ importers:
       '@effect/platform-node':
         specifier: 4.1.1
         version: 4.1.1(bufferutil@4.2.0)(effect@4.1.1)(redis@6.3.1(@opentelemetry/api@1.10.0))(utf-8-validate@6.1.0)
+      '@effect/vitest':
+        specifier: 4.1.1
+        version: 4.1.1(effect@4.1.1)(vitest@5.1.0)
+      '@types/node':
+        specifier: 'catalog:'
+        version: 26.6.6
+      typescript:
+        specifier: 'catalog:'
+        version: 6.0.3
+      vibelang:
+        specifier: 0.0.13
+        version: 0.0.13(patch_hash=84f6bd90a8ff37080f66a93718a62ff76b42541194e36701abb285d694f59ee8)(@babel/core@7.29.13)(effect@4.1.1)(typescript@6.0.3)
+      vibestack:
+        specifier: workspace:*
+        version: link:../..
+      vitest:
+        specifier: 'catalog:'
+        version: 5.1.0(@opentelemetry/api@1.10.0)(@types/node@26.6.6)(@vitest/browser-playwright@5.1.0)(@vitest/ui@5.1.0)(happy-dom@21.0.4(bufferutil@4.2.0)(utf-8-validate@6.1.0))(jsdom@31.0.1(@napi-rs/canvas@1.2.0)(@noble/hashes@1.8.0))(vite@8.3.5(@types/node@26.6.6)(esbuild@0.28.2)(jiti@2.7.0)(yaml@2.9.1))
+
+  vendor/eliza/packages/plugin-maps-client:
+    dependencies:
+      '@elizaos/cloud':
+        specifier: workspace:*
+        version: link:../cloud
+      effect:
+        specifier: 4.1.1
+        version: 4.1.1
+      vibelang-runtime:
+        specifier: 0.0.13
+        version: 0.0.13(@effect/platform-browser@4.1.1(effect@4.1.1))(@effect/platform-node@4.1.1(effect@4.1.1)(redis@6.3.1(@opentelemetry/api@1.10.0)))(effect@4.1.1)
+    devDependencies:
       '@effect/vitest':
         specifier: 4.1.1
         version: 4.1.1(effect@4.1.1)(vitest@5.1.0)
@@ -1545,9 +1870,9 @@ importers:
 
   vendor/eliza/packages/plugin-native-action-journal:
     dependencies:
-      '@elizaos/os':
+      '@elizaos/os-bridges':
         specifier: workspace:*
-        version: link:../os
+        version: link:../os-bridges
       effect:
         specifier: 4.1.1
         version: 4.1.1
@@ -1598,9 +1923,9 @@ importers:
 
   vendor/eliza/packages/plugin-native-agent:
     dependencies:
-      '@elizaos/os':
+      '@elizaos/os-bridges':
         specifier: workspace:*
-        version: link:../os
+        version: link:../os-bridges
       effect:
         specifier: 4.1.1
         version: 4.1.1
@@ -1623,9 +1948,9 @@ importers:
       '@capacitor/core':
         specifier: 8.4.0
         version: 8.4.0
-      '@elizaos/os':
+      '@elizaos/os-bridges':
         specifier: workspace:*
-        version: link:../os
+        version: link:../os-bridges
       effect:
         specifier: 4.1.1
         version: 4.1.1
@@ -1645,9 +1970,9 @@ importers:
 
   vendor/eliza/packages/plugin-native-browser-surface:
     dependencies:
-      '@elizaos/os':
+      '@elizaos/os-bridges':
         specifier: workspace:*
-        version: link:../os
+        version: link:../os-bridges
       effect:
         specifier: 4.1.1
         version: 4.1.1
@@ -1667,9 +1992,9 @@ importers:
 
   vendor/eliza/packages/plugin-native-bun-runtime:
     dependencies:
-      '@elizaos/os':
+      '@elizaos/os-bridges':
         specifier: workspace:*
-        version: link:../os
+        version: link:../os-bridges
       effect:
         specifier: 4.1.1
         version: 4.1.1
@@ -1692,9 +2017,9 @@ importers:
       '@capacitor/core':
         specifier: 8.4.0
         version: 8.4.0
-      '@elizaos/os':
+      '@elizaos/os-bridges':
         specifier: workspace:*
-        version: link:../os
+        version: link:../os-bridges
       effect:
         specifier: 4.1.1
         version: 4.1.1
@@ -1714,9 +2039,9 @@ importers:
 
   vendor/eliza/packages/plugin-native-camera:
     dependencies:
-      '@elizaos/os':
+      '@elizaos/os-bridges':
         specifier: workspace:*
-        version: link:../os
+        version: link:../os-bridges
       effect:
         specifier: 4.1.1
         version: 4.1.1
@@ -1739,9 +2064,9 @@ importers:
       '@capacitor/core':
         specifier: 8.4.0
         version: 8.4.0
-      '@elizaos/os':
+      '@elizaos/os-bridges':
         specifier: workspace:*
-        version: link:../os
+        version: link:../os-bridges
       effect:
         specifier: 4.1.1
         version: 4.1.1
@@ -1761,18 +2086,12 @@ importers:
 
   vendor/eliza/packages/plugin-native-contacts:
     dependencies:
-      '@elizaos/os':
+      '@elizaos/os-bridges':
         specifier: workspace:*
-        version: link:../os
-      '@repo/ui':
-        specifier: workspace:*
-        version: link:../ui
+        version: link:../os-bridges
       effect:
         specifier: 4.1.1
         version: 4.1.1
-      react:
-        specifier: 'catalog:'
-        version: 19.3.1
       vibelang-runtime:
         specifier: 0.0.13
         version: 0.0.13(@effect/platform-browser@4.1.1(effect@4.1.1))(@effect/platform-node@4.1.1(bufferutil@4.2.0)(effect@4.1.1)(redis@6.3.1(@opentelemetry/api@1.10.0))(utf-8-validate@6.1.0))(effect@4.1.1)
@@ -1780,9 +2099,6 @@ importers:
       '@types/node':
         specifier: 'catalog:'
         version: 26.6.6
-      '@types/react':
-        specifier: 'catalog:'
-        version: 19.3.0
       typescript:
         specifier: 'catalog:'
         version: 6.0.3
@@ -1795,9 +2111,9 @@ importers:
       '@capacitor/core':
         specifier: 8.4.0
         version: 8.4.0
-      '@elizaos/os':
+      '@elizaos/os-bridges':
         specifier: workspace:*
-        version: link:../os
+        version: link:../os-bridges
       effect:
         specifier: 4.1.1
         version: 4.1.1
@@ -1820,9 +2136,9 @@ importers:
       '@capacitor/core':
         specifier: 8.4.0
         version: 8.4.0
-      '@elizaos/os':
+      '@elizaos/os-bridges':
         specifier: workspace:*
-        version: link:../os
+        version: link:../os-bridges
       effect:
         specifier: 4.1.1
         version: 4.1.1
@@ -1842,9 +2158,9 @@ importers:
 
   vendor/eliza/packages/plugin-native-filesystem:
     dependencies:
-      '@elizaos/os':
+      '@elizaos/os-bridges':
         specifier: workspace:*
-        version: link:../os
+        version: link:../os-bridges
       effect:
         specifier: 4.1.1
         version: 4.1.1
@@ -1867,9 +2183,9 @@ importers:
       '@capacitor/core':
         specifier: 8.4.0
         version: 8.4.0
-      '@elizaos/os':
+      '@elizaos/os-bridges':
         specifier: workspace:*
-        version: link:../os
+        version: link:../os-bridges
       effect:
         specifier: 4.1.1
         version: 4.1.1
@@ -1911,9 +2227,9 @@ importers:
 
   vendor/eliza/packages/plugin-native-location:
     dependencies:
-      '@elizaos/os':
+      '@elizaos/os-bridges':
         specifier: workspace:*
-        version: link:../os
+        version: link:../os-bridges
       effect:
         specifier: 4.1.1
         version: 4.1.1
@@ -1933,9 +2249,9 @@ importers:
 
   vendor/eliza/packages/plugin-native-media:
     dependencies:
-      '@elizaos/os':
+      '@elizaos/os-bridges':
         specifier: workspace:*
-        version: link:../os
+        version: link:../os-bridges
       effect:
         specifier: 4.1.1
         version: 4.1.1
@@ -1955,18 +2271,12 @@ importers:
 
   vendor/eliza/packages/plugin-native-messages:
     dependencies:
-      '@elizaos/os':
+      '@elizaos/os-bridges':
         specifier: workspace:*
-        version: link:../os
-      '@repo/ui':
-        specifier: workspace:*
-        version: link:../ui
+        version: link:../os-bridges
       effect:
         specifier: 4.1.1
         version: 4.1.1
-      react:
-        specifier: 'catalog:'
-        version: 19.3.1
       vibelang-runtime:
         specifier: 0.0.13
         version: 0.0.13(@effect/platform-browser@4.1.1(effect@4.1.1))(@effect/platform-node@4.1.1(bufferutil@4.2.0)(effect@4.1.1)(redis@6.3.1(@opentelemetry/api@1.10.0))(utf-8-validate@6.1.0))(effect@4.1.1)
@@ -1974,9 +2284,6 @@ importers:
       '@types/node':
         specifier: 'catalog:'
         version: 26.6.6
-      '@types/react':
-        specifier: 'catalog:'
-        version: 19.3.0
       typescript:
         specifier: 'catalog:'
         version: 6.0.3
@@ -1989,9 +2296,9 @@ importers:
       '@capacitor/core':
         specifier: 8.4.0
         version: 8.4.0
-      '@elizaos/os':
+      '@elizaos/os-bridges':
         specifier: workspace:*
-        version: link:../os
+        version: link:../os-bridges
       effect:
         specifier: 4.1.1
         version: 4.1.1
@@ -2011,9 +2318,9 @@ importers:
 
   vendor/eliza/packages/plugin-native-network-policy:
     dependencies:
-      '@elizaos/os':
+      '@elizaos/os-bridges':
         specifier: workspace:*
-        version: link:../os
+        version: link:../os-bridges
       effect:
         specifier: 4.1.1
         version: 4.1.1
@@ -2033,9 +2340,9 @@ importers:
 
   vendor/eliza/packages/plugin-native-notifications:
     dependencies:
-      '@elizaos/os':
+      '@elizaos/os-bridges':
         specifier: workspace:*
-        version: link:../os
+        version: link:../os-bridges
       effect:
         specifier: 4.1.1
         version: 4.1.1
@@ -2055,9 +2362,9 @@ importers:
 
   vendor/eliza/packages/plugin-native-passwords:
     dependencies:
-      '@elizaos/os':
+      '@elizaos/os-bridges':
         specifier: workspace:*
-        version: link:../os
+        version: link:../os-bridges
       effect:
         specifier: 4.1.1
         version: 4.1.1
@@ -2077,18 +2384,12 @@ importers:
 
   vendor/eliza/packages/plugin-native-phone:
     dependencies:
-      '@elizaos/os':
+      '@elizaos/os-bridges':
         specifier: workspace:*
-        version: link:../os
-      '@repo/ui':
-        specifier: workspace:*
-        version: link:../ui
+        version: link:../os-bridges
       effect:
         specifier: 4.1.1
         version: 4.1.1
-      react:
-        specifier: 'catalog:'
-        version: 19.3.1
       vibelang-runtime:
         specifier: 0.0.13
         version: 0.0.13(@effect/platform-browser@4.1.1(effect@4.1.1))(@effect/platform-node@4.1.1(bufferutil@4.2.0)(effect@4.1.1)(redis@6.3.1(@opentelemetry/api@1.10.0))(utf-8-validate@6.1.0))(effect@4.1.1)
@@ -2096,9 +2397,6 @@ importers:
       '@types/node':
         specifier: 'catalog:'
         version: 26.6.6
-      '@types/react':
-        specifier: 'catalog:'
-        version: 19.3.0
       typescript:
         specifier: 'catalog:'
         version: 6.0.3
@@ -2108,9 +2406,9 @@ importers:
 
   vendor/eliza/packages/plugin-native-reminders:
     dependencies:
-      '@elizaos/os':
+      '@elizaos/os-bridges':
         specifier: workspace:*
-        version: link:../os
+        version: link:../os-bridges
       effect:
         specifier: 4.1.1
         version: 4.1.1
@@ -2130,9 +2428,9 @@ importers:
 
   vendor/eliza/packages/plugin-native-secure-store:
     dependencies:
-      '@elizaos/os':
+      '@elizaos/os-bridges':
         specifier: workspace:*
-        version: link:../os
+        version: link:../os-bridges
       effect:
         specifier: 4.1.1
         version: 4.1.1
@@ -2152,18 +2450,12 @@ importers:
 
   vendor/eliza/packages/plugin-native-settings:
     dependencies:
-      '@elizaos/os':
+      '@elizaos/os-bridges':
         specifier: workspace:*
-        version: link:../os
-      '@repo/ui':
-        specifier: workspace:*
-        version: link:../ui
+        version: link:../os-bridges
       effect:
         specifier: 4.1.1
         version: 4.1.1
-      react:
-        specifier: 'catalog:'
-        version: 19.3.1
       vibelang-runtime:
         specifier: 0.0.13
         version: 0.0.13(@effect/platform-browser@4.1.1(effect@4.1.1))(@effect/platform-node@4.1.1(bufferutil@4.2.0)(effect@4.1.1)(redis@6.3.1(@opentelemetry/api@1.10.0))(utf-8-validate@6.1.0))(effect@4.1.1)
@@ -2171,9 +2463,6 @@ importers:
       '@types/node':
         specifier: 'catalog:'
         version: 26.6.6
-      '@types/react':
-        specifier: 'catalog:'
-        version: 19.3.0
       typescript:
         specifier: 'catalog:'
         version: 6.0.3
@@ -2224,9 +2513,9 @@ importers:
 
   vendor/eliza/packages/plugin-native-system:
     dependencies:
-      '@elizaos/os':
+      '@elizaos/os-bridges':
         specifier: workspace:*
-        version: link:../os
+        version: link:../os-bridges
       effect:
         specifier: 4.1.1
         version: 4.1.1
@@ -2271,9 +2560,9 @@ importers:
       '@capacitor/core':
         specifier: 8.4.0
         version: 8.4.0
-      '@elizaos/os':
+      '@elizaos/os-bridges':
         specifier: workspace:*
-        version: link:../os
+        version: link:../os-bridges
       effect:
         specifier: 4.1.1
         version: 4.1.1
@@ -2293,18 +2582,12 @@ importers:
 
   vendor/eliza/packages/plugin-native-wifi:
     dependencies:
-      '@elizaos/os':
+      '@elizaos/os-bridges':
         specifier: workspace:*
-        version: link:../os
-      '@repo/ui':
-        specifier: workspace:*
-        version: link:../ui
+        version: link:../os-bridges
       effect:
         specifier: 4.1.1
         version: 4.1.1
-      react:
-        specifier: 'catalog:'
-        version: 19.3.1
       vibelang-runtime:
         specifier: 0.0.13
         version: 0.0.13(@effect/platform-browser@4.1.1(effect@4.1.1))(@effect/platform-node@4.1.1(bufferutil@4.2.0)(effect@4.1.1)(redis@6.3.1(@opentelemetry/api@1.10.0))(utf-8-validate@6.1.0))(effect@4.1.1)
@@ -2312,9 +2595,6 @@ importers:
       '@types/node':
         specifier: 'catalog:'
         version: 26.6.6
-      '@types/react':
-        specifier: 'catalog:'
-        version: 19.3.0
       typescript:
         specifier: 'catalog:'
         version: 6.0.3
@@ -2361,9 +2641,15 @@ importers:
       '@elizaos/agent':
         specifier: workspace:*
         version: link:../agent
+      '@elizaos/agent-host':
+        specifier: workspace:*
+        version: link:../agent-host
       '@elizaos/core':
         specifier: workspace:*
         version: link:../core
+      '@elizaos/plugin-notes-client':
+        specifier: workspace:*
+        version: link:../plugin-notes-client
       effect:
         specifier: 4.1.1
         version: 4.1.1
@@ -2393,11 +2679,42 @@ importers:
         specifier: 'catalog:'
         version: 5.1.0(@opentelemetry/api@1.10.0)(@types/node@26.6.6)(@vitest/browser-playwright@5.1.0)(@vitest/ui@5.1.0)(happy-dom@21.0.4(bufferutil@4.2.0)(utf-8-validate@6.1.0))(jsdom@31.0.1(@napi-rs/canvas@1.2.0)(@noble/hashes@1.8.0))(vite@8.3.5(@types/node@26.6.6)(esbuild@0.28.2)(jiti@2.7.0)(yaml@2.9.1))
 
+  vendor/eliza/packages/plugin-notes-client:
+    dependencies:
+      effect:
+        specifier: 4.1.1
+        version: 4.1.1
+      vibelang-runtime:
+        specifier: 0.0.13
+        version: 0.0.13(@effect/platform-browser@4.1.1(effect@4.1.1))(@effect/platform-node@4.1.1(effect@4.1.1)(redis@6.3.1(@opentelemetry/api@1.10.0)))(effect@4.1.1)
+    devDependencies:
+      '@effect/vitest':
+        specifier: 4.1.1
+        version: 4.1.1(effect@4.1.1)(vitest@5.1.0)
+      '@types/node':
+        specifier: 'catalog:'
+        version: 26.6.6
+      typescript:
+        specifier: 'catalog:'
+        version: 6.0.3
+      vibelang:
+        specifier: 0.0.13
+        version: 0.0.13(patch_hash=84f6bd90a8ff37080f66a93718a62ff76b42541194e36701abb285d694f59ee8)(@babel/core@7.29.13)(effect@4.1.1)(typescript@6.0.3)
+      vibestack:
+        specifier: workspace:*
+        version: link:../..
+      vitest:
+        specifier: 'catalog:'
+        version: 5.1.0(@opentelemetry/api@1.10.0)(@types/node@26.6.6)(@vitest/browser-playwright@5.1.0)(@vitest/ui@5.1.0)(happy-dom@21.0.4(bufferutil@4.2.0)(utf-8-validate@6.1.0))(jsdom@31.0.1(@napi-rs/canvas@1.2.0)(@noble/hashes@1.8.0))(vite@8.3.5(@types/node@26.6.6)(esbuild@0.28.2)(jiti@2.7.0)(yaml@2.9.1))
+
   vendor/eliza/packages/plugin-openai:
     dependencies:
       '@elizaos/core':
         specifier: workspace:*
         version: link:../core
+      '@elizaos/core-node':
+        specifier: workspace:*
+        version: link:../core-node
       effect:
         specifier: 4.1.1
         version: 4.1.1
@@ -2530,6 +2847,9 @@ importers:
       '@elizaos/core':
         specifier: workspace:*
         version: link:../core
+      '@elizaos/core-node':
+        specifier: workspace:*
+        version: link:../core-node
       '@slack/bolt':
         specifier: ^5.0.0
         version: 5.1.0(@types/express@5.0.6)(undici@8.13.1)
@@ -2608,6 +2928,9 @@ importers:
       '@elizaos/core':
         specifier: workspace:*
         version: link:../core
+      '@elizaos/core-node':
+        specifier: workspace:*
+        version: link:../core-node
       effect:
         specifier: 4.1.1
         version: 4.1.1
@@ -2652,9 +2975,6 @@ importers:
       effect:
         specifier: 4.1.1
         version: 4.1.1
-      react:
-        specifier: 'catalog:'
-        version: 19.3.1
       vibelang-runtime:
         specifier: 0.0.13
         version: 0.0.13(@effect/platform-browser@4.1.1(effect@4.1.1))(@effect/platform-node@4.1.1(bufferutil@4.2.0)(effect@4.1.1)(redis@6.3.1(@opentelemetry/api@1.10.0))(utf-8-validate@6.1.0))(effect@4.1.1)
@@ -2662,9 +2982,6 @@ importers:
       '@types/node':
         specifier: 'catalog:'
         version: 26.6.6
-      '@types/react':
-        specifier: 'catalog:'
-        version: 19.3.0
       typescript:
         specifier: 'catalog:'
         version: 6.0.3
@@ -2677,6 +2994,9 @@ importers:
       '@elizaos/core':
         specifier: workspace:*
         version: link:../core
+      '@elizaos/core-node':
+        specifier: workspace:*
+        version: link:../core-node
       effect:
         specifier: 4.1.1
         version: 4.1.1
@@ -2724,12 +3044,9 @@ importers:
       '@elizaos/core':
         specifier: workspace:*
         version: link:../core
-      '@repo/design-system':
+      '@elizaos/core-node':
         specifier: workspace:*
-        version: link:../design-system
-      '@repo/ui':
-        specifier: workspace:*
-        version: link:../ui
+        version: link:../core-node
       '@solana/web3.js':
         specifier: 1.98.4
         version: 1.98.4(bufferutil@4.2.0)(typescript@6.0.3)(utf-8-validate@6.1.0)
@@ -2742,37 +3059,19 @@ importers:
       ethers:
         specifier: ^6.16.0
         version: 6.17.0(bufferutil@4.2.0)(utf-8-validate@6.1.0)
-      react:
-        specifier: 'catalog:'
-        version: 19.3.1
       vibelang-runtime:
         specifier: 0.0.13
         version: 0.0.13(@effect/platform-browser@4.1.1(effect@4.1.1))(@effect/platform-node@4.1.1(bufferutil@4.2.0)(effect@4.1.1)(redis@6.3.1(@opentelemetry/api@1.10.0))(utf-8-validate@6.1.0))(effect@4.1.1)
     devDependencies:
-      '@tailwindcss/vite':
-        specifier: 'catalog:'
-        version: 4.3.5(vite@8.3.5(@types/node@26.6.6)(esbuild@0.28.2)(jiti@2.7.0)(yaml@2.9.1))
       '@types/node':
         specifier: 'catalog:'
         version: 26.6.6
-      '@types/react':
-        specifier: 'catalog:'
-        version: 19.3.0
-      react-dom:
-        specifier: 'catalog:'
-        version: 19.3.1(react@19.3.1)
       typescript:
         specifier: 'catalog:'
         version: 6.0.3
       vibelang:
         specifier: 0.0.13
         version: 0.0.13(patch_hash=84f6bd90a8ff37080f66a93718a62ff76b42541194e36701abb285d694f59ee8)(@babel/core@7.29.13)(effect@4.1.1)(typescript@6.0.3)
-      vibelang-vite:
-        specifier: 0.0.13
-        version: 0.0.13(vibelang@0.0.13(patch_hash=84f6bd90a8ff37080f66a93718a62ff76b42541194e36701abb285d694f59ee8)(@babel/core@7.29.13)(effect@4.1.1)(typescript@6.0.3))(vite@8.3.5(@types/node@26.6.6)(esbuild@0.28.2)(jiti@2.7.0)(yaml@2.9.1))
-      vite:
-        specifier: 'catalog:'
-        version: 8.3.5(@types/node@26.6.6)(esbuild@0.28.2)(jiti@2.7.0)(yaml@2.9.1)
 
   vendor/eliza/packages/plugin-web-search:
     dependencies:
@@ -2796,17 +3095,79 @@ importers:
         specifier: 0.0.13
         version: 0.0.13(patch_hash=84f6bd90a8ff37080f66a93718a62ff76b42541194e36701abb285d694f59ee8)(@babel/core@7.29.13)(effect@4.1.1)(typescript@6.0.3)
 
+  vendor/eliza/packages/plugin-workflow-client:
+    dependencies:
+      effect:
+        specifier: 4.1.1
+        version: 4.1.1
+      vibelang-runtime:
+        specifier: 0.0.13
+        version: 0.0.13(@effect/platform-browser@4.1.1(effect@4.1.1))(@effect/platform-node@4.1.1(effect@4.1.1)(redis@6.3.1(@opentelemetry/api@1.10.0)))(effect@4.1.1)
+    devDependencies:
+      '@effect/vitest':
+        specifier: 4.1.1
+        version: 4.1.1(effect@4.1.1)(vitest@5.1.0)
+      '@types/node':
+        specifier: 'catalog:'
+        version: 26.6.6
+      typescript:
+        specifier: 'catalog:'
+        version: 6.0.3
+      vibelang:
+        specifier: 0.0.13
+        version: 0.0.13(patch_hash=84f6bd90a8ff37080f66a93718a62ff76b42541194e36701abb285d694f59ee8)(@babel/core@7.29.13)(effect@4.1.1)(typescript@6.0.3)
+      vibestack:
+        specifier: workspace:*
+        version: link:../..
+      vitest:
+        specifier: 'catalog:'
+        version: 5.1.0(@opentelemetry/api@1.10.0)(@types/node@26.6.6)(@vitest/browser-playwright@5.1.0)(@vitest/ui@5.1.0)(happy-dom@21.0.4(bufferutil@4.2.0)(utf-8-validate@6.1.0))(jsdom@31.0.1(@napi-rs/canvas@1.2.0)(@noble/hashes@1.8.0))(vite@8.3.5(@types/node@26.6.6)(esbuild@0.28.2)(jiti@2.7.0)(yaml@2.9.1))
+
+  vendor/eliza/packages/plugin-workflow-worker:
+    dependencies:
+      '@elizaos/plugin-workflow-client':
+        specifier: workspace:*
+        version: link:../plugin-workflow-client
+      effect:
+        specifier: 4.1.1
+        version: 4.1.1
+      typescript:
+        specifier: 'catalog:'
+        version: 6.0.3
+      vibelang-runtime:
+        specifier: 0.0.13
+        version: 0.0.13(@effect/platform-browser@4.1.1(effect@4.1.1))(@effect/platform-node@4.1.1(effect@4.1.1)(redis@6.3.1(@opentelemetry/api@1.10.0)))(effect@4.1.1)
+    devDependencies:
+      '@effect/vitest':
+        specifier: 4.1.1
+        version: 4.1.1(effect@4.1.1)(vitest@5.1.0)
+      '@types/node':
+        specifier: 'catalog:'
+        version: 26.6.6
+      vibelang:
+        specifier: 0.0.13
+        version: 0.0.13(patch_hash=84f6bd90a8ff37080f66a93718a62ff76b42541194e36701abb285d694f59ee8)(@babel/core@7.29.13)(effect@4.1.1)(typescript@6.0.3)
+      vibestack:
+        specifier: workspace:*
+        version: link:../..
+      vitest:
+        specifier: 'catalog:'
+        version: 5.1.0(@opentelemetry/api@1.10.0)(@types/node@26.6.6)(@vitest/browser-playwright@5.1.0)(@vitest/ui@5.1.0)(happy-dom@21.0.4(bufferutil@4.2.0)(utf-8-validate@6.1.0))(jsdom@31.0.1(@napi-rs/canvas@1.2.0)(@noble/hashes@1.8.0))(vite@8.3.5(@types/node@26.6.6)(esbuild@0.28.2)(jiti@2.7.0)(yaml@2.9.1))
+
   vendor/eliza/packages/plugin-workflows:
     dependencies:
-      '@elizaos/agent':
+      '@elizaos/agent-host':
         specifier: workspace:*
-        version: link:../agent
+        version: link:../agent-host
       '@elizaos/cloud':
         specifier: workspace:*
         version: link:../cloud
       '@elizaos/core':
         specifier: workspace:*
         version: link:../core
+      '@elizaos/plugin-workflow-client':
+        specifier: workspace:*
+        version: link:../plugin-workflow-client
       '@jitl/quickjs-singlefile-browser-release-sync':
         specifier: 0.32.0
         version: 0.32.0
@@ -2832,6 +3193,9 @@ importers:
       '@electric-sql/pglite':
         specifier: 'catalog:'
         version: 0.4.6
+      '@elizaos/plugin-workflow-worker':
+        specifier: workspace:*
+        version: link:../plugin-workflow-worker
       '@types/node':
         specifier: 'catalog:'
         version: 26.6.6
@@ -15425,10 +15789,11 @@ snapshots:
     transitivePeerDependencies:
       - supports-color
 
-  eslint-module-utils@2.14.0(eslint-import-resolver-node@0.3.9)(eslint-import-resolver-typescript@4.4.5(eslint@10.14.0(jiti@2.7.0)))(eslint@10.14.0(jiti@2.7.0)):
+  eslint-module-utils@2.14.0(@typescript-eslint/parser@8.72.2(eslint@10.14.0(jiti@2.7.0))(typescript@6.0.3))(eslint-import-resolver-node@0.3.9)(eslint-import-resolver-typescript@4.4.5(eslint@10.14.0(jiti@2.7.0)))(eslint@10.14.0(jiti@2.7.0)):
     dependencies:
       debug: 3.2.7
     optionalDependencies:
+      '@typescript-eslint/parser': 8.72.2(eslint@10.14.0(jiti@2.7.0))(typescript@6.0.3)
       eslint: 10.14.0(jiti@2.7.0)
       eslint-import-resolver-node: 0.3.9
       eslint-import-resolver-typescript: 4.4.5(eslint@10.14.0(jiti@2.7.0))
@@ -15452,7 +15817,7 @@ snapshots:
       - '@eslint/css'
       - typescript
 
-  eslint-plugin-boundaries@7.4.4(eslint-import-resolver-typescript@4.4.5(eslint@10.14.0(jiti@2.7.0)))(eslint@10.14.0(jiti@2.7.0)):
+  eslint-plugin-boundaries@7.4.4(@typescript-eslint/parser@8.72.2(eslint@10.14.0(jiti@2.7.0))(typescript@6.0.3))(eslint-import-resolver-typescript@4.4.5(eslint@10.14.0(jiti@2.7.0)))(eslint@10.14.0(jiti@2.7.0)):
     dependencies:
       '@boundaries/config': 1.0.3
       '@boundaries/elements': 3.3.4
@@ -15460,7 +15825,7 @@ snapshots:
       chalk: 4.1.2
       eslint: 10.14.0(jiti@2.7.0)
       eslint-import-resolver-node: 0.3.9
-      eslint-module-utils: 2.14.0(eslint-import-resolver-node@0.3.9)(eslint-import-resolver-typescript@4.4.5(eslint@10.14.0(jiti@2.7.0)))(eslint@10.14.0(jiti@2.7.0))
+      eslint-module-utils: 2.14.0(@typescript-eslint/parser@8.72.2(eslint@10.14.0(jiti@2.7.0))(typescript@6.0.3))(eslint-import-resolver-node@0.3.9)(eslint-import-resolver-typescript@4.4.5(eslint@10.14.0(jiti@2.7.0)))(eslint@10.14.0(jiti@2.7.0))
     transitivePeerDependencies:
       - '@typescript-eslint/parser'
       - eslint-import-resolver-typescript

@@ -1,6 +1,6 @@
 // spec/telephony/contacts.md, "Story: Read my contacts only while I am looking at them"; spec/telephony/contacts.md, "A read starts only in the open view, and only the latest read publishes"; spec/telephony/contacts.md, "An open contact shows the fields the phone holds now, read for its own ticket"; spec/telephony/contacts.md, "The in-app editor opens only with write access and no write unsettled; otherwise the system editor opens"; spec/telephony/contacts.md, "A save names the version shown, a changed contact keeps the editor and writes nothing"; spec/telephony/contacts.md, "A removal needs the owner's confirmation of the contact read whole, at its version"; spec/telephony/contacts.md, "A write holds the gate while it runs, and a lost answer blocks every write until an explicit read that began after it"; spec/telephony/contacts.md, "Alpha's filter is the provider's own query on this phone, closes an open contact and shows a clearable chip"
-import { contactDraftProblem, isContactId, isContactVersion } from "@elizaos/os/bridges/contacts"
-import type { AddressBookContact, AddressBookRow, ContactDetail, ContactDraft, ContactId, ContactVersion } from "@elizaos/os/bridges/contacts"
+import { contactDraftProblem, isContactId, isContactVersion } from "@elizaos/os-bridges"
+import type { AddressBookContact, AddressBookRow, ContactDetail, ContactDraft, ContactId, ContactVersion } from "@elizaos/os-bridges"
 import {
   Machine as ContactsMachine, type ContactRow, type ContactsAnswer, type Detail, type EditMode, type Event as ContactsEvent, type WriteAnswer,
 } from "../../gen/telephony__contacts.effect.vibe"

@@ -1,5 +1,5 @@
 // spec/files/proposal.md, "Story: Review the actual files before anything changes"; spec/files/proposal.md, "Story: Carry out the change I approved, exactly"; spec/files/proposal.md, "Only filter and open bring Files forward, and they change nothing"; spec/files/filter.md, "Story: Let the agent show me the files I asked about"
-import { decodeFilesOperation, describeFilesOperation, type FilesAgentOperation } from "@elizaos/plugin-files/contract"
+import { decodeFilesOperation, describeFilesOperation, type FilesAgentOperation } from "@elizaos/plugin-files-client"
 import { copy } from "../assistant/presentation.vibe"
 import type { OperationPorts } from "../assistant/review.vibe"
 import { AssistantHost } from "../assistant/host.vibe"

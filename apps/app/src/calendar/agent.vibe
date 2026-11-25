@@ -5,11 +5,11 @@ import {
   type UpcomingReply, type WriteKind, type Event as AgentEvent, type WriteOutcome, type EventReturn, type ReturnFeed, Machine as AgentMachine, answerAdmitted, answerReadback, eventReturn,
 } from "../../gen/calendar__agent.effect.vibe"
 import { sourceKeyId, utcInstant } from "./source-key.ts"
-import { namedReadWindow } from "@elizaos/plugin-calendar/client"
+import { namedReadWindow } from "@elizaos/plugin-calendar-client"
 import { Resident, ResidentRefused, ResidentUnavailable } from "../platform/resident.vibe"
 import { ownerKey } from "../platform/storage.vibe"
 import { type CalendarRecord as CalendarSummary, type EventRecord, type FeedRecord, decodeCalendars, decodeFeed, decodeNext } from "./feed.schema.vibe"
-import type { CalendarChangeReply, CalendarCreateRequest, CalendarDeleteRequest, CalendarRespondRequest, CalendarUpdateRequest } from "@elizaos/plugin-calendar/client"
+import type { CalendarChangeReply, CalendarCreateRequest, CalendarDeleteRequest, CalendarRespondRequest, CalendarUpdateRequest } from "@elizaos/plugin-calendar-client"
 import { residentClients } from "./client.vibe"
 import { sha256Hex } from "./digest.ts"
 import { type InstantRange, agentEventKey, eventSourceKey, readableSource, windowKey } from "./model.vibe"

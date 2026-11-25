@@ -1,5 +1,5 @@
 // spec/notes/webSource.md, "Story: Visit or remove the web page a note came from"; spec/notes/webSource.md, "One action per dialog, only while the dialog is fresh over the note it reviewed"; spec/notes/attachment.md, "Story: Open the document a note came from"; spec/notes/attachment.md, "A retained reference opens directly; a fingerprint opens only the exact file picked"; spec/notes/attachment.md, "A document's grant is released only when neither a saved note nor Trash still refers to it"
-import type { NoteJson, NotesSnapshot } from "@elizaos/plugin-notes/types"
+import type { NoteJson, NotesSnapshot } from "@elizaos/plugin-notes-client"
 import { type Event as AttachmentEvent, Machine as AttachmentMachine, machine as attachmentMachine, releasesSource } from "../../gen/notes__attachment.effect.vibe"
 import { type Event as DialogEvent, Machine as SourceDialogMachine, machine as sourceDialogMachine, type SourceDialog } from "../../gen/notes__webSource.effect.vibe"
 import { Native } from "../platform/native.vibe"

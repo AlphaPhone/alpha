@@ -6,7 +6,7 @@ import type { MailBody } from "../../gen/inbox__reader.ts"
 import {
   mailCaches, mailReadKey, readSavedMailbox, saveMailbox, clearMailbox, savedMailboxName, mailSaveAllowed, MailStoreFailed,
   type GmailAccount, type GmailMessage, type GmailReadResult, type MailboxListSnapshot, type MailBodyEntry, type SavedMailboxStore
-} from "@elizaos/plugin-inbox/mailbox"
+} from "@elizaos/plugin-inbox-client"
 
 /** Who the saved mail belongs to and which session and credential may read it. */
 export interface SavedMailScope { readonly owner: string; readonly organization: string; readonly credential: string; readonly session: string }

@@ -1,5 +1,5 @@
 // spec/workflows/digestSources.md, "Story: Let my digest read Google through Cloud only as I authorized"; spec/workflows/digestSources.md, "Removing a grant Account names needs only Alpha in front, and clears this session's grant only once confirmed"; spec/workflows/digestSources.md, "Story: Let my digest read my phone's Calendar and reminders only with my consent"; spec/workflows/digestSources.md, "Story: Renew my phone source before its week ends"; spec/workflows/digestSources.md, "Story: Choose exactly what a Google source reads"
-import type { DigestLoop, DigestSource, HostedNativeSelection } from "@elizaos/plugin-workflow/digests"
+import type { DigestLoop, DigestSource, HostedNativeSelection } from "@elizaos/plugin-workflow-client"
 import {
   type Impact, type PhoneSourceProblem, type RenewalAction, Machine, canRevokeGrant, canRevokeNamedGrant, phoneSourceProblem, renewalAction, renewalArmed, revokeConfirmable,
   sourceRegistered, stored,

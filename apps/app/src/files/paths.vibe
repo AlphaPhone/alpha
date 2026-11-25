@@ -2,9 +2,9 @@
 import type { FileKind, Row } from "../../gen/files__storage.ts"
 import type { Criteria, FilterKind } from "../../gen/files__filter.ts"
 
-import { DOCUMENT_MIME_TYPES, baseName, filterTime, parentOf, within } from "@elizaos/plugin-files/client"
+import { DOCUMENT_MIME_TYPES, baseName, filterTime, parentOf, within } from "@elizaos/plugin-files-client"
 
-export { DOCUMENT_MIME_TYPES, baseName, breadcrumbs, filterTime, joinPath, parentOf, validName, validPath, within } from "@elizaos/plugin-files/client"
+export { DOCUMENT_MIME_TYPES, baseName, breadcrumbs, filterTime, joinPath, parentOf, validName, validPath, within } from "@elizaos/plugin-files-client"
 
 /** The kind an owner recognises, from a MIME type. */
 export function kindOf(mimeType: string, directory: boolean): FileKind {

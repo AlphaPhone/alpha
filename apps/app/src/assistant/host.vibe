@@ -1,5 +1,5 @@
 // spec/assistant/index.md, "The assistant observes the screen only while it is visible, unlocked and not private"; spec/assistant/context.md, "A private screen sends the message with no observation; an optional field goes only to the peer compared for this turn"; spec/assistant/context.md, "A hosted provider is disclosed wherever the owner can send, and on-device inference is never claimed for it"
-import type { Observation } from "@elizaos/agent/client"
+import type { Observation } from "@elizaos/agent"
 import type { Inference } from "../../gen/assistant__context.ts"
 import type { Exposure } from "../../gen/assistant.ts"
 

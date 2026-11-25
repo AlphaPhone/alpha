@@ -51,7 +51,7 @@ function start({dir, port, inputs}: {dir: string; port: number; inputs: string})
   const secrets = Object.fromEntries(['CLOUD_DIGEST_KEY', 'CLOUD_SEALING_KEY', 'GOOGLE_CLIENT_SECRET', 'STRIPE_SECRET_KEY', 'STRIPE_WEBHOOK_SECRET', 'CEREBRAS_API_KEY', 'CARTESIA_API_KEY', 'GOOGLE_MAPS_API_KEY', 'RESEND_API_KEY']
     .map(name => [name, process.env[name] || `local-${crypto.randomBytes(24).toString('base64url')}`]));
   secrets.CLOUD_ENTITLEMENT_KEY = process.env.CLOUD_ENTITLEMENT_KEY || crypto.generateKeyPairSync('ec', {namedCurve: 'P-256'}).privateKey.export({type: 'pkcs8', format: 'der'}).toString('base64');
-  const main = path.join(root, 'vendor/eliza/packages/cloud/src/main.vibe');
+  const main = path.join(root, 'vendor/eliza/packages/cloud-worker/src/main.vibe');
   const child = spawn(process.execPath, ['--conditions=eliza-source', '--import', 'vibelang/register', main, 'serve', '--profile', profile, '--environment', 'staging',
     '--store', `pglite:${path.join(dir, 'cloud.pglite')}`, '--seed', seed, '--port', String(port), '--host', '127.0.0.1'],
     {cwd: path.join(root, 'cloud'), stdio: 'inherit', env: {...process.env, ...secrets}});

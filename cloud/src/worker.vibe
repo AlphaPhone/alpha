@@ -1,5 +1,5 @@
 // spec/cloud/index.md, "Story: Use inference on my subscription or funded pilot account"; spec/cloud/index.md, "Story: Sign in to the Cloud"; spec/cloud/deployment.md, "Story: Serve the deployment from a Worker"
-import { cloudWorker, type CloudBindings, type WorkerExecution } from "@elizaos/cloud/worker"
+import { cloudWorker, type CloudBindings, type WorkerExecution } from "@elizaos/cloud-worker"
 import { profileUnavailable, readProfileAsset, type AssetFetcher } from "./profile-asset.ts"
 
 /** The API Worker's bindings: upstream's, with the profile read from the static assets and pinned by its digest, since the profile is larger than a Worker variable may be. */

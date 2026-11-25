@@ -1,5 +1,5 @@
 // spec/cloud/nativeClients/registry.md, "Story: Admit only a registered native client"; spec/cloud/operator.md, "Story: Operate the deployment without reading secrets"
-import type { CloudEnvironment, CloudProfile } from "@elizaos/cloud/profile"
+import type { CloudEnvironment, CloudProfile } from "@elizaos/cloud"
 import deployment from "../deployment.json" with { type: "json" }
 
 /** The app identity app.config.json records. */

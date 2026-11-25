@@ -1,6 +1,6 @@
 // spec/inbox/mailbox.md, "Story: Read my mailbox page by page"; spec/inbox/operations.md, "Story: Change or send from my mailbox once, as I reviewed it"; spec/inbox/drafts.md, "Story: Keep what I write, with the account I wrote it from"; spec/inbox/notices.md, "Story: Open the Inbox or ask about the exact notification I tapped"; spec/inbox/accounts.md, "Story: Choose which Gmail account my Inbox shows"
 import { assert, it } from "@effect/vitest"
-import { sha256Hex } from "@elizaos/plugin-inbox/mailbox"
+import { sha256Hex } from "@elizaos/plugin-inbox-client"
 import { initial as sessionInitial } from "../../gen/account__session.ts"
 import { fakeCloud, fakeNative, fakeResident, buildInfo } from "../../src/platform/layers.vibe"
 import { memoryStore } from "../../src/platform/storage.vibe"

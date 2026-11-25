@@ -1,5 +1,5 @@
 // spec/assistant/decision.md, "Story: Approve or deny a workflow step once"; spec/workflows/deviceSteps.md, "Story: Approve a phone step only as I reviewed it"
-import { type WorkflowApproval, parseWorkflowRun, workflowApprovalProposalId } from "@elizaos/plugin-workflow/client"
+import { type WorkflowApproval, parseWorkflowRun, workflowApprovalProposalId } from "@elizaos/plugin-workflow-client"
 import { type StepAnswer, WorkflowStepDecisions } from "../assistant/ports.vibe"
 import { WorkflowApi } from "./api.vibe"
 

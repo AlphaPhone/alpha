@@ -1,6 +1,6 @@
 // spec/clock/agentReview.md, "Story: Let the agent ask Clock only with my approval on the phone"; spec/clock/agentReview.md, "Story: Be offered only the Clock and reminder requests this phone can carry out"; spec/clock/reminderReads.md, "Story: Let a workflow read today's reminders only as I reviewed"; spec/clock/reminders.md, "Story: Change a reminder exactly once"; spec/clock/reminderJournal.md, "Story: Never create or change a reminder twice"; spec/clock/deletions.md, "Story: Undo a reviewed deletion in time"; spec/clock/reminderPage.md, "Story: Let the agent change a reminder I name only once I have it open"
-import { NOT_DISPATCHED, type ExecutorCall } from "@elizaos/agent/client"
-import { readOperation, readResult, type DeviceOperation } from "@elizaos/agent/operations"
+import { NOT_DISPATCHED, type ExecutorCall } from "@elizaos/agent"
+import { readOperation, readResult, type DeviceOperation } from "@elizaos/agent"
 import type { HandoffStatus } from "../../gen/clock__vocabulary.ts"
 import { advertises, isHandoff, reviewClassOf, type ClockOffer, type ClockOperationKind, type ClockSupport } from "../../gen/clock__agentReview.ts"
 import type { Op } from "../../gen/assistant__review.effect.vibe"

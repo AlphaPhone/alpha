@@ -1,6 +1,6 @@
 // spec/notes/collection.md, "Story: Read my notes under the account I am signed in as"; spec/notes/collection.md, "A mutation is confirmed only by its own reply, and an uncertain one stays under review"; spec/notes/trash.md, "A saved erase leaves its recordings' cleanup pending, a conflict changes nothing, and an unknown outcome reopens the store"
-import { createNotesClient, NotesClientRefused, type NotesInteractResult } from "@elizaos/plugin-notes/client"
-import type { NotesSnapshot, NotesTrashErase, NotesTrashRecordingCleanup } from "@elizaos/plugin-notes/types"
+import { createNotesClient, NotesClientRefused, type NotesInteractResult } from "@elizaos/plugin-notes-client"
+import type { NotesSnapshot, NotesTrashErase, NotesTrashRecordingCleanup } from "@elizaos/plugin-notes-client"
 import { Resident, ResidentRefused, ResidentUnavailable } from "../platform/resident.vibe"
 import { ResidentAnswerRefused, residentTransport } from "./transport.ts"
 

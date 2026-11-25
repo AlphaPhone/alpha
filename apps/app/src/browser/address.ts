@@ -1,5 +1,5 @@
 // spec/browser/page.md, "Typed text opens an address, opens the local development host, searches, or is refused"; spec/browser/session.md, "A link the owner taps outside Browser opens in a new tab and is never searched"; spec/browser/session.md, "The agent switches to or closes a private tab only for a request made from a private tab, never switches to the tab already showing, and closes the showing tab only when it is shown"
-import { isSecureWebAddress, isWebAddress, parseBrowserAddressInput } from "@elizaos/os/browser/address";
+import { isSecureWebAddress, isWebAddress, parseBrowserAddressInput } from "@elizaos/os-bridges";
 import type { AddressFacts, AddressOutcome, RefusalReason, TabPage } from "../../gen/browser__page.ts";
 import { newId } from "../platform/ids.ts";
 

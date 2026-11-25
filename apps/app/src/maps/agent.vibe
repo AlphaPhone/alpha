@@ -4,11 +4,11 @@ import { Machine as DeliveryMachine, claimDeadlineMs, negativeCleanupMs } from "
 import { type Guidance, Machine as GuidanceMachine } from "../../gen/maps__guidance.effect.vibe"
 import { type Screen, Machine as ScreenMachine } from "../../gen/maps__screen.effect.vibe"
 import { type ContextKind, Machine as ReadMachine, maxReadBytes } from "../../gen/maps__selectedRead.effect.vibe"
-import type { ProviderConfig, ResultState, Place, Route } from "@elizaos/plugin-maps/client/contracts"
+import type { ProviderConfig, ResultState, Place, Route } from "@elizaos/plugin-maps-client"
 import {
   type ActiveGuidance, type MapsNavigationSurface, type NavigationOwner, type RoutePlanReceipt, RelayUnavailable,
   deviceMapsNavigation, withMapsNavigationRelay,
-} from "@elizaos/plugin-maps/client/device-navigation"
+} from "@elizaos/plugin-maps-client"
 import { MapsRelay } from "../assistant/ports.vibe"
 import { newId } from "../platform/ids.ts"
 import { Resident } from "../platform/resident.vibe"

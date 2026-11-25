@@ -1,5 +1,5 @@
 // spec/files/browser.md, "Story: Walk my folders and categories"; spec/files/browser.md, "Story: Select files and act on them together"; spec/files/browser.md, "Story: Sort and view a listing my way"; spec/files/storage.md, "Only a complete read with no rows is empty; a partial read keeps its rows"
-import { breadcrumbs } from "@elizaos/plugin-files/client";
+import { breadcrumbs } from "@elizaos/plugin-files-client";
 import { ArrowUpDown, CheckSquare, Folder, LayoutGrid, List } from "lucide-react";
 import type { Browser, FolderGroup, SortMode } from "../../../gen/files__browser.ts";
 import { selectable, showsEmpty } from "../../../gen/files__browser.ts";

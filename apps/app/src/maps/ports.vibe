@@ -1,5 +1,5 @@
 // spec/maps/connection.md, "Changing account retires the provider; rebuilding the client for the same account keeps it"; spec/maps/vocabulary.md, "A Google place is never saved, shared, renamed or copied, and Google guidance is never spoken"; spec/maps/agentSurface.md, "Maps opens at most once per request, only over an unblocked launcher, and the answer waits for the open to commit or two seconds"
-import type { GuidanceSpeechStopped } from "@elizaos/plugin-maps/client/guidance"
+import type { GuidanceSpeechStopped } from "@elizaos/plugin-maps-client"
 
 /** The Cloud account Maps requests are made for; undefined when signed out. */
 export interface AccountBinding {

@@ -3,7 +3,7 @@ import * as KeyValueStore from "effect/persistence/KeyValueStore"
 import {
   type WorkflowNoticeRoute, type WorkflowRun, WorkflowAdmissionRejected, WorkflowResponseInvalid, isRecordedMissedExecution, openWorkflowNotice,
   parseWorkflowRun, parseWorkflowRunDeepLink, workflowRunDeepLink,
-} from "@elizaos/plugin-workflow/client"
+} from "@elizaos/plugin-workflow-client"
 import { type Entry, Machine, autoRefreshes, refreshAfter, stored } from "../../gen/workflows__runs.effect.vibe"
 import { occurred } from "../../gen/workflows__vocabulary.effect.vibe"
 import { ownerKey } from "../platform/storage.vibe"

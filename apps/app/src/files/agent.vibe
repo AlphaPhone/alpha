@@ -8,9 +8,9 @@ import { baseName, parentOf, rowKey, toRow } from "./paths.vibe"
 import { FilesStorage } from "./storage.vibe"
 import { FilesBrowser, accessOf, queryFilter } from "./browser.vibe"
 import { FilesPreview } from "./preview.vibe"
-import { FILES_CAPABILITY, FILES_SHOWN_TARGET_CAPABILITY, FilesOperationRefused, filesOperationAdmitted, filesShownTarget, type FilesAgentOperation, type FilesAgentRunner, type FilesPathOperation } from "@elizaos/plugin-files/contract"
+import { FILES_CAPABILITY, FILES_SHOWN_TARGET_CAPABILITY, FilesOperationRefused, filesOperationAdmitted, filesShownTarget, type FilesAgentOperation, type FilesAgentRunner, type FilesPathOperation } from "@elizaos/plugin-files-client"
 
-export { FILES_CAPABILITY, FILES_SHOWN_TARGET_CAPABILITY, describeFilesOperation, decodeFilesOperation, filesToolSurface } from "@elizaos/plugin-files/contract"
+export { FILES_CAPABILITY, FILES_SHOWN_TARGET_CAPABILITY, describeFilesOperation, decodeFilesOperation, filesToolSurface } from "@elizaos/plugin-files-client"
 
 /** What the agent is told of an operation's end. */
 export interface AgentResult { readonly status: "succeeded" | "failed"; readonly summary: string }

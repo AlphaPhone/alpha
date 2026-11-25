@@ -1,5 +1,5 @@
 // spec/assistant/reply.md, "A recognized tool block outside a fence becomes its card; inside a fence it stays code"; spec/calendar/approvals.md, "Story: Approve or decline a Calendar change the agent asked for"
-import { recognizedMapsCards, type MapsCard } from "@elizaos/plugin-maps/cards"
+import { recognizedMapsCards, type MapsCard } from "@elizaos/plugin-maps-client"
 import type { Line } from "../../gen/assistant__reply.ts"
 import { FormBlockBody, WorkflowBlock } from "./payloads.schema.vibe"
 import { calendarReviewText } from "../calendar/approvals.vibe"

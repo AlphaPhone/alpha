@@ -1,6 +1,6 @@
 // spec/maps/selectedRead.md, "Story: Let the agent see only what the Maps screen shows now"; spec/maps/selectedRead.md, "A read is approved only for the selection the card showed, and its result is uploaded only while that selection is still shown"; spec/maps/selectedRead.md, "The context revision changes exactly when what is shown changes, and clears when Maps is not in front"
-import { NOT_DISPATCHED } from "@elizaos/agent/client"
-import { readOperation, readResult, type DeviceOperation } from "@elizaos/agent/operations"
+import { NOT_DISPATCHED } from "@elizaos/agent"
+import { readOperation, readResult, type DeviceOperation } from "@elizaos/agent"
 import type { OperationPorts } from "../assistant/review.vibe"
 import { MapsAgent } from "./agent.vibe"
 

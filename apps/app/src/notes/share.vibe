@@ -1,6 +1,6 @@
 // spec/notes/share.md, "Story: Share the note I have open"; spec/notes/share.md, "A share acts on the open note's snapshot, only while it is still the same note"; spec/notes/share.md, "The export text is the note's own words by kind, and a voice note says its audio is not included"; spec/notes/share.md, "One document operation runs at a time, and its receipt shows only in its own visible visit"
-import { noteShareText } from "@elizaos/plugin-notes/format"
-import type { NoteFormat, StickyNote } from "@elizaos/plugin-notes/types"
+import { noteShareText } from "@elizaos/plugin-notes-client"
+import type { NoteFormat, StickyNote } from "@elizaos/plugin-notes-client"
 import { type Event as TransferEvent, Machine as TransferMachine, machine as transferMachine, shareAllowed, textExportFits, type Transfer } from "../../gen/notes__share.effect.vibe"
 import { Build } from "../platform/build.vibe"
 import { Native } from "../platform/native.vibe"

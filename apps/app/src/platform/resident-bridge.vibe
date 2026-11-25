@@ -1,6 +1,6 @@
 // spec/platform/resident.md, "Story: Start my agent and keep it running"; spec/platform/resident.md, "An abandoned request is withdrawn by its id, and its outcome is unknown unless native withdrew it first"; spec/platform/resident.md, "Stopping is confirmed only when the service reports its launch stopped and serving nothing"; spec/platform/resident.md, "The agent's status reads as running only while its launch serves"; spec/platform/nativeStream.md, "Story: Watch a reply arrive on the phone"; spec/platform/index.md, "A request carries only the device headers the resident reads, each one bounded line"
-import type { RuntimeJsonBridge, RuntimeStatus, RuntimeStreamFrame } from "@elizaos/agent/client"
-import type { AgentRequest, AgentStatus, AgentStreamData, AgentStreamEnd, AgentStreamRequest, ElizaAgentPlugin } from "@elizaos/os/bridges/definitions/agent"
+import type { RuntimeJsonBridge, RuntimeStatus, RuntimeStreamFrame } from "@elizaos/agent"
+import type { AgentRequest, AgentStatus, AgentStreamData, AgentStreamEnd, AgentStreamRequest, ElizaAgentPlugin } from "@elizaos/os-bridges"
 import { abortOutcome, runtimePhaseOf, stopConfirmed, type AbortOutcome, type Boot } from "../../gen/platform__resident.effect.vibe"
 import { Machine as Relay, machine as relayMachine, type Event as RelayEvent, type Failure, type Relay as RelayState } from "../../gen/platform__nativeStream.effect.vibe"
 import { bytesOfBase64, jsonBytes } from "./native-capacitor.ts"

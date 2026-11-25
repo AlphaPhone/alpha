@@ -1,5 +1,5 @@
 // spec/browser/webSurface.md, "Each host navigation gets a fresh frame, and only that frame's first load commits the page"; spec/browser/webSurface.md, "Stop swaps in a blank frame that reports nothing, and closing forgets the tab's history"
-import { isSecureWebAddress, isWebAddress } from "@elizaos/os/browser/address";
+import { isSecureWebAddress, isWebAddress } from "@elizaos/os-bridges";
 
 const MARKS_KEY = "alpha/browser/bookmarks";
 const SESSION_KEY = "alpha/browser/session";

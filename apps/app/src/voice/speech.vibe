@@ -1,5 +1,5 @@
 // spec/voice/speech.md, "Story: Never hear two things at once, or anything after I stopped it"; spec/voice/speech.md, "Story: Hear the reply start at once"; spec/voice/speech.md, "Story: Never have a secret read aloud"; spec/voice/speech.md, "Story: Keep a page I read and my voicemail on my phone"; spec/voice/conversation.md, "A Cloud stream listens, speaks the replies and the cue and mutes the speaker on one relay session, and only voice retiring ends it"
-import type { MisroutedSpeech, SpeechAttemptFailed } from "@elizaos/plugin-local-inference/speech-route"
+import type { MisroutedSpeech, SpeechAttemptFailed } from "@elizaos/plugin-local-inference-client"
 import { Native } from "../platform/native.vibe"
 import { Resident } from "../platform/resident.vibe"
 import { Machine, voiceEntry, type Channel, type Event, type SpeechChains, type VoiceEntry } from "../../gen/voice__speech.effect.vibe"

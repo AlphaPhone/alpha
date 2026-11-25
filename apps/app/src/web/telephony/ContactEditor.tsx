@@ -1,5 +1,5 @@
 // spec/telephony/contacts.md, "The in-app editor opens only with write access and no write unsettled; otherwise the system editor opens"; spec/telephony/contacts.md, "A save names the version shown, a changed contact keeps the editor and writes nothing"
-import type { ContactDraft } from "@elizaos/os/bridges/contacts";
+import type { ContactDraft } from "@elizaos/os-bridges";
 import { Plus, X } from "lucide-react";
 import { useState } from "react";
 import type { Detail, Editor } from "../../../gen/telephony__contacts.ts";

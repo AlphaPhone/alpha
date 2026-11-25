@@ -1,5 +1,5 @@
 // spec/voice/speech.md, "A spoken reply refuses only a likely password, key or card; everything else it cannot say becomes a pause"; spec/voice/speech.md, "A spoken reply or reading says a written date, clock time, range and percentage in words"; spec/voice/speech.md, "A reading also refuses a link or email address, characters it cannot say and more than 16,000 characters"; spec/voice/speech.md, "Each finished sentence is spoken while the rest is generated, in order, and streamed audio is never kept"; spec/voice/speech.md, "An email draft is said as one line, by whether its card was validated or the action failed; other action replies drop IDs and asides unless I asked for them word for word"; spec/voice/conversation.md, "A reply whose only card is one addressed text keeps voice listening and says the text is ready"; spec/voice/conversation.md, "Saying the send phrase sends the bound card once, as its Send tap does, only as the next thing said and only while it is still the one live text shown in that conversation"
-import type { VoiceReplyAction } from "@elizaos/agent/voice";
+import type { VoiceReplyAction } from "@elizaos/agent";
 import { clockWords, meridiemOf, twelveHour } from "../../gen/voice__speech.ts";
 
 /** Why a passage was not spoken: a likely secret, a link or address, a character it cannot say, a length, or a word too long. */

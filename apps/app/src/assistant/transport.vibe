@@ -1,5 +1,5 @@
 // spec/assistant/send.md, "The transport's own result decides, and a send that may have reached the agent stays in the transcript, unconfirmed"; spec/assistant/withdrawal.md, "A request withdrawn before its worker dispatched it never reaches the agent, and every call is answered at most once"; spec/assistant/context.md, "Every assistant request carries the capabilities this phone advertises of those the agent offered, and none when it offered none"
-import type { TurnTransport } from "@elizaos/agent/client"
+import type { TurnTransport } from "@elizaos/agent"
 import { Resident, ResidentRefused, ResidentUnavailable, type ResidentHeaders } from "../platform/resident.vibe"
 import { AdvertisedCapabilities } from "./ports.vibe"
 
