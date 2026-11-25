@@ -2,7 +2,9 @@
 
 A workflow's history and the sheet of one run: the runs the agent kept,
 read page by page, and one run opened with its output, read aloud on
-request, and handed to Ask Alpha. A removed workflow keeps its history.
+request, and handed to Ask Alpha. A scheduled run names its scheduled time.
+The run's Details show the execution, version, status, reconciliation, stop
+time and activity recorded by the agent. A removed workflow keeps its history.
 
 The run's status as reported, the workflow's newest version and whether
 it was removed are facts of [Runs](./runs.md) and [Workflows](./index.md),

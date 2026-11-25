@@ -232,6 +232,7 @@ export function elizaFiles(scene: FilesScene): Faked {
         return Promise.resolve({ status: "opened", count: 1 });
       },
       storageSelect({ volume, path }) {
+        called("storageSelect");
         if (denied()) return Promise.resolve(refused());
         const found = find(on(volume), path);
         return Promise.resolve(found && !found.directory ? {

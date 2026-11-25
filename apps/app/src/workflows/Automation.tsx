@@ -89,7 +89,7 @@ export function Automation({ runtime, row, owner }: AutomationProps) {
   return (
     <section aria-label={row === undefined ? "Automation" : "Automation controls"} className="flex flex-col gap-3">
       {row === undefined && !editing && model.can({ type: "openEditor", kind: "PromptTask", zone: 0 }) && (
-        <ListRow title="Automation" leading={<Repeat />} trailing={<ChevronRight aria-hidden />} onClick={editor} />
+        <ListRow className="min-h-18 px-1" title="Automation" leading={<Repeat />} trailing={<ChevronRight aria-hidden className="size-5" />} onClick={editor} />
       )}
       {row?.kind === "Prompt" && model.can(eventFor(toggle)) && (
         <label className="flex items-center justify-between gap-3">

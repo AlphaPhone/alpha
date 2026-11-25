@@ -157,6 +157,72 @@ describe("Notes", () => {
     await until(alpha, runtime, List, (s) => s.read.status === "Loaded" && s.version === world.notes.revision + 1);
   });
 
+  it("Pins the exact saved voice note from More (spec/app/notes/voice.md, \"Pinning writes the chosen flag over the revision shown\")", async () => {
+    const world = scene();
+    const { alpha, runtime } = await openNotesFromHome(world);
+    await until(alpha, runtime, List, (state) => state.read.status === "Loaded");
+    await press("Open Design sync");
+    await until(alpha, runtime, Voice, (state) => state.showing);
+    const saved = () => world.notes.notes.find((row) => row.id === "sync");
+    const original = saved();
+    if (original === undefined) throw new Error("The fixture needs a saved voice note");
+    const choose = async (name: string) => {
+      await control("More");
+      await drawn(() => button("More")?.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true })));
+      const choice = () => [...document.querySelectorAll<HTMLElement>("[role=menuitem]")].find((item) => item.textContent?.trim() === name);
+      await rendered(() => expect(choice()?.getAttribute("aria-disabled")).toBeNull());
+      await drawn(() => choice()?.click());
+    };
+
+    await choose("Pin");
+    await rendered(() => expect(saved()?.format).toEqual({ ...original.format, data: { ...original.format?.data, pinned: true } }));
+    await until(alpha, runtime, List, (state) => state.read.status === "Loaded" && state.version === world.notes.revision + 1);
+    await until(alpha, runtime, Voice, (state) => state.showing && state.revision === world.notes.revision + 1);
+    expect(world.notes.trash).toEqual([]);
+
+    await choose("Unpin");
+    await rendered(() => expect(saved()?.format).toEqual({ ...original.format, data: { ...original.format?.data, pinned: false } }));
+    await until(alpha, runtime, List, (state) => state.read.status === "Loaded" && state.version === world.notes.revision + 1);
+    await until(alpha, runtime, Voice, (state) => state.showing && state.revision === world.notes.revision + 1);
+    const previouslyShown = saved();
+    world.notes.revision++;
+    await choose("Pin");
+    await rendered(() => expect(document.body.textContent).toContain("The pin couldn’t be changed."));
+    expect(saved()).toEqual(previouslyShown);
+  });
+
+  it("Copies only the exact saved voice note after choosing Copy text (spec/app/notes/voice.md, \"Story: Share the text of a saved voice note\")", async () => {
+    const world = scene();
+    const { alpha, runtime } = await openNotesFromHome(world);
+    await until(alpha, runtime, List, (state) => state.read.status === "Loaded");
+    await press("Open Design sync");
+    await until(alpha, runtime, Voice, (state) => state.showing);
+    const copy = vi.spyOn(navigator.clipboard, "writeText").mockResolvedValue(undefined);
+    try {
+      const reopenShare = async () => {
+        await drawn(() => button("More")?.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true })));
+        const share = () => [...document.querySelectorAll<HTMLElement>("[role=menuitem]")].find((item) => item.textContent?.trim() === "Share");
+        await rendered(() => expect(share()?.getAttribute("aria-disabled")).toBeNull());
+        await drawn(() => share()?.click());
+        await control("Close share");
+      };
+      await reopenShare();
+      await press("Close share");
+      expect(copy).not.toHaveBeenCalled();
+      await reopenShare();
+      await pressOnTop("Copy text");
+      await rendered(() => expect(copy).toHaveBeenCalledTimes(1));
+      expect(copy.mock.calls[0]?.[0]).toContain("Voice note text (audio not included)");
+      expect(copy.mock.calls[0]?.[0]).toContain("Notifications stay as icons until unlock");
+      expect(copy.mock.calls[0]?.[0]).not.toContain("Enclave launch");
+      await reopenShare();
+      world.notes.revision++;
+      await pressOnTop("Copy text");
+      await rendered(() => expect(document.body.textContent).toContain("Sharing is unavailable."));
+      expect(copy).toHaveBeenCalledTimes(1);
+    } finally { copy.mockRestore(); }
+  });
+
   it("Read and use the transcript (spec/app/notes/voice.md, \"Story: Read and use the transcript\")", async () => {
     const world = scene();
     world.ask.metadata = [];
@@ -175,6 +241,7 @@ describe("Notes", () => {
     const transcript = world.notes.notes.find((note) => note.id === "sync")?.format?.data.lines;
     if (!Array.isArray(transcript)) throw new Error("The fixture needs a saved transcript");
     const words = transcript.map((line) => typeof line === "object" && line !== null && "t" in line && typeof line.t === "string" ? line.t : "").join("\n");
+    await control("Copy text");
     await press("Copy text");
     await rendered(async () => expect(await navigator.clipboard.readText()).toBe(words));
 

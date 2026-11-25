@@ -3,7 +3,7 @@ import { Effect, Exit } from "effect";
 import { useState, useSyncExternalStore } from "react";
 import { digestSourceState, digestStatusLabel, digestSummaryText, digestTemplateName } from "@elizaos/plugin-workflow-client";
 import { Alert, Button, ConfirmDialog, EmptyState, Input, ListRow, Spinner, Switch } from "@repo/ui";
-import { CalendarDays, ChevronRight, Plus, RefreshCw, Sun } from "lucide-react";
+import { CalendarDays, ChevronRight, Plus, RefreshCw, Sparkles, Sun } from "lucide-react";
 import { useMachine as useDigestDelivery } from "../../gen/app__digests.react.ts";
 import { useMachine } from "../../gen/app__digests__schedules.react.ts";
 import type { Machine } from "../../gen/app__digests__schedules.effect.vibe";
@@ -12,7 +12,7 @@ import type { Resident, Shown } from "../runtime/area.tsx";
 import { type DigestNoticeIdentity, sameDigestNoticeResult } from "../platform/hosted-digests.vibe";
 import { Time } from "../runtime/time.vibe";
 import { setBrowserDigestChecks } from "./browser-digests.vibe";
-import { enableDigestNotifications, NativeDigestPanel, setNativeDigestChecks } from "./native-digests.vibe";
+import { askAboutNativeDigest, digestQuestionExcerpt, enableDigestNotifications, NativeDigestPanel, setNativeDigestChecks } from "./native-digests.vibe";
 import { DigestWords, newDigest, pickDigestSource } from "./digests.vibe";
 
 interface DigestsProps extends Pick<Shown<Resident | Machine | DigestWords>, "runtime"> {
@@ -44,9 +44,15 @@ export function Digests({ runtime, owner, result, notice, onResult }: DigestsPro
   if (result > 0) {
     const selected = results.find((entry) => entry.cursor === result && (notice === undefined || sameDigestNoticeResult(entry, notice)));
     if (selected === undefined) return <EmptyState title="This result isn’t available" />;
+    const lease = nativeState?.lease;
+    const canAsk = lease !== undefined && digestQuestionExcerpt(selected) !== undefined
+      && delivery.can({ type: "askAbout", owner, result, retained: true });
     return <section aria-label="Digest result" className="flex flex-col gap-4">
       <p className="text-sm text-muted-foreground">{digestStatusLabel(selected.status)} · {new Date(selected.scheduledAt).toLocaleString()}</p>
       <div className="rounded-tile bg-secondary p-4 whitespace-pre-wrap break-words">{digestSummaryText(selected)}</div>
+      {canAsk && <Button variant="secondary" className="self-start" onClick={() => void runtime.runPromiseExit(askAboutNativeDigest(owner, lease, selected))}>
+        <Sparkles aria-hidden />Ask Alpha
+      </Button>}
     </section>;
   }
   const refresh = { type: "refresh" } as const;

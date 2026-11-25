@@ -94,6 +94,13 @@ function execution(world: WorkflowsScene) {
     finished: world.stage === "Done",
     status: world.stage === "Done" ? "finished" : world.stage === "Waiting" ? "waiting-approval" : "running",
     output: world.stage === "Done" ? receipt.output : "",
+    ...(world.stage === "Done" ? {
+      stoppedAt: "2026-11-24T07:02:00.000Z",
+      events: [{
+        type: "NodeFinished", timestamp: "2026-11-24T07:01:00.000Z", nodeId: approvalNode,
+        runId: receipt.id, workflowId: record.id,
+      }],
+    } : {}),
   };
 }
 

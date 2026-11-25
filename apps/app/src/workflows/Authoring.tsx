@@ -89,7 +89,7 @@ export function Authoring({ runtime, owner }: AuthoringProps) {
   const tell = (event: Event) => { if (builder.can(event)) void builder.send(event); };
   if (!state.open) return (
     <ul className="divide-y divide-border">
-      {builder.can(open) && <li><ListRow title="Workflow" leading={<ListChecks />} trailing={<ChevronRight aria-hidden />} onClick={() => tell(open)} /></li>}
+      {builder.can(open) && <li><ListRow className="min-h-18 px-1" title="Steps" leading={<ListChecks />} trailing={<ChevronRight aria-hidden className="size-5" />} onClick={() => tell(open)} /></li>}
     </ul>
   );
   const editable = unlocked(state);
