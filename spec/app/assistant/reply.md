@@ -4,7 +4,7 @@ One reply as Ask Alpha shows it while it is written and once it ends: the
 label shown while the agent works, its one brief acknowledgment, the text
 as it streams and the whole answer, the cards its lines become, its notices,
 and why it did not finish. The [conversation](./index.md) says how the turn
-ended; eliza's reply stream (`@elizaos/agent/client`) gives the text, the
+ended; eliza's reply stream (`@elizaos/agent`) gives the text, the
 planning label, the acknowledgment frame, each tool's label, the action
 results and the last frame with its failure kind and fix, none of which is
 restated here. Speaking the reply is the voice area's; the cue rules it
@@ -212,8 +212,11 @@ again, which puts the message back in the composer for the owner to send.
 A reply that names no fix offers Manage plan only for spent credits or
 out of funds. A limit reached answered live says "Try again in about …"
 (seconds under 90, then minutes under 90, then hours); a reply read again
-from history carries no wait and says to wait a moment. Nothing is sent
-again, bought or upgraded by itself.
+from history carries no wait and says to wait a moment. A failure shows
+once: when the page showing holds the same reply read again with the same
+failure, the live notice is left out unless it offers more than that reply
+does, a fix other than Manage plan or a live wait. Nothing is sent again,
+bought or upgraded by itself.
 
 ```quint
 type Fix = NoFix | SignInFix | FundingFix | RetryFix
@@ -235,6 +238,14 @@ pure def lawOnlyALimitShowsAWait(kind: Failure, waitMs: int): bool = showsWait(k
 pure def lawHistoryShowsNoWait(kind: Failure): bool = not(showsWait(kind, -1))
 
 pure def lawAWaitIsAtLeastASecond(waitMs: int): bool = waitMs >= 0 implies waitSeconds(waitMs) >= 1
+
+pure def liveAddsToHistory(kind: Failure, fix: Fix, waitMs: int): bool =
+  showsWait(kind, waitMs) or not(fix == NoFix or (fix == FundingFix and managesPlan(kind)))
+
+pure def lawALiveWaitIsNeverLeftOut(fix: Fix, waitMs: int): bool =
+  showsWait(LimitReached, waitMs) implies liveAddsToHistory(LimitReached, fix, waitMs)
+
+pure def lawLiveOutOfFundsRepeatsItsReadAgainReply(waitMs: int): bool = not(liveAddsToHistory(OutOfFunds, FundingFix, waitMs))
 ```
 
 ### Out of funds is refused before any output, is never spoken, and offers only Manage plan
