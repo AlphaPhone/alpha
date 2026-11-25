@@ -7,8 +7,8 @@ import { Attempts } from "../runtime/attempts.vibe"
 export error Unsent { cause: unknown }
 /** The other side could not be reached, did not answer in time, or stopped mid-answer: it may have acted. */
 export error Unreachable { cause: unknown }
-/** The other side answered with a status other than 2xx, and how many seconds it asked Alpha to wait, where it asked. */
-export error Refused { status: number; wait?: number }
+/** The other side answered with a status other than 2xx, how many seconds it asked Alpha to wait, where it asked, and the reason it named, where Alpha reads one. */
+export error Refused { status: number; wait?: number; reason?: string }
 
 /** The refusal of `status`, with the wait `said` gave where the platform's rule takes it: a `Retry-After` of whole seconds, or seconds already read. */
 export function refusal(status: number, said: string | number | undefined): Refused {
