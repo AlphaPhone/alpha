@@ -120,7 +120,7 @@ function Tab({ runtime, alpha, tabs, page }: BrowserProps & { tabs: State; page:
     canOpenTab(tabs, "Private") && { label: "Private tab", name: "New private tab", icon: <PrivateMark aria-hidden />, onSelect: () => opening("Private")?.() },
     hasLibrary && { label: booked ? "Bookmarked" : "Bookmark", icon: <Star fill={booked ? "currentColor" : "none"} />, disabled: !canBookmark, onSelect: chooseBookmark },
     hasLibrary && { label: "Library", name: "Library, bookmarks and history", icon: <History />, onSelect: openLibrary },
-    native && { label: "Downloads", icon: <Download />, onSelect: () => void runtime.runPromise(openDownloads) },
+    (native || tabHost.web !== undefined) && { label: "Downloads", icon: <Download />, onSelect: () => void runtime.runPromise(openDownloads) },
     shareable !== undefined && { label: "Share", icon: <Share2 />, onSelect: () => void runtime.runPromise(handoffPageLink({ kind: "Share", binding: shareable })) },
     binding !== undefined && { label: "Copy link", icon: <Link />, onSelect: () => void runtime.runPromise(handoffPageLink({ kind: "Copy", binding })) },
     native && can({ type: "openFind" }) && { label: "Find", name: "Find in page", icon: <Search />, onSelect: () => { setFinding(""); void browser.send({ type: "uncover" }).then(() => send({ type: "openFind" })); } },

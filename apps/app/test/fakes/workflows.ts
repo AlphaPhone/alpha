@@ -153,6 +153,11 @@ export function workflowRoutes(world: WorkflowsScene): Route[] {
       return readJsonBody(request).then((body) => {
         world.promptEdits.push(body);
         if (current.revision !== body.expectedRevision) return Response.json({}, { status: 409 });
+        if (typeof body.enabled === "boolean" && Object.keys(body).length === 2) {
+          const trigger = { ...current, enabled: body.enabled, revision: current.revision + 1 };
+          world.prompts.set(id, trigger);
+          return Response.json({ trigger });
+        }
         const timing: PromptTiming | undefined =
           body.triggerType === "once" && typeof body.scheduledAtIso === "string" ? { triggerType: "once", scheduledAtIso: body.scheduledAtIso }
             : body.triggerType === "cron" && typeof body.cronExpression === "string" ? { triggerType: "cron", cronExpression: body.cronExpression }

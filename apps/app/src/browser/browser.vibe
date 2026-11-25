@@ -380,11 +380,12 @@ effect function present(tab: number, host: TabHost.Shape): void!! {
 }
 
 // spec/app/browser/downloads.md, "Story: Download a file"
-/** Open the current native Browser's Downloads list after its menu closes. */
-export const openDownloads: void!!(Tabs.Machine | Shell | TabHost) = effect {
+/** Close the menu before opening Android's download list or handing the web view's Downloads over to Files. */
+export const openDownloads: void!!(Tabs.Machine | Shell | TabHost | BrowserDownloadsHandoff) = effect {
   if (!showing(try (try Shell).get(), "Browser") || (try (try Tabs.Machine).get()).layer !== "Menu") return
   if (!(try tellTabs({ type: "uncover" }))) return
-  try contained(hosted("downloads", (plugin, session) => plugin.downloads({ session })), "opening Browser downloads")
+  if ((try TabHost).web !== undefined) try (try BrowserDownloadsHandoff).open()
+  else try contained(hosted("downloads", (plugin, session) => plugin.downloads({ session })), "opening Browser downloads")
 }
 
 // spec/app/browser/share.md, "Choosing where to send the page sends it once, if it is still the page the panel opened on, and closes the panel"

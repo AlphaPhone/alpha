@@ -893,6 +893,11 @@ pure def sometimesTheAgentFiltered(s: Files): bool = S::finding(s.search) == S::
 
 ### The owner selects items of the place showing, all of them, or none, and a changed selection closes the sheets, telling the owner a share sheet sent nothing, and voids the delete confirmation
 
+Holding a listed row still for half a second selects it. Dragging, leaving
+its row or releasing early cancels the hold, and a hold that selects never
+also opens the item or toggles it off when the owner lifts their finger.
+Each row also has a keyboard-accessible way to select it.
+
 ```quint
 pure def selected(picked: List[int], s: Files): Files =
   { ...s, picked: picked, change: if (picked != s.picked) C::invalidate(s.change) else s.change,

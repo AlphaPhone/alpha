@@ -2,7 +2,7 @@
 import { Alert, AppHeader, Button, Checkbox, Chip, Dialog, DialogContent, DialogTitle, EmptyState, FilesRow, FilesSelectionBar, Input, ListGroup, ListRow, Menu, MenuContent, MenuItem, MenuTrigger, Progress, SearchField, Sheet, SheetContent, Spinner } from "@repo/ui";
 import { Effect, Option, type Layer, type ManagedRuntime } from "effect";
 import { ArrowDown, ArrowDownWideNarrow, ArrowUp, AudioLines, ScanLine, Download, Ellipsis, File, FileArchive, FileText, Folder, FolderInput, FolderOpen, HardDrive, Image, Info, LayoutGrid, List, Pencil, Plus, RefreshCw, Search, Share2, Trash2, Video, X, type LucideIcon } from "lucide-react";
-import { Fragment, useMemo, useState, type MouseEvent } from "react";
+import { Fragment, useCallback, useMemo, useState } from "react";
 import type { Event as FilesEvent, Files as FilesState, Machine, Order } from "../../gen/app__files.effect.vibe";
 import { ahead, browse, chosen, detailed, grouped, empty, filled } from "../../gen/app__files.ts";
 import { useMachine } from "../../gen/app__files.react.ts";
@@ -25,6 +25,7 @@ import { Preview, RecentFiles } from "./Preview.tsx";
 import { Trash, Undo } from "./Trash.tsx";
 import type { TrashFacts } from "./trashFacts.vibe";
 import { Scan } from "./Scan.tsx";
+import { fileRowHeld, selectListedFile } from "./files.vibe";
 import { type scan, startScan } from "./scan.vibe";
 
 export interface FilesProps {
@@ -100,6 +101,10 @@ export function Files({ runtime, alpha }: FilesProps) {
   const [naming, setNaming] = useState<Naming | undefined>(undefined);
   const [kind, setKind] = useState<Kind | undefined>(undefined);
   const [filtering, setFiltering] = useState(false);
+  const hold = useCallback((held: () => void) => {
+    const fiber = runtime.runFork(fileRowHeld(held));
+    return () => fiber.interruptUnsafe();
+  }, [runtime]);
   const items = state?.items;
   const order = state?.order;
   const reversed = state?.reversed;
@@ -171,10 +176,6 @@ export function Files({ runtime, alpha }: FilesProps) {
     const detail = summary(item, state.inCategory && state.category !== "Download");
     const action = selecting ? toggle : open;
     const onClick = owner(action) ? () => tell(action) : undefined;
-    const onContextMenu = selectable ? (event: MouseEvent) => {
-      event.preventDefault();
-      if (!selected) tell(toggle);
-    } : undefined;
     return (
       <div key={item.id} className="group relative min-w-0">
         <FilesRow
@@ -187,7 +188,8 @@ export function Files({ runtime, alpha }: FilesProps) {
           chosen={selecting ? selected : undefined}
           disabled={!onClick}
           onClick={onClick}
-          onContextMenu={onContextMenu}
+          hold={hold}
+          onHold={selectable ? () => void runtime.runPromise(selectListedFile(item.id)) : undefined}
         />
         {selectable && !selecting && <Checkbox aria-label={`Select ${item.name}`} checked={false} className={`absolute right-3 min-h-6 min-w-6 rounded-full opacity-0 group-hover:opacity-100 focus-visible:opacity-100 ${grid ? "top-3" : "top-1/2 -translate-y-1/2"}`} onCheckedChange={() => tell(toggle)} />}
       </div>

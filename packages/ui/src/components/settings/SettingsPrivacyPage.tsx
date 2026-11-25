@@ -1,15 +1,15 @@
 import type { ReactNode } from "react";
-import { Ear, ListChecks, SlidersHorizontal } from "lucide-react";
+import { ListChecks, SlidersHorizontal } from "lucide-react";
 import { ListGroup } from "../ListGroup.tsx";
 import { SettingsDeviceSwitch, type SettingsDeviceSwitchProps } from "./SettingsDeviceSwitch.tsx";
 import { SettingsNavRow } from "./SettingsNavRow.tsx";
 import { SettingsPage } from "./SettingsPage.tsx";
-import { type Neighbour, placed, type SettingsPageName, type SettingsPlaceProps } from "./vocabulary.ts";
+import { placed, type SettingsPageName, type SettingsPlaceProps } from "./vocabulary.ts";
 
 /** What Alpha may share with a chat turn or change: `Share` in spec/app/settings/preferences.md. */
-export type SettingsShare = "agent-location" | "browser-page" | "gmail-changes" | "calendar-edits" | "telegram-context" | "slack-context";
+export type SettingsShare = "agent-location" | "browser-page" | "gmail-changes" | "calendar-edits";
 
-const shared: SettingsShare[] = ["agent-location", "browser-page", "gmail-changes", "calendar-edits", "telegram-context", "slack-context"];
+const shared: SettingsShare[] = ["agent-location", "browser-page", "gmail-changes", "calendar-edits"];
 
 export type SettingsPrivacyPageProps = SettingsPlaceProps & {
   /** How the phone's read of the device preferences stands. */
@@ -34,8 +34,6 @@ export type SettingsPrivacyPageProps = SettingsPlaceProps & {
   onOpen?: (page: SettingsPageName) => void;
   /** Opens the access walkthrough, to set up Alpha's access. */
   onSetUpAccess?: () => void;
-  /** Hands over to the voice area, which owns the listener. */
-  onHandOver?: (neighbour: Neighbour) => void;
   /** The rows other areas own on this page, such as the listening rows. */
   children?: ReactNode;
 };
@@ -45,7 +43,7 @@ export type SettingsPrivacyPageProps = SettingsPlaceProps & {
  * with a chat turn or change, and the listener.
  * @model spec/app/settings/index.md
  */
-export function SettingsPrivacyPage({ read, askFirst, saving, recovering, onAskFirstChange, shares = {}, onShareChange, onRecover, onBack, onOpen, onSetUpAccess, onHandOver, place, onPlace, children }: SettingsPrivacyPageProps) {
+export function SettingsPrivacyPage({ read, askFirst, saving, recovering, onAskFirstChange, shares = {}, onShareChange, onRecover, onBack, onOpen, onSetUpAccess, place, onPlace, children }: SettingsPrivacyPageProps) {
   const at = (row: number) => placed({ place, onPlace }, row);
   return (
     <SettingsPage title="Privacy" onBack={onBack} backLabel="Back to Settings">
@@ -55,9 +53,6 @@ export function SettingsPrivacyPage({ read, askFirst, saving, recovering, onAskF
         {shared.map((share) => (
           <SettingsDeviceSwitch key={share} setting={share} read={read} checked={read === "loaded" && shares[share] === true} saving={saving} recovering={recovering} onChange={onShareChange && ((on) => onShareChange(share, on))} />
         ))}
-      </ListGroup>
-      <ListGroup>
-        <SettingsNavRow title="Listener" icon={<Ear />} onOpen={onHandOver && (() => onHandOver("listener"))} {...at(2)} />
       </ListGroup>
       {children}
       <ListGroup>

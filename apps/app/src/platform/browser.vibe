@@ -46,7 +46,7 @@ export service TabHost {
 }
 
 // spec/app/files/index.md, "Another area opens Files at Downloads: the Download folder of the main volume where the phone has one, else the Downloads category; the owner's own move to the top, a volume or a category ends that walk"
-/** Open the retained Files area when the owner chooses Show in Files in the phone's Browser Downloads. */
+/** Open the retained Files area at Downloads from the web Browser menu or Android's Show in Files. */
 export service BrowserDownloadsHandoff {
   open(): void!!
 }

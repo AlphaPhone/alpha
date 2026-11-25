@@ -140,8 +140,10 @@ const themesNamed = { system: "System", light: "Light", dark: "Dark" } as const 
 const noticeNames: Record<PrefsGen.Notice, SettingsPreferencesNoticeProps["notice"] | undefined> = {
   Quiet: undefined, NotSaved: "not-saved", SizeNotConfirmed: "size-not-confirmed", SizeUnavailable: "size-unavailable", NotRecovered: "not-recovered",
 };
-const shareNames: Record<PrefsGen.Share, SettingsShare> = { AgentLocation: "agent-location", BrowserPage: "browser-page", GmailChanges: "gmail-changes", CalendarEdits: "calendar-edits" };
-const sharesNamed = Object.fromEntries(Object.entries(shareNames).map(([share, name]) => [name, share])) as Record<SettingsShare, PrefsGen.Share>;
+const sharesNamed = {
+  "agent-location": "AgentLocation", "browser-page": "BrowserPage", "gmail-changes": "GmailChanges", "calendar-edits": "CalendarEdits",
+} as const satisfies Record<SettingsShare, PrefsGen.Share>;
+const shareNames = Object.fromEntries(Object.entries(sharesNamed).map(([name, share]) => [share, name])) as Record<PrefsGen.Share, SettingsShare>;
 
 const saidNames: Record<ResetGen.Said, SettingsResetNoticeProps["said"] | undefined> = {
   Quiet: undefined, NotConfirmedItsYou: "not-confirmed-its-you", EraseUnavailable: "erase-unavailable", ReviewExpired: "review-expired",

@@ -20,9 +20,8 @@ export const meta: ComponentMeta<SettingsPrivacyPageProps> = {
     onOpen,
     onSetUpAccess,
     onAskFirstChange,
-    shares: { "agent-location": true, "browser-page": true, "gmail-changes": false, "calendar-edits": true, "telegram-context": false, "slack-context": true },
+    shares: { "agent-location": true, "browser-page": true, "gmail-changes": false, "calendar-edits": true },
     onShareChange,
-    onHandOver: fn(),
     children: (
       <ListGroup>
         <SettingsSwitchRow title="Listening" icon={<Mic />} checked={false} onCheckedChange={() => undefined} />

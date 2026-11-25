@@ -53,6 +53,7 @@ export const mounts: readonly Mount[] = [
   at("overlay", () => import("./contacts/requestCard.tsx")),
   at("home/cards", () => import("./clock/cards.tsx")),
   at("settings/update", () => import("./update/index.tsx")),
+  at("settings/listening", () => import("./voice/ListenerSettings.tsx")),
   at("overlay", () => import("./update/overlay.tsx")),
   at("view:Browser", () => import("./browser/index.tsx")),
 ];

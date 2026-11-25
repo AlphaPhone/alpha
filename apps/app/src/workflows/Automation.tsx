@@ -8,7 +8,7 @@ import { useMachine } from "../../gen/app__workflows__automations.react.ts";
 import type { Machine } from "../../gen/app__workflows__automations.effect.vibe";
 import type { Preset, When } from "../../gen/app__workflows__schedule.ts";
 import type { Resident, Shown } from "../runtime/area.tsx";
-import { AutomationWords, editAutomation, promptEditEvent, reviewAutomation, rowOffers } from "./automations.vibe";
+import { AutomationWords, editAutomation, promptEditEvent, reviewAutomation, reviewPromptPower, rowOffers } from "./automations.vibe";
 import type { Prompt } from "./api.vibe";
 import type { WorkflowRow } from "./list.vibe";
 
@@ -63,6 +63,8 @@ function eventFor(wanted: Change): Event {
 }
 
 function reviewLabel(action: Change): string {
+  if (action === "Enable") return "Enable";
+  if (action === "Disable") return "Pause";
   return actions.find(([kind]) => kind === action)?.[1] ?? (action === "Edit" ? "Save changes" : "Save automation");
 }
 
@@ -85,16 +87,21 @@ export function Automation({ runtime, row, owner }: AutomationProps) {
   const schedule = draft.source.kind === "Existing" && !state.timingEditable
     ? savedSchedule(draft.source.prompt) : editedSchedule(state.when, time, draft.zone);
   const reviewEdit = state.proposed === "Edit" || state.proposed === "Create";
-  const reviewedTitle = reviewEdit ? draft.title : row?.title ?? draft.title;
+  const powerReview = state.review.showing && (state.proposed === "Enable" || state.proposed === "Disable")
+    ? runtime.runSync(Effect.flatMap(AutomationWords, (content) => content.powerReview())) : undefined;
+  const reviewedTitle = powerReview?.name ?? (reviewEdit ? draft.title : row?.title ?? draft.title);
+  const confirm = { type: "confirmChange" } as const;
   return (
     <section aria-label={row === undefined ? "Automation" : "Automation controls"} className="flex flex-col gap-3">
       {row === undefined && !editing && model.can({ type: "openEditor", kind: "PromptTask", zone: 0 }) && (
         <ListRow title="Automation" leading={<Repeat />} trailing={<ChevronRight aria-hidden />} onClick={editor} />
       )}
-      {row?.kind === "Prompt" && model.can(eventFor(toggle)) && (
+      {row?.kind === "Prompt" && state.present && (
         <label className="flex items-center justify-between gap-3">
           <span>{state.on ? "On" : "Off"}</span>
-          <Switch checked={state.on} aria-label={`Turn ${row.title} on or off`} onCheckedChange={() => send(eventFor(toggle))} />
+          <Switch checked={state.on} aria-label={`Turn ${row.title} on or off`}
+            disabled={observed === undefined || !model.can({ type: "reviewChange", wanted: toggle })}
+            onCheckedChange={() => void runtime.runPromiseExit(reviewPromptPower(owner, number))} />
         </label>
       )}
       {row !== undefined && !editing && (
@@ -140,9 +147,10 @@ export function Automation({ runtime, row, owner }: AutomationProps) {
       </Alert>}
       {state.change.attempt.outcome === "Refused" && state.fired === "NotFired" && <Alert variant="warn">The agent didn’t apply the change.</Alert>}
       <ConfirmDialog open={state.review.showing} title={`${reviewLabel(state.proposed)} “${reviewedTitle}”?`}
-        confirmLabel={reviewLabel(state.proposed)} destructive={state.proposed === "Remove"}
-        onConfirm={() => send({ type: "confirmChange" })} onCancel={() => send({ type: "cancelReview" })}>
-        {reviewEdit ? `${draft.text} · ${schedule}` : undefined}
+        confirmLabel={powerReview ? `Confirm ${reviewLabel(state.proposed)}` : reviewLabel(state.proposed)} destructive={state.proposed === "Remove"}
+        onConfirm={() => send(confirm)} onCancel={() => send({ type: "cancelReview" })}>
+        {reviewEdit ? `${draft.text} · ${schedule}` : powerReview?.enabled === true
+          ? "The prompt can run on its schedule while your phone is on." : powerReview ? "The prompt stops running on its schedule." : undefined}
       </ConfirmDialog>
     </section>
   );

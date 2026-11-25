@@ -5,8 +5,9 @@ phone's Downloads only once approved, and listed in the Browser's
 downloads. One download, from offer to file. The page and its tab come
 from the [Browser](./index.md) and its [page](./address.md). The Browser's
 menu opens the phone's Downloads list. Choosing Show in Files there for
-the current Browser session opens [Files](../files/) at Downloads. Back
-from that place returns to the Browser.
+the current Browser session opens [Files](../files/) at Downloads. In a web
+browser, the Browser menu opens Alpha's Downloads in Files directly.
+Back from Files returns to the same Browser tab.
 
 ## Story: Download a file
 

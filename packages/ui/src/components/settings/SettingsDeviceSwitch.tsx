@@ -6,9 +6,9 @@ import type { DeviceRead } from "./vocabulary.ts";
 export type SettingsDeviceSwitchProps = {
   /**
    * Which device preference: whether Alpha asks before it acts, whether Inbox loads images from the web, or what Alpha
-   * may share with a chat turn or change: the phone's location, the Browser page open, Gmail, Calendar, Telegram and Slack.
+   * may share with a chat turn or change: the phone's location, the Browser page open, Gmail and Calendar.
    */
-  setting: "ask-first" | "images" | "agent-location" | "browser-page" | "gmail-changes" | "calendar-edits" | "telegram-context" | "slack-context";
+  setting: "ask-first" | "images" | "agent-location" | "browser-page" | "gmail-changes" | "calendar-edits";
   /** How the phone's read of the device preferences stands; they cannot be changed until it has read them. */
   read: DeviceRead;
   /** The value read, or the safe one (asking first, loading no images, sharing nothing) when the phone could not read. */
@@ -37,8 +37,6 @@ const settings: Record<SettingsDeviceSwitchProps["setting"], { title: string; de
   "browser-page": { title: "Browser page for Alpha", detail: "The page open, with each message" },
   "gmail-changes": { title: "Gmail changes", detail: "Drafts, labels and sending" },
   "calendar-edits": { title: "Calendar changes", detail: "Events Alpha adds or edits" },
-  "telegram-context": { title: "Telegram screen", detail: "Open chat and recent messages" },
-  "slack-context": { title: "Slack screen", detail: "Open channel or thread, with each message" },
 };
 
 /**

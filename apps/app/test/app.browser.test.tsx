@@ -66,10 +66,24 @@ it("Keeps a browser frame while leaving and reopening Browser (spec/app/browser/
   const kept = { url: "https://archive.example/elsewhere", title: "Saved elsewhere" };
   await savedBrowserRecords([first, second], [bookmark, kept]);
   try {
-    await open(scene(), only("home", "view:Browser", "assistant"));
+    await open(scene(), only("home", "view:Browser", "view:Files", "assistant"));
     await page.getByRole("button", { name: "Browser", exact: true }).click();
     const link = page.getByRole("link", { name: "Open in browser" });
     await expect.element(link).toHaveAttribute("href", second.url);
+    const selectedFrame = () => [...document.querySelectorAll<HTMLIFrameElement>("iframe[title=Website]")].find((frame) => frame.src === second.url);
+    await expect.poll(selectedFrame).toBeDefined();
+    const beforeDownloads = selectedFrame();
+
+    // spec/app/browser/downloads.md, "Story: Download a file"; spec/app/files/index.md, "Another area opens Files at Downloads: the Download folder of the main volume where the phone has one, else the Downloads category; the owner's own move to the top, a volume or a category ends that walk"
+    await page.getByRole("button", { name: "Menu", exact: true }).click();
+    await page.getByRole("button", { name: "Downloads", exact: true }).click();
+    await expect.element(page.getByRole("heading", { name: /^Downloads?$/ })).toBeVisible();
+    await expect.element(link).not.toBeInTheDocument();
+    await page.getByRole("button", { name: "Back", exact: true }).click();
+    await expect.element(link).toHaveAttribute("href", second.url);
+    await expect.element(page.getByRole("dialog", { name: "Browser menu" })).not.toBeInTheDocument();
+    expect(selectedFrame()).toBe(beforeDownloads);
+
     const library = async () => {
       await page.getByRole("button", { name: "Menu", exact: true }).click();
       await page.getByRole("button", { name: "Library, bookmarks and history" }).click();

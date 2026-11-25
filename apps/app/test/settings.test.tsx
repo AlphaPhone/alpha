@@ -24,7 +24,7 @@ afterEach(closeAll);
 const shipped = vi.fn(() => Promise.resolve(Response.json(notices)));
 vi.stubGlobal("fetch", ((input: RequestInfo | URL, init?: RequestInit) => (String(input).endsWith("licenses/third-party-notices.json") ? shipped() : fetch(input, init))) as typeof fetch);
 
-const open = (world: Scene) => openAlpha(world, only("home", "view:Settings", "settings/phone", "settings/activity", "overlay"));
+const open = (world: Scene) => openAlpha(world, only("home", "view:Settings", "settings/phone", "settings/activity", "settings/listening", "overlay"));
 
 /** The row, switch or choice whose title is `title`, as a person reads it: a row's title, never its value beside it. */
 const titled = (title: string) => [...document.querySelectorAll<HTMLElement>("button, label")].find((found) => found.querySelector("span > span")?.textContent === title);
@@ -103,6 +103,49 @@ describe("Settings", () => {
     await until(alpha, alpha.runtime, Shell, (s) => s.assistant === "Full");
     expect((await machines.runPromise(Facts.Machine.use((facts) => facts.get()))).read.read.status).toBe("Loaded");
     expect(world.settings.opened).toEqual([]);
+  });
+
+  it.each([false, true])("Omits the image listener when the image is unavailable (phone %s)", async (phone) => {
+    const { alpha, world } = await settingsOpen({ ...scene(), phone });
+    await press("Privacy");
+    await until(alpha, alpha.runtime, Pages.Machine, (s) => s.page === "Privacy");
+    expect(titled("Listener")).toBeUndefined();
+    expect(titled("Listening")).toBeUndefined();
+    expect(titled("Listening settings")).toBeUndefined();
+    expect(world.settings.listener.calls).toEqual([]);
+  });
+
+  it('Opens the image listener consent screen and reports stops (spec/app/voice/listener.md, "Story: See and control the listener")', async () => {
+    const { world } = await settingsOpen({ ...scene(), phone: true, image: true });
+    const listener = world.settings.listener;
+    const mutations = () => listener.calls.filter((called) => called !== "status");
+    const listeningSwitch = () => titled("Listening")?.querySelector('[role="switch"]');
+    await press("Privacy");
+    await vi.waitFor(() => expect(listeningSwitch()?.getAttribute("aria-checked")).toBe("false"));
+    expect(mutations()).toEqual([]);
+
+    await tap("Listening settings");
+    await vi.waitFor(() => expect(mutations()).toEqual(["openSettings"]));
+    expect(listeningSwitch()?.getAttribute("aria-checked")).toBe("false");
+    expect(listener.status).toMatchObject({ state: "OFF", consented: false, microphoneOpen: false });
+
+    // Consent and activation occur in the native listener's screen, outside Alpha.
+    await seen(false);
+    listener.status = { available: true, state: "LISTENING", label: "Listening",
+      consented: true, listening: true, microphoneOpen: true };
+    await seen(true);
+    await vi.waitFor(() => expect(listeningSwitch()?.getAttribute("aria-checked")).toBe("true"));
+    expect(mutations()).toEqual(["openSettings"]);
+
+    listener.refusesStop = true;
+    await tap("Pause listening");
+    await vi.waitFor(() => expect(titled("Listening")?.textContent).toContain("The microphone may be on"));
+    expect(mutations()).toEqual(["openSettings", "pause"]);
+    listener.refusesStop = false;
+    await tap("Listening");
+    await vi.waitFor(() => expect(listeningSwitch()?.getAttribute("aria-checked")).toBe("false"));
+    expect(titled("Listening")?.textContent).toContain("Off");
+    expect(mutations()).toEqual(["openSettings", "pause", "turnOff"]);
   });
 
   it("See what the phone says (spec/app/settings/facts.md, \"Story: See what the phone says\")", async () => {
@@ -303,6 +346,7 @@ describe("Settings", () => {
     // spec/app/settings/preferences.md, "A new phone lets Alpha act without asking first, load images in Inbox, use its location and the Browser page open, and change Gmail and Calendar"
     await until(alpha, alpha.runtime, Prefs.Machine, (s) => s.document.read.status === "Loaded" && Prefs.allows(s, "BrowserPage") && !Prefs.asksBeforeActing(s, "WebAction") && s.images);
     // spec/app/settings/preferences.md, "The owner changes Ask before Alpha acts, Load images or what Alpha may share only once the phone has read them, one save at a time, with ten seconds to save"
+    expect([titled("Telegram screen"), titled("Slack screen")]).toEqual([undefined, undefined]);
     await tap("Ask before Alpha acts");
     await until(alpha, alpha.runtime, Prefs.Machine, (s) => s.saving.read.status === "Loaded" && Prefs.asksBeforeActing(s, "WebAction"));
     await tap("Browser page for Alpha");
