@@ -53,7 +53,7 @@ interface ApprovalScope {
 }
 
 module native {
-  import { registerPlugin } from "@capacitor/core"
+  import { Capacitor, registerPlugin } from "@capacitor/core"
   import type { DeviceJournal, JournalEntry } from "@elizaos/agent"
 
   interface EnrollmentPlugin {
@@ -71,9 +71,10 @@ module native {
   /** @throws {never} */
   export function enrollment() { return (enrolled ??= registerPlugin<EnrollmentPlugin>("AlphaMediaEnrollment")) }
 
-  /** @throws {never} */
+  /** Reuse an already-registered `ElizaActionJournal` plugin instance when available to avoid duplicate Capacitor registrations. @throws {never} */
   export function journal(): DeviceJournal {
-    const held = (journalPlugin ??= registerPlugin<JournalPlugin>("ElizaActionJournal"))
+    const existing = (Capacitor as { Plugins?: Record<string, unknown> }).Plugins?.ElizaActionJournal as JournalPlugin | undefined
+    const held = existing ?? (journalPlugin ??= registerPlugin<JournalPlugin>("ElizaActionJournal"))
     return {
       get: async (proposalId) => {
         const answer = await held.get({ proposalId })
@@ -813,7 +814,10 @@ export const mediaReview = Layer.effect(MediaReview, effect {
     pinnedFiles.clear()
     const owner = Effect.provideService(ownerAt(), Agent, agent) catch () => undefined
     const { image } = try device.capabilities()
-    latest = owner === undefined ? undefined : (enrolled(status.epoch, owner, image, runtime, guarded, readBack) catch () => undefined)
+    latest = owner === undefined ? undefined : (enrolled(status.epoch, owner, image, runtime, guarded, readBack) catch effect (cause) => {
+      try Effect.logWarning("Device action enrollment failed", cause instanceof Error ? cause.message : typeof cause)
+      return undefined
+    })
     const fresh = latest
     if (fresh !== undefined) try ignore(tryPromise(() => fresh.execute.sync()))
     return latest
@@ -957,7 +961,7 @@ export const mediaReview = Layer.effect(MediaReview, effect {
         if (!board.snapshot().media.includes(card) || (approve && namedReviewQuery(card.operation) !== undefined && card.phone?.tag !== "Exact")) return
         const held = try session()
         const live = held !== undefined && (try current(held))
-        if (card.phone !== undefined && !board.snapshot().media.includes(card)) return
+        if (!board.snapshot().media.includes(card)) return
         board.change({ media: board.snapshot().media.filter((one) => one !== card) })
         const report = (text: string) => board.change({ mediaNote: { conversation: card.conversation, text } })
         if (!live || held === undefined) { report("That review expired. Ask again from the current screen."); return }

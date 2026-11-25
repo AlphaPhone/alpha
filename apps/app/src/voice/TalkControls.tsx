@@ -1,6 +1,6 @@
 // spec/app/voice/index.md, "Story: Hold a spoken conversation"; spec/app/voice/index.md, "Story: Pause for a phone call"; spec/app/voice/index.md, "A failed conversation ends quietly: why it failed is kept only until voice returns to idle, and nothing is shown"; spec/app/voice/index.md, "Speaker mute is offered after the current speech bridge confirms gain control"
 import { Button, ConfirmDialog, cn } from "@repo/ui";
-import type { ManagedRuntime } from "effect";
+import { Effect, type ManagedRuntime } from "effect";
 import type { ReactNode } from "react";
 import { Keyboard, Mic, MicOff, Square, Volume2, VolumeX } from "lucide-react";
 import type { Machine as Shell } from "../../gen/app__shell.effect.vibe";
@@ -37,7 +37,7 @@ export function TalkControls({ runtime, trailing, compact = false, onKeyboard }:
   const allow = { ...decline, agree: true } as const;
   const stop = { type: "stop", keyboard: false } as const;
   const type = { ...stop, keyboard: true } as const;
-  const typeAfterStop = async () => (await runtime.runPromiseExit(Machine.use((machine) =>
+  const typeAfterStop = async () => (await runtime.runPromiseExit(Effect.flatMap(Machine, (machine) =>
     machine.send(type, (current) => current.session === state.session),
   )))._tag === "Success";
   const mute = { type: state.muted ? "unmute" : "mute" } as const;
@@ -74,7 +74,7 @@ export function TalkControls({ runtime, trailing, compact = false, onKeyboard }:
           </div>
         )}
         {!compact && onKeyboard && can(type) && <Button variant="ghost" size="icon" aria-label="Switch to keyboard" onClick={(event) => onKeyboard(event.currentTarget, typeAfterStop)}><Keyboard /></Button>}
-        {(!compact || !speakerConfirmed) && can({ type: "interrupt" }) && <Button variant="ghost" size="icon" aria-label="Stop speaking" onClick={() => void send({ type: "interrupt" })}><VolumeX /></Button>}
+        {can({ type: "interrupt" }) && <Button variant="ghost" size="icon" aria-label="Stop speaking" onClick={() => void send({ type: "interrupt" })}><VolumeX /></Button>}
         {speakerConfirmed && <Button variant="ghost" size="icon" disabled={!can(setSpeaker)} aria-pressed={speakerMuted}
           aria-label={speakerMuted ? "Unmute speaker" : "Mute speaker"} onClick={() => void send(setSpeaker)}>
           {speakerMuted ? <VolumeX /> : <Volume2 />}

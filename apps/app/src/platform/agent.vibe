@@ -79,8 +79,8 @@ const waits = { startupTimeoutMs: 30_000, pollMs: 250, requestTimeoutMs: 10_000 
 
 schema Health { readonly ready: boolean }
 
+/** The request path and query; the native agent gate preserves literal plus signs and expects spaces percent-encoded. */
 function located(request: HttpClientRequest.HttpClientRequest): string {
-  // The native agent gate preserves literal plus signs and expects spaces percent-encoded.
   const query = UrlParams.toString(request.urlParams).replaceAll("+", "%20")
   return query === "" ? request.url : `${request.url}?${query}`
 }
@@ -111,15 +111,20 @@ effect function plain(request: HttpClientRequest.HttpClientRequest): Option.Opti
 /** What eliza's client refuses before it sends anything: a path or a header it does not admit. */
 const refusedByTheClient = ["InvalidPath", "InvalidHeaders"]
 
-module aborting {
-  /** Once `signal` is aborted. @throws {never} */
-  export function abortedBy(signal: AbortSignal | undefined): Promise<void> {
-    if (signal === undefined) return new Promise<void>(() => {})
-    if (signal.aborted) return Promise.resolve()
-    return new Promise<void>((resolve) => signal.addEventListener("abort", () => resolve(), { once: true }))
-  }
+/** Ends once `signal` aborts, removing its listener if the stream finishes first. */
+function withdrawnBy(signal: AbortSignal | undefined): void!! {
+  if (signal === undefined) return Effect.never
+  if (signal.aborted) return Effect.void
+  return Effect.asVoid(Stream.runHead(Stream.callback<void>((queue) => effect {
+    const onAbort = () => {
+      Queue.offerUnsafe(queue, undefined)
+      Queue.endUnsafe(queue)
+    }
+    signal.addEventListener("abort", onAbort, { once: true })
+    try addFinalizer(() => sync(() => { signal.removeEventListener("abort", onAbort) }))
+    if (signal.aborted) onAbort()
+  })))
 }
-import { abortedBy } from aborting
 
 /** One answer as eliza's client reads a stream: its head, each chunk, and how it ended, or nothing more once `signal` is aborted. */
 function framed(opened: Opened!(Unsent | Unreachable)!Scope.Scope, signal?: AbortSignal): AsyncIterable<RuntimeStreamFrame> {
@@ -130,8 +135,7 @@ function framed(opened: Opened!(Unsent | Unreachable)!Scope.Scope, signal?: Abor
       |> Stream.concat(%, Stream.map(body, (data): RuntimeStreamFrame => ({ kind: "chunk", data })))
       |> Stream.concat(%, Stream.succeed<RuntimeStreamFrame>({ kind: "end" }))
   })
-  const withdrawn = promise(() => abortedBy(signal))
-  return Stream.toAsyncIterable(Stream.interruptWhen(Stream.catch(frames, () => Stream.succeed<RuntimeStreamFrame>({ kind: "error" })), withdrawn))
+  return Stream.toAsyncIterable(Stream.interruptWhen(Stream.catch(frames, () => Stream.succeed<RuntimeStreamFrame>({ kind: "error" })), withdrawnBy(signal)))
 }
 
 const posted = (input: { readonly path: string; readonly body?: unknown }) =>
@@ -242,12 +246,28 @@ effect function relayed(request: HttpClientRequest.HttpClientRequest): AgentRout
 }
 
 module web {
-  /** @throws {never} */
+  import type { AgentTopic, ElizaAgentPlugin } from "@elizaos/os-bridges"
+
   export function bytes(base64: string): Uint8Array {
     return Uint8Array.from(atob(base64), (one) => one.charCodeAt(0))
   }
+
+  /** Subscribe to native agent events and immediately unsubscribe if the stream closed before subscription settled. */
+  export async function subscribeGuarded(
+    plugin: ElizaAgentPlugin,
+    id: string,
+    topic: AgentTopic,
+    clientId: string | undefined,
+    isClosed: () => boolean,
+  ): Promise<{ readonly id: string }> {
+    const result = await plugin.subscribeEvents({ id, topic, ...(clientId === undefined ? {} : { clientId }) })
+    if (isClosed() && result.id === id) {
+      void plugin.unsubscribeEvents({ id }).catch(() => undefined)
+    }
+    return result
+  }
 }
-import { bytes } from web
+import { bytes, subscribeGuarded } from web
 
 /**
  * One stream of the plugin as it arrives: `requestStream` under an id made here, heard as `streamData` and
@@ -257,21 +277,31 @@ import { bytes } from web
 function streamed(plugin: ElizaAgentPlugin, route: AgentRoute): Stream.Stream<AgentStreamData | AgentStreamEnd, Unsent | Unreachable> {
   return Stream.callback<AgentStreamData | AgentStreamEnd, Unsent | Unreachable>((queue) => effect {
     const id = fresh()
-    const heard = try tryPromise({
-      try: () => Promise.all([
-        plugin.addListener("streamData", (data) => { if (data.id === id) Queue.offerUnsafe(queue, data) }),
-        plugin.addListener("streamEnd", (end) => {
-          if (end.id !== id) return
-          Queue.offerUnsafe(queue, end)
-          Queue.endUnsafe(queue)
-        }),
-      ]),
-      catch: undelivered,
-    })
-    try addFinalizer(() => ignore(tryPromise(async () => {
-      await plugin.abort({ id })
-      await Promise.all(heard.map((handle) => handle.remove()))
-    })))
+    const heard: Array<{ remove(): Promise<void> }> = []
+    uninterruptible {
+      const register = (attach: () => Promise<{ remove(): Promise<void> }>) => tryPromise({
+        try: attach,
+        catch: undelivered,
+      })
+      const removeAll = () => ignore(tryPromise(() => Promise.allSettled(heard.map((handle) => handle.remove()))))
+      const first = register(() => plugin.addListener("streamData", (data) => { if (data.id === id) Queue.offerUnsafe(queue, data) }))
+      const second = register(() => plugin.addListener("streamEnd", (end) => {
+        if (end.id !== id) return
+        Queue.offerUnsafe(queue, end)
+        Queue.endUnsafe(queue)
+      }))
+      const dataHandle = try first
+      heard.push(dataHandle)
+      const endHandle = second catch effect (failure) => {
+        try removeAll()
+        throw failure
+      }
+      heard.push(endHandle)
+      try addFinalizer(() => ignore(tryPromise(() => Promise.allSettled([
+        plugin.abort({ id }),
+        ...heard.map((handle) => handle.remove()),
+      ]))))
+    }
     try tryPromise({ try: () => plugin.requestStream({ ...route, id }), catch: undelivered })
   })
 }
@@ -291,7 +321,7 @@ effect function opened(plugin: ElizaAgentPlugin, route: AgentRoute): Opened!(Uns
   let held = 0
   const chunks = Stream.mapEffect(Stream.filter(rest, (frame) => frame.kind !== "end"), effect (frame): Uint8Array!Unreachable => {
     if (frame.kind !== "chunk") throw new Unreachable({ cause: frame })
-    const chunk = bytes(frame.dataBase64)
+    const chunk = try Effect.try({ try: () => bytes(frame.dataBase64), catch: (cause) => new Unreachable({ cause }) })
     if (!chunkTaken(held, chunk.byteLength)) throw new Unreachable({ cause: "the answer grew past its limit" })
     held += chunk.byteLength
     return chunk
@@ -348,7 +378,16 @@ function pluginBridge(plugin: ElizaAgentPlugin): RuntimeJsonBridge {
     status: async () => statusOf(await plugin.getStatus()),
     start: async () => statusOf(await plugin.start()),
     restart: async () => statusOf(await plugin.restart()),
-    request: (input) => plugin.request(routed(input)),
+    request: (input) => {
+      const id = fresh()
+      return runPromise(timeout(
+        onInterrupt(
+          tryPromise({ try: () => plugin.request({ ...routed(input), id }), catch: undelivered }),
+          () => ignore(tryPromise(() => plugin.abort({ id }))),
+        ),
+        patience,
+      ))
+    },
     requestStream: (input, signal) => framed(opened(plugin, routed(input)), signal),
   }
 }
@@ -359,8 +398,10 @@ function hosted(plugin: ElizaAgentPlugin): Life {
   return {
     status: () => asked(() => plugin.getStatus()),
     changes: Stream.callback<AgentStatus, Unsent>((queue) => effect {
-      const listener = try tryPromise({ try: () => plugin.addListener("status", (status) => { Queue.offerUnsafe(queue, status) }), catch: (cause) => new Unsent({ cause }) })
-      try addFinalizer(() => ignore(tryPromise(() => listener.remove())))
+      uninterruptible {
+        const listener = try tryPromise({ try: () => plugin.addListener("status", (status) => { Queue.offerUnsafe(queue, status) }), catch: (cause) => new Unsent({ cause }) })
+        try addFinalizer(() => ignore(tryPromise(() => listener.remove())))
+      }
     }),
     start: () => asked(() => plugin.start()),
     stop: () => asked(() => plugin.stop()),
@@ -397,6 +438,7 @@ function fed(plugin: ElizaAgentPlugin, topic: AgentTopic, clientId: string | und
       const feed = try Feed
       const id = fresh()
       const heard = Stream.callback<Heard>((queue) => effect {
+        let closed = false
         uninterruptible {
           const listener = tryPromise(() => plugin.addListener("agentEvent", (said: AgentEvent) => {
             if (said.id !== id) return
@@ -405,6 +447,7 @@ function fed(plugin: ElizaAgentPlugin, topic: AgentTopic, clientId: string | und
           feed.send({ type: "listenerResult", success: listener !== undefined }) catch () => undefined
           if (listener !== undefined) {
             try addFinalizer(() => effect {
+              closed = true
               feed.send({ type: "close" }) catch () => undefined
               tryPromise(() => listener.remove()) catch () => undefined
               if ((try feed.get()).asked) tryPromise(() => plugin.unsubscribeEvents({ id })) catch () => undefined
@@ -412,7 +455,7 @@ function fed(plugin: ElizaAgentPlugin, topic: AgentTopic, clientId: string | und
           }
         }
         if ((try feed.get()).phase !== "Subscribing") return Queue.endUnsafe(queue)
-        const admitted = tryPromise(() => plugin.subscribeEvents({ id, topic, ...(clientId === undefined ? {} : { clientId }) })) catch () => undefined
+        const admitted = tryPromise(() => subscribeGuarded(plugin, id, topic, clientId, () => closed)) catch () => undefined
         const after = feed.send({ type: "subscribeResult", success: admitted !== undefined, matching: admitted?.id === id }) catch () => undefined
         if (after?.phase !== "Ready") Queue.endUnsafe(queue)
       })

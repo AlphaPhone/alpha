@@ -116,14 +116,14 @@ export function preparedIn(results: ReadonlyArray<{ readonly action: string; rea
 effect function navigated(ticket: number, view: View): boolean!!Conversation.Machine {
   const conversation = try Conversation.Machine
   if (!Conversation.canNavigate(try conversation.get(), ticket, view)) return false
-  try ignore(conversation.send({ type: "navigate", ticket, view }))
+  if (!(try contained(conversation.send({ type: "navigate", ticket, view }), "opening the view a reply prepared"))) return false
   return try navigationEnded(conversation, ticket)
 }
 
 // spec/app/assistant/index.md, "An explicit Files continuation opens only from the same app trail and Ask Alpha panel"
 export effect function navigateFilesForReply(conversation: ConversationMachine.Shape, ticket: number, source: View[], panel: Detent, route: number): boolean!! {
   if (!Conversation.canNavigateFiles(try conversation.get(), ticket, source, panel, route)) return false
-  try ignore(conversation.send({ type: "navigateFiles", ticket, source, panel, route }))
+  if (!(try contained(conversation.send({ type: "navigateFiles", ticket, source, panel, route }), "opening Files for a reply"))) return false
   return try navigationEnded(conversation, ticket)
 }
 

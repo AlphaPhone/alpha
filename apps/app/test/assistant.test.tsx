@@ -318,7 +318,7 @@ describe.each([["a browser", false], ["a phone", true]])("in %s", (_where, phone
     await vi.waitFor(() => expect(world.ask.turns.size).toBe(1));
     await vi.waitFor(() => expect(document.body.textContent).toContain("Let me look"));
     expect([document.body.textContent?.includes("Using Calendar"), document.body.textContent?.includes("Working")]).toEqual([false, false]);
-    await act(async () => { for (const release of [...world.ask.turns.values()]) release(); });
+    act(() => { for (const release of [...world.ask.turns.values()]) release(); });
     await until(alpha, runtime, Reply, (s) => s.status === "Settled" && s.final === "You said: What's on today?".length);
     const said = await runtime.runPromise(Effect.flatMap(Reply, (machine) => machine.get()));
     expect([said.acks, lines()]).toEqual([1, ["What's on today?", "You said: What's on today?"]]);
@@ -331,7 +331,7 @@ describe.each([["a browser", false], ["a phone", true]])("in %s", (_where, phone
     const { alpha, runtime } = await openAssistant(world, false);
 
     // spec/app/assistant/search.md, "Words are searched from the first hit, and empty words are not searched"
-    await chatAction("Search chat");
+    chatAction("Search chat");
     await fill("Search chats", "friday");
     await until(alpha, runtime, Search, (s) => s.hits.status === "Loaded" && s.words === "friday");
     expect(rows("Results")).toBe(2);
@@ -347,7 +347,7 @@ describe.each([["a browser", false], ["a phone", true]])("in %s", (_where, phone
 
     // spec/app/assistant/search.md, "Only the newest asking's hits are shown, a page at a time, after those already shown": a search that fails says so.
     world.ask.searchDown = true;
-    await chatAction("Search chat");
+    chatAction("Search chat");
     await fill("Search chats", "noon");
     await until(alpha, runtime, Search, (s) => s.hits.status === "Failed");
     expect(document.body.textContent).toContain("Search did not finish");
@@ -470,5 +470,21 @@ describe.each([["a browser", false], ["a phone", true]])("in %s", (_where, phone
     await until(alpha, runtime, Conversation, (s) => s.turn.reply === "Stopped" && s.check !== "Aborting" && s.recheck.status !== "Loading");
     const { check } = await runtime.runPromise(Effect.flatMap(Conversation, (machine) => machine.get()));
     expect([world.ask.turns.size, lines()[0], check === "StoppedForSure" || check === "LookLater"]).toEqual([0, "Take your time", true]);
+  });
+
+  // spec/app/assistant/index.md, "A sensitive screen is never sent, and no reply is awaited over one"
+  it("marks screen context sensitive when hidden and hides pagination on a fresh 2-message chat", async () => {
+    const world = { ...scene(), phone };
+    const { alpha, runtime } = await openAssistant(world);
+    write("Hello");
+    await press("Send");
+    await until(alpha, runtime, Conversation, (s) => s.turn.reply === "Complete");
+    expect(lines()).toEqual(["Hello", "You said: Hello"]);
+    expect([button("Earlier"), button("Later")]).toEqual([undefined, undefined]);
+
+    await seen(false);
+    await until(alpha, runtime, Conversation, (s) => s.context.sensitive);
+    await seen(true);
+    await until(alpha, runtime, Conversation, (s) => !s.context.sensitive);
   });
 });

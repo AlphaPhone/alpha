@@ -3,12 +3,12 @@ import {
   Alert, AssistantCard, Button, AssistantConversation, AssistantGrabber, AssistantPhotoPreview, ConfirmDialog,
   type AssistantAttachment, type AssistantComposerProps, type AssistantDraftNoticeProps, type AssistantTurnNoteProps,
 } from "@repo/ui";
-import { Effect, type ManagedRuntime } from "effect";
-import { type ReactNode, type RefObject, useCallback, useMemo, useRef, useSyncExternalStore } from "react";
+import { Effect, Option, type ManagedRuntime } from "effect";
+import { type ReactNode, type RefObject, useCallback, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { type Conversation as Talking, Machine as ConversationMachine } from "../../gen/app__assistant.effect.vibe";
 import { askable, inFlight, pending } from "../../gen/app__assistant.ts";
 import { useMachine as useConversation } from "../../gen/app__assistant.react.ts";
-import type { Machine as AttachmentMachine } from "../../gen/app__assistant__attachments.effect.vibe";
+import { Machine as AttachmentMachine, canOpenPicker } from "../../gen/app__assistant__attachments.effect.vibe";
 import { useMachine as useAttachments } from "../../gen/app__assistant__attachments.react.ts";
 import type { Machine as ChatsMachine } from "../../gen/app__assistant__chats.effect.vibe";
 import { making } from "../../gen/app__assistant__chats.ts";
@@ -17,15 +17,15 @@ import { type Composer as Writing, Machine as ComposerMachine } from "../../gen/
 import { attachments as attachmentCount, content, maxFiles, textLimit } from "../../gen/app__assistant__composer.ts";
 import { useMachine as useComposer } from "../../gen/app__assistant__composer.react.ts";
 import type { Machine as DockMachine } from "../../gen/app__assistant__dock.effect.vibe";
-import { focused as dockFocused, isOpen as dockOpen } from "../../gen/app__assistant__dock.ts";
+import { composerLift, focused as dockFocused, isOpen as dockOpen } from "../../gen/app__assistant__dock.ts";
 import { useMachine as useDock } from "../../gen/app__assistant__dock.react.ts";
 import type { Machine as ReplyMachine } from "../../gen/app__assistant__reply.effect.vibe";
-import { useMachine as useReply } from "../../gen/app__assistant__reply.react.ts";
 import type { Machine as SearchMachine } from "../../gen/app__assistant__search.effect.vibe";
 import { useMachine as useSearch } from "../../gen/app__assistant__search.react.ts";
 import { Machine as CommsMachine } from "../../gen/app__phone__comms.effect.vibe";
 import { useMachine as useComms } from "../../gen/app__phone__comms.react.ts";
 import { Machine as ShellMachine, showing } from "../../gen/app__shell.effect.vibe";
+import { Machine as CanvasMachine } from "../../gen/app__shell__keyboard.effect.vibe";
 import type { Machine as LayersMachine } from "../../gen/app__shell__layers.effect.vibe";
 import { useMachine as useShell } from "../../gen/app__shell.react.ts";
 import { untimed } from "../runtime/reactor.vibe";
@@ -207,30 +207,98 @@ interface DockHandleProps {
   compact: boolean;
   focusOnPointerOpen: boolean;
   field: RefObject<HTMLTextAreaElement | null>;
+  measureBar: () => number;
+  measureFull: () => number;
+  onDragHeight: (height: number | undefined) => void;
 }
 
-function DockHandle({ dock, detent, compact, focusOnPointerOpen, field }: DockHandleProps) {
+function DockHandle({ dock, detent, compact, focusOnPointerOpen, field, measureBar, measureFull, onDragHeight }: DockHandleProps) {
   const open = dockOpen(detent);
+  const draggingRef = useRef(false);
   return (
     <AssistantGrabber
       variant={open ? "handle" : "mark"}
-      onPress={() => { void dock.send({ type: "press", detent, now: untimed }); }}
-      onDrag={() => { void dock.send({ type: "drag" }); }}
+      onPress={() => {
+        draggingRef.current = false;
+        void dock.send({ type: "press", detent, now: untimed });
+      }}
+      onDrag={(drag) => {
+        if (!draggingRef.current) {
+          draggingRef.current = true;
+          void dock.send({ type: "drag" });
+        }
+        if ("y" in drag) {
+          const full = measureFull();
+          const floor = measureBar();
+          onDragHeight(Math.max(floor, Math.min(full, Math.round(full - drag.y))));
+        }
+      }}
       onRelease={({ direction, flick, y }) => {
-        const height = Math.max(0, Math.round(window.innerHeight - y));
-        void dock.send({ type: "release", direction: direction === "up" ? "Up" : "Down", flick, height, floor: barHeight, full: window.innerHeight, now: untimed });
+        draggingRef.current = false;
+        onDragHeight(undefined);
+        const full = measureFull();
+        const floor = measureBar();
+        const height = Math.max(0, Math.round(full - y));
+        void dock.send({ type: "release", direction: direction === "up" ? "Up" : "Down", flick, height, floor, full, now: untimed });
       }}
       onLift={() => {
+        draggingRef.current = false;
+        onDragHeight(undefined);
         void dock.send({ type: "lift", now: untimed });
         if (!open && focusOnPointerOpen) field.current?.focus();
       }}
-      onCancel={() => { void dock.send({ type: "shift", now: untimed }); }}
+      onCancel={() => {
+        draggingRef.current = false;
+        onDragHeight(undefined);
+        void dock.send({ type: "shift", now: untimed });
+      }}
       onTap={({ keyboard }) => {
         void dock.send({ type: "click", now: untimed });
         if (!open && keyboard && !compact) field.current?.focus();
       }}
     />
   );
+}
+
+function readCanvasMetrics(runtime: AssistantProps["runtime"]): { bar: number; lift: number } {
+  const held = runtime.runSyncExit(Effect.gen(function* () {
+    const found = yield* Effect.serviceOption(CanvasMachine);
+    if (Option.isNone(found)) return { bar: 0, lift: 0 };
+    const state = yield* found.value.get();
+    return { bar: state.bar, lift: state.covered ? Math.max(0, state.base.h - state.visible) : 0 };
+  }));
+  return held._tag === "Success" ? held.value : { bar: 0, lift: 0 };
+}
+
+function openLiveAttachments(
+  runtime: AssistantProps["runtime"],
+  attachments: ReturnType<typeof useAttachments>,
+  targetRef: RefObject<FileTarget | undefined>,
+  board: { change: (patch: { attachmentNotice: string }) => void },
+  openSheet: () => void,
+) {
+  const initial = runtime.runSyncExit(Effect.flatMap(ComposerMachine, (machine) => machine.get()));
+  if (initial._tag !== "Success") return;
+  const initialRequest = { type: "openPicker", room: maxFiles - attachmentCount(initial.value.editor) } as const;
+  if (!attachments.can(initialRequest)) return;
+  void runtime.runPromise(attachmentAuthority()).then((authority) => {
+    if (authority === undefined) {
+      board.change({ attachmentNotice: "Could not verify the owner for these attachments. Try again." });
+      return;
+    }
+    const live = runtime.runSyncExit(Effect.gen(function* () {
+      const comp = yield* ComposerMachine.use((machine) => machine.get());
+      const conv = yield* ConversationMachine.use((machine) => machine.get());
+      const picker = yield* AttachmentMachine.use((machine) => machine.get());
+      return { comp, conv, picker };
+    }));
+    if (live._tag !== "Success") return;
+    const room = maxFiles - attachmentCount(live.value.comp.editor);
+    if (room <= 0 || !canOpenPicker(live.value.picker, room)) return;
+    targetRef.current = { binding: live.value.comp.binding, slot: live.value.comp.read.ticket, revision: live.value.conv.context.revision, authority };
+    openSheet();
+    void attachments.send({ type: "openPicker", room });
+  });
 }
 
 /** The route and draft that own the composer during a Talk-to-keyboard request. */
@@ -245,6 +313,77 @@ function keyboardScope(runtime: AssistantProps["runtime"]): string | undefined {
   return held._tag === "Success" ? held.value : undefined;
 }
 
+function buildDraftNotice(
+  notice: AssistantDraftNoticeProps["status"] | undefined,
+  onComms: boolean,
+  writing: Writing,
+  seen: ReturnType<Talk.Shape["board"]["snapshot"]>,
+  board: Talk.Shape["board"],
+  composer: ReturnType<typeof useComposer>,
+  conversation: ReturnType<typeof useConversation>,
+): AssistantDraftNoticeProps | undefined {
+  if (notice === undefined || onComms) return undefined;
+  const check = { type: "checkForReply" } as const;
+  return {
+    status: notice,
+    saved: seen.saved,
+    onRetry: composer.can({ type: "retry" }) ? () => void composer.send({ type: "retry" }) : undefined,
+    onRecover: composer.can({ type: "recover" }) ? () => void composer.send({ type: "recover" }) : undefined,
+    onReopen: composer.can({ type: "open" }) ? () => void composer.send({ type: "open" }) : undefined,
+    onRestoreSaved: composer.can({ type: "restoreSaved" }) ? () => {
+      const next = writing.unsettled || seen.typed === "" ? seen.saved : `${seen.saved}\n${seen.typed}`;
+      board.type(next);
+      void composer.send({ type: "restoreSaved" }).then((outcome) => {
+        if (outcome._tag === "Success" && next.length > textLimit) {
+          void composer.send({ type: "edit", blank: next.trim() === "", long: true });
+        }
+      });
+    } : undefined,
+    onKeepCurrent: composer.can({ type: "replaceSaved" }) ? () => void composer.send({ type: "replaceSaved" }) : undefined,
+    onCheck: writing.unsettled && conversation.can(check) ? () => void conversation.send(check) : undefined,
+  };
+}
+
+function removeAttachmentById(
+  id: string,
+  runtime: AssistantProps["runtime"],
+  composer: ReturnType<typeof useComposer>,
+  mail: MailQuestions.Shape,
+) {
+  if (id === "question") {
+    if (composer.can({ type: "removeQuestion" })) void composer.send({ type: "removeQuestion" });
+  } else if (id === "transcript") {
+    if (composer.can({ type: "detach", kind: "Transcript" })) void runtime.runPromise(retireTranscript());
+  } else if (id === "mail" || id === "shown") {
+    const event = { type: "detach", kind: detached[id] } as const;
+    if (!composer.can(event)) return;
+    void composer.send(event).then((outcome) => {
+      if (outcome._tag === "Success" && id === "mail") mail.clear();
+    });
+  } else void runtime.runPromise(removeFile(id));
+}
+
+function buildLiveMessages(
+  runtime: AssistantProps["runtime"],
+  seen: ReturnType<Talk.Shape["board"]["snapshot"]>,
+  talking: Talking,
+  chosen: number,
+  subject: string | undefined,
+  brief: string,
+  retryLastSent: () => void,
+  onSettings: (() => void) | undefined,
+) {
+  const writingReply = seen.reply !== "" ? [{ id: "reply", author: "alpha", text: seen.reply } as const] : [];
+  // spec/app/assistant/reply.md, "A failed reply offers the fix the agent named, and a limit reached shows its live wait, never sending the message again"; spec/app/assistant/reply.md, "Out of funds is refused before any output, is never spoken, and offers only Manage plan"
+  const mediaCards = seen.media.filter((card) => !talking.context.sensitive && card.conversation === chosen && card.revision === talking.context.revision).map((card) => ({
+    id: `media ${card.id}`, author: "alpha" as const, text: "", children: <DeviceReview runtime={runtime} card={card} />,
+  }));
+  const mediaNote = talking.context.sensitive || seen.mediaNote?.conversation !== chosen
+    ? [] : [{ id: "media result", author: "alpha" as const, text: seen.mediaNote.text }];
+  const failed = seen.failure === undefined ? [] : [{ id: "failure", author: "alpha", text: "", children: <ReplyFailure {...seen.failure} fix={seen.failure.kind === "OutOfFunds" ? "FundingFix" : seen.failure.fix} live onRetry={retryLastSent} onSettings={onSettings} /> } as const];
+  return [...(brief === "" ? [] : [{ id: `briefing:${subject}`, author: "alpha" as const, text: brief }]), ...writingReply, ...failed, ...mediaCards, ...mediaNote];
+}
+
 /** @model spec/app/assistant/index.md */
 export function Assistant({ runtime, messageActions, speech, canReadAloud = false }: AssistantProps) {
   const conversation = useConversation(runtime);
@@ -252,7 +391,6 @@ export function Assistant({ runtime, messageActions, speech, canReadAloud = fals
   const chats = useChats(runtime);
   const composer = useComposer(runtime);
   const search = useSearch(runtime);
-  const reply = useReply(runtime);
   const shell = useShell(runtime);
   const dock = useDock(runtime);
   const comms = useComms(runtime);
@@ -263,7 +401,9 @@ export function Assistant({ runtime, messageActions, speech, canReadAloud = fals
   const mailStore = useMemo(() => ({ subscribe: (listener: () => void) => mail.subscribe(listener), snapshot: () => mail.snapshot() }), [mail]);
   const reviewed = useSyncExternalStore(mailStore.subscribe, mailStore.snapshot);
   const composerRef = useRef<HTMLTextAreaElement>(null);
+  const sectionRef = useRef<HTMLElement>(null);
   const focusOnRevealRef = useRef(false);
+  const [dragHeight, setDragHeight] = useState<number | undefined>(undefined);
   const { voice: renderVoice, voiceReview, keyboard, ...speechProps } = speech ?? {};
   const keyboardOwner = useCallback(() => keyboardScope(runtime), [runtime]);
   const { onKeyboard, takeFocus } = useTalkKeyboard(composerRef, keyboardOwner, keyboard);
@@ -284,7 +424,8 @@ export function Assistant({ runtime, messageActions, speech, canReadAloud = fals
   const [talking, shown, writing, finding] = [conversation.state, chats.state, composer.state, search.state];
   const free = talking && shown && writing ? freedom(talking, writing, shown.chosen) : { replying: true, holding: true };
   const history = useHistorySheets(chats, search, seen, free);
-  const lines = !shown || (shown.page.status === "Idle" && shown.chosen === 0) ? emptyLines : seen.pages.get(shown.page.ticket)?.lines ?? emptyLines;
+  const activePage = !shown || (shown.page.status === "Idle" && shown.chosen === 0) ? undefined : seen.pages.get(shown.page.ticket);
+  const lines = activePage?.lines ?? emptyLines;
   const canPreview = attachments.can({ type: "preview", attachment: 1 });
   const preview = useCallback((file: Attached) => void runtime.runPromise(previewFile(file)), [runtime]);
   const onSettingsPage = shell.state && showing(shell.state, "Settings") && shell.state.assistant !== "Bar" && shell.can(back);
@@ -300,7 +441,12 @@ export function Assistant({ runtime, messageActions, speech, canReadAloud = fals
     onPreview: canPreview ? preview : undefined,
     onOpenMaps: shell.can(maps) ? onOpenMaps : undefined,
   });
-  if (conversation.cause || chats.cause || composer.cause || reply.cause) return <Alert variant="destructive" className="m-4">Alpha could not open Ask Alpha</Alert>;
+  const measureBar = useCallback(() => {
+    const measured = readCanvasMetrics(runtime).bar;
+    return measured > 0 ? measured : barHeight;
+  }, [runtime]);
+  const measureFull = useCallback(() => sectionRef.current?.parentElement?.clientHeight || window.innerHeight, []);
+  if (conversation.cause || chats.cause || composer.cause) return <Alert variant="destructive" className="m-4">Alpha could not open Ask Alpha</Alert>;
   if (!talking || !shown || !writing || !finding) return null;
   const hold = { type: "hold", askable: askable(talking) } as const;
   const start = { type: "start", ...free } as const;
@@ -319,6 +465,8 @@ export function Assistant({ runtime, messageActions, speech, canReadAloud = fals
   const draftFiles = sameBinding(seen.filesBinding, writing.binding) ? seen.files : [];
   const transcriptTitle = sameBinding(seen.transcript?.binding, writing.binding) ? seen.transcript?.offered.title : undefined;
   const previewed = seen.preview?.ticket === attachments.state?.preview ? seen.preview?.file : undefined;
+  const canvasMetrics = readCanvasMetrics(runtime);
+  const lift = assistantDetent === "Typing" ? composerLift(true, canvasMetrics.lift, 0) : 0;
 
   const type = (text: string) => {
     if (subject !== undefined) {
@@ -349,27 +497,32 @@ export function Assistant({ runtime, messageActions, speech, canReadAloud = fals
       void chats.send(start);
       return;
     }
-    board.hold(seen.typed);
+    const prior = seen.typed;
+    board.hold(prior);
     board.type("");
-    void composer.send(hold);
+    void composer.send(hold).then((outcome) => {
+      if (outcome._tag === "Failure" && board.outgoing === prior) {
+        board.outgoing = "";
+        if (board.snapshot().typed === "") board.type(prior);
+      }
+    });
   };
   // spec/app/assistant/chats.md, "Older or newer messages are read around a message of the conversation showing"
   const earlier = { type: "scroll", around: board.numbered(lines[0]?.id ?? "") } as const;
   const later = { type: "scroll", around: board.numbered(lines.at(-1)?.id ?? "") } as const;
-  const writingReply = seen.reply !== "" ? [{ id: "reply", author: "alpha", text: seen.reply } as const] : [];
-  // spec/app/assistant/reply.md, "A failed reply offers the fix the agent named, and a limit reached shows its live wait, never sending the message again"; spec/app/assistant/reply.md, "Out of funds is refused before any output, is never spoken, and offers only Manage plan"
-  const mediaCards = seen.media.filter((card) => !talking.context.sensitive && card.conversation === shown.chosen && card.revision === talking.context.revision).map((card) => ({
-    id: `media ${card.id}`, author: "alpha" as const, text: "", children: <DeviceReview runtime={runtime} card={card} />,
-  }));
-  const mediaNote = talking.context.sensitive || seen.mediaNote?.conversation !== shown.chosen
-    ? [] : [{ id: "media result", author: "alpha" as const, text: seen.mediaNote.text }];
-  const failed = seen.failure === undefined ? [] : [{ id: "failure", author: "alpha", text: "", children: <ReplyFailure {...seen.failure} fix={seen.failure.kind === "OutOfFunds" ? "FundingFix" : seen.failure.fix} live onRetry={() => type(board.lastSent)} onSettings={settingsAction ? onSettings : undefined} /> } as const];
+  const retryLastSent = () => {
+    if (subject !== undefined || board.lastSent === "") return;
+    const current = board.snapshot().typed;
+    type(current.trim() === "" ? board.lastSent : `${current}\n${board.lastSent}`);
+  };
+  const liveMessages = buildLiveMessages(runtime, seen, talking, shown.chosen, subject, brief, retryLastSent, settingsAction ? onSettings : undefined);
   const quotedLine = board.line(shown.chosen, writing.editor.quote);
   const quoted = quotedLine === undefined ? undefined : wordsOf(quotedLine);
   const view = talking.context.showing.tag === "App" ? talking.context.showing.view : "Home";
   const open = dockOpen(assistantDetent);
   const full = assistantDetent === "Full";
   const keptHeight = assistantDetent === "Sheet" && dock.state && dock.state.kept > 0 ? dock.state.kept : undefined;
+  const sheetHeight = dragHeight ?? keptHeight;
   const openWithFocus = (focusField: boolean) => {
     for (const ask of dockFocused(assistantDetent)) {
       if (ask.tag === "Raise" && shell.can({ type: "raise", detent: ask.detent })) void shell.send({ type: "raise", detent: ask.detent });
@@ -385,45 +538,52 @@ export function Assistant({ runtime, messageActions, speech, canReadAloud = fals
     });
   };
   const grabber = shell.state ? <DockHandle dock={dock} detent={assistantDetent} compact={compact}
-    focusOnPointerOpen={currentView !== undefined && !compact} field={composerRef} /> : undefined;
+    focusOnPointerOpen={currentView !== undefined && !compact} field={composerRef}
+    measureBar={measureBar} measureFull={measureFull} onDragHeight={setDragHeight} /> : undefined;
 
   return (
     <>
       <AssistantAttachments runtime={runtime} attachments={attachments} preview={previewed} targetRef={fileTargetRef} composerRef={composerRef} />
       {onComms && full && <CommsTarget runtime={runtime} placement="strip" />}
       {(!onComms || open) && <AssistantConversation
+        ref={sectionRef}
+        data-alpha-dragging={dragHeight !== undefined ? "true" : undefined}
         voiceReview={voiceReview}
         detent={assistantDetent === "Full" ? "full" : assistantDetent === "Sheet" ? "sheet" : "bar"}
-        className={onComms ? "relative w-full motion-safe:transition-[height] motion-safe:duration-[420ms]" : open ? "fixed inset-x-0 bottom-0 mx-auto max-w-md" : "sticky bottom-0"}
+        className={onComms
+          ? (dragHeight !== undefined ? "relative w-full" : "relative w-full motion-safe:transition-[height] motion-safe:duration-slow")
+          : open ? "fixed inset-x-0 bottom-0 mx-auto max-w-md" : compact ? "pointer-events-none sticky bottom-0" : "sticky bottom-0"}
         style={onComms
-          ? { height: assistantDetent === "Full" ? "calc(100dvh - 52px)" : `clamp(38dvh, ${keptHeight === undefined ? "50dvh" : `${keptHeight}px`}, 60dvh)` }
-          : keptHeight ? { height: keptHeight } : undefined}
+          ? { height: assistantDetent === "Full" ? "calc(100dvh - 52px)" : `clamp(38dvh, ${sheetHeight === undefined ? "50dvh" : `${sheetHeight}px`}, 60dvh)` }
+          : sheetHeight ? { height: sheetHeight } : undefined}
         header={{
           title: seen.titles.get(shown.chosen) ?? "Ask Alpha",
           context: { view, selected: talking.context.selected, sensitive: talking.context.sensitive },
           onHome: () => void runtime.runPromise(home()),
-          onClose: open && shell.can({ type: "goBack" }) ? () => void shell.send({ type: "goBack" }) : undefined,
+          onClose: open && shell.can(back) ? () => void shell.send(back) : undefined,
           expanded: assistantDetent === "Full",
           onResize: assistantDetent === "Full"
-            ? () => void shell.send({ type: "goBack" })
+            ? (shell.can(back) ? () => void shell.send(back) : undefined)
             : shell.can({ type: "raise", detent: "Full" }) ? () => void shell.send({ type: "raise", detent: "Full" }) : undefined,
           grabber: open ? grabber : undefined,
         }}
         attachmentNotice={onComms ? undefined : seen.attachmentNotice}
         transcript={{
           messages,
-          liveMessages: [...(brief === "" ? [] : [{ id: `briefing:${subject}`, author: "alpha" as const, text: brief }]), ...writingReply, ...failed, ...mediaCards, ...mediaNote],
+          liveMessages,
           position: { page: `${shown.chosen}/${shown.page.ticket}`, around: board.messageId(shown.around) },
           visible: open,
           status: shown.page.status === "Loading" ? "loading" : shown.page.status === "Failed" ? "failed" : "loaded",
           turn: status === undefined ? undefined : { status, label: seen.label === "" ? undefined : seen.label, onCheck: checkable ? () => void conversation.send(check) : undefined },
           onRetry: chats.can({ type: "reread" }) ? () => void chats.send({ type: "reread" }) : undefined,
-          onEarlier: chats.can(earlier) ? () => void chats.send(earlier) : undefined,
-          onLater: chats.can(later) ? () => void chats.send(later) : undefined,
+          onEarlier: activePage?.hasEarlier && chats.can(earlier) ? () => void chats.send(earlier) : undefined,
+          onLater: activePage?.hasLater && chats.can(later) ? () => void chats.send(later) : undefined,
           onReturnToOriginal: chats.can({ type: "returnToOriginal", ...free }) ? () => void chats.send({ type: "returnToOriginal", ...free }) : undefined,
         }}
         composer={{
           ...speechProps,
+          className: compact ? "[&>div]:pointer-events-auto [&>section]:pointer-events-auto" : undefined,
+          lift: lift > 0 ? lift : undefined,
           voice: renderVoice?.({ compactDock: compact, atBar: assistantDetent === "Bar", onKeyboard }),
           onDictate: onComms || inFlight(talking.turn) || !speech?.onDictate ? undefined : () => {
             openWithFocus(false);
@@ -435,19 +595,7 @@ export function Assistant({ runtime, messageActions, speech, canReadAloud = fals
           placeholder: onComms ? "Ask Alpha" : assistantDetent === "Bar" && currentView === "Browser" ? "Ask about this page" : undefined,
           leading: onComms ? <CommsTarget runtime={runtime} placement="composer" /> : undefined,
           closed: subject === undefined && !composer.can({ type: "edit", blank: false, long: false }),
-          notice: notice === undefined || onComms ? undefined : {
-            status: notice,
-            saved: seen.saved,
-            onRetry: composer.can({ type: "retry" }) ? () => void composer.send({ type: "retry" }) : undefined,
-            onRecover: composer.can({ type: "recover" }) ? () => void composer.send({ type: "recover" }) : undefined,
-            onReopen: composer.can({ type: "open" }) ? () => void composer.send({ type: "open" }) : undefined,
-            onRestoreSaved: composer.can({ type: "restoreSaved" }) ? () => {
-              board.type(writing.unsettled || seen.typed === "" ? seen.saved : `${seen.saved}\n${seen.typed}`);
-              void composer.send({ type: "restoreSaved" });
-            } : undefined,
-            onKeepCurrent: composer.can({ type: "replaceSaved" }) ? () => void composer.send({ type: "replaceSaved" }) : undefined,
-            onCheck: writing.unsettled && conversation.can(check) ? () => void conversation.send(check) : undefined,
-          },
+          notice: buildDraftNotice(notice, onComms, writing, seen, board, composer, conversation),
           unavailable: !talking.ready ? "away" : talking.context.sensitive ? "sensitive" : undefined,
           attachments: onComms ? undefined : waiting(writing, draftFiles, transcriptTitle),
           onPreviewAttachment: !onComms && canPreview ? (id) => {
@@ -466,17 +614,7 @@ export function Assistant({ runtime, messageActions, speech, canReadAloud = fals
           onStop: conversation.can({ type: "stop" }) ? () => void conversation.send({ type: "stop" }) : undefined,
           stopping: talking.turn.stopping,
           onAttach: !onComms && composer.can({ type: "attach", count: 1 }) ? () => {
-            const request = { type: "openPicker", room: maxFiles - attachmentCount(writing.editor) } as const;
-            if (!attachments.can(request)) return;
-            void runtime.runPromise(attachmentAuthority()).then((authority) => {
-              if (authority === undefined) {
-                board.change({ attachmentNotice: "Could not verify the owner for these attachments. Try again." });
-                return;
-              }
-              fileTargetRef.current = { binding: writing.binding, slot: writing.read.ticket, revision: talking.context.revision, authority };
-              openWithFocus(false);
-              void attachments.send(request);
-            });
+            openLiveAttachments(runtime, attachments, fileTargetRef, board, () => openWithFocus(false));
           } : undefined,
           onFocusField: assistantDetent === "Typing" ? undefined : () => openWithFocus(false),
           onHistory: history.browse,
@@ -484,18 +622,10 @@ export function Assistant({ runtime, messageActions, speech, canReadAloud = fals
           onNew: chats.can(start) ? () => void chats.send(start) : undefined,
           making: making(shown),
           onClick: assistantDetent === "Bar" && !compact ? (event) => {
-            if (event.target instanceof Element && event.target.closest("button, textarea")) return;
+            if (event.target instanceof Element && event.target.closest("button, textarea, [role='button'], [data-alpha-attachment-chip]")) return;
             openWithFocus(true);
           } : undefined,
-          onRemoveAttachment: (id) => {
-            if (id === "question") void composer.send({ type: "removeQuestion" });
-            else if (id === "transcript") {
-              if (composer.can({ type: "detach", kind: "Transcript" })) void runtime.runPromise(retireTranscript());
-            } else if (id === "mail" || id === "shown") {
-              if (id === "mail") mail.clear();
-              void composer.send({ type: "detach", kind: detached[id] });
-            } else void runtime.runPromise(removeFile(id));
-          },
+          onRemoveAttachment: (id) => removeAttachmentById(id, runtime, composer, mail),
           onUnquote: composer.can({ type: "unquote" }) ? () => void composer.send({ type: "unquote" }) : undefined,
         }}
       />}

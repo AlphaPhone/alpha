@@ -20,7 +20,7 @@ import * as Voice from "../../gen/app__voice.effect.vibe"
 import type { Machine as Speaker } from "../../gen/app__voice__output.effect.vibe"
 import { Machine as Shell, canReturnCommsView, showing } from "../../gen/app__shell.effect.vibe"
 import { Machine as Canvas } from "../../gen/app__shell__keyboard.effect.vibe"
-import { Machine as Layers } from "../../gen/app__shell__layers.effect.vibe"
+import { Machine as Layers, assistantInert } from "../../gen/app__shell__layers.effect.vibe"
 import { syncClockNow } from "../clock/sync.vibe"
 import { type NoteTranscript, type NotesSelection, type RendererNote, noteSubjects, notesSelection, transcriptCurrent } from "../notes/selection.vibe"
 import type { NoteStore } from "../platform/notes.vibe"
@@ -79,10 +79,16 @@ const made = () => Schema.Struct({ conversation: titled })
 const page = () => Schema.Struct({ messages: Schema.Array(Schema.Struct({ id: Schema.String, role: Schema.Literals(["user", "assistant"]), text: Schema.String, clientMessageId: Schema.optionalKey(Schema.String), failureKind: Schema.optionalKey(Schema.String), cloudCode: Schema.optionalKey(Schema.String) })) })
 const hits = () => Schema.Struct({ results: Schema.Array(Schema.Struct({ conversationId: Schema.NonEmptyString, roomId: Schema.NonEmptyString, messageId: Schema.String, text: Schema.String })) })
 
-// Eliza's pinned history contract projects a redacted body to this exact text.
+/** Eliza's pinned history contract projects a redacted body to this exact text. */
 const privateHistoryNotice = "[Private information removed]"
 
-const slotted = Schema.fromJsonString(Schema.Struct({ revision: Schema.Int, text: Schema.String, sending: Schema.Boolean }))
+const slotted = Schema.fromJsonString(Schema.Struct({
+  revision: Schema.Int,
+  text: Schema.String,
+  sending: Schema.Boolean,
+  lastSentId: Schema.optionalKey(Schema.String),
+  lastSentWire: Schema.optionalKey(Schema.String),
+}))
 
 const pageSize = 20
 
@@ -246,21 +252,28 @@ export const spokenScreen = started(effect {
   }, context)
 }, "telling voice the screen")
 
-effect function syncAlphaApps(): void!!(Agent | KeyValueStore.KeyValueStore | Time) {
+effect function syncAlphaApps(actions: ReadonlyArray<{ readonly action: string }>, toolRan: boolean): void!!(Agent | KeyValueStore.KeyValueStore | Time) {
+  const touchedClock = toolRan || actions.some((one) => /clock|alarm|timer|world/i.test(one.action))
+  const touchedReminders = toolRan || actions.some((one) => /reminder/i.test(one.action))
+  if (!touchedClock && !touchedReminders) return
   const ctx = try Effect.context<never>()
-  const alarms = Context.getOption(ctx, Alarms.Machine)
-  const timers = Context.getOption(ctx, Timers.Machine)
-  const world = Context.getOption(ctx, World.Machine)
-  if (Option.isSome(alarms) && Option.isSome(timers) && Option.isSome(world)) {
-    try ignore(Effect.provide(syncClockNow(), Layer.mergeAll(
-      Layer.succeed(Alarms.Machine, alarms.value),
-      Layer.succeed(Timers.Machine, timers.value),
-      Layer.succeed(World.Machine, world.value),
-    )))
+  if (touchedClock) {
+    const alarms = Context.getOption(ctx, Alarms.Machine)
+    const timers = Context.getOption(ctx, Timers.Machine)
+    const world = Context.getOption(ctx, World.Machine)
+    if (Option.isSome(alarms) && Option.isSome(timers) && Option.isSome(world)) {
+      try ignore(Effect.provide(syncClockNow(), Layer.mergeAll(
+        Layer.succeed(Alarms.Machine, alarms.value),
+        Layer.succeed(Timers.Machine, timers.value),
+        Layer.succeed(World.Machine, world.value),
+      )))
+    }
   }
-  const reminders = Context.getOption(ctx, Reminders.Machine)
-  if (Option.isSome(reminders)) {
-    try ignore(Effect.provide(syncRemindersNow(), Layer.succeed(Reminders.Machine, reminders.value)))
+  if (touchedReminders) {
+    const reminders = Context.getOption(ctx, Reminders.Machine)
+    if (Option.isSome(reminders)) {
+      try ignore(Effect.provide(syncRemindersNow(), Layer.succeed(Reminders.Machine, reminders.value)))
+    }
   }
 }
 
@@ -404,7 +417,10 @@ function posted(ticket: number, told: boolean, context: Conversation.Context): S
     const asked = try views.begin()
     const metadata = { ...screen, ...(told ? delivery(views.clientId, requestedFiles !== undefined || outsideOrigin !== undefined) : {}), ...(quoted === undefined ? {} : { replyToMessageId: quoted.id }) }
     const images = files.map(({ data, mimeType, name }) => ({ data, mimeType, name }))
+    let inFlightSend = true
+    try addFinalizer(() => inFlightSend ? ignore(tryPromise(() => controller.interrupt())) : Effect.void)
     const result = tryPromise(() => controller.send({ text: outgoing, ...(images.length === 0 ? {} : { images }), ...(Object.keys(metadata).length === 0 ? {} : { metadata }) }, { stream: hooks, ...(enrolled === undefined ? {} : { headers: enrolled.headers }) })) catch () => undefined
+    inFlightSend = false
     if (!(try ownsSeat(board, seat))) {
       Queue.offerUnsafe(queue, { type: "lose", ticket })
       Queue.endUnsafe(queue)
@@ -440,7 +456,7 @@ function posted(ticket: number, told: boolean, context: Conversation.Context): S
       }
       board.messageNumber(result.reply.messageId)
       board.append(pageTicket, chats.chosen, { id: result.reply.messageId, mine: false, text: result.reply.text })
-      try syncAlphaApps()
+      try syncAlphaApps(result.reply.actionResults, toolRan)
       if (enrolled !== undefined && result.reply.userMessageId !== undefined) {
         const replied = streamed(result.clientMessageId)
         const stillAuthored = effect {
@@ -559,6 +575,13 @@ effect function settled(hold: number, sent: boolean): void!!(Talk | Composer.Mac
   if (sent) board.change({ files: [], filesBinding: undefined, filesAuthority: undefined, transcript: undefined, attachmentNotice: "" })
   else giveBack(board)
   try contained(composer.send(event), "settling the composer")
+  if (!sent) {
+    const restored = board.snapshot().typed
+    if (restored.length > Composer.textLimit) {
+      const tooLong: Composer.Event = { type: "edit", blank: restored.trim() === "", long: true }
+      if (Composer.enabled(try composer.get(), tooLong)) try contained(composer.send(tooLong), "marking restored draft length")
+    }
+  }
   if (!sent && board.snapshot().transcript === undefined && (try composer.get()).editor.transcript) try retireTranscript()
   if (staged?.hold === hold) {
     if (board.staged === staged) board.staged = undefined
@@ -721,12 +744,17 @@ effect function paged(conversation: number, around: number, ticket: number): Cha
         ...(attachments === undefined ? {} : { attachments }),
       }
     })
-    const preview = board.takeHistory(ticket, conversation, recorded, redacted)
+    const numbers = messages.map((one) => board.messageNumber(one.id))
+    const firstNumber = numbers[0] ?? 0
+    const bounds = {
+      hasEarlier: around === 0 ? recorded.length > 2 : firstNumber > 1,
+      hasLater: around > 0 && recorded.length > 0,
+    }
+    const preview = board.takeHistory(ticket, conversation, recorded, redacted, bounds)
     if (preview !== undefined) {
       const picker = try Attachments.Machine
       try ignore(picker.send({ type: "closePreview" }, (state) => state.preview === preview && board.snapshot().preview === undefined))
     }
-    const numbers = messages.map((one) => board.messageNumber(one.id))
     return { type: "paged", ticket, ok: true, messages: Math.max(0, ...numbers) }
   } catch (failure) => (around === 0 && failure instanceof Refused && failure.status === 404 ? { type: "notFound", ticket } : { type: "paged", ticket, ok: false, messages: 0 })
 }
@@ -768,7 +796,7 @@ function carryChats(fx: Chats.Effect): Job<Chats.Event, Agent | Talk | Chats.Mac
   }
 }
 
-type SlotReading = { found: Composer.Found; revision: number; text: string; raw?: string }
+type SlotReading = { found: Composer.Found; revision: number; text: string; raw?: string; lastSentId?: string; lastSentWire?: string }
 
 function emptySlot(found: Composer.Found): SlotReading {
   return { found, revision: 0, text: "" }
@@ -803,7 +831,14 @@ effect function slotOf(board: Board, slot: DraftSlot | undefined): SlotReading!!
     const decoded = Schema.decodeUnknownOption(slotted)(raw)
     if (Option.isNone(decoded)) return { ...emptySlot("Corrupt"), raw }
     const saved = decoded.value
-    return { found: saved.sending ? "Sending" as const : "Saved" as const, revision: saved.revision, text: saved.text, raw }
+    return {
+      found: saved.sending ? "Sending" as const : "Saved" as const,
+      revision: saved.revision,
+      text: saved.text,
+      raw,
+      ...(saved.lastSentId === undefined ? {} : { lastSentId: saved.lastSentId }),
+      ...(saved.lastSentWire === undefined ? {} : { lastSentWire: saved.lastSentWire }),
+    }
   } catch () => emptySlot("Failure")
 }
 
@@ -845,6 +880,10 @@ effect function slotRead(ticket: number, binding: Composer.Binding, recover: boo
   if (!sameBinding(now.binding, binding) || !Composer.canSlotRead(now, ticket, revision) || slot?.key !== draftSlot(board, binding)?.key) {
     return { type: "slotRead", ticket, found: "Failure", revision: 0 }
   }
+  if (found === "Sending") {
+    board.lastSentId = held.lastSentId ?? ""
+    board.lastSentWire = held.lastSentWire ?? text
+  }
   board.change(found === "Saved" ? { typed: text, saved: "" } : found === "Sending" ? { typed: "", saved: text } : { typed: "", saved: "" })
   return { type: "slotRead", ticket, found, revision }
 }
@@ -877,7 +916,10 @@ effect function wrote(ticket: number, binding: Composer.Binding, sending: boolea
     return { type: "wrote", ticket, result: "Collided", revision: held.revision }
   }
   const text = sending ? board.outgoing : board.snapshot().typed
-  const landed = try putSlot(board, slot, held.raw, JSON.stringify({ revision: base + 1, text, sending }))
+  const payload = sending
+    ? { revision: base + 1, text, sending, ...(board.lastSentId === "" ? {} : { lastSentId: board.lastSentId }), lastSentWire: board.lastSentWire || text }
+    : { revision: base + 1, text, sending }
+  const landed = try putSlot(board, slot, held.raw, JSON.stringify(payload))
   const then = try machine.get()
   if (!sameBinding(then.binding, binding) || then.writing !== ticket || slot.key !== draftSlot(board, binding)?.key) {
     return { type: "wrote", ticket, result: "Lost", revision: 0 }
@@ -899,14 +941,12 @@ effect function cleared(attempt: number, binding: Composer.Binding, revision: nu
 }
 
 // spec/app/assistant/index.md, "A message is asked when the agent can be reached, the screen may be sent and no turn is in flight"; spec/app/assistant/index.md, "A message that cannot be asked is given back at once: a typed one to the composer, a card's prompt to its card"
-function asked(hold: number, attachments: number): Stream.Stream<Composer.Event, never, Conversation.Machine | Talk> {
-  return Stream.unwrap(effect {
-    const conversation = try Conversation.Machine
-    if (try contained(conversation.send({ type: "ask", hold, prompt: 0, attachments }), "asking")) return Stream.empty
-    if (try contained(conversation.send({ type: "decline", hold, prompt: 0 }), "declining")) return Stream.empty
-    giveBack((try Talk).board)
-    return Stream.succeed<Composer.Event>({ type: "release", hold })
-  })
+effect function asked(hold: number, attachments: number): void!!(Conversation.Machine | Composer.Machine | Talk) {
+  const conversation = try Conversation.Machine
+  if (try contained(conversation.send({ type: "ask", hold, prompt: 0, attachments }), "asking")) return
+  if (try contained(conversation.send({ type: "decline", hold, prompt: 0 }), "declining")) return
+  giveBack((try Talk).board)
+  try contained((try Composer.Machine).send({ type: "release", hold }), "releasing unasked composer")
 }
 
 function carryComposer(fx: Composer.Effect): Job<Composer.Event, Agent | KeyValueStore.KeyValueStore | Talk | Composer.Machine | Conversation.Machine, []> {
@@ -914,7 +954,7 @@ function carryComposer(fx: Composer.Effect): Job<Composer.Event, Agent | KeyValu
     when { tag: "ReadSlot", let ticket, let binding, let recover }: answer("slot", slotRead(ticket, binding, recover), { type: "slotRead", ticket, found: "Failure", revision: 0 });
     when { tag: "Write", let ticket, let binding, let sending }: answer(`write ${ticket}`, wrote(ticket, binding, sending), { type: "wrote", ticket, result: "Lost", revision: 0 });
     when { tag: "Clear", let attempt, let binding, let revision }: answer("clear", cleared(attempt, binding, revision), { type: "cleared", attempt, ok: false, known: false });
-    when { tag: "Ask", let hold, let attachments }: stream(`ask ${hold}`, asked(hold, attachments), { type: "release", hold });
+    when { tag: "Ask", let hold, let attachments }: run(`ask ${hold}`, asked(hold, attachments));
   }
 }
 
@@ -982,7 +1022,9 @@ const reached = started(effect {
       const picker = try attachments.get()
       if (Attachments.canCancel(picker)) try ignore(attachments.send({ type: "cancel" }))
       if (Attachments.canClosePreview(try attachments.get())) try ignore(attachments.send({ type: "closePreview" }))
-      if (Search.canCloseSearch(try search.get())) try ignore(search.send({ type: "closeSearch" }))
+      try ignore(search.send({ type: "switchSession" }))
+      const voiceWords = Option.getOrUndefined(try Effect.serviceOption(VoiceWords))
+      if (voiceWords !== undefined) voiceWords.memory.conversation = undefined
       if ((try composer.get()).binding.owner !== 0) try ignore(composer.send({ type: "switchOwner", owner: 0 }))
       if (next !== undefined) {
         ownerNumber += 1
@@ -1002,28 +1044,48 @@ const reached = started(effect {
   })
 }, "following Ask Alpha's agent")
 
-// spec/app/assistant/index.md, "A screen that changed takes a new revision and stops the turn in flight; an unchanged one is ignored"; spec/app/assistant/index.md, "A sensitive screen says only that it is sensitive: no selection and no day"
+// spec/app/assistant/index.md, "A screen that changed takes a new revision and stops the turn in flight; an unchanged one is ignored"; spec/app/assistant/index.md, "A sensitive screen says only that it is sensitive: no selection and no day"; spec/app/assistant/composer.md, "What a view offered is dropped when another view shows before Send"
 const looked = started(effect {
   const shell = try Shell
   const settings = try Pages.Machine
   const conversation = try Conversation.Machine
+  const composer = try Composer.Machine
+  const device = try Device
+  const layers = try Layers
+  const mail = try MailQuestions
   const { board } = try Talk
   let taken: string | undefined
+  let previousView: string | undefined
   const page = Stream.zipLatest(shell.changes, settings.changes)
+  const visibility = Stream.concat(Stream.fromEffect(device.showing()), device.visible)
+  const environment = Stream.zipLatest(visibility, layers.changes)
   const selection = Stream.zipLatest(noteSubjects, conversation.changes)
-  try Stream.runForEach(Stream.zipLatest(page, selection), effect ([[shown, pages], [subject]]) => {
+  try Stream.runForEach(Stream.zipLatest(Stream.zipLatest(page, environment), selection), effect ([[[shown, pages], [visible, layerState]], [subject]]) => {
     const view = shown.trail.at(-1)
+    const viewKey = view ?? ""
+    if (previousView !== undefined && viewKey !== previousView) {
+      const comp = try composer.get()
+      const nextRev = Math.max(comp.offeredAt + 1, (try conversation.get()).context.revision + 1)
+      if (Composer.canMoveOn(comp, nextRev)) {
+        if (try contained(composer.send({ type: "moveOn", revision: nextRev }), "dropping view offers on view change")) {
+          if (comp.editor.mail) mail.clear()
+          if (comp.editor.transcript) board.change({ transcript: undefined })
+        }
+      }
+    }
+    previousView = viewKey
     const offer = board.snapshot().transcript
     const transcript = offer?.offered
     if (transcript !== undefined && (view !== "Notes" || transcript.owner !== subject.owner ||
       transcript.number !== subject.note || transcript.opened !== subject.opened || transcript.record.revision !== String(subject.revision - 1))) try retireTranscript(offer)
     const section: Pages.Page = view === "Settings" ? pages.page : "Top"
-    const sensitive = view === "Settings" && Pages.sensitive(pages)
+    const sensitive = !visible || assistantInert(layerState) || (view === "Settings" && Pages.sensitive(pages))
     const { note } = subject
     const selected = view === "Notes" && !sensitive && note > 0
-    const seen = `${view ?? ""} ${section} ${sensitive} ${selected ? note : ""}`
+    const currentZone = zone()
+    const seen = `${viewKey} ${section} ${sensitive} ${visible} ${currentZone} ${selected ? note : ""}`
     if (seen === taken) return
-    const event: Conversation.Event = { type: "look", showing: view === undefined ? { tag: "Home" } : { tag: "App", view }, zone: zone(), day: 0, selected, sensitive, section }
+    const event: Conversation.Event = { type: "look", showing: view === undefined ? { tag: "Home" } : { tag: "App", view }, zone: currentZone, day: 0, selected, sensitive, section }
     if (!Conversation.enabled(try conversation.get(), event) || (try contained(conversation.send(event), "telling the screen"))) taken = seen
   })
 }, "telling the screen")
@@ -1043,8 +1105,10 @@ const bound = started(effect {
   const composer = try Composer.Machine
   const conversation = try Conversation.Machine
   const { board } = try Talk
+  let sawMaking = false
   try Stream.runForEach(Stream.zipLatest(Stream.zipLatest(chats.changes, composer.changes), conversation.changes), effect ([[shown, writing], talking]) => {
     if (board.draftSeat === undefined || writing.binding.owner !== board.draftSeat.number) return
+    if (Chats.making(shown)) sawMaking = true
     const offered = board.snapshot().transcript
     if (offered !== undefined && offered.binding.owner !== writing.binding.owner) board.change({ transcript: undefined })
     const staged = board.staged
@@ -1054,6 +1118,7 @@ const bound = started(effect {
     }
     const here = writing.binding.conversation
     if (shown.chosen !== here) {
+      if (shown.chosen > 0) sawMaking = false
       board.change({ reply: "", label: "", failure: undefined })
       const moving = here === 0 && shown.chosen > 0 && (Composer.content(writing.editor) || Composer.attached(writing.editor) || writing.draft.sync !== "Kept")
       const bound = try contained(composer.send(moving ? { type: "adopt", conversation: shown.chosen } : { type: "bind", conversation: shown.chosen }), "binding the composer")
@@ -1066,8 +1131,14 @@ const bound = started(effect {
       }
       return
     }
+    if (board.sendWhenMade && sawMaking && shown.chosen === 0 && !Chats.making(shown)) {
+      sawMaking = false
+      board.sendWhenMade = false
+      return
+    }
     if (board.sendWhenMade && here > 0 && writing.source === 0 && writing.clear.outcome !== "Sent") {
       if (writing.slot !== "Open" || writing.draft.sync === "Saving") return
+      sawMaking = false
       board.sendWhenMade = false
       const event: Composer.Event = { type: "hold", askable: Conversation.askable(talking) }
       if (Composer.enabled(writing, event)) board.outgoing = board.snapshot().typed
@@ -1155,12 +1226,21 @@ const steppingBack = started(effect {
   const composer = try Composer.Machine
   const voice = try Voice.Machine
   const attachments = try Attachments.Machine
+  const comms = try Comms.Machine
+  const mail = try MailQuestions
   const layers = try Layers
   let offered = false
+  const mailOpen = Stream.callback<boolean>((queue) => effect {
+    const emit = () => { Queue.offerUnsafe(queue, mail.snapshot().question !== undefined) }
+    emit()
+    const off = mail.subscribe(emit)
+    try addFinalizer(() => sync(off))
+  })
   const composing = Stream.zipLatest(search.changes, composer.changes)
   const media = Stream.zipLatest(voice.changes, attachments.changes)
-  try Stream.runForEach(Stream.zipLatest(composing, media), effect ([[finding, writing], [speech, picker]]) => {
-    const has = finding.open || writing.editor.quote > 0 || Voice.canCloseRecorder(speech) || Voice.canStop(speech, false) || Attachments.canClosePreview(picker) || Attachments.canCancel(picker)
+  const dialogs = Stream.zipLatest(mailOpen, comms.changes)
+  try Stream.runForEach(Stream.zipLatest(Stream.zipLatest(composing, media), dialogs), effect ([[[finding, writing], [speech, picker]], [mailReview, commState]]) => {
+    const has = finding.open || writing.editor.quote > 0 || mailReview || commState.stage.length > 0 || Voice.canCloseRecorder(speech) || Voice.canStop(speech, false) || Attachments.canClosePreview(picker) || Attachments.canCancel(picker)
     if (has === offered) return
     if (try contained(layers.send({ type: has ? "offerStep" : "withdrawStep", place: "assistant" }), "offering Back")) offered = has
   })

@@ -1,10 +1,13 @@
 // @vitest-environment happy-dom
 import { Effect, Stream } from "effect";
-import { act } from "react";
+import { act, useState } from "react";
+import { createRoot } from "react-dom/client";
 import { afterEach, describe, expect, it } from "vitest";
 import { Machine as Dock } from "../gen/app__assistant__dock.effect.vibe";
 import { Machine as Shell } from "../gen/app__shell.effect.vibe";
 import { Machine as Canvas } from "../gen/app__shell__keyboard.effect.vibe";
+import { AttachmentSources } from "../src/assistant/AttachmentSources.tsx";
+import type { Tab } from "../gen/app__assistant__attachments.ts";
 import { closeAllDocks, mountDock } from "./dock-support.tsx";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -15,7 +18,7 @@ const underAct = async (work: () => Promise<void> | void) => {
 };
 
 describe("Ask Alpha dock and shell navigation", () => {
-  // spec/app/assistant/attachments.md, "Story: Choose files to attach"; "Cancel closes the picker, and files still being read are not attached"
+  // spec/app/assistant/attachments.md, "Story: Choose files to attach"; spec/app/assistant/attachments.md, "Cancel closes the picker, and files still being read are not attached"
   it("reviews local Files and only attaches the confirmed selection to the draft", async () => {
     await mountDock({ view: "Home", flush: underAct });
     const file = new File(["notes for the appointment"], "appointment.txt", { type: "text/plain" });
@@ -153,5 +156,61 @@ describe("Ask Alpha dock and shell navigation", () => {
       await runtime.runPromise(Effect.flatMap(Shell, (m) => m.send({ type: "agentGoHome" })));
     });
     expect(await runtime.runPromise(Effect.flatMap(Shell, (m) => m.get()))).toMatchObject({ trail: [], assistant: "Sheet" });
+  });
+
+  it("hides attachment search and shows empty-state copy when no files are selected", async () => {
+    const named = <T extends HTMLElement>(name: string) => document.querySelector<T>(`[aria-label="${name}"]`);
+    const host = document.body.appendChild(document.createElement("div"));
+    const root = createRoot(host);
+    function Harness() {
+      const [tab, setTab] = useState<Tab>("Photos");
+      return (
+        <AttachmentSources
+          tab={tab}
+          room={4}
+          accept="image/*,text/plain"
+          onAttach={() => Promise.resolve(true)}
+          onClose={() => undefined}
+          onReturnFocus={() => undefined}
+          onTab={setTab}
+        />
+      );
+    }
+    try {
+      await underAct(() => { root.render(<Harness />); });
+      expect(named("Attach files")).not.toBeNull();
+      expect(named("Search photos")).toBeNull();
+      expect(named("Attach files")?.textContent).toContain("No photos selected yet.");
+
+      const filesTab = [...document.querySelectorAll<HTMLButtonElement>('[aria-label="Attachment sources"] button')].find((item) => item.textContent === "Files");
+      await underAct(() => { filesTab?.click(); });
+      expect(named("Search files")).toBeNull();
+      expect(named("Attach files")?.textContent).toContain("No files selected yet.");
+    } finally {
+      await underAct(() => { root.unmount(); });
+      host.remove();
+    }
+  });
+
+  it("tracks live drag state on the sheet grabber and clears it on release", async () => {
+    const { runtime } = await mountDock({ view: "Home", flush: underAct });
+    const section = document.querySelector<HTMLElement>("section[aria-label='Ask Alpha']");
+    await act(async () => {
+      await runtime.runPromise(Effect.flatMap(Shell, (m) => m.send({ type: "raise", detent: "Sheet" })));
+      await runtime.runPromise(Effect.flatMap(Shell, (m) => Stream.runHead(Stream.filter(m.changes, (s) => s.assistant === "Sheet"))));
+    });
+    const grabber = document.querySelector<HTMLButtonElement>("button[aria-label='Resize chat']");
+    expect(grabber).not.toBeNull();
+    await act(async () => {
+      grabber?.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true, clientY: 500, pointerId: 1 }));
+      grabber?.dispatchEvent(new PointerEvent("pointermove", { bubbles: true, clientY: 360, pointerId: 1 }));
+      await runtime.runPromise(Effect.flatMap(Dock, (m) => Stream.runHead(Stream.filter(m.changes, (s) => s.gesture === "Dragging"))));
+    });
+    expect(section?.getAttribute("data-alpha-dragging")).toBe("true");
+    await act(async () => {
+      grabber?.dispatchEvent(new PointerEvent("pointerup", { bubbles: true, clientY: 360, pointerId: 1 }));
+      await runtime.runPromise(Effect.flatMap(Dock, (m) => Stream.runHead(Stream.filter(m.changes, (s) => s.gesture === "Idle"))));
+    });
+    expect(section?.getAttribute("data-alpha-dragging")).toBeNull();
   });
 });

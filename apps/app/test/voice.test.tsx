@@ -4,6 +4,7 @@ import { type Context, Effect, Layer, ManagedRuntime, Stream } from "effect";
 import { afterEach, describe, expect, it } from "vitest";
 import * as Shell from "../gen/app__shell.effect.vibe";
 import * as Voice from "../gen/app__voice.effect.vibe";
+import * as VoiceRoute from "../gen/app__voice__route.ts";
 import { VoiceBridge } from "../src/platform/voice.vibe";
 import { together, untimed, whole } from "../src/runtime/reactor.vibe";
 import { shell } from "../src/shell/shell.vibe";
@@ -827,5 +828,66 @@ describe("Talk from Ask Alpha's composer (spec/app/voice/index.md, \"Story: Hold
     const after = await area.runPromise(Effect.flatMap(Voice.Machine, (m) => m.get()));
     expect([after.recorder.stage, after.permission.asked]).toEqual(["Closed", true]);
     expect([document.querySelector("[role=alertdialog], [role=alert], [role=note], [role=status], section[aria-label='Voice transcription']"), world.voice.permission]).toEqual([null, "denied"]);
+  });
+
+  // spec/app/voice/route.md, "A failure of the network service holds speech on the phone: a minute after a brief failure, ten minutes after the account was refused, and the server's wait after a rate limit, never more than an hour"
+  it("computes voice route holds in milliseconds rather than seconds", () => {
+    const cloud = VoiceRoute.decide(VoiceRoute.changeAccount(VoiceRoute.signedOut, "CloudAccount", 1), true);
+    expect([VoiceRoute.briefHold, VoiceRoute.accountHold, VoiceRoute.longestHold]).toEqual([60_000, 600_000, 3_600_000]);
+    expect(VoiceRoute.noteFailure(cloud, "Brief", 0, 1_000).holdUntil).toBe(61_000);
+    expect(VoiceRoute.noteFailure(cloud, "AccountRefused", 0, 1_000).holdUntil).toBe(601_000);
+    expect(VoiceRoute.noteFailure(cloud, "RateLimited", 15_000, 1_000).holdUntil).toBe(16_000);
+  });
+
+  // spec/app/voice/index.md, "A failed network service falls back to this phone once per session when the phone is ready"
+  it("falls back to on-device speech when Cloud speech fails during an active session", async () => {
+    const world = { ...scene(), phone: true, signedIn: true };
+    world.voice.onDevice = true;
+    const runtime = bootVoice(world);
+    await until(runtime, Voice.Machine, (s) => s.route.account === "CloudAccount" && s.route.consent && s.warmed);
+
+    await sendVoice(runtime, { type: "startTalking", now: untimed });
+    await until(runtime, Voice.Machine, (s) => s.phase === "Listening" && s.mic === "On" && s.network);
+    const sessionId = world.voice.activeMicSession;
+    expect(sessionId).toBeDefined();
+    world.voice.emitCloud?.({ sessionId: sessionId ?? "", type: "error", code: "network_timeout" });
+
+    await until(runtime, Voice.Machine, (s) => s.phase === "Listening" && s.mic === "On" && !s.network && s.route.holdUntil > 0);
+    expect(world.voice.startLiveCaptureCalls).toBeGreaterThanOrEqual(1);
+    await sendVoice(runtime, { type: "stop", keyboard: false });
+    await until(runtime, Voice.Machine, (s) => s.phase === "Idle");
+  });
+
+  // spec/app/voice/index.md, "The microphone permission is read again on foreground return"
+  it("re-syncs microphone permission grant on foreground return after OS settings change", async () => {
+    const world = { ...scene(), phone: true, signedIn: false };
+    world.voice.permission = "denied";
+    const { alpha } = await open(world, talkMounts);
+    const area = assistant.runtime(alpha);
+    await drawnUntil(alpha, area, Voice.Machine, (s) => s.permission.grant === "Denied");
+
+    world.voice.permission = "granted";
+    await seen(true);
+    await drawnUntil(alpha, area, Voice.Machine, (s) => s.permission.grant === "Granted");
+  });
+
+  // spec/app/voice/index.md, "Stop ends the conversation and abandons the stalled turn"
+  it("aborts a stalled voice turn and clears heard transcript when stopped", async () => {
+    const world = { ...scene(), phone: true, signedIn: false };
+    world.ask.stalled = true;
+    const runtime = await startListening(world);
+    world.voice.emitLocal?.("liveCaptureTranscript", {
+      captureId: world.voice.activeMicSession,
+      partial: "Halfway",
+    });
+    await untilCondition(runtime, () => true);
+    speakUtterance(world, "Take your time");
+    await until(runtime, Voice.Machine, (s) => s.phase === "Thinking");
+    await untilCondition(runtime, () => world.ask.turns.size === 1, () => world.ask.turns.size);
+
+    await sendVoice(runtime, { type: "stop", keyboard: false });
+    await until(runtime, Voice.Machine, (s) => s.phase === "Idle");
+    const words = await runtime.runPromise(Effect.flatMap(VoiceWords, (w) => Effect.sync(() => w.snapshot())));
+    expect([world.ask.turns.size, words.heardText]).toEqual([0, ""]);
   });
 });

@@ -60,8 +60,8 @@ pure val speakerTicketValues = Set(1, 2, 3, 4)
 pure val turnValues = Set(1, 2, 3, 4, 5)
 pure val placeValues = Set(1, 2)
 pure val keyValues = Set(0, 1, 2)
-pure val nowValues = Set(0, 30, 90, 700)
-pure val waitValues = Set(0, 20, 120)
+pure val nowValues = Set(0, 30000, 90000, 700000)
+pure val waitValues = Set(0, 20000, 120000)
 pure val weight_micOpened = 15
 pure val weight_speechHeard = 10
 pure val weight_turnEnded = 10
@@ -745,9 +745,9 @@ pure def speechFailed(v: Voice, session: int, fault: R::Fault, wait: int, device
   val onPhone = begin(false, { ...base, phase: Starting, session: v.session + 1, turn: v.turn + 1, heard: false, mic: Off })
   if (v.network and R::fallsBack(fault) and v.played == 0 and v.queued == 0 and deviceReady)
     { state: onPhone.state, out: shut.concat(onPhone.out) }
-  else if (transient and v.retries < 2 and wait <= 30)
+  else if (transient and v.retries < 2 and wait <= 30000)
     { state: { ...base, phase: Starting, mic: Off, turn: v.turn + 1, heard: false, retries: v.retries + 1,
-        retryAt: now + (if (wait > 0) wait else 2) }, out: shut }
+        retryAt: now + (if (wait > 0) wait else 2000) }, out: shut }
   else shutDown(if (transient) D::NoFailure else D::Recognition, false, { ...v, route: route })
 
 pure def sometimesFellBackToThePhone(v: Voice): bool = v.phase == Listening and not(v.network) and v.route.holdUntil > 0 and v.session >= 2
