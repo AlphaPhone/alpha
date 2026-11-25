@@ -20,7 +20,7 @@ export const meta: ComponentMeta<InboxDraftStatusProps> = {
   play: {
     "Not kept": async ({ canvasElement }: { canvasElement: HTMLElement }) => {
       onRetry.mockClear();
-      await userEvent.click(within(canvasElement).getByRole("button", { name: "Try again" }));
+      await userEvent.click(within(canvasElement).getByRole("button", { name: "Retry" }));
       await expect(onRetry.mock.calls.length).toBe(1);
     },
     Default: ({ canvasElement }: { canvasElement: HTMLElement }) => expect(within(canvasElement).queryByRole("button")).toBeNull(),

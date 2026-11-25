@@ -1,15 +1,16 @@
 // spec/app/files/scan.md, "Story: Arrange the pages"; spec/app/files/scan.md, "Story: Keep the scan as I work"; spec/app/files/scan.md, "Story: Make the PDF, and keep the photo"
-import { Alert, Button, Dialog, DialogContent, DialogDescription, DialogTitle, DialogTrigger, DialogClose, cn, focusRing } from "@repo/ui";
-import type { Layer } from "effect";
+import { Alert, Button, Input, Dialog, DialogContent, DialogDescription, DialogTitle, DialogTrigger, DialogClose, cn, focusRing } from "@repo/ui";
+import { Effect, type Layer } from "effect";
 import { ArrowDown, Camera, Crop, FileDown, ImagePlus, Save, Trash2 } from "lucide-react";
 import type { ReactNode } from "react";
 import { useMachine as useCorrection } from "../../gen/app__files__correction.react.ts";
 import { useMachine } from "../../gen/app__files__scan.react.ts";
 import { pageLimit } from "../../gen/app__files__scanDraft.ts";
+import type { Page } from "../../gen/app__files__scanDraft.ts";
 import type { Event } from "../../gen/app__files__scan.ts";
 import type { Resident, Shown } from "../runtime/area.tsx";
 import { ScanCorrection } from "./ScanCorrection.tsx";
-import { ScanAssets, addScanImage, editScanLine, exportScan, type scan } from "./scan.vibe";
+import { ScanAssets, addScanImage, editScanLine, exportScan, noteContent, reviewCalendarEvent, type scan } from "./scan.vibe";
 
 type Runtime = Layer.Success<typeof scan> | Resident;
 
@@ -17,13 +18,13 @@ function PickPage({ capture, children, replacing, selected, label }: {
   capture: boolean;
   children: ReactNode;
   replacing: number;
-  selected(file: File, replacing: number, camera: boolean): void;
+  selected: (file: File, replacing: number, camera: boolean) => void;
   label: string;
 }) {
   return (
     <label className={cn("relative inline-flex min-h-11 cursor-pointer items-center gap-2 rounded-full bg-secondary px-4 text-sm font-semibold text-secondary-foreground focus-within:outline-ring", focusRing)}>
       {children}
-      <input
+      <Input
         type="file"
         accept="image/jpeg,image/png,image/webp"
         capture={capture ? "environment" : undefined}
@@ -36,6 +37,19 @@ function PickPage({ capture, children, replacing, selected, label }: {
         }}
       />
     </label>
+  );
+}
+
+function NoteReview({ runtime, pages, save }: { runtime: Shown<Runtime>["runtime"]; pages: ReadonlyArray<Page>; save: () => void }) {
+  const content = runtime.runSync(noteContent(pages));
+  const allowed = content !== undefined && content.trim() !== "" && content.length <= 20_241;
+  return (
+    <DialogContent aria-describedby={undefined} closeLabel="Close note review" className="max-h-[86dvh] overflow-y-auto">
+      <DialogTitle>Make note from scanned text</DialogTitle>
+      {content !== undefined && content !== "" && <pre className="max-h-[55dvh] overflow-y-auto whitespace-pre-wrap break-words font-sans">{content}</pre>}
+      {!allowed && <Alert variant="destructive">Shorten the reviewed text before making a note.</Alert>}
+      <DialogClose asChild><Button disabled={!allowed} onClick={save}>Save note</Button></DialogClose>
+    </DialogContent>
   );
 }
 
@@ -54,7 +68,7 @@ export function Scan({ runtime }: Shown<Runtime>) {
   const canExport = allowed({ type: "exportPdf" });
   const searchable = state.pages.every((page) => page.text !== 0) && state.pages.some((page) => !page.blank);
   const links = state.text.links.showing
-    ? runtime.runSync(ScanAssets.use((assets) => assets.words(state.text.linksOf.image, state.text.linksOf.edits)))?.links ?? []
+    ? runtime.runSync(Effect.flatMap(ScanAssets, (assets) => assets.words(state.text.linksOf.image, state.text.linksOf.edits)))?.links ?? []
     : [];
   const busy = state.pdf.outcome === "Recorded" || state.pdf.outcome === "Sent";
   return (
@@ -81,17 +95,19 @@ export function Scan({ runtime }: Shown<Runtime>) {
         {state.pages.length === 0 ? <p className="py-6 text-center text-muted-foreground">No pages yet</p> : (
           <ol className="space-y-2" aria-label={`${state.pages.length} of ${pageLimit} scanned pages`}>
             {state.pages.map(({ image, text, blank, edits }, at) => {
-              const page = runtime.runSync(ScanAssets.use((assets) => assets.read(image)));
-              const words = text === 0 ? undefined : runtime.runSync(ScanAssets.use((assets) => assets.words(image, edits)));
+              const page = runtime.runSync(Effect.flatMap(ScanAssets, (assets) => assets.read(image)));
+              const words = text === 0 ? undefined : runtime.runSync(Effect.flatMap(ScanAssets, (assets) => assets.words(image, edits)));
               const begin = { type: "begin", image } as const;
               const read = { type: "recognize", image } as const;
               const reading = state.text.reading.status === "Loading" && state.text.read === image;
+              const event = state.text.eventOf.image === image && state.text.eventOf.edits === edits ? state.text.event : undefined;
+              const suggestion = event !== undefined && state.text.found ? runtime.runSync(Effect.flatMap(ScanAssets, (assets) => assets.event(event.ticket))) : undefined;
               const replace = can({ type: "add", frame: state.images + 1, replacing: image, camera: true }, "Phone");
               const number = at + 1;
               return (
                 <li key={image} className="grid gap-2 rounded-tile bg-card p-3">
                   <p className="font-semibold">Page {number}</p>
-                  {page && <img src={page.uri} alt={`Document page ${number}`} className="max-h-32 w-full object-contain" loading="lazy" />}
+                  {page !== undefined && <img src={page.uri} alt={`Document page ${number}`} className="max-h-32 w-full object-contain" loading="lazy" />}
                   <div className="flex flex-wrap gap-2">
                     {replace && correction.can(begin, "Owner") && <Button variant="secondary" size="sm" aria-label={`Correct page ${number}`} onClick={() => void correction.send(begin, "Owner")}><Crop />Correct</Button>}
                     {replace && <PickPage capture replacing={image} selected={selected} label={`Retake page ${number}`}><Camera className="size-4" aria-hidden />Retake</PickPage>}
@@ -102,15 +118,24 @@ export function Scan({ runtime }: Shown<Runtime>) {
                     {allowed(read) && <Button variant="secondary" size="sm" loading={reading} onClick={() => fire(read)}>Read text</Button>}
                     {allowed({ type: "copyText", image }) && <Button variant="secondary" size="sm" onClick={() => fire({ type: "copyText", image })}>Copy text</Button>}
                     {allowed({ type: "reviewLinks", image }) && <Button variant="secondary" size="sm" onClick={() => fire({ type: "reviewLinks", image })}>Review links</Button>}
+                    {allowed({ type: "suggestEvent", image }) && <Button variant="secondary" size="sm" loading={event?.status === "Loading"} onClick={() => fire({ type: "suggestEvent", image })}>Suggest event</Button>}
                   </div>
+                  {suggestion !== undefined && event !== undefined && (
+                    <div className="grid gap-2 rounded-tile bg-secondary p-3">
+                      <strong>{suggestion.fields.title}</strong>
+                      {suggestion.disclosures.map((detail) => <p key={detail} className="text-sm">{detail}</p>)}
+                      <Button size="sm" onClick={() => void runtime.runPromiseExit(reviewCalendarEvent(event.ticket))}>Review in Calendar</Button>
+                    </div>
+                  )}
+                  {event?.status === "Loaded" && !suggestion && <p className="text-sm text-muted-foreground">No date and time found</p>}
                   {blank && <p className="text-sm text-muted-foreground">No text found</p>}
                   {!blank && words !== undefined && (
                     <details>
                       <summary className="font-semibold">Review page text</summary>
                       {words.lines.length === 0 ? <p className="whitespace-pre-wrap">{words.text}</p> : words.lines.map((line, index) => (
-                        <label key={index} className="mb-1 block">
+                        <label key={`${line.x}:${line.y}:${line.width}:${line.height}`} className="mb-1 block">
                           <span className="sr-only">Line {index + 1}</span>
-                          <input defaultValue={line.text} className="w-full rounded-sm border border-input bg-background p-2 text-sm" maxLength={2_000}
+                          <Input defaultValue={line.text} className="w-full rounded-sm border border-input bg-background p-2 text-sm" maxLength={2_000}
                             onBlur={(event) => void runtime.runPromiseExit(editScanLine(image, index, event.currentTarget.value))} />
                         </label>
                       ))}
@@ -124,8 +149,15 @@ export function Scan({ runtime }: Shown<Runtime>) {
         )}
         {state.problem !== "NoProblem" && <Alert variant="destructive">{state.problem === "TooLarge" ? "This document is too large to save." : "The PDF could not be prepared."}</Alert>}
         {state.pdf.outcome === "Refused" && <Alert variant="destructive">The PDF was not saved.</Alert>}
-        {state.pdf.outcome === "Uncertain" && <Alert variant="destructive">Saving the PDF could not be confirmed.</Alert>}
+        {state.pdf.outcome === "Unknown" && <Alert variant="destructive">Saving the PDF could not be confirmed.</Alert>}
+        {state.text.note.outcome === "Unknown" && <Alert variant="destructive">Saving the note could not be confirmed.</Alert>}
         <div className="flex flex-wrap justify-end gap-2">
+          {allowed({ type: "makeNote" }) && (
+            <Dialog>
+              <DialogTrigger asChild><Button variant="secondary" size="sm">Make note</Button></DialogTrigger>
+              <NoteReview runtime={runtime} pages={state.pages} save={() => fire({ type: "makeNote" })} />
+            </Dialog>
+          )}
           {allowed({ type: "discardDraft" }) && (
             <Dialog>
               <DialogTrigger asChild><Button variant="ghost" size="sm"><Trash2 />Delete draft</Button></DialogTrigger>

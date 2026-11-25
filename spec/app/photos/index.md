@@ -34,6 +34,7 @@ import albums as AL from "./albums"
 
 type Tab = Library | Albums
 type Filter = Everything | Favorites | Videos | People | Matching
+type Density = Spacious | Regular | Compact
 ```
 
 ### What Photos asks of the phone
@@ -70,7 +71,7 @@ changes. None of it is kept through a restart: the phone holds the library.
 type Photos = {
   access: P::Permission, videos: bool, visible: bool, secure: bool, only: Set[int],
   library: R::Read, locked: bool, paging: bool, more: bool, revision: int,
-  tab: Tab, filter: Filter, query: str, person: int, album: int,
+  tab: Tab, filter: Filter, query: str, person: int, album: int, density: Density,
   rows: Set[int], mine: Set[int], starred: Set[int], albums: Set[int],
   selecting: bool, selected: Set[int],
   shelf: AL::Shelf, job: C::Run,
@@ -81,7 +82,7 @@ type Done = { state: Photos, out: List[Effect] }
 pure val initial: Photos = {
   access: P::unasked, videos: false, visible: true, secure: false, only: Set(),
   library: R::unread, locked: false, paging: false, more: false, revision: 0,
-  tab: Library, filter: Everything, query: "", person: 0, album: 0,
+  tab: Library, filter: Everything, query: "", person: 0, album: 0, density: Regular,
   rows: Set(), mine: Set(), starred: Set(), albums: Set(),
   selecting: false, selected: Set(),
   shelf: AL::initial, job: C::initial,
@@ -117,6 +118,7 @@ pure val revisionValues = Set(1, 2)
 pure val basisValues = Set(1, 2)
 pure val queryValues = Set("", "beach")
 pure val personValues = Set(0, 4)
+pure val densityValues = Set(Spacious, Regular, Compact)
 pure val nameValues = Set("", "Trip")
 pure val lettersValues = Set(0, 4, 81)
 pure val weight_listed = 4
@@ -268,7 +270,7 @@ pure def sometimesOwnBeforeAsking(s: Photos): bool =
 ## Story: Browse the library
 
 > As the owner, I want to see my photos and albums, narrow them by
-> favourites, videos, people or a search, scroll on through them, and be
+> favourites, videos, people or a search, scroll on through them, change the thumbnail size, and be
 > told when they are loading, empty, locked, or could not be read, with a
 > way to try again.
 
@@ -335,6 +337,21 @@ pure def loadMore(s: Photos, by: Actor): Done = fetching(true, List(), s)
 pure def canRetry(s: Photos, by: Actor): bool = by == Owner and s.visible and s.library.status == R::Failed
 
 pure def retry(s: Photos, by: Actor): Done = listing(List(), s)
+```
+
+### While Photos is open, the owner can pinch the grid between three, four and five columns
+
+Four columns is the starting size. Spreading two fingers increases the
+thumbnail size by one step from the size at the start of the gesture;
+bringing them together decreases it by one step. The Library, album and
+Recently deleted grids use the same size throughout the session. Pinching
+changes the layout without rereading the rows or changing the selection.
+
+```quint
+pure def canSetDensity(s: Photos, density: Density, by: Actor): bool =
+  by == Owner and s.visible and s.shelf.dialog == AL::NoDialog and s.density != density
+
+pure def setDensity(s: Photos, density: Density, by: Actor): Photos = { ...s, density: density }
 ```
 
 ### Switching between Library and Albums lists the new tab afresh and ends the selection

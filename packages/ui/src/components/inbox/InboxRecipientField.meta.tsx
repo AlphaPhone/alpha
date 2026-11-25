@@ -23,12 +23,12 @@ export const meta: ComponentMeta<InboxRecipientFieldProps> = {
     },
     "Half typed": async ({ canvasElement }: { canvasElement: HTMLElement }) => {
       onAdd.mockClear();
-      await userEvent.type(within(canvasElement).getByRole("textbox", { name: "Add to To" }), "{Enter}");
+      await userEvent.type(within(canvasElement).getByRole("textbox", { name: "To" }), "{Enter}");
       await expect(onAdd.mock.calls).toEqual([["elena.fa"]]);
     },
     "With contacts": async ({ canvasElement }: { canvasElement: HTMLElement }) => {
       onPickContact.mockClear();
-      await userEvent.click(within(canvasElement).getByRole("button", { name: "Pick To from contacts" }));
+      await userEvent.click(within(canvasElement).getByRole("button", { name: "Choose contact" }));
       await expect(onPickContact.mock.calls.length).toBe(1);
     },
   },

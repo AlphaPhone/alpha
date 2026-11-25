@@ -127,6 +127,8 @@ pure def flagShown(listed: bool, label: str, flag: str): str = if (listed) label
 pure def lawAnUnlistedFlagIsShownAsWritten(flag: str): bool = flagShown(false, "", flag) == flag
 ```
 
+A source location included with a licence can be read in its detail.
+
 ### A licence opens only from the list the search shows
 
 ```quint

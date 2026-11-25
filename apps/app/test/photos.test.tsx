@@ -3,15 +3,15 @@ import { afterEach, expect, it } from "vitest";
 import { Machine as Library } from "../gen/app__photos.effect.vibe";
 import { Machine as Viewer } from "../gen/app__photos__viewer.effect.vibe";
 import { photosArea } from "../src/photos/index.tsx";
-import { button, closeAll, drawn, hardware, open, press, underAct, until } from "./alpha.tsx";
+import { button, closeAll, drawn, hardware, only, open, press, underAct, until } from "./alpha.tsx";
 import { scene } from "./fakes/scene.ts";
 
 underAct();
 afterEach(closeAll);
 
 it("Allow Photos and browse the library (spec/app/photos/index.md, \"Story: Give Photos access\"; spec/app/photos/index.md, \"Story: Browse the library\"; spec/app/photos/viewer.md, \"Story: Look at a photo or video\"; spec/app/photos/viewer.md, \"Story: Edit a photo or trim a video\")", async () => {
-  const world = { ...scene(), phone: true };
-  const { alpha } = await open(world);
+  const world = { ...scene(), phone: true, now: 1795400000000 + 86_400_000 + 240_000 };
+  const { alpha } = await open(world, only("home", "view:Photos", "notice"));
   await press("Photos");
   const runtime = photosArea.runtime(alpha);
   await until(alpha, runtime, Library, (state) => state.library.status === "Loaded" && state.rows.length === 1);
@@ -21,6 +21,8 @@ it("Allow Photos and browse the library (spec/app/photos/index.md, \"Story: Give
   await until(alpha, runtime, Library, (state) => state.library.status === "Loaded" && state.access.grant === "Granted");
   await press("Show more");
   await until(alpha, runtime, Library, (state) => state.library.status === "Loaded" && state.rows.length === 3);
+  // spec/app/photos/index.md, "Story: Browse the library": the Library is headed by day as v121 headed it, counted back from Alpha's time
+  expect([...document.querySelectorAll("[data-alpha-app-scroll=photos] section h2")].map((heading) => heading.textContent)).toEqual(["Yesterday"]);
 
   await press("Park.jpg");
   await until(alpha, runtime, Viewer, (state) => state.read.status === "Loaded");
