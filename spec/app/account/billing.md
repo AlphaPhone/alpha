@@ -64,6 +64,11 @@ pure def alwaysTheVisitIsWellFormed(b: Billing): bool = O::valid(b.visit) and (b
 
 ### The plans and their prices are read from Cloud, and only the newest reading is taken
 
+The owner opens Plans in the Account sheet to see the monthly prices
+and AI allowances Cloud offers. The read must still belong to the same
+authenticated Account visit when it finishes. Closing Plans or leaving
+Account retires the read. Opening Plans alone starts no checkout.
+
 ```quint
 pure def canAskOffers(b: Billing, signIn: int): bool = signIn > 0 and b.offers.status != R::Loading
 

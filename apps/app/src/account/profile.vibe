@@ -1,5 +1,6 @@
-// spec/app/account/plan.md, "Story: Know my plan"; spec/app/settings/index.md, "Each page links to what another area owns there"; spec/app/shell/layers.md, "Story: Keep a sheet or a dialog above the phone"; spec/kit/read.md, "Story: Read from outside"
-import { type Account as CloudProfile, CloudError, isCredentialInvalid, networkError, subscriptionView } from "@elizaos/cloud"
+// spec/app/account/billing.md, "The plans and their prices are read from Cloud, and only the newest reading is taken"; spec/app/account/plan.md, "Story: Know my plan"; spec/app/settings/index.md, "Each page links to what another area owns there"; spec/app/shell/layers.md, "Story: Keep a sheet or a dialog above the phone"; spec/kit/read.md, "Story: Read from outside"
+import { type Account as CloudProfile, CloudError, isCredentialInvalid, networkError, type PlanOffer, subscriptionView } from "@elizaos/cloud"
+import * as Billing from "../../gen/app__account__billing.effect.vibe"
 import * as Settings from "../../gen/app__settings.effect.vibe"
 import * as Shell from "../../gen/app__shell.effect.vibe"
 import * as Layers from "../../gen/app__shell__layers.effect.vibe"
@@ -39,18 +40,29 @@ export type Profile =
 
 const reading: Profile = { tag: "Reading" }
 
+export interface Catalog {
+  readonly ticket: number
+  readonly offers: ReadonlyArray<PlanOffer>
+}
+
 /** Display details from the current read, held for the Settings row and Account sheet. */
 export function profileShelf() {
   let current: Profile = reading
+  let offers: Catalog | undefined
   const listeners = new Set<() => void>()
   return {
     snapshot: (): Profile => current,
+    catalog: (): Catalog | undefined => offers,
     subscribe: (listener: () => void): (() => void) => {
       listeners.add(listener)
       return (): void => { listeners.delete(listener) }
     },
     publish: (value: Profile): void => {
       current = value
+      for (const listener of listeners) listener()
+    },
+    publishCatalog: (value: Catalog | undefined): void => {
+      offers = value
       for (const listener of listeners) listener()
     },
   }
@@ -81,24 +93,36 @@ effect function credentialOf(owner: CloudProfile) {
   return account?.kind === "signedIn" && account.userId === owner.id && account.organizationId === owner.organization_id ? account.credentialId : undefined
 }
 
-const planUnavailable: Plan = { tag: "PlanUnavailable" }
+type Checked<A> =
+  | { readonly tag: "Current"; readonly answer: A }
+  | { readonly tag: "Unconfirmed"; readonly profile: Profile }
 
-effect function readPlan(cloud: Account, owner: CloudProfile, profile: ReadProfile): Profile!! {
+effect function readForOwner<A>(cloud: Account, owner: CloudProfile, profile: ReadProfile, request: (signal: AbortSignal) => Promise<A>): Checked<A>!! {
   const phone = native()
-  const unavailable = { ...profile, plan: planUnavailable }
+  const unavailable: Checked<A> = { tag: "Unconfirmed", profile }
   if (!owner.id || !owner.organization_id) return unavailable
   const before = phone ? try credentialOf(owner) : undefined
   if (phone && before === undefined) return unavailable
-  const snapshot = timeout(tryPromise({ try: (signal) => cloud.client.snapshot({ signal }), catch: cloudFailure }), "10 seconds") catch () => undefined
+  const answer = try exit(timeout(tryPromise({ try: request, catch: cloudFailure }), "10 seconds"))
   const checked = try exit(readAccount(cloud))
   if (Exit.isFailure(checked)) {
     const issue = profileFailure(Cause.squash(checked.cause))
-    return issue.tag === "SignInRequired" ? issue : unavailable
+    return issue.tag === "SignInRequired" ? { tag: "Unconfirmed", profile: issue } : unavailable
   }
   const after = checked.value
-  if (after.id !== owner.id || after.organization_id !== owner.organization_id) return { ...profileOf(after), plan: planUnavailable }
+  if (after.id !== owner.id || after.organization_id !== owner.organization_id) return { tag: "Unconfirmed", profile: profileOf(after) }
   if (phone && (try credentialOf(after)) !== before) return unavailable
-  if (!snapshot || snapshot.account.status !== "active") return unavailable
+  return Exit.isSuccess(answer) ? { tag: "Current", answer: answer.value } : unavailable
+}
+
+const planUnavailable: Plan = { tag: "PlanUnavailable" }
+
+effect function readPlan(cloud: Account, owner: CloudProfile, profile: ReadProfile): Profile!! {
+  const found = try readForOwner(cloud, owner, profile, (signal) => cloud.client.snapshot({ signal }))
+  if (found.tag === "Unconfirmed") return found.profile.tag === "Read" ? { ...found.profile, plan: planUnavailable } : found.profile
+  const snapshot = found.answer
+  const unavailable = { ...profile, plan: planUnavailable }
+  if (snapshot.account.status !== "active") return unavailable
   const now = try Clock.currentTimeMillis
   const view = subscriptionView(snapshot, now)
   if (view.credit.kind === "unavailable" || (view.planEffectiveUntil !== null && view.planEffectiveUntil <= now)) return unavailable
@@ -155,9 +179,47 @@ function visit(cloud: Account, place: "Account" | "Settings"): Stream.Stream<Pro
   })
 }
 
+const settingsIsInFront = (shell: Shell.Shell, settings: Settings.Settings): boolean =>
+  Shell.showing(shell, "Settings") && shell.assistant !== "Full" && settings.page === "Top"
+
+const accountIsInFront = effect {
+  const shell = try (try Shell.Machine).get()
+  const settings = try (try Settings.Machine).get()
+  const layers = try (try Layers.Machine).get()
+  return settingsIsInFront(shell, settings) && Layers.top(layers).id === accountLayer && (try (try Device).showing())
+}
+
+/** Drops the offer receipt and retires the read when the owner leaves the catalog. */
+export effect function closeCatalog(publish: (catalog: Catalog | undefined) => void) {
+  const billing = try Billing.Machine
+  try sync(() => publish(undefined))
+  try contained(billing.send({ type: "reset", signIn: 0 }), "closing Plans")
+}
+
+/** Reads Cloud's plan catalog only while the authenticated settings visit is still on top. */
+export effect function openCatalog(publish: (catalog: Catalog | undefined) => void) {
+  if (!(try accountIsInFront)) return
+  const billing = try Billing.Machine
+  const cloud = try Cloud
+  const read = try exit(billing.send({ type: "askOffers", signIn: 1 }))
+  if (Exit.isFailure(read)) return
+  const ticket = read.value.state.offers.ticket
+  const owner = readAccount(cloud) catch () => undefined
+  if (!(try accountIsInFront) || !Billing.canOffersRead(try billing.get(), ticket)) return
+  const result = owner === undefined ? undefined : try readForOwner(cloud, owner, profileOf(owner), (signal) => cloud.client.plans({ signal }))
+  if (!(try accountIsInFront) || !Billing.canOffersRead(try billing.get(), ticket)) return
+  const receipt = try contained(billing.send({ type: "offersRead", ticket, ok: result?.tag === "Current" }), "reading Plans")
+  if (receipt && result?.tag === "Current" && (try accountIsInFront)) {
+    const settled = try billing.get()
+    if (settled.offers.status !== "Loaded" || settled.offers.ticket !== ticket) return
+    const offers = result.answer.toSorted((a, b) => a.amountCents - b.amountCents)
+    try sync(() => publish({ ticket, offers }))
+  }
+}
+
 /** Reads the account while Settings or its Account sheet is visible. Leaving interrupts the read and drops its answer. */
-export function profileLive(publish: (value: Profile) => void) {
-  return started(effect {
+export function profileLive(publish: (value: Profile) => void, publishCatalog: (catalog: Catalog | undefined) => void) {
+  return Layer.provideMerge(started(effect {
     const { changes } = try Layers.Machine
     const cloud = try Cloud
     const device = try Device
@@ -165,15 +227,18 @@ export function profileLive(publish: (value: Profile) => void) {
     const settings = try Settings.Machine
     const pages = Stream.zipLatest(shell.changes, settings.changes)
     const active = Stream.changes(Stream.map(Stream.zipLatest(changes, pages), ([layers, [shell, settings]]) => {
-      if (!Shell.showing(shell, "Settings") || shell.assistant === "Full" || settings.page !== "Top") return "Away"
+      if (!settingsIsInFront(shell, settings)) return "Away"
       return Layers.top(layers).id === accountLayer ? "Account" : "Settings"
     }))
     const visible = Stream.switchMap(active, (place) => place === "Away"
       ? Stream.succeed("Away" as const)
       : Stream.map(Stream.changes(Stream.concat(Stream.fromEffect(device.showing()), device.visible)), (showing) => showing ? place : "Away" as const))
-    const watched = Stream.switchMap(visible, (place) => place === "Away"
-      ? Stream.succeed<Profile>(reading)
-      : Stream.concat(Stream.succeed<Profile>(reading), visit(cloud, place)))
+    const watched = Stream.switchMap(visible, (place) => Stream.unwrap(effect {
+      if (place !== "Account") try closeCatalog(publishCatalog)
+      return place === "Away"
+        ? Stream.succeed<Profile>(reading)
+        : Stream.concat(Stream.succeed<Profile>(reading), visit(cloud, place))
+    }))
     try Stream.runForEach(watched, (value) => sync(() => publish(value)))
-  }, "reading Account")
+  }, "reading Account"), Billing.machine())
 }
