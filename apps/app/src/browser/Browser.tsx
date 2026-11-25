@@ -1,6 +1,6 @@
 // spec/app/browser/index.md, "Story: Open, pick and close tabs"; spec/app/browser/address.md, "Story: Go where I typed"; spec/app/browser/address.md, "Story: Watch a page load"; spec/app/browser/address.md, "Story: Browse privately"
 import { Button, BrowserAddressBar, type BrowserAddressChoice, BrowserAddressChoices, BrowserFindBar, BrowserBar, BrowserLibrary, type BrowserMenuItem, BrowserMenu, BrowserNewTab, BrowserTabs, ConfirmDialog, PrivateMark } from "@repo/ui";
-import { ChevronLeft, Download, History, Link, Plus, RotateCw, Search, Share2, Square, Star, Trash2 } from "lucide-react";
+import { ChevronLeft, Clock, Download, Link, Plus, RotateCw, Search, Share2, Square, Star, Trash2 } from "lucide-react";
 import { Effect, Option } from "effect";
 import { useState, useSyncExternalStore } from "react";
 import { canAskErase, canCancelErase, canConfirmErase, canOpenTab } from "../../gen/app__browser.ts";
@@ -134,7 +134,7 @@ function Tab({ runtime, alpha, tabs, page }: BrowserProps & { tabs: State; page:
     canOpenTab(tabs, "Normal") && { label: "New tab", icon: <Plus />, onSelect: () => opening("Normal")?.() },
     canOpenTab(tabs, "Private") && { label: "Private tab", name: "New private tab", icon: <PrivateMark aria-hidden />, onSelect: () => opening("Private")?.() },
     hasLibrary && { label: booked ? "Bookmarked" : "Bookmark", icon: <Star fill={booked ? "currentColor" : "none"} />, disabled: !canBookmark, onSelect: chooseBookmark },
-    hasLibrary && { label: "Library", name: "Library, bookmarks and history", icon: <History />, onSelect: openLibrary },
+    hasLibrary && { label: "Library", name: "Library, bookmarks and history", icon: <Clock />, onSelect: openLibrary },
     hasLibrary && { label: "Downloads", icon: <Download />, onSelect: () => void runtime.runPromise(openDownloads) },
     canShare && { label: "Share", icon: <Share2 />, onSelect: () => void runtime.runPromise(offerShare("System")) },
     canShare && canCopy && { label: "Copy link", icon: <Link />, onSelect: () => void runtime.runPromise(offerShare("Copy")) },
