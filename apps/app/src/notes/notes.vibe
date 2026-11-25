@@ -2,14 +2,17 @@
 import * as KeyValueStore from "effect/persistence/KeyValueStore"
 import { CloudError } from "@elizaos/cloud/client"
 import * as List from "../../gen/app__notes.effect.vibe"
-import type { Change, Effect as Out, Event } from "../../gen/app__notes.effect.vibe"
-import type { Actor } from "../../gen/app__notes__note.ts"
+import type { Change, Effect as Out, Event, Row } from "../../gen/app__notes.effect.vibe"
+import * as Editor from "../../gen/app__notes__editor.effect.vibe"
+import type { Actor, Request } from "../../gen/app__notes__note.ts"
+import * as Voice from "../../gen/app__notes__voice.effect.vibe"
 import * as Shell from "../../gen/app__shell.effect.vibe"
 import type { Agent } from "../platform/agent.vibe"
 import { Cloud } from "../platform/cloud.vibe"
 import { type Job, answer, contained, reacting, run, started, together } from "../runtime/reactor.vibe"
 import { keep, noteOf, storedId } from "./shown.ts"
 import { interact, readState } from "./store.vibe"
+import { Opens, opens } from "./opens.vibe"
 import { type Opened, shows, tellOwner } from "./views.vibe"
 
 /** The folders the phone keeps for one owner's notes, and their own revision. */
@@ -54,12 +57,23 @@ effect function write(ticket: number, change: Change): Event!!Agent {
   } catch effect (failure) => (failure._tag === "Refused" ? refused : { type: "changeWritten", ticket, ok: false, known: false } as Event)
 }
 
-function carry(fx: Out): Job<Event, Agent | KeyValueStore.KeyValueStore | Shell.Machine | Opened, [by: Actor]> {
+// spec/app/notes/index.md, "The agent opens the one note the owner named, as the list shows it now, once for the owner's current turn, and is told whether it opened"
+/** Open what the list hands over, and tell whoever waits on an agent's open for that turn whether the editor or voice note holds it now. */
+effect function shown(row: Row, by: Actor, req: Request) {
+  try shows(row, by, req)
+  if (by !== "Agent") return
+  const e = try (try Editor.Machine).get()
+  const v = try (try Voice.Machine).get()
+  try (try Opens).settle(req.turn, (e.showing && e.note === row.id) || (v.showing && v.note === row.id))
+}
+
+function carry(fx: Out): Job<Event, Agent | KeyValueStore.KeyValueStore | Shell.Machine | Opened | Opens, [by: Actor]> {
   return match (fx) {
     when { tag: "Lists", let ticket, let owner }: answer("list", list(ticket, owner), { type: "listed", ticket, ok: false, version: 0, rows: [], folders: [], shelf: 0 }, "Phone");
     when { tag: "Writes", let ticket, let change }: answer("write", write(ticket, change), { type: "changeWritten", ticket, ok: false, known: false }, "Phone");
-    when { tag: "Shows", let row }: run("show", shows(row), "Phone");
+    when { tag: "Shows", let row, let by, let req }: run("show", shown(row, by, req), "Phone");
     when { tag: "OpensAccount" }: run("account", effect { try contained((try Shell.Machine).send({ type: "openView", view: "Settings" }), "opening Settings") }, "Phone");
+    when { tag: "Opened", let turn, let ok }: run("opened", effect { if (!ok) try (try Opens).settle(turn, false) }, "Phone");
   }
 }
 
@@ -91,7 +105,7 @@ effect function account(): (string | undefined)!!Cloud {
 
 // spec/app/notes/index.md, "When another owner takes the phone, the list forgets everything shown, asked or proposed, and reads nothing until opened again"; spec/app/notes/index.md, "Opening Notes, or trying again, reads the owner's notes"
 /** Tell the list who is signed in, then read that owner's notes. */
-effect function opened() {
+export effect function opened() {
   const who = try account()
   const notes = try List.Machine
   if (who !== undefined) {
@@ -110,5 +124,5 @@ const fronted = started(effect {
   try Stream.runForEach(forward, () => contained(opened(), "opening Notes"))
 }, "following Notes to the front")
 
-/** Notes' list: in memory, told who is signed in and read from the agent's store each time Notes comes forward. */
-export const notes = together(kept, fronted)
+/** Notes' list: in memory, told who is signed in and read from the agent's store each time Notes comes forward, and who waits on an agent's open. */
+export const notes = Layer.provideMerge(together(kept, fronted), opens)

@@ -28,6 +28,8 @@ import { requests } from "./contacts/requests.vibe"
 import { clockResident } from "./clock/sync.vibe"
 import { remindersResident } from "./reminders/reminders.vibe"
 import { listing as workflowList } from "./workflows/list.vibe"
+import { notes } from "./notes/notes.vibe"
+import { views as noteViews } from "./notes/views.vibe"
 
 /**
  * The machines that live from launch to exit: those another area follows or tells, and those that must act while
@@ -63,6 +65,8 @@ const machines = together(
   clockResident,
   remindersResident,
   workflowList,
+  notes,
+  noteViews,
 )
 
 /** The resident machines, closed: each machine one of them follows or tells is among them. */

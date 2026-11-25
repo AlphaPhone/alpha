@@ -6,7 +6,7 @@ import * as Editor from "../../gen/app__notes__editor.effect.vibe"
 import type { Effect as Saving, Event as Edit, Verdict } from "../../gen/app__notes__editor.effect.vibe"
 import * as Link from "../../gen/app__notes__linkNote.effect.vibe"
 import type { Effect as Visiting, Event as Visit } from "../../gen/app__notes__linkNote.effect.vibe"
-import type { Actor } from "../../gen/app__notes__note.ts"
+import type { Actor, Request } from "../../gen/app__notes__note.ts"
 import * as Voice from "../../gen/app__notes__voice.effect.vibe"
 import type { Effect as Listening, Event as Listen } from "../../gen/app__notes__voice.effect.vibe"
 import type { Agent } from "../platform/agent.vibe"
@@ -26,23 +26,28 @@ import { visited } from web
 /** Every machine of an open note: the editor, a voice note and a link note's dialog. */
 export type Opened = Editor.Machine | Voice.Machine | Link.Machine
 
-// spec/app/notes/index.md, "The owner opens a note the list shows, when nothing else of Notes is open, and it opens as listed"
-/** Open `row` as its kind needs: a text note or a checklist in the editor, a voice note as one, a link note in its dialog. */
-export effect function shows(row: Row) {
+// spec/app/notes/index.md, "The owner opens a note the list shows, when nothing else of Notes is open, and it opens as listed"; spec/app/notes/index.md, "The agent opens the one note the owner named, as the list shows it now, once for the owner's current turn, and is told whether it opened"
+/**
+ * Open `row` as its kind needs, in the name of `by` and for the owner's request `req` the agent opens it for: a text
+ * note or a checklist in the editor, a voice note as one, a link note in its dialog.
+ */
+export effect function shows(row: Row, by: Actor, req: Request) {
   const note = noteOf(row.id)
   if (note === undefined) return
   if (row.kind === "Voice") {
     const segments = Math.max(1, note.format?.data.lines?.length ?? 0)
     const summary = (note.format?.data.summary?.length ?? 0) > 0 ? segments : 0
-    try contained((try Voice.Machine).send({ type: "openVoice", note: row.id, revision: row.revision, segments, heard: segments, summary, covered: false }, "Owner"), "opening a voice note")
+    try contained((try Voice.Machine).send({ type: "openVoice", note: row.id, revision: row.revision, segments, heard: segments, summary, covered: false, req }, by), "opening a voice note")
     return
   }
   if (row.kind === "Link") {
     try contained((try Link.Machine).send({ type: "openLink", note: row.id, revision: row.revision, kind: row.kind, origin: row.origin, link: row.source, covered: false }, "Owner"), "opening a link note")
     return
   }
+  const editor = try Editor.Machine
+  if (!Editor.canOpenNote(try editor.get(), row.id, row.revision, row.kind, row.source, false, req, by)) return
   put(wordsOf(note))
-  try contained((try Editor.Machine).send({ type: "openNote", id: row.id, revision: row.revision, kind: row.kind, link: row.source, covered: false }, "Owner"), "opening a note")
+  try contained(editor.send({ type: "openNote", id: row.id, revision: row.revision, kind: row.kind, link: row.source, covered: false, req }, by), "opening a note")
 }
 
 /** Tell every machine of an open note who has the phone now. */

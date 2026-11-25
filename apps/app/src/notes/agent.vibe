@@ -1,0 +1,42 @@
+// spec/app/notes/index.md, "The agent opens the one note the owner named, as the list shows it now, once for the owner's current turn, and is told whether it opened"; spec/app/notes/note.md, "Only the owner opens a dialog or a question in Notes; a note is opened by the owner, or by the agent for the one the owner just named; and nothing opens while anything else of Notes is open"
+import * as List from "../../gen/app__notes.effect.vibe"
+import * as Editor from "../../gen/app__notes__editor.effect.vibe"
+import * as Link from "../../gen/app__notes__linkNote.effect.vibe"
+import type { Request } from "../../gen/app__notes__note.ts"
+import * as Voice from "../../gen/app__notes__voice.effect.vibe"
+import { contained } from "../runtime/reactor.vibe"
+import { opened } from "./notes.vibe"
+import { Opens } from "./opens.vibe"
+import { numberOf } from "./shown.ts"
+
+/** The owner's turn an open is for: its number, the number of the owner's turn that is current, and whether the screen it was asked from is sensitive. */
+export interface Asked {
+  readonly turn: number
+  readonly current: number
+  readonly sensitive: boolean
+}
+
+/** Read who is signed in and their notes, and wait for the reading to end, as for a note saved in the same turn as it was named. */
+effect function readAgain() {
+  try opened()
+  try Stream.runHead(Stream.filter((try List.Machine).changes, (s) => s.read.status !== "Loading"))
+}
+
+/**
+ * Open the saved note eliza's agent named by `noteId` for the owner's turn `asked`, as Notes allows the agent: as the
+ * list shows it now, never over anything of Notes open or another note's unsaved draft. Whether it is open now; a
+ * refusal leaves the screen as it was.
+ */
+export effect function agentOpen(noteId: string, asked: Asked) {
+  const list = try List.Machine
+  const id = numberOf(noteId)
+  if (!(try list.get()).rows.some((row) => row.id === id)) try readAgain()
+  const s = try list.get()
+  const e = try (try Editor.Machine).get()
+  const covered = s.review.showing || e.showing || (try (try Voice.Machine).get()).showing || (try (try Link.Machine).get()).showing
+  const req: Request = { turn: asked.turn, current: asked.current, opened: s.agentTurn, sensitive: asked.sensitive, unsaved: Editor.waiting(e) }
+  const opens = try Opens
+  const waiting = try opens.expect(asked.turn)
+  if (!(try contained(list.send({ type: "agentOpen", id, covered, req }, "Agent"), "the agent opening a note"))) try opens.settle(asked.turn, false)
+  return try Deferred.await(waiting)
+}
