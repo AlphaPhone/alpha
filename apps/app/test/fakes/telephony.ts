@@ -12,7 +12,7 @@ import { type TextReviewScene, textReviewEnrollment } from "./text-review.ts";
 /** A call in the phone's log. */
 export interface LoggedCall { id: number; number: string; name: string | null; date: number; type: "incoming" | "outgoing" | "missed"; seconds?: number }
 /** A voicemail the carrier delivered. */
-export interface HeldVoicemail { id: number; number: string; date: number; heard: boolean; deleted: boolean; seconds?: number; name?: string; transcript?: string }
+export interface HeldVoicemail { id: number; number: string; date: number; heard: boolean; deleted: boolean; seconds?: number; name?: string; transcript?: string; deletionWitness?: string }
 /** A text in the phone's SMS provider: received into the inbox, or sent from it. */
 export interface Text { id: number; thread: number; address: string; box: "inbox" | "sent"; date: number; body: string; read: boolean; pictures?: number }
 /** A contact in the address book. */
@@ -40,6 +40,8 @@ export interface TelephonyScene {
   voicemails: HeldVoicemail[];
   /** True while this fake phone's voicemail deletion is still in Android's Undo window. */
   holdVoicemailDeletion: boolean;
+  readonly voicemailObservations: boolean[];
+  voicemailRetirementRefused: boolean;
   sms: "granted" | "denied";
   texts: Text[];
   /** Leaves the staged SMS deletion open so the owner can Undo. */
@@ -114,6 +116,8 @@ export function telephonyScene(): TelephonyScene {
     emergencyNumbers: new Set(["911", "112"]),
     voicemails: [{ id: 11, number: "+14155550100", date: 1_700_000_100_000, heard: false, deleted: false }],
     holdVoicemailDeletion: false,
+    voicemailObservations: [],
+    voicemailRetirementRefused: false,
     sms: "granted",
     texts: [{ id: 1, thread: 1, address: "+14155550100", box: "inbox", date: 1_700_000_050_000, body: "See you at five", read: false }],
     holdMessageDeletion: false,
@@ -239,10 +243,11 @@ function telephony(world: TelephonyScene): Faked {
         lines: [{ subscriptionId: 1, slot: 0, displayName: "Carrier", carrierName: "Carrier", number: "+14155550199", countryIso: "us", networkType: "5g", roaming: false, signalLevel: 3, embedded: false, iccid: null, imei: null }],
       }),
       voicemailStatus: () => Promise.resolve({ access: true, state: world.carrier }),
-      listVoicemail: ({ limit }) => Promise.resolve({
+      listVoicemail: ({ limit, withDeletionWitness }) => Promise.resolve({
         state: world.carrier,
         voicemails: world.carrier === "unsupported" ? [] : world.voicemails.filter((one) => !one.deleted).slice(0, limit).map((one) => ({
           id: String(one.id), number: one.number, cachedName: one.name ?? null, date: one.date, durationSeconds: one.seconds ?? 24, isNew: !one.heard, hasAudio: true, carrierTranscript: one.transcript ?? null,
+          ...(withDeletionWitness && one.deletionWitness !== undefined ? { deletionWitness: one.deletionWitness } : {}),
         })),
       }),
       fetchVoicemailAudio: () => Promise.resolve({ status: "ready" }),
@@ -254,16 +259,22 @@ function telephony(world: TelephonyScene): Faked {
         one.heard = true;
         return Promise.resolve({ status: "marked" });
       },
-      deleteVoicemail: ({ id }) => {
+      deleteVoicemail: ({ id, witness }) => {
         world.deletionAttempts.push(`voicemail:${id}`);
         const one = voicemail(id);
         if (one === undefined) return Promise.resolve({ status: "not-found" });
+        if (witness !== undefined && witness !== one.deletionWitness) return Promise.resolve({ status: "stale" });
         one.deleted = !world.holdVoicemailDeletion;
-        const staged = { id: `staged-${world.staged.length + 1}`, kind: "voicemail", target: { id }, phase: world.holdVoicemailDeletion ? "queued" : "deleted", deadline: { expiresAt: 1_800_000_000_000 } };
+        const staged = { id: `staged-${world.staged.length + 1}`, kind: "voicemail", target: { id, ...(witness === undefined ? {} : { witness }) }, phase: world.holdVoicemailDeletion ? "queued" : "deleted", deadline: { expiresAt: 1_800_000_000_000 } };
         world.staged.push(staged);
         return deletionResponse({ status: "queued", deletion: staged });
       },
-      observeVoicemail: () => Promise.resolve(undefined),
+      observeVoicemail: ({ enabled }) => {
+        world.voicemailObservations.push(enabled);
+        return !enabled && world.voicemailRetirementRefused
+          ? Promise.reject(rejection("Couldn’t confirm voicemail observation stopped", "unavailable"))
+          : Promise.resolve(undefined);
+      },
       smsNoticePending: () => Promise.resolve(world.smsNotice ?? {}),
       acknowledgeSmsNotice: ({ token }) => {
         if (world.smsNotice?.token === token) world.smsNotice = undefined;

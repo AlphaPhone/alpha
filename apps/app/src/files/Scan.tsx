@@ -83,6 +83,7 @@ export function Scan({ runtime }: Shown<Runtime>) {
     ? runtime.runSync(Effect.flatMap(ScanAssets, (assets) => assets.words(state.text.linksOf.image, state.text.linksOf.edits)))?.links ?? []
     : [];
   const busy = state.pdf.outcome === "Recorded" || state.pdf.outcome === "Sent";
+  const unconfirmed = state.pdf.outcome === "Unknown" || (state.pdf.outcome === "Sent" && state.search.stage === "SearchClosed" && state.search.tried);
   return (
     <>
     <Dialog open onOpenChange={(open) => { if (!open) fire({ type: "close" }); }}>
@@ -121,8 +122,8 @@ export function Scan({ runtime }: Shown<Runtime>) {
                 const suggestion = event !== undefined && state.text.found ? runtime.runSync(Effect.flatMap(ScanAssets, (assets) => assets.event(event.ticket))) : undefined;
                 const replace = can({ type: "add", frame: state.images + 1, replacing: image, camera: true }, "Phone");
                 const number = at + 1;
-                const earlier = { type: "swapPages", at: at - 1, earlier: state.pages[at - 1]?.image ?? 0, later: image } as const;
-                const later = { type: "swapPages", at, earlier: image, later: state.pages[at + 1]?.image ?? 0 } as const;
+                const earlier = { type: "swapPages", slot: at - 1, earlier: state.pages[at - 1]?.image ?? 0, later: image } as const;
+                const later = { type: "swapPages", slot: at, earlier: image, later: state.pages[at + 1]?.image ?? 0 } as const;
                 const reviewed = !blank && words !== undefined && (
                   <details open={selectedImage || undefined}>
                     <summary className="font-semibold">{selectedImage ? "Scanned text" : "Review page text"}</summary>
@@ -176,7 +177,7 @@ export function Scan({ runtime }: Shown<Runtime>) {
           )}
           {state.problem !== "NoProblem" && <Alert variant="destructive">{state.problem === "TooLarge" ? "This document is too large to save." : "The PDF could not be prepared."}</Alert>}
           {state.pdf.outcome === "Refused" && <Alert variant="destructive">The PDF was not saved.</Alert>}
-          {state.pdf.outcome === "Unknown" && <Alert variant="destructive">Saving the PDF could not be confirmed.</Alert>}
+          {unconfirmed && <Alert variant="destructive">Saving the PDF could not be confirmed.</Alert>}
           {state.text.note.outcome === "Unknown" && <Alert variant="destructive">Saving the note could not be confirmed.</Alert>}
           {allowed({ type: "makeNote" }) && (
             <Dialog>

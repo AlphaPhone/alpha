@@ -25,19 +25,19 @@ export effect function taking(place: string, took: () => Promise<boolean>): void
 }
 
 module previous {
-  /** Older shell state with the route number initialized, still untrusted. @throws {never} */
-  export function withRoute(raw: string, needsDrawer: boolean): unknown {
+  /** Older shell state with the navigation fields initialized, still untrusted. @throws {never} */
+  export function withSpokenRoute(raw: string, needsDrawer: boolean, needsRoute: boolean): unknown {
     try {
       const parsed: unknown = JSON.parse(raw)
       return typeof parsed === "object" && parsed !== null && !Array.isArray(parsed)
-        ? { ...parsed, ...(needsDrawer ? { drawer: false } : {}), route: 0 }
+        ? { ...parsed, ...(needsDrawer ? { drawer: false } : {}), ...(needsRoute ? { route: 0 } : {}), spokenRoute: 0 }
         : undefined
     } catch {
       return undefined
     }
   }
 }
-import { withRoute } from previous
+import { withSpokenRoute } from previous
 
 // spec/app/shell/index.md, "When Alpha opens again the trail is kept, and Ask Alpha is closed"
 function stored(key: string, start?: Shell.Shell) {
@@ -45,14 +45,15 @@ function stored(key: string, start?: Shell.Shell) {
     const store = try KeyValueStore.KeyValueStore
     const current = store.get(key) catch () => undefined
     if (current !== undefined) return Shell.stored(key, start)
-    const withDrawer = store.get("alpha/app/shell/index@2") catch () => undefined
+    const withRoute = store.get("alpha/app/shell/index@3") catch () => undefined
+    const withDrawer = withRoute ?? (store.get("alpha/app/shell/index@2") catch () => undefined)
     const raw = withDrawer ?? (store.get("alpha/app/shell/index@1") catch () => undefined)
-    const recovered = raw === undefined ? undefined : (Shell.decodeState(withRoute(raw, withDrawer === undefined)) catch () => undefined)
+    const recovered = raw === undefined ? undefined : (Shell.decodeState(withSpokenRoute(raw, withDrawer === undefined, withRoute === undefined)) catch () => undefined)
     return Shell.stored(key, recovered ?? start)
   })
 }
 
-const kept = reacting({ ...Shell, stored }, { keep: 3, open: [{ type: "reopen" }] })
+const kept = reacting({ ...Shell, stored }, { keep: 4, open: [{ type: "reopen" }] })
 
 // spec/app/shell/layers.md, "Story: Keep a sheet or a dialog above the phone"
 const layered = reacting(Layers, {})

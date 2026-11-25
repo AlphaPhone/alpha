@@ -1,7 +1,7 @@
 // spec/app/notes/index.md, "Story: See my notes"; spec/app/notes/index.md, "Story: Organise my notes"; spec/app/notes/editor.md, "Story: Write a note"; spec/app/notes/trash.md, "Story: Delete a note and get it back"
 import { Alert, AppHeader, Button, Chip, Dialog, DialogClose, DialogContent, DialogDescription, DialogTitle, Input, LinkNoteView, Menu, MenuContent, MenuItem, MenuTrigger, NoteEditor as NoteForm, NoteMenu, NoteRow, cn, focusRing, noteMenuItem, noteMenuPanel, NotesList as NoteRows, Spinner, VoiceNoteView } from "@repo/ui";
 import { Copy, Download, Ellipsis, FileDown, Folder, FolderInput, Mail, MessageSquare, Mic, Pin, Plus, Share2, Trash2, X } from "lucide-react";
-import { useRef, useState, useSyncExternalStore, type FormEvent } from "react";
+import { useRef, useState, useSyncExternalStore, type CSSProperties, type FormEvent } from "react";
 import * as Notes from "../../gen/app__notes.ts";
 import * as Editor from "../../gen/app__notes__editor.ts";
 import * as Trash from "../../gen/app__notes__trash.ts";
@@ -21,6 +21,7 @@ import { NoteDevice } from "../platform/noteDevice.vibe";
 import { unfinished } from "../../gen/app__notes__recording.ts";
 import type { Alpha } from "../runtime/area.tsx";
 import { AppBack } from "../shell/AppBack.tsx";
+import { desktopPreview } from "../shell/canvas.vibe";
 import { type Collection, type DraftWords, NoteContent, audioIdOf, hasContent, savedVoice } from "./content.vibe";
 import { type Fields, NoteEditor } from "./editor.vibe";
 import { enter } from "./notes.vibe";
@@ -216,17 +217,28 @@ function VoiceSharePanel({ open, close, choose, canSave, restore }: {
   readonly canSave: boolean;
   readonly restore: () => void;
 }) {
+  const preview = useSyncExternalStore(desktopPreview.subscribe, desktopPreview.snapshot, () => undefined);
+  let style: CSSProperties | undefined;
+  if (preview !== undefined) {
+    const panelBottom = preview.top + (preview.height - 108) * preview.scale - 8;
+    style = {
+      left: Math.max(12, preview.left + 12),
+      width: Math.max(0, preview.width * preview.scale - 24),
+      bottom: `max(12px, calc(100dvh - ${panelBottom}px))`,
+      maxHeight: Math.max(0, panelBottom - preview.top - 16),
+    };
+  }
   return <Dialog open={open} onOpenChange={(shown) => { if (!shown) close(); }}>
-    <DialogContent aria-describedby={undefined} overlayClassName="bg-foreground/35 dark:bg-background/35"
-      className="inset-x-3 top-auto bottom-[calc(max(6.75rem,var(--alpha-dock-overlap,0px),env(safe-area-inset-bottom))+--spacing(2))] mx-auto max-h-[80dvh] max-w-lg translate-y-0 gap-0 overflow-y-auto rounded-panel bg-background p-5 shadow-none"
+    <DialogContent aria-describedby={undefined} overlayClassName="bg-foreground/35 dark:bg-background/35" style={style}
+      className="inset-x-auto top-auto bottom-[calc(max(6.75rem,var(--alpha-dock-overlap,0px),env(safe-area-inset-bottom))+--spacing(2))] left-3 mx-0 max-h-[80dvh] w-[calc(100vw_-_--spacing(6))] max-w-[calc(100vw_-_2em_-_6px)] translate-y-0 gap-0 overflow-y-auto rounded-panel bg-background p-5 text-md shadow-none"
       onCloseAutoFocus={(event) => { event.preventDefault(); restore(); }}>
       <div className="mb-5 flex items-center justify-between gap-4">
         <DialogTitle className="font-sans text-2xl font-bold">Share</DialogTitle>
-        <DialogClose asChild><Button size="icon" variant="secondary" className="size-11 rounded-full" aria-label="Close share"><X className="size-5.5" /></Button></DialogClose>
+        <DialogClose asChild><Button size="icon" variant="secondary" className="size-11 rounded-full text-md" aria-label="Close share"><X className="size-5.5" /></Button></DialogClose>
       </div>
       <div className="flex flex-col gap-2">
         {destinations.filter(({ destination }) => destination !== "SaveText" || canSave).map(({ destination, label, Icon }) =>
-          <Button key={destination} variant="secondary" className="h-13 justify-start gap-3 rounded-lg px-4 text-base font-normal" onClick={() => choose(destination)}>
+          <Button key={destination} variant="secondary" className="h-auto min-h-13 justify-start gap-3 rounded-lg px-4 py-3.5 text-md font-normal" onClick={() => choose(destination)}>
             <Icon aria-hidden className="size-5.25" />{label}
           </Button>)}
       </div>

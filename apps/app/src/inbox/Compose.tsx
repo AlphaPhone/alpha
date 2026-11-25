@@ -18,9 +18,9 @@ import { useMachine as useChanges } from "../../gen/app__inbox__sending.react.ts
 import { useTimed } from "../runtime/react.ts";
 import { untimed } from "../runtime/reactor.vibe";
 import type { Time } from "../runtime/time.vibe";
-import { Incoming, mibOf } from "./adding.vibe";
+import { Incoming } from "./adding.vibe";
 import { Offers, fits } from "./suggestion.vibe";
-import { Letters, type Words, acceptable, backFromDraft, choiceOf, policy, restoreMyEdits, useLatestSavedDraft } from "./composer.vibe";
+import { Letters, type Words, acceptable, backFromDraft, choiceOf, mibOf, policy, restoreMyEdits, useLatestSavedDraft } from "./composer.vibe";
 import { Mail } from "./gmail.vibe";
 
 export interface ComposeProps {

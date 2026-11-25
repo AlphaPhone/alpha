@@ -86,7 +86,13 @@ describe("the shell", () => {
 
   // spec/app/shell/gestures.md, "Story: Swipe the way the phone expects"
   it("Swipe the way the phone expects (spec/app/shell/gestures.md, \"Story: Swipe the way the phone expects\")", async () => {
-    const { alpha } = await open({ ...scene(), phone: true });
+    const world = { ...scene(), phone: true };
+    world.settings.roles = world.settings.roles.map((role) => role.role === "home"
+      ? { ...role, held: true, holders: ["ai.alphacompute.alphaphone"] }
+      : role);
+    const { alpha } = await open(world);
+    await until(alpha, alpha.runtime, Canvas, (c) => c.mounted);
+    expect((await alpha.runtime.runPromise(Canvas.use((c) => c.get()))).launcher).toBe(true);
     await press("Notes");
     await until(alpha, alpha.runtime, Shell, (s) => s.trail.at(-1) === "Notes");
     const page = document.querySelector("main");
@@ -119,7 +125,6 @@ describe("the shell", () => {
     await until(alpha, alpha.runtime, Shell, (s) => s.trail.length === 0);
 
     // spec/app/shell/gestures.md, "On the launcher a pull down that Home allows opens Android's shade, and a swipe up from the bottom bar goes Home; nothing else is a swipe"
-    await until(alpha, alpha.runtime, Canvas, (c) => c.mounted && c.launcher);
     await press("Notes");
     await until(alpha, alpha.runtime, Shell, (s) => s.trail.at(-1) === "Notes");
     await swiped({ x: 200, y: Math.round(height / 2) }, { x: 200, y: Math.round(height / 2) - 100 });

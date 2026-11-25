@@ -3,8 +3,8 @@ import { cn } from "../../lib/cn.ts";
 import { Alert } from "../Alert.tsx";
 import { AssistantChatHeader, type AssistantChatHeaderProps } from "./AssistantChatHeader.tsx";
 import { AssistantComposer, type AssistantComposerProps } from "./AssistantComposer.tsx";
-import { type AssistantBarDrag, useAssistantBarDrag } from "./AssistantGrabber.tsx";
 import { AssistantTranscript, type AssistantTranscriptProps } from "./AssistantTranscript.tsx";
+import { type AssistantBarDrag, useAssistantBarDrag } from "./assistant-pull.ts";
 
 export type AssistantConversationProps = Omit<ComponentProps<"section">, "children"> & {
   /** The top of the sheet: handle, name, context and the ways to find or start a conversation. */

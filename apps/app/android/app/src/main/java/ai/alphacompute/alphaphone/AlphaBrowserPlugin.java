@@ -205,7 +205,7 @@ public class AlphaBrowserPlugin extends Plugin {
  /** Kept separate from dispatch so resolver changes cannot bypass page/owner checks. */
  private java.util.function.Function<Intent,java.util.List<android.content.pm.ResolveInfo>> externalBrowserResolver =
   intent->getContext().getPackageManager().queryIntentActivities(intent,android.content.pm.PackageManager.MATCH_DEFAULT_ONLY|android.content.pm.PackageManager.GET_RESOLVED_FILTER);
- private static class Tab { BrowserReadingWorld readingWorld; BrowserBlobCapture capture; String findQuery; /** Latest main-frame request or redirect target (any thread). */ volatile String pendingMain; /** Main-frame start address before any document history updates. */ String startedMain; /** Origin of a submitted HTTP sign-in whose result is pending; Save waits for it. */ String authSaveOrigin; int authAttempts; boolean passkeys; String id, profile, opener, url = "", error = "", finishedUrl = "", lastCommittedUrl = ""; WebView web; TabFrame frame; TextView message; /** Engine-attested login fields (null when the WebView cannot attest field origins). */ BrowserLoginFields fields; boolean priv, handedOff, loading, dead, committed, autofillEnabled; /** The engine started a new document for the current load. */ boolean documentStarted; /** The host this load moved from HTTP to HTTPS, so a redirect back to HTTP fails instead of looping. */ String upgradedHost = ""; /** The address another browser may open after this page failed, or "". */ String elsewhereUrl = ""; int httpStatus, autofillVirtualId=View.NO_ID; long navigation; Runnable timeout; }
+ static class Tab { BrowserReadingWorld readingWorld; BrowserBlobCapture capture; String findQuery; /** Latest main-frame request or redirect target (any thread). */ volatile String pendingMain; /** Main-frame start address before any document history updates. */ String startedMain; /** Origin of a submitted HTTP sign-in whose result is pending; Save waits for it. */ String authSaveOrigin; int authAttempts; boolean passkeys; String id, profile, opener, url = "", error = "", finishedUrl = "", lastCommittedUrl = ""; WebView web; TabFrame frame; TextView message; /** Engine-attested login fields (null when the WebView cannot attest field origins). */ BrowserLoginFields fields; boolean priv, handedOff, loading, dead, committed, autofillEnabled; /** The engine started a new document for the current load. */ boolean documentStarted; /** The host this load moved from HTTP to HTTPS, so a redirect back to HTTP fails instead of looping. */ String upgradedHost = ""; /** The address another browser may open after this page failed, or "". */ String elsewhereUrl = ""; int httpStatus, autofillVirtualId=View.NO_ID; long navigation; Runnable timeout; }
  /** Credentials stay in the framework/provider and the remote document. No bridge API
   * reads fields or replaces Chromium's frame-specific webDomain metadata. The only addition
   * is the committed top-level origin, which the password provider requires to equal the
@@ -422,7 +422,70 @@ public class AlphaBrowserPlugin extends Plugin {
    t.fields=BrowserLoginFields.install(t.web,()->fieldSnapshot(t),config().autofillExtras);
    if(t.fields!=null)t.frame.addView(t.fields.anchor, new FrameLayout.LayoutParams(-1,-1));
    t.message = new TextView(getActivity()); t.message.setPadding(24,24,24,24); t.message.setBackgroundColor(0xfffafafa); t.message.setTextColor(0xff222222); t.message.setVisibility(View.GONE); t.frame.addView(t.message, new FrameLayout.LayoutParams(-1,-1));
-   t.web.setWebViewClient(new WebViewClient() {
+   t.web.setWebViewClient(tabClient(t));
+   t.web.setWebChromeClient(new WebChromeClient() {
+    @Override public void onProgressChanged(WebView v,int p) { if(p==100 && t.committed && t.error.isEmpty()) t.loading=false; syncAutofill(t); emit(t); }
+    @Override public void onReceivedTitle(WebView v,String title) { emit(t); }
+    @Override public void onPermissionRequest(PermissionRequest request) { mediaPermission(t,request); }
+    @Override public void onPermissionRequestCanceled(PermissionRequest request) { if(siteDialogTab==t)dismissSiteDialogs(); }
+    @Override public void onGeolocationPermissionsShowPrompt(String origin,GeolocationPermissions.Callback cb) { locationPermission(t,origin,cb); }
+    @Override public void onGeolocationPermissionsHidePrompt() { if(siteDialogTab==t)dismissSiteDialogs(); }
+    @Override public void onShowCustomView(View view,CustomViewCallback callback) { enterFullscreen(t,view,callback); }
+    @Override public void onHideCustomView() { if(fullscreenTab==t)exitFullscreen(false); }
+    @Override public boolean onShowFileChooser(WebView v,ValueCallback<Uri[]> cb,FileChooserParams params) {
+     if(paused||t.dead||tabs.get(t.id)!=t||!Objects.equals(presentedId,t.id)||!v.isShown()||pickerOutstanding||!t.committed||t.loading||!t.error.isEmpty()||!safe(t.url)||params.getMode()==FileChooserParams.MODE_SAVE){cb.onReceiveValue(null);return true;}
+     cancelFile();fileCallback=cb;fileTab=t;fileNavigation=t.navigation;pickerOutstanding=true;
+     if(params.isCaptureEnabled()&&captureType(params.getAcceptTypes())){offerCamera(t,params);return true;}
+     openPicker(t,params);
+     return true;
+    }
+    private void openPicker(Tab t,FileChooserParams params) {
+     Intent picker=new Intent(Intent.ACTION_OPEN_DOCUMENT).addCategory(Intent.CATEGORY_OPENABLE).setType("*/*").addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+     ArrayList<String> types=new ArrayList<>();for(String type:params.getAcceptTypes())if(type!=null&&type.matches("[A-Za-z0-9!#$&^_.+-]+/[A-Za-z0-9!#$&^_.+*\\-]+"))types.add(type);
+     if(!types.isEmpty())picker.putExtra(Intent.EXTRA_MIME_TYPES,types.toArray(new String[0]));
+     picker.putExtra(Intent.EXTRA_ALLOW_MULTIPLE,params.getMode()==FileChooserParams.MODE_OPEN_MULTIPLE);
+     try{filePicker.launch(Intent.createChooser(picker,AlphaBrowserCopy.chooseFiles(Uri.parse(t.url).getHost())));}
+     catch(Exception unavailable){pickerOutstanding=false;cancelFile();}
+    }
+    /** A capture-enabled image input offers the camera only after an explicit choice. */
+    private void offerCamera(Tab t,FileChooserParams params) {
+     AlertDialog dialog=new AlertDialog.Builder(getActivity()).setTitle(AlphaBrowserCopy.PHOTO_TITLE).setMessage(AlphaBrowserCopy.photoMessage(Uri.parse(t.url).getHost()))
+      .setPositiveButton(AlphaBrowserCopy.USE_CAMERA,(d,w)->{siteDialogCancel=null;cameraForFile(t);})
+      .setNeutralButton(AlphaBrowserCopy.CHOOSE_FILE,(d,w)->{siteDialogCancel=null;if(fileTab==t&&t.navigation==fileNavigation)openPicker(t,params);else{pickerOutstanding=false;cancelFile();}})
+      .setNegativeButton(AlphaBrowserCopy.CANCEL,null).create();
+     showSiteDialog(t,dialog,()->{pickerOutstanding=false;cancelFile();});
+    }
+    @Override public boolean onCreateWindow(WebView v,boolean dialog,boolean gesture,android.os.Message message) { return popup(t,gesture,message); }
+    @Override public void onCloseWindow(WebView window) {
+     if(t.opener==null||tabs.get(t.id)!=t)return;
+     tabs.remove(t.id);dispose(t);tabClosed(t.id);
+    }
+   });
+   t.web.setDownloadListener((url,agent,disposition,mime,length) -> {
+    if(paused||t.dead||!Objects.equals(presentedId,t.id)||tabs.get(t.id)!=t)return;
+    finishAuthSave(t,null);disableAutofill(t);clearTimeout(t);t.loading=false;
+    if(!t.lastCommittedUrl.isEmpty()&&Objects.equals(t.lastCommittedUrl,t.web.getUrl())){
+     t.url=t.lastCommittedUrl;t.committed=true;t.web.setVisibility(View.VISIBLE);t.message.setVisibility(View.GONE);
+    }else {t.committed=false;t.web.setVisibility(View.INVISIBLE);t.message.setText(AlphaBrowserCopy.DOWNLOAD_REQUESTED);t.message.setVisibility(View.VISIBLE);}
+    long revision=t.navigation;
+    java.util.function.BooleanSupplier current=()->!paused&&!t.dead&&tabs.get(t.id)==t&&t.navigation==revision&&Objects.equals(presentedId,t.id);
+    AlphaBrowserDownloads.Source source=new AlphaBrowserDownloads.Source(t.id,t.priv,BrowserWebOrigin.of(t.lastCommittedUrl),()->{
+     if(t.dead||tabs.get(t.id)!=t)return null;
+     try{return WebViewCompat.getProfile(t.web).getCookieManager().getCookie(url);}catch(Exception unavailable){return null;}
+    },agent);
+    if(url!=null&&url.regionMatches(true,0,"blob:",0,5)){if(!downloads.ignoring(t.id))t.capture.capture(url,(file,type)->{
+     if(current.getAsBoolean())downloads.reviewCaptured(source,file,AlphaBrowserDownloads.safeName("download",disposition,AlphaBrowserDownloads.validMime(mime)?mime:type),AlphaBrowserDownloads.validMime(mime)?mime:type,current);else file.delete();
+    },reason->notice(t,reason));}
+    else downloads.request(source,url,disposition,mime,length,current);
+    emit(t);
+   });
+   ((ViewGroup)getActivity().findViewById(android.R.id.content)).addView(t.frame); tabs.put(id,t); return t;
+  } catch (Exception e) { dispose(t); throw e; }
+ }
+
+ /** The main-frame navigation callbacks of tab {@code t}: redirects, page starts, commits and history updates. */
+ WebViewClient tabClient(Tab t) {
+  return new WebViewClient() {
     @Override public boolean shouldOverrideUrlLoading(WebView v, WebResourceRequest r) {
      String target = r.getUrl().toString();
      if (BrowserExternalHandoff.external(target, config())) { if (r.isForMainFrame()) handoff(t, target, r.hasGesture()); return true; }
@@ -489,65 +552,7 @@ public class AlphaBrowserPlugin extends Plugin {
      if (r.isForMainFrame()) { t.httpStatus=response.getStatusCode(); emit(t); }
     }
     @Override public boolean onRenderProcessGone(WebView v, RenderProcessGoneDetail detail) { finishAuthSave(t,null); if(t.readingWorld!=null)t.readingWorld.close(); if(reading!=null)reading.cancelFor(t.id);disableAutofill(t); if(t.fields!=null)t.fields.close(); clearTimeout(t); t.dead=true; if(siteDialogTab==t)dismissSiteDialogs(); if(fullscreenTab==t)exitFullscreen(true); t.loading=false; t.committed=false; t.error="Browser renderer stopped. Close this tab and open a new one."; t.frame.removeView(v); v.destroy(); t.message.setText(AlphaBrowserCopy.pageError(t.error)); t.message.setVisibility(View.VISIBLE); JSObject event=new JSObject(); event.put("session",session); event.put("id",t.id); event.put("sequence",++sequence); event.put("error",t.error); event.put("loading",false); notifyListeners("stateChanged",event); return true; }
-   });
-   t.web.setWebChromeClient(new WebChromeClient() {
-    @Override public void onProgressChanged(WebView v,int p) { if(p==100 && t.committed && t.error.isEmpty()) t.loading=false; syncAutofill(t); emit(t); }
-    @Override public void onReceivedTitle(WebView v,String title) { emit(t); }
-    @Override public void onPermissionRequest(PermissionRequest request) { mediaPermission(t,request); }
-    @Override public void onPermissionRequestCanceled(PermissionRequest request) { if(siteDialogTab==t)dismissSiteDialogs(); }
-    @Override public void onGeolocationPermissionsShowPrompt(String origin,GeolocationPermissions.Callback cb) { locationPermission(t,origin,cb); }
-    @Override public void onGeolocationPermissionsHidePrompt() { if(siteDialogTab==t)dismissSiteDialogs(); }
-    @Override public void onShowCustomView(View view,CustomViewCallback callback) { enterFullscreen(t,view,callback); }
-    @Override public void onHideCustomView() { if(fullscreenTab==t)exitFullscreen(false); }
-    @Override public boolean onShowFileChooser(WebView v,ValueCallback<Uri[]> cb,FileChooserParams params) {
-     if(paused||t.dead||tabs.get(t.id)!=t||!Objects.equals(presentedId,t.id)||!v.isShown()||pickerOutstanding||!t.committed||t.loading||!t.error.isEmpty()||!safe(t.url)||params.getMode()==FileChooserParams.MODE_SAVE){cb.onReceiveValue(null);return true;}
-     cancelFile();fileCallback=cb;fileTab=t;fileNavigation=t.navigation;pickerOutstanding=true;
-     if(params.isCaptureEnabled()&&captureType(params.getAcceptTypes())){offerCamera(t,params);return true;}
-     openPicker(t,params);
-     return true;
-    }
-    private void openPicker(Tab t,FileChooserParams params) {
-     Intent picker=new Intent(Intent.ACTION_OPEN_DOCUMENT).addCategory(Intent.CATEGORY_OPENABLE).setType("*/*").addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
-     ArrayList<String> types=new ArrayList<>();for(String type:params.getAcceptTypes())if(type!=null&&type.matches("[A-Za-z0-9!#$&^_.+-]+/[A-Za-z0-9!#$&^_.+*\\-]+"))types.add(type);
-     if(!types.isEmpty())picker.putExtra(Intent.EXTRA_MIME_TYPES,types.toArray(new String[0]));
-     picker.putExtra(Intent.EXTRA_ALLOW_MULTIPLE,params.getMode()==FileChooserParams.MODE_OPEN_MULTIPLE);
-     try{filePicker.launch(Intent.createChooser(picker,AlphaBrowserCopy.chooseFiles(Uri.parse(t.url).getHost())));}
-     catch(Exception unavailable){pickerOutstanding=false;cancelFile();}
-    }
-    /** A capture-enabled image input offers the camera only after an explicit choice. */
-    private void offerCamera(Tab t,FileChooserParams params) {
-     AlertDialog dialog=new AlertDialog.Builder(getActivity()).setTitle(AlphaBrowserCopy.PHOTO_TITLE).setMessage(AlphaBrowserCopy.photoMessage(Uri.parse(t.url).getHost()))
-      .setPositiveButton(AlphaBrowserCopy.USE_CAMERA,(d,w)->{siteDialogCancel=null;cameraForFile(t);})
-      .setNeutralButton(AlphaBrowserCopy.CHOOSE_FILE,(d,w)->{siteDialogCancel=null;if(fileTab==t&&t.navigation==fileNavigation)openPicker(t,params);else{pickerOutstanding=false;cancelFile();}})
-      .setNegativeButton(AlphaBrowserCopy.CANCEL,null).create();
-     showSiteDialog(t,dialog,()->{pickerOutstanding=false;cancelFile();});
-    }
-    @Override public boolean onCreateWindow(WebView v,boolean dialog,boolean gesture,android.os.Message message) { return popup(t,gesture,message); }
-    @Override public void onCloseWindow(WebView window) {
-     if(t.opener==null||tabs.get(t.id)!=t)return;
-     tabs.remove(t.id);dispose(t);tabClosed(t.id);
-    }
-   });
-   t.web.setDownloadListener((url,agent,disposition,mime,length) -> {
-    if(paused||t.dead||!Objects.equals(presentedId,t.id)||tabs.get(t.id)!=t)return;
-    finishAuthSave(t,null);disableAutofill(t);clearTimeout(t);t.loading=false;
-    if(!t.lastCommittedUrl.isEmpty()&&Objects.equals(t.lastCommittedUrl,t.web.getUrl())){
-     t.url=t.lastCommittedUrl;t.committed=true;t.web.setVisibility(View.VISIBLE);t.message.setVisibility(View.GONE);
-    }else {t.committed=false;t.web.setVisibility(View.INVISIBLE);t.message.setText(AlphaBrowserCopy.DOWNLOAD_REQUESTED);t.message.setVisibility(View.VISIBLE);}
-    long revision=t.navigation;
-    java.util.function.BooleanSupplier current=()->!paused&&!t.dead&&tabs.get(t.id)==t&&t.navigation==revision&&Objects.equals(presentedId,t.id);
-    AlphaBrowserDownloads.Source source=new AlphaBrowserDownloads.Source(t.id,t.priv,BrowserWebOrigin.of(t.lastCommittedUrl),()->{
-     if(t.dead||tabs.get(t.id)!=t)return null;
-     try{return WebViewCompat.getProfile(t.web).getCookieManager().getCookie(url);}catch(Exception unavailable){return null;}
-    },agent);
-    if(url!=null&&url.regionMatches(true,0,"blob:",0,5)){if(!downloads.ignoring(t.id))t.capture.capture(url,(file,type)->{
-     if(current.getAsBoolean())downloads.reviewCaptured(source,file,AlphaBrowserDownloads.safeName("download",disposition,AlphaBrowserDownloads.validMime(mime)?mime:type),AlphaBrowserDownloads.validMime(mime)?mime:type,current);else file.delete();
-    },reason->notice(t,reason));}
-    else downloads.request(source,url,disposition,mime,length,current);
-    emit(t);
-   });
-   ((ViewGroup)getActivity().findViewById(android.R.id.content)).addView(t.frame); tabs.put(id,t); return t;
-  } catch (Exception e) { dispose(t); throw e; }
+  };
  }
 
  private boolean promptable(Tab t){return !paused&&!destroyed&&!t.dead&&tabs.get(t.id)==t&&Objects.equals(presentedId,t.id)&&t.error.isEmpty();}
