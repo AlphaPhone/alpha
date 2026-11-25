@@ -4,8 +4,8 @@ import {
   importLibraryFile, importLibraryFolder, indexedLibrary, librarySelections, libraryVolume, validName,
 } from "@elizaos/plugin-files/client"
 import type { ElizaFilesPlugin, FileOutcomeRow, FilesResult } from "@elizaos/os/bridges/definitions/files"
-import type { DocumentHandoff, SelectedDocument, SelectedDocumentsClient, SelectionId } from "@elizaos/os/bridges/definitions/media"
-import { bytesOf, downloadCopy, previewOf, releasePreview, selectedFile, shareCopy } from "./browser-library.ts"
+import type { DocumentHandoff, PdfPage, SelectedDocument, SelectedDocumentsClient, SelectionId } from "@elizaos/os/bridges/definitions/media"
+import { bytesOf, downloadCopy, pdfPage, previewOf, releasePreview, selectedFile, shareCopy } from "./browser-library.ts"
 import { Documents, browserDocuments } from "./documents.vibe"
 import { Files, browserFiles } from "./files.vibe"
 
@@ -63,14 +63,49 @@ const webLibrary = Layer.effectContext(effect {
     return { status: "opened", message: "" }
   }
   const blobs = new Map<string, string>()
-  try addFinalizer(() => sync(() => { for (const url of blobs.values()) releasePreview(url) }))
+  const pages = new Map<string, Map<number, PdfPage>>()
+  try addFinalizer(() => sync(() => {
+    for (const id of new Set([...blobs.keys(), ...pages.keys()])) forgetUrl(id)
+  }))
   const selectionId = Schema.decodeUnknownSync(Schema.NonEmptyString.pipe(Schema.brand("SelectionId")))
   const notify = <A>(write: A!VolumeRefused): A!VolumeRefused => Effect.tap(write, () => PubSub.publish(changed, undefined))
   const announce = <A>(work: A!VolumeRefused, painted: (value: A) => object) => answer(notify(work), painted)
-  const forgetUrl = (id: string) => {
+  function forgetUrl(id: string): void {
     const url = blobs.get(id)
     if (url !== undefined) releasePreview(url)
     blobs.delete(id)
+    for (const page of pages.get(id)?.values() ?? []) if (page.imageUri !== undefined) releasePreview(page.imageUri)
+    pages.delete(id)
+  }
+  effect function rendered(id: SelectionId, index: number): PdfPage!! {
+    const file = selections.bytes(id) catch () => undefined
+    if (file === undefined) return { status: "unavailable", message: "Select this file again." }
+    const papers = pages.get(id) ?? new Map<number, PdfPage>()
+    pages.set(id, papers)
+    const known = papers.get(index)
+    if (known !== undefined) return known
+    const page = try promise(() => pdfPage(file.blob, index))
+    if (page.status !== "rendered") return page
+    const unchanged = selections.bytes(id) catch () => undefined
+    if (pages.get(id) !== papers || unchanged === undefined) {
+      if (page.imageUri !== undefined) releasePreview(page.imageUri)
+      return { status: "unavailable", message: "Select this file again." }
+    }
+    const duplicate = papers.get(index)
+    if (duplicate !== undefined) {
+      if (page.imageUri !== undefined) releasePreview(page.imageUri)
+      return duplicate
+    }
+    papers.set(index, page)
+    if (papers.size > 8) {
+      const oldest = papers.keys().next().value
+      if (oldest !== undefined) {
+        const uri = papers.get(oldest)?.imageUri
+        if (uri !== undefined) releasePreview(uri)
+        papers.delete(oldest)
+      }
+    }
+    return page
   }
   const library: ElizaFilesPlugin = {
     storageState: () => answer(volume.state(), (state) => ({ access: state.access, volumes: state.volumes })),
@@ -122,7 +157,7 @@ const webLibrary = Layer.effectContext(effect {
     rename: (id, name) => Effect.runPromise(Effect.match(notify(selections.rename(id, name)), {
       onFailure: unavailable, onSuccess: (file) => { forgetUrl(id); return selected(file) },
     })),
-    pdf: () => Promise.resolve({ status: "unsupported", message: "PDF preview is unavailable in this browser." }),
+    pdf: (id, index) => Effect.runPromise(rendered(id, index)),
     read: (id) => Effect.runPromise(Effect.match(selections.readText(id), {
       onFailure: unavailable,
       onSuccess: (text) => text.kind === "read" ? { ...text, status: "read", message: "" } as const

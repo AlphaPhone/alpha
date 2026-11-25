@@ -36,12 +36,18 @@ module browser {
     readonly duration?: number
     readonly thumbnail?: string
     readonly revision?: string
+    readonly sourceRevision?: string
+    readonly favorite?: boolean
+    readonly trashedAt?: number
   }
+
+  export type BrowserSource = { readonly item: BrowserCapture; readonly file: Blob }
 
   const event = "alpha:photos-captured"
   const store = "captures"
   const originals = "originals"
   const edits = "edit-receipts"
+  const albums = "albums"
   const earlierLibrary = "alpha.browser.photos.v1"
   const earlierPrefix = "earlier:"
   const earlierRows = "photos"
@@ -54,12 +60,18 @@ module browser {
 
   async function storage(): Promise<IDBDatabase> {
     return new Promise((resolve, reject) => {
-      const request = indexedDB.open("alpha-photo-library", 3)
+      const request = indexedDB.open("alpha-photo-library", 4)
+      let blocked = false
+      request.onblocked = () => {
+        blocked = true
+        reject(new Error("The photo library is open in another tab."))
+      }
       request.onupgradeneeded = (event) => {
         const database = request.result
         const upgrade = request.transaction
         if (!database.objectStoreNames.contains(store)) database.createObjectStore(store, { keyPath: "id" })
         if (!database.objectStoreNames.contains(edits)) database.createObjectStore(edits)
+        if (!database.objectStoreNames.contains(albums)) database.createObjectStore(albums, { keyPath: "id" })
         if (!database.objectStoreNames.contains(originals)) database.createObjectStore(originals)
         const data = upgrade?.objectStore(originals)
         if (event.oldVersion !== 1 || upgrade === null || data === undefined) return
@@ -76,7 +88,12 @@ module browser {
           cursor.continue()
         }
       }
-      request.onsuccess = () => resolve(request.result)
+      request.onsuccess = () => {
+        const database = request.result
+        database.onversionchange = () => database.close()
+        if (blocked) database.close()
+        else resolve(database)
+      }
       request.onerror = () => reject(request.error)
     })
   }
@@ -102,8 +119,346 @@ module browser {
     return id
   }
 
+  export type BrowserChange = "favorite" | "unfavorite" | "trash" | "restore" | "delete"
+  export type BrowserChangeRow = { readonly id: string; readonly status: "done" | "stale" | "unverified"; readonly item?: BrowserCapture }
+  export type BrowserAlbum = {
+    readonly kind: "browser"
+    readonly id: string
+    readonly revision: string
+    readonly name: string
+    readonly memberIds: readonly string[]
+  }
+  export type BrowserAlbumWrite = {
+    readonly change: "Create" | "Rename" | "Delete" | "Add" | "Remove"
+    readonly album?: BrowserAlbum
+    readonly name: string
+    readonly items: readonly BrowserCapture[]
+  }
+  export interface BrowserLibrary {
+    rows(): Promise<readonly BrowserCapture[]>
+    albums(): Promise<readonly BrowserAlbum[]>
+    change(operation: BrowserChange, items: readonly BrowserCapture[]): Promise<readonly BrowserChangeRow[]>
+    writeAlbum(request: BrowserAlbumWrite): Promise<boolean>
+    shareFiles(items: readonly BrowserCapture[]): Promise<readonly File[] | undefined>
+    share(files: readonly File[]): Promise<"opened" | "declined" | "unavailable">
+  }
+
+  const albumLimit = 24
+  const memberLimit = 200
+
+  function savedAlbum(row: unknown): row is BrowserAlbum {
+    return typeof row === "object" && row !== null && "kind" in row && row.kind === "browser"
+      && "id" in row && typeof row.id === "string" && "revision" in row && typeof row.revision === "string"
+      && "name" in row && typeof row.name === "string" && "memberIds" in row && Array.isArray(row.memberIds)
+      && row.memberIds.every((id: unknown) => typeof id === "string")
+  }
+
+  type ErasedSource = { readonly id: string; readonly erased: true; readonly pending?: BrowserCapture }
+
+  function erased(row: unknown): row is ErasedSource {
+    return typeof row === "object" && row !== null && "id" in row && typeof row.id === "string" && "erased" in row && row.erased === true
+      && (!("pending" in row) || row.pending === undefined || valid(row.pending) && row.pending.id === row.id)
+  }
+
+  function matching(first: BrowserCapture | undefined, expected: BrowserCapture): first is BrowserCapture {
+    return first !== undefined && first.id === expected.id && first.revision === expected.revision
+      && first.trashedAt === expected.trashedAt
+  }
+
+  function photoTransaction<T>(database: IDBDatabase, tables: readonly string[], mode: IDBTransactionMode, use: (tx: IDBTransaction, hold: (result: T) => void) => void): Promise<T> {
+    return new Promise((resolve, reject) => {
+      const tx = database.transaction([...tables], mode)
+      let result: T
+      tx.oncomplete = () => resolve(result)
+      tx.onabort = () => reject(tx.error ?? new Error("The photo library transaction was interrupted."))
+      try { use(tx, (value) => { result = value }) }
+      catch (cause) { tx.abort(); reject(cause) }
+    })
+  }
+
+  async function libraryTransaction<T>(tables: readonly string[], mode: IDBTransactionMode, use: (tx: IDBTransaction, hold: (result: T) => void) => void): Promise<T> {
+    const database = await storage()
+    try { return await photoTransaction(database, tables, mode, use) }
+    finally { database.close() }
+  }
+
+  async function earlierCaptures(): Promise<readonly BrowserCapture[]> {
+    const database = await previous()
+    if (database === undefined) return []
+    try {
+      if (!database.objectStoreNames.contains(earlierRows)) return []
+      return await stored(database, earlierRows, undefined, (rows) => Array.isArray(rows) ? rows.flatMap(knownLegacy) : [])
+    } finally { database.close() }
+  }
+
+  async function inherited(items: readonly BrowserCapture[]): Promise<ReadonlyMap<string, BrowserCapture>> {
+    if (!items.some((item) => item.id.startsWith(earlierPrefix))) return new Map()
+    return new Map((await earlierCaptures()).map((row) => [row.id, row]))
+  }
+
+  function currentRow(raw: unknown, expected: BrowserCapture, earlier: ReadonlyMap<string, BrowserCapture>): BrowserCapture | undefined {
+    if (valid(raw)) return raw
+    return raw === undefined ? earlier.get(expected.id) : undefined
+  }
+
+  type EarlierErasures = { readonly expected: BrowserCapture; readonly status: "erased" | "stale" | "unverified"; readonly current?: BrowserCapture }
+
+  async function eraseEarlierOriginals(wanted: readonly BrowserCapture[]): Promise<readonly EarlierErasures[]> {
+    const previousPhotos = await previous()
+    if (previousPhotos === undefined) return wanted.map((expected) => ({ expected, status: "erased" }))
+    try {
+      const split = previousPhotos.objectStoreNames.contains("video-data")
+      if (!previousPhotos.objectStoreNames.contains(earlierRows)) return wanted.map((expected) => ({ expected, status: split ? "unverified" : "erased" }))
+      return await photoTransaction<EarlierErasures[]>(previousPhotos, split ? [earlierRows, "video-data"] : [earlierRows], "readwrite", (tx, hold) => {
+        const media = tx.objectStore(earlierRows)
+        const data = split ? tx.objectStore("video-data") : undefined
+        const result: EarlierErasures[] = []
+        hold(result)
+        for (const expected of wanted) {
+          const id = expected.id.slice(earlierPrefix.length)
+          const read = media.get(id)
+          read.onsuccess = () => {
+            if (read.result === undefined) {
+              if (data === undefined) result.push({ expected, status: "erased" })
+              else {
+                const orphan = data.get(id)
+                orphan.onsuccess = () => result.push({ expected, status: orphan.result === undefined ? "erased" : "unverified" })
+              }
+              return
+            }
+            const current = knownLegacy(read.result)[0]
+            if (current?.revision === undefined || (expected.sourceRevision ?? expected.revision) === undefined) { result.push({ expected, status: "unverified" }); return }
+            if (current.revision !== (expected.sourceRevision ?? expected.revision)) {
+              result.push({ expected, status: "stale", current })
+              return
+            }
+            media.delete(id)
+            data?.delete(id)
+            result.push({ expected, status: "erased" })
+          }
+        }
+      })
+    } finally { previousPhotos.close() }
+  }
+
+  function pruneAlbumMembers(tx: IDBTransaction, removed: ReadonlySet<string>) {
+    if (removed.size === 0) return
+    const all = tx.objectStore(albums).openCursor()
+    all.onsuccess = () => {
+      const cursor = all.result
+      if (cursor === null) return
+      const album: unknown = cursor.value
+      if (savedAlbum(album) && album.memberIds.some((id) => removed.has(id))) {
+        cursor.update({ ...album, revision: crypto.randomUUID(), memberIds: album.memberIds.filter((id) => !removed.has(id)) })
+      }
+      cursor.continue()
+    }
+  }
+
+  /** The local row hides as soon as its reviewed erasure is durable, and success waits for both databases. */
+  async function finishEarlierErasures(wanted: readonly BrowserCapture[]): Promise<readonly BrowserChangeRow[]> {
+    if (wanted.length === 0) return []
+    const failed = () => wanted.map(({ id }): BrowserChangeRow => ({ id, status: "unverified" }))
+    try {
+      const confirmed = await eraseEarlierOriginals(wanted)
+      return await libraryTransaction<BrowserChangeRow[]>([store, albums], "readwrite", (tx, hold) => {
+        const media = tx.objectStore(store)
+        const result: BrowserChangeRow[] = []
+        const removed = new Set<string>()
+        let pending = confirmed.length
+        hold(result)
+        for (const proof of confirmed) {
+          const id = proof.expected.id
+          const read = media.get(id)
+          read.onsuccess = () => {
+            const current: unknown = read.result
+            const approved = erased(current) && current.pending !== undefined && matching(current.pending, proof.expected)
+            if (proof.status === "erased" && erased(current) && (approved || current.pending === undefined)) {
+              if (approved) media.put({ id, erased: true })
+              removed.add(id)
+              result.push({ id, status: "done" })
+            } else if (proof.status === "stale" && proof.current !== undefined && (approved || valid(current))) {
+              if (approved) media.put({ ...proof.current, favorite: proof.expected.favorite, trashedAt: proof.expected.trashedAt,
+                sourceRevision: proof.current.revision, revision: crypto.randomUUID() } satisfies BrowserCapture)
+              result.push({ id, status: "stale" })
+            } else result.push({ id, status: "unverified" })
+            if (--pending === 0) pruneAlbumMembers(tx, removed)
+          }
+        }
+      })
+    } catch { return failed() }
+  }
+
+  async function changeBrowserRows(operation: BrowserChange, items: readonly BrowserCapture[]): Promise<readonly BrowserChangeRow[]> {
+    const earlier = await inherited(items)
+    const earlierErases: BrowserCapture[] = []
+    const result = await libraryTransaction<BrowserChangeRow[]>([store, originals, albums], "readwrite", (tx, hold) => {
+      const media = tx.objectStore(store)
+      const changed: BrowserChangeRow[] = []
+      const removed = new Set<string>()
+      let pending = items.length
+      hold(changed)
+      for (const expected of items) {
+        const read = media.get(expected.id)
+        read.onsuccess = () => {
+          const item = currentRow(read.result, expected, earlier)
+          const needsTrash = operation === "restore" || operation === "delete"
+          if (!matching(item, expected) || (item.trashedAt !== undefined) !== needsTrash) changed.push({ id: expected.id, status: "stale" })
+          else if (operation === "delete") {
+            if (item.id.startsWith(earlierPrefix)) {
+              media.put({ id: item.id, erased: true, pending: item } satisfies ErasedSource)
+              earlierErases.push(item)
+              changed.push({ id: item.id, status: "unverified" })
+            } else {
+              media.delete(item.id)
+              tx.objectStore(originals).delete(item.id)
+              removed.add(item.id)
+              changed.push({ id: item.id, status: "done" })
+            }
+          } else {
+            const sourceRevision = item.id.startsWith(earlierPrefix) ? item.sourceRevision ?? item.revision : undefined
+            const next = operation === "favorite" || operation === "unfavorite"
+              ? { ...item, favorite: operation === "favorite", sourceRevision, revision: crypto.randomUUID() }
+              : { ...item, trashedAt: operation === "trash" ? Date.now() : undefined, sourceRevision, revision: crypto.randomUUID() }
+            media.put(next)
+            changed.push({ id: item.id, status: "done", item: next })
+          }
+          if (--pending === 0) pruneAlbumMembers(tx, removed)
+        }
+      }
+    })
+    const completed = await finishEarlierErasures(earlierErases)
+    const settled = result.map((row) => completed.find((answer) => answer.id === row.id) ?? row)
+    if (settled.some((row) => row.status === "done" || row.status === "unverified") || earlierErases.length > 0) window.dispatchEvent(new Event(event))
+    return settled
+  }
+
+  const albumMigration = "develop-albums-adopted"
+
+  async function developAlbums(): Promise<readonly BrowserAlbum[]> {
+    const documents = await existingDatabase("alpha.browser.documents.v1")
+    if (documents === undefined) return []
+    try {
+      if (!documents.objectStoreNames.contains("documents")) return []
+      const row = await stored(documents, "documents", "alpha.browser.albums.v1", (value) => value)
+      if (typeof row !== "object" || row === null || !("raw" in row) || typeof row.raw !== "string") return []
+      const envelope: unknown = JSON.parse(row.raw)
+      if (typeof envelope !== "object" || envelope === null || !("version" in envelope) || envelope.version !== 1
+        || !("value" in envelope) || typeof envelope.value !== "string") return []
+      const all: unknown = JSON.parse(envelope.value)
+      if (!Array.isArray(all)) return []
+      const adopted = new Map<string, BrowserAlbum>()
+      for (const raw of all as unknown[]) {
+        if (typeof raw !== "object" || raw === null || !("id" in raw) || typeof raw.id !== "string"
+          || !("revision" in raw) || typeof raw.revision !== "string" || !("name" in raw) || typeof raw.name !== "string"
+          || !("memberIds" in raw) || !Array.isArray(raw.memberIds) || raw.name.trim() === "") continue
+        const id = earlierPrefix + raw.id
+        const memberIds = [...new Set(raw.memberIds.flatMap((id: unknown) => typeof id === "string" ? [earlierPrefix + id] : []))]
+        adopted.set(id, { kind: "browser", id, name: raw.name, revision: raw.revision, memberIds })
+      }
+      return [...adopted.values()]
+    } finally { documents.close() }
+  }
+
+  async function adoptDevelopAlbums() {
+    const done = await libraryTransaction<boolean>([albums], "readonly", (tx, hold) => {
+      const read = tx.objectStore(albums).get(albumMigration)
+      read.onsuccess = () => hold(read.result !== undefined)
+    })
+    if (done) return
+    const inherited = await developAlbums().catch(() => undefined)
+    if (inherited === undefined) return
+    await libraryTransaction<void>([albums], "readwrite", (tx, hold) => {
+      const shelves = tx.objectStore(albums)
+      const read = shelves.get(albumMigration)
+      hold(undefined)
+      read.onsuccess = () => {
+        if (read.result !== undefined) return
+        for (const shelf of inherited) shelves.add(shelf)
+        shelves.add({ id: albumMigration, adopted: true })
+      }
+    })
+  }
+
+  async function browserAlbums(): Promise<readonly BrowserAlbum[]> {
+    await adoptDevelopAlbums()
+    const database = await storage()
+    try { return await stored(database, albums, undefined, (rows) => Array.isArray(rows) ? rows.filter(savedAlbum) : []) }
+    finally { database.close() }
+  }
+
+  async function writeBrowserAlbum(request: BrowserAlbumWrite): Promise<boolean> {
+    const name = request.name.trim()
+    if ((request.change === "Create" || request.change === "Rename") && (name === "" || Array.from(name).length > 80 || /[\u0000-\u001f\u007f]/.test(name))) return false
+    await adoptDevelopAlbums()
+    const earlier = await inherited(request.items)
+    const written = await libraryTransaction<boolean>([store, albums], "readwrite", (tx, hold) => {
+      const shelves = tx.objectStore(albums)
+      const current = shelves.getAll()
+      const captures = request.items.map((row) => ({ row, read: tx.objectStore(store).get(row.id) }))
+      let applied = false
+      hold(false)
+      const ready = () => {
+        if (applied || current.readyState !== "done" || captures.some(({ read }) => read.readyState !== "done")) return
+        applied = true
+        const held = (current.result as unknown[]).filter(savedAlbum)
+        const selected = captures.flatMap(({ row, read }) => {
+          const media = currentRow(read.result, row, earlier)
+          return matching(media, row) && media.trashedAt === undefined ? [row.id] : []
+        })
+        if (selected.length !== captures.length) return
+        if (request.change === "Create") {
+          if (held.length >= albumLimit || selected.length > memberLimit) return
+          shelves.add({ kind: "browser", id: crypto.randomUUID(), revision: crypto.randomUUID(), name, memberIds: selected } satisfies BrowserAlbum)
+        } else {
+          const album = held.find((one) => one.id === request.album?.id && one.revision === request.album.revision)
+          if (album === undefined) return
+          if (request.change === "Delete") shelves.delete(album.id)
+          else {
+            const members = request.change === "Rename" ? album.memberIds : request.change === "Add"
+              ? [...new Set([...album.memberIds, ...selected])] : album.memberIds.filter((id) => !selected.includes(id))
+            if (request.change === "Add" && members.length > memberLimit) return
+            shelves.put({ ...album, name: request.change === "Rename" ? name : album.name, memberIds: members, revision: crypto.randomUUID() })
+          }
+        }
+        hold(true)
+      }
+      current.onsuccess = ready
+      for (const { read } of captures) read.onsuccess = ready
+    })
+    if (written) window.dispatchEvent(new Event(event))
+    return written
+  }
+
+  async function browserShareFiles(items: readonly BrowserCapture[]): Promise<readonly File[] | undefined> {
+    if (items.length === 0 || items.length > 100) return undefined
+    const files: File[] = []
+    let bytes = 0
+    for (const row of items) {
+      const source = await browserCapture(row.id)
+      if (!matching(source?.item, row) || source === undefined || source.item.trashedAt !== undefined) return undefined
+      bytes += source.file.size
+      if (bytes > 100 * 1024 * 1024) return undefined
+      files.push(new File([source.file], source.item.name, { type: source.file.type, lastModified: source.item.created }))
+    }
+    const latest = new Map((await browserCaptures()).map((item) => [item.id, item]))
+    return items.every((row) => matching(latest.get(row.id), row)) ? files : undefined
+  }
+
+  async function browserShare(files: readonly File[]): Promise<"opened" | "declined" | "unavailable"> {
+    const data = { files: [...files] }
+    if (typeof navigator.share !== "function" || !navigator.canShare?.(data)) return "unavailable"
+    try { await navigator.share(data); return "opened" }
+    catch (cause) { return cause instanceof DOMException && cause.name === "AbortError" ? "declined" : "unavailable" }
+  }
+
+  export const browserLibrary: BrowserLibrary = {
+    rows: browserCaptures, albums: browserAlbums, change: changeBrowserRows, writeAlbum: writeBrowserAlbum,
+    shareFiles: browserShareFiles, share: browserShare,
+  }
+
   export type BrowserEditReceipt =
-    | { readonly status: "saved"; readonly id: string; readonly replaced: boolean }
+    | { readonly status: "saved"; readonly id: string; readonly replaced: boolean; readonly name?: string }
     | { readonly status: "not-started" | "stale" }
 
   export type BrowserEditSave = {
@@ -123,7 +478,8 @@ module browser {
     if (typeof raw !== "object" || raw === null || !("status" in raw)) return undefined
     if (raw.status === "not-started" || raw.status === "stale") return { status: raw.status }
     if (raw.status === "saved" && "id" in raw && typeof raw.id === "string" && raw.id !== "" && "replaced" in raw && typeof raw.replaced === "boolean") {
-      return { status: "saved", id: raw.id, replaced: raw.replaced }
+      return { status: "saved", id: raw.id, replaced: raw.replaced,
+        name: "name" in raw && typeof raw.name === "string" ? raw.name : undefined }
     }
     return undefined
   }
@@ -147,9 +503,9 @@ module browser {
           const current = captures.get(source.id)
           current.onsuccess = () => {
             const original: unknown = current.result
-            const isCurrent = canReplaceBrowserEdit(source.id)
-              ? valid(original) && original.revision === source.revision
-              : !replace
+            const isCurrent = source.trashedAt === undefined && (canReplaceBrowserEdit(source.id)
+              ? matching(valid(original) ? original : undefined, source)
+              : !replace && (original === undefined || matching(valid(original) ? original : undefined, source)))
             if (!isCurrent) {
               result = { status: "stale" }
               results.add(result, operation)
@@ -158,9 +514,9 @@ module browser {
             const created = replace ? source.created : Date.now()
             const id = replace ? source.id : `browser:${created}:${crypto.randomUUID()}`
             const extension = frame.file.type === "video/mp4" ? "mp4" : frame.file.type.startsWith("video/") ? "webm" : "jpg"
-            const name = replace ? source.name : `Edited ${source.name.replace(/\.[^.]+$/, "")}.${extension}`
+            const name = `${replace ? "" : "Edited "}${source.name.replace(/\.[^.]+$/, "")}.${extension}`
             const item: BrowserCapture = { id, name, created, mimeType: frame.file.type, size: frame.file.size,
-              width: frame.width, height: frame.height, duration: frame.duration, thumbnail: frame.thumbnail, revision: operation }
+              width: frame.width, height: frame.height, duration: frame.duration, thumbnail: frame.thumbnail, revision: operation, favorite: replace && source.favorite === true }
             if (replace) {
               captures.put(item)
               tx.objectStore(originals).put(frame.file, id)
@@ -168,7 +524,7 @@ module browser {
               captures.add(item)
               tx.objectStore(originals).add(frame.file, id)
             }
-            result = { status: "saved", id, replaced: replace }
+            result = { status: "saved", id, name, replaced: replace }
             results.add(result, operation)
           }
         }
@@ -199,26 +555,39 @@ module browser {
     } finally { database.close() }
   }
 
-  async function previous(): Promise<IDBDatabase | undefined> {
-    if (typeof indexedDB.databases !== "function") return undefined
-    if (!(await indexedDB.databases()).some((database) => database.name === earlierLibrary)) return undefined
+  const previous = (): Promise<IDBDatabase | undefined> => existingDatabase(earlierLibrary)
+
+  async function existingDatabase(name: string): Promise<IDBDatabase | undefined> {
+    if (typeof indexedDB.databases === "function") {
+      const databases = await indexedDB.databases().catch(() => undefined)
+      if (databases !== undefined && !databases.some((database) => database.name === name)) return undefined
+    }
     return new Promise((resolve, reject) => {
-      const request = indexedDB.open(earlierLibrary)
+      const request = indexedDB.open(name)
+      let absent = false
+      request.onupgradeneeded = (event) => {
+        if (event.oldVersion !== 0) return
+        absent = true
+        request.transaction?.abort()
+      }
       request.onsuccess = () => resolve(request.result)
-      request.onerror = () => reject(request.error)
+      request.onerror = () => { if (absent) resolve(undefined); else reject(request.error) }
     })
   }
 
   function knownLegacy(row: unknown): BrowserCapture[] {
     if (typeof row !== "object" || row === null || !("id" in row) || typeof row.id !== "string" || !("kind" in row)
-      || (row.kind !== "image" && row.kind !== "video") || ("trashed" in row && row.trashed === true)
+      || (row.kind !== "image" && row.kind !== "video")
       || !("date" in row) || typeof row.date !== "number" || !Number.isSafeInteger(row.date)
       || !("width" in row) || typeof row.width !== "number" || !("height" in row) || typeof row.height !== "number") return []
     return [{
       id: earlierPrefix + row.id, mimeType: row.kind === "image" ? "image/jpeg" : "video/webm",
       name: row.kind === "image" ? "Camera.jpg" : "Camera.webm", created: row.date,
+      favorite: "favorite" in row && row.favorite === true,
+      trashedAt: "trashed" in row && row.trashed === true ? ("trashedAt" in row && typeof row.trashedAt === "number" ? row.trashedAt : row.date) : undefined,
       width: row.width, height: row.height, size: "size" in row && typeof row.size === "number" ? row.size : 0,
       ...("duration" in row && typeof row.duration === "number" ? { duration: row.duration } : {}),
+      ...("mutationRevision" in row && typeof row.mutationRevision === "string" ? { revision: row.mutationRevision } : "revision" in row && typeof row.revision === "string" ? { revision: row.revision } : {}),
       ...("image" in row && typeof row.image === "string" && row.image.startsWith("data:image/") ? { thumbnail: row.image } : {}),
     }]
   }
@@ -232,23 +601,19 @@ module browser {
     })
   }
 
-  /** Read saved capture data from this browser origin. */
+  /** Read metadata without fetching any original pixels. Local changes supersede inherited rows. */
   export async function browserCaptures(): Promise<readonly BrowserCapture[]> {
     const database = await storage()
     try {
-      const captures = await stored(database, store, undefined, (rows) => Array.isArray(rows) ? rows.filter(valid) : [])
-      const earlier = await previous()
-      if (earlier === undefined) return captures
-      try {
-        if (!earlier.objectStoreNames.contains(earlierRows)) return captures
-        const existing = await stored(earlier, earlierRows, undefined, (rows) => Array.isArray(rows) ? rows.flatMap(knownLegacy) : [])
-        return [...captures, ...existing]
-      } finally {
-        earlier.close()
-      }
-    } finally {
-      database.close()
-    }
+      const readRows = () => stored(database, store, undefined, (rows) => Array.isArray(rows) ? rows as unknown[] : [])
+      let raw = await readRows()
+      const interrupted = raw.filter(erased).flatMap((row) => row.pending === undefined ? [] : [row.pending])
+      if (interrupted.length > 0 && (await finishEarlierErasures(interrupted)).some((row) => row.status !== "unverified")) raw = await readRows()
+      const local = raw.filter(valid)
+      const present = new Set([...local, ...raw.filter(erased)].map((row) => row.id))
+      const earlier = await earlierCaptures()
+      return [...local, ...earlier.filter((row) => !present.has(row.id))]
+    } finally { database.close() }
   }
 
   /** The newest saved capture's metadata, without reading every original. */
@@ -261,7 +626,7 @@ module browser {
           const cursor = query.result
           if (cursor === null) { resolve(undefined); return }
           const row: unknown = cursor.value
-          if (valid(row) && row.name.startsWith("Camera.")) resolve(row)
+          if (valid(row) && row.trashedAt === undefined && row.name.startsWith("Camera.")) resolve(row)
           else cursor.continue()
         }
         query.onerror = () => reject(query.error)
@@ -269,32 +634,61 @@ module browser {
     } finally { database.close() }
   }
 
-  /** Read one selected original without materializing every stored recording. */
-  export async function browserOriginal(id: string): Promise<Blob | undefined> {
-    if (id.startsWith(earlierPrefix)) return legacyOriginal(id.slice(earlierPrefix.length))
-    const database = await storage()
-    try {
-      return await stored(database, originals, id, (file) => file instanceof Blob ? file : undefined)
-    } finally {
-      database.close()
-    }
+  /** Read one capture with the original that belongs to its exact metadata revision. */
+  export async function browserCapture(id: string): Promise<BrowserSource | undefined> {
+    const local = await libraryTransaction<{ item: unknown; file: unknown }>([store, originals], "readonly", (tx, hold) => {
+      const facts = tx.objectStore(store).get(id)
+      const data = tx.objectStore(originals).get(id)
+      const read = () => {
+        if (facts.readyState === "done" && data.readyState === "done") hold({ item: facts.result, file: data.result })
+      }
+      facts.onsuccess = read
+      data.onsuccess = read
+    })
+    if (valid(local.item) && local.file instanceof Blob) return { item: local.item, file: local.file }
+    if (erased(local.item) || !id.startsWith(earlierPrefix)) return undefined
+    const original = await legacyCapture(id.slice(earlierPrefix.length))
+    if (original === undefined || !valid(local.item)) return original
+    return original.item.revision === local.item.sourceRevision ? { item: local.item, file: original.file } : undefined
   }
 
-  async function legacyOriginal(id: string): Promise<Blob | undefined> {
+  /** Read one selected original without materializing every stored recording. */
+  export async function browserOriginal(id: string): Promise<Blob | undefined> {
+    return (await browserCapture(id))?.file
+  }
+
+  async function legacyCapture(id: string): Promise<BrowserSource | undefined> {
     const database = await previous()
     if (database === undefined) return undefined
     try {
       if (!database.objectStoreNames.contains(earlierRows)) return undefined
-      const current = await stored(database, earlierRows, id, (raw) => knownLegacy(raw)[0])
-      if (current === undefined) return undefined
-      const uri = current.mimeType.startsWith("image/") ? current.thumbnail
-        : database.objectStoreNames.contains("video-data") ? await stored(database, "video-data", id, (raw) => (
-          typeof raw === "object" && raw !== null && "path" in raw && typeof raw.path === "string" && raw.path.startsWith("data:video/") ? raw.path : undefined
-        )) : undefined
-      return uri ? (await fetch(uri)).blob() : undefined
-    } finally {
-      database.close()
-    }
+      const videoStore = "video-data"
+      const split = database.objectStoreNames.contains(videoStore)
+      const found = await new Promise<{ item: BrowserCapture; uri?: string } | undefined>((resolve, reject) => {
+        const tx = database.transaction(split ? [earlierRows, videoStore] : [earlierRows])
+        const request = tx.objectStore(earlierRows).get(id)
+        let result: { item: BrowserCapture; uri?: string } | undefined
+        tx.oncomplete = () => resolve(result)
+        tx.onabort = () => reject(tx.error)
+        request.onsuccess = () => {
+          const row: unknown = request.result
+          const item = knownLegacy(row)[0]
+          if (item === undefined) return
+          if (item.mimeType.startsWith("image/")) { result = { item, uri: item.thumbnail }; return }
+          const legacyPath = (raw: unknown) => typeof raw === "object" && raw !== null && "path" in raw
+            && typeof raw.path === "string" && raw.path.startsWith("data:video/") ? raw.path : undefined
+          const embedded = legacyPath(row)
+          if (embedded !== undefined || !split) { result = { item, uri: embedded }; return }
+          const video = tx.objectStore(videoStore).get(id)
+          video.onsuccess = () => { result = { item, uri: legacyPath(video.result) } }
+        }
+      })
+      if (found?.uri === undefined) return undefined
+      const file = await (await fetch(found.uri)).blob()
+      const extension = file.type === "video/mp4" ? "mp4" : file.type === "image/png" ? "png" : file.type === "image/webp" ? "webp" : undefined
+      const name = extension === undefined ? found.item.name : `Camera.${extension}`
+      return { item: { ...found.item, mimeType: file.type || found.item.mimeType, size: file.size, name }, file }
+    } finally { database.close() }
   }
 
   function valid(row: unknown): row is BrowserCapture {
@@ -303,22 +697,26 @@ module browser {
       && "size" in row && Number.isSafeInteger(row.size)
       && "created" in row && Number.isSafeInteger(row.created)
       && "width" in row && Number.isSafeInteger(row.width) && "height" in row && Number.isSafeInteger(row.height)
+      && (!("favorite" in row) || row.favorite === undefined || typeof row.favorite === "boolean")
+      && (!("trashedAt" in row) || row.trashedAt === undefined || typeof row.trashedAt === "number" && Number.isFinite(row.trashedAt))
+      && (!("sourceRevision" in row) || row.sourceRevision === undefined || typeof row.sourceRevision === "string")
       && (!("revision" in row) || row.revision === undefined || typeof row.revision === "string")
       && (!("duration" in row) || row.duration === undefined || typeof row.duration === "number" && Number.isFinite(row.duration))
       && (!("thumbnail" in row) || row.thumbnail === undefined || typeof row.thumbnail === "string")
   }
 }
-import { type BrowserCapture, type BrowserEditReceipt, type BrowserEditSave, browserCaptures, browserEditResult, browserOriginal, canReplaceBrowserEdit, captureEvent, isBrowserEdit, latestBrowserCapture, page, saveBrowserCapture, saveBrowserEdit } from browser
+import { type BrowserAlbum, type BrowserCapture, type BrowserEditReceipt, type BrowserEditSave, type BrowserLibrary, type BrowserSource, browserCapture, browserLibrary, browserEditResult, browserOriginal, canReplaceBrowserEdit, captureEvent, isBrowserEdit, latestBrowserCapture, page, saveBrowserCapture, saveBrowserEdit } from browser
 export { latestBrowserCapture, saveBrowserCapture, isBrowserEdit, canReplaceBrowserEdit }
-export type { BrowserCapture }
+export type { BrowserAlbum, BrowserCapture, BrowserSource }
 
 /** The phone's permitted library and its reviewed read surface, or the captures saved in this browser. */
 export service PhotosPort {
   readonly phone: Option.Option<PhotosClient>
   readonly reviewed: Option.Option<DeviceLibraryClient>
   readonly changes: Stream.Stream<void>
-  captures(): readonly BrowserCapture[]!PhotosFailed
+  readonly browser: Option.Option<BrowserLibrary>
   original(id: string): (Blob | undefined)!PhotosFailed
+  capture(id: string): (BrowserSource | undefined)!PhotosFailed
   saveEdit(request: BrowserEditSave): BrowserEditReceipt!PhotosFailed
   editResult(operation: string): BrowserEditReceipt!PhotosFailed
   handoff(id: string): void!!
@@ -347,7 +745,7 @@ export const phonePhotos = Layer.sync(PhotosPort, () => {
     Effect.orElseSucceed(tryPromise(() => phone.value.onLibraryChanged((): void => { Queue.offerUnsafe(queue, undefined) })), () => undefined),
     (handle) => handle === undefined ? Effect.void : ignore(tryPromise(() => handle.remove())),
   )))
-  return { phone, reviewed, changes, captures: () => succeed([]), original: () => succeed(undefined),
+  return { phone, reviewed, changes, browser: Option.none<BrowserLibrary>(), original: () => succeed(undefined), capture: () => succeed(undefined),
     saveEdit: () => succeed({ status: "not-started" } as const), editResult: () => succeed({ status: "not-started" } as const), ...entry() }
 })
 
@@ -356,8 +754,9 @@ export const browserPhotos = Layer.sync(PhotosPort, () => ({
   phone: Option.none(),
   reviewed: Option.none(),
   changes: Stream.suspend(() => Stream.as(Stream.fromEventListener(page(), captureEvent()), undefined)),
-  captures: () => tryPromise({ try: browserCaptures, catch: (cause) => new PhotosFailed({ cause }) }),
+  browser: Option.some(browserLibrary),
   original: (id: string) => tryPromise({ try: () => browserOriginal(id), catch: (cause) => new PhotosFailed({ cause }) }),
+  capture: (id: string) => tryPromise({ try: () => browserCapture(id), catch: (cause) => new PhotosFailed({ cause }) }),
   saveEdit: (request: BrowserEditSave) => tryPromise({ try: () => saveBrowserEdit(request), catch: (cause) => new PhotosFailed({ cause }) }),
   editResult: (operation: string) => tryPromise({ try: () => browserEditResult(operation), catch: (cause) => new PhotosFailed({ cause }) }),
 }))

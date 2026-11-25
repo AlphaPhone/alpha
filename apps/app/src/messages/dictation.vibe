@@ -5,8 +5,8 @@ import * as Messages from "../../gen/app__messages.effect.vibe"
 import { Machine as Phone } from "../../gen/app__phone.effect.vibe"
 import { Machine as Shell, showing } from "../../gen/app__shell.effect.vibe"
 import * as Voice from "../../gen/app__voice.effect.vibe"
-import { say, type Said } from "../notices/toasts.vibe"
-import type { Machine as Toasts } from "../../gen/app__notices__toasts.effect.vibe"
+import { Said, say } from "../notices/toasts.vibe"
+import { Machine as Toasts } from "../../gen/app__notices__toasts.effect.vibe"
 import { Device } from "../platform/device.vibe"
 import { VoiceBridge } from "../platform/voice.vibe"
 import { contained, started, together } from "../runtime/reactor.vibe"
@@ -62,12 +62,16 @@ export effect function dictateMessage(thread: number): void!!(Composer.Machine |
     try say("Dictation is unavailable. You can still type your message.", true)
     return
   }
+  const toasts = try Toasts
+  const said = try Said
   const opened = try openDictation("MessagesBar", effect (words: string) => {
     if (!(try editableHere)) return
     const before = try drafts.text(thread)
     const next = before.trim() === "" ? words : `${before.trimEnd()} ${words}`
     if (next.length > MMS_MAX_BODY) {
-      try say("That transcription would make the message too long", true)
+      try (say("That transcription would make the message too long", true)
+        |> Effect.provideService(%, Toasts, toasts)
+        |> Effect.provideService(%, Said, said))
       return
     }
     try drafts.write(thread, next)

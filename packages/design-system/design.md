@@ -22,7 +22,10 @@ do next.
   Fraunces behind it, at weight `light`: a screen's display title on the launcher, the date on Home, a large figure. The sizes
   are in rem, so Android's text size scales them: `base` is body text, `md` a row title or a field,
   `caption` and `sm` the quieter line beside it, `xl` a shared app header title in the browser, `3xl` a screen title
-  (also the shared app header title in `font-display` on the launcher), and `4xl` the Home date. Text up to `lg` is set at Public Sans's own line height (1.175), as develop sets it; copy that
+  (also the shared app header title in `font-display` on an app's first page on the launcher, drawn no larger than lets
+  a 4.4em word fit its own row above 150% text), `home-display` that title on a screen inside an app on the launcher, on
+  one line and cut with an ellipsis until above 150% text, where every header title takes its own row and wraps, and
+  `4xl` the Home date. Text up to `lg` is set at Public Sans's own line height (1.175), as develop sets it; copy that
   is read at length takes `leading-normal`. `tracking-caps` with `text-xs` is a small uppercase label; `text-label` names an app tile on
   Home and in the drawer. A list row reads `text-base`,
   `text-subject` and `text-snippet` line by line; `text-meta` is a status line under a header, and `text-body`
@@ -30,7 +33,7 @@ do next.
   keypad key's letters; `text-keypad-number` the number being dialled, `text-keypad-digit` a key's
   digit and `text-keypad-letters` the letters under it; `text-contact-name` and `text-contact-initials`, in
   `font-display`, are a contact's name and initials at the top of their card. `text-lead` is the street of the next turn,
-  `text-title` a document's name over its preview, and `text-figure` and `text-figure-sm` a route's time.
+  `text-title` a document's name over its preview and Notes' Recently deleted header on the launcher, and `text-figure` and `text-figure-sm` a route's time.
   `leading-row` sets `text-body` as a note's or a routine's title in a list.
   `text-badge` is a video's length over a thumbnail and `text-tile-name` an album's name under its cover.
   `text-headline` is an open voice or link note's title and `text-quote` a clip kept from a page.

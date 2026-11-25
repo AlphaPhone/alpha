@@ -108,7 +108,7 @@ type Effect =
   | Shut({ session: int, keyboard: bool })
   | Navigate({ place: int })
   | Record({ ticket: int })
-  | Transcribe({ ticket: int, network: bool })
+  | Transcribe({ ticket: int, network: bool, automatic: bool })
   | Abandon({ recording: int })
   | Fill({ field: D::Field, filling: int })
 
@@ -876,23 +876,49 @@ pure def recordingFailed(v: Voice, ticket: int, failure: D::Failure): Voice =
 
 ### A clip is transcribed on the route speech takes now
 
+When Android finalizes the current recording, the recorder takes that exact
+clip as stopped. Automatic transcription runs while the phone and its
+recording's screen are in front. Otherwise the finished clip waits for the
+owner to retry. An unconfirmed manual stop has no clip to transcribe or
+retry. Late answers and duplicate stops have no effect.
+
 ```quint
 pure def canStopRecording(v: Voice, now: int): bool = D::canStopRecording(v.recorder)
 
-pure def stopRecording(v: Voice, now: int): Change =
+pure def transcribingDictation(now: int, automatic: bool, v: Voice): Change =
   { state: { ...v, recorder: D::stopRecording(v.recorder) },
-    out: List(Transcribe({ ticket: v.recorder.ticket, network: onNetwork(v.route, now) })) }
+    out: List(Transcribe({ ticket: v.recorder.ticket, network: onNetwork(v.route, now), automatic: automatic })) }
+
+pure def stopRecording(v: Voice, now: int): Change = transcribingDictation(now, false, v)
+
+pure def canRecordingStopped(v: Voice, ticket: int, showing: bool, now: int): bool =
+  not(v.prompting) and D::canRecordingStopped(v.recorder, ticket)
+
+pure def recordingStopped(v: Voice, ticket: int, showing: bool, now: int): Change =
+  if (showing) transcribingDictation(now, true, v)
+  else { state: { ...v, recorder: D::transcribed(D::stopRecording(v.recorder), ticket, D::AgentUnavailable) }, out: List() }
 
 pure def canTranscribed(v: Voice, ticket: int, failure: D::Failure): bool = D::canTranscribed(v.recorder, ticket, failure)
 
 pure def transcribed(v: Voice, ticket: int, failure: D::Failure): Voice =
   { ...v, recorder: D::transcribed(v.recorder, ticket, failure) }
 
+pure def canClipLost(v: Voice, ticket: int): bool = D::canClipLost(v.recorder, ticket)
+
+pure def clipLost(v: Voice, ticket: int): Voice = { ...v, recorder: D::clipLost(v.recorder, ticket) }
+
+pure def stepHiddenNativeStopKeepsTheClipWithoutAsking(before: Voice, via: str, after: Voice, out: List[Effect]): bool =
+  (via == "recordingStopped" and after.recorder.stage == D::Recorded) implies
+    (out == List() and after.recorder.clip and after.recorder.ticket == before.recorder.ticket)
+
+pure def stepMissingClipOffersNoRetry(before: Voice, via: str, after: Voice): bool =
+  via == "clipLost" implies (after.recorder.stage == D::Ready and not(D::canTranscribeAgain(after.recorder)))
+
 pure def canTranscribeAgain(v: Voice, now: int): bool = D::canTranscribeAgain(v.recorder)
 
 pure def transcribeAgain(v: Voice, now: int): Change =
   val r = D::transcribeAgain(v.recorder)
-  { state: { ...v, recorder: r }, out: List(Transcribe({ ticket: r.ticket, network: onNetwork(v.route, now) })) }
+  { state: { ...v, recorder: r }, out: List(Transcribe({ ticket: r.ticket, network: onNetwork(v.route, now), automatic: false })) }
 
 pure def canRecordAgain(v: Voice): bool = D::canRecordAgain(v.recorder)
 

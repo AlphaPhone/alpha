@@ -140,7 +140,7 @@ function timing(seconds: number): string {
 const Tile = memo(function Tile({ number, row, image, selected, interactive }: TileProps) {
   const video = row.kind === "phone" ? row.item.kind === "video" : row.item.mimeType.startsWith("video/");
   const name = row.item.name ?? (video ? "Video" : "Photo");
-  const starred = row.kind === "phone" && row.item.favorite === true;
+  const starred = row.item.favorite === true;
   return (
     <button type="button" data-alpha-media-key={number} aria-label={name} aria-pressed={selected}
       disabled={!interactive}
