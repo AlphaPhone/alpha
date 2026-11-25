@@ -450,11 +450,13 @@ describe("Talk from Ask Alpha's composer (spec/app/voice/index.md, \"Story: Hold
     await drawnUntil(alpha, area, Voice.Machine, (s) => s.warmed);
     await settled(() => button("Talk") !== undefined);
 
+    await drawn(() => document.querySelector<HTMLTextAreaElement>("textarea[data-alpha-composer]")?.focus());
     await drawn(() => area.runPromise(dictate()));
-    await drawnUntil(alpha, area, Voice.Machine, (s) => s.recorder.stage === "Ready" && s.recorder.field === "ComposerField");
+    await settled(() => button("Start recording") !== undefined);
     await press("Start recording");
-    await drawnUntil(alpha, area, Voice.Machine, (s) => s.recorder.stage === "Closed" && s.permission.asked);
     await settled(() => button("Talk") !== undefined);
+    const after = await area.runPromise(Effect.flatMap(Voice.Machine, (m) => m.get()));
+    expect([after.recorder.stage, after.permission.asked]).toEqual(["Closed", true]);
     expect([document.querySelector("[role=alertdialog], [role=alert], [role=note], [role=status], section[aria-label='Voice transcription']"), world.voice.permission]).toEqual([null, "denied"]);
   });
 });
