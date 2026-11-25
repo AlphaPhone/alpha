@@ -4,7 +4,7 @@ One reply as Ask Alpha shows it while it is written and once it ends: the
 label shown while the agent works, its one brief acknowledgment, the text
 as it streams and the whole answer, the cards its lines become, its notices,
 and why it did not finish. The [conversation](./index.md) says how the turn
-ended; eliza's reply stream (`@elizaos/agent/client`) gives the text, the
+ended; eliza's reply stream (`@elizaos/agent`) gives the text, the
 planning label, the acknowledgment frame, each tool's label, the action
 results and the last frame with its failure kind and fix, none of which is
 restated here. Speaking the reply is the voice area's; the cue rules it
@@ -164,7 +164,8 @@ out of funds, and any other failure; a stop reads as any other. Out of funds
 is Cloud refusing the turn with its own code for an account with no plan
 allowance and no credits left, which the agent has no funds to explain: it
 reads as one fixed line in the transcript, the same one Talk posts, and is
-never spoken. Spent credits the agent reports without that code keep their
+never spoken; a conversation read again shows that line for the reply the
+agent kept with Cloud's code, as the live reply did. Spent credits the agent reports without that code keep their
 own words. Every kind but a timeout
 and any other is refused before output. A reply the agent chose not to give
 removes its bubble. Stop keeps what was shown, and the conversation's check

@@ -28,6 +28,7 @@ import shell as S from "../shell"
 import tiles as T from "./tiles"
 import android as N from "./android"
 import apps as P from "./apps"
+import drawer as D from "./drawer"
 
 type Host = InBrowser | AsApp | AsLauncher | AssistantOnly
 type Actor = Owner | Agent
@@ -75,11 +76,13 @@ pure val tilesValues = Set(
   List(T::Own({ view: S::Notes }), T::Installed({ app: "clock" }), T::Own({ view: S::Inbox })),
   List(T::Installed({ app: "mail" }), T::Installed({ app: "clock" })))
 pure val listedValues = Set(Set(), Set("clock"), Set("clock", "mail"), Set("mail", "maps"))
+pure val drawerValues = Set(D::initial, { ...D::initial, menu: "clock" }, { ...D::initial, menu: "mail" })
 pure val nowValues = Set(0, 2000, 6000, 12000)
 pure val ticketValues = Set(1, 2, 3, 4, 5, 6, 7, 8, 9, 10)
 pure val shellValues = Set(
   S::initial,
   { ...S::initial, image: true, contacts: true },
+  { ...S::initial, drawer: true },
   { ...S::initial, trail: List(S::Notes) })
 pure val readHome: Home = {
   ...initial, host: AsLauncher, installed: { ...P::initial, read: { status: R::Loaded, ticket: 1 }, apps: Set("clock", "mail") },
@@ -272,6 +275,47 @@ pure def stepReadingsAreTicketed(before: Home, via: str, after: Home, out: List[
   })
 ```
 
+## Story: Find an installed app in Apps
+
+> As the owner, I want to open Apps on my phone, see the current launcher
+> catalog, and try again if it could not be read.
+
+### The Apps tile belongs to phone Home and leaves while Home is being edited
+
+The drawer uses the last accepted catalog, including while a new reading is
+on its way. The page displays reading, unreadable, empty and matching states.
+
+```quint
+pure def offersDrawer(h: Home): bool = onPhone(h) and not(h.editing)
+
+pure def canTryAgain(h: Home, shell: S::Shell): bool =
+  onPhone(h) and shell.drawer and h.installed.read.status == R::Failed
+
+pure def tryAgain(h: Home, shell: S::Shell): Moved = thenReadApps(List(), h, false)
+```
+
+### The app in the menu can be added to Home or handed to Android as App info
+
+An accepted Add to Home uses the same ticketed save as other tiles. App
+info uses the same one-at-a-time handoff as opening an app.
+
+```quint
+pure def inMenu(h: Home, app: str, shell: S::Shell, drawer: D::Drawer): bool =
+  onPhone(h) and not(h.editing) and shell.drawer and drawer.menu == app and h.installed.apps.contains(app)
+
+pure def canPinInstalled(h: Home, app: str, shell: S::Shell, drawer: D::Drawer, by: Actor): bool =
+  by == Owner and inMenu(h, app, shell, drawer) and T::canAddTile(h.tiles, T::Installed({ app: app }))
+
+pure def pinInstalled(h: Home, app: str, shell: S::Shell, drawer: D::Drawer, by: Actor): Moved =
+  changed(T::addTile(h.tiles, T::Installed({ app: app })), h)
+
+pure def canShowAppInfo(h: Home, app: str, shell: S::Shell, drawer: D::Drawer, by: Actor): bool =
+  by == Owner and inMenu(h, app, shell, drawer) and N::canSend(h.handoff)
+
+pure def showAppInfo(h: Home, app: str, shell: S::Shell, drawer: D::Drawer, now: int, by: Actor): Moved =
+  asking(N::AppInfo({ app: app }), now, h)
+```
+
 ## Story: Open an app
 
 > As the owner, I want a tap to open the app once, and to be told why when
@@ -461,7 +505,7 @@ pure def moveTile(h: Home, tile: T::Tile, onto: T::Tile, behind: bool, shell: S:
 pure def isSave(e: Effect): bool = match e { | SaveHome(s) => true | _ => false }
 
 pure def stepEveryChangeIsSentToBeSaved(before: Home, via: str, after: Home, out: List[Effect]): bool =
-  (out.some(e => isSave(e)) iff (via == "addToHome" or via == "removeFromHome" or via == "moveTile"))
+  (out.some(e => isSave(e)) iff (via == "addToHome" or via == "pinInstalled" or via == "removeFromHome" or via == "moveTile"))
     and out.every(e => match e {
       | SaveHome(s) => s.tiles == after.tiles.favourites and s.ticket == after.tiles.save.id and T::saving(after.tiles)
       | _ => true
@@ -546,15 +590,23 @@ pure def done(h: Home): Home = { ...h, editing: false, adding: false }
 
 ### When the shell moves, anything over Home ends editing
 
-The shell tells Home each time it moves.
+The shell tells Home each time it moves. Opening Apps also starts the first
+catalog read if the phone's apps have not yet been read.
 
 ```quint
-pure def canShellMoved(h: Home, shell: S::Shell): bool = h.editing and S::layers(shell) > 0
+pure def needsAppsForDrawer(h: Home, shell: S::Shell): bool =
+  onPhone(h) and shell.drawer and h.installed.read.status == R::Idle
 
-pure def shellMoved(h: Home, shell: S::Shell): Home = { ...h, editing: false, adding: false }
+pure def canShellMoved(h: Home, shell: S::Shell): bool =
+  (h.editing and S::layers(shell) > 0) or needsAppsForDrawer(h, shell)
+
+pure def shellMoved(h: Home, shell: S::Shell): Moved =
+  val fitted = if (S::layers(shell) > 0) { ...h, editing: false, adding: false } else h
+  if (needsAppsForDrawer(h, shell)) thenReadApps(List(), fitted, false)
+  else { state: fitted, out: List() }
 
 pure def lawWhatTheShellLeavesBehindCloses(home: Home, shell: S::Shell): bool =
-  canShellMoved(home, shell) implies not(shellMoved(home, shell).editing)
+  canShellMoved(home, shell) implies (S::layers(shell) > 0 implies not(shellMoved(home, shell).state.editing))
 ```
 
 ### Nothing on Home starts under a layer of the shell
@@ -639,16 +691,20 @@ pure def sometimesTheShadeGoesUnanswered(h: Home): bool = N::isShade(h.handoff.a
 
 ### A notice shows as a toast on bare Home and in the edit bar while editing; told while an app or Ask Alpha is up, it is not shown
 
+When Apps is open, a notice is told in that drawer.
+
 ```quint
-type Place = AsToast | InEditBar | Nowhere
+type Place = AsToast | InDrawer | InEditBar | Nowhere
 
 pure def noticeAt(h: Home, shell: S::Shell): Place =
   if (shell.trail.length() > 0 or shell.assistant != S::Bar) Nowhere
+  else if (shell.drawer) InDrawer
   else if (h.editing) InEditBar
   else AsToast
 
 pure def lawANoticeIsShownOnlyWhereTheOwnerIs(home: Home, shell: S::Shell): bool =
   ((noticeAt(home, shell) == Nowhere) iff (shell.trail.length() > 0 or shell.assistant != S::Bar))
+    and (noticeAt(home, shell) == InDrawer implies shell.drawer)
     and (noticeAt(home, shell) == InEditBar implies home.editing)
     and (noticeAt(home, shell) == AsToast implies S::layers(shell) == 0)
 ```
@@ -661,8 +717,9 @@ pure def lawANoticeIsShownOnlyWhereTheOwnerIs(home: Home, shell: S::Shell): bool
 ### The agent is refused every touch on Home: opening an app, the shade, and adding, removing or moving a tile
 
 ```quint
-pure def lawTheAgentChangesNothingOnHome(home: Home, shell: S::Shell, app: str, tile: T::Tile, onto: T::Tile, view: S::View): bool =
+pure def lawTheAgentChangesNothingOnHome(home: Home, shell: S::Shell, drawer: D::Drawer, app: str, tile: T::Tile, onto: T::Tile, view: S::View): bool =
   not(canOpenTile(home, view, shell, Agent)) and not(canOpenApp(home, app, Agent))
+    and not(canPinInstalled(home, app, shell, drawer, Agent)) and not(canShowAppInfo(home, app, shell, drawer, Agent))
     and not(canPullDown(home, shell, false, Agent))
     and not(canAddToHome(home, tile, shell, Agent)) and not(canRemoveFromHome(home, tile, shell, Agent))
     and not(canMoveTile(home, tile, onto, shell, Agent))

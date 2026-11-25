@@ -366,7 +366,8 @@ submitted is watched for its final record, up to six reads half a second
 apart. A text whose outcome is still unknown, or whose answer was lost, is
 settled only by the phone's own send record for its operation ID: read
 back once, it ends as sent, not sent, or unknown, and nothing is sent
-again.
+again. A contact deletion that Android queues waits for that deletion's
+receipt before Alpha reports whether it happened.
 
 ```quint
 pure def canActed(r: Request, id: int, by: Actor): bool = by == Device and r.stage == Acting and A::canConclude(r.attempt, id)

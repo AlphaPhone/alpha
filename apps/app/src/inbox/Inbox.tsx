@@ -4,7 +4,7 @@ import {
   InboxLinkReview, type InboxListRow, InboxListScreen, type InboxListStateKind, InboxMessageScreen, type InboxMessageFaultKind, InboxNotice,
   type InboxNoticeKind, ToastRegion,
 } from "@repo/ui";
-import type { MailCard, MailMessage } from "@elizaos/cloud/client";
+import type { MailCard, MailMessage } from "@elizaos/cloud";
 import { Effect, type ManagedRuntime } from "effect";
 import { type ReactNode, useCallback, useMemo, useState } from "react";
 import { type Folder, type Mailbox, accessOf, readable, searchableIn } from "../../gen/app__inbox.ts";
@@ -25,6 +25,7 @@ import type { Machine as Shell } from "../../gen/app__shell.effect.vibe";
 import { useMachine as useShell } from "../../gen/app__shell.react.ts";
 import type { Machine as Preferences } from "../../gen/app__settings__preferences.effect.vibe";
 import { useMachine as usePreferences } from "../../gen/app__settings__preferences.react.ts";
+import type { Alpha } from "../runtime/area.tsx";
 import { useTimed } from "../runtime/react.ts";
 import type { Cloud } from "../platform/cloud.vibe";
 import { untimed } from "../runtime/reactor.vibe";
@@ -76,7 +77,7 @@ const senderAddress = (from: string) => /<([^>]+)>/u.exec(from)?.[1] ?? from;
 
 /** Why the list has nothing to show, as the list's state says it; none where it has rows to show or is reading. */
 function emptyOf(s: Mailbox): InboxListStateKind | undefined {
-  if (!s.signedIn) return "signedOut";
+  if (!s.signedIn || s.failure === "LeaseNeeded") return "signedOut";
   if (s.accounts.status === "Loaded" && s.selected.account === 0 && s.connected.length === 0) return "notConnected";
   if (s.accounts.status === "Loaded" && s.selected.account !== 0 && !readable(s)) return "needsAccess";
   if (readable(s) && !searchableIn(s.selected.folder, s)) return "unavailable";
@@ -280,7 +281,7 @@ const sizeOf = (bytes: number) => (bytes >= 1_000_000 ? `${(bytes / 1_000_000).t
  * its event.
  * @model spec/app/inbox/index.md
  */
-export function Inbox({ runtime }: InboxProps) {
+export function Inbox({ runtime, alpha }: InboxProps & { alpha: Alpha }) {
   const { state, cause, can, send } = useList(runtime);
   const message = useMessage(runtime);
   const changes = useTimed(runtime, useChanges);
@@ -376,7 +377,7 @@ export function Inbox({ runtime }: InboxProps) {
   return (
     <>
       <InboxListScreen
-        onBack={shell.can({ type: "goBack" }) ? () => void shell.send({ type: "goBack" }) : undefined}
+        onBack={shell.can({ type: "goBack" }) ? () => void alpha.back() : undefined}
         account={account === 0 ? undefined : mailOf(runtime, (mail) => mail.email(account))}
         folder={folderNames[folder]}
         unavailable={!state.searchable}

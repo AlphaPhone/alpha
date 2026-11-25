@@ -1,6 +1,6 @@
 // spec/app/inbox/index.md, "Story: See my mail"; spec/app/inbox/index.md, "Story: See my last list when offline"; spec/app/inbox/message.md, "Story: Read a message"
-import { CloudError, type MailCard, type MailMessage, type MailOperation, type MailSearch } from "@elizaos/cloud/client"
-import { gmailReadable, type GmailAccount, type GmailDraftSummary } from "@elizaos/plugin-inbox/mailbox"
+import { CloudError, type MailCard, type MailMessage, type MailOperation, type MailSearch } from "@elizaos/cloud"
+import { gmailReadable, type GmailAccount, type GmailDraftSummary } from "@elizaos/plugin-inbox-client"
 import * as KeyValueStore from "effect/persistence/KeyValueStore"
 import type { Failure, Folder, Linked, Mailbox, Selection } from "../../gen/app__inbox.ts"
 import type { Fault } from "../../gen/app__inbox__message.ts"
@@ -9,7 +9,7 @@ import { Attempts } from "../runtime/attempts.vibe"
 import { provider } from "./provider.vibe"
 
 module pure {
-  import type { MailCard } from "@elizaos/cloud/client"
+  import type { MailCard } from "@elizaos/cloud"
   import type { Selection } from "../../gen/app__inbox.ts"
 
   /** One message of a list as the screen shows it: Alpha's number for it, and eliza's card of it. */
@@ -98,6 +98,8 @@ export service Mail {
   relabelled(message: number, unread: boolean): void!!
   /** The list on screen for `state`: none, the one kept, or the one read. */
   shown(state: Mailbox): ReadonlyArray<Letter>
+  /** The first page of the unsearched Inbox read for the currently authorized credential. */
+  incoming(state: Mailbox): ReadonlyArray<Letter>
   read(ticket: number, body: MailMessage): void
   body(ticket: number): MailMessage | undefined
   /** Forget every account, message and list of the session before. */
@@ -300,6 +302,14 @@ export const mail = Layer.effect(Mail, effect {
       const live = currentPage(state)
       return live !== undefined && sameSelection(live.selection, state.selected) && live.credential === credentialOf(state) ? live.letters : []
     },
+    incoming(state: Mailbox) {
+      const credential = credentialOf(state)
+      const kept = currentPage(state) ?? ledger.kept
+      if (kept === undefined || credential === undefined || credential !== state.keptCredential ||
+        kept.credential !== credential || kept.selection.account !== state.selected.account ||
+        kept.selection.folder !== "Incoming" || kept.selection.query !== "") return []
+      return kept.letters.slice(0, pageSize)
+    },
     read(ticket: number, body: MailMessage) {
       bodies.set(ticket, body)
       if (bodies.size > 8) {
@@ -331,13 +341,14 @@ function consentOf(account: GmailAccount) {
   return { read, send: read && has("google.gmail.send"), modify: read && (has("google.gmail.manage") || has("google.gmail.mailbox")) }
 }
 
-/** The failure of a read, as the list tells it: offline, access withdrawn, or Gmail not reached for another reason. */
+/** The failure of a read, as the list tells it: offline, access withdrawn, a phone that needs one more sign-in for its mail lease, or Gmail not reached for another reason. */
 export function failureOf(failed: unknown): Failure {
   const cause = failed instanceof Asked ? failed.cause : failed
   if (!(cause instanceof CloudError)) return "Unreachable"
   const failure = cause.failure
   if (failure.tag === "CloudNetwork") return "Offline"
   if (failure.tag === "CloudCredentialInvalid") return "Revoked"
+  if (failure.tag === "CloudRefused" && failure.reason === "DeviceKeyNotAllowed") return "LeaseNeeded"
   if (failure.tag === "CloudRefused" && (failure.code === "GoogleReauthRequired" || failure.reason === "CredentialRevoked" || failure.reason === "GrantRequired" || failure.reason === "CapabilityMissing")) return "Revoked"
   return "Unreachable"
 }

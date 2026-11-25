@@ -1,5 +1,5 @@
 // spec/app/inbox/message.md, "Story: Read a message"
-import type { MailMessage } from "@elizaos/cloud/client";
+import type { MailMessage } from "@elizaos/cloud";
 import createDOMPurify from "dompurify";
 import { type Link, linkOf, linksOf } from "./links.ts";
 
