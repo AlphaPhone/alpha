@@ -1,4 +1,4 @@
-import type { ComponentProps, PointerEvent, ReactNode, Ref } from "react";
+import { type ComponentProps, type PointerEvent, type ReactNode, type Ref, useRef } from "react";
 import { ArrowUp, Clock, Keyboard, Mic, Paperclip, Plus, Search } from "lucide-react";
 import { cn } from "../../lib/cn.ts";
 import { Button } from "../Button.tsx";
@@ -64,6 +64,8 @@ export type AssistantComposerProps = Omit<ComponentProps<"div">, "children" | "o
   onOpen?: () => void;
   /** Presents the resting controls as a pill with a separate Type button. */
   onType?: () => void;
+  /** A swipe up that starts on one of the pill's buttons, as v121's pill took one from anywhere on it; its mark and its background are the dock's own drag. */
+  onSwipeUp?: () => void;
   /** The other target when Ask Alpha is open above a call or a conversation. */
   leading?: ReactNode;
   /** The mark in the closed dock when it also acts as the gesture handle. */
@@ -86,6 +88,40 @@ export type AssistantComposerProps = Omit<ComponentProps<"div">, "children" | "o
 
 const reasons = { away: "Alpha cannot be reached", sensitive: "This screen is private and is never sent" };
 
+const swipeSlop = 6;
+
+/**
+ * v121's pillSw on the pill's buttons: nothing is taken until the finger moves past a few pixels, so a still tap stays
+ * the button's; once it moves the finger is held, and a release above where it started is a swipe up. The press is seen
+ * on its way down, before Talk keeps it for the field.
+ */
+function usePillSwipe(onSwipeUp: (() => void) | undefined) {
+  const swipeRef = useRef<{ pointer: number; y: number; moved: boolean } | undefined>(undefined);
+  if (!onSwipeUp) return {};
+  return {
+    onPointerDownCapture: (event: PointerEvent<HTMLDivElement>) => {
+      const on = event.target instanceof Element ? event.target.closest("button") : null;
+      swipeRef.current = on && !on.matches("[data-alpha-grabber]") && event.isPrimary && event.button === 0 ? { pointer: event.pointerId, y: event.clientY, moved: false } : undefined;
+    },
+    onPointerMove: (event: PointerEvent<HTMLDivElement>) => {
+      const swipe = swipeRef.current;
+      if (!swipe || swipe.pointer !== event.pointerId || swipe.moved || Math.abs(event.clientY - swipe.y) <= swipeSlop) return;
+      swipe.moved = true;
+      try {
+        event.currentTarget.setPointerCapture(event.pointerId);
+      } catch {
+        return;
+      }
+    },
+    onPointerUp: (event: PointerEvent<HTMLDivElement>) => {
+      const swipe = swipeRef.current;
+      swipeRef.current = undefined;
+      if (swipe?.moved && swipe.pointer === event.pointerId && event.clientY < swipe.y - swipeSlop) onSwipeUp();
+    },
+    onPointerCancel: () => { swipeRef.current = undefined; },
+  };
+}
+
 function keepComposerFocus(event: PointerEvent<HTMLButtonElement>) {
   event.stopPropagation();
   if (event.button === 0 && event.currentTarget.ownerDocument.activeElement?.matches("textarea[data-alpha-composer]")) event.preventDefault();
@@ -99,13 +135,14 @@ function keepComposerFocus(event: PointerEvent<HTMLButtonElement>) {
  */
 export function AssistantComposer({
   variant = "sheet", value, onValueChange, closed = false, notice, unavailable, attachments = [], limit = 4, quote, editing = false, lift,
-  onSend, onStop, stopping = false, onAttach, onSearch, onNew, making = false, onHistory, onTalk, onDictate, showUnavailableTalk = false, voice, voiceNotice, onOpen, onType, leading, opener, placeholder, onFocusField, fieldRef, fieldPull, onRemoveAttachment, onPreviewAttachment, onUnquote, className, style, ...props
+  onSend, onStop, stopping = false, onAttach, onSearch, onNew, making = false, onHistory, onTalk, onDictate, showUnavailableTalk = false, voice, voiceNotice, onOpen, onType, onSwipeUp, leading, opener, placeholder, onFocusField, fieldRef, fieldPull, onRemoveAttachment, onPreviewAttachment, onUnquote, className, style, ...props
 }: AssistantComposerProps) {
   const written = value.trim() !== "" || attachments.length > 0;
   // spec/app/assistant/dock.md, "A press does one thing: a tap is never also a drag, and a late click never taps"
   const draggable = value.length === 0;
   const bar = variant === "bar";
   const compact = bar && onType !== undefined;
+  const swiping = usePillSwipe(compact ? onSwipeUp : undefined);
   const targeting = !bar && placeholder !== undefined;
   const frame = bar ? "mx-4 [--alpha-composer-rest:1.75rem]" : "mx-3 [--alpha-composer-rest:1.875rem]";
   const pull = useAssistantPull<HTMLTextAreaElement>(fieldPull, true);
@@ -119,7 +156,7 @@ export function AssistantComposer({
       {!compact && editing ? <AssistantQuoteBar kind="editing" /> : null}
       {voiceNotice}
       {voice}
-      <div hidden={Boolean(voice)} className={cn("items-center bg-secondary", voice ? "hidden" : "flex", compact ? "touch-none gap-0.5 self-center rounded-dock-compact p-1.25 shadow-dock-compact dark:shadow-dock-compact-dark" : bar ? cn("min-h-[calc(--spacing(18.5)_-_2_*_var(--alpha-composer-fit,0px))] gap-1 rounded-dock py-1.5 pr-2 pl-2.25 shadow-dock dark:shadow-dock-dark", draggable ? "touch-none" : "touch-pan-y") : cn("min-h-[calc(--spacing(17)_-_2_*_var(--alpha-composer-fit,0px))] touch-pan-y gap-1.5 rounded-sheet py-1.5 pr-1.5", targeting ? "pl-1.5 ring-[1.5px] ring-primary ring-inset" : "pl-5"))}>
+      <div {...swiping} hidden={Boolean(voice)} className={cn("items-center bg-secondary", voice ? "hidden" : "flex", compact ? "touch-none gap-0.5 self-center rounded-dock-compact p-1.25 shadow-dock-compact dark:shadow-dock-compact-dark" : bar ? cn("min-h-[calc(--spacing(18.5)_-_2_*_var(--alpha-composer-fit,0px))] gap-1 rounded-dock py-1.5 pr-2 pl-2.25 shadow-dock dark:shadow-dock-dark", draggable ? "touch-none" : "touch-pan-y") : cn("min-h-[calc(--spacing(17)_-_2_*_var(--alpha-composer-fit,0px))] touch-pan-y gap-1.5 rounded-sheet py-1.5 pr-1.5", targeting ? "pl-1.5 ring-[1.5px] ring-primary ring-inset" : "pl-5"))}>
         {leading}
         {bar ? opener ?? (onOpen ? (
           <Button size="icon" aria-label="Open conversation" data-alpha-input-drag-alpha="" className="overflow-hidden bg-alpha text-alpha-foreground hover:bg-alpha/90" onClick={onOpen}><Mark aria-hidden className="size-[118%]" /></Button>

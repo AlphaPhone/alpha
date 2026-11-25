@@ -224,6 +224,105 @@ describe("Ask Alpha dock and shell navigation", () => {
     expect((await runtime.runPromise(Effect.flatMap(Shell, (m) => m.get()))).assistant).toBe("Bar");
   });
 
+  // spec/app/assistant/dock.md, "Story: Drag Ask Alpha where I want it"; spec/app/assistant/dock.md, "A drag released asks the shell once for where it landed, and keeps a sheet's height"
+  it("the sheet follows the finger from Alpha's mark on the bar and lands where the drag is released (spec/app/assistant/dock.md, \"Story: Drag Ask Alpha where I want it\")", async () => {
+    const { runtime } = await mountDock({ view: "Home", flush: underAct });
+    const section = () => document.querySelector<HTMLElement>("section[aria-label='Ask Alpha']");
+    const at = (type: string, y: number, target: EventTarget = window) =>
+      underAct(() => { target.dispatchEvent(new PointerEvent(type, { bubbles: true, clientY: y, pointerId: 5, pointerType: "touch" })); });
+    const shell = () => runtime.runPromise(Effect.flatMap(Shell, (m) => m.get()));
+    const pressed = () => runtime.runPromise(Effect.flatMap(Dock, (m) => Stream.runHead(Stream.filter(m.changes, (s) => s.gesture === "Pressed"))));
+
+    const mark = document.querySelector<HTMLElement>("button[aria-label='Open conversation']");
+    expect(mark).not.toBeNull();
+    await at("pointerdown", 700, mark ?? window);
+    await underAct(async () => { await pressed(); });
+    await at("pointermove", 650, mark ?? window);
+    await at("pointermove", 500, mark ?? window);
+    expect([section()?.getAttribute("data-alpha-detent"), section()?.style.height]).toEqual(["sheet", "302px"]);
+    expect((await shell()).assistant).toBe("Bar");
+    await at("pointerup", 500, mark ?? window);
+    await act(async () => { await runtime.runPromise(Effect.flatMap(Shell, (m) => Stream.runHead(Stream.filter(m.changes, (s) => s.assistant === "Sheet")))); });
+
+    // spec/app/assistant/dock.md, "A released drag lands on the bar, a sheet at a height, or the full screen": pulled to the floor by its handle, the open sheet follows and rests on the bar
+    const handle = document.querySelector<HTMLElement>("button[aria-label='Resize chat']");
+    expect(handle).not.toBeNull();
+    await at("pointerdown", 400, handle ?? window);
+    await underAct(async () => { await pressed(); });
+    await at("pointermove", 500, handle ?? window);
+    await at("pointermove", 740, handle ?? window);
+    expect(section()?.style.height).toBe("102px");
+    await at("pointerup", 740, handle ?? window);
+    await act(async () => { await runtime.runPromise(Effect.flatMap(Shell, (m) => Stream.runHead(Stream.filter(m.changes, (s) => s.assistant === "Bar")))); });
+    expect(section()?.getAttribute("data-alpha-detent")).toBe("bar");
+  });
+
+  // spec/app/assistant/dock.md, "Story: Drag Ask Alpha where I want it": as v121's chat scrim did, a tap or a drag on the page outside the open sheet lowers it when it ends
+  it("a tap or a drag outside the open sheet lowers it to the bar (spec/app/assistant/dock.md, \"Story: Drag Ask Alpha where I want it\")", async () => {
+    const { runtime } = await mountDock({ view: "Home", flush: underAct });
+    const shell = () => runtime.runPromise(Effect.flatMap(Shell, (m) => m.get()));
+    const raise = () => act(async () => {
+      await runtime.runPromise(Effect.flatMap(Shell, (m) => m.send({ type: "raise", detent: "Sheet" })));
+    });
+    const lowered = () => act(async () => { await runtime.runPromise(Effect.flatMap(Shell, (m) => Stream.runHead(Stream.filter(m.changes, (s) => s.assistant === "Bar")))); });
+    const on = (target: Element | null, type: string, y: number) =>
+      underAct(() => { target?.dispatchEvent(new PointerEvent(type, { bubbles: true, clientX: 40, clientY: y, pointerId: 9, pointerType: "touch", isPrimary: true })); });
+    const scrim = () => document.querySelector("[data-alpha-chat-scrim]");
+
+    await raise();
+    expect((await shell()).assistant).toBe("Sheet");
+    await on(scrim(), "pointerdown", 120);
+    await on(scrim(), "pointerup", 120);
+    await lowered();
+
+    await raise();
+    expect(scrim()).not.toBeNull();
+    await on(scrim(), "pointerdown", 120);
+    await on(scrim(), "pointermove", 160);
+    await on(scrim(), "pointermove", 260);
+    expect((await shell()).assistant).toBe("Sheet");
+    await on(scrim(), "pointerup", 260);
+    await lowered();
+  });
+
+  // spec/app/assistant/dock.md, "A keyboard closed while typing puts Ask Alpha back on the bar": typing in an app, a tap beside the bar only leaves the field, so Ask Alpha rests once and the app stays
+  it("a tap beside the bar being typed in rests it without leaving the app (spec/app/assistant/dock.md, \"A keyboard closed while typing puts Ask Alpha back on the bar\")", async () => {
+    const { runtime } = await mountDock({ view: "Calendar", flush: underAct });
+    await act(async () => {
+      document.querySelector<HTMLButtonElement>("[data-alpha-compact-dock] button[aria-label='Type']")?.click();
+      await runtime.runPromise(Effect.flatMap(Shell, (m) => Stream.runHead(Stream.filter(m.changes, (s) => s.assistant === "Typing"))));
+    });
+    const textarea = document.querySelector<HTMLTextAreaElement>("textarea[data-alpha-composer]");
+    await act(async () => { textarea?.focus(); });
+    const scrim = document.querySelector("[data-alpha-chat-scrim]");
+    expect(scrim).not.toBeNull();
+    await act(async () => {
+      scrim?.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true, clientX: 40, clientY: 120, pointerId: 11, pointerType: "touch", isPrimary: true }));
+      scrim?.dispatchEvent(new PointerEvent("pointerup", { bubbles: true, clientX: 40, clientY: 120, pointerId: 11, pointerType: "touch", isPrimary: true }));
+      await runtime.runPromise(Effect.flatMap(Shell, (m) => Stream.runHead(Stream.filter(m.changes, (s) => s.assistant === "Bar"))));
+    });
+    await act(async () => { await Effect.runPromise(Effect.sleep("50 millis")); });
+    expect(await runtime.runPromise(Effect.flatMap(Shell, (m) => m.get()))).toMatchObject({ trail: ["Calendar"], assistant: "Bar" });
+  });
+
+  // spec/app/assistant/dock.md, "A keyboard closed while typing puts Ask Alpha back on the bar": a field left with no keyboard report rests it once, and the reported close after it takes no step Back out of the app
+  it("leaving the field being typed in rests Ask Alpha once (spec/app/assistant/dock.md, \"A keyboard closed while typing puts Ask Alpha back on the bar\")", async () => {
+    const { runtime } = await mountDock({ view: "Calendar", flush: underAct });
+    await act(async () => {
+      document.querySelector<HTMLButtonElement>("[data-alpha-compact-dock] button[aria-label='Type']")?.click();
+      await runtime.runPromise(Effect.flatMap(Shell, (m) => Stream.runHead(Stream.filter(m.changes, (s) => s.assistant === "Typing"))));
+    });
+    const textarea = document.querySelector<HTMLTextAreaElement>("textarea[data-alpha-composer]");
+    await act(async () => { textarea?.focus(); });
+    await act(async () => {
+      textarea?.blur();
+      await runtime.runPromise(Effect.flatMap(Shell, (m) => Stream.runHead(Stream.filter(m.changes, (s) => s.assistant === "Bar"))));
+      await runtime.runPromise(Effect.flatMap(Canvas, (m) => m.send({ type: "keyboardReported", shown: true, voice: false })));
+      await runtime.runPromise(Effect.flatMap(Canvas, (m) => m.send({ type: "keyboardReported", shown: false, voice: false })));
+    });
+    expect(await runtime.runPromise(Effect.flatMap(Shell, (m) => m.get()))).toMatchObject({ trail: ["Calendar"], assistant: "Bar" });
+  });
+
   // spec/app/shell/index.md, "Agent navigation shows an admitted app or Home without lowering Ask Alpha"
   it("agent navigation moves between admitted apps and Home while keeping Ask Alpha raised (spec/app/shell/index.md, \"Agent navigation shows an admitted app or Home without lowering Ask Alpha\")", async () => {
     const { runtime } = await mountDock({ view: "Home", withToast: true, flush: underAct });

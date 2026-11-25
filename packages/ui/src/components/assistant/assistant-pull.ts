@@ -8,8 +8,8 @@ type Track = { pointer: number; start: number; prev: Sample; last: Sample; moved
 export type AssistantRelease = { direction: "up" | "down"; flick: boolean; y: number; now: number };
 
 export interface AssistantPull {
-  /** A finger or mouse pressed the control. */
-  onPress?: (press: Press) => void;
+  /** A finger or mouse pressed the control at `y`. */
+  onPress?: (press: Press & { y: number }) => void;
   /** The pointer moved beyond the press slop and may keep moving. */
   onDrag?: (drag: { y: number }) => void;
   /** A drag ended at the reported position. */
@@ -50,7 +50,7 @@ export function useAssistantPull<Target extends HTMLElement>(pull: AssistantPull
       track.current = {
         pointer: event.pointerId, start: sample.y, prev: sample, last: sample, moved: false, onCancel: pull.onCancel,
       };
-      pull.onPress?.({ now: event.timeStamp });
+      pull.onPress?.({ now: event.timeStamp, y: sample.y });
     },
     onPointerMove: (event: PointerEvent<Target>) => {
       const current = track.current;

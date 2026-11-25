@@ -1339,12 +1339,18 @@ function carryDock(fx: Dock.Effect): Job<Dock.Event, Shell, []> {
 // spec/app/assistant/dock.md, "Ask Alpha put away forgets the height its sheet was left at"
 const rested = following(Shell, (shown) => shown.assistant === "Bar", Dock.Machine, (bar): Dock.Event | undefined => (bar ? { type: "putAway", now: untimed } : undefined))
 
-// spec/app/assistant/dock.md, "A keyboard closed while typing puts Ask Alpha back on the bar"
-const keyboardRest = applying(Canvas, (canvas) => canvas.released, effect (releases) => {
-  if (releases === 0) return
+// spec/app/assistant/dock.md, "A keyboard closed while typing puts Ask Alpha back on the bar": a closed keyboard and a field left for elsewhere rest it one at a time, so the second finds the bar and never takes a second step Back
+const resting = Semaphore.makeUnsafe(1)
+export const restTyping = resting.withPermits(1)(effect {
   const shell = try Shell
   const current = try shell.get()
   if (Dock.keyboardClosed(current.assistant).length > 0) try contained(shell.send({ type: "goBack" }), "resting Ask Alpha after typing")
+})
+
+// spec/app/assistant/dock.md, "A keyboard closed while typing puts Ask Alpha back on the bar"
+const keyboardRest = applying(Canvas, (canvas) => canvas.released, effect (releases) => {
+  if (releases === 0) return
+  try restTyping
 })
 
 // spec/app/assistant/index.md, "Back closes a review, then search, then a quote or an edit, one at a time; with none of them open Back is the shell's"; spec/app/shell/layers.md, "A screen says when it has a step of its own to take Back, and when it has none left; its page stays usable"

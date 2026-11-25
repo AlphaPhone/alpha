@@ -17,11 +17,26 @@ const formClose = /\[\/FORM\]\s*$/;
 const cardOpen = /^\s*\[[ \t]*MAPSCARD[ \t]*\][ \t]*$/;
 const cardClose = /^\s*\[[ \t]*\/[ \t]*MAPSCARD[ \t]*\][ \t]*$/;
 const option = /^([^=\n]{1,500})=([^=\n]{1,80})$/;
+const callOpen = /<tool_call>|<function=/;
+const callClose = /<\/function>(?:\s*<\/tool_call>)?|<\/tool_call>/;
+const strayClose = /^\s*(?:<\/function>|<\/tool_call>)\s*$/;
+const partialCall = /<(?:t(?:o(?:o(?:l(?:_(?:c(?:a(?:l(?:l)?)?)?)?)?)?)?)?|f(?:u(?:n(?:c(?:t(?:i(?:o(?:n)?)?)?)?)?)?)?)?$/;
 const tag = String.raw`(?:\[(?:answer|promise)\](?!\()|<(?:answer|promise)>)`;
 const turnTag = new RegExp(String.raw`[ \t]*${tag}[ \t]*(?=\r?$)|${tag}[ \t]*`, "g");
 const turnTagSoFar = /(?:[[<](?:a(?:n(?:s(?:w(?:e(?:r)?)?)?)?)?|p(?:r(?:o(?:m(?:i(?:s(?:e)?)?)?)?)?)?)?|\[(?:answer|promise)\])$/;
 const inlineCode = /(`+[^`]*`+|`.*$)/;
 const partialOpener = /^\s*\[(?:M(?:A(?:P(?:S(?:C(?:A(?:R(?:D)?)?)?)?)?)?)?|C(?:H(?:O(?:I(?:C(?:E(?::[^\]\n]*)?)?)?)?)?)?|F(?:O(?:R(?:M)?)?)?)?$/;
+
+/** Where a written-out tool call opens on a line, in prose only: never inside inline code, as with the turn tag. */
+function callIn(line: string): { readonly index: number; readonly length: number } | undefined {
+  let offset = 0;
+  for (const [at, piece] of line.split(inlineCode).entries()) {
+    const found = at % 2 === 0 ? callOpen.exec(piece) : null;
+    if (found !== null) return { index: offset + found.index, length: found[0].length };
+    offset += piece.length;
+  }
+  return undefined;
+}
 
 interface Blocks {
   readonly words: string;
@@ -44,10 +59,12 @@ export function withoutTurnTags(text: string, streaming = false): string {
 }
 
 /**
- * A reply read for the owner, without the agent's turn tag: its Maps cards (eliza's recognizer), its Maps share questions and its forms taken out of the
- * words, outside a code fence only, with each share question's answers kept. Any other block reads as text. While the reply
- * is still `streaming`, a block that has not closed, and a last line that may still become one, are held back; in a finished
- * reply an unclosed block stays as text. @throws {never}
+ * A reply read for the owner, without the agent's turn tag: its Maps cards (eliza's recognizer), its Maps share questions,
+ * its forms and any tool call the model wrote out as text (`<tool_call>` or `<function=` to its closing tag) taken out of the
+ * words, outside a code fence only and never across a fence, with each share question's answers kept; the prose left around a
+ * tool call is read again as one line, which loses only its own trailing blanks. Any other block reads as text. While the
+ * reply is still `streaming`, a block that has not closed, and a last line that may still become one, are held back; in a
+ * finished reply an unclosed block stays as text. @throws {never}
  */
 export function replyBlocks(text: string, streaming = false): Blocks {
   const lines = withoutMapsCards(withoutTurnTags(text, streaming)).split(/\r?\n/);
@@ -64,6 +81,39 @@ export function replyBlocks(text: string, streaming = false): Blocks {
     if (fenced) {
       kept.push(line);
       continue;
+    }
+    const call = callIn(line);
+    if (call !== undefined) {
+      const before = line.slice(0, call.index);
+      let end = at;
+      let after: string | undefined;
+      for (; end < lines.length && (end === at || !fence.test(lines[end] ?? "")); end++) {
+        const from = end === at ? call.index + call.length : 0;
+        const rest = (lines[end] ?? "").slice(from);
+        const closed = callClose.exec(rest);
+        if (closed !== null) {
+          after = rest.slice(closed.index + closed[0].length);
+          break;
+        }
+      }
+      if (after === undefined) {
+        if (!streaming) {
+          kept.push(line);
+          continue;
+        }
+        if (before.trim() !== "") kept.push(before.trimEnd());
+        break;
+      }
+      const joined = (/(^|\s)$/.test(before) ? before + after.trimStart() : before + after).trimEnd();
+      lines.splice(at, end - at + 1, ...(joined.trim() === "" ? [] : [joined]));
+      at--;
+      continue;
+    }
+    if (strayClose.test(line)) continue;
+    if (streaming && at === lines.length - 1 && partialCall.test(line)) {
+      const head = line.replace(partialCall, "").trimEnd();
+      if (head.trim() !== "") kept.push(head);
+      break;
     }
     if (streaming && at === lines.length - 1 && partialOpener.test(line)) break;
     const share = shareOpen.exec(line);

@@ -1,7 +1,7 @@
-// spec/app/assistant/index.md, "Story: Ask Alpha something"; spec/app/assistant/index.md, "Story: Stop a reply"; spec/app/assistant/chats.md, "Story: Find my conversations"; spec/app/assistant/composer.md, "Story: Send what I wrote"; spec/app/assistant/dock.md, "Focusing or tapping the composer on the bar opens Ask Alpha as a sheet"; spec/app/assistant/search.md, "Story: Search my conversations"; spec/app/assistant/reply.md, "Story: Hear a brief acknowledgment and still get the whole answer"
+// spec/app/assistant/index.md, "Story: Ask Alpha something"; spec/app/assistant/index.md, "Story: Stop a reply"; spec/app/assistant/chats.md, "Story: Find my conversations"; spec/app/assistant/composer.md, "Story: Send what I wrote"; spec/app/assistant/dock.md, "Focusing or tapping the composer on the bar opens Ask Alpha as a sheet"; spec/app/assistant/dock.md, "Inside an app other than the Browser, Ask Alpha at rest is the pill; Type raises it to typing, where the whole bar shows, and a swipe up from it opens the sheet"; spec/app/assistant/search.md, "Story: Search my conversations"; spec/app/assistant/reply.md, "Story: Hear a brief acknowledgment and still get the whole answer"; spec/app/assistant/reply.md, "A recognized tool block outside a fence becomes its card; inside a fence every line stays code"
 import {
   Alert, AssistantCard, AssistantCardFrame, Button, AssistantConversation, AssistantGrabber, AssistantPhotoPreview, ConfirmDialog, Sheet, SheetContent, SmsReviewCard, Textarea,
-  type AssistantAttachment, type AssistantComposerProps, type AssistantDraftNoticeProps, type AssistantTurnNoteProps,
+  type AssistantAttachment, type AssistantComposerProps, type AssistantPull, type AssistantDraftNoticeProps, type AssistantTurnNoteProps,
 } from "@repo/ui";
 import { Effect, type ManagedRuntime } from "effect";
 import { FileText } from "lucide-react";
@@ -44,9 +44,10 @@ import type { Machine as NotesMachine } from "../../gen/app__notes.effect.vibe";
 import { Documents } from "../platform/documents.vibe";
 import { AttachmentSources, type AttachmentSourceRow } from "./AttachmentSources.tsx";
 import { AttachmentPicker, choosePickerRow, clearPickerChoice, importPickerFiles, openAttachmentPicker, pickSystemDocument, upPickerFolder, usePickerVolume } from "./attachment-picker.vibe";
-import { askComms, freedom, openChatSearch } from "./assistant.vibe";
+import { askComms, freedom, openChatSearch, restTyping } from "./assistant.vibe";
 import { acceptedFiles, acceptedPhotos, attachmentAuthority, previewFile, removeFile, retireTranscript, sameBinding } from "./attachments.vibe";
 import { chip, type MessageActions, useHistorySheets, useMessageRows } from "./history.tsx";
+import { barHeight, ChatScrim, useSheetFollow } from "./follow.tsx";
 import { holdMessagePress } from "./message-actions.vibe";
 import { ReplyFailure } from "./ReplyFailure.tsx";
 import {
@@ -113,7 +114,6 @@ function waiting(writing: Writing, files: readonly Attached[], transcriptTitle: 
 
 const detached = { mail: "Mail", shown: "Shown" } as const;
 
-const barHeight = 102;
 const emptyLines: readonly Line[] = [];
 const settings = { type: "openView", view: "Settings" } as const;
 const maps = { type: "openView", view: "Maps" } as const;
@@ -355,6 +355,10 @@ interface DockHandleProps {
   compact: boolean;
   focusOnPointerOpen: boolean;
   field: RefObject<HTMLTextAreaElement | null>;
+  /** The press, drag, release and cancel of the handle, which the sheet follows. */
+  gesture: AssistantPull;
+  /** The press ended without moving: the gesture is over. */
+  done: () => void;
 }
 
 function dockPull(dock: DockHandleProps["dock"], detent: DockHandleProps["detent"]): NonNullable<AssistantComposerProps["fieldPull"]> {
@@ -369,13 +373,14 @@ function dockPull(dock: DockHandleProps["dock"], detent: DockHandleProps["detent
   };
 }
 
-function DockHandle({ dock, detent, compact, focusOnPointerOpen, field }: DockHandleProps) {
+function DockHandle({ dock, detent, compact, focusOnPointerOpen, field, gesture, done }: DockHandleProps) {
   const open = dockOpen(detent);
   return (
     <AssistantGrabber
       variant={open ? "handle" : "mark"}
-      {...dockPull(dock, detent)}
+      {...gesture}
       onLift={() => {
+        done();
         void dock.send({ type: "lift", now: untimed });
         if (!open && focusOnPointerOpen) field.current?.focus();
       }}
@@ -417,6 +422,7 @@ export function Assistant({ runtime, messageActions, speech, canReadAloud = fals
   const mail = useMemo(() => runtime.runSync(MailQuestions), [runtime]);
   const mailStore = useMemo(() => ({ subscribe: (listener: () => void) => mail.subscribe(listener), snapshot: () => mail.snapshot() }), [mail]);
   const reviewed = useSyncExternalStore(mailStore.subscribe, mailStore.snapshot);
+  const sectionRef = useRef<HTMLElement>(null);
   const composerRef = useRef<HTMLTextAreaElement>(null);
   const focusOnRevealRef = useRef(false);
   const { voice: renderVoice, voicePanel: renderDictation, interim, keyboard, ...speechProps } = speech ?? {};
@@ -426,6 +432,7 @@ export function Assistant({ runtime, messageActions, speech, canReadAloud = fals
   const currentView = shell.state?.trail.at(-1);
   const onComms = isCommsView(currentView);
   const assistantDetent = shell.state?.assistant ?? "Bar";
+  const { following, gesture, done } = useSheetFollow(dock, assistantDetent, sectionRef);
   const compact = assistantDetent === "Bar" && currentView !== undefined && currentView !== "Browser" && !onComms;
   const composerField = useCallback((element: HTMLTextAreaElement | null) => {
     composerRef.current = element;
@@ -587,16 +594,20 @@ export function Assistant({ runtime, messageActions, speech, canReadAloud = fals
   };
   const draftEditable = composer.can({ type: "edit", blank: false, long: false });
   const pullFromField = shell.state && browserFieldPull(shell.state, seen.typed === "", draftEditable);
-  const grabber = shell.state ? <DockHandle dock={dock} detent={assistantDetent} compact={compact}
+  const grabber = shell.state ? <DockHandle dock={dock} detent={assistantDetent} compact={compact} gesture={gesture} done={done}
     focusOnPointerOpen={currentView !== undefined && !compact} field={composerRef} /> : undefined;
+  const live = following !== undefined;
+  const scrim = !onComms && !live && !dock.state?.voice && currentView !== "Camera" && (assistantDetent === "Sheet" || assistantDetent === "Typing");
 
   return (
     <>
       <AssistantAttachments runtime={runtime} attachments={attachments} preview={previewed} notice={seen.attachmentNotice} composerRef={composerRef} />
       {onComms && full && <CommsTarget runtime={runtime} placement="strip" />}
+      {scrim ? <ChatScrim typing={assistantDetent === "Typing"} field={composerRef} onLower={() => { if (shell.can(back)) void shell.send(back); }} /> : null}
       {(!onComms || open) && <AssistantConversation
+        ref={sectionRef}
         voicePanel={voicePanel}
-        detent={assistantDetent === "Full" ? "full" : assistantDetent === "Sheet" ? "sheet" : "bar"}
+        detent={live && !onComms ? "sheet" : assistantDetent === "Full" ? "full" : assistantDetent === "Sheet" ? "sheet" : "bar"}
         barDrag={shell.state ? {
           onStart: () => {
             void dock.send({ type: "press", detent: assistantDetent, now: untimed });
@@ -608,10 +619,10 @@ export function Assistant({ runtime, messageActions, speech, canReadAloud = fals
           },
           onCancel: () => { void dock.send({ type: "shift", now: untimed }); },
         } : undefined}
-        className={onComms ? "relative w-full motion-safe:transition-[height] motion-safe:duration-[420ms]" : open ? "fixed inset-x-0 bottom-0 mx-auto max-w-md" : "sticky bottom-0"}
+        className={onComms ? "relative w-full motion-safe:transition-[height] motion-safe:duration-[420ms]" : open || live ? "fixed inset-x-0 bottom-0 mx-auto max-w-md" : "sticky bottom-0"}
         style={onComms
-          ? assistantDetent === "Full" ? { height: "calc(100dvh - 52px)" } : keptHeight === undefined ? undefined : { height: `clamp(38dvh, ${keptHeight}px, 60dvh)` }
-          : keptHeight ? { height: keptHeight } : undefined}
+          ? live ? { height: following, transition: "none" } : assistantDetent === "Full" ? { height: "calc(100dvh - 52px)" } : keptHeight === undefined ? undefined : { height: `clamp(38dvh, ${keptHeight}px, 60dvh)` }
+          : live ? { height: following, borderRadius: following >= window.innerHeight ? 0 : undefined } : keptHeight ? { height: keptHeight } : undefined}
         header={{
           title: seen.titles.get(shown.chosen) ?? "Ask Alpha",
           context: { view, selected: talking.context.selected, sensitive: talking.context.sensitive },
@@ -641,6 +652,7 @@ export function Assistant({ runtime, messageActions, speech, canReadAloud = fals
         }}
         composer={{
           ...speechProps,
+          ...(live && !open ? { variant: "bar" as const } : {}),
           voice: voicePanel ?? renderVoice?.({ compactDock: compact, atBar: assistantDetent === "Bar", onKeyboard }),
           onDictate: onComms || inFlight(talking.turn) || !speech?.onDictate ? undefined : () => {
             openWithFocus(false);
@@ -680,6 +692,7 @@ export function Assistant({ runtime, messageActions, speech, canReadAloud = fals
           opener: !open ? grabber : undefined,
           onOpen: !open && !grabber ? () => openWithFocus(!compact) : undefined,
           onType: compact ? revealComposer : undefined,
+          onSwipeUp: compact ? () => openWithFocus(false) : undefined,
           onSend: sendable && !inFlight(talking.turn) ? () => {
             if (assistantDetent === "Typing") openWithFocus(false);
             send();
@@ -698,12 +711,17 @@ export function Assistant({ runtime, messageActions, speech, canReadAloud = fals
             });
           } : undefined,
           onFocusField: assistantDetent === "Typing" ? undefined : () => openWithFocus(false),
+          onBlur: assistantDetent === "Typing" && !onComms ? (event) => {
+            const next = event.relatedTarget;
+            if (next instanceof Element && (event.currentTarget.contains(next) || next.closest("[role='menu'], [role='dialog'], [role='alertdialog']"))) return;
+            void runtime.runPromise(restTyping);
+          } : undefined,
           onHistory: history.browse,
           onSearch: history.search,
           onNew: chats.can(start) ? () => void chats.send(start) : undefined,
           making: making(shown),
           onClick: assistantDetent === "Bar" && !compact ? (event) => {
-            if (event.target instanceof Element && event.target.closest("button, textarea")) return;
+            if (!(event.target instanceof Element) || !event.currentTarget.contains(event.target) || event.target.closest("button, textarea")) return;
             openWithFocus(true);
           } : undefined,
           onRemoveAttachment: (id) => {
