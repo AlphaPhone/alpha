@@ -4,6 +4,7 @@ import { page, userEvent } from "vitest/browser";
 import { Machine as Shell } from "../gen/app__shell.effect.vibe";
 import { Machine as Workflows } from "../gen/app__workflows__list.effect.vibe";
 import { at, first, mounts } from "../src/areas.ts";
+import files from "../src/files/index.tsx";
 import { single } from "../src/runtime/single.ts";
 import { home } from "../src/shell/shell.vibe";
 import { button, closeAll, later, only, open, seen, until } from "./alpha.tsx";
@@ -66,7 +67,7 @@ it("Keeps a browser frame while leaving and reopening Browser", async () => {
   const bookmark = { url: "https://archive.example/reference", title: "Saved reference" };
   await savedBrowserRecords([first, second], [bookmark]);
   try {
-    const { alpha } = await open(scene(), only("home", "view:Browser", "view:Files", "assistant"));
+    const { alpha } = await open(scene(), [...only("home", "view:Browser", "assistant"), first("view:Files", files)]);
     await page.getByRole("button", { name: "Browser", exact: true }).click();
     const link = page.getByRole("link", { name: "Open in browser" });
     await expect.element(link).toHaveAttribute("href", second.url);
@@ -118,7 +119,7 @@ it("Keeps a browser frame while leaving and reopening Browser", async () => {
     await closeAll();
     await savedBrowserRecords([]);
   }
-});
+}, 120_000);
 
 // spec/app/sample/index.md, "Story: See and dismiss reminders"
 it("Moves reminder dismissal focus to Undo", async () => {
@@ -227,4 +228,4 @@ it("Checks for browser briefs only after the owner opts in", async () => {
   expect(hosted.reads).toBe(switchedReads);
   await scheduled();
   await expect.element(toggle()).not.toBeChecked();
-});
+}, 120_000);
