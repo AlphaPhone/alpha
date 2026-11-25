@@ -27,7 +27,6 @@ export function plugins(world: Scene, services: { readonly agent: Answering; rea
     ElizaAgent: elizaAgent(services.agent, world.settings.recovery),
     ElizaCloud: elizaCloud(services.cloud, () => world.signedIn, world.mailLease),
     AlphaAssistantDraft: alphaAssistantDraft(world.ask, () => ({ owner: world.notes.ownerIdentity, agent: world.notes.owner, epoch: 1 })),
-    ElizaCloud: elizaCloud(services.cloud, () => world.signedIn, () => world.mailLease),
     ElizaSecureStore: elizaSecureStore(world.secrets, (key) => world.slots.has(key) || /^notes-(?:draft|folders):[1-9][0-9]*$/.test(key)),
     ElizaCalendar: elizaCalendar(world.calendar),
     ElizaReminders: elizaReminders(world.reminders, () => world.now),
