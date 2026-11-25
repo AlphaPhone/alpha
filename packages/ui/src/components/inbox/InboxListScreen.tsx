@@ -105,7 +105,7 @@ export function InboxListScreen({
       leading={searching || onBack ? <Button variant="ghost" size="icon" aria-label={searching ? "Back to inbox" : "Back to apps"} className="ml-1" onClick={searching ? closeSearch : onBack}><ChevronLeft className="size-5" /></Button> : undefined}
       titleControl={searching ? <InboxSearchBar value={search} onValueChange={onSearchChange} onSearch={onSearch} onClose={closeSearch} focusOnOpen /> : undefined}
       actions={searching ? undefined : actions}
-      className="[&_header>h1]:font-sans [&_header>h1]:text-xl [&_header>h1]:font-semibold [&_header>h1]:pl-0.5 [&_main>div]:gap-2 [&_main>div]:pt-1"
+      className="[&_header>h1]:pl-0.5 [&_main>div]:gap-2 [&_main>div]:pt-1"
     >
       {searching ? null : <InboxFolderBar folder={folder} unavailable={unavailable} onChoose={onChooseFolder} />}
       {notice ? <InboxNotice kind={notice} onAction={onNoticeAction} /> : null}

@@ -1,4 +1,6 @@
 // spec/app/inbox/index.md, "Story: See my mail"
+import { Buffer } from "node:buffer";
+import { createHash } from "node:crypto";
 import type { GoogleStatus, MailCard, MailMessage, MailOperation, MailSearch } from "@elizaos/cloud/client";
 import type { Route } from "./routes.ts";
 
@@ -8,6 +10,7 @@ export interface Stored {
   body: string;
   html: string | null;
   files: MailMessage["attachments"];
+  attachmentText?: Readonly<Record<string, string>>;
 }
 
 type DraftFixture = {
@@ -42,6 +45,7 @@ export interface InboxScene {
   readonly changes: string[];
   /** The name of every file a dispatched send carried. */
   readonly attached: string[];
+  readonly attachmentReads: string[];
 }
 
 const everything: GoogleStatus["grantedCapabilities"] = ["google.basic_identity", "google.gmail.triage", "google.gmail.send", "google.gmail.manage"];
@@ -84,7 +88,7 @@ export function inboxScene(): InboxScene {
       letter(8, "Win a prize", ["SPAM"], "About Win a prize", "Prize Desk <win@prize.example>", today(7, 0, 2)),
       letter(9, "Notes from me", ["SENT"], "About Notes from me", "You <you@gmail.example>", today(17, 0, 2)),
     ],
-    history: 500, offline: false, revoked: false, changes: [], attached: [], drafts: new Map(),
+    history: 500, offline: false, revoked: false, changes: [], attached: [], attachmentReads: [], drafts: new Map(),
   };
 }
 
@@ -196,6 +200,19 @@ export function inboxRoutes(scene: InboxScene): Route[] {
       if (url.pathname !== `${google}/gmail/inbox-v1/draft`) return;
       const draft = scene.drafts.get(url.searchParams.get("draftId") ?? "");
       return draft ? Response.json({ ...draft, version: 1 }) : refused(404, "not_found");
+    },
+    (request, url) => {
+      if (request.method !== "GET" || url.pathname !== `${google}/gmail/inbox-v1/attachment`) return;
+      const { grantId, messageId, partId, historyId } = Object.fromEntries(url.searchParams);
+      if (grantId !== scene.google?.connection) return refused(403, "google_reauth_required");
+      const stored = scene.mail.find(({ card }) => card.id === messageId);
+      const file = stored?.files.find((part) => part.partId === partId);
+      const text = partId === undefined ? undefined : stored?.attachmentText?.[partId];
+      if (!file || text === undefined) return refused(404, "not_found");
+      if (historyId === undefined || stored?.card.metadata.historyId !== historyId) return refused(409, "stale_revision");
+      const bytes = Buffer.from(text, "utf8");
+      scene.attachmentReads.push(`${messageId}/${partId}`);
+      return Response.json({ version: 1, messageId, historyId, ...file, dataBase64: bytes.toString("base64"), sha256: createHash("sha256").update(bytes).digest("hex") });
     },
     (request, url) => {
       if (request.method !== "POST" || url.pathname !== operations) return;

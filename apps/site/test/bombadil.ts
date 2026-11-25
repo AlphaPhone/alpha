@@ -3,37 +3,33 @@ import { extract } from "@antithesishq/bombadil/browser";
 
 export * from "@antithesishq/bombadil/browser/defaults";
 
-const phone = extract(({ document }) => {
-  const shown = document.querySelector('[role="img"][aria-label^="Alpha Home"]');
-  if (!shown) return { scenes: 1, picks: 1, typing: false, answered: false };
-  const scenes = [...shown.querySelectorAll("img")].map((capture) => capture.parentElement?.classList.contains("opacity-100") ?? false);
-  const picks = [...document.querySelectorAll('button[aria-label^="Show "]')].map((button) => button.getAttribute("aria-pressed") === "true");
+const phone = extract(({ document, window }) => {
+  if (!["localhost", "127.0.0.1", "alphaphone.dev"].includes(window.location.hostname)) return null;
+  const shown = document.querySelector('[role="img"][aria-label^="An Alpha phone"]');
+  const text = shown?.textContent ?? "";
   return {
-    scenes: scenes.filter(Boolean).length,
-    picks: picks.length === 0 ? 1 : picks.filter(Boolean).length,
-    typing: shown.querySelectorAll("i").length > 0,
-    answered: (shown.textContent ?? "").includes("Two things this afternoon."),
+    mounted: shown !== null,
+    scene: shown?.getAttribute("data-scene") ?? "Home",
+    sheet: shown?.querySelector("[data-sheet]")?.getAttribute("data-sheet") ?? "closed",
+    marked: [...document.querySelectorAll('nav[aria-label="Walkthrough"] a[aria-current="true"]')].length,
+    typing: shown?.querySelector("[data-typing]") != null,
+    answered: ["Two things this afternoon.", "Three within a five-minute walk.", "Three need you.", "Sent"].some((answer) => text.includes(answer)),
+    offered: text.includes("Cancel"),
+    sent: text.includes("I’ll tell you when she replies."),
   };
 });
 
-// spec/site/index.md, "The demo is always on a beat of its scene, and a scene shown whole has one beat"
-/** One scene is on the phone at a time, and the controls mark that one. */
-export const siteOneSceneAtATime = always(() => phone.current.scenes === 1 && phone.current.picks === 1);
+// spec/site/index.md, "The phone is always on a beat of its scene, and a scene shown whole is on its first"
+/** One scene is on the phone at a time: the conversation is open for exactly the four that are asked in it, and the walkthrough marks one. */
+export const siteOneSceneAtATime = always(() => {
+  const current = phone.current;
+  return current === null || (current.mounted && (current.sheet === "open") === ["Calendar", "Text", "Maps", "Inbox"].includes(current.scene) && current.marked === 1);
+});
 
-// spec/site/index.md, "The chat shows the question, the agent typing, its answer and the two events, each from its beat, and all but the typing when shown whole"
+// spec/site/index.md, "A part of a scene shows from its beat on, the typing only during its own, and all but the typing when shown whole"
 /** The agent is never shown typing beside its answer. */
-export const siteTypingBeforeTheAnswer = always(() => !(phone.current.typing && phone.current.answered));
+export const siteTypingBeforeTheAnswer = always(() => phone.current === null || !(phone.current.typing && phone.current.answered));
 
-const motion = extract(({ document, window }) => {
-  const handset = document.querySelector('[role="img"][aria-label^="Alpha Home"]');
-  const pause = document.querySelector('button[aria-label="Pause automatic playback"]');
-  const style = handset ? window.getComputedStyle(handset) : undefined;
-  return {
-    paused: pause?.getAttribute("aria-pressed") === "true",
-    swaying: style !== undefined && style.animationName !== "none" && style.animationPlayState === "running",
-  };
-});
-
-// spec/site/index.md, "Pausing keeps the time the beat has left, and playing again goes on from it"
-/** The phone does not sway while the visitor has paused the demo. */
-export const siteStillWhilePaused = always(() => !(motion.current.paused && motion.current.swaying));
+// spec/site/index.md, "The phone shows Home, the calendar, a text, a map, the inbox and a spoken note, each staged in beats"
+/** The text is never said to be sent while Alpha is still asking whether to send it. */
+export const siteAsksBeforeItSends = always(() => phone.current === null || !(phone.current.offered && phone.current.sent));
