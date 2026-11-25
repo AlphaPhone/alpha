@@ -107,15 +107,26 @@ pure def browse(c: Chats): Moved =
 
 ### The newest list says which conversations there are, and a conversation no longer listed stops showing
 
+Its page is left behind with it, so a read of it still loading, or waiting
+on the list after a 404, never keeps the new chat loading.
+
 ```quint
 pure def canListed(c: Chats, ticket: int, ids: List[int]): bool = R::canAnswer(c.list, ticket) and ids.every(i => i > 0)
 
 pure def listed(c: Chats, ticket: int, ok: bool, ids: List[int]): Chats =
   val listing = if (ok) ids else c.ids
   val chosen = if (listing.includes(c.chosen)) c.chosen else 0
+  val stays = chosen == c.chosen
   { ...c, list: R::answer(c.list, ok), ids: listing, chosen: chosen,
     origin: if (chosen > 0 and listing.includes(c.origin) and c.origin != chosen) c.origin else 0,
-    messages: if (chosen == c.chosen) c.messages else 0 }
+    page: if (stays) c.page else X::dropped(c.page), around: if (stays) c.around else 0,
+    messages: if (stays) c.messages else 0 }
+```
+
+### A new chat holds no conversation's page
+
+```quint
+pure def alwaysANewChatHoldsNoPage(c: Chats): bool = c.chosen == 0 implies c.page.status == R::Idle
 ```
 
 ### Another conversation is chosen only while the turn and the composer are free

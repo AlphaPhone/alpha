@@ -1,5 +1,5 @@
 // spec/app/digests/index.md, "Story: See my digests"; spec/app/digests/index.md, "Story: Receive results without losing or repeating one"; spec/app/digests/schedules.md, "Story: Keep my digest schedules"
-import * as KeyValueStore from "effect/persistence/KeyValueStore"
+import type * as KeyValueStore from "effect/persistence/KeyValueStore"
 import { type WorkflowRequest, WorkflowHttpError, WorkflowLifecycleRejected, workflowHttpError } from "@elizaos/plugin-workflow/client"
 import { type DigestLoop, type DigestResult, type DigestSource, type DigestSpec, digestInbox, digestSourceState, hostedDigestProtocol } from "@elizaos/plugin-workflow/digests"
 import * as List from "../../gen/app__workflows__list.effect.vibe"
