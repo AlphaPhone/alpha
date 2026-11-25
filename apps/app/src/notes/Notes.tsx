@@ -1,5 +1,5 @@
 // spec/app/notes/index.md, "Story: See my notes"; spec/app/notes/index.md, "Story: Organise my notes"; spec/app/notes/editor.md, "Story: Write a note"; spec/app/notes/trash.md, "Story: Delete a note and get it back"
-import { Alert, AppHeader, Button, Chip, Dialog, DialogClose, DialogContent, DialogDescription, DialogTitle, Input, LinkNoteView, Menu, MenuContent, MenuItem, MenuTrigger, NoteEditor as NoteForm, NoteMenu, NoteRow, NotesList as NoteRows, Spinner, VoiceNoteView } from "@repo/ui";
+import { Alert, AppHeader, Button, Chip, Dialog, DialogClose, DialogContent, DialogDescription, DialogTitle, Input, LinkNoteView, Menu, MenuContent, MenuItem, MenuTrigger, NoteEditor as NoteForm, NoteMenu, NoteRow, cn, focusRing, noteMenuItem, noteMenuPanel, NotesList as NoteRows, Spinner, VoiceNoteView } from "@repo/ui";
 import { Copy, Download, Ellipsis, FileDown, Folder, Mail, MessageSquare, Mic, Plus, Share2, Trash2, X } from "lucide-react";
 import { useRef, useState, useSyncExternalStore, type FormEvent } from "react";
 import * as Notes from "../../gen/app__notes.ts";
@@ -32,6 +32,9 @@ import { RecentlyDeleted } from "./RecentlyDeleted.tsx";
 import { VoiceReview, copyTranscript, generateTranscript, pageOf } from "./sides.vibe";
 
 type Runtime = Alpha["runtime"];
+/** A row of the Notes options menu, whose icons are 22px. */
+const notesOption = cn(noteMenuItem, "[&_svg:not([class*='size-'])]:size-5.5");
+
 type Form = { readonly op: "AddFolder" } | { readonly op: "RenameFolder"; readonly folder: Notes.Folder };
 
 const transferNotices = {
@@ -53,8 +56,6 @@ function TransferNotice({ runtime }: { readonly runtime: Runtime }) {
   </Alert>;
 }
 
-/** A row of a note's actions menu, as develop's: 48px, 18px icons, a 10px corner. */
-const noteAction = "min-h-12 rounded-option px-3 [&_svg:not([class*='size-'])]:size-4.5";
 
 function EditorScreen({ runtime, saved }: { readonly runtime: Runtime; readonly saved: DraftWords }) {
   const writing = useEditor(runtime);
@@ -87,20 +88,20 @@ function EditorScreen({ runtime, saved }: { readonly runtime: Runtime; readonly 
     if (open && actions.can(sharing, "Owner")) void actions.send(sharing, "Owner");
     if (!open && actions.can({ type: "closeMenu" }, "Owner")) void actions.send({ type: "closeMenu" }, "Owner");
   }}>
-    <MenuTrigger asChild><Button aria-label="Note actions" size="icon" variant="ghost"><Ellipsis /></Button></MenuTrigger>
-    <MenuContent align="end" alignOffset={-60} sideOffset={6} className="rounded-lg bg-card p-1.5 shadow-lg">
+    <MenuTrigger aria-label="More" className={cn(focusRing, "flex h-13 w-11 shrink-0 items-center justify-center rounded-full active:bg-accent")}><Ellipsis aria-hidden className="size-5.5" /></MenuTrigger>
+    <MenuContent align="end" alignOffset={-59} sideOffset={4} className={noteMenuPanel}>
       {shared && actions.state?.open && <>
-        <MenuItem className={noteAction} onSelect={() => void actions.send({ type: "share", channel: "Email", mark: 0 }, "Owner")}><Mail /> Share by email</MenuItem>
-        <MenuItem className={noteAction} onSelect={() => void actions.send({ type: "share", channel: "Messages", mark: 0 }, "Owner")}><MessageSquare /> Share in Messages</MenuItem>
+        <MenuItem className={noteMenuItem} onSelect={() => void actions.send({ type: "share", channel: "Email", mark: 0 }, "Owner")}><Mail /> Share by email</MenuItem>
+        <MenuItem className={noteMenuItem} onSelect={() => void actions.send({ type: "share", channel: "Messages", mark: 0 }, "Owner")}><MessageSquare /> Share in Messages</MenuItem>
       </>}
-      {exportable && <MenuItem className={noteAction} onSelect={() => void transfer.send(exporting, "Owner")}><FileDown /> Save as text</MenuItem>}
+      {exportable && <MenuItem className={noteMenuItem} onSelect={() => void transfer.send(exporting, "Owner")}><FileDown /> Save as text</MenuItem>}
       {deletable && (shared && actions.state?.open || exportable) && <div role="separator" className="my-1 border-t border-border" />}
-      {deletable && <MenuItem className={noteAction} onSelect={() => send(deletion)}><Trash2 /> Delete</MenuItem>}
+      {deletable && <MenuItem className={noteMenuItem} onSelect={() => send(deletion)}><Trash2 /> Delete</MenuItem>}
     </MenuContent>
   </Menu>;
   return (
     <NoteForm
-      className="relative inset-auto flex-1"
+      className="relative inset-auto min-h-0 flex-1"
       data-alpha-subview="notes-editor"
       title={saved.title}
       body={saved.body}
@@ -151,15 +152,15 @@ function LinkedNote({ runtime, collection }: { readonly runtime: Runtime; readon
   const clips = Array.isArray(data?.clips) ? data.clips.filter((part): part is string => typeof part === "string") : [];
   if (clips.length === 0 && note?.body.trim()) clips.push(note.body);
   return <LinkNoteView
-    className="relative inset-auto flex-1"
+    className="relative inset-auto min-h-0 flex-1"
     title={note === undefined ? "Link note" : titleOf(note)}
     domain={typeof data?.domain === "string" ? data.domain : URL.parse(page)?.hostname ?? ""}
     clips={clips}
     onBack={close}
     onVisit={page !== "" && link.can(event, "Owner") ? () => void link.send(event, "Owner") : undefined}
     menu={link.can(askRemove, "Owner") && <Menu>
-      <MenuTrigger asChild><Button aria-label="Link actions" size="icon" variant="ghost"><Ellipsis /></Button></MenuTrigger>
-      <MenuContent><MenuItem destructive onSelect={() => void link.send(askRemove, "Owner")}>Remove source</MenuItem></MenuContent>
+      <MenuTrigger aria-label="More" className={cn(focusRing, "flex size-13 shrink-0 items-center justify-center rounded-full active:bg-accent")}><Ellipsis aria-hidden className="size-5.5" /></MenuTrigger>
+      <MenuContent sideOffset={4} alignOffset={2} className={noteMenuPanel}><MenuItem className={noteMenuItem} destructive onSelect={() => void link.send(askRemove, "Owner")}>Remove source</MenuItem></MenuContent>
     </Menu>}
     feedback={state.review.showing && <Alert variant="warn" className="mt-4">Remove the web source from this note?
       <div className="mt-2 flex gap-2">
@@ -259,7 +260,7 @@ function VoiceNote({ runtime, collection }: { readonly runtime: Runtime; readonl
     if (voice.can(event, "Owner")) void voice.send(event, "Owner");
   } : undefined;
   return <VoiceNoteView
-    className="relative inset-auto flex-1"
+    className="relative inset-auto min-h-0 flex-1"
     title={note === undefined ? "Voice note" : titleOf(note)}
     meta={note === undefined ? "" : [dated(note, collection.readAt), length].filter(Boolean).join(" · ")}
     playback={player ? { time: length, playing: state.play.status === "Loading", toggle, seek } : undefined}
@@ -382,16 +383,16 @@ function NotesList({ alpha, runtime }: { readonly alpha: Alpha; readonly runtime
   return (
     <section aria-label="Notes" data-alpha-subview="notes-list" className="flex min-h-0 flex-1 flex-col">
       <AppHeader title="Notes" leading={<AppBack alpha={alpha} />}>
-        {available && hasMic && !Editor.waiting(writing) && <Button size="icon" variant="ghost" aria-label="Record voice note" onClick={() => void runtime.runPromise(record)}><Mic /></Button>}
-        {editor.can(newNote, "Owner") && <Button size="icon" variant="ghost" aria-label="New note" onClick={() => void runtime.runPromise(writer.newNote("Text", available, state.filter, false))}><Plus /></Button>}
+        {available && hasMic && !Editor.waiting(writing) && <Button size="icon" variant="ghost" aria-label="Record voice note" onClick={() => void runtime.runPromise(record)}><Mic className="size-5" /></Button>}
+        {editor.can(newNote, "Owner") && <Button size="icon" variant="ghost" aria-label="New note" onClick={() => void runtime.runPromise(writer.newNote("Text", available, state.filter, false))}><Plus className="size-5" /></Button>}
         {bin.can(openTrash, "Owner") && <Menu>
           <MenuTrigger asChild><Button size="icon" variant="ghost" aria-label="Notes options"><Ellipsis /></Button></MenuTrigger>
-          <MenuContent align="end">
-            <MenuItem onSelect={() => void bin.send(openTrash, "Owner")}><Trash2 /> Recently deleted</MenuItem>
-            {previous.can(showPrevious, "Owner") && <MenuItem onSelect={() => void previous.send(showPrevious, "Owner")}><Folder /> On this phone</MenuItem>}
-            {available && <MenuItem onSelect={() => { setForm({ op: "AddFolder" }); setFolderName(""); }}><Folder /> New folder</MenuItem>}
-            {folder && <MenuItem onSelect={() => { setForm({ op: "RenameFolder", folder }); setFolderName(folder.name); }}>Rename folder</MenuItem>}
-            {folder && can(folderChange("RemoveFolder", folder.id, "")) && <MenuItem onSelect={() => listEvent(folderChange("RemoveFolder", folder.id, ""))}>Delete folder</MenuItem>}
+          <MenuContent align="end" sideOffset={4} alignOffset={2} className={noteMenuPanel}>
+            <MenuItem className={notesOption} onSelect={() => void bin.send(openTrash, "Owner")}><Trash2 /> Recently deleted</MenuItem>
+            {previous.can(showPrevious, "Owner") && <MenuItem className={notesOption} onSelect={() => void previous.send(showPrevious, "Owner")}><Folder /> On this phone</MenuItem>}
+            {available && <MenuItem className={notesOption} onSelect={() => { setForm({ op: "AddFolder" }); setFolderName(""); }}><Folder /> New folder</MenuItem>}
+            {folder && <MenuItem className={notesOption} onSelect={() => { setForm({ op: "RenameFolder", folder }); setFolderName(folder.name); }}>Rename folder</MenuItem>}
+            {folder && can(folderChange("RemoveFolder", folder.id, "")) && <MenuItem className={notesOption} onSelect={() => listEvent(folderChange("RemoveFolder", folder.id, ""))}>Delete folder</MenuItem>}
           </MenuContent>
         </Menu>}
       </AppHeader>

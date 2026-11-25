@@ -3,6 +3,12 @@ import { Ellipsis, Pin, Share2, Trash2 } from "lucide-react";
 import { cn, focusRing } from "../../lib/cn.ts";
 import { Menu, MenuContent, MenuItem, MenuTrigger } from "../Menu.tsx";
 
+/** A Notes menu's panel, as develop's: the raised surface, 208px at least, 6px padding, a 16px corner. */
+export const noteMenuPanel = "min-w-52 rounded-lg border-0 bg-card p-1.5 shadow-note-menu dark:shadow-note-menu";
+
+/** One row of a Notes menu: 48px, 12px in, a 10px corner, 15px words and 18px icons. */
+export const noteMenuItem = "min-h-12 gap-3 rounded-option px-3 text-base [&_svg:not([class*='size-'])]:size-4.5";
+
 export interface NoteMenuProps {
   /** Whether the note is pinned, which makes the pin action Unpin. */
   pinned?: boolean;
@@ -21,7 +27,6 @@ export interface NoteMenuProps {
 /** The actions of an open note, behind its More button: Share, Pin or Unpin, and Delete. */
 export function NoteMenu({ pinned = false, onShare, onPin, onDelete, size = "md", triggerRef }: NoteMenuProps) {
   const [open, setOpen] = useState(false);
-  const item = "min-h-12 rounded-option px-3 text-base";
   return (
     <Menu open={open} onOpenChange={setOpen}>
       <MenuTrigger ref={triggerRef} aria-label="More"
@@ -31,11 +36,11 @@ export function NoteMenu({ pinned = false, onShare, onPin, onDelete, size = "md"
         <Ellipsis aria-hidden className="size-5.5" />
       </MenuTrigger>
       <MenuContent aria-label="Note actions" aria-labelledby={undefined} sideOffset={size === "sm" ? 6 : 2} alignOffset={size === "sm" ? -58 : 2}
-        className="min-w-52 rounded-lg border-0 bg-card p-1.5 shadow-lg">
-        <MenuItem disabled={!onShare} onSelect={onShare} className={item}><Share2 aria-hidden className="size-4.5" />Share</MenuItem>
-        <MenuItem disabled={!onPin} onSelect={onPin} className={item}><Pin aria-hidden className="size-4.5" />{pinned ? "Unpin" : "Pin"}</MenuItem>
+        className={noteMenuPanel}>
+        <MenuItem disabled={!onShare} onSelect={onShare} className={noteMenuItem}><Share2 aria-hidden className="size-4.5" />Share</MenuItem>
+        <MenuItem disabled={!onPin} onSelect={onPin} className={noteMenuItem}><Pin aria-hidden className="size-4.5" />{pinned ? "Unpin" : "Pin"}</MenuItem>
         <div role="separator" className="my-1 border-t border-border" />
-        <MenuItem disabled={!onDelete} onSelect={onDelete} className={item}><Trash2 aria-hidden className="size-4.5" />Delete</MenuItem>
+        <MenuItem disabled={!onDelete} onSelect={onDelete} className={noteMenuItem}><Trash2 aria-hidden className="size-4.5" />Delete</MenuItem>
       </MenuContent>
     </Menu>
   );
