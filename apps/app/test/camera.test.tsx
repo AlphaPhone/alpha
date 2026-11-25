@@ -156,14 +156,14 @@ describe("Camera on a phone", () => {
     selected.date = 1795399000000;
     selected.mutationRevision = "last-capture";
     const mutations: string[] = [];
-    world.photos.changeMany = async ({ operation, items }) => {
+    world.photos.changeMany = ({ operation, items }) => {
       if (items.length !== 1 || items[0]?.id !== selected.id || items[0]?.revision !== selected.mutationRevision
-        || (operation !== "favorite" && operation !== "unfavorite")) throw new Error("Wrong photo or revision");
+        || (operation !== "favorite" && operation !== "unfavorite")) return Promise.reject(new Error("Wrong photo or revision"));
       mutations.push(operation);
       selected.mutationRevision = operation;
       selected.favorite = operation === "favorite";
       const status = selected.favorite ? "favorited" : "unfavorited";
-      return { status: "complete", outcomes: [{ id: selected.id, status, item: selected }] };
+      return Promise.resolve({ status: "complete", outcomes: [{ id: selected.id, status, item: selected }] });
     };
     world.photos.rows.splice(world.photos.rows.indexOf(selected), 1);
     world.photos.rows.push(selected);

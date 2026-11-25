@@ -7,7 +7,7 @@ import type { AgentStatus } from "@elizaos/os-bridges"
 import { Agent } from "../platform/agent.vibe"
 import { Device } from "../platform/device.vibe"
 import { SystemSettings } from "../platform/systemSettings.vibe"
-import { signInAccounts } from "../platform/voice.vibe"
+import { CLOUD_ENVIRONMENT, signInAccounts } from "../platform/voice.vibe"
 import { type Job, answer, contained, reacting, run, started, together } from "../runtime/reactor.vibe"
 
 export const needsRecords = (status: AgentStatus | undefined): boolean => status?.state === "failed" && status.failure === "storage"
@@ -22,7 +22,7 @@ export const activityInFront = effect {
 }
 
 effect function owner(): (string | undefined)!! {
-  const signIn = timeout(tryPromise(() => signInAccounts().status({ environment: "production" })), "5 seconds") catch () => undefined
+  const signIn = timeout(tryPromise(() => signInAccounts().status({ environment: CLOUD_ENVIRONMENT })), "5 seconds") catch () => undefined
   if (signIn === undefined) return undefined
   const account = signIn.account
   return account.kind === "signedIn" ? JSON.stringify([account.organizationId, account.userId]) : "local"

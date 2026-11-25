@@ -47,7 +47,9 @@ import { displayNumber } from "../phone/words.ts";
 export interface AssistantProps {
   runtime: ManagedRuntime.ManagedRuntime<ConversationMachine | AttachmentMachine | ChatsMachine | ComposerMachine | SearchMachine | ReplyMachine | DockMachine | ShellMachine | CommsMachine | CommsTargetServices | CommsBriefing | Talk | MailQuestions | LayersMachine | MediaReview | Documents, unknown>;
   messageActions?: MessageActions;
-  speech?: Pick<AssistantComposerProps, "onTalk" | "onDictate" | "showUnavailableTalk" | "voiceNotice"> & { voice?: (compact: boolean) => ReactNode };
+  speech?: Pick<AssistantComposerProps, "onTalk" | "onDictate" | "showUnavailableTalk" | "voiceNotice"> & {
+    voice?: (presentation: { compactDock: boolean; atBar: boolean }) => ReactNode;
+  };
   canReadAloud?: boolean;
 }
 
@@ -393,7 +395,7 @@ export function Assistant({ runtime, messageActions, speech, canReadAloud = fals
         }}
         composer={{
           ...speech,
-          voice: speech?.voice?.(compact),
+          voice: speech?.voice?.({ compactDock: compact, atBar: assistantDetent === "Bar" }),
           onDictate: onComms || inFlight(talking.turn) || !speech?.onDictate ? undefined : () => {
             openWithFocus(false);
             speech.onDictate?.();
