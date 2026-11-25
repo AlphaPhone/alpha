@@ -5,7 +5,6 @@ import type { Plugin } from "vite";
 import type { Answering } from "./routes.ts";
 import { seedReferenceWeek } from "./calendar.ts";
 import { type Scene, scene, services } from "./scene.ts";
-import { notices } from "./settings.ts";
 
 async function relay(answer: Answering, incoming: IncomingMessage, outgoing: ServerResponse) {
   const body = incoming.method === "GET" || incoming.method === "HEAD" ? undefined : (Readable.toWeb(incoming) as ReadableStream<Uint8Array>);
@@ -27,6 +26,18 @@ function developed(world: Scene): Scene {
   return world;
 }
 
+/** The page's first script: the fake phone's plugins, which reach the dev server's /agent and /cloud as an Alpha image's native code would. */
+const phoned = [{ tag: "script", attrs: { type: "module", src: "/test/fakes/page.ts" }, injectTo: "head-prepend" as const }];
+
+/**
+ * The fake phone over whatever agent and cloud the dev server answers, eliza's own included: `ALPHA_PHONE=1 pnpm dev`
+ * shows Alpha as an Alpha image draws it, Phone, Messages and Contacts on Home among the rest, with eliza's agent and
+ * cloud behind it. `apply: "serve"` keeps it out of every build.
+ */
+export function fakePhone(): Plugin {
+  return { name: "alpha-fake-phone", apply: "serve", transformIndexHtml: () => phoned };
+}
+
 /**
  * The fake agent and cloud at the dev server's /agent and /cloud, from the routes the journeys use, so that `pnpm dev`
  * and the explore stage run with no agent; `apply: "serve"` keeps it out of every build. With `real` the agent is the one at that address.
@@ -41,7 +52,6 @@ export function fakes(real?: string, phone = false): Plugin {
     configureServer(server) {
       if (real === undefined) server.middlewares.use("/agent", (incoming, outgoing) => void relay(agent, incoming, outgoing));
       server.middlewares.use("/cloud", (incoming, outgoing) => void relay(cloud, incoming, outgoing));
-      server.middlewares.use("/licenses/third-party-notices.json", (_incoming, outgoing) => void outgoing.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify(notices)));
     },
     config: () => (real === undefined ? {} : { server: { proxy: { "/agent": { target: real, rewrite: (path: string) => path.slice("/agent".length) } } } }),
   };

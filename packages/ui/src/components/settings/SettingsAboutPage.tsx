@@ -42,7 +42,7 @@ export function SettingsAboutPage({ alphaVersion, androidVersion, onPhone = true
           <Mark aria-hidden className="size-[118%] shrink-0" />
         </span>
         <h2 className="font-display text-title font-light">Alpha Phone</h2>
-        <p className="text-caption text-muted-foreground">
+        <p className="text-caption leading-normal text-muted-foreground">
           {alphaVersion.word === "reported" ? `Version ${alphaVersion.value}` : !onPhone && alphaVersion.word === "unavailable" ? "Development preview" : <SettingsReading reading={alphaVersion} />}
         </p>
       </div>

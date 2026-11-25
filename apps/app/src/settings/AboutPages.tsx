@@ -30,15 +30,16 @@ const matches = (notice: Notice, query: string) => `${notice.name} ${notice.lice
 /** The licences, searched; one opens from the list the search shows, and Back returns to the same search. */
 export function Licences({ runtime, common }: AboutProps) {
   const { state, send, can } = useTimed(runtime, useLicences);
-  if (!state) return null;
   const notices = runtime.runSync(Notices.use((held) => held.get()));
+  if (!state) return null;
   const shown = notices.filter((notice) => matches(notice, state.query));
   const open = state.licence >= 0 ? shown[state.licence] : undefined;
   if (open !== undefined) {
     return (
       <SettingsLicenceDetail
         name={open.name}
-        licence={`${open.license} · ${open.version}`}
+        licence={open.license}
+        version={open.version}
         source={open.source}
         flags={(open.flags ?? []).map((flag) => flags[flag] ?? flag)}
         text={open.text}

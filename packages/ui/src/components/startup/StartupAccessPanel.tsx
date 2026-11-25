@@ -33,7 +33,7 @@ const notices: Record<StartupAccessNotice, string> = {
   NotSaved: "Not saved",
 };
 
-export const startupPanel = "inset-0 grid max-w-none translate-y-0 overflow-y-auto overscroll-contain rounded-none bg-background px-6 pt-[max(--spacing(8),env(safe-area-inset-top))] pb-[max(--spacing(8),env(safe-area-inset-bottom))] text-foreground shadow-none motion-safe:animate-none";
+export const startupPanel = "inset-0 grid max-h-none max-w-none translate-y-0 overflow-y-auto overscroll-contain rounded-none bg-background px-6 pt-[max(--spacing(8),env(safe-area-inset-top))] pb-[max(--spacing(8),env(safe-area-inset-bottom))] text-foreground shadow-none motion-safe:animate-none";
 export const startupMainAction = "h-13 w-full rounded-lg bg-alpha font-medium text-alpha-foreground hover:bg-alpha/90 active:bg-alpha/80";
 
 /**
