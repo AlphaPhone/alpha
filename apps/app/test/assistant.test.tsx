@@ -15,7 +15,7 @@ import type { Mount } from "../src/areas.ts";
 import type { Alpha } from "../src/runtime/area.tsx";
 import assistant from "../src/assistant/index.tsx";
 import { untimed } from "../src/runtime/reactor.vibe";
-import { button, closeAll, drawn, fill, hardware, later, open, press, pressOnTop, underAct, until } from "./alpha.tsx";
+import { button, closeAll, fill, hardware, later, open, press, underAct, until } from "./alpha.tsx";
 import { scene } from "./fakes/scene.ts";
 
 underAct();
@@ -173,6 +173,8 @@ describe.each([["a browser", false], ["a phone", true]])("in %s", (_where, phone
     await chatsList(alpha);
     await until(alpha, runtime, Chats, (s) => s.list.status === "Loaded");
     expect(rows("Chat history")).toBe(2);
+    await hardware("home");
+    await until(alpha, alpha.runtime, Shell, (s) => s.trail.length === 0);
 
     // spec/app/assistant/index.md, "A sensitive screen is never sent, and no reply is awaited over one": Settings showing carrier identifiers is a sensitive screen (on a phone).
     if (phone) {
@@ -190,9 +192,9 @@ describe.each([["a browser", false], ["a phone", true]])("in %s", (_where, phone
       expect(button("Send")?.disabled).toBe(false);
       await hardware("home");
       await until(alpha, runtime, Conversation, (s) => s.context.showing.tag === "Home");
-      await press("Open conversation");
-      await until(alpha, alpha.runtime, Shell, (s) => s.assistant === "Sheet");
     }
+    await press("Open conversation");
+    await until(alpha, alpha.runtime, Shell, (s) => s.assistant === "Sheet");
 
     // spec/app/assistant/reply.md, "Out of funds is refused before any output, is never spoken, and offers only Manage plan"
     world.ask.refusal = { failureKind: "insufficient_credits", cloudCode: "allowance_exhausted", planAction: "funding" };
@@ -260,7 +262,7 @@ describe.each([["a browser", false], ["a phone", true]])("in %s", (_where, phone
     const { alpha, runtime } = await openAssistant(world, false);
 
     // spec/app/assistant/search.md, "Words are searched from the first hit, and empty words are not searched"
-    await chatAction("Search chat");
+    chatAction("Search chat");
     await fill("Search chats", "friday");
     await until(alpha, runtime, Search, (s) => s.hits.status === "Loaded" && s.words === "friday");
     expect(rows("Results")).toBe(2);
@@ -273,7 +275,7 @@ describe.each([["a browser", false], ["a phone", true]])("in %s", (_where, phone
 
     // spec/app/assistant/search.md, "Only the newest asking's hits are shown, a page at a time, after those already shown": a search that fails says so.
     world.ask.searchDown = true;
-    await chatAction("Search chat");
+    chatAction("Search chat");
     await fill("Search chats", "noon");
     await until(alpha, runtime, Search, (s) => s.hits.status === "Failed");
     expect(document.body.textContent).toContain("Search did not finish");

@@ -4,9 +4,11 @@ import { type Context, Effect, Layer, ManagedRuntime, Stream } from "effect";
 import { afterEach, describe, expect, it } from "vitest";
 import * as Shell from "../gen/app__shell.effect.vibe";
 import * as Voice from "../gen/app__voice.effect.vibe";
+import * as Listener from "../gen/app__voice__listener.effect.vibe";
 import { VoiceBridge } from "../src/platform/voice.vibe";
 import { together, untimed, whole } from "../src/runtime/reactor.vibe";
 import { shell } from "../src/shell/shell.vibe";
+import { listener, stockListener } from "../src/voice/listener.vibe";
 import { placeOf, type VoiceWords, voicing } from "../src/voice/voice.vibe";
 import { Machine as Conversation } from "../gen/app__assistant.effect.vibe";
 import { Machine as Dock } from "../gen/app__assistant__dock.effect.vibe";
@@ -433,7 +435,7 @@ const talkMounts: Mount[] = [{ at: "assistant", load: () => import("../src/assis
 
 describe("Talk from Ask Alpha's composer (spec/app/voice/index.md, \"Story: Hold a spoken conversation\")", () => {
   it("draws the compact Talk waveform for the device's listening and muted phases", async () => {
-    const world = { ...scene(), phone: true };
+    const world = { ...scene(), phone: true, signedIn: false };
     const { alpha } = await open(world, talkMounts);
     const area = assistant.runtime(alpha);
     await drawnUntil(alpha, area, Voice.Machine, (state) => state.warmed);
@@ -455,7 +457,7 @@ describe("Talk from Ask Alpha's composer (spec/app/voice/index.md, \"Story: Hold
   });
 
   it("restores the local speaker before unrelated playback when Talk stops during a mute (spec/app/voice/index.md, \"Speaker mute is offered after the current speech bridge confirms gain control\")", async () => {
-    const world = { ...scene(), phone: true };
+    const world = { ...scene(), phone: true, signedIn: false };
     const { alpha } = await open(world, talkMounts);
     const area = assistant.runtime(alpha);
     await drawnUntil(alpha, area, Voice.Machine, (state) => state.warmed);
@@ -497,7 +499,7 @@ describe("Talk from Ask Alpha's composer (spec/app/voice/index.md, \"Story: Hold
   });
 
   it("keeps the speaker control hidden when the live bridge refuses gain (spec/app/voice/index.md, \"Speaker mute is offered after the current speech bridge confirms gain control\")", async () => {
-    const world = { ...scene(), phone: true };
+    const world = { ...scene(), phone: true, signedIn: false };
     world.voice.speakerGainGate = () => Promise.reject(new Error("Output gain unavailable"));
     const { alpha } = await open(world, talkMounts);
     const area = assistant.runtime(alpha);
@@ -627,5 +629,25 @@ describe("Talk from Ask Alpha's composer (spec/app/voice/index.md, \"Story: Hold
     const after = await area.runPromise(Effect.flatMap(Voice.Machine, (m) => m.get()));
     expect([after.recorder.stage, after.permission.asked]).toEqual(["Closed", true]);
     expect([document.querySelector("[role=alertdialog], [role=alert], [role=note], [role=status], section[aria-label='Voice transcription']"), world.voice.permission]).toEqual([null, "denied"]);
+  });
+
+  // spec/app/voice/listener.md, "Story: See and control the listener"; spec/app/voice/listener.md, "Story: Wake Alpha by voice or with a button"
+  it("admits the always-on listener on an Alpha image and hands a wake directly into voice", async () => {
+    const world = { ...scene(), phone: true, image: true, signedIn: false };
+    localStorage.clear();
+    const appLayer = Layer.provideMerge(
+      whole(together(shell, voicing, listener)),
+      Layer.mergeAll(fakeWorld(world), stockListener),
+    ) as unknown as Layer.Layer<Voice.Machine | VoiceWords | VoiceBridge | Shell.Machine | Listener.Machine>;
+    const runtime = ManagedRuntime.make(appLayer);
+    opened.push(runtime);
+
+    await until(runtime, Listener.Machine, (s) => s.image === true);
+    await until(runtime, Voice.Machine, (s) => s.warmed);
+    await runtime.runPromise(Effect.flatMap(Voice.Machine, (machine) => machine.send({ type: "permissionChanged", grant: "Granted" })));
+    await runtime.runPromise(Effect.flatMap(Listener.Machine, (machine) => machine.send({ type: "invoke" })));
+    await until(runtime, Voice.Machine, (s) => s.phase === "Listening" && s.mic === "On");
+    await runtime.runPromise(Effect.flatMap(Voice.Machine, (machine) => machine.send({ type: "stop", keyboard: false })));
+    await until(runtime, Voice.Machine, (s) => s.phase === "Idle");
   });
 });

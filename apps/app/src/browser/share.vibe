@@ -1,0 +1,103 @@
+// spec/app/browser/share.md, "Story: Share the page"; spec/app/browser/share.md, "Story: Open the page in another browser"
+import * as Tabs from "../../gen/app__browser.effect.vibe"
+import * as Share from "../../gen/app__browser__share.effect.vibe"
+import { TabHost, hosted } from "../platform/browser.vibe"
+import { Device } from "../platform/device.vibe"
+import { type Job, answer, contained, reacting, run, started, together } from "../runtime/reactor.vibe"
+import { idOf } from "./browser.vibe"
+
+module external {
+  import { isSecureWebAddress } from "@elizaos/os-bridges"
+
+  /** Whether `href` is an HTTPS address eligible for external opening. @throws {never} */
+  export function secureHref(href: string): boolean {
+    try { return isSecureWebAddress(href) } catch { return false }
+  }
+
+  /** Write `href` to the clipboard when available. @throws {never} */
+  export async function copyText(href: string): Promise<boolean> {
+    if (typeof navigator === "undefined" || !navigator.clipboard?.writeText) return false
+    try { await navigator.clipboard.writeText(href); return true } catch { return false }
+  }
+
+  /** Share `href` through the platform share sheet when available. @throws {never} */
+  export async function webShare(href: string, title?: string): Promise<boolean> {
+    if (typeof navigator === "undefined" || typeof navigator.share !== "function") return false
+    try { await navigator.share({ url: href, title }); return true } catch { return false }
+  }
+
+  /** Open `href` in another browser window when not running inside the native tab host. @throws {never} */
+  export function openWindow(href: string): boolean {
+    if (typeof window === "undefined" || typeof window.open !== "function") return false
+    return window.open(href, "_blank", "noopener,noreferrer") !== null
+  }
+}
+import { copyText, openWindow, secureHref, webShare } from external
+
+effect function currentPage(): ({ readonly url: string; readonly title?: string } | undefined)!!(TabHost | Tabs.Machine) {
+  const tabs = try (try Tabs.Machine).get()
+  const info = (try TabHost).session.info(idOf(tabs.selected))
+  return info?.url ? { url: info.url, title: info.title } : undefined
+}
+
+effect function launchElsewhere(): Share.Event!!(TabHost | Tabs.Machine) {
+  const page = try currentPage()
+  if (page === undefined || !secureHref(page.url)) return { type: "launched", ok: false, found: false }
+  const host = try TabHost
+  const tabs = try (try Tabs.Machine).get()
+  if (Option.isSome(host.plugin)) {
+    const binding = host.session.pageBinding(idOf(tabs.selected))
+    if (binding === undefined) return { type: "launched", ok: false, found: false }
+    const opened = hosted("openExternalBrowser", (plugin, session) => plugin.openExternalBrowser({
+      session,
+      id: binding.id,
+      url: binding.url,
+      navigation: binding.navigation,
+      privateConfirmed: binding.private,
+    })) catch () => undefined
+    return { type: "launched", ok: opened !== undefined, found: opened !== undefined }
+  }
+  const ok = openWindow(page.url)
+  return { type: "launched", ok, found: ok }
+}
+
+function carry(fx: Share.Effect): Job<Share.Event, TabHost | Tabs.Machine, []> {
+  return match (fx) {
+    when { tag: "Sheet" }: run("browser share sheet", effect {
+      const page = try currentPage()
+      if (page !== undefined) try ignore(tryPromise(() => webShare(page.url, page.title)))
+    });
+    when { tag: "CopyLink" }: run("browser copy link", effect {
+      const page = try currentPage()
+      if (page !== undefined) try ignore(tryPromise(() => copyText(page.url)))
+    });
+    when { tag: "Draft" }: run("browser share draft", effect {
+      const page = try currentPage()
+      if (page !== undefined) openWindow(`mailto:?body=${encodeURIComponent(page.url)}`)
+    });
+    when { tag: "Elsewhere" }: answer("browser open elsewhere", launchElsewhere(), { type: "launched", ok: false, found: false });
+  }
+}
+
+const hideShare = started(effect {
+  const device = try Device
+  const share = try Share.Machine
+  try Stream.runForEach(Stream.filter(device.visible, (shown) => !shown), effect () => {
+    try contained(share.send({ type: "hidden" }), "hiding browser share panel")
+  })
+}, "browser share visibility")
+
+const tabChanges = started(effect {
+  const tabs = try Tabs.Machine
+  const share = try Share.Machine
+  let last = 0
+  try Stream.runForEach(tabs.changes, effect (state) => {
+    if (last !== 0 && state.selected !== last) {
+      try contained(share.send({ type: "pageChanged" }), "resetting share on tab change")
+    }
+    last = state.selected
+  })
+}, "browser share tab tracking")
+
+/** Share panel and external-browser handoff for the shown tab. */
+export const share = together(reacting(Share, { carry }), hideShare, tabChanges)

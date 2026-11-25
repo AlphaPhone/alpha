@@ -15,6 +15,7 @@ module held {
   }
 }
 import { client } from held
+export { client as cloudPlugin }
 
 /**
  * eliza's own typed client of its cloud: the account, plans, entitlement, billing, managed Google and maps, each

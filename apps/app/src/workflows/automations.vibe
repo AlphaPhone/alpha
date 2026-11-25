@@ -8,7 +8,7 @@ import { ownerAt } from "../platform/owner.vibe"
 import { Garbled, Refused, ask, outcomeOf } from "../platform/remote.vibe"
 import { Attempts } from "../runtime/attempts.vibe"
 import { type Job, answer, applying, following, reacting, together } from "../runtime/reactor.vibe"
-import { Prompt, type PromptTiming, ScheduledTask } from "./api.vibe"
+import { type Prompt, PromptSchema, type PromptTiming, ScheduledTask } from "./api.vibe"
 import { type WorkflowRow, Rows, refresh } from "./list.vibe"
 
 type EditSource =
@@ -60,7 +60,7 @@ module local {
 }
 import { timezone } from local
 
-const TriggerReply = Schema.Struct({ trigger: Prompt })
+const TriggerReply = Schema.Struct({ trigger: PromptSchema })
 const TaskReply = Schema.Struct({ task: ScheduledTask })
 const RemovedReply = Schema.Struct({ ok: Schema.Literal(true) })
 const TriggerExecution = Schema.Struct({ ok: Schema.Boolean, result: Schema.Struct({ status: Schema.String }) })

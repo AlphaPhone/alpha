@@ -60,6 +60,7 @@ module held {
   }
 }
 import { filesOf, hostOf, locationOf, noticesOf, passwordsOf, photosOf, systemOf, wifiOf } from held
+export { passwordsOf }
 
 module web {
   /** The browser's own answer for `name`, or none where it has no such permission. */

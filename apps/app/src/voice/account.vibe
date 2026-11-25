@@ -1,4 +1,4 @@
-// spec/app/voice/index.md, "Signing in, out or to another account changes the route, invalidates warmup, and ends a running conversation"
+// spec/app/voice/index.md, "Signing in, out or to another account changes the route, invalidates warmup, and ends a running conversation"; spec/app/voice/route.md, "Story: Choose where speech is processed"
 import * as Voice from "../../gen/app__voice.effect.vibe"
 import { Device } from "../platform/device.vibe"
 import { type CloudSignIn, VoiceBridge } from "../platform/voice.vibe"

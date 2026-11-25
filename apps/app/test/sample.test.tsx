@@ -132,7 +132,7 @@ describe.each([["a browser", false], ["a phone", true]])("in %s", (_where, phone
     localStorage.setItem(kept, JSON.stringify({ titles: "of another shape" }));
     const fourth = await open(world, withSample);
     await until(fourth.alpha, sample.runtime(fourth.alpha), Reminders, (s) => s.list.status === "Loaded");
-    expect([localStorage.getItem(`${kept}.unreadable`), document.querySelector("h1")?.textContent]).toEqual([JSON.stringify({ titles: "of another shape" }), "Notes"]);
+    expect([localStorage.getItem(`${kept}.unreadable`), (await fourth.alpha.runtime.runPromise(Shell.use((shell) => shell.get()))).trail.at(-1)]).toEqual([JSON.stringify({ titles: "of another shape" }), "Notes"]);
 
     // spec/kit/attempt.md, "A sent attempt ends as its own answer says, or as unknown when no answer can be trusted": an agent that takes a deletion and never answers is waited on for ten seconds, and the deletion is then unknown, never refused.
     const last = sample.runtime(fourth.alpha);

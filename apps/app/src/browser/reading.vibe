@@ -1,0 +1,121 @@
+// spec/app/browser/reading.md, "Story: Ask Alpha about the page"; spec/app/browser/reading.md, "Story: Hear the page read aloud"
+import type { BrowserPageBinding } from "@elizaos/os-bridges"
+import * as Tabs from "../../gen/app__browser.effect.vibe"
+import * as Reading from "../../gen/app__browser__reading.effect.vibe"
+import { TabHost } from "../platform/browser.vibe"
+import { Device } from "../platform/device.vibe"
+import { type Job, answer, contained, reacting, run, started, together } from "../runtime/reactor.vibe"
+import { idOf } from "./browser.vibe"
+
+module pure {
+  const sensitivePattern = /\b(password|passcode|otp|one[- ]time|verification\s+code|2fa|cvv|ssn|secret\s+key|recovery\s+phrase)\b|\b\d{6}\b/i
+
+  /** Whether `text` looks like a password, verification code or credential that must never leave the Browser. @throws {never} */
+  export function looksSensitive(text: string): boolean {
+    return sensitivePattern.test(text)
+  }
+}
+import { looksSensitive } from pure
+export { looksSensitive }
+
+/** What the owner reviewed for the shown page, bound to that page's identity so a withdrawn page never leaves. */
+export interface PageReadingHandoff {
+  readonly excerpt: string
+  readonly url: string
+  readonly title?: string
+  readonly purpose: Reading.Purpose
+}
+
+/** Excerpt text and page binding held only while a reading review is active. */
+export service ReadingBuffer {
+  hold(ticket: number, excerpt: string, binding: BrowserPageBinding): void!!
+  edit(excerpt: string): void!!
+  clear(): void!!
+  current(): ({ readonly excerpt: string; readonly binding: BrowserPageBinding | undefined })!!
+  deliver(handoff: PageReadingHandoff): void!!
+}
+
+/** Default in-memory reading buffer and egress sink. */
+export const readingBuffer = Layer.sync(ReadingBuffer, () => {
+  let heldExcerpt = ""
+  let heldBinding: BrowserPageBinding | undefined
+  return {
+    hold: (_ticket: number, excerpt: string, binding: BrowserPageBinding) => sync(() => {
+      heldExcerpt = excerpt
+      heldBinding = binding
+    }),
+    edit: (excerpt: string) => sync(() => { heldExcerpt = excerpt }),
+    clear: () => sync(() => {
+      heldExcerpt = ""
+      heldBinding = undefined
+    }),
+    current: () => sync(() => ({ excerpt: heldExcerpt, binding: heldBinding })),
+    deliver: () => Effect.void,
+  }
+})
+
+effect function extractPage(ticket: number): Reading.Event!!(TabHost | Tabs.Machine | ReadingBuffer) {
+  const tabs = try (try Tabs.Machine).get()
+  const host = (try TabHost).session
+  const tabId = idOf(tabs.selected)
+  const binding = host.pageBinding(tabId)
+  const info = host.info(tabId)
+  if (binding === undefined || info === undefined) return { type: "extracted", ticket, ok: false, sensitive: false }
+  const excerpt = [info.title, info.url].filter(Boolean).join("\n").trim()
+  if (excerpt === "") return { type: "extracted", ticket, ok: false, sensitive: false }
+  if (looksSensitive(excerpt)) {
+    try (try ReadingBuffer).clear()
+    return { type: "extracted", ticket, ok: false, sensitive: true }
+  }
+  try (try ReadingBuffer).hold(ticket, excerpt, binding)
+  return { type: "extracted", ticket, ok: true, sensitive: false }
+}
+
+effect function sendIfCurrent(purpose: Reading.Purpose): void!!(TabHost | Tabs.Machine | ReadingBuffer) {
+  const buffer = try ReadingBuffer
+  const { excerpt, binding } = try buffer.current()
+  try buffer.clear()
+  if (excerpt.trim() === "" || looksSensitive(excerpt)) return
+  const tabs = try (try Tabs.Machine).get()
+  const host = (try TabHost).session
+  const tabId = idOf(tabs.selected)
+  if (binding !== undefined && !host.current(binding, tabId)) return
+  const info = host.info(tabId)
+  try buffer.deliver({ excerpt, url: binding?.url ?? info?.url ?? "", title: info?.title, purpose })
+}
+
+function carry(fx: Reading.Effect): Job<Reading.Event, TabHost | Tabs.Machine | ReadingBuffer, []> {
+  return match (fx) {
+    when { tag: "Extract", let ticket }: answer("browser extract page", extractPage(ticket), { type: "extracted", ticket, ok: false, sensitive: false });
+    when { tag: "Question" }: run("browser send question", sendIfCurrent("Ask"));
+    when { tag: "Speak" }: run("browser read aloud", sendIfCurrent("Aloud"));
+    when { tag: "Cancel" }: run("browser cancel extract", effect { try (try ReadingBuffer).clear() });
+  }
+}
+
+const hideReading = started(effect {
+  const device = try Device
+  const reader = try Reading.Machine
+  try Stream.runForEach(Stream.filter(device.visible, (shown) => !shown), effect () => {
+    const state = try reader.get()
+    if (Reading.canCancel(state)) try contained(reader.send({ type: "cancel" }), "cancelling page reading on hide")
+  })
+}, "browser reading visibility")
+
+const tabChanges = started(effect {
+  const tabs = try Tabs.Machine
+  const reader = try Reading.Machine
+  let last = 0
+  try Stream.runForEach(tabs.changes, effect (state) => {
+    if (last !== 0 && state.selected !== last) {
+      try contained(reader.send({ type: "pageChanged" }), "resetting page reading on tab change")
+    }
+    last = state.selected
+  })
+}, "browser reading tab tracking")
+
+/** Private page reading for Ask Alpha and reading aloud, guarded against withdrawn pages. */
+export const reading = Layer.provideMerge(
+  together(reacting(Reading, { carry }), hideReading, tabChanges),
+  readingBuffer,
+)

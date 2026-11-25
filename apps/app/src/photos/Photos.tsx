@@ -1,4 +1,4 @@
-// spec/app/photos/index.md, "Story: Browse the library"; spec/app/photos/index.md, "Story: Select photos"; spec/app/photos/index.md, "Story: Change albums from what I am looking at"
+// spec/app/photos/index.md, "Story: Browse the library"; spec/app/photos/index.md, "Story: Select photos"; spec/app/photos/index.md, "Story: Change albums from what I am looking at"; spec/app/photos/albums.md, "Story: Keep albums"; spec/app/photos/changes.md, "Story: Change many photos at once"
 import { Effect } from "effect";
 import { Album, ChevronLeft, ChevronRight, Ellipsis, Folder, Heart, Image, Images, ListChecks, Plus, ScanText, Search, Share2, Trash2, Undo2, X } from "lucide-react";
 import { useCallback, useRef, useState, type ReactNode } from "react";

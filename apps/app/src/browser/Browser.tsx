@@ -1,6 +1,6 @@
-// spec/app/browser/index.md, "Story: Open, pick and close tabs"; spec/app/browser/index.md, "Story: Let the agent open a page"; spec/app/browser/library.md, "Story: Keep bookmarks"; spec/app/browser/library.md, "Story: Look back through history"; spec/app/browser/address.md, "Story: Go where I typed"; spec/app/browser/address.md, "Story: Watch a page load"; spec/app/browser/address.md, "Story: Browse privately"
-import { Button, BrowserAddressBar, type BrowserAddressChoice, BrowserAddressChoices, BrowserFindBar, BrowserBar, BrowserLibrary, type BrowserMenuItem, BrowserMenu, BrowserNewTab, BrowserTabs, ConfirmDialog, PrivateMark } from "@repo/ui";
-import { ChevronLeft, Clock, Download, Plus, RotateCw, Search, Square, Star, Trash2, X } from "lucide-react";
+// spec/app/browser/index.md, "Story: Open, pick and close tabs"; spec/app/browser/index.md, "Story: Let the agent open a page"; spec/app/browser/library.md, "Story: Keep bookmarks"; spec/app/browser/library.md, "Story: Look back through history"; spec/app/browser/address.md, "Story: Go where I typed"; spec/app/browser/address.md, "Story: Watch a page load"; spec/app/browser/address.md, "Story: Browse privately"; spec/app/browser/share.md, "Story: Share the page"; spec/app/browser/share.md, "Story: Open the page in another browser"; spec/app/browser/reading.md, "Story: Ask Alpha about the page"; spec/app/browser/reading.md, "Story: Hear the page read aloud"; spec/app/browser/site.md, "Story: Let a site use the camera, microphone or location"
+import { Button, BrowserAddressBar, type BrowserAddressChoice, BrowserAddressChoices, BrowserFindBar, BrowserBar, BrowserLibrary, type BrowserMenuItem, BrowserMenu, BrowserNewTab, BrowserTabs, ConfirmDialog, ListRow, PrivateMark, Sheet, SheetContent } from "@repo/ui";
+import { ArrowUpRight, ChevronLeft, Clock, Copy, Download, Mail, Plus, RotateCw, Search, Share2, Square, Star, Trash2, Volume2, X } from "lucide-react";
 import { Effect, Option } from "effect";
 import { useState } from "react";
 import { canAskErase, canCancelErase, canConfirmErase, canOpenTab } from "../../gen/app__browser.ts";
@@ -11,6 +11,12 @@ import { verdict } from "../../gen/app__browser__address.ts";
 import { useMachine as usePage } from "../../gen/app__browser__address.react.ts";
 import { Machine as LibraryMachine } from "../../gen/app__browser__library.effect.vibe";
 import { useMachine as useLibrary } from "../../gen/app__browser__library.react.ts";
+import type { Machine as ReadingMachine } from "../../gen/app__browser__reading.effect.vibe";
+import { useMachine as useReading } from "../../gen/app__browser__reading.react.ts";
+import type { Machine as ShareMachine } from "../../gen/app__browser__share.effect.vibe";
+import { useMachine as useShare } from "../../gen/app__browser__share.react.ts";
+import type { Machine as SiteMachine } from "../../gen/app__browser__site.effect.vibe";
+import { useMachine as useSite } from "../../gen/app__browser__site.react.ts";
 import type { Machine as Shell } from "../../gen/app__shell.effect.vibe";
 import { TabHost } from "../platform/browser.vibe";
 import type { Alpha, Resident } from "../runtime/area.tsx";
@@ -18,10 +24,11 @@ import { AppBack } from "../shell/AppBack.tsx";
 import type { ManagedRuntime } from "effect";
 import { Pages, type PageRuntime, addressOf, idOf, inputOf, openDownloads, placed } from "./browser.vibe";
 import { LibraryRows, markPage, setMark } from "./library.vibe";
+import { ReadingBuffer } from "./reading.vibe";
 
 export interface BrowserProps {
   /** Provides the Browser's tabs and each tab's page, `browser` of browser.vibe, over the resident machines and the phone's tab host. */
-  runtime: ManagedRuntime.ManagedRuntime<Machine | Pages | LibraryMachine | LibraryRows | TabHost | Shell | Resident, unknown>;
+  runtime: ManagedRuntime.ManagedRuntime<Machine | Pages | LibraryMachine | LibraryRows | ShareMachine | ReadingMachine | ReadingBuffer | SiteMachine | TabHost | Shell | Resident, unknown>;
   alpha: Alpha;
 }
 
@@ -54,6 +61,9 @@ function Tab({ runtime, alpha, tabs, page }: BrowserProps & { tabs: State; page:
   const browser = useMachine(runtime);
   const { state, can, send } = usePage(page);
   const library = useLibrary(runtime);
+  const share = useShare(runtime);
+  const reading = useReading(runtime);
+  const site = useSite(runtime);
   const [typed, setTyped] = useState("");
   const [refusal, setRefusal] = useState<string>();
   const [finding, setFinding] = useState("");
@@ -108,6 +118,9 @@ function Tab({ runtime, alpha, tabs, page }: BrowserProps & { tabs: State; page:
   const bookmarkNotice = library.state?.notice === "NotSecure" ? "HTTPS only"
     : library.state?.notice === "Full" ? "The bookmark list is full."
       : library.state?.notice === "Failed" ? "Could not change the bookmark." : undefined;
+  const ready = state.phase === "Shown" && Boolean(shown?.url);
+  const elsewhere = { type: "openExternally", kind: state.kind, secure: state.secure } as const;
+  const readAloud = { type: "request", purpose: "Aloud", secure: state.secure, supported: native } as const;
   const offered: (BrowserMenuItem | false)[] = [
     can({ type: "reload" }) && { label: "Reload", name: "Reload page", icon: <RotateCw />, onSelect: () => { void browser.send({ type: "uncover" }).then(() => send({ type: "reload" })); } },
     can({ type: "stop" }) && { label: "Stop", name: "Stop loading", icon: <Square />, onSelect: () => { void browser.send({ type: "uncover" }).then(() => send({ type: "stop" })); } },
@@ -116,7 +129,10 @@ function Tab({ runtime, alpha, tabs, page }: BrowserProps & { tabs: State; page:
     native && { label: booked ? "Bookmarked" : "Bookmark", icon: <Star className={booked ? "fill-current" : undefined} />, disabled: !canBookmark, onSelect: chooseBookmark },
     native && { label: "Library", name: "Library, bookmarks and history", icon: <Clock />, onSelect: openLibrary },
     native && { label: "Downloads", icon: <Download />, onSelect: () => void runtime.runPromise(openDownloads) },
+    share.can({ type: "openPanel", ready }) && { label: "Share", icon: <Share2 />, onSelect: () => { void browser.send({ type: "uncover" }).then(() => share.send({ type: "openPanel", ready })); } },
+    ready && reading.can(readAloud) && { label: "Read aloud", icon: <Volume2 />, onSelect: () => { void browser.send({ type: "uncover" }).then(() => reading.send(readAloud)); } },
     can({ type: "openFind" }) && { label: "Find", name: "Find in page", icon: <Search />, onSelect: () => { setFinding(""); void browser.send({ type: "uncover" }).then(() => send({ type: "openFind" })); } },
+    share.can(elsewhere) && { label: "Open externally", name: "Open in another browser", icon: <ArrowUpRight />, onSelect: () => { void browser.send({ type: "uncover" }).then(() => share.send(elsewhere)); } },
     canAskErase(tabs) && { label: "Clear all", name: "Clear all browsing data", icon: <Trash2 />, onSelect: () => void browser.send({ type: "askErase" }) },
   ];
   const stood = runtime.runSync(Effect.flatMap(Pages, (pages) => pages.sought(tab)));
@@ -191,6 +207,31 @@ function Tab({ runtime, alpha, tabs, page }: BrowserProps & { tabs: State; page:
         onConfirm={() => { if (canConfirmErase(tabs)) void browser.send({ type: "confirmErase" }); }}
         onCancel={() => { if (canCancelErase(tabs)) void browser.send({ type: "cancelErase" }); }}>
         Clears history, cookies and tabs.
+      </ConfirmDialog>
+      <Sheet open={share.state?.review.showing === true} onOpenChange={(open) => { if (!open && share.can({ type: "closePanel" })) void share.send({ type: "closePanel" }); }}>
+        <SheetContent title="Share page">
+          <div className="flex flex-col divide-y divide-border">
+            <ListRow leading={<Share2 />} title="Share…" onClick={() => void share.send({ type: "choose", dest: "System", ok: true })} />
+            <ListRow leading={<Copy />} title="Copy link" onClick={() => void share.send({ type: "choose", dest: "Copy", ok: true })} />
+            <ListRow leading={<Mail />} title="Email link" onClick={() => void share.send({ type: "choose", dest: "Email", ok: true })} />
+          </div>
+        </SheetContent>
+      </Sheet>
+      <ConfirmDialog open={share.state?.handoff.showing === true} title="Open private page in another browser?" confirmLabel="Open externally"
+        onConfirm={() => { if (share.can({ type: "confirmExternally" })) void share.send({ type: "confirmExternally" }); }}
+        onCancel={() => { if (share.can({ type: "cancelExternally" })) void share.send({ type: "cancelExternally" }); }}>
+        This private tab will leave Alpha.
+      </ConfirmDialog>
+      <ConfirmDialog open={reading.state?.phase === "Reviewing"} title={reading.state?.purpose === "Aloud" ? "Read this page aloud?" : "Share excerpt with Ask Alpha?"}
+        confirmLabel={reading.state?.purpose === "Aloud" ? "Read aloud" : "Send excerpt"}
+        onConfirm={() => { if (reading.can({ type: "confirm" })) void reading.send({ type: "confirm" }); }}
+        onCancel={() => { if (reading.can({ type: "cancel" })) void reading.send({ type: "cancel" }); }}>
+        {runtime.runSync(Effect.flatMap(ReadingBuffer, (buffer) => buffer.current())).excerpt}
+      </ConfirmDialog>
+      <ConfirmDialog open={site.state?.prompt === "Asking"} title={`Allow this site to use your ${site.state?.want.toLowerCase() ?? "device"}?`} confirmLabel="Allow"
+        onConfirm={() => { if (site.can({ type: "decide", allow: true })) void site.send({ type: "decide", allow: true }); }}
+        onCancel={() => { if (site.can({ type: "decide", allow: false })) void site.send({ type: "decide", allow: false }); }}>
+        {site.state?.kind === "Private" ? "Private tabs do not remember site permissions." : "Normal tabs remember your choice for this site."}
       </ConfirmDialog>
     </div>
   );

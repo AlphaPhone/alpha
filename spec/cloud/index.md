@@ -219,13 +219,16 @@ eliza's sign-in plugin.
 
 ### Each route of Alpha's cloud table is one of eliza's device routes by method and path, buffered, outside sign-in, and needs no account session
 
-The app holds no account session, so a route that needs one could never be
-sent. Sign-in owns the routes under `/api/v1/auth/`, `/api/v1/app-auth/`,
+The app holds no fresh or stepped-up account session, so a route that needs
+one (`FreshSession`, `StepUp` or `SessionFamily`) could never be sent;
+`ElizaCloud` attaches the device key (`KeyOrSession`), the mail lease (`Mail`),
+or the reauthenticated session (`Session`) natively (`spec/os/signIn/cloudRequests.md`).
+Sign-in owns the routes under `/api/v1/auth/`, `/api/v1/app-auth/`,
 `/api/v1/api-keys/`, `/api/public/` and `/api/v1/voice/speech/`.
 
 ```quint
 type Verb = Get | Post | Patch | Delete
-type Auth = Public | KeyOrSession | SessionOnly
+type Auth = Public | KeyOrSession | Mail | Session | SessionOnly
 type Listing = { matches: int, buffered: bool, auth: Auth }
 
 pure val signInPrefixes: List[str] = List("/api/v1/auth/", "/api/v1/app-auth/", "/api/v1/api-keys/", "/api/public/", "/api/v1/voice/speech/")

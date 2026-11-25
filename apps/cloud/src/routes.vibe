@@ -22,7 +22,11 @@ function samePath(route: TableRoute, device: DeviceRoute): boolean {
 }
 
 function authOf(device: DeviceRoute | undefined): Auth {
-  return device === undefined || device.auth === "Public" ? "Public" : device.auth === "KeyOrSession" ? "KeyOrSession" : "SessionOnly"
+  return device === undefined || device.auth === "Public" ? "Public"
+    : device.auth === "KeyOrSession" ? "KeyOrSession"
+    : device.auth === "Mail" ? "Mail"
+    : device.auth === "Session" ? "Session"
+    : "SessionOnly"
 }
 
 /** Why eliza would refuse the table, one line per route it would refuse: empty when every route is one it loads. */

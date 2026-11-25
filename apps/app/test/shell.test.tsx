@@ -86,12 +86,13 @@ describe("the shell", () => {
 
   // spec/app/shell/gestures.md, "Story: Swipe the way the phone expects"
   it("Swipe the way the phone expects (spec/app/shell/gestures.md, \"Story: Swipe the way the phone expects\")", async () => {
-    const { alpha } = await open({ ...scene(), phone: true });
+    const world = { ...scene(), phone: true };
+    world.settings.roles = world.settings.roles.map((role) => role.role === "home" ? { ...role, held: true, holders: ["ai.alphacompute.alphaphone"] } : role);
+    const { alpha } = await open(world);
     await press("Notes");
     await until(alpha, alpha.runtime, Shell, (s) => s.trail.at(-1) === "Notes");
     const page = document.querySelector("main");
     if (!page) throw new Error("no Alpha shell");
-    // Happy DOM does not lay out the shell. Give the gesture the phone's canvas.
     const width = 390;
     const height = 844;
     Object.defineProperties(page, {

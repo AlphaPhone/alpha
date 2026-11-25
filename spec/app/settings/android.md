@@ -105,14 +105,14 @@ pure def handOff(s: Android, page: I::Page, target: Target, channel: str, at: in
 
 ### Android says whether it opened that page, a nearby one, or none
 
-Mobile networks, airplane mode, Do Not Disturb, screen lock, and the SIM and access point pages may open a related Android page. Alpha says so when a nearby page opened, and says unavailable when none did.
+Mobile networks, airplane mode, Do Not Disturb, screen lock, password autofill, and the SIM and access point pages may open a related Android page. Alpha says so when a nearby page opened, and says unavailable when none did.
 
 ```quint
 type Opened = Exactly | Nearby | NotAtAll
 
 pure val startValues = Set(1, 2, 3)
 
-pure def hasNearby(target: Target): bool = target == MobileNetworks or target == AirplaneMode or target == DoNotDisturb or target == ScreenLock or target == SimCards or target == AccessPointNames
+pure def hasNearby(target: Target): bool = target == MobileNetworks or target == AirplaneMode or target == DoNotDisturb or target == ScreenLock or target == PasswordAutofill or target == SimCards or target == AccessPointNames
 
 pure def canAndroidAnswered(s: Android, start: int, opened: Opened): bool =
   T::canAnswer(s.start, start) and (opened == Nearby implies hasNearby(s.target))

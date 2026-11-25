@@ -36,7 +36,7 @@ it("Move between Home and the apps on an Alpha image, where a screen that throws
   ]);
   // spec/app/shell/index.md, "Phone and Messages exist only on an Alpha image, and Contacts only where that image admits it": the phone admits them by the plugins its host registered, and the broken layer over Home took nothing away.
   await until(alpha, alpha.runtime, Shell, (s) => s.image && s.contacts);
-  expect(["Phone", "Messages", "Contacts"].map((name) => Boolean(button(name)))).toEqual([true, true, true]);
+  expect(["Phone", "Messages", "Contacts"].map((name) => Boolean(document.querySelector(`[data-home-tile='view:${name}']`)))).toEqual([true, true, true]);
 
   // spec/app/shell/index.md, "Opening an app shows it on top and lowers Ask Alpha to its bar"
   for (const view of ["Files", "Maps"]) {

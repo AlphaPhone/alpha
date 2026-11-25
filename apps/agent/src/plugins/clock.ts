@@ -3,9 +3,12 @@ import { showsApp } from "@elizaos/agent-host";
 import {
   type AlphaAppsStore, isValidTimeZone, normalizeSound,
 } from "./store.ts";
-import {
-  alarmFields, alarmOperations, timerFields, timerOperations, worldFields, worldOperations,
-} from "../../gen/agent.ts";
+const alarmFields = ["action", "id", "hour", "minute", "days", "label", "enabled", "snoozeMinutes", "sound", "vibrate"] as const;
+const timerFields = ["action", "id", "durationSeconds", "label"] as const;
+const worldFields = ["action", "id", "city"] as const;
+const alarmOperations = ["set", "update", "toggle", "delete", "list", "snooze", "dismiss"] as const;
+const timerOperations = ["start", "pause", "resume", "add_time", "reset", "cancel", "dismiss", "list"] as const;
+const worldOperations = ["time_in", "add_city", "remove_city", "list"] as const;
 import {
   type AgentAction, type AgentProvider, type AgentRoute, type ClockAlarmRecord, type ClockTimerRecord,
   type WorldCityRecord, asRecord, readBoolean, readNumber, readRawString, readString,

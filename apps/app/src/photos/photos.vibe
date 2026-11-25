@@ -1,4 +1,4 @@
-// spec/app/photos/index.md, "Story: Browse the library"; spec/app/photos/index.md, "Story: Give Photos access"; spec/app/photos/index.md, "Story: Change albums from what I am looking at"; spec/app/photos/index.md, "Story: Select photos"
+// spec/app/photos/index.md, "Story: Browse the library"; spec/app/photos/index.md, "Story: Give Photos access"; spec/app/photos/index.md, "Story: Change albums from what I am looking at"; spec/app/photos/index.md, "Story: Select photos"; spec/app/photos/actor.md, "Story: Know who did what"; spec/app/photos/albums.md, "Story: Keep albums"; spec/app/photos/changes.md, "Story: Change many photos at once"
 import { MediaId as MediaIdSchema, type AlbumChange, type LibraryAccess, type MediaId, type MediaItem, type MediaPage, type PhotosClient, type Reviewed } from "@elizaos/os-bridges"
 import * as Library from "../../gen/app__photos.effect.vibe"
 import type { Actor } from "../../gen/app__photos__actor.effect.vibe"

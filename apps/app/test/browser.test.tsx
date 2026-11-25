@@ -4,8 +4,12 @@ import { afterEach, describe, expect, it } from "vitest";
 import { Machine as Tabs } from "../gen/app__browser.effect.vibe";
 import { Machine as Page } from "../gen/app__browser__address.effect.vibe";
 import { Machine as Library } from "../gen/app__browser__library.effect.vibe";
+import { Machine as Reading } from "../gen/app__browser__reading.effect.vibe";
+import { Machine as Share } from "../gen/app__browser__share.effect.vibe";
+import { Machine as Site } from "../gen/app__browser__site.effect.vibe";
 import { Machine as Home } from "../gen/app__home.effect.vibe";
 import { Pages } from "../src/browser/browser.vibe";
+import { looksSensitive } from "../src/browser/reading.vibe";
 import browser from "../src/browser/index.tsx";
 import home from "../src/home/index.tsx";
 import { button, closeAll, drawn, fill, hardware, only, open, press, underAct, until } from "./alpha.tsx";
@@ -23,13 +27,22 @@ async function onBrowser(world = { ...scene(), phone: true, image: true }) {
   return { ...running, world, runtime };
 }
 
-const go = (text: string) => drawn(async () => {
-  await press(button("Search or type address") ? "Search or type address" : "Edit address");
+const tabsButton = () => [...document.querySelectorAll<HTMLButtonElement>("button")].find((control) => control.getAttribute("aria-label")?.startsWith("Tabs"));
+const editAddressButton = () => button("Search or type address") ?? button("Edit address") ?? [...document.querySelectorAll<HTMLButtonElement>("button")].find((control) => control.textContent?.startsWith("Edit address"));
+
+const go = async (text: string) => {
+  await drawn(() => {
+    const trigger = editAddressButton();
+    if (!trigger) throw new Error("no button Edit address");
+    trigger.click();
+  });
   await fill("Address", text);
-  const form = document.querySelector<HTMLFormElement>("form[role=search]");
-  if (!form) throw new Error("no address field");
-  form.requestSubmit();
-});
+  await drawn(() => {
+    const form = document.querySelector<HTMLFormElement>("form[role=search]");
+    if (!form) throw new Error("no address field");
+    form.requestSubmit();
+  });
+};
 
 const libraryTab = (name: "History" | "Bookmarks") => drawn(() => {
   const tab = button(name);
@@ -149,20 +162,20 @@ describe("The Browser on a phone", () => {
     await until(alpha, runtime, Tabs, (s) => s.native.length === 2);
     expect([...world.browser.tabs.values()].map((one) => one.private)).toEqual([false, true]);
     // spec/app/browser/index.md, "Picking another open tab shows it and uncovers the page"
-    await press("Tabs");
+    await drawn(() => { const found = tabsButton(); if (!found) throw new Error("no button Tabs"); found.click(); });
     await until(alpha, runtime, Tabs, (s) => s.layer === "Switcher");
     const selected = document.querySelector<HTMLButtonElement>("button[aria-current=true]");
     if (!selected) throw new Error("no active tab card");
     await drawn(() => selected.click());
     await until(alpha, runtime, Tabs, (s) => s.layer === "Uncovered" && s.privates.includes(s.selected));
-    await press("Tabs");
+    await drawn(() => { const found = tabsButton(); if (!found) throw new Error("no button Tabs"); found.click(); });
     await until(alpha, runtime, Tabs, (s) => s.layer === "Switcher");
     const original = [...document.querySelectorAll("button")].find((control) => control.textContent?.startsWith("The case for on-device agents"));
     if (!original) throw new Error("no original tab card");
     await drawn(() => original.click());
     await until(alpha, runtime, Tabs, (s) => s.layer === "Uncovered" && s.selected === s.open[0]);
     // spec/app/browser/index.md, "Closing a tab closes its native tab, shows another open tab if it was the one shown, and leaves one new tab when it was the last"
-    await press("Tabs");
+    await drawn(() => { const found = tabsButton(); if (!found) throw new Error("no button Tabs"); found.click(); });
     await press("Close The case for on-device agents");
     await until(alpha, runtime, Tabs, (s) => s.open.length === 1 && s.selected === s.privates[0]);
     expect(world.browser.tabs.size).toBe(1);
@@ -173,5 +186,32 @@ describe("The Browser on a phone", () => {
     await until(alpha, runtime, Tabs, (s) => s.erasing === "Asked");
     await press("Clear");
     await until(alpha, runtime, Tabs, (s) => s.erasing === "Kept" && s.privates.length === 1 && s.kept.length === 0);
+  });
+
+  it("Shares a page, guards reading excerpts against sensitive text and withdrawn pages, and tracks site state (spec/app/browser/share.md, \"Story: Share the page\"; spec/app/browser/reading.md, \"Story: Ask Alpha about the page\"; spec/app/browser/site.md, \"Story: Clear a site's data\")", async () => {
+    const { alpha, runtime } = await onBrowser();
+    await until(alpha, runtime, Tabs, (s) => s.hydrated);
+    await go("news.example/on-device-agents");
+    const tab = runtime.runSync(Effect.map(Tabs.use((m) => m.get()), (s) => s.selected));
+    const page = runtime.runSync(Effect.flatMap(Pages, (pages) => pages.of(tab)));
+    await until(alpha, page, Page, (p) => p.phase === "Shown");
+
+    // spec/app/browser/share.md, "Story: Share the page"
+    await press("Menu");
+    await press("Share");
+    await until(alpha, runtime, Share, (s) => s.review.showing === true);
+    await press("Copy link");
+    await until(alpha, runtime, Share, (s) => !s.review.showing && s.notice === "Copied");
+
+    // spec/app/browser/reading.md, "Story: Ask Alpha about the page"; spec/app/browser/reading.md, "Story: Hear the page read aloud"
+    expect([looksSensitive("One-time verification code 123456"), looksSensitive("The case for on-device agents")]).toEqual([true, false]);
+    await press("Menu");
+    await press("Read aloud");
+    await until(alpha, runtime, Reading, (s) => s.phase === "Reviewing");
+    await press("Cancel");
+    await until(alpha, runtime, Reading, (s) => s.phase === "Idle");
+
+    // spec/app/browser/site.md, "Story: Clear a site's data"
+    await until(alpha, runtime, Site, (s) => s.shown === tab);
   });
 });

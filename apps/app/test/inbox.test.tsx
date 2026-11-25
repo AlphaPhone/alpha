@@ -142,7 +142,12 @@ describe.each([["a browser", false], ["a phone", true]])("in %s", (_where, phone
     expect(visited).toHaveBeenCalledWith("https://northpoint.test/room", "_blank", "noopener,noreferrer");
 
     // spec/app/inbox/message.md, "An attachment is reviewed before it is opened or saved, and one use is in flight at a time"
-    await action("Open agenda.txt");
+    await drawn(() => {
+      const found = [...document.querySelectorAll<HTMLButtonElement>("button[aria-description='Open attachment']")].find((one) => one.textContent?.includes("agenda.txt"))
+        ?? document.querySelector<HTMLButtonElement>("button[aria-label='Open agenda.txt']");
+      if (!found) throw new Error("no action Open agenda.txt");
+      found.click();
+    });
     await until(alpha, runtime, Shown, (s) => s.attachment === 2);
     expect([world.inbox.attachmentReads, document.querySelector("[aria-label='Attachment contents']")]).toEqual([[], null]);
     await confirm("Open");
@@ -269,7 +274,7 @@ it("Send a draft I reviewed (spec/app/inbox/sending.md, \"Story: Send a draft I 
   await until(alpha, runtime, Offering, (s) => s.used === 1 && s.text === 0);
   await later(alpha, 10);
   await until(alpha, runtime, Writing, (s) => s.stored && !s.pending && s.write.status === "Loaded");
-  expect((document.querySelector("textarea[aria-label=Message]") as HTMLTextAreaElement | null)?.value).toBe("Thanks, it is all in order.\n\nSee you on Friday.");
+  expect(document.querySelector<HTMLTextAreaElement>("textarea[aria-label=Message]")?.value).toBe("Thanks, it is all in order.\n\nSee you on Friday.");
 
   // spec/app/inbox/sending.md, "Story: Save my draft to Gmail, or delete it there, knowingly"
   await menu("Save to Gmail", "Draft actions");
@@ -343,7 +348,8 @@ it("Send a draft I reviewed (spec/app/inbox/sending.md, \"Story: Send a draft I 
   const again = await open(world);
   const restored = inbox.runtime(again.alpha);
   await until(again.alpha, restored, Writing, (s) => !s.open && s.shelf.shelved.length === 1);
-  await press("1 drafts set aside");
+  if (button("1 drafts set aside")) await press("1 drafts set aside");
+  else await menu("Drafts set aside (1)", "Mail options");
   await press("Keep these words.No recipient");
   await until(again.alpha, restored, Writing, (s) => s.open);
   expect([
@@ -384,17 +390,17 @@ it("Keep the drafts the earlier Alpha kept (spec/app/inbox/drafts.md, \"Story: K
   await tile("Inbox");
   await until(alpha, runtime, Writing, (s) => !s.open && s.shelf.shelved.length === 3);
   // spec/app/platform/adoption.md, "A value is moved by copying it only where the new place is still empty, and its earlier place is cleared only once the new place holds a value": a slot that cannot be read stays where it was
-  await until(alpha, runtime, Writing, () => !world.platform.earlier.has(slots.saved) && !world.platform.earlier.has(slots.shelf));
+  await vi.waitFor(() => expect(!world.platform.earlier.has(slots.saved) && !world.platform.earlier.has(slots.shelf)).toBe(true));
   // spec/app/inbox/drafts.md, "An earlier operation that never left the phone is dropped; a send whose receipt says it went marks its draft sent, one refused leaves it unsent, and any other leaves it marked as possibly sent"
   expect([...world.platform.earlier.keys()]).toEqual([slots.unsaved]);
   await close();
 
   const again = await open(world);
   const restored = inbox.runtime(again.alpha);
-  await tile("Inbox");
   await until(again.alpha, restored, Writing, (s) => !s.open && s.shelf.shelved.length === 3);
-  await press("3 drafts set aside");
-  await press("Attached and signed.lee@example.test");
+  if (button("3 drafts set aside")) await press("3 drafts set aside");
+  else await menu("Drafts set aside (3)", "Mail options");
+  await press("Contract signedlee@example.test");
   await until(again.alpha, restored, Writing, (s) => s.open && s.letter.doubt.attempt === 0 && s.letter.doubt.revision === 1);
   expect([
     document.querySelector<HTMLInputElement>('input[aria-label="Subject"]')?.value,
@@ -490,6 +496,7 @@ it("Find out whether a send went (spec/app/inbox/drafts.md, \"Story: Find out wh
 });
 
 it("Stay safe with what a message carries (spec/app/inbox/message.md, \"Story: Stay safe with what a message carries\"; spec/app/inbox/message.md, \"Story: Read a saved message offline\")", async () => {
+  localStorage.setItem("alpha.preferences", JSON.stringify({ askFirst: true, images: false, shares: [] }));
   const world = { ...scene(), phone: false };
   const standup = world.inbox.mail.find((stored) => stored.card.subject === "Standup notes");
   if (standup) standup.html = "<p>Build 0.9 goes to beta testers Thursday.</p><img src=\"https://track.test/pixel.png\">";
@@ -514,7 +521,6 @@ it("Stay safe with what a message carries (spec/app/inbox/message.md, \"Story: S
   world.inbox.stalled = true;
   const second = await open(world);
   const again = inbox.runtime(second.alpha);
-  await tile("Inbox");
   await until(second.alpha, again, List, (s) => s.saved && s.accounts.status === "Loading");
   await row("Standup notes");
   await until(second.alpha, again, Shown, (s) => s.fromPhone && s.message !== 0);

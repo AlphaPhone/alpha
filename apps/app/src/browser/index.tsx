@@ -3,6 +3,11 @@ import { Layer } from "effect";
 import { Browser } from "./Browser.tsx";
 import { back, browser } from "./browser.vibe";
 import { library } from "./library.vibe";
+import { reading } from "./reading.vibe";
+import { share } from "./share.vibe";
+import { site } from "./site.vibe";
+
+const layers = Layer.provideMerge(Layer.mergeAll(library, share, reading, site), browser);
 
 /** The Browser, at its view (areas.ts): its tabs, kept across restarts, and each tab's page in the phone's tab host. */
-export default area(Layer.provideMerge(library, browser), Browser, { back });
+export default area(layers, Browser, { back });

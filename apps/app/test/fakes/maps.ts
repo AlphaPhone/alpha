@@ -148,7 +148,7 @@ export function mapsRoutes(scene: MapsScene, now: () => number): Route[] {
       if (scene.tilesLimited !== undefined) {
         const wait = scene.tilesLimited;
         scene.tilesLimited = undefined;
-        return Response.json({ error: { code: "RateLimited", message: "slow down" } }, { status: 429, headers: { "retry-after": String(wait) } });
+        return Response.json({ error: { code: "RateLimited", message: "slow down" } }, { status: 429, headers: { "retry-after": new Date(now() + wait * 1000).toUTCString() } });
       }
       return new Response(new Uint8Array([137, 80, 78, 71]), { headers: { "content-type": "image/png" } });
     },
@@ -173,7 +173,7 @@ export function elizaLocation(scene: MapsScene, now: () => number): Faked {
         scene.watches.add(watchId);
         scene.listeners.add(told);
         const here = scene.here;
-        if (here) queueMicrotask(() => told({ coords: { ...here, timestamp: now() }, cached: false }));
+        if (here) void Promise.resolve().then(() => told({ coords: { ...here, timestamp: now() }, cached: false }));
         return Promise.resolve({ watchId });
       },
       clearWatch: ({ watchId }) => {

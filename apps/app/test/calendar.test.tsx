@@ -1,4 +1,5 @@
 // @vitest-environment happy-dom
+import { Effect } from "effect";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { Machine as View } from "../gen/app__calendar.effect.vibe";
 import { Machine as Changes } from "../gen/app__calendar__agent.effect.vibe";
@@ -41,7 +42,7 @@ function morning(phone: boolean): Scene & { at: (day: number, hours: number) => 
 }
 
 /** The titles of the events the days show, in order: each event's button is named by its title and time. */
-const titles = () => [...document.querySelectorAll("[data-alpha-subview=calendar-list] button")].map((found) => (found.getAttribute("aria-label") ?? "").split(", "))
+const titles = () => [...document.querySelectorAll("[data-alpha-subview=calendar-list] button")].filter((found) => !found.closest("[data-alpha-calendar-invites]")).map((found) => (found.getAttribute("aria-label") ?? "").split(", "))
   .map((names) => ["Standup", "Team lunch", "Dentist", "Gym", "Coffee"].find((title) => names.includes(title)) ?? "").filter((title) => title !== "");
 
 /** Tap the row or block with `text` as the event title. */
@@ -60,7 +61,7 @@ async function fromMonth(pill: string) {
 }
 
 /** Bring Calendar forward, as Home, a notice or Ask Alpha does through the shell. */
-const openCalendar = (alpha: Alpha) => alpha.runtime.runPromise(Shell.use((shell) => shell.send({ type: "openView", view: "Calendar" })));
+const openCalendar = (alpha: Alpha) => alpha.runtime.runPromise(Effect.flatMap(Shell, (shell) => shell.send({ type: "openView", view: "Calendar" })));
 
 const dayButton = (day: number) => `${narrowDay.format(dateOf(day))} ${dateOf(day).getDate()}`;
 
@@ -252,7 +253,7 @@ describe("on a phone", () => {
     const runtime = calendar.runtime(alpha);
     await openCalendar(alpha);
     await until(alpha, runtime, View, (s) => s.googleRows === 2);
-    const reread = () => runtime.runPromise(View.use((machine) => machine.send({ type: "refresh" })));
+    const reread = () => runtime.runPromise(Effect.flatMap(View, (machine) => machine.send({ type: "refresh" })));
     const lunch = { source: { calendarId: "eliza-calendar/primary" }, eventId: "ev-team-lunch", expectedVersion: "1" };
 
     // spec/app/calendar/agent.md, "A card that leaves out a field its change would set can be declined, never approved"; spec/app/calendar/agent.md, "The owner declines, or the agent withdraws, and nothing is sent"

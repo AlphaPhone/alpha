@@ -20,21 +20,20 @@ const withMaps = only("home", "view:Maps");
 /** `until`, failing with the last state it saw when that state does not come within ten seconds. */
 const until: typeof reached = async (alpha, runtime, key, ok) => {
   let last: unknown;
-  let timer: ReturnType<typeof setTimeout> | undefined;
-  const late = new Promise<never>((_, fail) => { timer = setTimeout(() => fail(new Error(`not reached; last state: ${JSON.stringify(last)?.slice(0, 4000)}`)), 10_000); });
-  try {
-    await Promise.race([reached(alpha, runtime, key, (state) => { last = state; return ok(state); }), late]);
-  } finally {
-    clearTimeout(timer);
-  }
+  const timedOut = Symbol("timeout");
+  const result = await Effect.runPromise(Effect.race(
+    Effect.promise(() => reached(alpha, runtime, key, (state) => { last = state; return ok(state); })),
+    Effect.as(Effect.sleep("10 seconds"), timedOut),
+  ));
+  if (result === timedOut) throw new Error(`not reached; last state: ${JSON.stringify(last)?.slice(0, 4000)}`);
 };
 
 /** Press Enter in the field whose accessible name is `name`. */
-const enter = (name: string) => act(async () => {
+const enter = (name: string) => Promise.resolve(act(() => {
   const field = [...document.querySelectorAll("input")].find((found) => found.getAttribute("aria-label") === name);
   if (!field?.form) throw new Error(`no form around ${name}`);
   field.form.requestSubmit();
-});
+}));
 
 /** Open Maps from the shell, as Home's tile or the agent does. */
 const showMaps = (alpha: Alpha) => act(async () => {
@@ -42,9 +41,9 @@ const showMaps = (alpha: Alpha) => act(async () => {
 });
 
 /** Focus the field whose accessible name is `name`. */
-const focus = (name: string) => act(async () => {
+const focus = (name: string) => Promise.resolve(act(() => {
   [...document.querySelectorAll("input")].find((found) => found.getAttribute("aria-label") === name)?.focus();
-});
+}));
 
 /** The places the results list shows, by name. */
 const results = () => [...document.querySelectorAll("section[aria-label=Maps] button")].map((found) => found.getAttribute("aria-label")).filter((name) => name?.startsWith("Harbour"));
@@ -81,7 +80,7 @@ describe("Maps on a phone", () => {
     await press("Harbour Cafe");
     await until(alpha, runtime, Screen, (s) => s.place !== 0 && s.sheet === "Half");
 
-    // spec/app/maps/index.md, "\"Use my location\" locates once when allowed, asks when it may, and otherwise opens Settings"; spec/app/maps/index.md, "A fix goes to whoever holds the location"
+    // spec/app/maps/index.md, "'Use my location' locates once when allowed, asks when it may, and otherwise opens Settings"; spec/app/maps/index.md, "A fix goes to whoever holds the location"
     await press("Directions");
     await until(alpha, runtime, Screen, (s) => s.trip.route !== 0 && s.trip.origin === "MyLocation" && s.link.locator === "Nobody");
     expect(world.maps.asked.at(-1)?.body).toMatchObject({ from: start, to: harbour.coordinate, mode: "drive" });
@@ -155,7 +154,7 @@ describe("Maps on a phone", () => {
     await press("Recenter");
     await until(alpha, runtime, Screen, (s) => s.following);
 
-    // spec/app/maps/index.md, "Leaving Maps keeps guidance with its service and ends it without; a pending \"Use my location\" and the Calendar return end": locking the phone is leaving
+    // spec/app/maps/index.md, "Leaving Maps keeps guidance with its service and ends it without; a pending 'Use my location' and the Calendar return end": locking the phone is leaving
     await seen(false);
     await until(alpha, runtime, Screen, (s) => s.trip.away && s.trip.guidance === "Going");
 
@@ -171,7 +170,7 @@ describe("Maps on a phone", () => {
     expect(heard.spoken).toEqual(["Head north", "Head north"]);
     await seen(false);
     await until(alpha, runtime, Screen, (s) => s.trip.away);
-    await act(async () => { world.maps.guidance.stop?.("notification"); });
+    act(() => { world.maps.guidance.stop?.("notification"); });
     await until(alpha, runtime, Screen, (s) => s.trip.guidance === "Stopped" && s.guideNotice === "StoppedFromNotification" && s.link.locator === "Nobody");
     await seen(true);
     await until(alpha, runtime, Screen, (s) => !s.trip.away);
@@ -182,7 +181,7 @@ describe("Maps on a phone", () => {
     await until(alpha, runtime, Screen, (s) => s.trip.service === "Running" && s.guideNotice === "Quiet");
     await seen(false);
     await until(alpha, runtime, Screen, (s) => s.trip.away);
-    await act(async () => { world.maps.guidance.stop?.("task-removed"); });
+    act(() => { world.maps.guidance.stop?.("task-removed"); });
     await until(alpha, runtime, Screen, (s) => s.trip.guidance === "Stopped" && s.guideNotice === "PausedAway");
     await seen(true);
     await until(alpha, runtime, Screen, (s) => !s.trip.away);
@@ -297,7 +296,7 @@ describe("Maps in a browser", () => {
     await until(second.alpha, again, Credits, (s) => !s.infoOpen);
     await until(second.alpha, again, Screen, (s) => s.place !== 0);
 
-    // spec/app/maps/index.md, "A route is asked from coordinates or another place, which ends a pending \"Use my location\"": no control prompts for coordinates
+    // spec/app/maps/index.md, "A route is asked from coordinates or another place, which ends a pending 'Use my location'": no control prompts for coordinates
     await press("Directions");
     await until(second.alpha, again, Screen, (s) => s.directions);
     await fill("Starting point", "Off");
@@ -344,7 +343,7 @@ describe("Maps in a browser", () => {
     await later(alpha, 400);
     expect([world.maps.asked.length, (await runtime.runPromise(Effect.flatMap(Screen, (screen) => screen.get()))).recent]).toEqual([asked, ["gallery"]]);
 
-    // spec/app/maps/index.md, "The card shares the place or the arrival time, opens its website, or opens it in the phone's maps app"; spec/app/maps/index.md, "A copied number is told: \"Number copied\" or \"Couldn't copy\""
+    // spec/app/maps/index.md, "The card shares the place or the arrival time, opens its website, or opens it in the phone's maps app"; spec/app/maps/index.md, "A copied number is told: 'Number copied' or 'Couldn't copy'"
     await press("Harbour Gallery");
     await until(alpha, runtime, Screen, (s) => s.place !== 0);
     expect(button("Copy phone number")).toBeUndefined();
@@ -459,10 +458,12 @@ describe("Maps in a browser", () => {
     expect([button("Save"), document.body.textContent?.includes("Saved places are full. Remove one before adding another.")]).toEqual([undefined, true]);
     // spec/app/maps/places.md, "A saved place keeps its name, its coordinates and the provider's identity of it, and nothing else": a pin at a saved place's coordinates is that place
     await hardware("back");
+    await until(alpha, runtime, Screen, (s) => s.place === 0);
+    await focus("Search Maps");
     await fill("Search Maps", "43.000001, 7");
     await enter("Search Maps");
     await until(alpha, runtime, Screen, (s) => s.place === s.saved[1]?.place);
-    expect(Boolean(button("Rename"))).toBe(true);
+    expect(Boolean(button("Rename place"))).toBe(true);
   });
 
   it("Be told why before Android asks for my location, and sent to Settings once I said no (spec/app/maps/index.md, \"Story: Use my location\"; spec/app/maps/connection.md, \"Story: Use my location\")", async () => {
@@ -478,7 +479,7 @@ describe("Maps in a browser", () => {
     await press("Continue");
     await until(alpha, runtime, Screen, (s) => s.link.disclosed && !s.link.prompting && s.link.location.grant === "Denied");
     expect(world.maps.watches.size).toBe(0);
-    // spec/app/maps/index.md, "Settings opens only once Android has said no"; spec/app/maps/index.md, "\"Use my location\" locates once when allowed, asks when it may, and otherwise opens Settings"
+    // spec/app/maps/index.md, "Settings opens only once Android has said no"; spec/app/maps/index.md, "'Use my location' locates once when allowed, asks when it may, and otherwise opens Settings"
     await press("My location");
     await until(alpha, runtime, Screen, () => world.settings.opened.includes("location"));
     expect(world.maps.watches.size).toBe(0);
@@ -493,7 +494,7 @@ describe("Maps in a browser", () => {
     const runtime = maps.runtime(alpha);
     // spec/app/maps/index.md, "Opening Maps with location already allowed and nothing chosen takes one fix quietly, once a visit"
     await until(alpha, runtime, Screen, (s) => s.link.provider !== 0 && s.quiet && s.quietDone);
-    // spec/app/maps/connection.md, "\"Use my location\" gives up after 15 seconds without a fix"
+    // spec/app/maps/connection.md, "'Use my location' gives up after 15 seconds without a fix"
     await later(alpha, 16_000);
     await until(alpha, runtime, Screen, (s) => !s.quiet && s.link.locator === "Nobody");
     expect([document.body.textContent?.includes("No location fix arrived."), world.maps.watches.size]).toEqual([false, 0]);

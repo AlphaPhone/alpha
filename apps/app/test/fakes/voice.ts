@@ -183,12 +183,12 @@ export function alphaVoiceCloud(voice: VoiceScene): Faked {
         await voice.recordingStartGate?.();
         return { recordingId };
       },
-      stopRecording: async () => {
+      stopRecording: () => {
         if (voice.refuseRecordingStop) {
           activeRecording = undefined;
-          throw new Error("Recording could not be saved");
+          return Promise.reject(new Error("Recording could not be saved"));
         }
-        return finish();
+        return Promise.resolve(finish());
       },
       dictationForeground: () => Promise.resolve({ available: voice.dictationInFront }),
       cancelRecording: () => {
@@ -244,7 +244,12 @@ export function elizaCloudSpeech(voice: VoiceScene): Faked {
         if (voice.activeMicSession === sessionId) voice.activeMicSession = undefined;
         return Promise.resolve({});
       },
-      setCloudSpeechOutputMuted: () => Promise.resolve({}),
+      setCloudSpeechOutputMuted: async ({ muted }: { muted: boolean }) => {
+        voice.speakerGainRequests.push(muted);
+        await voice.speakerGainGate?.(muted);
+        voice.speakerMuted = muted;
+        return {};
+      },
       setCloudSpeechMuted: () => Promise.resolve({}),
       speakCloudSpeech: ({ sessionId, utteranceId, text }) => {
         voice.spoken.push({ text, append: false, replace: false, channel: "cloud" });

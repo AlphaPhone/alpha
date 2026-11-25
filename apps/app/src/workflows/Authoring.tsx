@@ -1,4 +1,4 @@
-// spec/app/workflows/builder.md, "Story: Write a workflow step by step"; spec/app/workflows/builder.md, "Story: Save a workflow on the agent once"; spec/app/workflows/generate.md, "Story: Have the agent draft a workflow"
+// spec/app/workflows/builder.md, "Story: Write a workflow step by step"; spec/app/workflows/builder.md, "Story: Save a workflow on the agent once"; spec/app/workflows/generate.md, "Story: Have the agent draft a workflow"; spec/app/workflows/schedule.md, "Story: Say when it runs"; spec/app/workflows/steps.md, "Story: Describe a step"
 import { Effect } from "effect";
 import { Alert, Button, ConfirmDialog, Input, ListRow, Select, SelectContent, SelectItem, SelectTrigger, Sheet, SheetContent, Spinner, Textarea } from "@repo/ui";
 import { ChevronRight, ListChecks, Plus, Sparkles } from "lucide-react";

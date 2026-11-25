@@ -23,12 +23,32 @@ const client = (running: Running) => createRuntimeJsonClient({ bridge: () => soc
 
 /** A path of the host file's list with each placeholder named: the conversation's id, its room's for the turn routes, and an event no calendar holds. */
 const filled = (route: string, conversation: ConversationRecord) => {
-  const path = route.replace("{id}", conversation.id).replace("{roomId}", conversation.roomId).replace("{eventId}", "no-such-event")
+  const path = route
+    .replace("{id}", conversation.id)
+    .replace("{roomId}", conversation.roomId)
+    .replace("{eventId}", "no-such-event")
+    .replace("{nodeId}", "n1")
+    .replace("{iteration}", "1")
+    .replace("{mutationId}", "m1")
+    .replace("{submissionId}", "s1")
   return path === "/api/scheduled-tasks" ? `${path}?ownerVisibleOnly=1` : path
 }
 
 /** The agent's own answer to a route no module or plugin serves. */
 const unserved = { status: 404, body: { error: "not_found" } }
+/** Record-lookup routes whose missing-record answer matches `unserved` when no record holds `{id}`. */
+const missingRecordRoutes = new Set([
+  "GET /api/triggers/{id}/runs",
+  "GET /api/scheduled-tasks/{id}",
+  "GET /api/triggers/{id}",
+  "POST /api/triggers/{id}/execute",
+  "DELETE /api/triggers/{id}",
+  "POST /api/scheduled-tasks/{id}/complete",
+  "POST /api/scheduled-tasks/{id}/dismiss",
+  "POST /api/scheduled-tasks/{id}/skip",
+  "POST /api/scheduled-tasks/{id}/reopen",
+  "POST /api/scheduled-tasks/{id}/fire",
+])
 const answerOf = (status: number, body: string) => {
   try { return { status, body: JSON.parse(body) as unknown } } catch { return { status, body } }
 }
@@ -87,7 +107,7 @@ describe("Run Alpha's agent on the phone", () => {
       const result = try promise(() => controller.send({ text: "Remember the word heron." }, { stream: { onPreview: () => {} } }))
       try Effect.try(() => expect(result.kind === "Replied" ? result.reply.text : result.kind).toContain("You said: Remember the word heron."))
       for (const route of try Effect.try(() => listed())) {
-        if (route.path === "/api/triggers/{id}/runs") continue
+        if (missingRecordRoutes.has(`${route.method} ${route.path}`)) continue
         const target = filled(route.path, opened)
         const status = route.stream === true
           ? try promise(async () => {

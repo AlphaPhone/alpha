@@ -1,4 +1,4 @@
-// spec/app/camera/index.md, "Story: Open the camera"; spec/app/camera/index.md, "Story: Frame the shot"; spec/app/camera/index.md, "Story: Take photos and videos"; spec/app/camera/index.md, "Story: Let Alpha take a photo"
+// spec/app/camera/index.md, "Story: Open the camera"; spec/app/camera/index.md, "Story: Frame the shot"; spec/app/camera/index.md, "Story: Take photos and videos"; spec/app/camera/index.md, "Story: Let Alpha take a photo"; spec/app/camera/agent.md, "Story: Take a photo for Alpha"; spec/app/camera/recording.md, "Story: Record a video"; spec/app/camera/recording.md, "Story: Read the clock"
 import { Button, cn, focusRing, Spinner } from "@repo/ui";
 import { CameraOff, ChevronLeft, Clock, FileScan, Flashlight, FlashlightOff, Grid3x3, MicOff, SwitchCamera, Video, Zap, ZapOff } from "lucide-react";
 import { useCallback, useRef, useState, type PointerEvent } from "react";
