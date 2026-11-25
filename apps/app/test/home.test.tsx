@@ -124,6 +124,9 @@ describe("Home on a phone", () => {
   // spec/app/home/cards.md, "Story: The other cards"; spec/app/home/cards.md, "Story: Open my day from a card"
   it("See what waits in my apps on Home's cards and open one (spec/app/home/cards.md, \"Story: The other cards\"; spec/app/home/cards.md, \"Story: Open my day from a card\")", async () => {
     const world = { ...scene(), phone: true, image: true };
+    world.telephony.calls = [];
+    world.telephony.texts = [];
+    world.telephony.voicemails = [];
     const { alpha } = await open(world);
     await until(alpha, home.runtime(alpha), Home.Machine, (h) => h.tiles.load.status === "Loaded");
     await until(alpha, alpha.runtime, Shell, (s) => s.image);
