@@ -231,6 +231,15 @@ describe("Settings", () => {
     answer();
     await until(alpha, alpha.runtime, Prefs.Machine, (s) => s.document.read.status === "Loaded" && Prefs.allows(s, "GmailChanges") && Prefs.allows(s, "CalendarEdits"));
     await vi.waitFor(() => expect(world.settings.consents.at(-1)).toEqual({ gmailChanges: true, calendarEdits: true }));
+    world.settings.consentGate = new Promise((resolve) => { answer = resolve; });
+    world.settings.refusesConsent = true;
+    await tap("Gmail changes");
+    await later(alpha, 10_000);
+    await until(alpha, alpha.runtime, Prefs.Machine, (s) => s.saving.read.status === "Failed" && s.document.read.status === "Loading");
+    answer();
+    await until(alpha, alpha.runtime, Prefs.Machine, (s) => s.document.read.status === "Loaded" && Prefs.allows(s, "GmailChanges"));
+    expect([JSON.parse(localStorage.getItem("alpha.preferences") ?? "{}"), world.settings.consents.at(-1)])
+      .toEqual([{ askFirst: true, images: true, shares: ["CalendarEdits", "GmailChanges"] }, { gmailChanges: true, calendarEdits: true }]);
   });
 
   it("A consent the host refused after a read is told again at the next read (spec/app/settings/preferences.md, \"Story: Decide whether Alpha asks before it acts\")", async () => {

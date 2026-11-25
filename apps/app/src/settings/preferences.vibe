@@ -118,9 +118,11 @@ effect function saved(save: number, choices: Choices, consent: AgentGoogle): Eve
 
 // spec/app/settings/preferences.md, "When the device preferences cannot be read, the owner can recover them: the phone resets them to its defaults, and they are read again"
 effect function recovered(recovery: number): Event!!KeyValueStore.KeyValueStore {
-  const store = try KeyValueStore.KeyValueStore
-  const ok = effect { try store.set(keys.choices, JSON.stringify(fresh)); return true } catch () => false
-  return { type: "recovered", recovery, ok, at: untimed }
+  return try turn.withPermits(1)(effect {
+    const store = try KeyValueStore.KeyValueStore
+    const ok = effect { try store.set(keys.choices, JSON.stringify(fresh)); return true } catch () => false
+    return { type: "recovered", recovery, ok, at: untimed } satisfies Event
+  })
 }
 
 // spec/app/settings/preferences.md, "The size shown is the one the phone says it applied; when it cannot say, Alpha says so and reads the size again"
