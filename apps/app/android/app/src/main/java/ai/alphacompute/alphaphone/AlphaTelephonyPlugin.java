@@ -38,20 +38,26 @@ public final class AlphaTelephonyPlugin extends TelephonyPlugin {
  }
 
  void sendComposed(MainActivity activity, WebView view, PluginCall call, boolean mms, JSObject approval, BooleanSupplier active, Consumer<Runnable> queue) {
+  Object requestedTicket = approval == null ? null : approval.opt("textAskTicket");
+  if (requestedTicket != null && (!(requestedTicket instanceof Integer ticket) || ticket <= 0)) {
+   call.reject("The approved text no longer belongs to the open review.", "composer-not-started");
+   return;
+  }
+  int textAskTicket = requestedTicket instanceof Integer ticket ? ticket : 0;
   long visit = activity.composerVisit();
-  BooleanSupplier current = () -> composerCurrent(activity, view, visit, active, true);
+  BooleanSupplier current = () -> composerCurrent(activity, view, visit, textAskTicket, active, true);
   if (!current.getAsBoolean()) {
    call.reject("Open and unlock Messages to send this draft.", "composer-not-started");
    return;
   }
   SmsTelephony.DispatchGuard guard = () -> {
-   if (!composerCurrent(activity, view, visit, active, mms)) {
+   if (!composerCurrent(activity, view, visit, textAskTicket, active, mms)) {
     throw new IllegalStateException("The Messages composer is no longer current");
    }
    if (approval != null) {
     try { requireReviewedText(call.getData(), approval); }
     catch (Exception stale) { throw new IllegalStateException("The approved text is no longer current", stale); }
-    if (!composerCurrent(activity, view, visit, active, true)) throw new IllegalStateException("The text review is no longer in front");
+    if (!current.getAsBoolean()) throw new IllegalStateException("The text review is no longer in front");
    }
   };
   queue.accept(() -> {
@@ -80,7 +86,8 @@ public final class AlphaTelephonyPlugin extends TelephonyPlugin {
   String digest = approval.getString("digest");
   long attemptId = approval.getLong("attemptId"), expiresAt = approval.getLong("expiresAt");
   JSONObject contact = approval.optJSONObject("contact");
-  if (approval.length() != (contact == null ? 3 : 4) || digest == null || digest.isBlank() || attemptId <= 0 || expiresAt <= System.currentTimeMillis()) {
+  int fields = 3 + (contact == null ? 0 : 1) + (approval.has("textAskTicket") ? 1 : 0);
+  if (approval.length() != fields || digest == null || digest.isBlank() || attemptId <= 0 || expiresAt <= System.currentTimeMillis()) {
    throw new SecurityException("The text's approval is no longer current");
   }
   JSONObject entry = DeviceExecutionJournal.of(getContext()).get(operationId);
@@ -120,9 +127,9 @@ public final class AlphaTelephonyPlugin extends TelephonyPlugin {
   return false;
  }
 
- private boolean composerCurrent(MainActivity activity, WebView view, long visit, BooleanSupplier active, boolean requireClearCall) {
+ private boolean composerCurrent(MainActivity activity, WebView view, long visit, int textAskTicket, BooleanSupplier active, boolean requireClearCall) {
   if (!active.getAsBoolean() || getActivity() != activity || activity.composerVisit() != visit
-    || activity.isAssistantSurface() || !view.isShown() || !admitted() || !unlockedForeground()
+    || activity.assistantVisit() != textAskTicket || !view.isShown() || !admitted() || !unlockedForeground()
     || !AlphaDevicePlugin.shareForeground(activity)) return false;
   return (!requireClearCall || AlphaCallState.read(getContext()).clearForMessages())
     && activity.composerVisit() == visit && active.getAsBoolean();
