@@ -14,6 +14,7 @@ import { Machine as Shell } from "../gen/app__shell.effect.vibe";
 import type { Mount } from "../src/areas.ts";
 import type { Alpha } from "../src/runtime/area.tsx";
 import assistant from "../src/assistant/index.tsx";
+import { shownReply } from "../src/assistant/shown.ts";
 import { untimed } from "../src/runtime/reactor.vibe";
 import { button, closeAll, drawn, fill, hardware, later, open, press, pressOnTop, seen, underAct, until } from "./alpha.tsx";
 import { draftKey } from "./fakes/ask.ts";
@@ -338,6 +339,7 @@ describe.each([["a browser", false], ["a phone", true]])("in %s", (_where, phone
     await press("Send");
     await until(alpha, runtime, Conversation, (s) => s.turn.send.id === (phone ? 8 : 5) && s.turn.reply === "Complete");
     expect(lines().slice(-2)).toEqual([written, "You said: Open Maps"]);
+    expect(shownReply("```\nkept  \n```\nSee <tool_call>x</tool_call>  ")).toBe("```\nkept  \n```\nSee");
   });
 
   // spec/app/assistant/search.md, "Story: Search my conversations"; spec/app/assistant/chats.md, "Story: Open a message that search found"

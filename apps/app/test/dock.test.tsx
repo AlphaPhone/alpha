@@ -78,6 +78,15 @@ describe("Ask Alpha dock and shell navigation", () => {
     expect(document.querySelector("textarea[data-alpha-composer]")).toBe(textarea);
     expect(document.activeElement).toBe(textarea);
     expect(section?.getAttribute("data-alpha-detent")).toBe("bar");
+
+    // spec/app/assistant/dock.md, "A keyboard closed while typing puts Ask Alpha back on the bar": a field left with no keyboard report rests it once, and the reported close after it takes no step Back out of the Browser.
+    await act(async () => {
+      textarea?.blur();
+      await runtime.runPromise(Effect.flatMap(Shell, (m) => Stream.runHead(Stream.filter(m.changes, (s) => s.assistant === "Bar"))));
+      await runtime.runPromise(Effect.flatMap(Canvas, (m) => m.send({ type: "keyboardReported", shown: true, voice: false })));
+      await runtime.runPromise(Effect.flatMap(Canvas, (m) => m.send({ type: "keyboardReported", shown: false, voice: false })));
+    });
+    expect(await runtime.runPromise(Effect.flatMap(Shell, (m) => m.get()))).toMatchObject({ trail: ["Browser"], assistant: "Bar" });
   });
 
   // spec/app/shell/index.md, "Ask Alpha rises to typing, a sheet or the full screen, never over the drawer"
