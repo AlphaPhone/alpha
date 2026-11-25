@@ -153,7 +153,7 @@ export default {
     "apps/*": app,
     "apps/app": {
       ...app,
-      ignoreDependencies: [...app.ignoreDependencies, "@capacitor/android"]
+      ignoreDependencies: [...app.ignoreDependencies, "@capacitor/android", "@tesseract.js-data/eng", "tesseract.js", "tesseract.js-core"]
     }
   }
 }

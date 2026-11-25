@@ -54,6 +54,8 @@ as `@repo/app`'s are. `pnpm lint:js` on its own needs what `gen` and `typecheck`
 `pnpm lint` runs them first.
 `pnpm all //#analyze` also runs or restores the application and Studio generators,
 the UI stories, the design theme and the Eliza harness before analysis reads their outputs.
+The app's Knip configuration accounts for the Android Gradle module selected by
+`apps/app/android/host.json` and the OCR package files read by `apps/app/scripts/ocr-assets.ts`.
 
 The hosted VibeStack app build keys its `//#gen` dependency on `apps/app/gen/`.
 Its other inputs come from `apps/app/` and the declared workspace builds. Add any
