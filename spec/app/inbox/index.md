@@ -34,6 +34,10 @@ the card a positive attachment hint. An older card without a hint and a
 card with a false hint show no paperclip. The row uses the list response.
 Opening the message reads the available attachments.
 
+```quint
+pure def showsAttachment(positiveHint: bool): bool = positiveHint
+```
+
 ### The list is for one account, folder and search, and remembers the last list it showed and the credential it was read under
 
 Account 0 is no account, and credential 0 none. What is kept through a

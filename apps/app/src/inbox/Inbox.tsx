@@ -1,4 +1,4 @@
-// spec/app/inbox/index.md, "Story: See my mail"; "Only a card with a positive attachment hint shows a paperclip"; spec/app/inbox/message.md, "Story: Read a message"; spec/app/inbox/marking.md, "Story: Mark mail read or unread"; spec/app/inbox/sending.md, "Story: Archive or trash mail, with Undo"
+// spec/app/inbox/index.md, "Story: See my mail"; spec/app/inbox/index.md, "Only a card with a positive attachment hint shows a paperclip"; spec/app/inbox/message.md, "Story: Read a message"; spec/app/inbox/marking.md, "Story: Mark mail read or unread"; spec/app/inbox/sending.md, "Story: Archive or trash mail, with Undo"
 import {
   Alert, Button, InboxAccountList, type InboxAttachmentPreview, InboxAttachmentReview, InboxChangeReview, InboxChangeToast, type InboxFolder,
   InboxLinkReview, type InboxListRow, InboxListScreen, type InboxListStateKind, InboxMessageScreen, type InboxMessageFaultKind, InboxNotice,
@@ -7,7 +7,7 @@ import {
 import type { MailCard, MailMessage } from "@elizaos/cloud";
 import { Effect, type ManagedRuntime } from "effect";
 import { type ReactNode, useCallback, useMemo, useState } from "react";
-import { type Folder, type Mailbox, accessOf, readable, searchableIn } from "../../gen/app__inbox.ts";
+import { type Folder, type Mailbox, accessOf, readable, searchableIn, showsAttachment } from "../../gen/app__inbox.ts";
 import type { Machine as List } from "../../gen/app__inbox.effect.vibe";
 import { useMachine as useList } from "../../gen/app__inbox.react.ts";
 import type { Machine as Marks } from "../../gen/app__inbox__marking.effect.vibe";
@@ -372,7 +372,7 @@ export function Inbox({ runtime, alpha }: InboxProps & { alpha: Alpha }) {
         : folder === "Sent" ? `To: ${card.to.length ? card.to.join(", ") : "(no recipients)"}` : senderName(card.from),
       initial: draftsFolder ? "D" : folder === "Sent" ? (card.to[0] ?? "?").slice(0, 1).toUpperCase() : undefined,
       subject: card.subject || "(no subject)", snippet: card.snippet,
-      time: arrived(card.receivedAt, today), unread: card.isUnread, attachment: card.hasAttachments === true, chosen, selecting,
+      time: arrived(card.receivedAt, today), unread: card.isUnread, attachment: showsAttachment(card.hasAttachments === true), chosen, selecting,
       onOpen: editing ?? (opening ? () => void message.send(opening) : undefined),
       onChosenChange: selecting && can(toggle) ? () => void send(toggle) : undefined,
       onSwipe: canArchive ? () => void send(swipe).then((applied) => {
