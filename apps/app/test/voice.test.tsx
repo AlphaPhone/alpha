@@ -8,6 +8,7 @@ import { VoiceBridge } from "../src/platform/voice.vibe";
 import { together, untimed, whole } from "../src/runtime/reactor.vibe";
 import { shell } from "../src/shell/shell.vibe";
 import { placeOf, VoiceWords, voicing } from "../src/voice/voice.vibe";
+import { DictationClock } from "../src/voice/dictation-clock.vibe";
 import { Machine as Conversation } from "../gen/app__assistant.effect.vibe";
 import { Machine as Composer } from "../gen/app__assistant__composer.effect.vibe";
 import { Machine as Dock } from "../gen/app__assistant__dock.effect.vibe";
@@ -19,7 +20,7 @@ import type { Mount } from "../src/areas.ts";
 import { dictate } from "../src/assistant/dictation.vibe";
 import assistant from "../src/assistant/index.tsx";
 import files from "../src/files/index.tsx";
-import { button, closeAll, drawn, fill, open, press, seen, underAct, until as drawnUntil } from "./alpha.tsx";
+import { button, closeAll, drawn, fill, later, open, press, seen, underAct, until as drawnUntil } from "./alpha.tsx";
 import { scene, type Scene } from "./fakes/scene.ts";
 import { textReview } from "./fakes/text-review.ts";
 import { fakeWorld } from "./fakes/world.vibe";
@@ -803,6 +804,54 @@ describe("Talk from Ask Alpha's composer (spec/app/voice/index.md, \"Story: Hold
     expect([after.mic, after.network, world.voice.cloudStarts, world.voice.relayWarmups, document.querySelector("[role=alertdialog], [role=alert], [role=note], [role=status]"), button("Talk") !== undefined]).toEqual([
       "Off", false, [], [], null, true,
     ]);
+  });
+
+  // spec/app/voice/dictation.md, "Recording starts from ready, and only the answer to that start opens it"; spec/app/voice/dictation.md, "A transcript with words is shown for review; no speech, an unavailable agent or a failed recognition keeps the clip"
+  it("times the admitted composer recording and keeps the confirmed clip's length through a failed transcription", async () => {
+    const world = { ...scene(), phone: true, signedIn: false };
+    const { alpha } = await open(world, talkMounts);
+    const area = assistant.runtime(alpha);
+    await drawnUntil(alpha, area, Composer, (state) => state.slot === "Open");
+    await drawn(() => alpha.runtime.runPromise(Effect.flatMap(Shell.Machine, (machine) => machine.send({ type: "raise", detent: "Sheet" }))));
+    await drawn(() => area.runPromise(dictate()));
+    await drawnUntil(alpha, area, Voice.Machine, (state) => state.recorder.stage === "Ready");
+
+    const confirmed = Promise.withResolvers<void>();
+    world.voice.recordingStartGate = () => confirmed.promise;
+    const clock = () => document.querySelector('[aria-label="Voice transcription"] .tabular-nums')?.textContent;
+    const marks = () => document.querySelector('[aria-label="Recording activity"]')?.children.length ?? 0;
+    try {
+      await press("Start recording");
+      await drawnUntil(alpha, area, Voice.Machine, (state) => state.recorder.stage === "Starting");
+      await later(alpha, 1000);
+      expect([clock(), marks()]).toEqual(["0:00", 0]);
+    } finally {
+      confirmed.resolve();
+    }
+
+    await drawnUntil(alpha, area, Voice.Machine, (state) => state.recorder.stage === "Recording");
+    await drawn(async () => {
+      const observed = area.runSync(DictationClock);
+      for (let turn = 0; turn < 400 && observed.snapshot().ticket === undefined; turn += 1) await area.runPromise(Effect.yieldNow);
+      expect(observed.snapshot().ticket).toBeDefined();
+    });
+    expect(marks()).toBe(44);
+    await later(alpha, 2000);
+    expect(clock()).toBe("0:02");
+
+    world.voice.transcriptionFailures = 1;
+    await press("Stop recording");
+    await drawnUntil(alpha, area, Voice.Machine, (state) => state.recorder.stage === "Recorded");
+    expect([clock(), marks()]).toEqual(["0:59", 0]);
+    await press("Record again");
+    await drawnUntil(alpha, area, Voice.Machine, (state) => state.recorder.stage === "Ready");
+    expect([clock(), marks()]).toEqual(["0:00", 0]);
+    await press("Start recording");
+    await drawnUntil(alpha, area, Voice.Machine, (state) => state.recorder.stage === "Recording");
+    expect(area.runSync(VoiceWords).memory.dictatedDurationMs).toBeUndefined();
+    await press("Discard transcription");
+    await drawnUntil(alpha, area, Voice.Machine, (state) => state.recorder.stage === "Closed");
+    expect(world.ask.said).toEqual([]);
   });
 
   // spec/app/voice/index.md, "Story: Dictate into a field"; spec/app/voice/index.md, "Recording asks for the microphone the first time, like a conversation"; spec/app/voice/dictation.md, "A microphone failure ends dictation quietly and a failed transcription keeps its clip"
