@@ -177,15 +177,18 @@ pure def offersAlphasServices(name: str, audience: str, capabilities: List[str])
   name == ownCloudName and audience == alphaPackage and capabilities == ownCapabilities
 ```
 
-### Alpha's own cloud mails each sign-in code from its own address on Alpha's zone
+### Alpha's own cloud uses Cloudflare to mail sign-in codes from its own address
 
-The sender is `noreply@alphacompute.cc` in both environments, the address the
-mail provider verified for Alpha's zone.
+The reviewed profile names `SIGN_IN_EMAIL` in both environments. The API
+Worker binds Cloudflare Email Sending to that name and allows it to send
+from `noreply@auth.alphaphone.dev` only.
 
 ```quint
-pure val ownMailSender = "noreply@alphacompute.cc"
+pure val ownMailSender = "noreply@auth.alphaphone.dev"
+pure val ownMailBinding = "SIGN_IN_EMAIL"
 
-pure def mailsAsAlpha(sender: str): bool = sender == ownMailSender
+pure def mailsAsAlpha(sender: str, binding: str): bool =
+  sender == ownMailSender and binding == ownMailBinding
 ```
 
 ### Chat on Alpha's own cloud is Alpha's model, and a request that names no cap is quoted and sent at the longest reply its provider generates

@@ -23,6 +23,8 @@ import { elizaCloudRoutes, tableProblems } from "../src/routes.vibe"
 import { smoke } from "../src/smoke.vibe"
 import alphaCloudWorker from "../src/worker.vibe"
 import { leakedElizaHost, problemsRendering, renderEnvironment } from "../src/wrangler.vibe"
+import apiTemplate from "../wrangler/api.template.json" with { type: "json" }
+import edgeTemplate from "../wrangler/edge.template.json" with { type: "json" }
 import { startCloudflare } from "./fakes/cloudflare.ts"
 import { hosting } from "./hosts.ts"
 import resources from "./fixtures/resources.json" with { type: "json" }
@@ -268,6 +270,11 @@ describe(`Alpha's own cloud waits, ready, for the cutover (spec/cloud/index.md, 
       inference: { ...production.inference!, models: [{ ...model, defaultMaxTokens: 4096 }] },
     } } }
     try holds(() => assert.deepStrictEqual(candidateProblems(strayed, hosts).map((problem) => problem.split(":")[0]), ["production", "production", "production"]))
+    const staging = profile.environments.staging
+    const alternatives: ReadonlyArray<typeof staging.mail> = [{ kind: "binding", binding: "OTHER_EMAIL" }, { kind: "https", url: "https://email.example.com/messages", apiKeyEnv: "OTHER_EMAIL_KEY" }]
+    try holds(() => assert.deepStrictEqual(alternatives.map((mail) => candidateProblems({
+      ...profile, environments: { ...profile.environments, staging: { ...staging, mail } },
+    }, hosts)), alternatives.map(() => ["staging: the profile must use Alpha's own Cloudflare email binding and sender"])))
     try holds(() => assert.deepStrictEqual(candidateProblems(profile, { production: hosts.production, staging: hosts.production }).length > 0, true))
     const shipped = (profiled("profile/staging.json") catch (failure) => failure._tag)
     try holds(() => assert.strictEqual(shipped, "CandidateRefused"))
@@ -302,10 +309,7 @@ describe(`Alpha's screens reach the cloud through eliza's policy (spec/cloud/ind
   } |> Effect.provide(%, NodeServices.layer))
 })
 
-const templates = {
-  api: { name: "{{workerName}}", assets: { directory: "{{assetsDirectory}}", binding: "ASSETS" }, routes: [{ pattern: "{{apiHost}}", custom_domain: true }], hyperdrive: [{ binding: "HYPERDRIVE", id: "{{hyperdriveId}}" }], vars: "{{vars}}" },
-  edge: { name: "{{workerName}}-edge", routes: [{ pattern: "{{webHost}}", custom_domain: true }], services: [{ binding: "API", service: "{{workerName}}" }], vars: "{{vars}}" },
-}
+const templates = { api: apiTemplate, edge: edgeTemplate }
 const paths = { apiMain: "../dist/src/worker.js", edgeMain: "../dist/src/edge.js", assets: "./assets.production" }
 
 describe(`Alpha's own cloud is rendered only when provisioned (spec/cloud/rollout.md, "Story: Render a deployment only when it is provisioned")`, () => {
@@ -313,7 +317,7 @@ describe(`Alpha's own cloud is rendered only when provisioned (spec/cloud/rollou
     const profile = try profileNamed("candidate")
     const registration = registrationOn(profile, "production")
     const rendered = try renderEnvironment(templates, profile, "production", resources.production, registration, paths)
-    const api = rendered.api as { name: string; routes: ReadonlyArray<{ pattern: string }>; vars: Record<string, string> }
+    const api = rendered.api as { name: string; routes: ReadonlyArray<{ pattern: string }>; vars: Record<string, string>; send_email: unknown }
     const edge = rendered.edge as { routes: ReadonlyArray<{ pattern: string }>; services: ReadonlyArray<{ service: string }>; vars: Record<string, string> }
     try holds(() => assert.deepStrictEqual([api.routes[0]?.pattern, edge.routes[0]?.pattern, edge.services[0]?.service], ["api.alphaphone.dev", "cloud.alphaphone.dev", api.name]))
     // spec/cloud/rollout.md, "The API Worker's bindings repeat its profile's origins and database, and its registry is Alpha's registration of that environment"
@@ -323,6 +327,10 @@ describe(`Alpha's own cloud is rendered only when provisioned (spec/cloud/rollou
       [api.vars.PUBLIC_API_ORIGIN, api.vars.WEB_ORIGIN, api.vars.CLOUD_IDENTITY_DIGEST, registry, api.vars.CLOUD_PROFILE_SHA256, api.vars.CLOUD_PROFILE],
       [settings.api, settings.web, settings.databaseIdentity, [{ ...entryOf(registration), environment: "production", enabled: true }], sha256Hex(rendered.profile), undefined]))
     try holds(() => assert.deepStrictEqual(edge.vars, { CLOUD_ENVIRONMENT: "production", PUBLIC_API_ORIGIN: settings.api, WEB_ORIGIN: settings.web }))
+    // spec/cloud/index.md, "Alpha's own cloud uses Cloudflare to mail sign-in codes from its own address"
+    try holds(() => assert.deepStrictEqual([api.send_email, api.vars.EMAIL_FROM, "send_email" in edge], [
+      [{ name: "SIGN_IN_EMAIL", allowed_sender_addresses: ["noreply@auth.alphaphone.dev"] }], "noreply@auth.alphaphone.dev", false,
+    ]))
     try holds(() => assert.ok(!JSON.stringify(rendered).includes('STRIPE_SECRET_KEY":')))
     try holds(() => assert.deepStrictEqual(problemsRendering(profile, "staging", resources.staging), ["DatabaseUnprovisioned"]))
     const staging = (renderEnvironment(templates, profile, "staging", resources.staging, registrationOn(profile, "staging"), paths) catch (failure) => failure._tag)
@@ -368,7 +376,7 @@ describe(`The web host returns the owner to the app (spec/cloud/rollout.md, "Sto
   })
 })
 
-const provided = { DATABASE_URL: "postgres://alpha:secret@db.example:5432/alpha", RESEND_API_KEY: "re_x", GOOGLE_CLIENT_SECRET: "g", GOOGLE_CONNECT_CLIENT_SECRET: "g", STRIPE_SECRET_KEY: "sk_test_x", STRIPE_WEBHOOK_SECRET: "whsec_x", CEREBRAS_API_KEY: "c", CARTESIA_API_KEY: "k", GOOGLE_MAPS_API_KEY: "m" }
+const provided = { DATABASE_URL: "postgres://alpha:secret@db.example:5432/alpha", GOOGLE_CLIENT_SECRET: "g", GOOGLE_CONNECT_CLIENT_SECRET: "g", STRIPE_SECRET_KEY: "sk_test_x", STRIPE_WEBHOOK_SECRET: "whsec_x", CEREBRAS_API_KEY: "c", CARTESIA_API_KEY: "k", GOOGLE_MAPS_API_KEY: "m" }
 
 /** The secrets of `file` as one rollout reads them, frozen as CI's are or not. */
 effect function settledIn(file: string, frozen: boolean) {
@@ -397,9 +405,9 @@ describe(`Secrets stay private and fit their environment (spec/cloud/rollout.md,
     try holds(() => assert.ok(typeof frozen === "string" && frozen.includes("CLOUD_SEALING_KEY is missing")))
     try holds(() => assert.deepStrictEqual(second.values, first.values))
     try holds(() => assert.deepStrictEqual(first.entitlementPublicKey, publicKey))
-    try holds(() => assert.deepStrictEqual(Object.keys(workerSecrets(first.values)).sort(), ["CARTESIA_API_KEY", "CEREBRAS_API_KEY", "CLOUD_DIGEST_KEY", "CLOUD_ENTITLEMENT_KEY", "CLOUD_SEALING_KEY", "EMAIL_CODE_SECRET", "GOOGLE_CLIENT_SECRET", "GOOGLE_CONNECT_CLIENT_SECRET", "GOOGLE_CONNECT_TOKEN_KEY", "GOOGLE_MAPS_API_KEY", "RESEND_API_KEY", "STRIPE_SECRET_KEY", "STRIPE_WEBHOOK_SECRET"]))
+    try holds(() => assert.deepStrictEqual(Object.keys(workerSecrets(first.values)).sort(), ["CARTESIA_API_KEY", "CEREBRAS_API_KEY", "CLOUD_DIGEST_KEY", "CLOUD_ENTITLEMENT_KEY", "CLOUD_SEALING_KEY", "EMAIL_CODE_SECRET", "GOOGLE_CLIENT_SECRET", "GOOGLE_CONNECT_CLIENT_SECRET", "GOOGLE_CONNECT_TOKEN_KEY", "GOOGLE_MAPS_API_KEY", "STRIPE_SECRET_KEY", "STRIPE_WEBHOOK_SECRET"]))
     try holds(() => assert.deepStrictEqual(secretProblems(first.values, "production"), ["STRIPE_SECRET_KEY must be a live key in production"]))
-    try holds(() => assert.deepStrictEqual(secretProblems({ ...generated(provided), RESEND_API_KEY: "https://api.eliza.app" }, "staging"), ["RESEND_API_KEY names a deployed Eliza Cloud host"]))
+    try holds(() => assert.deepStrictEqual(secretProblems({ ...generated(provided), CARTESIA_API_KEY: "https://api.eliza.app" }, "staging"), ["CARTESIA_API_KEY names a deployed Eliza Cloud host"]))
   } |> scoped(%) |> Effect.provide(%, NodeServices.layer))
 })
 

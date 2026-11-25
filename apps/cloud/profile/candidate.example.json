@@ -7,7 +7,7 @@
       "api": "https://api.alphaphone.dev",
       "web": "https://cloud.alphaphone.dev",
       "entitlementAudience": "ai.alphacompute.alphaphone",
-      "mailSender": "noreply@alphacompute.cc",
+      "mailSender": "noreply@auth.alphaphone.dev",
       "databaseIdentity": "2f0a1c1d3e4b5a69788796a5b4c3d2e1f00112233445566778899aabbccddeef",
       "firstPartyOrigins": [
         "https://cloud.alphaphone.dev"
@@ -62,9 +62,8 @@
         "smsHourlyBudget": 0
       },
       "mail": {
-        "kind": "https",
-        "url": "https://api.resend.com/emails",
-        "apiKeyEnv": "RESEND_API_KEY"
+        "kind": "binding",
+        "binding": "SIGN_IN_EMAIL"
       },
       "sms": {
         "kind": "none"
@@ -178,7 +177,7 @@
       "api": "https://api-staging.alphaphone.dev",
       "web": "https://cloud-staging.alphaphone.dev",
       "entitlementAudience": "ai.alphacompute.alphaphone",
-      "mailSender": "noreply@alphacompute.cc",
+      "mailSender": "noreply@auth.alphaphone.dev",
       "databaseIdentity": "3e1b2d2e4f5c6b7a8998a7b6c5d4e3f201122334455667788990aabbccddeeff",
       "firstPartyOrigins": [
         "https://cloud-staging.alphaphone.dev"
@@ -233,9 +232,8 @@
         "smsHourlyBudget": 0
       },
       "mail": {
-        "kind": "https",
-        "url": "https://api.resend.com/emails",
-        "apiKeyEnv": "RESEND_API_KEY"
+        "kind": "binding",
+        "binding": "SIGN_IN_EMAIL"
       },
       "sms": {
         "kind": "none"
