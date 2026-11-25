@@ -1,4 +1,4 @@
-// spec/app/notes/index.md, "Story: See my notes"
+// spec/app/notes/index.md, "Story: See my notes"; spec/app/notes/index.md, "The agent opens the one note the owner named, as the list shows it now, once for the owner's current turn, and is told whether it opened"
 import type { Route } from "./routes.ts";
 
 /** One note of the store, as `@elizaos/plugin-notes` serves it at `/api/notes/state`. */
@@ -18,6 +18,18 @@ export interface NotesScene {
   revision: number;
   /** Whether a read of the store fails, as an agent without its notes answers. */
   failing: boolean;
+  /** Whether a write to the store fails, as an agent that cannot reach its notes answers. */
+  refusing: boolean;
+  /** The note a claim of a prepared saved-note editor names, as eliza's view host hands it to the renderer it is bound to. */
+  target?: string;
+  /** Each claim and result a renderer sent eliza's views routes, in order. */
+  readonly views: { readonly path: "claim" | "result"; readonly body: Record<string, unknown> }[];
+}
+
+/** What a VIEWS action that prepared a navigation for `clientId` hands back in a reply (`.eliza/packages/agent/src/views/show-action.vibe`). */
+export function prepared(clientId: string, viewId: string, saved: boolean) {
+  const navigationBinding = { requestId: `request-${viewId}`, clientId, viewId, viewType: "gui", installationId: "alpha" };
+  return { action: "VIEWS", data: { actionName: "VIEWS", values: { mode: "show", viewId, ...(saved ? { subview: "saved-note-v1" } : {}), completedActionDelivered: false, completedActionHandoffId: navigationBinding.requestId, navigationPrepared: true, navigationBinding } } };
 }
 
 const hour = 3_600_000;
@@ -36,6 +48,8 @@ export function notesScene(now = Date.now()): NotesScene {
   return {
     revision: 6,
     failing: false,
+    refusing: false,
+    views: [],
     notes: [
       note("enclave", "Enclave launch", "Confirm attestation flow\nShip the keys-on-device doc\nDry run Friday", now - 20 * 60_000, { kind: "text", data: { pinned: true } }),
       note("sync", "Design sync", "", now - hour, {
@@ -110,9 +124,26 @@ function interacted(scene: NotesScene, { capability, params }: Interaction, now:
 /** The agent's Notes routes: its store's state and its writes, as `@elizaos/plugin-notes` serves them. */
 export function notesRoutes(scene: NotesScene): Route[] {
   return [
-    (request, url) => (request.method === "POST" && url.pathname === "/api/notes/interact"
-      ? request.json().then((body: Interaction) => interacted(scene, body, Date.now()))
-      : undefined),
+    (request, url) => {
+      if (request.method !== "POST" || url.pathname !== "/api/notes/interact") return;
+      if (scene.refusing) return Response.json({ error: "Notes are unavailable" }, { status: 503 });
+      return request.json().then((body: Interaction) => interacted(scene, body, Date.now()));
+    },
+    (request, url) => {
+      if (request.method !== "POST" || url.pathname !== "/api/views/interact-claim") return;
+      return request.json().then((body: Record<string, unknown>) => {
+        scene.views.push({ path: "claim", body });
+        const saved = body.targetProtocol === "saved-note-v1" && scene.target !== undefined;
+        return Response.json({ claimId: `claim-${scene.views.length}`, ...(saved ? { target: { kind: "saved-note", noteId: scene.target } } : {}) });
+      });
+    },
+    (request, url) => {
+      if (request.method !== "POST" || url.pathname !== "/api/views/interact-result") return;
+      return request.json().then((body: Record<string, unknown>) => {
+        scene.views.push({ path: "result", body });
+        return Response.json({ ok: true });
+      });
+    },
     (request, url) => {
       if (request.method !== "GET" || url.pathname !== "/api/notes/state") return;
       if (scene.failing) return Response.json({ error: "Notes are unavailable" }, { status: 503 });

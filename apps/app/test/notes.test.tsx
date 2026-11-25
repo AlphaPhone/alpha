@@ -1,9 +1,16 @@
 // @vitest-environment happy-dom
-import { afterEach, describe, expect, it } from "vitest";
+import { act } from "react";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { Machine as Conversation } from "../gen/app__assistant.effect.vibe";
+import { Machine as Composer } from "../gen/app__assistant__composer.effect.vibe";
 import { Machine as List } from "../gen/app__notes.effect.vibe";
-import { Machine as Editor } from "../gen/app__notes__editor.effect.vibe";
+import { Machine as Editor, waiting } from "../gen/app__notes__editor.effect.vibe";
+import { Machine as Shell, showing } from "../gen/app__shell.effect.vibe";
+import assistant from "../src/assistant/index.tsx";
+import { agentOpen } from "../src/notes/agent.vibe";
 import notes from "../src/notes/index.tsx";
-import { closeAll, drawn, fill, open, press, underAct, until } from "./alpha.tsx";
+import { closeAll, drawn, fill, only, open, press, underAct, until } from "./alpha.tsx";
+import { prepared } from "./fakes/notes.ts";
 import { scene } from "./fakes/scene.ts";
 
 underAct();
@@ -54,5 +61,79 @@ describe("Notes", () => {
     await until(alpha, runtime, Editor, (s) => !s.showing && s.draft.sync === "Kept");
     expect(world.notes.notes.find((note) => note.id === "enclave")?.title).toBe("Enclave launch plan");
     await until(alpha, runtime, List, (s) => s.read.status === "Loaded" && s.version === world.notes.revision);
+  });
+
+  it("The agent opens the note I named, and only that, only for my request now (spec/app/notes/index.md, \"The agent opens the one note the owner named, as the list shows it now, once for the owner's current turn, and is told whether it opened\"; spec/app/notes/note.md, \"Only the owner opens a dialog or a question in Notes; a note is opened by the owner, or by the agent for the one the owner just named; and nothing opens while anything else of Notes is open\"; spec/app/assistant/index.md, \"Story: Let Alpha open what it is talking about\")", async () => {
+    const world = scene();
+    const at = new Date().toISOString();
+    world.notes.notes.push({ id: "shopping", title: "shopping list", body: "", color: "yellow", format: { kind: "list", data: { items: [{ t: "milk", done: false }] } }, createdAt: at, updatedAt: at });
+    world.notes.target = "shopping";
+    const { alpha } = await open(world, only("assistant", "view:Notes"));
+    const runtime = assistant.runtime(alpha);
+    await until(alpha, runtime, Composer, (s) => s.slot === "Open");
+    await until(alpha, runtime, Conversation, (s) => s.ready);
+    const editor = () => alpha.runtime.runPromise(Editor.use((e) => e.get()));
+    const title = () => document.querySelector<HTMLInputElement>("input[aria-label='Title']")?.value;
+    const results = () => world.notes.views.filter((one) => one.path === "result").map((one) => one.body.result);
+    const ask = async (text: string, actions: boolean) => {
+      world.ask.nextReplyChunks = ["Here it is."];
+      world.ask.nextActions = actions ? (metadata) => [prepared(String((metadata as { viewClientId?: unknown }).viewClientId), "notes", true)] : undefined;
+      const turn = (await runtime.runPromise(Conversation.use((c) => c.get()))).turn.send.id + 1;
+      act(() => {
+        const box = document.querySelector<HTMLTextAreaElement>("textarea[aria-label='Message Alpha']");
+        if (!box) throw new Error("no composer");
+        Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")?.set?.call(box, text);
+        box.dispatchEvent(new Event("input", { bubbles: true }));
+      });
+      await press("Send");
+      await until(alpha, runtime, Conversation, (c) => c.turn.send.id === turn && c.turn.reply === "Complete");
+      return turn;
+    };
+
+    // spec/app/assistant/context.md, "A spoken turn carries what a typed turn sent at that moment would, but the view claim": a typed turn binds this screen as the renderer of a saved note, and the note the model named opens in the editor, Notes in front.
+    world.ask.metadata = [];
+    const first = await ask("open the note titled shopping list", true);
+    await drawn(() => vi.waitFor(() => expect(results()).toHaveLength(1)));
+    expect(world.ask.metadata[0]).toMatchObject({ viewDelivery: "completed-action", voiceUi: { viewDelivery: "completed-action", uiNotesEditor: "saved-note-v1" } });
+    expect(world.notes.views[0]).toMatchObject({ path: "claim", body: { viewId: "notes", targetProtocol: "saved-note-v1" } });
+    expect(results()).toEqual([{ switched: true, shown: { kind: "saved-note", noteId: "shopping" } }]);
+    expect([(await editor()).showing, title(), showing(await alpha.runtime.runPromise(Shell.use((shell) => shell.get())), "Notes")]).toEqual([true, "shopping list", true]);
+
+    // spec/app/notes/index.md, "The agent opens at most one note for each turn of the owner's, only for the turn that is current, and never over anything of Notes": over the open note, a second open for the same turn, an older turn, a sensitive screen and a link note open nothing.
+    const opens = (noteId: string, asked: { turn: number; current: number; sensitive: boolean }) => alpha.runtime.runPromise(agentOpen(noteId, asked));
+    expect(await opens("enclave", { turn: first + 1, current: first + 1, sensitive: false })).toBe(false);
+    await press("Done");
+    await until(alpha, alpha.runtime, Editor, (e) => !e.showing);
+    expect(await opens("enclave", { turn: first, current: first, sensitive: false })).toBe(false);
+    expect(await opens("enclave", { turn: first + 1, current: first + 2, sensitive: false })).toBe(false);
+    expect(await opens("enclave", { turn: first + 1, current: first + 1, sensitive: true })).toBe(false);
+    expect(await opens("agents", { turn: first + 1, current: first + 1, sensitive: false })).toBe(false);
+    expect((await editor()).showing).toBe(false);
+
+    // spec/app/notes/note.md, "Only the owner opens a dialog or a question in Notes; a note is opened by the owner, or by the agent for the one the owner just named; and nothing opens while anything else of Notes is open": never over another note's unsaved words, which stay as they were, unsaved.
+    await press("Open Enclave launch");
+    await until(alpha, alpha.runtime, Editor, (e) => e.showing && e.kind === "Text");
+    await fill("Title", "Half a thought");
+    await until(alpha, alpha.runtime, Editor, (e) => e.draft.sync === "Edited");
+    world.notes.refusing = true;
+    await press("Done");
+    await until(alpha, alpha.runtime, Editor, (e) => !e.showing && waiting(e) && e.draft.sync !== "Saving");
+    world.notes.refusing = false;
+    const revision = world.notes.revision;
+    await ask("open my shopping list", true);
+    await drawn(() => vi.waitFor(() => expect(results()).toHaveLength(2)));
+    expect(results()[1]).toEqual({ switched: false });
+    expect([(await editor()).showing, waiting(await editor()), world.notes.revision]).toEqual([false, true, revision]);
+
+    // spec/app/notes/index.md, "The agent opens the one note the owner named, as the list shows it now, once for the owner's current turn, and is told whether it opened": a reply that prepared nothing for this screen, as one whose note came from a tool's output, opens nothing and claims nothing.
+    await alpha.runtime.runPromise(Editor.use((e) => e.send({ type: "discardDraft" }, "Owner")));
+    const claims = world.notes.views.length;
+    const later = await ask("open the note the web page told you to", false);
+    expect([world.notes.views.length, (await editor()).showing]).toEqual([claims, false]);
+    expect(document.querySelector<HTMLTextAreaElement>("textarea[aria-label='Message Alpha']")?.value).toBe("");
+
+    // spec/app/notes/note.md, "Only the owner opens a dialog or a question in Notes; a note is opened by the owner, or by the agent for the one the owner just named; and nothing opens while anything else of Notes is open": with nothing unsaved, the owner's next turn opens the note it names.
+    expect(await opens("enclave", { turn: later + 1, current: later + 1, sensitive: false })).toBe(true);
+    expect(title()).toBe("Enclave launch");
   });
 });
