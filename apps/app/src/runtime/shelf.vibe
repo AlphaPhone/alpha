@@ -1,0 +1,23 @@
+// spec/app/shell/index.md, "Story: Move between Home and the apps"
+import {
+  type BoundedCache,
+  type BoundedCacheOptions,
+  type Shelf,
+  type ShelfOptions,
+  createBoundedCache,
+  createShelf,
+} from "./store.ts"
+
+export { type BoundedCache, type BoundedCacheOptions, type Shelf, type ShelfOptions, createBoundedCache, createShelf }
+
+/**
+ * Provides a scoped `Shelf<T>` under `tag` whose state is created freshly for each runtime and automatically reset
+ * when the runtime scope closes.
+ */
+export function scopedShelf<I, T>(tag: Context.Key<I, Shelf<T>>, initial: () => T): Layer.Layer<I> {
+  return Layer.effect(tag, effect {
+    const shelf = createShelf(initial(), { reset: initial })
+    try Effect.addFinalizer(() => sync(() => { shelf.reset() }))
+    return shelf
+  })
+}
