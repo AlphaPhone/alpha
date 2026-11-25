@@ -6,7 +6,7 @@ import type { Effect as Out, Event, Telecom, Typed } from "../../gen/app__phone.
 import type { Grant } from "../../gen/kit__permission.ts"
 import { Calls } from "../platform/calls.vibe"
 import { SystemSettings } from "../platform/systemSettings.vibe"
-import { Telephony, TelephonyRefused, namesOf, telephony } from "../platform/telephony.vibe"
+import { Telephony, TelephonyAbsent, TelephonyRefused, namesOf, telephony } from "../platform/telephony.vibe"
 import { type Job, answer, applying, contained, hearing, reacting, run, started, together } from "../runtime/reactor.vibe"
 import { on, visiting } from "./visit.vibe"
 import { judge, matches } from "./words.ts"
@@ -101,8 +101,12 @@ effect function askLog(): Event!!Telephony {
   return { type: "logReported", grant: grantOf(status?.permissions.callLog) }
 }
 
-/** Whether a failure means the phone may have acted: no answer came back. */
-const lost = (failure: unknown) => failure instanceof TelephonyRefused && failure.code === undefined && failure.tag === ""
+/** Explicit refusals before Android opened the dialer or placed a call. */
+function refusedBeforeDispatch(failure: unknown): boolean {
+  return failure instanceof TelephonyAbsent || (failure instanceof TelephonyRefused &&
+    (failure.tag === "BridgeUnavailable" || failure.tag === "PhoneRequestRefused" ||
+      failure.code === "invalid" || failure.code === "unavailable"))
+}
 
 /** Final handoff reply known to have opened the system dialer or placed the call. */
 function dialAnswered(ticket: number, opened: boolean, placed = false): Event {
@@ -111,7 +115,7 @@ function dialAnswered(ticket: number, opened: boolean, placed = false): Event {
 
 /** The dial screen opened with `number`, as the phone answers it. */
 effect function dialScreen(ticket: number, number: string): Event!!Telephony {
-  const report = telephony("dial", (c) => c.phone.dial(number)) catch (failure) => (lost(failure) ? undefined : null)
+  const report = telephony("dial", (c) => c.phone.dial(number)) catch (failure) => (refusedBeforeDispatch(failure) ? null : undefined)
   return report === undefined ? { type: "dialLost", ticket } : dialAnswered(ticket, report?.dialStatus === "DialHandedOff")
 }
 
@@ -132,7 +136,7 @@ effect function handoff(ticket: number, typed: boolean, tapped: string): Event!!
   const status = telephony("status", (c) => c.phone.status()) catch () => undefined
   if (!(try mayHandoff(ticket, shape))) return dialAnswered(ticket, false)
   if (status?.roles.dialer.held !== true) return try dialScreen(ticket, number)
-  const placed = telephony("placeCall", (c) => c.phone.placeCall(number)) catch (failure) => (lost(failure) ? undefined : null)
+  const placed = telephony("placeCall", (c) => c.phone.placeCall(number)) catch (failure) => (refusedBeforeDispatch(failure) ? null : undefined)
   if (placed === undefined) return { type: "dialLost", ticket }
   switch (placed?.placeStatus) {
     case "CallPlaced":
