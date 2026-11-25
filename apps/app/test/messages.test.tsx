@@ -653,6 +653,35 @@ describe("Messages on an Alpha image", () => {
     await vi.waitFor(() => expect(document.querySelector('[aria-label^="Message draft to Maya Chen"]')?.textContent).toContain(compose.body));
   });
 
+  it.each([["a contact's first name", "Maya", true], ["a name no contact has", "Bob", false]] as const)("Reviews a text to %s on its card and sends nothing (spec/app/contacts/agent.md, \"Only the phone answers the newest search, and the request goes on by what it found\")", async (_label, query, known) => {
+    const world = image();
+    const review = textReview(world.notes.owner, `text-${query}`, { type: "sms_compose", query, body: "I'm running late" });
+    world.telephony.textReview = review;
+    const { alpha } = await openImage(world);
+    const runtime = assistant.runtime(alpha);
+    await ready(alpha.runtime, Shell, "Alpha image admitted", (state) => state.image);
+    await ready(runtime, Conversation, "Ask Alpha ready on Home", (state) => state.ready && state.context.showing.tag === "Home");
+    await vi.waitFor(() => expect(button("Open conversation")).toBeDefined());
+    await press("Open conversation");
+    await ready(alpha.runtime, Shell, "Ask Alpha open", (state) => state.assistant === "Sheet");
+
+    world.ask.nextReplyChunks = ["Review this request on your phone before it can run."];
+    world.ask.nextActions = () => [{ action: "PROPOSE_DEVICE_ACTION", data: { proposalId: review.proposal.id, state: "pending", executed: false, approvalRequired: true, awaitingUserInput: true } }];
+    await write("Message Alpha", `text ${query} I'm running late`);
+    await vi.waitFor(() => expect(button("Send")?.disabled).toBe(false));
+    await press("Send");
+    await ready(runtime, Conversation, "The named proposal is read", (state) => review.pendingReads >= 1 && state.turn.reply === "Complete");
+    if (known) {
+      await vi.waitFor(() => expect(document.querySelector('[aria-label="Choose a phone number"] button')?.textContent).toContain("Maya Chen"));
+    } else {
+      await vi.waitFor(() => expect(document.body.textContent).toContain("No matching contact with a phone number was found."));
+      expect(document.querySelector('[aria-label="Choose a phone number"]')).toBeNull();
+    }
+    expect(button("Decline")).toBeDefined();
+    expect([button("Approve"), button("Open draft")]).toEqual([undefined, undefined]);
+    expect([review.decisions, review.claims, review.confirmations, world.telephony.sent]).toEqual([[], [], [], []]);
+  });
+
   it.each(["suffix", "whole number", "open thread"] as const)("Completes the exact approved %s read in its original chat (spec/app/contacts/agent.md, \"The latest text's sender is named by its number alone, and the whole number only where the agent asked for it\"; spec/app/contacts/agent.md, \"The agent reads only the conversation, voicemail or contact open on screen, as the phone last read it\")", async (scope) => {
     const world = image();
     const selected = scope === "open thread";
