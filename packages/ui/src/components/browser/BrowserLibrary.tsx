@@ -65,8 +65,8 @@ function LibraryList({ title, entries, query, onQuery, loading, failed, onRetry,
         {title === "History" && visible.length > 0 && <h3 className="mx-5 mt-3.5 mb-1 text-fine font-semibold text-muted-foreground">Earlier</h3>}
         {visible.length > 0 && <ul>{visible.map((entry) => <li key={entry.url}><LibraryRow entry={entry} onOpen={onOpen} /></li>)}</ul>}
         {visible.length === 0 && (seeking
-          ? <p role="status" className="px-6 py-10 text-center text-base leading-[normal] text-muted-foreground">No matches</p>
-          : <div role="status" aria-label={`No ${title.toLowerCase()}`} className="flex flex-col items-center gap-2.5 px-6 py-15 text-base leading-[normal] text-muted-foreground"><Star aria-hidden className="size-7" />Empty</div>)}
+          ? <p role="status" className="px-6 py-10 text-center text-base leading-plain text-muted-foreground">No matches</p>
+          : <div role="status" aria-label={`No ${title.toLowerCase()}`} className="flex flex-col items-center gap-2.5 px-6 py-15 text-base leading-plain text-muted-foreground"><Star aria-hidden className="size-7" />Empty</div>)}
       </div>
     </>
   );
@@ -81,7 +81,7 @@ function LibraryRow({ entry, onOpen }: { entry: BrowserLibraryEntry; onOpen: Bro
     <button type="button" className={cn(focusRing, "flex min-h-14 w-full items-center gap-3.5 py-2 pr-3 pl-5 text-left active:bg-accent")} onClick={() => onOpen(entry.url)}>
       <span aria-hidden className="flex size-10 shrink-0 items-center justify-center rounded-full bg-secondary font-display text-date">{title.slice(0, 1).toUpperCase()}</span>
       <span className="min-w-0">
-        <span className="block truncate text-prose leading-[normal]">{title}</span>
+        <span className="block truncate text-prose leading-plain">{title}</span>
         <span className="mt-0.5 block truncate text-fine text-muted-foreground">{where}</span>
       </span>
     </button>
