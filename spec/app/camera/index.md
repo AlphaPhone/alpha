@@ -708,8 +708,8 @@ pure def canRecordingStarted(s: Camera, by: Actor): bool = by == Phone and F::ca
 
 pure def recordingStarted(s: Camera, ok: bool, now: int, by: Actor): Done =
   val begun = F::started(s.film, ok, now)
-  val current = if (begun.stage == F::Running and not(holds(s))) F::stop(begun, now) else begun
-  filming(current, now, s)
+  val held = if (begun.stage == F::Running and not(holds(s))) F::stop(begun, now) else begun
+  filming(held, now, s)
 
 pure def canTick(s: Camera, now: int, by: Actor): bool = by == Phone and F::canTick(s.film, now)
 
@@ -770,7 +770,14 @@ pure def volumeShutter(s: Camera): bool =
 
 ### A video saved while Camera is unlocked becomes the last capture
 
+The last capture can open as soon as the phone saves it. While Camera shows
+that newly saved video, the tile can fill in its thumbnail from that same
+owned video. If the thumbnail is unavailable, the tile shows the video icon.
+
 ```quint
+pure def savedVideoThumbnail(s: Camera): int =
+  if (s.showing and not(s.secure) and not(s.covered) and s.film.stage == F::Saved and s.last == s.film.video) s.last else 0
+
 pure def stepASavedVideoIsTheLast(before: Camera, after: Camera): bool =
   (before.film.stage != F::Saved and after.film.stage == F::Saved and not(before.secure)) implies after.last == after.film.video
 ```

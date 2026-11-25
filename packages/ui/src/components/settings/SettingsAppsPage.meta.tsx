@@ -9,7 +9,7 @@ const onOpenApp = fn();
 export const meta: ComponentMeta<SettingsAppsPageProps> = {
   args: { onBack: fn(), onOpen, onOpenApp },
   decorator: fullHeight,
-  examples: { "Returning to a row": { place: 1 } },
+  examples: { "Returning to a row": { place: 2 } },
   play: {
     Default: async ({ canvasElement }: { canvasElement: HTMLElement }) => {
       onOpen.mockClear();

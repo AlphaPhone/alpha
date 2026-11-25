@@ -1,4 +1,5 @@
 // spec/app/notes/agent.md, "The agent reads one note, or the note the owner has open in Notes in front, and is told the revision it read"; spec/app/assistant/index.md, "The agent is told the view, the time zone, the day only from Calendar, and whether something is selected"
+import type { StickyNote } from "@elizaos/plugin-notes-client"
 import { Machine as Notes, type Notes as List } from "../../gen/app__notes.effect.vibe"
 import { Machine as Editor, type Editor as Writing } from "../../gen/app__notes__editor.effect.vibe"
 import { Machine as Link, type Dialog } from "../../gen/app__notes__linkNote.effect.vibe"
@@ -16,13 +17,13 @@ import { NoteContent, numberOf, savedVoice } from "./content.vibe"
 
 export type RendererNote = { readonly kind: "canonical-note" | "canonical-note-source"; readonly id: string; readonly revision: string }
 export type NotesSelection = Notes | Editor | Link | Voice | Previous | Trash | Recorder | Layers | Shell | Device | Agent | NoteContent
-export type NoteTranscript = {
+export type TranscriptSource = {
   readonly owner: number
   readonly number: number
   readonly opened: number
   readonly record: RendererNote & { readonly kind: "canonical-note" }
-  readonly title: string
 }
+export type NoteTranscript = TranscriptSource & { readonly title: string }
 
 type NoteSubjects = { readonly note: number; readonly owner: number; readonly revision: number; readonly opened: number }
 
@@ -66,17 +67,22 @@ export effect function notesSelection(): (RendererNote | undefined)!!NotesSelect
   return { kind: "canonical-note-source", id: "notes", revision: String(snapshot.version - 1) }
 }
 
-/** Only the still visible, exact saved recording can supply an attached transcript. */
-export effect function transcriptCurrent(transcript: NoteTranscript): boolean!!(NotesSelection | NoteStore) {
+/** Read the saved words only while their exact voice note remains selected. */
+export effect function savedTranscriptRecord(transcript: TranscriptSource): (StickyNote | undefined)!!(NotesSelection | NoteStore) {
   if (!showing(try (try Shell).get(), "Notes") || !(try (try Device).showing()) ||
-    pageInert(try (try Layers).get())) return false
+    pageInert(try (try Layers).get())) return undefined
   const saved = (try NoteStore).read() catch () => undefined
-  if (saved === undefined || String(saved.revision) !== transcript.record.revision) return false
+  if (saved === undefined || String(saved.revision) !== transcript.record.revision) return undefined
   const note = saved.notes.find((item) => item.id === transcript.record.id)
-  if (note === undefined || (savedVoice(note)?.lines.length ?? 0) === 0) return false
+  if (note === undefined || (savedVoice(note)?.lines.length ?? 0) === 0) return undefined
   const selected = try notesSelection()
   const voice = try (try Voice).get()
-  return selected?.kind === "canonical-note" && selected.id === transcript.record.id && selected.revision === transcript.record.revision &&
+  const matches = selected?.kind === "canonical-note" && selected.id === transcript.record.id && selected.revision === transcript.record.revision &&
     voice.showing && voice.owner === transcript.owner && voice.note === transcript.number && voice.opened === transcript.opened &&
     String(voice.revision - 1) === transcript.record.revision && voice.added > 0
+  return matches ? note : undefined
+}
+
+export effect function transcriptCurrent(transcript: TranscriptSource): boolean!!(NotesSelection | NoteStore) {
+  return (try savedTranscriptRecord(transcript)) !== undefined
 }
