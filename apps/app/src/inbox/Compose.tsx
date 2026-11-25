@@ -91,6 +91,13 @@ export function Compose({ runtime, list }: ComposeProps) {
       void send(removed, "Owner");
     },
   });
+  const query = typing.to.trim().toLowerCase();
+  const correspondents = list.selected.account === letter.account
+    ? runtime.runSync(Mail.use((mail) => Effect.sync(() => mail.shown(list))))
+      .map(({ card }) => ({ name: card.from.replace(/<[^>]*>/u, "").replace(/"/gu, "").trim(), email: /<([^>]+)>/u.exec(card.from)?.[1] ?? card.from }))
+      .filter((one, at, all) => acceptable(one.email) && one.email !== from && !words.to.includes(one.email) && all.findIndex((other) => other.email.toLowerCase() === one.email.toLowerCase()) === at)
+    : [];
+  const suggested = query === "" ? (words.to.length === 0 ? correspondents.slice(0, 3) : []) : correspondents.filter(({ name, email }) => name.toLowerCase().includes(query) || email.toLowerCase().includes(query));
   const kept = state.stored && flushed(state);
   const addressed = Object.values(typing).every((value) => value.trim() === "");
   const changeFrom = (account: number) => ({ type: "changeFrom", account, access: accessOf(list, account), typing: !addressed }) as const;
@@ -137,6 +144,7 @@ export function Compose({ runtime, list }: ComposeProps) {
           if (can(event, "Owner")) void send(event, "Owner");
         } : undefined}
         to={line("to")}
+        suggestions={suggested.map(({ name, email }) => ({ name: name || email, email }))}
         cc={line("cc")}
         bcc={line("bcc")}
         subject={words.subject}

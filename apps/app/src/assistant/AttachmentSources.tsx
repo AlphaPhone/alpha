@@ -67,7 +67,7 @@ export function AttachmentSources({ tab, room, accept, chooseDocument, onAttach,
         aria-labelledby={undefined}
         overlayClassName="bg-black/28"
         style={{ top: "8dvh" }}
-        className="inset-x-0 bottom-0 max-w-103 translate-y-0 gap-0 overflow-hidden rounded-t-sheet rounded-b-none bg-background p-0 text-foreground"
+        className="inset-x-0 bottom-0 max-h-none max-w-103 translate-y-0 gap-0 overflow-hidden rounded-t-sheet rounded-b-none bg-background p-0 text-foreground"
         onOpenAutoFocus={(event) => { event.preventDefault(); openerRef.current?.focus(); }}
         onCloseAutoFocus={(event) => { event.preventDefault(); onReturnFocus(); }}
       >
