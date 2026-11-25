@@ -1,5 +1,5 @@
 // spec/app/voice/index.md, "Story: Hold a spoken conversation"; spec/app/voice/index.md, "The speech pipeline warms on startup, foreground return and account readiness without opening the microphone"; spec/app/voice/index.md, "A reply that needs the owner's review in chat keeps voice listening with the microphone open"; spec/app/voice/index.md, "An active voice conversation may ask the shell to open Home or any admitted screen"; spec/app/shell/index.md, "Agent navigation shows an admitted app or Home without lowering Ask Alpha"; spec/app/voice/index.md, "A spoken reply says a written date, clock time, range and percentage in words"; spec/app/voice/index.md, "A turn Cloud refuses because the account is out of funds ends voice quietly, as Stop does"; spec/app/assistant/reply.md, "The agent's turn tag is never drawn, copied, quoted, emailed or spoken, and a reply still being written holds back what may become one"
-import { ConversationRecord, TurnController, type TurnContext, type TurnTransport } from "@elizaos/agent"
+import { TurnController, type ConversationRecord, type TurnContext, type TurnResult, type TurnTransport } from "@elizaos/agent"
 import { Machine as Conversation, type Context as Screen } from "../../gen/app__assistant.effect.vibe"
 import { Machine as Chats } from "../../gen/app__assistant__chats.effect.vibe"
 import { sendsOpenDocument } from "../../gen/app__assistant__context.effect.vibe"
@@ -10,10 +10,9 @@ import * as Voice from "../../gen/app__voice.effect.vibe"
 import type { Field } from "../../gen/app__voice__dictation.ts"
 import { Agent, isCloudFundsRefusal } from "../platform/agent.vibe"
 import { Device } from "../platform/device.vibe"
-import { ask } from "../platform/remote.vibe"
 import { Views, delivery, preparedIn, resendWithoutMode } from "../assistant/views.vibe"
 import { filesOnlyHeaders, MediaReview, sameFiles } from "../assistant/media-review.vibe"
-import { Talk, type Attached } from "../assistant/talk.vibe"
+import { Talk, type Attached, type DraftSeat } from "../assistant/talk.vibe"
 import type { MessageSmsRequest } from "../messages/agent-sim.vibe"
 import { SystemSettings } from "../platform/systemSettings.vibe"
 import { type VoiceEvent, VoiceBridge } from "../platform/voice.vibe"
@@ -48,8 +47,20 @@ interface SpokenNavigation {
   readonly decline: Effect.Effect<void>
 }
 
+export interface SpokenChatLease {
+  readonly session: number
+  readonly turn: number
+  readonly record: ConversationRecord
+  readonly authority: DraftSeat["authority"]
+  readonly conversation: number
+  readonly current: boolean!!
+  readonly verified: boolean!!
+  readonly retired: Stream.Stream<void>
+  settle(result: Extract<TurnResult, { kind: "Replied" }>, spoken: string): void!!
+}
+
 export interface VoiceMemory {
-  conversation: ConversationRecord | undefined
+  chat: { readonly writer: Semaphore.Semaphore; readonly begin: (session: number, turn: number, current: boolean!!) => (SpokenChatLease | undefined)!! } | undefined
   heardText: { readonly session: number; readonly turn: number; readonly text: string } | undefined
   lastReply: string
   readonly queuedSentences: string[]
@@ -84,7 +95,7 @@ export service VoiceWords {
 export const voiceWords = Layer.effect(VoiceWords, effect {
   const playLock = try Semaphore.make(1)
   const memory: VoiceMemory = {
-    conversation: undefined,
+    chat: undefined,
     heardText: undefined,
     lastReply: "",
     queuedSentences: [],
@@ -308,47 +319,14 @@ function placeForDestination(name: string): number | undefined {
   return matched === undefined ? undefined : placeOf(matched)
 }
 
-const createdConversation = Schema.Struct({ conversation: Schema.Struct({ ...ConversationRecord.fields, title: Schema.String }) })
-
-effect function ensureConversation(): (ConversationRecord | undefined)!!(Agent | VoiceWords) {
-  const { memory } = try VoiceWords
-  if (memory.conversation !== undefined) return memory.conversation
-  return effect {
-    const created = try ask(Agent, HttpClientRequest.bodyJsonUnsafe(HttpClientRequest.post("/api/conversations"), { title: "Voice" }), createdConversation)
-    const record = { id: created.conversation.id, roomId: created.conversation.roomId } as ConversationRecord
-    memory.conversation = record
-    return record
-  } catch () => undefined
-}
-
 // spec/app/assistant/context.md, "A spoken turn carries what a typed turn sent at that moment would, the view claim included"
 function sendVoiceTurn(session: number, turn: number): Stream.Stream<Voice.Event, never, Agent | VoiceWords | Voice.Machine | Shell.Machine> {
-  return Stream.callback<Voice.Event, never, Agent | VoiceWords | Voice.Machine | Shell.Machine>((queue) => effect {
+  const post = (queue: Queue.Queue<Voice.Event, Cause.Done>, lease: SpokenChatLease, spoken: string, finishLocally: () => void) => effect {
     const { runtime } = try Agent
     const { memory } = try VoiceWords
     const voice = try Voice.Machine
     const chat = Option.getOrUndefined(try Effect.serviceOption(Talk))?.board
-    const heard = memory.heardText
-    memory.heardText = undefined
-    const spoken = heard?.session === session && heard.turn === turn ? heard.text.trim() : ""
-    const finishLocally = (words?: string) => {
-      if (words !== undefined) {
-        memory.enqueueSentence(turn, words)
-        Queue.offerUnsafe(queue, { type: "sentence", session, turn })
-      }
-      Queue.offerUnsafe(queue, { type: "replyEnds", session, turn, asks: false })
-      Queue.endUnsafe(queue)
-    }
-    if (spoken === "" || !Voice.canSentence(try voice.get(), session, turn)) {
-      finishLocally()
-      return
-    }
-    if (smsConfirmation(spoken)) {
-      const card = chat?.snapshot().media.find((one) => one.spokenSms !== undefined)
-      const open = card?.spokenSms !== undefined && (try card.spokenSms.current)
-      finishLocally(open ? "Tap Approve on the text review." : "There’s no text open for review.")
-      return
-    }
+    const { record } = lease
     const rendering = try Effect.serviceOption(Views)
     const conversation = Option.getOrUndefined(try Effect.serviceOption(Conversation))
     const chats = Option.getOrUndefined(try Effect.serviceOption(Chats))
@@ -371,14 +349,14 @@ function sendVoiceTurn(session: number, turn: number): Stream.Stream<Voice.Event
       chat?.change({ media: existing.filter((card) => card.spokenSms === undefined) })
       if (Voice.canReviewSettled(try voice.get())) try ignore(voice.send({ type: "reviewSettled" }))
     }
-    const room = chatPage !== undefined && chatPage.chosen !== 0 && chatPage.page.status === "Loaded" ? chat?.known(chatPage.chosen)?.record : undefined
+    const room = chatPage?.chosen === lease.conversation && chatPage.page.status === "Loaded" ? record : undefined
     const selection = observed?.sms?.selection
     const smsReview = recipient === undefined || selection === undefined || room === undefined ? undefined
       : Option.getOrUndefined(try Effect.serviceOption(MediaReview))
     const handset = smsReview === undefined ? undefined : Option.getOrUndefined(try Effect.serviceOption(Phone))
     const smsCurrent = effect {
       if (room === undefined || chat === undefined || chatPage === undefined || chats === undefined || handset === undefined
-        || conversation === undefined || screen === undefined || views === undefined) return false
+        || conversation === undefined || screen === undefined || views === undefined || !(try lease.current)) return false
       const visible = try conversation.get()
       const chosen = try chats.get()
       const activeRoom = chat.known(chosen.chosen)?.record
@@ -393,10 +371,7 @@ function sendVoiceTurn(session: number, turn: number): Stream.Stream<Voice.Event
     const smsSession = smsReview !== undefined && (try smsCurrent) ? try smsReview.session() : undefined
     const sms = smsSession !== undefined && smsSession.capabilities.has("sms.send.v1") && (try smsCurrent)
       && recipient !== undefined && selection !== undefined && room !== undefined && chatPage !== undefined && screen !== undefined
-      ? { opened: smsSession, recipient, selection, room, conversation: chatPage.chosen, pageTicket: chatPage.page.ticket,
-        revision: screen.context.revision } : undefined
-    const record = sms?.room ?? (try ensureConversation())
-    if (record === undefined) { finishLocally(); return }
+      ? { opened: smsSession, recipient, selection, room, conversation: chatPage.chosen, revision: screen.context.revision } : undefined
     let streamed = false
     const transport: TurnTransport = {
       request(path, body, headers) {
@@ -456,7 +431,7 @@ function sendVoiceTurn(session: number, turn: number): Stream.Stream<Voice.Event
     const origin = review === undefined || alreadyInFiles ? undefined : try review.filesOrigin(true)
     const enrolled = review === undefined || (files === undefined && origin === undefined) ? undefined : try review.session()
     const currentRequest = effect {
-      return memory.conversation === record
+      return (try lease.current)
         && controller.conversation?.id === record.id && controller.conversation?.roomId === record.roomId
         && Voice.canSentence(try voice.get(), session, turn)
         && (views === undefined || (try views.current()) === asked)
@@ -471,10 +446,7 @@ function sendVoiceTurn(session: number, turn: number): Stream.Stream<Voice.Event
     const readyToSend = review !== undefined && (files !== undefined ? sameFiles(files, try review.filesContext())
       : origin !== undefined && (try review.filesOrigin(true))?.route === origin.route)
     const direct = enrolled !== undefined && readyToSend && (try atSource) ? enrolled : undefined
-    if (!Voice.canSentence(try voice.get(), session, turn)) {
-      Queue.endUnsafe(queue)
-      return
-    }
+    if (!(try lease.verified) || !(try currentRequest)) { finishLocally(); return }
     if (sms !== undefined && !(try smsCurrent)) { finishLocally(); return }
     const admittedScreen = direct === undefined ? sameScreen : try atSource
     // spec/app/assistant/reply.md, "One brief acknowledgment at most, only from the agent's acknowledgment frame, before any tool runs": it is said at once, with no hold, as the turn's first line.
@@ -504,14 +476,26 @@ function sendVoiceTurn(session: number, turn: number): Stream.Stream<Voice.Event
         text: spoken, channelType: "VOICE_DM", ...(images.length === 0 ? {} : { images }), ...(Object.keys(metadata).length === 0 ? {} : { metadata }),
       }, { stream: hooks, ...(headers === undefined ? {} : { headers }) })) catch () => undefined
     }
-    const first = try sent(direct)
-    const result = resendWithoutMode(first, direct !== undefined) ? try sent(undefined) : first
+    const retired = Stream.merge(lease.retired, Stream.as(Stream.filter(voice.changes, (current) => !Voice.canSentence(current, session, turn)), undefined))
+    const stopped = Effect.as(Stream.runHead(retired), undefined)
+    const result = try Effect.ensuring(Effect.raceFirst(effect {
+      const first = try sent(direct)
+      return resendWithoutMode(first, direct !== undefined) && (try lease.verified) && (try currentRequest) ? try sent(undefined) : first
+    }, stopped), effect {
+      if (controller.pending) try ignore(tryPromise(() => controller.interrupt()))
+    })
+    if (!(try currentRequest)) {
+      Queue.offerUnsafe(queue, { type: "replyEnds", session, turn, asks: false })
+      Queue.endUnsafe(queue)
+      return
+    }
     if (isCloudFundsRefusal(result)) {
       memory.lastReply = ""
       Queue.offerUnsafe(queue, { type: "refusedForFunds", session, turn })
       Queue.endUnsafe(queue)
       return
     }
+    if (result?.kind === "Replied") try lease.settle(result, spoken)
     let filesReport: string | undefined
     if (direct !== undefined && review !== undefined && awaitingFiles && streamed
       && result?.kind === "Replied" && result.reply.userMessageId !== undefined && result.reply.failureKind === undefined) {
@@ -539,8 +523,6 @@ function sendVoiceTurn(session: number, turn: number): Stream.Stream<Voice.Event
         room: sms.room, current: smsCurrent,
       })
       if (card !== undefined && (try smsCurrent) && Voice.canSentence(try voice.get(), session, turn)) {
-        chat.messageNumber(result.reply.userMessageId)
-        chat.append(sms.pageTicket, sms.conversation, { id: result.reply.userMessageId, mine: true, text: spoken })
         chat.change({ media: [...chat.snapshot().media, card] })
         smsShown = true
       }
@@ -576,6 +558,45 @@ function sendVoiceTurn(session: number, turn: number): Stream.Stream<Voice.Event
     sayFrom(full.length >= shown.length ? full : shown, true)
     Queue.offerUnsafe(queue, { type: "replyEnds", session, turn, asks: false })
     Queue.endUnsafe(queue)
+  }
+  return Stream.callback<Voice.Event, never, Agent | VoiceWords | Voice.Machine | Shell.Machine>((queue) => effect {
+    const { memory } = try VoiceWords
+    const voice = try Voice.Machine
+    const chat = Option.getOrUndefined(try Effect.serviceOption(Talk))?.board
+    const heard = memory.heardText
+    memory.heardText = undefined
+    const spoken = heard?.session === session && heard.turn === turn ? heard.text.trim() : ""
+    const finishLocally = (words?: string) => {
+      if (words !== undefined) {
+        memory.enqueueSentence(turn, words)
+        Queue.offerUnsafe(queue, { type: "sentence", session, turn })
+      }
+      Queue.offerUnsafe(queue, { type: "replyEnds", session, turn, asks: false })
+      Queue.endUnsafe(queue)
+    }
+    if (spoken === "" || !Voice.canSentence(try voice.get(), session, turn)) {
+      finishLocally()
+      return
+    }
+    if (smsConfirmation(spoken)) {
+      const card = chat?.snapshot().media.find((one) => one.spokenSms !== undefined)
+      const open = card?.spokenSms !== undefined && (try card.spokenSms.current)
+      finishLocally(open ? "Tap Approve on the text review." : "There’s no text open for review.")
+      return
+    }
+    const shared = memory.chat
+    if (shared !== undefined) {
+      const current = effect { return Voice.canSentence(try voice.get(), session, turn) }
+      const carried = try shared.writer.withPermitsIfAvailable(1)(effect {
+        const abandoned = Effect.as(Stream.runHead(Stream.filter(voice.changes, (state) => !Voice.canSentence(state, session, turn))), undefined)
+        const lease = try Effect.raceFirst(shared.begin(session, turn, current), abandoned)
+        if (lease === undefined) return false
+        try post(queue, lease, spoken, finishLocally)
+        return true
+      })
+      if (Option.isSome(carried) && carried.value) return
+    }
+    finishLocally()
   })
 }
 
