@@ -321,7 +321,7 @@ export function Camera({ runtime, alpha }: Shown<Runtime>) {
             aria-busy={state.shot !== 0 || inProgress && state.film.stage !== "Running"}
             disabled={!active || (video ? !videoShutter : !photoShutter)}
             onClick={click}
-            className={cn("flex size-20 items-center justify-center rounded-full border-4 border-foreground disabled:opacity-60", focusRing)}
+            className={cn("flex size-20 items-center justify-center rounded-full border-4 border-foreground", focusRing)}
           >
             <span aria-hidden className={cn("transition-all duration-fast motion-reduce:transition-none", inProgress ? "size-7.5 rounded-lg bg-record" : cn("size-15.5 rounded-full", video ? "bg-record" : "bg-foreground"))} />
           </button>
