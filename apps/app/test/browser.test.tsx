@@ -6,6 +6,7 @@ import { Machine as Composer } from "../gen/app__assistant__composer.effect.vibe
 import { Machine as Tabs } from "../gen/app__browser.effect.vibe";
 import { Machine as Page } from "../gen/app__browser__address.effect.vibe";
 import { Machine as Library } from "../gen/app__browser__library.effect.vibe";
+import { Machine as Settings } from "../gen/app__settings.effect.vibe";
 import { Machine as Share } from "../gen/app__browser__share.effect.vibe";
 import { Machine as Site } from "../gen/app__browser__site.effect.vibe";
 import { Machine as Home } from "../gen/app__home.effect.vibe";
@@ -37,6 +38,12 @@ const go = (text: string) => drawn(async () => {
   if (!form) throw new Error("no address field");
   form.requestSubmit();
 });
+
+const placeNative = () => {
+  const surface = document.querySelector<HTMLElement>("[data-alpha-browser-page]");
+  if (!surface) throw new Error("Browser has no native page slot");
+  Object.defineProperty(surface, "getBoundingClientRect", { value: () => new DOMRect(0, 104, 390, 650) });
+};
 
 const libraryTab = (name: "History" | "Bookmarks") => drawn(() => {
   const tab = button(name);
@@ -152,6 +159,7 @@ describe("The Browser on a phone", () => {
     expect([...world.browser.tabs.values()].map((one) => one.history)).toEqual([["https://news.example/on-device-agents"]]);
     expect(Boolean(document.querySelector("[aria-label='Secure connection']"))).toBe(true);
 
+    placeNative();
     await press("Menu");
     await press("Share");
     await until(alpha, runtime, Share, (s) => s.sent === 1 && s.delivery.tag === "NoDelivery");
@@ -214,6 +222,47 @@ describe("The Browser on a phone", () => {
     await press("Clear data");
     expect(world.browser.calls).not.toContain("clearSiteData");
     expect(runtime.runSync(Site.use((m) => m.get())).clear).toBe(0);
+  });
+
+  it("Opens Passwords settings from the Browser menu (spec/app/settings/index.md, \"A notice or Ask Alpha may open a section directly, at its top, and Back from it goes to its parent\")", async () => {
+    const { alpha, runtime } = await onBrowser();
+    await until(alpha, runtime, Tabs, (s) => s.hydrated);
+    await press("Menu");
+    await press("Password manager");
+    await until(alpha, alpha.runtime, Settings, (s) => s.page === "PasswordsPage");
+  });
+
+  it("Only opens a private HTTPS page after the owner confirms it (spec/app/browser/share.md, \"Story: Open the page in another browser\")", async () => {
+    const { alpha, runtime, world } = await onBrowser();
+    await until(alpha, runtime, Tabs, (s) => s.hydrated);
+    await press("Menu");
+    expect(button("Open externally, passkeys unsupported here")).toBeUndefined();
+    await press("New private tab");
+    await until(alpha, runtime, Tabs, (s) => s.privates.length === 1 && s.layer === "Address");
+    await drawn(async () => {
+      await fill("Address", "enclave.example/keys-in-hardware");
+      document.querySelector<HTMLFormElement>("form[role=search]")?.requestSubmit();
+    });
+    const selected = runtime.runSync(Tabs.use((m) => m.get())).selected;
+    const page = runtime.runSync(Effect.flatMap(Pages, (pages) => pages.of(selected)));
+    await until(alpha, page, Page, (p) => p.phase === "Shown" && p.secure);
+    placeNative();
+    await press("Menu");
+    await press("Open externally, passkeys unsupported here");
+    await until(alpha, runtime, Share, (s) => s.handoff.showing);
+    expect(document.querySelector("[role=alertdialog]")?.textContent).toContain("enclave.example");
+    expect(world.browser.handedOff).toEqual([]);
+    await press("Cancel");
+    await until(alpha, runtime, Share, (s) => !s.handoff.showing);
+    expect(world.browser.handedOff).toEqual([]);
+
+    await press("Open externally, passkeys unsupported here");
+    await until(alpha, runtime, Share, (s) => s.handoff.showing);
+    await press("Open in browser");
+    await until(alpha, runtime, Share, (s) => s.confirmed && !s.launching);
+    expect(world.browser.handedOff.map(({ url, privateConfirmed }) => [url, privateConfirmed])).toEqual([
+      ["https://enclave.example/keys-in-hardware", true],
+    ]);
   });
 
   it("Open, pick and close tabs (spec/app/browser/index.md, \"Story: Open, pick and close tabs\"; spec/app/browser/index.md, \"Story: Clear all browsing data\")", async () => {

@@ -36,6 +36,7 @@ export interface BrowserScene {
   /** Every call the page made, by method. */
   readonly calls: string[];
   readonly shared: BrowserPageGuard[];
+  readonly handedOff: (BrowserPageGuard & { readonly privateConfirmed?: boolean })[];
   showInFiles: (() => void) | undefined;
   navigateFromPage?: (id: string, url: string) => void;
 }
@@ -153,6 +154,7 @@ export function browserScene(): BrowserScene {
     shown: undefined,
     calls: [],
     shared: [],
+    handedOff: [],
     showInFiles: undefined,
   };
 }
@@ -332,7 +334,15 @@ export function alphaBrowser(world: BrowserScene): Faked {
         world.shared.push(options);
         return Promise.resolve(tab);
       },
-      openExternalBrowser: () => Promise.resolve(),
+      openExternalBrowser: (request) => {
+        const tab = held(request);
+        if (world.shown?.id !== tab.id || !tab.committed || tab.loading || request.navigation !== String(tab.navigation) ||
+            request.url !== tab.history[tab.at] || (tab.private && !request.privateConfirmed)) {
+          return Promise.reject(rejection("The page changed"));
+        }
+        world.handedOff.push(request);
+        return Promise.resolve();
+      },
       downloads: ({ session: requested }) => {
         world.calls.push("downloads");
         world.showInFiles = () => {

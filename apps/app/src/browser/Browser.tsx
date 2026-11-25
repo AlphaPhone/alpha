@@ -1,6 +1,6 @@
 // spec/app/browser/index.md, "Story: Open, pick and close tabs"; spec/app/browser/index.md, "Story: Let the agent open a page"; spec/app/browser/address.md, "Story: Go where I typed"; spec/app/browser/address.md, "Story: Watch a page load"; spec/app/browser/address.md, "Story: Browse privately"
 import { Button, BrowserAddressBar, type BrowserAddressChoice, BrowserAddressChoices, BrowserFindBar, BrowserBar, BrowserLibrary, type BrowserMenuItem, BrowserMenu, BrowserNewTab, BrowserReview, BrowserTabs, ConfirmDialog, PrivateMark } from "@repo/ui";
-import { ChevronLeft, Clock, Download, Link, ListFilter, Plus, RotateCw, Search, Share2, Square, Star, Trash2 } from "lucide-react";
+import { ChevronLeft, Clock, Download, ExternalLink, Link, ListFilter, Lock, Plus, RotateCw, Search, Share2, Square, Star, Trash2 } from "lucide-react";
 import { Effect, Option } from "effect";
 import { useState, useSyncExternalStore } from "react";
 import { canAskErase, canCancelErase, canConfirmErase, canOpenTab } from "../../gen/app__browser.ts";
@@ -23,9 +23,9 @@ import { AppBack } from "../shell/AppBack.tsx";
 import { desktopPreview } from "../shell/canvas.vibe";
 import type { ManagedRuntime } from "effect";
 import { Reviewing, approve, decline } from "./agent.vibe";
-import { Pages, type PageRuntime, addressOf, idOf, inputOf, openDownloads, placed } from "./browser.vibe";
+import { Pages, type PageRuntime, addressOf, idOf, inputOf, openDownloads, openPasswords, placed } from "./browser.vibe";
 import { LibraryRows, editHistory, markPage, setMark } from "./library.vibe";
-import { type SharePages, cancelPrivateFrame, confirmPrivateFrame, offerShare } from "./share.vibe";
+import { SharePages, cancelExternal, confirmExternal, offerNativeHandoff, offerShare } from "./share.vibe";
 import { type SitePage, type SiteRows, clearSiteShown, siteShown } from "./site.vibe";
 
 export interface BrowserProps {
@@ -115,6 +115,11 @@ function Tab({ runtime, alpha, tabs, page }: BrowserProps & { tabs: State; page:
     ? tabHost.web === undefined ? tabHost.session.pageBinding(idOf(tab)) : tabHost.web.current(idOf(tab), state.load)
     : undefined;
   const canShare = share.can({ type: "openPanel", ready: binding !== undefined });
+  const nativePage = binding !== undefined && "navigation" in binding && state.secure ? binding : undefined;
+  const canHandoff = nativePage !== undefined && share.can({ type: "openExternally", kind: state.kind, secure: true });
+  const reviewed = share.state?.handoff.showing
+    ? runtime.runSync(Effect.map(SharePages, ({ external }) => external.page))
+    : undefined;
   const booked = binding !== undefined && runtime.runSync(Effect.flatMap(LibraryRows, (rows) => rows.bookmarks())).some((entry) => entry.url === binding.url);
   const canBookmark = library.can(booked ? { type: "unmark" } : { type: "mark", secure: state.secure, userInfo: false });
   const chooseBookmark = () => {
@@ -140,8 +145,10 @@ function Tab({ runtime, alpha, tabs, page }: BrowserProps & { tabs: State; page:
     hasLibrary && { label: booked ? "Bookmarked" : "Bookmark", icon: <Star fill={booked ? "currentColor" : "none"} />, disabled: !canBookmark, onSelect: chooseBookmark },
     hasLibrary && { label: "Library", name: "Library, bookmarks and history", icon: <Clock />, onSelect: openLibrary },
     hasLibrary && { label: "Downloads", icon: <Download />, onSelect: () => void runtime.runPromise(openDownloads) },
-    native && canShare && { label: "Share", icon: <Share2 />, onSelect: () => void runtime.runPromise(offerShare("System")) },
-    canShare && binding !== undefined && { label: "Copy link", icon: <Link />, onSelect: () => void runtime.runPromise(offerShare("Copy")) },
+    native && canShare && { label: "Share", icon: <Share2 />, onSelect: () => void runtime.runPromise(offerShare("System", binding)) },
+    canShare && binding !== undefined && { label: "Copy link", icon: <Link />, onSelect: () => void runtime.runPromise(offerShare("Copy", binding)) },
+    native && { label: "Passwords", name: "Password manager", icon: <Lock />, onSelect: () => void runtime.runPromise(openPasswords) },
+    canHandoff && { label: "Open externally", name: "Open externally, passkeys unsupported here", icon: <ExternalLink />, onSelect: () => void runtime.runPromise(offerNativeHandoff(nativePage)) },
     native && can({ type: "openFind" }) && { label: "Find", name: "Find in page", icon: <Search />, onSelect: () => { setFinding(""); void browser.send({ type: "uncover" }).then(() => send({ type: "openFind" })); } },
     clearable !== undefined && { label: "Clear site", name: "Clear site data", icon: <ListFilter />, onSelect: () => { setClearingSite(clearable); void browser.send({ type: "uncover" }); } },
     canAskErase(tabs) && { label: "Clear all", name: "Clear all browsing data", icon: <Trash2 />, onSelect: () => void browser.send({ type: "askErase" }) },
@@ -205,10 +212,10 @@ function Tab({ runtime, alpha, tabs, page }: BrowserProps & { tabs: State; page:
           onNewPrivate={opening("Private")}
         />
       )}
-      <ConfirmDialog open={share.state?.handoff.showing === true} title="Open private page?" confirmLabel="Open in browser"
-        onConfirm={() => void runtime.runPromise(confirmPrivateFrame())}
-        onCancel={() => void runtime.runPromise(cancelPrivateFrame())}>
-        Your browser will receive this private page.
+      <ConfirmDialog open={reviewed !== undefined} title="Open private page?" confirmLabel="Open in browser"
+        onConfirm={() => void runtime.runPromise(confirmExternal())}
+        onCancel={() => void runtime.runPromise(cancelExternal())}>
+        The other browser may save {reviewed ? new URL(reviewed.url).host : "this page"} in its history.
       </ConfirmDialog>
       <AgentPageCard runtime={runtime} />
       <BrowserReview open={clearingSite !== undefined} title={`Clear data for ${clearingSite?.host ?? ""}?`} confirmLabel="Clear data" destructive
