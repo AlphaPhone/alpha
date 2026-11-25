@@ -23,7 +23,7 @@ export const MenuTrigger = MenuPrimitive.Trigger;
 export function MenuContent({ align = "end", sideOffset = 0, collisionPadding = 8, className, ...props }: MenuContentProps) {
   return (
     <MenuPrimitive.Portal>
-      <MenuPrimitive.Content align={align} sideOffset={sideOffset} collisionPadding={collisionPadding} className={cn(floatingPanel, "flex min-w-50 flex-col", className)} {...props} />
+      <MenuPrimitive.Content align={align} sideOffset={sideOffset} collisionPadding={collisionPadding} className={cn(floatingPanel, "flex min-w-54 flex-col", className)} {...props} />
     </MenuPrimitive.Portal>
   );
 }
@@ -36,7 +36,7 @@ export function MenuItem({ destructive = false, className, onPointerDown, onClic
   const pressedRef = useRef(false);
   return (
     <MenuPrimitive.Item
-      className={cn(floatingRow, "[&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-5.5", destructive && "text-destructive", className)}
+      className={cn(floatingRow, "rounded-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-5", destructive && "text-destructive", className)}
       onPointerDown={(event) => {
         pressedRef.current = true;
         onPointerDown?.(event);
