@@ -39,7 +39,8 @@ export const meta: ComponentMeta<AssistantMessageProps> = {
       onReadAloud.mockClear();
       onFork.mockClear();
       const trigger = within(canvasElement).getByRole("button", { name: "Message actions" });
-      await userEvent.click(trigger);
+      trigger.focus();
+      await userEvent.keyboard("{Enter}");
       await expect(screen.queryByRole("menuitem", { name: "Edit and resend" })).toBeNull();
       await userEvent.click(await screen.findByRole("menuitem", { name: "Read aloud" }));
       await waitFor(() => expect(onReadAloud.mock.calls.length).toBe(1));
@@ -51,7 +52,7 @@ export const meta: ComponentMeta<AssistantMessageProps> = {
     "Owner actions": async ({ canvasElement }: { canvasElement: HTMLElement }) => {
       onEditAgain.mockClear();
       const trigger = within(canvasElement).getByRole("button", { name: "Message actions" });
-      await userEvent.click(trigger);
+      await userEvent.click(within(canvasElement).getByText("What is on Friday?"));
       await expect(screen.queryByRole("menuitem", { name: "Read aloud" })).toBeNull();
       await userEvent.click(await screen.findByRole("menuitem", { name: "Edit and resend" }));
       await waitFor(() => expect([onEditAgain.mock.calls.length, screen.queryByRole("menu"), document.activeElement]).toEqual([1, null, trigger]));

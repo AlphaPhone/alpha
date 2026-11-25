@@ -42,6 +42,7 @@ import { AttachmentSources } from "./AttachmentSources.tsx";
 import { askComms, freedom } from "./assistant.vibe";
 import { acceptedFiles, acceptedPhotos, attachmentAuthority, chooseDocument, type FileTarget, insertFiles, previewFile, readChosenDocument, removeFile, retireTranscript, sameBinding } from "./attachments.vibe";
 import { chip, type MessageActions, useHistorySheets, useMessageRows } from "./history.tsx";
+import { holdMessagePress } from "./message-actions.vibe";
 import { ReplyFailure } from "./ReplyFailure.tsx";
 import { type Attached, type Line, Talk } from "./talk.vibe";
 import { CommsTarget, type CommsTargetServices } from "../phone/CommsTarget.tsx";
@@ -320,6 +321,10 @@ export function Assistant({ runtime, messageActions, speech, canReadAloud = fals
     takeFocus(element);
   }, [assistantDetent, compact, takeFocus]);
   const fileTargetRef = useRef<FileTarget | undefined>(undefined);
+  const holdMessage = useCallback((held: () => void) => {
+    const fiber = runtime.runFork(holdMessagePress(held));
+    return () => fiber.interruptUnsafe();
+  }, [runtime]);
   const [talking, shown, writing, finding] = [conversation.state, chats.state, composer.state, search.state];
   const free = talking && shown && writing ? freedom(talking, writing, shown.chosen) : { replying: true, holding: true };
   const history = useHistorySheets(chats, search, layers, seen, free, () => focusChatActions(composerRef.current));
@@ -486,6 +491,7 @@ export function Assistant({ runtime, messageActions, speech, canReadAloud = fals
         attachmentNotice={onComms ? undefined : seen.attachmentNotice}
         transcript={{
           messages,
+          holdMessage: open ? holdMessage : undefined,
           liveMessages: [...(brief === "" ? [] : [{ id: `briefing:${subject}`, author: "alpha" as const, text: brief, onOpenLink }]), ...writingReply, ...failed, ...mediaCards, ...mediaNote],
           interim: open && shown.around === 0 && !talking.context.sensitive ? interim : undefined,
           position: { page: `${shown.chosen}/${shown.page.ticket}`, around: board.messageId(shown.around) },

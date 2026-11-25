@@ -450,6 +450,18 @@ pure def stepOnlyAMessageOfTheConversationShowingIsReadAloud(before: Chats, via:
 > As the owner, I want to copy a recorded message and review Alpha's
 > answer before using it in an email draft.
 
+### A message's words can be selected without opening its actions
+
+Dragging the text can select words across consecutive messages. A tap or a
+half-second hold opens the actions on the current message. Moving a finger
+before the hold scrolls normally. Moving after the hold closes the actions
+and extends the selection from the held word. The keyboard can open and
+close the same actions. Links keep their own action.
+
+```quint
+pure val messageActionHoldMillis = 500
+```
+
 ### Only text in the recorded message showing can be copied; only an answer from Alpha can be offered to Inbox
 
 The offer carries text only. Inbox displays it with its destination
