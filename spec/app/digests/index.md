@@ -52,7 +52,7 @@ type Effect =
   | SetBackground({ id: int, on: bool })
   | SetNotices({ id: int, on: bool })
   | ReadResult({ ticket: int, owner: int, result: int })
-  | AskAlpha({ result: int })
+  | AskAlpha({ owner: int, result: int })
 type Digests = {
   owner: int, open: bool, checks: Checks,
   stage: Stage, inbox: R::Read, page: int, pageEnd: int, pageRan: Brief,
@@ -154,10 +154,24 @@ pure def noticeOpened(d: Digests, owner: int, upTo: int, checks: Checks): Moved 
 
 ### Ask Alpha about a result hands that result to Ask Alpha
 
-```quint
-pure def canAskAbout(d: Digests, result: int): bool = d.open and 1 <= result and result <= d.bucket.kept
+The owner presses Ask Alpha on the displayed result. The inbox that owns
+the displayed row confirms it is still retained for this owner. Android
+requires the same lease that supplied the result. The handoff samples
+the selected result and the current owner again before staging a safe
+excerpt with an editable suggestion. The owner chooses when to send.
 
-pure def askAbout(d: Digests, result: int): Moved = { state: d, out: List(AskAlpha({ result: result })) }
+```quint
+pure def canAskAbout(d: Digests, owner: int, result: int, retained: bool): bool =
+  d.open and owner >= 1 and d.owner == owner and result >= 1 and retained
+
+pure def askAbout(d: Digests, owner: int, result: int, retained: bool): Moved =
+  { state: d, out: List(AskAlpha({ owner: owner, result: result })) }
+
+pure def stepOnlyTheRetainedOwnersResultIsAsked(before: Digests, via: str, after: Digests, out: List[Effect]): bool =
+  out.every(one => match one {
+    | AskAlpha(ask) => via == "askAbout" and before.open and ask.owner == before.owner and ask.owner >= 1 and ask.result >= 1 and after == before
+    | _ => true
+  })
 ```
 
 ### Background checks and notifications are asked one at a time each and shown as the platform last took them
