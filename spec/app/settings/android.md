@@ -25,6 +25,10 @@ access point names and default apps; the Calendar, Camera,
 Maps and Notes pages Alpha's permissions, and the Photos page Alpha's
 photo access. Developer offers Android's developer options; About phone
 is on Carrier & SIM setup, not on About, as in Alpha's earlier build. The Passwords page opens Android's confirmation to use Alpha for autofill.
+The phone keeps Alpha's installed Autofill component and the native vault
+identity across an app update. The browser may fill only fields whose
+committed origin the native browser can attest. Typed or generated passwords
+stay in native password screens and never cross the page bridge.
 
 ```quint
 import index as I from "./index"

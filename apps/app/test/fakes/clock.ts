@@ -121,7 +121,7 @@ export function clockRoutes(scene: ClockScene, now: () => number): Route[] {
           sound: (typeof body.sound === "string" ? body.sound : "radar") as FakeClockAlarm["sound"],
           vibrate: typeof body.vibrate === "boolean" ? body.vibrate : true,
           enabled: typeof body.enabled === "boolean" ? body.enabled : true,
-          snoozeMinutes: typeof body.snoozeMinutes === "number" ? body.snoozeMinutes : 9,
+          snoozeMinutes: typeof body.snoozeMinutes === "number" ? body.snoozeMinutes : 10,
           phase: "idle",
           fireAtMs: typeof body.fireAtMs === "number" ? body.fireAtMs : ts + 3_600_000,
           snoozeUntilMs: null,

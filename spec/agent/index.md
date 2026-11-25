@@ -40,7 +40,14 @@ owner" or "the user". The model also described example.com from memory when
 asked to summarize "this page" on Home, where no page goes with the turn, so
 the prompt tells the agent that it sees a web page only in the latest
 message's Browser page, and with none to say that no page is open rather
-than describe one. The words are in `apps/agent/host/character.json`.
+than describe one. Asked "Go home." from Notes, with Home declared as a
+view, the model most often planned directions to a saved Home place or asked
+which was meant, where the old phone went to its home screen. So the prompt
+tells the agent that the phone's screens are its views and Home is the home
+screen, and that a request to go to one of these screens by its name, with no
+directions, route or travel asked for, means that screen, shown with VIEWS
+without asking. The model still decides what a request means; nothing matches the
+owner's words. The words are in `apps/agent/host/character.json`.
 
 ```quint
 pure val characterName: str = "Alpha"
