@@ -127,8 +127,7 @@ name, so an action a later pin adds is refused until it is reviewed here.
 Core's `REPLY`, `IGNORE` and `NONE` are always allowed. Every other
 registered action is named in the policy's refused list with the reason the
 old phone did not run it: `CALCULATE` because the old agent had no
-calculator, and `BROWSER_OPEN` because Alpha's Browser does not yet show the
-review card the owner taps before an address the agent asked for opens.
+calculator.
 
 ```quint
 pure val productPluginName: str = "alpha-apps"

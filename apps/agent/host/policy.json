@@ -16,7 +16,6 @@
       "WALLET"
     ],
     "refused": {
-      "BROWSER_OPEN": "Alpha's Browser has no review card yet for an address the agent opens; the owner must tap that card before anything opens.",
       "CALCULATE": "The old phone's agent had no calculator: develop's plugins registered no calculate action."
     }
   },
