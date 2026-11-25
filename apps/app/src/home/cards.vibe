@@ -116,7 +116,7 @@ effect function readAgent(ticket: number, now: number): Event!!Agent {
   }
 }
 
-// spec/app/home/cards.md, "A card opens its app: the agenda Calendar, Messages and Phone their own, mail Inbox, the brief and Workflows Workflows; the agenda asks its calendar again if the last read did not succeed"
+// spec/app/home/cards.md, "A card opens its app: the agenda Calendar, Messages and Phone their own, mail Inbox, Telegram and Slack their own, the brief and Workflows Workflows; the agenda asks its calendar again if the last read did not succeed"
 effect function go(view: View) {
   try contained((try Shell.Machine).send({ type: "openView", view }), "opening an app from a card")
 }

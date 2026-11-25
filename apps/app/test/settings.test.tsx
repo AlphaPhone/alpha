@@ -1,5 +1,4 @@
 // @vitest-environment happy-dom
-import { act } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import * as Android from "../gen/app__settings__android.effect.vibe";
 import * as Carrier from "../gen/app__settings__carrier.effect.vibe";
@@ -12,21 +11,22 @@ import * as Reset from "../gen/app__settings__reset.effect.vibe";
 import * as Pages from "../gen/app__settings.effect.vibe";
 import { Machine as Shell } from "../gen/app__shell.effect.vibe";
 import settings from "../src/settings/index.tsx";
-import { button, closeAll, fill, hardware, later, open, press, seen, underAct, until } from "./alpha.tsx";
+import { button, closeAll, drawn, fill, hardware, later, open, press, seen, underAct, until } from "./alpha.tsx";
 import { notices } from "./fakes/settings.ts";
 import { scene } from "./fakes/scene.ts";
 
 underAct();
 afterEach(closeAll);
 
+const requestUrl = (input: RequestInfo | URL) => (typeof input === "string" ? input : input instanceof URL ? input.href : input.url);
 const shipped = vi.fn(() => Promise.resolve(Response.json(notices)));
-vi.stubGlobal("fetch", ((input: RequestInfo | URL, init?: RequestInit) => (String(input).endsWith("licenses/third-party-notices.json") ? shipped() : fetch(input, init))) as typeof fetch);
+vi.stubGlobal("fetch", (input: RequestInfo | URL, init?: RequestInit) => (requestUrl(input).endsWith("licenses/third-party-notices.json") ? shipped() : fetch(input, init)));
 
 /** The row, switch or choice whose title is `title`, as a person reads it: a row's title, never its value beside it. */
 const titled = (title: string) => [...document.querySelectorAll<HTMLElement>("button, label")].find((found) => found.querySelector("span > span")?.textContent === title);
 
 /** Press the row titled `title`; a switch's or a choice's row presses its control, as a tap on the row does. */
-const tap = (title: string) => act(async () => {
+const tap = (title: string) => drawn(() => {
   const found = titled(title);
   if (!found) throw new Error(`no row ${title}`);
   const control = found instanceof HTMLLabelElement ? document.getElementById(found.htmlFor) : found;
@@ -172,14 +172,17 @@ describe("Settings", () => {
     await press("Privacy");
     await tap("Recover device settings");
     await press("Recover");
-    // spec/app/settings/preferences.md, "A new phone lets Alpha act without asking first, load images in Inbox, use its location and the Browser page open, and change Gmail and Calendar"
-    await until(alpha, alpha.runtime, Prefs.Machine, (s) => s.document.read.status === "Loaded" && Prefs.allows(s, "BrowserPage") && !Prefs.asksBeforeActing(s, "WebAction") && s.images);
+    // spec/app/settings/preferences.md, "A new phone lets Alpha act without asking first, load images in Inbox, use its location, the Browser page open, and Telegram or Slack screen context, and change Gmail and Calendar"
+    await until(alpha, alpha.runtime, Prefs.Machine, (s) => s.document.read.status === "Loaded" && Prefs.allows(s, "BrowserPage") && Prefs.allows(s, "TelegramContext") && Prefs.allows(s, "SlackContext") && !Prefs.asksBeforeActing(s, "WebAction") && s.images);
     // spec/app/settings/preferences.md, "The owner changes Ask before Alpha acts, Load images or what Alpha may share only once the phone has read them, one save at a time, with ten seconds to save"
     await tap("Ask before Alpha acts");
     await until(alpha, alpha.runtime, Prefs.Machine, (s) => s.saving.read.status === "Loaded" && Prefs.asksBeforeActing(s, "WebAction"));
     await tap("Browser page");
     await until(alpha, alpha.runtime, Prefs.Machine, (s) => s.saving.read.status === "Loaded" && !Prefs.allows(s, "BrowserPage"));
-    expect(JSON.parse(localStorage.getItem("alpha.preferences") ?? "{}")).toEqual({ askFirst: true, images: true, shares: ["AgentLocation", "GmailChanges", "CalendarEdits"] });
+    // spec/app/settings/preferences.md, "Alpha shares the phone's location, the Browser page open, or Telegram or Slack screen context with a chat turn, and changes Gmail or Calendar, only when the phone read that the owner allowed it"
+    await tap("Telegram screen");
+    await until(alpha, alpha.runtime, Prefs.Machine, (s) => s.saving.read.status === "Loaded" && !Prefs.allows(s, "TelegramContext"));
+    expect(JSON.parse(localStorage.getItem("alpha.preferences") ?? "{}")).toEqual({ askFirst: true, images: true, shares: ["AgentLocation", "GmailChanges", "CalendarEdits", "SlackContext"] });
   });
 
   it("A phone updated from the previous Alpha keeps its choices (spec/app/settings/preferences.md, \"The device preferences are read when Alpha starts, when Settings opens, and when Alpha comes back while Settings shows, with ten seconds to answer, never while a change or a recovery is in flight\")", async () => {
@@ -187,7 +190,7 @@ describe("Settings", () => {
     const { alpha } = await open({ ...scene(), phone: true });
     await until(alpha, alpha.runtime, Prefs.Machine, (s) => s.document.read.status === "Loaded");
     const adopted = await alpha.runtime.runPromise(Prefs.Machine.use((prefs) => prefs.get()));
-    expect([adopted.askFirst, adopted.images, adopted.shares]).toEqual([false, true, ["BrowserPage", "GmailChanges", "CalendarEdits"]]);
+    expect([adopted.askFirst, adopted.images, adopted.shares]).toEqual([false, true, ["BrowserPage", "GmailChanges", "CalendarEdits", "TelegramContext", "SlackContext"]]);
     expect(localStorage.getItem("alpha.preferences")).toBeNull();
   });
 
@@ -230,8 +233,8 @@ describe("Settings", () => {
     await press("Export diagnostics");
     await until(alpha, machines, Developer.Machine, (s) => s.exporting.read.status === "Loaded");
     const text = await sharedFiles[0]?.text();
-    const report = JSON.parse(text ?? "{}");
-    expect([report.format, report.roles, report.problems.count, report.permissions, text?.includes("launcher3"), text?.includes("ai.alphacompute"), text?.includes("\"session\""), report.talk]).toEqual([
+    const report = JSON.parse(text ?? "{}") as { format?: string; roles?: unknown; problems?: { count?: number }; permissions?: unknown; talk?: unknown };
+    expect([report.format, report.roles, report.problems?.count, report.permissions, text?.includes("launcher3"), text?.includes("ai.alphacompute"), text?.includes("\"session\""), report.talk]).toEqual([
       "alpha-diagnostics/v1", [{ role: "home", held: false, available: true }, { role: "assistant", held: false, available: true }], 2, { FilesAccess: true, LocationAccess: true }, false, false, false,
       { format: "alpha-cloud-stream-timing-v1", sessions: [{ sttConnectedMs: 812, firstFrameSentMs: 815, consentRetry: true }, { sttConnectedMs: 390, firstFrameSentMs: null, consentRetry: false }] },
     ]);

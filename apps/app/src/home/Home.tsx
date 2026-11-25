@@ -12,6 +12,7 @@ import { untimed } from "../runtime/reactor.vibe";
 import { feel } from "../shell/haptics.vibe";
 import { views } from "../shell/views.tsx";
 import { Agenda } from "./Agenda.tsx";
+import { MessagingCards } from "./MessagingCards.tsx";
 import { catalog, labelOf } from "./catalog.vibe";
 import { told } from "./home.vibe";
 import { waiting } from "./waiting.vibe";
@@ -45,9 +46,9 @@ function tileItem(tile: Tile, known: ReadonlyMap<string, InstalledApp>, said?: s
 export function HomePage({ runtime, alpha }: Shown<HomeMachines | Resident>) {
   const home = useHome(runtime);
   const shell = useShell(alpha.runtime);
-  const known = useSyncExternalStore(catalog.subscribe, catalog.snapshot, catalog.snapshot);
-  const inline = useSyncExternalStore(told.subscribe, told.snapshot, told.snapshot);
-  const waits = useSyncExternalStore(waiting.subscribe, waiting.snapshot, waiting.snapshot);
+  const known = useSyncExternalStore((listener) => catalog.subscribe(listener), () => catalog.snapshot(), () => catalog.snapshot());
+  const inline = useSyncExternalStore((listener) => told.subscribe(listener), () => told.snapshot(), () => told.snapshot());
+  const waits = useSyncExternalStore((listener) => waiting.subscribe(listener), () => waiting.snapshot(), () => waiting.snapshot());
   const h = home.state;
   const s = shell.state;
   if (!h || !s || h.host === "AssistantOnly") return null;
@@ -70,7 +71,7 @@ export function HomePage({ runtime, alpha }: Shown<HomeMachines | Resident>) {
     <>
       <HomeScreen
         covered={s.drawer}
-        cards={Home.showsCards(h) ? [<Agenda key="agenda" runtime={runtime} />, <div key="others" className="contents">{alpha.slot("home/cards")}</div>] : []}
+        cards={Home.showsCards(h) ? [<Agenda key="agenda" runtime={runtime} />, <MessagingCards key="messaging" runtime={runtime} />, <div key="others" className="contents">{alpha.slot("home/cards")}</div>] : []}
         tiles={h.tiles.load.status === "Loaded" ? Home.tilesShown(h, s).map((tile) => tileItem(tile, known.apps, tile.tag === "Own" ? waits.get(tile.view) : undefined, h.editing)) : undefined}
         editing={h.editing}
         onOpenTile={(id) => {

@@ -1,6 +1,6 @@
 // spec/app/assistant/index.md, "Story: Ask Alpha something"; spec/app/assistant/index.md, "Story: Stop a reply"; spec/app/assistant/chats.md, "Story: Find my conversations"; spec/app/assistant/composer.md, "Story: Send what I wrote"; spec/app/assistant/dock.md, "Focusing or tapping the composer on the bar opens Ask Alpha as a sheet"; spec/app/assistant/search.md, "Story: Search my conversations"; spec/app/assistant/reply.md, "Story: Hear a brief acknowledgment and still get the whole answer"
 import {
-  Alert, AssistantCard, AssistantChatHistorySheet, AssistantConversation, AssistantGrabber, AssistantSearchSheet, ConfirmDialog,
+  Alert, AssistantCard, AssistantChatHistorySheet, AssistantConversation, AssistantGrabber, AssistantMessageDraftCard, AssistantSearchSheet, ConfirmDialog,
   type AssistantAttachment, type AssistantDraftNoticeProps, type AssistantMessageProps, type AssistantTurnNoteProps,
 } from "@repo/ui";
 import { Effect, type ManagedRuntime } from "effect";
@@ -27,14 +27,15 @@ import { useMachine as useComms } from "../../gen/app__phone__comms.react.ts";
 import { type Machine as ShellMachine, showing } from "../../gen/app__shell.effect.vibe";
 import { useMachine as useShell } from "../../gen/app__shell.react.ts";
 import { untimed } from "../runtime/reactor.vibe";
-import { MailQuestions } from "../inbox/mail-context.vibe";
+import { type MailQuestion, MailQuestions } from "../inbox/mail-context.vibe";
+import { MessagingBridge, type MessagingBridgeApi, type MessagingDraftProposal } from "../messaging/bridge.vibe";
 import { isCommsView } from "../shell/views.tsx";
 import { askComms, freedom } from "./assistant.vibe";
-import { Talk } from "./talk.vibe";
+import { type Seen, Talk } from "./talk.vibe";
 import { CommsTarget, type CommsTargetServices } from "../phone/CommsTarget.tsx";
 
 export interface AssistantProps {
-  runtime: ManagedRuntime.ManagedRuntime<ConversationMachine | ChatsMachine | ComposerMachine | SearchMachine | ReplyMachine | DockMachine | ShellMachine | CommsMachine | CommsTargetServices | Talk | MailQuestions, unknown>;
+  runtime: ManagedRuntime.ManagedRuntime<ConversationMachine | ChatsMachine | ComposerMachine | SearchMachine | ReplyMachine | DockMachine | ShellMachine | CommsMachine | CommsTargetServices | Talk | MailQuestions | MessagingBridge, unknown>;
 }
 
 function turnOf(talking: Talking, label: string): AssistantTurnNoteProps["status"] | undefined {
@@ -100,6 +101,145 @@ const detached = { mail: "Mail", transcript: "Transcript", shown: "Shown" } as c
 
 const barHeight = 80;
 
+function draftMessageCards(
+  drafts: ReadonlyArray<MessagingDraftProposal>,
+  bridge: MessagingBridgeApi,
+  runSend: (id: string) => void,
+  runOpen: (draft: MessagingDraftProposal) => void,
+): (AssistantMessageProps & { id: string })[] {
+  return drafts.map((draft) => ({
+    id: `messaging-draft-${draft.id}`,
+    author: "alpha",
+    text: "",
+    children: (
+      <AssistantMessageDraftCard
+        platform={draft.platform}
+        target={draft.target}
+        replyContext={draft.replyContext}
+        body={draft.body}
+        onBodyChange={(body) => bridge.editDraft(draft.id, body)}
+        status={draft.status}
+        error={draft.error}
+        settled={draft.settled}
+        onSend={() => runSend(draft.id)}
+        onOpenInApp={() => runOpen(draft)}
+        onDecline={() => bridge.declineDraft(draft.id)}
+      />
+    ),
+  }));
+}
+
+function failureCardOf(
+  { kind, fix, waitMs }: { kind: Failure; fix: Fix; waitMs: number },
+  live: boolean,
+  onRetry: () => void,
+  openSettings: (() => void) | undefined,
+) {
+  const act = actionOf(kind, fix);
+  const detail = showsWait(kind, waitMs) ? `Try again in about ${about(waitMs)}` : !live && kind === "LimitReached" ? "Wait a moment, then try again" : undefined;
+  return (
+    <AssistantCard
+      card={act === undefined || !fixShown(fix, kind)
+        ? { kind: "plain", text: detail === undefined ? failures[kind] : `${failures[kind]}. ${detail}` }
+        : { kind: "action", action: act, title: failures[kind], ...(detail === undefined ? {} : { detail }), ...(act === "funding" ? { label: "Manage plan" } : {}) }}
+      onAct={act === "retry" ? onRetry : act !== undefined ? openSettings : undefined}
+    />
+  );
+}
+
+interface MailDialogsProps {
+  readonly open: boolean;
+  readonly reviewed: { readonly question?: MailQuestion; readonly failure?: "tooLarge" | "changed" };
+  readonly onConfirm: () => void;
+  readonly onDismiss: () => void;
+}
+
+function MailDialogs({ open, reviewed, onConfirm, onDismiss }: MailDialogsProps) {
+  return (
+    <>
+      <ConfirmDialog open={open && reviewed.question !== undefined} title="Share this email with Alpha?" confirmLabel="Add to chat" onConfirm={onConfirm} onCancel={onDismiss}>
+        {reviewed.question ? (
+          <span className="block max-h-72 overflow-y-auto whitespace-pre-wrap [overflow-wrap:anywhere]">
+            {reviewed.question.review.source.subject || "(no subject)"}{"\n"}
+            {reviewed.question.review.source.from}{"\n"}
+            {reviewed.question.review.source.to.join(", ")}{"\n\n"}
+            {reviewed.question.review.source.bodyText}
+          </span>
+        ) : null}
+      </ConfirmDialog>
+      <ConfirmDialog
+        open={open && reviewed.failure !== undefined}
+        title={reviewed.failure === "tooLarge" ? "This email is too long to share in full" : "Review this email again before sharing"}
+        confirmLabel="OK"
+        onConfirm={onDismiss}
+        onCancel={onDismiss}
+      />
+    </>
+  );
+}
+
+interface AssistantSheetsProps {
+  readonly listing: boolean;
+  readonly onListingChange: (open: boolean) => void;
+  readonly words: string;
+  readonly onWordsChange: (words: string) => void;
+  readonly shown: NonNullable<ReturnType<typeof useChats>["state"]>;
+  readonly finding: NonNullable<ReturnType<typeof useSearch>["state"]>;
+  readonly seen: Seen;
+  readonly free: ReturnType<typeof freedom>;
+  readonly chats: ReturnType<typeof useChats>;
+  readonly search: ReturnType<typeof useSearch>;
+  readonly start: { readonly type: "start"; readonly replying: boolean; readonly holding: boolean };
+}
+
+function AssistantSheets({ listing, onListingChange, words, onWordsChange, shown, finding, seen, free, chats, search, start }: AssistantSheetsProps) {
+  return (
+    <>
+      <AssistantChatHistorySheet
+        open={listing}
+        onOpenChange={onListingChange}
+        history={{
+          chats: shown.ids.map((id) => ({ id: String(id), title: seen.titles.get(id) ?? "Ask Alpha", current: id === shown.chosen })),
+          status: shown.list.status === "Loading" ? "loading" : shown.list.status === "Failed" ? "failed" : "loaded",
+          blocked: free.replying || free.holding,
+          making: making(shown),
+          unsure: unsure(shown),
+          onChoose: (id) => {
+            const choose = { type: "choose", conversation: Number(id), ...free } as const;
+            if (!chats.can(choose)) return;
+            void chats.send(choose);
+            onListingChange(false);
+          },
+          onStart: chats.can(start) ? () => { void chats.send(start); onListingChange(false); } : undefined,
+          onRetry: () => void chats.send({ type: "browse" }),
+        }}
+      />
+      <AssistantSearchSheet
+        open={finding.open}
+        onOpenChange={(open) => { if (!open && search.can({ type: "closeSearch" })) void search.send({ type: "closeSearch" }); }}
+        search={{
+          words,
+          hits: seen.hits.slice(0, finding.shown).map((hit, at) => ({ id: String(at + 1), chat: seen.titles.get(hit.conversation) ?? "Ask Alpha", snippet: hit.text })),
+          status: finding.hits.status === "Idle" ? "idle" : finding.hits.status === "Loading" ? "loading" : finding.hits.status === "Failed" ? "failed" : "loaded",
+          blocked: free.replying || free.holding,
+          onWordsChange: (typed) => {
+            onWordsChange(typed);
+            const find = { type: "find", words: typed.trim() } as const;
+            if (search.can(find)) void search.send(find);
+          },
+          onMore: search.can({ type: "more" }) ? () => void search.send({ type: "more" }) : undefined,
+          onOpenHit: (id) => {
+            const hit = seen.hits[Number(id) - 1];
+            if (hit === undefined) return;
+            const open = { type: "openHit", hit: Number(id), conversation: hit.conversation, message: hit.message, here: hit.conversation === shown.chosen, ...free } as const;
+            if (search.can(open)) void search.send(open);
+          },
+        }}
+      />
+    </>
+  );
+}
+
 /** @model spec/app/assistant/index.md */
 export function Assistant({ runtime }: AssistantProps) {
   const conversation = useConversation(runtime);
@@ -113,7 +253,9 @@ export function Assistant({ runtime }: AssistantProps) {
   const board = runtime.runSync(Effect.map(Talk, (talk) => talk.board));
   const seen = useSyncExternalStore((listener) => board.subscribe(listener), () => board.snapshot());
   const mail = runtime.runSync(MailQuestions);
-  const reviewed = useSyncExternalStore(mail.subscribe, mail.snapshot);
+  const reviewed = useSyncExternalStore((listener) => mail.subscribe(listener), () => mail.snapshot());
+  const messagingBridge = runtime.runSync(MessagingBridge);
+  const messaging = useSyncExternalStore((listener) => messagingBridge.subscribe(listener), () => messagingBridge.snapshot(), () => messagingBridge.snapshot());
   const [listing, setListing] = useState(false);
   const [words, setWords] = useState("");
   const composerRef = useRef<HTMLTextAreaElement>(null);
@@ -172,23 +314,13 @@ export function Assistant({ runtime }: AssistantProps) {
     void composer.send(hold);
   };
   // spec/app/assistant/reply.md, "A failed reply offers the fix the agent named, and a limit reached shows its live wait, never sending the message again"
-  const failureCard = ({ kind, fix, waitMs }: { kind: Failure; fix: Fix; waitMs: number }, live: boolean) => {
-    const act = actionOf(kind, fix);
-    const detail = showsWait(kind, waitMs) ? `Try again in about ${about(waitMs)}` : !live && kind === "LimitReached" ? "Wait a moment, then try again" : undefined;
-    const openSettings = shell.can({ type: "openView", view: "Settings" })
-      ? () => void shell.send({ type: "openView", view: "Settings" })
-      : shell.state && showing(shell.state, "Settings")
-        ? () => { if (shell.can({ type: "raise", detent: "Bar" })) void shell.send({ type: "raise", detent: "Bar" }); }
-        : undefined;
-    return (
-      <AssistantCard
-        card={act === undefined || !fixShown(fix, kind)
-          ? { kind: "plain", text: detail === undefined ? failures[kind] : `${failures[kind]}. ${detail}` }
-          : { kind: "action", action: act, title: failures[kind], ...(detail === undefined ? {} : { detail }), ...(act === "funding" ? { label: "Manage plan" } : {}) }}
-        onAct={act === "retry" ? () => type(board.lastSent) : act !== undefined ? openSettings : undefined}
-      />
-    );
-  };
+  const openSettings = shell.can({ type: "openView", view: "Settings" })
+    ? () => void shell.send({ type: "openView", view: "Settings" })
+    : shell.state && showing(shell.state, "Settings")
+      ? () => { if (shell.can({ type: "raise", detent: "Bar" })) void shell.send({ type: "raise", detent: "Bar" }); }
+      : undefined;
+  const failureCard = (item: { kind: Failure; fix: Fix; waitMs: number }, live: boolean) =>
+    failureCardOf(item, live, () => type(board.lastSent), openSettings);
   const messages = lines.map((line): AssistantMessageProps & { id: string } => {
     const message = board.numbered(line.id);
     const settled = message > 0 && settledLine(line.id);
@@ -212,6 +344,16 @@ export function Assistant({ runtime }: AssistantProps) {
   const earlier = { type: "scroll", around: board.numbered(lines[0]?.id ?? "") } as const;
   const later = { type: "scroll", around: board.numbered(lines.at(-1)?.id ?? "") } as const;
   const writingReply = seen.reply !== "" ? [{ id: "reply", author: "alpha", text: seen.reply } as const] : [];
+  const draftCards = draftMessageCards(
+    messaging.drafts,
+    messagingBridge,
+    (id) => { void runtime.runPromise(messagingBridge.sendDraft(id)); },
+    (draft) => {
+      void runtime.runPromise(messagingBridge.openDraftInApp(draft.id));
+      const openView = { type: "openView", view: draft.platform } as const;
+      if (shell.can(openView)) void shell.send(openView);
+    },
+  );
   // spec/app/assistant/reply.md, "A failed reply offers the fix the agent named, and a limit reached shows its live wait, never sending the message again"; spec/app/assistant/reply.md, "Out of funds is refused before any output, is never spoken, and offers only Manage plan"
   const failed = seen.failure === undefined ? [] : [{ id: "failure", author: "alpha", text: "", children: failureCard(seen.failure, true) } as const];
   const quoteId = writing.editor.quote > 0 ? board.messageId(writing.editor.quote) : undefined;
@@ -275,7 +417,7 @@ export function Assistant({ runtime }: AssistantProps) {
           grabber: open ? grabber : undefined,
         }}
         transcript={{
-          messages: [...messages, ...writingReply, ...failed],
+          messages: [...messages, ...writingReply, ...draftCards, ...failed],
           position: { page: `${shown.chosen}/${shown.page.ticket}`, around: board.messageId(shown.around) },
           visible: open,
           status: shown.page.status === "Loading" ? "loading" : shown.page.status === "Failed" ? "failed" : "loaded",
@@ -330,69 +472,19 @@ export function Assistant({ runtime }: AssistantProps) {
           onUnquote: composer.can({ type: "unquote" }) ? () => void composer.send({ type: "unquote" }) : undefined,
         }}
       />}
-      <ConfirmDialog
-        open={!onComms && open && reviewed.question !== undefined}
-        title="Share this email with Alpha?"
-        confirmLabel="Add to chat"
-        onConfirm={attachMail}
-        onCancel={() => mail.show({})}
-      >
-        {reviewed.question ? (
-          <span className="block max-h-72 overflow-y-auto whitespace-pre-wrap [overflow-wrap:anywhere]">
-            {reviewed.question.review.source.subject || "(no subject)"}{"\n"}
-            {reviewed.question.review.source.from}{"\n"}
-            {reviewed.question.review.source.to.join(", ")}{"\n\n"}
-            {reviewed.question.review.source.bodyText}
-          </span>
-        ) : null}
-      </ConfirmDialog>
-      <ConfirmDialog
-        open={!onComms && open && reviewed.failure !== undefined}
-        title={reviewed.failure === "tooLarge" ? "This email is too long to share in full" : "Review this email again before sharing"}
-        confirmLabel="OK"
-        onConfirm={() => mail.show({})}
-        onCancel={() => mail.show({})}
-      />
-      <AssistantChatHistorySheet
-        open={listing}
-        onOpenChange={setListing}
-        history={{
-          chats: shown.ids.map((id) => ({ id: String(id), title: seen.titles.get(id) ?? "Ask Alpha", current: id === shown.chosen })),
-          status: shown.list.status === "Loading" ? "loading" : shown.list.status === "Failed" ? "failed" : "loaded",
-          blocked: free.replying || free.holding,
-          making: making(shown),
-          unsure: unsure(shown),
-          onChoose: (id) => {
-            const choose = { type: "choose", conversation: Number(id), ...free } as const;
-            if (!chats.can(choose)) return;
-            void chats.send(choose);
-            setListing(false);
-          },
-          onStart: chats.can(start) ? () => { void chats.send(start); setListing(false); } : undefined,
-          onRetry: () => void chats.send({ type: "browse" }),
-        }}
-      />
-      <AssistantSearchSheet
-        open={finding.open}
-        onOpenChange={(open) => { if (!open && search.can({ type: "closeSearch" })) void search.send({ type: "closeSearch" }); }}
-        search={{
-          words,
-          hits: seen.hits.slice(0, finding.shown).map((hit, at) => ({ id: String(at + 1), chat: seen.titles.get(hit.conversation) ?? "Ask Alpha", snippet: hit.text })),
-          status: finding.hits.status === "Idle" ? "idle" : finding.hits.status === "Loading" ? "loading" : finding.hits.status === "Failed" ? "failed" : "loaded",
-          blocked: free.replying || free.holding,
-          onWordsChange: (typed) => {
-            setWords(typed);
-            const find = { type: "find", words: typed.trim() } as const;
-            if (search.can(find)) void search.send(find);
-          },
-          onMore: search.can({ type: "more" }) ? () => void search.send({ type: "more" }) : undefined,
-          onOpenHit: (id) => {
-            const hit = seen.hits[Number(id) - 1];
-            if (hit === undefined) return;
-            const open = { type: "openHit", hit: Number(id), conversation: hit.conversation, message: hit.message, here: hit.conversation === shown.chosen, ...free } as const;
-            if (search.can(open)) void search.send(open);
-          },
-        }}
+      <MailDialogs open={!onComms && open} reviewed={reviewed} onConfirm={attachMail} onDismiss={() => mail.show({})} />
+      <AssistantSheets
+        listing={listing}
+        onListingChange={setListing}
+        words={words}
+        onWordsChange={setWords}
+        shown={shown}
+        finding={finding}
+        seen={seen}
+        free={free}
+        chats={chats}
+        search={search}
+        start={start}
       />
     </>
   );

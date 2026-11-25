@@ -5,18 +5,20 @@ import * as Conversation from "../../gen/app__assistant.effect.vibe"
 import * as Chats from "../../gen/app__assistant__chats.effect.vibe"
 import * as Composer from "../../gen/app__assistant__composer.effect.vibe"
 import * as Dock from "../../gen/app__assistant__dock.effect.vibe"
-import { zoneOf } from "../../gen/app__assistant__context.effect.vibe"
+import { type MessagingApp, sendsMessagingContext, zoneOf } from "../../gen/app__assistant__context.effect.vibe"
 import * as Reply from "../../gen/app__assistant__reply.effect.vibe"
 import * as Pages from "../../gen/app__settings.effect.vibe"
+import * as Prefs from "../../gen/app__settings__preferences.effect.vibe"
 import * as Search from "../../gen/app__assistant__search.effect.vibe"
 import * as Comms from "../../gen/app__phone__comms.effect.vibe"
-import { Machine as Shell, canReturnCommsView } from "../../gen/app__shell.effect.vibe"
+import { Machine as Shell, type View, canReturnCommsView } from "../../gen/app__shell.effect.vibe"
 import { stepping } from "../shell/shell.vibe"
 import { Agent } from "../platform/agent.vibe"
 import { CommsPrompts, type CommsPrompt, commsViewOf } from "../phone/comms.vibe"
 import { ask, outcomeOf } from "../platform/remote.vibe"
 import { Attempts } from "../runtime/attempts.vibe"
 import { MailQuestions, withMail } from "../inbox/mail-context.vibe"
+import { MessagingBridge, type MessagingBridgeApi, type MessagingPlatform, boundedMessagingContext } from "../messaging/bridge.vibe"
 import { type Job, answer, contained, following, hearing, reacting, run, started, stream, tell, together, untimed } from "../runtime/reactor.vibe"
 import { type Board, type Line, Talk, talk } from "./talk.vibe"
 
@@ -126,18 +128,50 @@ function viewOf(showing: Conversation.Showing): string {
   }
 }
 
-// spec/app/assistant/index.md, "The agent is told the view, the time zone, the day only from Calendar, and whether something is selected"; spec/app/assistant/context.md, "The day and the location go only to a peer that takes them, and a sensitive screen sends no optional field"; spec/app/assistant/context.md, "The time zone told is the one the phone's interface shows, else the one the screen reported, else the one the agent was launched with, else the host's"
-function observed(told: boolean, context: Conversation.Context) {
+function messagingPlatformOf(view: View | undefined): MessagingPlatform | undefined {
+  return view === "Telegram" ? "Telegram" : view === "Slack" ? "Slack" : undefined
+}
+
+function showingPlatform(showing: Conversation.Showing): MessagingPlatform | undefined {
+  return match (showing) {
+    when { tag: "App", let view }: messagingPlatformOf(view);
+    default: undefined;
+  }
+}
+
+function messagingAppOf(platform: MessagingPlatform | undefined): MessagingApp {
+  return platform === "Telegram" ? "OnTelegram" : platform === "Slack" ? "OnSlack" : "NoMessaging"
+}
+
+function shareOf(platform: MessagingPlatform): Prefs.Share {
+  return platform === "Telegram" ? "TelegramContext" : "SlackContext"
+}
+
+// spec/app/assistant/index.md, "The agent is told the view, the time zone, the day only from Calendar, and whether something is selected"; spec/app/assistant/context.md, "The day and the location go only to a peer that takes them, and a sensitive screen sends no optional field"; spec/app/assistant/context.md, "A turn carries bounded Telegram or Slack context only while that app is in front, authenticated, non-sensitive, allowed by Settings' privacy share, and taken by the peer"; spec/app/assistant/context.md, "The time zone told is the one the phone's interface shows, else the one the screen reported, else the one the agent was launched with, else the host's"
+function observed(told: boolean, context: Conversation.Context, bridge: MessagingBridgeApi, prefs: Prefs.Preferences) {
   if (!told) return undefined
-  return encodeTurnContext({
-    observation: { view: viewOf(context.showing), revision: context.revision, sensitive: context.sensitive, timeZone: zoneOf(context.zone, "", "", zone()) },
+  const platform = showingPlatform(context.showing)
+  const shareAllowed = platform === undefined ? true : Prefs.allows(prefs, shareOf(platform))
+  const raw = platform === undefined ? undefined : bridge.contextOf(platform)
+  const bounded = boundedMessagingContext(raw)
+  const peer = { takes: told, declaresLocation: false, declaresPage: false }
+  const sendMessaging = platform !== undefined
+    && sendsMessagingContext(!context.sensitive, messagingAppOf(platform), raw?.authenticated === true, shareAllowed, bounded !== undefined, peer)
+  const encoded = encodeTurnContext({
+    observation: {
+      view: viewOf(context.showing),
+      revision: context.revision,
+      sensitive: context.sensitive || !shareAllowed,
+      timeZone: zoneOf(context.zone, "", "", zone()),
+    },
   }, { optionalFields: true })
+  return sendMessaging && bounded !== undefined ? { ...encoded, messagingContext: bounded } : encoded
 }
 
 // spec/app/assistant/index.md, "Every message asked is posted exactly once, under a new ticket, whoever gave the text, with the screen showing and never a sensitive one"; spec/app/assistant/index.md, "The first word of a reply shows that the agent has the message, and a withdrawal that came too late stops it there"
 // spec/app/assistant/composer.md, "A quoted message goes with the next send, until the owner removes the quote"
-function posted(ticket: number, told: boolean, context: Conversation.Context): Stream.Stream<Conversation.Event, never, Turns | Talk | Chats.Machine | Conversation.Machine | Reply.Machine | Composer.Machine | Comms.Machine | MailQuestions> {
-  return Stream.callback<Conversation.Event, never, Turns | Talk | Chats.Machine | Conversation.Machine | Reply.Machine | Composer.Machine | Comms.Machine | MailQuestions>((queue) => effect {
+function posted(ticket: number, told: boolean, context: Conversation.Context): Stream.Stream<Conversation.Event, never, Turns | Talk | Chats.Machine | Conversation.Machine | Reply.Machine | Composer.Machine | Comms.Machine | MailQuestions | MessagingBridge | Prefs.Machine> {
+  return Stream.callback<Conversation.Event, never, Turns | Talk | Chats.Machine | Conversation.Machine | Reply.Machine | Composer.Machine | Comms.Machine | MailQuestions | MessagingBridge | Prefs.Machine>((queue) => effect {
     const { controller } = try Turns
     const { board } = try Talk
     const reply = try Reply.Machine
@@ -190,7 +224,9 @@ function posted(ticket: number, told: boolean, context: Conversation.Context): S
         if (board.snapshot().reply === "") board.change({ label: label ?? `Using ${name}` })
       },
     }
-    const metadata = { ...observed(told, context), ...(quoted === undefined ? {} : { replyToMessageId: quoted.id }) }
+    const bridge = try MessagingBridge
+    const prefState = try (try Prefs.Machine).get()
+    const metadata = { ...observed(told, context, bridge, prefState), ...(quoted === undefined ? {} : { replyToMessageId: quoted.id }) }
     const result = tryPromise(() => controller.send({ text: outgoing, ...(Object.keys(metadata).length === 0 ? {} : { metadata }) }, { stream: hooks })) catch () => undefined
     board.change({ reply: "", label: "" })
     board.lastSentId = result !== undefined && "clientMessageId" in result ? result.clientMessageId : ""
@@ -206,7 +242,11 @@ function posted(ticket: number, told: boolean, context: Conversation.Context): S
     }
     const finishing = Conversation.canFinish(try (try Conversation.Machine).get(), ticket)
     if (result?.kind === "Replied" && finishing) {
-      if (result.reply.userMessageId !== undefined) board.rename(mine, result.reply.userMessageId)
+      if (result.reply.userMessageId !== undefined) {
+        board.messageNumber(result.reply.userMessageId)
+        board.rename(mine, result.reply.userMessageId)
+      }
+      board.messageNumber(result.reply.messageId)
       board.append({ id: result.reply.messageId, mine: false, text: result.reply.text })
     }
     if (event.type === "refuse") board.drop(mine)
@@ -257,7 +297,7 @@ const storedAttachments = (ticket: number) => effect {
   return { type: "uploaded", ticket, ok } as const
 }
 
-function carryTurn(fx: Conversation.Effect): Job<Conversation.Event, Agent | Turns | Talk | Chats.Machine | Composer.Machine | Conversation.Machine | Reply.Machine | Comms.Machine | Shell | MailQuestions, []> {
+function carryTurn(fx: Conversation.Effect): Job<Conversation.Event, Agent | Turns | Talk | Chats.Machine | Composer.Machine | Conversation.Machine | Reply.Machine | Comms.Machine | Shell | MailQuestions | MessagingBridge | Prefs.Machine, []> {
   return match (fx) {
     when { tag: "CheckSupport", let support }: answer("support", supported(support), { type: "supported", ticket: support, ok: false, takes: false });
     when { tag: "Upload", let ticket }: answer("upload", storedAttachments(ticket), { type: "uploaded", ticket, ok: false });
@@ -455,14 +495,22 @@ const sensitivePages: ReadonlySet<Pages.Page> = new Set(["CarrierPage"])
 const looked = started(effect {
   const shell = try Shell
   const settings = try Pages.Machine
+  const bridge = try MessagingBridge
+  const prefs = try Prefs.Machine
   const conversation = try Conversation.Machine
   let taken: string | undefined
-  try Stream.runForEach(Stream.zipLatest(Stream.zipLatest(shell.changes, settings.changes), conversation.changes), effect ([[shown, pages]]) => {
+  const upstream = Stream.zipLatest(Stream.zipLatest(shell.changes, settings.changes), Stream.zipLatest(bridge.changes, prefs.changes))
+  try Stream.runForEach(Stream.zipLatest(upstream, conversation.changes), effect ([[[shown, pages], [messaging, prefState]]]) => {
     const view = shown.trail.at(-1)
-    const sensitive = view === "Settings" && sensitivePages.has(pages.page)
-    const seen = `${view ?? ""} ${sensitive}`
+    const platform = messagingPlatformOf(view)
+    const msgCtx = platform === undefined ? undefined : messaging.contexts[platform]
+    const shareAllowed = platform !== undefined && Prefs.allows(prefState, shareOf(platform))
+    const msgSensitive = platform !== undefined && (msgCtx?.sensitive === true || msgCtx?.pane === "auth")
+    const sensitive = (view === "Settings" && sensitivePages.has(pages.page)) || msgSensitive
+    const selected = !sensitive && platform !== undefined && shareAllowed && msgCtx !== undefined && msgCtx.authenticated && msgCtx.conversation !== undefined
+    const seen = `${view ?? ""} ${sensitive} ${selected}`
     if (seen === taken) return
-    const event: Conversation.Event = { type: "look", showing: view === undefined ? { tag: "Home" } : { tag: "App", view }, zone: zone(), day: 0, selected: false, sensitive }
+    const event: Conversation.Event = { type: "look", showing: view === undefined ? { tag: "Home" } : { tag: "App", view }, zone: zone(), day: 0, selected, sensitive }
     if (!Conversation.enabled(try conversation.get(), event) || (try contained(conversation.send(event), "telling the screen"))) taken = seen
   })
 }, "telling the screen")

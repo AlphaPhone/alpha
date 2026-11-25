@@ -121,7 +121,14 @@ const themesNamed = { system: "System", light: "Light", dark: "Dark" } as const 
 const noticeNames: Record<PrefsGen.Notice, SettingsPreferencesNoticeProps["notice"] | undefined> = {
   Quiet: undefined, NotSaved: "not-saved", SizeNotConfirmed: "size-not-confirmed", SizeUnavailable: "size-unavailable", NotRecovered: "not-recovered",
 };
-const shareNames: Record<PrefsGen.Share, SettingsShare> = { AgentLocation: "agent-location", BrowserPage: "browser-page", GmailChanges: "gmail-changes", CalendarEdits: "calendar-edits" };
+const shareNames: Record<PrefsGen.Share, SettingsShare> = {
+  AgentLocation: "agent-location",
+  BrowserPage: "browser-page",
+  GmailChanges: "gmail-changes",
+  CalendarEdits: "calendar-edits",
+  TelegramContext: "telegram-context",
+  SlackContext: "slack-context",
+};
 const sharesNamed = Object.fromEntries(Object.entries(shareNames).map(([share, name]) => [name, share])) as Record<SettingsShare, PrefsGen.Share>;
 
 const saidNames: Record<ResetGen.Said, SettingsResetNoticeProps["said"] | undefined> = {
@@ -225,7 +232,7 @@ function General({ runtime, common }: PageProps) {
       onPhone={onPhone}
       reviewing={reset.state !== undefined && loading(reset.state.review)}
       onErase={reset.can(erase) ? () => void reset.send(erase) : undefined}
-      said={reset.state && saidNames[reset.state.said]}
+      said={reset.state ? saidNames[reset.state.said] : undefined}
       requestingHome={facts !== undefined && loading(facts.request)}
       onRequestHome={can(request) ? () => void send(request) : undefined}
     />

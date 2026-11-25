@@ -1,4 +1,4 @@
-// spec/app/home/tiles.md, "Only Phone, Messages and Inbox carry a badge, only when something waits there, and no tile does while Home is being edited"
+// spec/app/home/tiles.md, "Only Phone, Messages, Inbox, Telegram and Slack carry a badge, only when something waits there, and no tile does while Home is being edited"
 import type { View } from "../../gen/app__shell.effect.vibe"
 
 let current: ReadonlyMap<View, string> = new Map()
