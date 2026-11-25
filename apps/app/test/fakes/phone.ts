@@ -1,13 +1,11 @@
-import type { AgentEvents, AgentRequest, AgentStatus, AgentStreamRequest, ElizaAgentPlugin } from "@elizaos/os/bridges/definitions/agent";
-import type { ElizaCloudPlugin, NativeCloudRequest } from "@elizaos/os/bridges/definitions/cloud";
-import type { ElizaSecureStorePlugin, ElizaSecureStoreResult } from "@elizaos/os/bridges/definitions/secure-store";
+import type { AgentEvents, AgentRequest, AgentStatus, AgentStreamRequest, ElizaAgentPlugin, ElizaCloudPlugin, NativeCloudRequest, ElizaSecureStorePlugin, ElizaSecureStoreResult } from "@elizaos/os-bridges";
 import type { Answering } from "./routes.ts";
 
 /**
  * A plugin as its Java or Kotlin answers the page: each method of eliza's definition `P`. The phone is faked once, at
  * the boundary Capacitor's own runtime calls on a native platform (`plugIn`), with eliza's plugins behind it by their
  * names, arguments, answers, rejections and events (`.eliza/packages/os/android`, typed by
- * `.eliza/packages/os/src/bridges/definitions`): Alpha's phone layers, eliza's clients and Capacitor run on it unchanged.
+ * `.eliza/packages/os-bridges/src/bridges/definitions`): Alpha's phone layers, eliza's clients and Capacitor run on it unchanged.
  */
 export type Native<P> = { [Method in Exclude<keyof P, "addListener">]: P[Method] };
 

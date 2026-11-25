@@ -1,6 +1,5 @@
 // spec/app/files/index.md, "Story: Browse my storage"
-import type { ElizaFilesPlugin, FileOutcomeRow, FilesAccess, StorageEntry, StorageVolume, TrashEntry } from "@elizaos/os/bridges/definitions/files";
-import type { SelectedDocumentsPlugin } from "@elizaos/os/bridges/definitions/media";
+import type { ElizaFilesPlugin, FileOutcomeRow, FilesAccess, StorageEntry, StorageVolume, TrashEntry, SelectedDocumentsPlugin } from "@elizaos/os-bridges";
 import { type Faked, plugin } from "./phone.ts";
 
 /** One file or folder the fake storage holds, by its volume and its path from that volume's root. */

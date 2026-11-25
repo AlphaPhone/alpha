@@ -18,7 +18,7 @@ export interface Pack {
 /** The name of the one package the pack's entry is, inside the clone. */
 export const packEntryName = "@repo/agent-pack-entry";
 
-const always = ["@elizaos/core", "@elizaos/cloud", "@elizaos/agent", "@elizaos/os"];
+const always = ["@elizaos/core", "@elizaos/core-node", "@elizaos/cloud", "@elizaos/agent", "@elizaos/os-bridges", "@elizaos/os", "@elizaos/agent-host"];
 
 /** Where this machine keeps its pack clone for `commit`, outside any worktree's `node_modules` or glob tree. @throws {never} */
 export function packRoot(commit = checkout().commit): string {
@@ -83,7 +83,7 @@ async function prepare(root: string, commit: string, plugins: readonly string[])
   const unknown = plugins.filter((name) => !names.has(name));
   if (unknown.length > 0) throw new Error(`eliza ${commit.slice(0, 12)} has no package ${unknown.join(", ")}`);
   const built = [...always, ...plugins];
-  run(root, "pnpm", "-r", "--workspace-concurrency=2", ...built.flatMap((name) => ["--filter", name]), "run", "build");
+  run(root, "pnpm", "-r", "--workspace-concurrency=2", ...built.flatMap((name) => ["--filter", `${name}...`]), "run", "build");
   fs.mkdirSync(path.dirname(stampOf(root)), { recursive: true });
   fs.writeFileSync(stampOf(root), JSON.stringify({ commit, plugins: [...new Set([...(before.commit === commit ? before.plugins ?? [] : []), ...plugins])].sort() }));
 }

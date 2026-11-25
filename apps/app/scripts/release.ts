@@ -10,7 +10,7 @@ import * as NodeServices from "@effect/platform-node/NodeServices";
 import {
   aaptManifestTree, apkReleaseBlockers, apkUpdateAdmission, apkUpdateReceipt, integrityQuery, listAndroidArtifactEntries, manifestFacts, qaEvidenceAdmission,
   readApkBuildFlags, readApkSignerDigest, readbackInventory, snapshotAndroidArtifact,
-} from "@elizaos/os/image";
+} from "@elizaos/os";
 import { Data, Effect } from "effect";
 import * as Channel from "../gen/release.ts";
 import {

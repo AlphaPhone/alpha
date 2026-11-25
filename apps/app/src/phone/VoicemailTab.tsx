@@ -1,5 +1,5 @@
 // spec/app/phone/voicemail.md, "Story: See my voicemail"; spec/app/phone/voicemail.md, "Story: Listen to a voicemail"; spec/app/phone/voicemail.md, "Story: Read what was said"; spec/app/phone/voicemail.md, "Story: Answer a voicemail"; spec/app/phone/voicemail.md, "Story: Delete a voicemail"
-import type { ListedVoicemail } from "@elizaos/os/bridges/phone";
+import type { ListedVoicemail } from "@elizaos/os-bridges";
 import { Banner, Button, Spinner, cn, focusRing } from "@repo/ui";
 import { MessageCircle, Pause, Phone, Play, RotateCw, Trash2, X } from "lucide-react";
 import { useSyncExternalStore } from "react";

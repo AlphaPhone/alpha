@@ -1,5 +1,5 @@
 // spec/cloud/rollout.md, "Story: Deploy an environment without reading a secret into the repository"; spec/cloud/rollout.md, "Story: Keep every secret private and fitting its environment"; spec/cloud/provisioning.md, "Story: Bring a deployment up, one confirmed step at a time"
-import { parseProfile, type CloudEnvironment, type CloudProfile } from "@elizaos/cloud/profile"
+import { parseProfile, type CloudEnvironment, type CloudProfile } from "@elizaos/cloud"
 import { ChildProcess } from "effect/process"
 import { ChildProcessSpawner } from "effect/process/ChildProcessSpawner"
 import { Machine, machine, paymentKeyFits, secretsFileAccepted } from "../gen/cloud__rollout.effect.vibe"
@@ -120,7 +120,7 @@ effect function run(label: string, command: string, args: ReadonlyArray<string>,
 export effect function elizaosCloud(args: ReadonlyArray<string>, values: Readonly<Record<string, string>>) {
   const path = try Path.Path
   const directory = try packageDirectory()
-  try run(`elizaos-cloud ${args.slice(0, 2).join(" ")}`, "node", [path.join(directory, "node_modules/@elizaos/cloud/dist/src/main.js"), ...args], directory, values)
+  try run(`elizaos-cloud ${args.slice(0, 2).join(" ")}`, "node", [path.join(directory, "node_modules/@elizaos/cloud-worker/dist/src/main.js"), ...args], directory, values)
 }
 
 /** Wrangler in this package, in the account the resources record. */

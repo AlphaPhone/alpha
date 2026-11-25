@@ -1,6 +1,6 @@
 // spec/app/notes/index.md, "Story: See my notes"; spec/app/notes/index.md, "Story: Open a note"; spec/app/notes/index.md, "Story: Another owner never sees my notes"
 import * as KeyValueStore from "effect/persistence/KeyValueStore"
-import { CloudError } from "@elizaos/cloud/client"
+import { CloudError } from "@elizaos/cloud"
 import * as List from "../../gen/app__notes.effect.vibe"
 import type { Effect as Out, Event } from "../../gen/app__notes.effect.vibe"
 import type { Actor } from "../../gen/app__notes__note.ts"

@@ -1,5 +1,5 @@
 // spec/agent/index.md, "Story: Run Alpha's agent on the phone"
-import { showsApp } from "@elizaos/agent";
+import { showsApp } from "@elizaos/agent-host";
 import {
   type AlphaAppsStore, isValidTimeZone, normalizeSound,
 } from "./store.ts";

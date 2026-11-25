@@ -1,7 +1,7 @@
 // spec/cloud/local.md, "Story: Check Alpha's contract on my computer"; spec/cloud/index.md, "Story: Keep Alpha's own cloud ready for the cutover"; spec/cloud/index.md, "Story: Reach my account's services from the app"; spec/cloud/rollout.md, "Story: Deploy an environment without reading a secret into the repository"; spec/cloud/index.md, "Story: Register Alpha's app with the cloud"; spec/cloud/index.md, "Story: Come back to Alpha after authorizing a connection in my browser"
 import * as NodeServices from "@effect/platform-node/NodeServices"
 import { assert, describe, it } from "@effect/vitest"
-import { createCloudClient } from "@elizaos/cloud/client"
+import { createCloudClient } from "@elizaos/cloud"
 import { deployment } from "@repo/deployment"
 import { prepared } from "@repo/eliza-harness/checkout"
 import { said } from "@repo/eliza-harness/services"
@@ -286,7 +286,7 @@ describe(`Alpha's screens reach the cloud through eliza's policy (spec/cloud/ind
       "GET /api/v1/nowhere: matches 0 of eliza's device routes",
     ]))
     const files = try FileSystem.FileSystem
-    const client = try files.readFileString(`${(try Effect.try(() => prepared())).root}/packages/plugin-inbox/src/client/index.vibe`)
+    const client = try files.readFileString(`${(try Effect.try(() => prepared())).root}/packages/plugin-inbox-client/src/client/index.vibe`)
     const google = "/api/v1/eliza/google"
     const sent = [...client.matchAll(/`\$\{(google|inbox)\}([^`?]*)(?:\?\$\{query\((\{[^`]*?\})\)\})?`/gs)].filter((found) => found[0] !== "`${google}/gmail/inbox-v1`").map((found) => ({
       path: (found[1] === "google" ? google : `${google}/gmail/inbox-v1`) + found[2].replace(/\$\{encodeURIComponent\(\w+\)\}/g, "{}"),

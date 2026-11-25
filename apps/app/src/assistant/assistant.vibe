@@ -1,5 +1,5 @@
 // spec/app/assistant/index.md, "Story: Ask Alpha something"; spec/app/assistant/index.md, "Story: Stop a reply"
-import { ConversationRecord, TurnController, encodeTurnContext, learnPeer, notLearned, sendsOptionalFields, statusRead, type TurnReply, type TurnResult } from "@elizaos/agent/client"
+import { ConversationRecord, TurnController, encodeTurnContext, learnPeer, notLearned, sendsOptionalFields, statusRead, type TurnReply, type TurnResult } from "@elizaos/agent"
 import * as KeyValueStore from "effect/persistence/KeyValueStore"
 import * as Conversation from "../../gen/app__assistant.effect.vibe"
 import * as Chats from "../../gen/app__assistant__chats.effect.vibe"

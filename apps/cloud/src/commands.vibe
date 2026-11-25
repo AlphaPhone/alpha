@@ -1,5 +1,5 @@
 // spec/cloud/rollout.md, "Story: Deploy an environment without reading a secret into the repository"; spec/cloud/provisioning.md, "The steps run in one order, the same for staging and production, each one command"
-import type { CloudEnvironment } from "@elizaos/cloud/profile"
+import type { CloudEnvironment } from "@elizaos/cloud"
 import { Machine, machine } from "../gen/cloud__rollout.effect.vibe"
 import { ownCloudName } from "../gen/cloud.effect.vibe"
 import { deploy, elizaosCloud, packageDirectory, privateDirectory, profiled, readSecrets, reconciled, recordResources, registrationInto, renderInto, resourcesOf, settledSecrets, workerSecrets, wrangler, type Component } from "./operator.vibe"

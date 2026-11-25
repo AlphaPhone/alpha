@@ -1,5 +1,5 @@
 // spec/app/voice/index.md, "Story: Hold a spoken conversation"; spec/app/voice/index.md, "The speech pipeline warms on startup, foreground return and account readiness without opening the microphone"; spec/app/voice/index.md, "Starting asks for the microphone the first time, opens it once it is allowed, and holds the speech engine while talking"
-import { type CloudStreamingSpeech, createCloudStreamingSpeech, type CredentialId, type EnvironmentName } from "@elizaos/os/bridges/voice"
+import { type CloudStreamingSpeech, createCloudStreamingSpeech, type CredentialId, type EnvironmentName } from "@elizaos/os-bridges"
 import { fresh } from "../runtime/attempts.vibe"
 import { Agent } from "./agent.vibe"
 import { registered } from "./device.vibe"
@@ -26,8 +26,8 @@ export interface RecordedClip {
 
 module capacitor {
   import { registerPlugin } from "@capacitor/core"
-  import type { ElizaCloudSpeechPlugin } from "@elizaos/os/bridges/definitions/voice"
-  import { type SignInClient, signInClient } from "@elizaos/os/bridges/sign-in"
+  import type { ElizaCloudSpeechPlugin } from "@elizaos/os-bridges"
+  import { type SignInClient, signInClient } from "@elizaos/os-bridges"
 
   export interface ListenerHandle { remove(): Promise<void> }
 

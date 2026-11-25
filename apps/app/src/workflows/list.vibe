@@ -1,5 +1,5 @@
 // spec/app/workflows/list.md, "Story: Find a workflow"; spec/app/workflows/list.md, "Story: Keep the list to its owner"
-import type { RemoteWorkflow } from "@elizaos/plugin-workflow/client"
+import type { RemoteWorkflow } from "@elizaos/plugin-workflow-client"
 import * as List from "../../gen/app__workflows__list.effect.vibe"
 import type { Effect as Out, Event } from "../../gen/app__workflows__list.effect.vibe"
 import { Machine as Shell, showing } from "../../gen/app__shell.effect.vibe"

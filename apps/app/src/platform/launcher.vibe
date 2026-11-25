@@ -1,9 +1,9 @@
 // spec/app/home/index.md, "Story: Open an app"; spec/app/home/index.md, "Story: See the apps on this phone"
-import type { InstalledApp, LaunchTarget } from "@elizaos/os/bridges/definitions/system"
+import type { InstalledApp, LaunchTarget } from "@elizaos/os-bridges"
 
 module held {
-  import type { InstalledApp } from "@elizaos/os/bridges/definitions/system"
-  type Bridge = typeof import("@elizaos/os/bridges/system")
+  import type { InstalledApp } from "@elizaos/os-bridges"
+  type Bridge = typeof import("@elizaos/os-bridges")
   let loaded: Promise<Bridge> | undefined
   let ready: Bridge | undefined
   /**
@@ -12,7 +12,7 @@ module held {
    * @throws {never}
    */
   export function bridge(): Promise<Bridge> {
-    return (loaded ??= import("@elizaos/os/bridges/system").then((found) => (ready = found)))
+    return (loaded ??= import("@elizaos/os-bridges").then((found) => (ready = found)))
   }
   /** The apps of `apps` that match `query`, in the order the drawer lists them, as eliza's launcher tells; all of them before the bridge is loaded. @throws {never} */
   export function found(apps: readonly InstalledApp[], query: string): InstalledApp[] {
@@ -70,7 +70,7 @@ export interface Listed {
   readonly app: InstalledApp
 }
 
-/** The phone's launcher, through eliza's client `System` of `@elizaos/os/bridges/system`. */
+/** The phone's launcher, through eliza's client `System` of `@elizaos/os-bridges`. */
 export const phoneLauncher = Layer.effect(Launcher, effect {
   const loaded = try promise(() => bridge())
   const system = loaded.System

@@ -7,7 +7,7 @@ import { tmpdir } from "node:os";
 import { dirname, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import * as NodeServices from "@effect/platform-node/NodeServices";
-import { generateAndroidHost, stageRuntimePayload } from "@elizaos/os/build";
+import { generateAndroidHost, stageRuntimePayload } from "@elizaos/os";
 import { prepared } from "@repo/eliza-harness/checkout";
 import { Effect, Layer } from "effect";
 import { FetchHttpClient } from "effect/http";

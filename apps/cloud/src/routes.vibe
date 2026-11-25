@@ -1,5 +1,5 @@
 // spec/cloud/index.md, "Story: Reach my account's services from the app"; spec/cloud/index.md, "Each route of Alpha's cloud table is one of eliza's device routes by method and path, buffered, outside sign-in, and needs no account session"; spec/cloud/index.md, "The table lists every route Alpha's screens and eliza's managed mail client send, each with the query keys they send"
-import { deviceRoutes, type DeviceRoute } from "@elizaos/cloud/client"
+import { deviceRoutes, type DeviceRoute } from "@elizaos/cloud"
 import { cloudTable, pageRoute, signInPrefixes, type Auth, type TableRoute } from "../gen/cloud.effect.vibe"
 
 const wireVerb = { Get: "GET", Post: "POST", Patch: "PATCH", Delete: "DELETE" } as const

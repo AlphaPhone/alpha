@@ -1,5 +1,5 @@
 // spec/app/assistant/chats.md, "Story: Find my conversations"; spec/app/assistant/composer.md, "Story: Keep what I am writing"
-import { ConversationRecord } from "@elizaos/agent/client"
+import { ConversationRecord } from "@elizaos/agent"
 import * as KeyValueStore from "effect/persistence/KeyValueStore"
 import type { MediaCard } from "./media-review.vibe"
 import type { Attachment } from "./attachments.vibe"

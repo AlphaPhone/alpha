@@ -1,6 +1,6 @@
 // spec/app/home/index.md, "Story: Start Home"
 import * as KeyValueStore from "effect/persistence/KeyValueStore"
-import type { InstalledApp } from "@elizaos/os/bridges/definitions/system"
+import type { InstalledApp } from "@elizaos/os-bridges"
 import * as Home from "../../gen/app__home.effect.vibe"
 import type { Actor, Effect as Out, Event, Host } from "../../gen/app__home.effect.vibe"
 import { type Ask, waiting } from "../../gen/app__home__android.effect.vibe"

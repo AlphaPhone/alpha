@@ -1,5 +1,5 @@
 // spec/app/home/index.md, "Story: Open an app"; spec/app/home/index.md, "On the assistant alone Home shows no tile and no card"; spec/app/home/index.md, "Story: Edit Home"; spec/app/home/index.md, "Story: Find an app and see its details"; spec/app/home/index.md, "Story: Pull down for notifications"
-import type { InstalledApp } from "@elizaos/os/bridges/definitions/system";
+import type { InstalledApp } from "@elizaos/os-bridges";
 import { AppsDrawer, HomeScreen, type HomeInstalledApp, type HomeTileItem, InstalledAppIcon } from "@repo/ui";
 import { useSyncExternalStore } from "react";
 import * as Home from "../../gen/app__home.ts";

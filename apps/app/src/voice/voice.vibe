@@ -1,5 +1,5 @@
 // spec/app/voice/index.md, "Story: Hold a spoken conversation"; spec/app/voice/index.md, "The speech pipeline warms on startup, foreground return and account readiness without opening the microphone"; spec/app/voice/index.md, "A reply that needs the owner's review in chat keeps voice listening with the microphone open"; spec/app/voice/index.md, "An active voice conversation may ask the shell to open Home or any admitted screen"; spec/app/shell/index.md, "Agent navigation shows an admitted app or Home without lowering Ask Alpha"; spec/app/voice/index.md, "A spoken reply says a written date, clock time, range and percentage in words"; spec/app/voice/index.md, "A turn Cloud refuses because the account is out of funds ends voice quietly, as Stop does"
-import { ConversationRecord, TurnController } from "@elizaos/agent/client"
+import { ConversationRecord, TurnController } from "@elizaos/agent"
 import * as Shell from "../../gen/app__shell.effect.vibe"
 import * as Voice from "../../gen/app__voice.effect.vibe"
 import { Agent } from "../platform/agent.vibe"

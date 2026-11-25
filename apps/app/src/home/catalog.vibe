@@ -1,5 +1,5 @@
 // spec/app/home/index.md, "Whether an app matches a search is told from its label and package, ignoring case and accents, and an empty search matches every app"
-import type { InstalledApp } from "@elizaos/os/bridges/definitions/system"
+import type { InstalledApp } from "@elizaos/os-bridges"
 import { opaque } from "../../gen/app__home.effect.vibe"
 import { type Listed, details, found } from "../platform/launcher.vibe"
 

@@ -1,5 +1,5 @@
 // spec/app/inbox/index.md, "Story: See my mail"
-import type { GoogleStatus, MailCard, MailMessage, MailOperation, MailSearch } from "@elizaos/cloud/client";
+import type { GoogleStatus, MailCard, MailMessage, MailOperation, MailSearch } from "@elizaos/cloud";
 import type { Route } from "./routes.ts";
 
 /** A message of the fake mailbox: eliza's card of it, and what reading it whole gives. */

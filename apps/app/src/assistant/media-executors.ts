@@ -1,6 +1,4 @@
-import type { ExecutorCall } from "@elizaos/agent/client";
-import { NOT_DISPATCHED } from "@elizaos/agent/client";
-import type { DeviceOperation } from "@elizaos/agent/operations";
+import { type ExecutorCall, NOT_DISPATCHED, type DeviceOperation } from "@elizaos/agent";
 import type { Alpha } from "../runtime/area.tsx";
 
 const refused = { kind: "refused", code: NOT_DISPATCHED } as const;

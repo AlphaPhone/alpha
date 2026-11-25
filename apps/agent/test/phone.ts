@@ -3,7 +3,7 @@ import { randomBytes, randomUUID } from "node:crypto";
 import fs from "node:fs";
 import net from "node:net";
 import path from "node:path";
-import type { RuntimeJsonBridge, RuntimeStatus, RuntimeStreamFrame } from "@elizaos/agent/client";
+import type { RuntimeJsonBridge, RuntimeStatus, RuntimeStreamFrame } from "@elizaos/agent";
 import { packPrepared } from "@repo/eliza-harness/pack";
 import { type Cloud, type DeviceKey, said, scratch, startCloud } from "@repo/eliza-harness/services";
 
