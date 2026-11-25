@@ -72,7 +72,7 @@ export type AssistantComposerProps = Omit<ComponentProps<"div">, "children" | "o
   opener?: ReactNode;
   /** The target or action named in the field. */
   placeholder?: string;
-  /** Called when the field takes focus: on the bar this raises it to typing. */
+  /** Called when the field takes focus: on the bar this opens Ask Alpha as a sheet. */
   onFocusField?: () => void;
   /** Ref to the composer field so a tap on the resting bar can focus it synchronously. */
   fieldRef?: Ref<HTMLTextAreaElement>;
