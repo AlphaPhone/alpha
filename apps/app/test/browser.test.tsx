@@ -352,7 +352,7 @@ describe("The Browser on a phone", () => {
     expect(dialog()?.textContent).not.toContain("123456");
     await fill("Question about content", "What does it say?");
     await fill("Content excerpt", "The exact edited excerpt.");
-    await press("Use in conversation");
+    await press("Add to chat");
     await until(alpha, runtime, Shell, (s) => s.assistant === "Sheet");
     expect(document.querySelector<HTMLTextAreaElement>("textarea[aria-label='Message Alpha']")?.value)
       .toBe("What does it say?\n\nSource: Current page\n\nThe exact edited excerpt.");

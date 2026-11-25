@@ -45,7 +45,7 @@ export function BrowserQuestion({ source, question, excerpt, ready, status, onQu
           <p role="status">{status}</p>
         </section>
         <footer className="flex shrink-0 flex-row-reverse flex-wrap gap-2">
-          <Button aria-label="Use in conversation" className={action} disabled={!ready} onClick={onConfirm}>Add to chat</Button>
+          <Button className={action} disabled={!ready} onClick={onConfirm}>Add to chat</Button>
           <Button className={action} onClick={onCancel}>Cancel</Button>
         </footer>
       </DialogContent>
