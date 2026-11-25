@@ -43,6 +43,26 @@ jobs:
         with:
           job: release-candidate
           verification: "false"
+      - uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6.0.1
+        with:
+          distribution: temurin
+          java-version: '21'
+      - uses: android-actions/setup-android@9fc6c4e9069bf8d3d10b2204b1fb8f6ef7065407 # v3.2.2
+        with:
+          packages: platform-tools platforms;android-36 build-tools;36.0.0 ndk;28.2.13676358 cmake;3.22.1
+          log-accepted-android-sdk-licenses: false
+      - run: printf '%s\n' "$ANDROID_HOME/cmake/3.22.1/bin" >> "$GITHUB_PATH"
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: '3.12'
+      - name: Install speech model converter dependencies
+        run: |
+          python3 -m pip install --index-url https://download.pytorch.org/whl/cpu 'torch==2.8.0+cpu'
+          python3 -m pip install 'numpy==2.2.6' 'zstandard==0.23.0' 'librosa==0.11.0' 'onnx==1.21.0' 'PyYAML==6.0.2' 'tqdm==4.67.1' 'requests==2.34.2'
+      - name: Prepare the pinned Eliza packages
+        run: |
+          pnpm eliza
+          pnpm --filter @repo/eliza-harness build
       - run: pnpm --filter @repo/app android build --release
       - name: Build the candidate, mirror it and plan its signing
         working-directory: apps/app
