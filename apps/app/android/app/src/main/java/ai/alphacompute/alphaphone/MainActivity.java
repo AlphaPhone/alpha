@@ -99,6 +99,7 @@ public class MainActivity extends BridgeActivity {
   if (image) {
    registerPlugin(AlphaTelephonyPlugin.class);
    registerPlugin(AlphaContactsPlugin.class);
+   if (AlphaSenseAdmission.available(this)) registerPlugin(ai.eliza.plugins.system.SensePlugin.class);
   }
   AlphaLauncher.register(this, image);
   super.onCreate(state);
