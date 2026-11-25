@@ -283,8 +283,11 @@ pure def bind(c: Composer, conversation: int): Composer = rest({ ...c.binding, c
 
 ### Another owner or agent session drops the editor, the attachments and any send in hand
 
-Their slots stay as they were on the phone; a message left marked as
-sending is reviewed when its owner comes back.
+Their verified owner, agent and exact conversation slots stay as they
+were on the phone. A message left marked as sending is reviewed when its
+owner comes back. While no owner is verified, new text can wait in this
+editor until it closes. It is never admitted to a signed-in draft. Older
+slots whose authority was not recorded stay sealed.
 
 ```quint
 pure def canSwitchOwner(c: Composer, owner: int): bool = owner != c.binding.owner
@@ -581,6 +584,29 @@ pure def attach(c: Composer, count: int): Composer = { ...c, editor: { ...c.edit
 pure def canRemoveFile(c: Composer): bool = c.away == Free and c.editor.files > 0
 
 pure def removeFile(c: Composer): Composer = { ...c, editor: { ...c.editor, files: c.editor.files - 1 } }
+```
+
+### A shared result adds its file and leaves the owner's draft as written
+
+The selected result adds one file to the same open composer slot. It
+may also supply editable text when the draft is empty. Both belong to one
+change. A send in hand or a draft being edited from history refuses the
+handoff.
+
+```quint
+pure def canAttachQuestion(c: Composer, owner: int, conversation: int, ticket: int, seed: bool): bool =
+  c.binding.owner == owner and c.binding.conversation == conversation and c.read.ticket == ticket
+    and canAttach(c, 1) and attachments(c.editor) < maxFiles and c.editor.editing == 0
+    and (not(seed) or not(c.editor.text))
+
+pure def attachQuestion(c: Composer, owner: int, conversation: int, ticket: int, seed: bool): Composer =
+  val added = attach(c, 1)
+  if (seed) edit(added, false, false) else added
+
+pure def stepAQuestionKeepsAnExistingDraft(before: Composer, via: str, after: Composer): bool =
+  via == "attachQuestion" implies
+    (after.binding == before.binding and after.editor.files == before.editor.files + 1 and
+      (before.editor.text implies (after.editor.text and after.long == before.long and after.draft == before.draft)))
 ```
 
 ### The mail open in Inbox, the photo open in Photos, or a transcript handed over by "Ask Alpha about this" is offered once by the view showing

@@ -5,7 +5,7 @@ import * as Agent from "../../gen/app__contacts__agent.effect.vibe"
 import { Machine as ContactsMachine, canBookChanged } from "../../gen/app__contacts.effect.vibe"
 import { Machine as PhoneMachine, clear } from "../../gen/app__phone.effect.vibe"
 import type { Ask, Effect as Out, Ending, Event, Request } from "../../gen/app__contacts__agent.effect.vibe"
-import { Telephony, TelephonyRefused, namesOf, readAddressBook, telephony } from "../platform/telephony.vibe"
+import { type Telephony, TelephonyRefused, namesOf, readAddressBook, telephony, textingDefault } from "../platform/telephony.vibe"
 import { Attempts } from "../runtime/attempts.vibe"
 import { type Job, answer, contained, reacting, run, together } from "../runtime/reactor.vibe"
 import { Time } from "../runtime/time.vibe"
@@ -120,18 +120,24 @@ export effect function withdrawn(): boolean!!Agent.Machine {
 
 module page {
   /** Whether the review is whole on screen and its enabled Send is what a finger there would hit, nothing covering it. @throws {never} */
-  export function sendShowing(): boolean {
-    if (typeof document === "undefined") return false
-    const review = document.querySelector<HTMLElement>("[data-alpha-review]")
+  export function sendShowing(proposal?: string): boolean {
+    if (typeof document === "undefined" || document.visibilityState !== "visible" || typeof document.elementFromPoint !== "function") return false
+    const review = Array.from(document.querySelectorAll<HTMLElement>("[data-alpha-review]"))
+      .find((item) => item.dataset.alphaReview === (proposal ?? ""))
     const send = review?.querySelector<HTMLButtonElement>("button[data-alpha-review-send]")
-    if (!review || !send || send.disabled) return false
+    if (!review || !send || send.disabled || review.closest('[inert],[hidden],[aria-hidden="true"]')) return false
     const whole = review.getBoundingClientRect()
     if (whole.width <= 0 || whole.height <= 0 || whole.top < 0 || whole.left < 0 || whole.bottom > window.innerHeight || whole.right > window.innerWidth) return false
+    if (proposal !== undefined) {
+      const clip = review.closest('[role="log"]')?.getBoundingClientRect()
+      if (clip === undefined || whole.top < clip.top || whole.bottom > clip.bottom || whole.left < clip.left || whole.right > clip.right) return false
+    }
     const at = send.getBoundingClientRect()
     return send.contains(document.elementFromPoint(at.left + at.width / 2, at.top + at.height / 2))
   }
 }
 import { sendShowing } from page
+export { sendShowing }
 
 // spec/app/contacts/agent.md, "Only the owner approves, only what is shown as it is now, and only when the phone has ruled out an emergency call"
 /** The owner said "Send this text" as the next thing said in Talk: the shown text is approved only while its whole review and its enabled Send are on screen. Answers whether it was approved. */
@@ -225,8 +231,7 @@ function settled(record: SmsSendResult): { readonly done: boolean; readonly know
 effect function simFor(operation: Asking | undefined): (number | undefined)!!Telephony {
   if (operation?.type === "sms_send") return operation.subscriptionId
   const status = telephony("status", (c) => c.messages.status()) catch () => undefined
-  const sims = status?.subscriptions ?? []
-  return sims.find((one) => one.defaultSms)?.id ?? (sims.length === 1 ? sims[0].id : undefined)
+  return textingDefault(status?.subscriptions ?? [])
 }
 
 // spec/app/contacts/agent.md, "Only the phone answers the action, and the request ends as that answer says"

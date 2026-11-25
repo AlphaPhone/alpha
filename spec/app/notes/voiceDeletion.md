@@ -29,16 +29,16 @@ import note.* from "./note"
 
 type Fate = Standing | Gone | Altered
 type Receipt = NoReceipt | Removed | Restored | Purged | Unreadable
-type Plan = AskOwner | Retire | EraseRecording | MoveThenErase | DeleteNote | RestoreRecording
+type Plan = AskOwner | Retire | EraseRecording | MoveThenErase | DeleteNote | RestoreRecording | FinishCanonical
 type Stage = Free | Found | Claimed | Asking | Acting
-type Row = { note: int, recording: int, process: int, confirmed: bool, deferred: bool }
+type Row = { note: int, recording: int, process: int, confirmed: bool, deferred: bool, operation: str }
 type Findings = { fate: Fate, known: bool, owned: bool, shared: bool }
 type Recovery = {
   owner: int, process: int, stage: Stage, row: Row, look: R::Read, findings: Findings, plan: Plan,
   review: V::Review, attempt: A::Attempt, byOwner: bool,
 }
 
-pure val noRow: Row = { note: 0, recording: 0, process: 0, confirmed: false, deferred: false }
+pure val noRow: Row = { note: 0, recording: 0, process: 0, confirmed: false, deferred: false, operation: "" }
 pure val unclear: Findings = { fate: Altered, known: false, owned: false, shared: true }
 
 pure val initial: Recovery = {
@@ -57,8 +57,9 @@ for the owner, and to carry out one plan for it, which also retires the row.
 ```quint
 type Effect =
   | Inspects({ ticket: int, owner: int, note: int, recording: int })
-  | Defers({ owner: int, note: int, recording: int })
+  | Defers({ owner: int, note: int, recording: int, operation: str })
   | Settles({ ticket: int, owner: int, plan: Plan, note: int, recording: int })
+  | FinishesCanonical({ ticket: int, owner: int, note: int, recording: int, operation: str, keep: bool })
 type Moved = { state: Recovery, out: List[Effect] }
 ```
 
@@ -71,7 +72,8 @@ pure val processValues = Set(1, 2)
 pure val ticketValues = Set(1, 2, 3, 4)
 pure val ownerValues = Set(0, 1, 2)
 pure val receiptValues = Set(NoReceipt, Removed, Purged)
-pure val choiceValues = Set(Retire, EraseRecording)
+pure val choiceValues = Set(Retire, EraseRecording, FinishCanonical)
+pure val operationValues = Set("", "cleanup-1")
 pure val weight_inspected = 3
 pure val weight_showRow = 3
 pure val weight_decide = 3
@@ -136,11 +138,34 @@ pure def canFound(r: Recovery, note: int, recording: int, process: int, confirme
   by == Phone and isOwner(r.owner) and r.stage == Free and note > 0 and recording > 0 and process > 0 and process < r.process
 
 pure def found(r: Recovery, note: int, recording: int, process: int, confirmed: bool, deferred: bool, by: Actor): Recovery =
-  { ...r, stage: Found, row: { note: note, recording: recording, process: process, confirmed: confirmed, deferred: deferred },
+  { ...r, stage: Found, row: { note: note, recording: recording, process: process, confirmed: confirmed, deferred: deferred, operation: "" },
     findings: unclear }
 
 pure def alwaysOnlyAnEarlierRunsRow(r: Recovery): bool =
-  holding(r) implies (r.row.process < r.process and r.row.process > 0 and r.row.note > 0 and r.row.recording > 0 and isOwner(r.owner))
+  (holding(r) and r.row.operation == "") implies
+    (r.row.process < r.process and r.row.process > 0 and r.row.note > 0 and r.row.recording > 0 and isOwner(r.owner))
+```
+
+### A canonical pending receipt can be taken up in this run
+
+A receipt the resident still holds for the current owner already names
+the committed erasure. The phone takes it up from a current read, under
+its exact operation. Android checks the owner's serving launch, that
+same pending row and the native recording before it erases anything.
+Keeping a recording leaves the resident receipt pending and skips it
+on later passes.
+
+```quint
+pure def canFoundCanonical(r: Recovery, note: int, recording: int, operation: str, deferred: bool, by: Actor): bool =
+  by == Phone and isOwner(r.owner) and r.stage == Free and note > 0 and recording > 0 and operation != ""
+
+pure def foundCanonical(r: Recovery, note: int, recording: int, operation: str, deferred: bool, by: Actor): Recovery =
+  { ...r, stage: Found, findings: unclear,
+    row: { note: note, recording: recording, process: r.process, confirmed: true, deferred: deferred, operation: operation } }
+
+pure def alwaysCanonicalRowBelongsToThisRun(r: Recovery): bool =
+  (holding(r) and r.row.operation != "") implies
+    (r.row.process == r.process and r.row.note > 0 and r.row.recording > 0 and isOwner(r.owner))
 ```
 
 ### The phone claims the row only when no other process holds its lease, and then looks at what is there
@@ -150,7 +175,9 @@ pure def canClaim(r: Recovery, free: bool, by: Actor): bool = by == Phone and r.
 
 pure def claim(r: Recovery, free: bool, by: Actor): Moved =
   val look = R::ask(r.look)
-  { state: { ...r, stage: Claimed, look: look },
+  if (r.row.operation != "")
+    (if (r.row.deferred) leftForOwner(r.attempt, r) else act(FinishCanonical, false, r))
+  else { state: { ...r, stage: Claimed, look: look },
     out: List(Inspects({ ticket: look.ticket, owner: r.owner, note: r.row.note, recording: r.row.recording })) }
 ```
 
@@ -164,11 +191,14 @@ never carries one out by itself.
 pure def act(plan: Plan, byOwner: bool, r: Recovery): Moved =
   val attempt = A::dispatch(A::record(A::plan(r.attempt.id + 1)))
   { state: { ...r, stage: Acting, plan: plan, attempt: attempt, byOwner: byOwner },
-    out: List(Settles({ ticket: attempt.id, owner: r.owner, plan: plan, note: r.row.note, recording: r.row.recording })) }
+    out: if (r.row.operation == "")
+      List(Settles({ ticket: attempt.id, owner: r.owner, plan: plan, note: r.row.note, recording: r.row.recording }))
+      else List(FinishesCanonical({ ticket: attempt.id, owner: r.owner, note: r.row.note, recording: r.row.recording,
+        operation: r.row.operation, keep: plan == Retire })) }
 
 pure def leftForOwner(attempt: A::Attempt, r: Recovery): Moved =
   { state: { ...r, attempt: attempt, stage: Asking, plan: AskOwner, review: V::revise(r.review), row: { ...r.row, deferred: true } },
-    out: if (r.row.deferred) List() else List(Defers({ owner: r.owner, note: r.row.note, recording: r.row.recording })) }
+    out: if (r.row.deferred) List() else List(Defers({ owner: r.owner, note: r.row.note, recording: r.row.recording, operation: r.row.operation })) }
 
 pure def canInspected(r: Recovery, ticket: int, by: Actor): bool = by == Phone and r.stage == Claimed and R::canAnswer(r.look, ticket)
 
@@ -188,7 +218,8 @@ pure def showRow(r: Recovery, covered: bool, by: Actor): Recovery = { ...r, revi
 
 pure def canDecide(r: Recovery, choice: Plan, by: Actor): bool =
   by == Owner and r.stage == Asking and V::canConfirm(r.review)
-    and (choice == Retire or (choice == EraseRecording and safeToErase(r.findings)))
+    and (choice == Retire or (if (r.row.operation != "") choice == FinishCanonical
+      else choice == EraseRecording and safeToErase(r.findings)))
 
 pure def decide(r: Recovery, choice: Plan, by: Actor): Moved = act(choice, true, { ...r, review: V::confirm(r.review) })
 
@@ -221,6 +252,11 @@ pure def stepNoUnownedErasure(before: Recovery, via: str, after: Recovery, out: 
         and x.ticket == before.attempt.id + 1 and x.owner == before.owner
         and (erasesTheRecording(x.plan) implies safeToErase(after.findings)) and (
           (via == "inspected" and before.stage == Claimed and x.plan != AskOwner and not(before.row.deferred))
+          or (via == "decide" and before.stage == Asking and V::canConfirm(before.review)))
+    | FinishesCanonical(x) => x.operation != "" and x.operation == before.row.operation
+        and x.note == before.row.note and x.recording == before.row.recording and x.owner == before.owner
+        and x.ticket == before.attempt.id + 1 and ((via == "claim" and before.stage == Found
+          and not(before.row.deferred) and not(x.keep))
           or (via == "decide" and before.stage == Asking and V::canConfirm(before.review)))
     | Inspects(i) => via == "claim" and before.stage == Found and i.recording == before.row.recording
     | Defers(d) => not(before.row.deferred) and d.note == before.row.note and d.recording == before.row.recording

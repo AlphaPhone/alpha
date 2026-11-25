@@ -1,8 +1,8 @@
 # Speech out loud
 
 Alpha reading something aloud for the owner: a message in a conversation,
-a note, or a page in the browser. One reader is heard at a time, and a new
-reading waits until the audio of the one before has been confirmed
+a note, a page in the browser, or a dictation transcript still in review.
+One reader is heard at a time, and a new reading waits until the audio of the one before has been confirmed
 stopped. Alpha's spoken replies in a conversation belong to
 [Voice](./index.md), which keeps them to the current turn.
 
@@ -18,7 +18,7 @@ speaker is silent otherwise. A reading ends once: finished, failed, stopped,
 or unavailable when speech cannot be used.
 
 ```quint
-type Text = Message | Note | Page
+type Text = Message | Note | Page | Transcript
 type Stage = Silent | Waiting | Preparing | Playing
 type Outcome = Unread | Pending | Finished | Failed | Stopped | Unavailable
 type Speaker = { text: Text, item: int, ticket: int, stage: Stage, retiring: bool, started: bool, outcome: Outcome, latched: bool }
@@ -89,6 +89,10 @@ pure def ended(s: Speaker, ticket: int, ok: bool): Speaker =
 ```
 
 ### Stopping, or losing what is read (another conversation, another screen, a hidden page, a closed chat), stops the reading
+
+Dictation reads the words held for that exact transcript review on the
+phone. Editing, using, or closing the review stops its reading. Listening
+sends neither the transcript nor its recording to the agent.
 
 ```quint
 pure def canStop(s: Speaker): bool = reading(s)

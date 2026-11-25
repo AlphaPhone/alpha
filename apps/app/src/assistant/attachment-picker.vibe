@@ -1,0 +1,538 @@
+// spec/app/assistant/attachments.md, "Story: Choose files to attach"; spec/app/assistant/attachments.md, "Only the newest listing is shown; a denied folder asks for access, and one that fails offers Retry"; spec/app/assistant/attachments.md, "Attach reads the chosen files once, and adds only those within the type, name and size limits"
+import type { SelectionId, StorageVolume } from "@elizaos/os-bridges"
+import * as Picker from "../../gen/app__assistant__attachments.effect.vibe"
+import { Machine as Conversation } from "../../gen/app__assistant.effect.vibe"
+import { Machine as Composer, attachments as draftFiles, maxFiles } from "../../gen/app__assistant__composer.effect.vibe"
+import { Machine as Shell, canRaise } from "../../gen/app__shell.effect.vibe"
+import { Agent } from "../platform/agent.vibe"
+import { Device, native } from "../platform/device.vibe"
+import { Documents } from "../platform/documents.vibe"
+import { Files } from "../platform/files.vibe"
+import { PhotosPort } from "../platform/photos.vibe"
+import { fresh } from "../runtime/attempts.vibe"
+import { type Job, answer, contained, reacting, run, started, together } from "../runtime/reactor.vibe"
+import { attachmentPhotoAccess, listAttachmentPhotos, openAttachmentPhotoSettings, readPickedPhoto, type AttachmentPhotoCursor, type AttachmentPhotoRow } from "./attachment-library.vibe"
+import { attachmentDocumentsAccess, listAttachmentDocuments, openAttachmentDocumentSettings, readPickedDocument, reviewPickedDocument,
+  type AttachmentDocumentLocation, type AttachmentDocumentRow, type PickedAttachmentDocument } from "./attachment-documents.vibe"
+import { attachmentAuthority, chooseDocument, insertPickedFiles, readChosenDocument, sameBinding, supportedAttachment, type FileTarget } from "./attachments.vibe"
+import { Talk } from "./talk.vibe"
+
+export interface AttachmentPickerRowView {
+  readonly id: string
+  readonly kind: "photo" | "file" | "folder"
+  readonly name: string
+  readonly bytes?: number
+  readonly image?: string
+  readonly imageFile?: File
+  readonly external?: boolean
+  readonly available?: boolean
+}
+
+export interface AttachmentPickerView {
+  readonly visit: number
+  readonly ticket: number
+  readonly rows: readonly AttachmentPickerRowView[]
+  readonly selected: readonly AttachmentPickerRowView[]
+  readonly location?: { readonly name: string; readonly volume?: string; readonly up: boolean }
+  readonly volumes: readonly Pick<StorageVolume, "id" | "name">[]
+  readonly availability: "checking" | "available" | "unsupported" | "failed"
+  readonly truncated: boolean
+  readonly preparing: boolean
+  readonly problem?: string
+  readonly refused: readonly string[]
+  readonly systemDocuments: boolean
+}
+
+type ListedRow =
+  | { readonly kind: "photo"; readonly row: AttachmentPhotoRow; readonly view: AttachmentPickerRowView }
+  | { readonly kind: "document"; readonly row: AttachmentDocumentRow; readonly view: AttachmentPickerRowView }
+
+type Choice =
+  | Extract<ListedRow, { kind: "photo" }>
+  | { readonly kind: "document"; readonly row: PickedAttachmentDocument; readonly view: AttachmentPickerRowView }
+  | { readonly kind: "imported"; readonly file: File; readonly view: AttachmentPickerRowView }
+  | { readonly kind: "system"; readonly id: SelectionId; readonly view: AttachmentPickerRowView }
+
+type Browse = Extract<Picker.Effect, { tag: "Browse" }>
+type Access = Extract<Picker.Effect, { tag: "Access" }>
+type ReadFiles = Extract<Picker.Effect, { tag: "ReadFiles" }>
+
+interface Listing {
+  readonly request: Browse
+  readonly rows: readonly ListedRow[]
+  readonly next?: AttachmentPhotoCursor
+  readonly location?: AttachmentDocumentLocation
+  readonly truncated?: boolean
+}
+
+interface Visit {
+  readonly id: number
+  readonly route: number
+  readonly target: FileTarget
+  readonly systemDocuments: boolean
+  readonly folders: Map<number, AttachmentDocumentLocation>
+  volumes: readonly StorageVolume[]
+  listing?: Listing
+  selection: readonly Choice[]
+  availability: AttachmentPickerView["availability"]
+  preparing: boolean
+  problem?: string
+  refused: readonly string[]
+}
+
+interface PickerBoard {
+  snapshot(this: void): AttachmentPickerView
+  subscribe(this: void, listener: () => void): () => void
+  current(): Visit | undefined
+  show(visit: Visit): void
+  clear(visit: Visit): void
+}
+
+export service AttachmentPicker {
+  readonly board: PickerBoard
+  readonly writer: Semaphore.Semaphore
+}
+
+const noView: AttachmentPickerView = {
+  visit: 0, ticket: 0, rows: [], selected: [], volumes: [], availability: "checking", truncated: false,
+  preparing: false, refused: [], systemDocuments: false,
+}
+const root: AttachmentDocumentLocation = { path: "" }
+
+const store = Layer.effect(AttachmentPicker, effect {
+  const writer = try Semaphore.make(1)
+  let current: Visit | undefined
+  let view = noView
+  const listeners = new Set<() => void>()
+  const tell = () => { for (const notify of listeners) notify() }
+  const board: PickerBoard = {
+    snapshot: () => view,
+    subscribe(listener) { listeners.add(listener); return () => { listeners.delete(listener) } },
+    current: () => current,
+    show(visit) {
+      current = visit
+      const listing = visit.listing
+      const location = listing?.location
+      view = {
+        visit: visit.id, ticket: listing?.request.ticket ?? 0, rows: listing?.rows.map(({ view }) => view) ?? [],
+        selected: visit.selection.map(({ view }) => view), volumes: visit.volumes,
+        location: location === undefined ? undefined : { name: location.path.split("/").at(-1) || "", volume: location.volume, up: location.path !== "" },
+        availability: visit.availability, truncated: listing?.truncated ?? false, preparing: visit.preparing,
+        problem: visit.problem, refused: visit.refused, systemDocuments: visit.systemDocuments,
+      }
+      tell()
+    },
+    clear(visit) {
+      if (current !== visit) return
+      current = undefined
+      view = noView
+      tell()
+    },
+  }
+  return { board, writer }
+})
+
+function photoRow(row: AttachmentPhotoRow): ListedRow {
+  const { item } = row
+  return { kind: "photo", row, view: {
+    id: `photo:${item.id}`, kind: "photo", name: item.name || "Photo", bytes: item.size,
+    image: row.kind === "phone" ? row.item.image : row.item.thumbnail,
+  } }
+}
+
+function documentRow(row: AttachmentDocumentRow): ListedRow {
+  const { entry, volume } = row
+  return { kind: "document", row, view: {
+    id: `document:${JSON.stringify([volume ?? "primary", entry.path])}`, kind: row.kind,
+    name: entry.name, bytes: row.kind === "file" ? entry.size : undefined,
+    available: row.kind === "folder" || supportedAttachment(entry.name, entry.mimeType, entry.size),
+  } }
+}
+
+function sameLocation(a: AttachmentDocumentLocation, b: AttachmentDocumentLocation): boolean {
+  return a.path === b.path && (a.volume ?? "primary") === (b.volume ?? "primary")
+}
+
+function folderNumber(visit: Visit, location: AttachmentDocumentLocation): number {
+  for (const [id, where] of visit.folders) if (sameLocation(where, location)) return id
+  const id = visit.folders.size
+  visit.folders.set(id, location)
+  return id
+}
+
+type PickerShell = AttachmentPicker | Picker.Machine | Composer | Conversation | Shell | Talk
+type PickerNeeds = PickerShell | Agent | Device | Documents | Files | PhotosPort
+
+effect function targetCurrent(target: FileTarget): boolean!!(Composer | Conversation | Talk) {
+  const writing = try (try Composer).get()
+  const context = (try (try Conversation).get()).context
+  const seat = (try Talk).board.draftSeat
+  return seat !== undefined && Picker.sameArchiveAuthority(target.authority, seat.authority)
+    && writing.slot === "Open" && writing.away === "Free" && writing.read.ticket === target.slot && sameBinding(writing.binding, target.binding)
+    && !context.sensitive && context.revision === target.revision
+}
+
+effect function sameVisit(visit: Visit): boolean!!PickerShell {
+  const board = (try AttachmentPicker).board
+  const model = try (try Picker.Machine).get()
+  return model.open && model.visit === visit.id && board.current() === visit && (try (try Shell).get()).route === visit.route
+    && (try targetCurrent(visit.target))
+}
+
+effect function releaseSystemChoices(choices: readonly Choice[]): void!!Documents {
+  const { client } = try Documents
+  if (Option.isNone(client)) return
+  for (const choice of choices) {
+    if (choice.kind === "system") try ignore(tryPromise(() => client.value.forget(choice.id)))
+  }
+}
+
+/** Begin a new picker visit for the exact draft that supplied the paperclip. */
+export effect function openAttachmentPicker(target: FileTarget, room: number): boolean!!(PickerShell | Agent | Device | Documents) {
+  const { board, writer } = try AttachmentPicker
+  const machine = try Picker.Machine
+  const shell = try Shell
+  const device = try Device
+  const source = try shell.get()
+  const authority = try attachmentAuthority()
+  if (authority === undefined || !Picker.sameArchiveAuthority(target.authority, authority)) return false
+  return try writer.withPermits(1)(effect {
+    const state = try machine.get()
+    const available = Math.min(room, maxFiles - draftFiles((try (try Composer).get()).editor))
+    if (!Picker.canOpenPicker(state, available) || !(try device.showing()) || !(try targetCurrent(target)) || (try shell.get()).route !== source.route) return false
+    const shown = canRaise(source, "Sheet")
+      ? (shell.send({ type: "raise", detent: "Sheet" }, (live) => live.route === source.route) catch () => undefined) : source
+    if (shown === undefined || (try shell.get()).route !== shown.route || !(try targetCurrent(target))) return false
+    const previous = board.current()
+    const visit: Visit = {
+      id: state.visit + 1, route: shown.route, target, systemDocuments: native() && Option.isSome((try Documents).client),
+      folders: new Map([[0, root]]), volumes: [], selection: [], availability: "checking", preparing: false, refused: [],
+    }
+    board.show(visit)
+    const opened = try contained(machine.send({ type: "openPicker", room: available }), "opening the attachment picker")
+    if (!opened) board.clear(visit)
+    if (previous !== undefined) try releaseSystemChoices(previous.selection)
+    return opened
+  })
+}
+
+effect function observeAccess(request: Access): void!!PickerNeeds {
+  const board = (try AttachmentPicker).board
+  const machine = try Picker.Machine
+  const visit = board.current()
+  if (visit === undefined || visit.id !== request.visit || !(try sameVisit(visit)) || (try machine.get()).tab !== request.tab) return
+  visit.availability = "checking"
+  visit.problem = undefined
+  board.show(visit)
+  const asked = request.mode === "Request" || request.mode === "ChooseItems"
+  let grant: Picker.Attachments["photos"]["grant"] | "Unsupported" | "Failed" | undefined
+  if (request.tab === "Photos") {
+    if (request.mode === "Settings" && !(try openAttachmentPhotoSettings())) grant = "Failed"
+    else grant = try attachmentPhotoAccess(asked)
+  } else {
+    grant = request.mode === "Settings" ? (try openAttachmentDocumentSettings()) : (try attachmentDocumentsAccess(asked))
+  }
+  if (!(try sameVisit(visit)) || (try machine.get()).tab !== request.tab) return
+  visit.availability = grant === "Unsupported" ? "unsupported" : grant === undefined || grant === "Failed" ? "failed" : "available"
+  if (grant !== "Granted" && grant !== "Limited") {
+    visit.listing = undefined
+    visit.volumes = []
+  }
+  board.show(visit)
+  if (grant === undefined || grant === "Failed" || grant === "Unsupported") return
+  try ignore(machine.send({ type: "granted", tab: request.tab, grant, visit: request.visit }))
+}
+
+const listed = ({ ticket }: Browse, listing: Picker.Listing): Picker.Event => ({ type: "listed", ticket, listing })
+
+effect function stillListing(visit: Visit, request: Browse): boolean!!PickerShell {
+  const state = try (try Picker.Machine).get()
+  return request.visit === visit.id && Picker.canListed(state, request.ticket) && state.tab === request.tab && state.query === request.query
+    && (request.tab !== "Documents" || state.folder === request.folder) && (try sameVisit(visit))
+}
+
+effect function browse(request: Browse): Picker.Event!!PickerNeeds {
+  const board = (try AttachmentPicker).board
+  const visit = board.current()
+  if (visit === undefined || !(try stillListing(visit, request))) return listed(request, "Failure")
+  const previous = visit.listing
+  const nextPage = request.more && previous?.request.tab === request.tab && previous.request.query === request.query && previous.request.folder === request.folder
+  if (request.tab === "Photos") {
+    const page = try listAttachmentPhotos(request.query, nextPage ? previous?.next : undefined)
+    if (!(try stillListing(visit, request))) return listed(request, "Failure")
+    visit.availability = "available"
+    const prior = nextPage && previous !== undefined && page.kind !== "Denied" ? previous.rows : []
+    const known = new Set(prior.map(({ view }) => view.id))
+    const rows = page.kind === "Listed" ? [...prior, ...page.rows.map(photoRow).filter(({ view }) => !known.has(view.id))] : prior
+    const next = page.kind === "Listed" ? page.next : undefined
+    visit.listing = { request, rows, next }
+    board.show(visit)
+    return listed(request, page.kind === "Denied" ? "Denied" : page.kind === "Failed" ? "Failure" : next === undefined ? "Last" : "Rows")
+  }
+  const location = visit.folders.get(request.folder)
+  if (location === undefined) return listed(request, "Failure")
+  const page = try listAttachmentDocuments(location, request.query)
+  if (!(try stillListing(visit, request))) return listed(request, "Failure")
+  visit.availability = page.status === "unsupported" ? "unsupported" : "available"
+  if (page.status === "ready") {
+    visit.volumes = page.volumes
+    visit.listing = { request, rows: page.rows.map(documentRow), location: page.location, truncated: page.truncated }
+  } else visit.listing = { request, rows: [], location }
+  board.show(visit)
+  return listed(request, page.status === "ready" ? "Last" : page.status === "denied" ? "Denied" : "Failure")
+}
+
+effect function recordChoice(visit: Visit, choices: readonly Choice[], external: boolean): boolean!!PickerShell {
+  const { board } = try AttachmentPicker
+  if (!(try sameVisit(visit))) return false
+  const machine = try Picker.Machine
+  const state = try machine.get()
+  const event: Picker.Event = { type: external ? "includePicked" : "choose", count: choices.length }
+  if (!Picker.enabled(state, event)) return false
+  const old = visit.selection
+  visit.selection = choices
+  if (!(try contained(machine.send(event), "choosing an attachment"))) { visit.selection = old; return false }
+  if (board.current() === visit) {
+    visit.problem = undefined
+    visit.refused = []
+    board.show(visit)
+  }
+  return true
+}
+
+effect function leaveDocument(visit: Visit, done: Choice | undefined): void!!(PickerShell | Documents) {
+  const board = (try AttachmentPicker).board
+  if (board.current() === visit) {
+    visit.preparing = false
+    board.show(visit)
+  }
+  if (done !== undefined) try releaseSystemChoices([done])
+}
+
+/** Toggle an exact visible row, or enter the folder it names. Native files are reviewed before selection. */
+export effect function choosePickerRow(id: string, visitId: number, ticket: number): boolean!!(PickerShell | Documents) {
+  const { board, writer } = try AttachmentPicker
+  const machine = try Picker.Machine
+  const visit = board.current()
+  if (visit === undefined || visit.id !== visitId) return false
+  const review = try writer.withPermits(1)(effect {
+    if (!(try sameVisit(visit)) || visit.preparing) return undefined
+    const state = try machine.get()
+    const current = state.rows.ticket === ticket && state.rows.status === "Loaded" && visit.listing?.request.ticket === ticket
+    const shown = current ? visit.listing?.rows.find((item) => item.view.id === id) : undefined
+    const chosen = visit.selection.find((one) => one.view.id === id)
+    if (chosen !== undefined && (shown !== undefined || chosen.view.external === true)) {
+      const removed = try recordChoice(visit, visit.selection.filter((one) => one !== chosen), false)
+      return removed ? { kind: "removed" as const, chosen } : undefined
+    }
+    if (shown === undefined || shown.view.available === false) return undefined
+    if (shown.kind === "document" && shown.row.kind === "folder") {
+      const folder = folderNumber(visit, { path: shown.row.entry.path, volume: shown.row.volume })
+      return (try contained(machine.send({ type: "setFolder", folder }), "opening the attachment folder")) ? { kind: "changed" as const } : undefined
+    }
+    if (!Picker.canChoose(state, visit.selection.length + 1)) return undefined
+    if (shown.kind === "photo") return (try recordChoice(visit, [...visit.selection, shown], false)) ? { kind: "changed" as const } : undefined
+    visit.preparing = true
+    visit.problem = undefined
+    board.show(visit)
+    return { kind: "review" as const, shown }
+  })
+  if (review === undefined) return false
+  if (review.kind === "changed") return true
+  if (review.kind === "removed") { try releaseSystemChoices([review.chosen]); return true }
+  return try Effect.ensuring(effect {
+    const row = try reviewPickedDocument(review.shown.row)
+    return try writer.withPermits(1)(effect {
+      const state = try machine.get()
+      if (!(try sameVisit(visit)) || state.rows.ticket !== ticket || state.rows.status !== "Loaded") return false
+      if (row === undefined) {
+        visit.problem = "This file changed. Select it again."
+        board.show(visit)
+        return false
+      }
+      return try recordChoice(visit, [...visit.selection, { kind: "document", row, view: review.shown.view }], false)
+    })
+  }, leaveDocument(visit, undefined))
+}
+
+/** Stage user-selected input Files against this visit without reading or opening a broader library. */
+export effect function importPickerFiles(files: readonly File[], visitId: number): boolean!!PickerShell {
+  const { board, writer } = try AttachmentPicker
+  const machine = try Picker.Machine
+  return try writer.withPermits(1)(effect {
+    const visit = board.current()
+    if (visit === undefined || visit.id !== visitId || visit.preparing || !(try sameVisit(visit))) return false
+    const remaining = (try machine.get()).room - visit.selection.length
+    const chosen: Choice[] = files.slice(0, remaining).map((file) => ({ kind: "imported", file, view: {
+      id: `picked:${fresh()}`, kind: file.type.startsWith("image/") ? "photo" : "file", name: file.name, bytes: file.size,
+      imageFile: file.type.startsWith("image/") ? file : undefined, external: true,
+    } }))
+    const added = chosen.length > 0 && (try recordChoice(visit, [...visit.selection, ...chosen], true))
+    if (files.length > remaining && board.current() === visit) {
+      visit.problem = `Choose up to ${(try machine.get()).room} files.`
+      board.show(visit)
+    }
+    return added
+  })
+}
+
+/** Stage exactly one Android system selection; release its receipt if the originating visit is gone. */
+export effect function pickSystemDocument(visitId: number): boolean!!(PickerShell | Documents) {
+  const { board, writer } = try AttachmentPicker
+  const machine = try Picker.Machine
+  const visit = try writer.withPermits(1)(effect {
+    const held = board.current()
+    if (held === undefined || held.id !== visitId || !held.systemDocuments || held.preparing || !(try sameVisit(held))) return undefined
+    const state = try machine.get()
+    if (state.tab !== "Documents" || !Picker.canIncludePicked(state, held.selection.length + 1)) return undefined
+    held.preparing = true
+    held.problem = undefined
+    board.show(held)
+    return held
+  })
+  if (visit === undefined) return false
+  let pending: Choice | undefined
+  return try Effect.ensuring(effect {
+    const item = try chooseDocument()
+    if (item === undefined) return false
+    const choice: Choice = { kind: "system", id: item.id, view: { id: `system:${item.id}`, kind: "file", name: item.name, bytes: item.bytes, external: true } }
+    pending = choice
+    if (!(try writer.withPermits(1)(recordChoice(visit, [...visit.selection, choice], true)))) return false
+    pending = undefined
+    return true
+  }, effect { try leaveDocument(visit, pending) })
+}
+
+export effect function clearPickerChoice(visitId: number): boolean!!(PickerShell | Documents) {
+  const { board, writer } = try AttachmentPicker
+  const removed = try writer.withPermits(1)(effect {
+    const visit = board.current()
+    if (visit === undefined || visit.id !== visitId || visit.preparing || !(try sameVisit(visit))) return undefined
+    const selected = visit.selection
+    return (try recordChoice(visit, [], false)) ? selected : undefined
+  })
+  if (removed === undefined) return false
+  try releaseSystemChoices(removed)
+  return true
+}
+
+export effect function upPickerFolder(visitId: number): boolean!!PickerShell {
+  const { board, writer } = try AttachmentPicker
+  const machine = try Picker.Machine
+  return try writer.withPermits(1)(effect {
+    const visit = board.current()
+    if (visit === undefined || visit.id !== visitId || visit.preparing || !(try sameVisit(visit))) return false
+    const state = try machine.get()
+    const located = visit.listing?.request.ticket === state.rows.ticket ? visit.listing?.location : undefined
+    if (!located?.path) return false
+    const folder = folderNumber(visit, { path: located.path.split("/").slice(0, -1).join("/"), volume: located.volume })
+    return try contained(machine.send({ type: "setFolder", folder }), "going up an attachment folder")
+  })
+}
+
+export effect function usePickerVolume(id: string, visitId: number): boolean!!PickerShell {
+  const { board, writer } = try AttachmentPicker
+  const machine = try Picker.Machine
+  return try writer.withPermits(1)(effect {
+    const visit = board.current()
+    if (visit === undefined || visit.id !== visitId || visit.preparing || !(try sameVisit(visit)) || !visit.volumes.some((volume) => volume.id === id)) return false
+    const folder = folderNumber(visit, { path: "", volume: id })
+    return try contained(machine.send({ type: "setFolder", folder }), "opening an attachment volume")
+  })
+}
+
+const filesRead = ({ attempt }: ReadFiles, accepted: number): Picker.Event => ({ type: "filesRead", attempt, accepted })
+
+effect function selectedFile(choice: Choice): (File | undefined)!!(PhotosPort | Documents) {
+  switch (choice.kind) {
+    case "photo": return try readPickedPhoto(choice.row)
+    case "document": return try readPickedDocument(choice.row)
+    case "imported": return choice.file
+    case "system": {
+      const file = try readChosenDocument(choice.id)
+      return file?.name === choice.view.name && (choice.view.bytes === undefined || file.size === choice.view.bytes) ? file : undefined
+    }
+  }
+}
+
+effect function readFiles(request: ReadFiles): Picker.Event!!PickerNeeds {
+  const { board, writer } = try AttachmentPicker
+  const machine = try Picker.Machine
+  const device = try Device
+  const visit = board.current()
+  if (visit === undefined || visit.id !== request.visit) return filesRead(request, 0)
+  const context = try Effect.context<PickerShell>()
+  const active = Effect.provideContext(effect {
+    if (board.current() !== visit || !(try sameVisit(visit)) || !(try device.showing())) return false
+    const state = try machine.get()
+    return state.selected === request.count && Picker.canFilesRead(state, request.attempt, 0)
+  }, context)
+  const selection = try writer.withPermits(1)(effect {
+    const state = try machine.get()
+    return board.current() === visit && state.visit === visit.id && Picker.canFilesRead(state, request.attempt, 0)
+      && visit.selection.length === request.count ? visit.selection : undefined
+  })
+  if (selection === undefined) return filesRead(request, 0)
+  const candidates: Array<{ name: string; file: File | undefined }> = []
+  for (const choice of selection) {
+    if (!(try active)) break
+    candidates.push({ name: choice.view.name, file: try selectedFile(choice) })
+  }
+  const accepted = candidates.length === selection.length && (try active)
+    ? (try insertPickedFiles(visit.target, candidates, active)) : 0
+  if (board.current() === visit) {
+    visit.selection = []
+    visit.refused = accepted === 0 ? selection.map(({ view }) => view.name) : candidates.filter((one) => one.file === undefined).map(({ name }) => name)
+    board.show(visit)
+  }
+  try releaseSystemChoices(selection)
+  return filesRead(request, accepted)
+}
+
+function carry(request: Picker.Effect): Job<Picker.Event, PickerNeeds, []> {
+  return match (request) {
+    when { tag: "Access" }: run("picker access", observeAccess(request));
+    when { tag: "Browse" }: answer("picker browse", browse(request), listed(request, "Failure"));
+    when { tag: "ReadFiles" }: answer("picker files", readFiles(request), filesRead(request, 0));
+  }
+}
+
+const retirement = started(effect {
+  const { board, writer } = try AttachmentPicker
+  const machine = try Picker.Machine
+  const shell = try Shell
+  const composer = try Composer
+  const conversation = try Conversation
+  const touched = Stream.mergeAll([Stream.as(machine.changes, undefined), Stream.as(shell.changes, undefined),
+    Stream.as(composer.changes, undefined), Stream.as(conversation.changes, undefined)], { concurrency: "unbounded" })
+  try Stream.runForEach(touched, effect () => {
+    const choices = try writer.withPermits(1)(effect {
+      const visit = board.current()
+      if (visit === undefined || (try sameVisit(visit))) return undefined
+      board.clear(visit)
+      const state = try machine.get()
+      if (state.visit === visit.id && Picker.canCancel(state)) try ignore(machine.send({ type: "cancel" }))
+      return visit.selection
+    })
+    if (choices !== undefined) try releaseSystemChoices(choices)
+  })
+}, "retiring the attachment picker")
+
+const refreshed = started(effect {
+  const board = (try AttachmentPicker).board
+  const machine = try Picker.Machine
+  const device = try Device
+  const photos = try PhotosPort
+  const documents = try Files
+  const resume = Stream.as(Stream.filter(device.visible, (visible) => visible), undefined)
+  const changes = Stream.mergeAll([resume, Stream.as(photos.changes, "Photos" as const), Stream.as(documents.changed, "Documents" as const)],
+    { concurrency: "unbounded" })
+  try Stream.runForEach(changes, effect (source) => {
+    const visit = board.current()
+    if (visit === undefined || visit.preparing || visit.availability === "checking" || !(try device.showing()) || !(try sameVisit(visit))) return
+    const state = try machine.get()
+    if ((source === undefined || source === state.tab) && Picker.canRefresh(state)) try ignore(machine.send({ type: "refresh" }))
+  })
+}, "refreshing the attachment sources")
+
+export const picker = together(store, reacting(Picker, { carry }), retirement, refreshed)

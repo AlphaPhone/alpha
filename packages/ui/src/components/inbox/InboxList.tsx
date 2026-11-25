@@ -9,6 +9,8 @@ export type InboxListRow = InboxMessageRowProps & {
 export type InboxListProps = {
   /** The messages of the page or pages read, newest first; those an operation holds are left out by the parent. */
   rows: InboxListRow[];
+  /** Whether these are results under the search field. */
+  searching?: boolean;
   /** A first page is being read: with rows, they stay and are marked busy. */
   loading?: boolean;
   /** Reads the next page; offered only while the list has a page cursor left and mail can be read, so the last page and a saved list leave it out. */
@@ -22,12 +24,12 @@ export type InboxListProps = {
  *
  * @model spec/app/inbox/index.md
  */
-export function InboxList({ rows, loading = false, onLoadMore, loadingMore = false }: InboxListProps) {
+export function InboxList({ rows, searching = false, loading = false, onLoadMore, loadingMore = false }: InboxListProps) {
   return (
-    <div className="-mx-4 flex flex-col">
+    <div className={cn("-mx-4 flex flex-col", searching && "pt-1.5")}>
       <ul aria-label="Email messages" aria-busy={loading || undefined} className="flex flex-col">
         {rows.map(({ id, ...row }) => (
-          <li key={id}><InboxMessageRow {...row} /></li>
+          <li key={id} className="[contain-intrinsic-size:auto_5rem] [content-visibility:auto]"><InboxMessageRow {...row} /></li>
         ))}
       </ul>
       {onLoadMore ? (

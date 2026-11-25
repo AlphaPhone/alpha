@@ -1,15 +1,17 @@
 // spec/app/clock/alarms.md, "Story: Manage my alarms"; spec/app/clock/index.md, "One sheet opens at a time, and editing an alarm requires a positive alarm id"
+import type { ClockSound } from "@repo/launcher-records";
 import { Button, Chip, Input, Label, Select, SelectContent, SelectItem, SelectTrigger, Sheet, SheetContent, Switch } from "@repo/ui";
 import { Effect, type ManagedRuntime } from "effect";
 import { Minus, Plus, Trash2, Volume2 } from "lucide-react";
 import { useState, useSyncExternalStore } from "react";
 import type { Machine as ClockViewMachine } from "../../gen/app__clock.effect.vibe";
+import { defaultSnooze } from "../../gen/app__clock__alarms.ts";
 import { useMachine as useAlarms } from "../../gen/app__clock__alarms.react.ts";
 import type { Machine as ToastsMachine } from "../../gen/app__notices__toasts.effect.vibe";
 import type { Said } from "../notices/toasts.vibe";
 import { createAlarm, deleteAlarmWithUndo, updateAlarm } from "./alarms.vibe";
 import { playChimePulse } from "./chime.ts";
-import { ALARM_SOUNDS, type AlarmSound, SNOOZE_OPTIONS, clockRecords } from "./records.ts";
+import { ALARM_SOUNDS, SNOOZE_OPTIONS, clockRecords } from "./records.ts";
 import type { ClockResident } from "./sync.vibe";
 import { clockNow } from "./ticker.vibe";
 import {
@@ -46,8 +48,8 @@ export function AlarmEditorSheet({ runtime, alarmId, onClose }: AlarmEditorSheet
   const [minute, setMinute] = useState<number>(() => existing?.minute ?? 0);
   const [daysMask, setDaysMask] = useState<number>(() => existing?.daysMask ?? 0);
   const [label, setLabel] = useState<string>(() => existingMeta?.label ?? "");
-  const [sound, setSound] = useState<AlarmSound>(() => existingMeta?.sound ?? "radar");
-  const [snoozeMinutes, setSnoozeMinutes] = useState<number>(() => existing?.snoozeMinutes ?? 9);
+  const [sound, setSound] = useState<ClockSound>(() => existingMeta?.sound ?? "radar");
+  const [snoozeMinutes, setSnoozeMinutes] = useState<number>(() => existing?.snoozeMinutes ?? defaultSnooze);
   const [vibrate, setVibrate] = useState<boolean>(() => existing?.vibrate ?? true);
 
   const display = formatAlarmTime(hour, minute, meta.hour24);
@@ -79,7 +81,7 @@ export function AlarmEditorSheet({ runtime, alarmId, onClose }: AlarmEditorSheet
             <Button variant="ghost" onClick={onClose}>Cancel</Button>
             {existing !== undefined && (
               <Button variant="destructive" aria-label="Delete alarm" onClick={handleDelete}>
-                <Trash2 aria-hidden className="size-4" />
+                <Trash2 aria-hidden className="size-4.5" />
                 Delete
               </Button>
             )}
@@ -91,25 +93,25 @@ export function AlarmEditorSheet({ runtime, alarmId, onClose }: AlarmEditorSheet
           <div className="flex items-center justify-center gap-4 rounded-lg bg-secondary p-4">
             <div className="flex flex-col items-center gap-1">
               <Button variant="ghost" size="icon" aria-label="Increase hour" onClick={() => adjustHour(1)}>
-                <Plus aria-hidden className="size-4" />
+                <Plus aria-hidden className="size-4.5" />
               </Button>
               <span className="text-4xl font-light tabular-nums" aria-label="Selected hour">
                 {display.time.split(":")[0]}
               </span>
               <Button variant="ghost" size="icon" aria-label="Decrease hour" onClick={() => adjustHour(-1)}>
-                <Minus aria-hidden className="size-4" />
+                <Minus aria-hidden className="size-4.5" />
               </Button>
             </div>
             <span className="text-3xl font-light text-muted-foreground">:</span>
             <div className="flex flex-col items-center gap-1">
               <Button variant="ghost" size="icon" aria-label="Increase minute" onClick={() => adjustMinute(1)}>
-                <Plus aria-hidden className="size-4" />
+                <Plus aria-hidden className="size-4.5" />
               </Button>
               <span className="text-4xl font-light tabular-nums" aria-label="Selected minute">
                 {display.time.split(":")[1]}
               </span>
               <Button variant="ghost" size="icon" aria-label="Decrease minute" onClick={() => adjustMinute(-1)}>
-                <Minus aria-hidden className="size-4" />
+                <Minus aria-hidden className="size-4.5" />
               </Button>
             </div>
             {!meta.hour24 && (
@@ -156,7 +158,7 @@ export function AlarmEditorSheet({ runtime, alarmId, onClose }: AlarmEditorSheet
           <div className="flex flex-col gap-2">
             <Label htmlFor="alarm-sound-select">Sound</Label>
             <div className="flex items-center gap-2">
-              <Select value={sound} onValueChange={(next) => setSound(next as AlarmSound)}>
+              <Select value={sound} onValueChange={(next) => setSound(next as ClockSound)}>
                 <SelectTrigger id="alarm-sound-select" aria-label="Alarm sound" className="flex-1" />
                 <SelectContent>
                   {ALARM_SOUNDS.map((option) => (
@@ -165,7 +167,7 @@ export function AlarmEditorSheet({ runtime, alarmId, onClose }: AlarmEditorSheet
                 </SelectContent>
               </Select>
               <Button variant="outline" size="icon" aria-label="Preview sound" onClick={() => playChimePulse(sound, false)}>
-                <Volume2 aria-hidden className="size-4" />
+                <Volume2 aria-hidden className="size-4.5" />
               </Button>
             </div>
           </div>

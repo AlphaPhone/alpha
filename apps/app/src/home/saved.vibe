@@ -1,6 +1,7 @@
 // spec/app/home/tiles.md, "Story: Keep my apps on Home"
-import type { Found, Tile } from "../../gen/app__home__tiles.effect.vibe"
+import { type Found, type Tile, homeOrder } from "../../gen/app__home__tiles.effect.vibe"
 import type { View } from "../../gen/app__shell.effect.vibe"
+import { viewOrder } from "../shell/order.ts"
 
 /** Where Home's tiles are kept. */
 export const savedKey = "alpha.home.tiles"
@@ -8,14 +9,12 @@ export const savedKey = "alpha.home.tiles"
 /** Where an earlier Alpha kept them: its Alpha apps as `alpha:<app>`, and each installed app by its launcher key. */
 const earlierKey = "alpha.launcher.favorites.v1"
 
-/** Today's view of each name an earlier Alpha saved an app of its own under; Wallet and the assistant are no tile. */
+/** Today's view of each name an earlier Alpha saved an app of its own under; the assistant is no tile. */
 const earlierViews: Readonly<Record<string, View>> = {
   phone: "Phone", messages: "Messages", inbox: "Inbox", calendar: "Calendar", clock: "Clock", reminders: "Reminders",
   browser: "Browser", camera: "Camera", photos: "Photos", maps: "Maps", notes: "Notes", contacts: "Contacts",
-  files: "Files", workflows: "Workflows", automations: "Workflows", settings: "Settings",
+  files: "Files", workflows: "Workflows", automations: "Workflows", wallet: "Wallet", settings: "Settings",
 }
-
-const views: ReadonlyArray<View> = ["Phone", "Messages", "Inbox", "Calendar", "Clock", "Reminders", "Browser", "Camera", "Photos", "Maps", "Notes", "Contacts", "Files", "Workflows", "Settings"]
 
 schema OwnTile { readonly tag: "Own"; readonly view: string }
 schema InstalledTile { readonly tag: "Installed"; readonly app: string }
@@ -29,7 +28,7 @@ export function written(tiles: ReadonlyArray<Tile>): string {
 
 function tileOf(tile: OwnTile | InstalledTile): Tile | undefined {
   if (tile.tag === "Installed") return tile.app === "" ? undefined : { tag: "Installed", app: tile.app }
-  const view = views.find((one) => one === tile.view)
+  const view = viewOrder.find((one) => one === tile.view)
   return view === undefined ? undefined : { tag: "Own", view }
 }
 
@@ -43,7 +42,7 @@ function earlierTiles(record: Earlier): Tile[] {
       if (view !== undefined) add({ tag: "Own", view })
     } else if (record.version === 1 || record.defaultPolicy !== undefined) add({ tag: "Installed", app: key })
   }
-  if (record.version === 1) for (const view of views) add({ tag: "Own", view })
+  if (record.version === 1) for (const view of homeOrder) add({ tag: "Own", view })
   return tiles
 }
 

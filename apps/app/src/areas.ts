@@ -55,4 +55,7 @@ export const mounts: readonly Mount[] = [
   at("settings/update", () => import("./update/index.tsx")),
   at("overlay", () => import("./update/overlay.tsx")),
   at("view:Browser", () => import("./browser/index.tsx")),
+  at("view:Wallet", () => import("./wallet/index.tsx")),
+  at("settings/voice", () => import("./assistant/settingsVoice.tsx")),
+  at("settings/notification-collection", () => import("./notices/SettingsCollection.tsx")),
 ];

@@ -36,7 +36,8 @@ module web {
   }
 }
 import { shared, shipped } from web
-import { development, versions } from "./build.ts"
+import { appVersion } from "../platform/build.ts"
+import { development } from "./build.ts"
 
 /** One licence as the notices file holds it. */
 export schema Notice { name: string; version: string; license: string; text: string; source?: string; flags?: ReadonlyArray<string> }
@@ -130,7 +131,8 @@ export function reportOf(input: { readonly at: number; readonly native: boolean;
   const text = (value: unknown, shape: RegExp) => (typeof value === "string" && shape.test(value) ? value : undefined)
   const whole = (value: unknown, below: number) => (typeof value === "number" && Number.isSafeInteger(value) && value > 0 && value < below ? value : undefined)
   const hashes: Record<string, unknown> = typeof facts.runtimeHashes === "object" && facts.runtimeHashes !== null ? { ...facts.runtimeHashes } : {}
-  const { app, mode } = versions()
+  const app = appVersion() || "development"
+  const mode = import.meta.env.MODE
   const version = input.phone.readings.find((reading) => reading.fact === "Versions")?.value
   return {
     format: "alpha-diagnostics/v1",

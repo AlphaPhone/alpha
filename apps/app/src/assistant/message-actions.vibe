@@ -3,12 +3,19 @@ import * as Chats from "../../gen/app__assistant__chats.effect.vibe"
 import * as Inbox from "../../gen/app__inbox.effect.vibe"
 import * as Drafts from "../../gen/app__inbox__drafts.effect.vibe"
 import type { Machine as OffersMachine } from "../../gen/app__inbox__suggestion.effect.vibe"
-import * as Shell from "../../gen/app__shell.effect.vibe"
+import type * as Shell from "../../gen/app__shell.effect.vibe"
 import type { Machine as Toasts } from "../../gen/app__notices__toasts.effect.vibe"
 import { useInEmail, type Offers } from "../inbox/suggestion.vibe"
 import { say, type Said } from "../notices/toasts.vibe"
 import { Device } from "../platform/device.vibe"
 import { Talk, type Line } from "./talk.vibe"
+import { wordsOf } from "./words.ts"
+
+// spec/app/assistant/chats.md, "A message's words can be selected without opening its actions"
+export effect function holdMessagePress(held: () => void): void!! {
+  try sleep(Duration.millis(Chats.messageActionHoldMillis))
+  try sync(held)
+}
 
 /** The exact page and recorded message offered by the transcript. */
 export interface MessageSelection {
@@ -43,21 +50,21 @@ effect function selected(selection: MessageSelection): (Line | undefined)!!(Chat
 /** Copy the text of the selected message and report the clipboard's answer. */
 export effect function copyMessage(selection: MessageSelection): void!!(Chats.Machine | Talk | Device | Toasts | Said) {
   const line = try selected(selection)
-  if (line === undefined || !Chats.copyableText(true, line.text.trim() === "")) return
-  const copied = try (try Device).copyText(line.text)
+  if (line === undefined || !Chats.copyableText(true, wordsOf(line).trim() === "")) return
+  const copied = try (try Device).copyText(wordsOf(line))
   try say(copied ? "Copied" : "Could not copy message", !copied)
 }
 
 /** Bring the selected reply to Inbox for a review without sending or changing a draft. */
 export effect function emailMessage(selection: MessageSelection, expected: EmailDestination): void!!(Chats.Machine | Talk | Inbox.Machine | Drafts.Machine | OffersMachine | Offers | Shell.Machine | Toasts | Said) {
   const line = try selected(selection)
-  if (line === undefined || !Chats.textForEmail(true, line.text.trim() === "", line.mine)) return
+  if (line === undefined || !Chats.textForEmail(true, wordsOf(line).trim() === "", line.mine)) return
   const composer = try (try Drafts.Machine).get()
   const target = emailDestination(try (try Inbox.Machine).get(), composer)
   if (target === undefined || target.account !== expected.account || target.draft !== expected.draft || target.session !== expected.session) {
     try say("The email draft changed. Try again.", true)
     return
   }
-  const opened = try useInEmail(line.text, "Ask Alpha", { target: "NewEmail", account: target.account, message: 0, draft: target.draft }, true)
+  const opened = try useInEmail(wordsOf(line), "Ask Alpha", { target: "NewEmail", account: target.account, message: 0, draft: target.draft }, true)
   if (!opened) try say("Could not open the email review", true)
 }

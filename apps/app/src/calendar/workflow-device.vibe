@@ -1,0 +1,38 @@
+// spec/app/calendar/index.md, "A reviewed workflow reads only the selected phone calendars in its approved range"
+import {
+  type WorkflowCalendarReadOperation, type WorkflowCalendarRow, type WorkflowReadResult, WORKFLOW_READ_RESULT_MAX_BYTES,
+  validateWorkflowReadResult, workflowBytes, workflowCalendarRevisionInput, workflowSha,
+} from "@elizaos/plugin-workflow-client"
+import { PhoneCalendar } from "../platform/calendar.vibe"
+
+const event = Schema.Struct({
+  id: Schema.String, calendarId: Schema.String, title: Schema.String,
+  start: Schema.String, end: Schema.String, allDay: Schema.Boolean,
+})
+const ready = Schema.Struct({
+  status: Schema.Literal("ready"),
+  events: Schema.Array(event).check(Schema.isMaxLength(200)),
+})
+type CalendarResult = Extract<WorkflowReadResult, { readonly kind: "calendar" }>
+
+/** Reads the exact reviewed range through ElizaCalendar, while the caller still holds the foreground review. */
+export effect function readWorkflowCalendar(
+  operation: WorkflowCalendarReadOperation,
+  current: Effect.Effect<boolean>,
+): (CalendarResult | undefined)!!PhoneCalendar {
+  const calendar = try PhoneCalendar
+  if (!calendar.present || !(try current)) return undefined
+  const { calendarIds, start, end, timeZone, maximumEvents } = operation
+  const raw = timeout(calendar.workflowRange({ calendarIds, start, end, timeZone, maximumEvents }), "15 seconds") catch () => undefined
+  if (raw === undefined || !(try current) || workflowBytes(raw) > WORKFLOW_READ_RESULT_MAX_BYTES) return undefined
+  const reply = Schema.decodeUnknownEffect(ready)(raw) catch () => undefined
+  if (reply === undefined || reply.events.length > maximumEvents) return undefined
+  const events: WorkflowCalendarRow[] = []
+  for (const row of reply.events) {
+    const revision = workflowSha(workflowCalendarRevisionInput(row)) catch () => undefined
+    if (revision === undefined) return undefined
+    events.push({ ...row, revision })
+  }
+  const confirmed = validateWorkflowReadResult(operation, { kind: "calendar", events }) catch () => undefined
+  return confirmed?.kind === "calendar" && (try current) ? confirmed : undefined
+}

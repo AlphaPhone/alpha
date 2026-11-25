@@ -28,6 +28,7 @@ import shell as S from "../shell"
 import tiles as T from "./tiles"
 import android as N from "./android"
 import apps as P from "./apps"
+import drawer as D from "./drawer"
 
 type Host = InBrowser | AsApp | AsLauncher | AssistantOnly
 type Actor = Owner | Agent
@@ -75,6 +76,7 @@ pure val tilesValues = Set(
   List(T::Own({ view: S::Notes }), T::Installed({ app: "clock" }), T::Own({ view: S::Inbox })),
   List(T::Installed({ app: "mail" }), T::Installed({ app: "clock" })))
 pure val listedValues = Set(Set(), Set("clock"), Set("clock", "mail"), Set("mail", "maps"))
+pure val drawerValues = Set(D::initial, { ...D::initial, menu: "clock" }, { ...D::initial, menu: "mail" })
 pure val nowValues = Set(0, 2000, 6000, 12000)
 pure val ticketValues = Set(1, 2, 3, 4, 5, 6, 7, 8, 9, 10)
 pure val shellValues = Set(
@@ -292,6 +294,28 @@ pure def canTryAgain(h: Home, shell: S::Shell): bool =
 pure def tryAgain(h: Home, shell: S::Shell): Moved = thenReadApps(List(), h, false)
 ```
 
+### The app in the menu can be added to Home or handed to Android as App info
+
+An accepted Add to Home uses the same ticketed save as other tiles. App
+info uses the same one-at-a-time handoff as opening an app.
+
+```quint
+pure def inMenu(h: Home, app: str, shell: S::Shell, drawer: D::Drawer): bool =
+  onPhone(h) and not(h.editing) and shell.drawer and drawer.menu == app and h.installed.apps.contains(app)
+
+pure def canPinInstalled(h: Home, app: str, shell: S::Shell, drawer: D::Drawer, by: Actor): bool =
+  by == Owner and inMenu(h, app, shell, drawer) and T::canAddTile(h.tiles, T::Installed({ app: app }))
+
+pure def pinInstalled(h: Home, app: str, shell: S::Shell, drawer: D::Drawer, by: Actor): Moved =
+  changed(T::addTile(h.tiles, T::Installed({ app: app })), h)
+
+pure def canShowAppInfo(h: Home, app: str, shell: S::Shell, drawer: D::Drawer, by: Actor): bool =
+  by == Owner and inMenu(h, app, shell, drawer) and N::canSend(h.handoff)
+
+pure def showAppInfo(h: Home, app: str, shell: S::Shell, drawer: D::Drawer, now: int, by: Actor): Moved =
+  asking(N::AppInfo({ app: app }), now, h)
+```
+
 ## Story: Open an app
 
 > As the owner, I want a tap to open the app once, and to be told why when
@@ -429,11 +453,13 @@ pure def sometimesATileWaitsForItsApp(h: Home): bool =
 
 ### Add to Home adds one of Alpha's own apps it lists
 
+Wallet is available through Add to Home and is kept when saved on Home.
+
 ```quint
 pure def holdsView(tiles: List[T::Tile], view: S::View): bool = tiles.some(t => T::shows(t, view))
 
 pure def hiddenApps(h: Home, shell: S::Shell): List[S::View] =
-  T::homeOrder.select(view => S::available(shell, view) and not(holdsView(h.tiles.favourites, view)))
+  T::homeCatalog.select(view => S::available(shell, view) and not(holdsView(h.tiles.favourites, view)))
 
 pure def offered(h: Home, tile: T::Tile, shell: S::Shell): bool =
   h.adding and hiddenApps(h, shell).some(v => T::shows(tile, v))
@@ -481,7 +507,7 @@ pure def moveTile(h: Home, tile: T::Tile, onto: T::Tile, behind: bool, shell: S:
 pure def isSave(e: Effect): bool = match e { | SaveHome(s) => true | _ => false }
 
 pure def stepEveryChangeIsSentToBeSaved(before: Home, via: str, after: Home, out: List[Effect]): bool =
-  (out.some(e => isSave(e)) iff (via == "addToHome" or via == "removeFromHome" or via == "moveTile"))
+  (out.some(e => isSave(e)) iff (via == "addToHome" or via == "pinInstalled" or via == "removeFromHome" or via == "moveTile"))
     and out.every(e => match e {
       | SaveHome(s) => s.tiles == after.tiles.favourites and s.ticket == after.tiles.save.id and T::saving(after.tiles)
       | _ => true
@@ -693,8 +719,9 @@ pure def lawANoticeIsShownOnlyWhereTheOwnerIs(home: Home, shell: S::Shell): bool
 ### The agent is refused every touch on Home: opening an app, the shade, and adding, removing or moving a tile
 
 ```quint
-pure def lawTheAgentChangesNothingOnHome(home: Home, shell: S::Shell, app: str, tile: T::Tile, onto: T::Tile, view: S::View): bool =
+pure def lawTheAgentChangesNothingOnHome(home: Home, shell: S::Shell, drawer: D::Drawer, app: str, tile: T::Tile, onto: T::Tile, view: S::View): bool =
   not(canOpenTile(home, view, shell, Agent)) and not(canOpenApp(home, app, Agent))
+    and not(canPinInstalled(home, app, shell, drawer, Agent)) and not(canShowAppInfo(home, app, shell, drawer, Agent))
     and not(canPullDown(home, shell, false, Agent))
     and not(canAddToHome(home, tile, shell, Agent)) and not(canRemoveFromHome(home, tile, shell, Agent))
     and not(canMoveTile(home, tile, onto, shell, Agent))

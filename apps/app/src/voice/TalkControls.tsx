@@ -1,25 +1,28 @@
-// spec/app/voice/index.md, "Story: Hold a spoken conversation"; spec/app/voice/index.md, "Story: Pause for a phone call"; spec/app/voice/index.md, "A failed conversation ends quietly: why it failed is kept only until voice returns to idle, and nothing is shown"; spec/app/voice/index.md, "Speaker mute is offered after the current speech bridge confirms gain control"
+// spec/app/voice/index.md, "Story: Hold a spoken conversation"; spec/app/voice/index.md, "A reply that needs the owner's review in chat keeps voice listening with the microphone open"; spec/app/voice/index.md, "Story: Pause for a phone call"; spec/app/voice/index.md, "A failed conversation ends quietly: why it failed is kept only until voice returns to idle, and nothing is shown"; spec/app/voice/index.md, "Speaker mute is offered after the current speech bridge confirms gain control"
 import { Button, ConfirmDialog, cn } from "@repo/ui";
 import type { ManagedRuntime } from "effect";
 import type { ReactNode } from "react";
 import { Keyboard, Mic, MicOff, Square, Volume2, VolumeX } from "lucide-react";
 import type { Machine as Shell } from "../../gen/app__shell.effect.vibe";
 import { useMachine as useShell } from "../../gen/app__shell.react.ts";
-import type { Machine } from "../../gen/app__voice.effect.vibe";
+import { Machine } from "../../gen/app__voice.effect.vibe";
 import { useMachine } from "../../gen/app__voice.react.ts";
 import type { Phase } from "../../gen/app__voice.ts";
 import { untimed } from "../runtime/reactor.vibe";
+import type { VoiceKeyboard } from "./useTalkKeyboard.ts";
+import { VoiceStopIcon } from "./VoiceStopIcon.tsx";
 import { VoiceWaveform } from "./VoiceWaveform.tsx";
 
 export interface TalkControlsProps {
   runtime: ManagedRuntime.ManagedRuntime<Machine | Shell, unknown>;
   trailing?: ReactNode;
   compact?: boolean;
+  onKeyboard?: VoiceKeyboard;
 }
 
 const compactStatus: Record<Phase, string> = {
   Idle: "", Starting: "Connecting to voice", Listening: "Listening", Transcribing: "Transcribing", Thinking: "Thinking",
-  Speaking: "Speaking", Paused: "Voice paused for a phone call", Stopping: "Stopping voice", Failed: "",
+  Speaking: "Speaking", Stopping: "Stopping voice", Failed: "",
 };
 
 const expandedStatus: Partial<Record<Phase, string>> = {
@@ -27,7 +30,7 @@ const expandedStatus: Partial<Record<Phase, string>> = {
 };
 
 /** The controls the Voice machine offers while Talk owns the composer. The sheet shows a brief phase label beside the controls. */
-export function TalkControls({ runtime, trailing, compact = false }: TalkControlsProps) {
+export function TalkControls({ runtime, trailing, compact = false, onKeyboard }: TalkControlsProps) {
   const { state, can, send } = useMachine(runtime);
   const shell = useShell(runtime);
   if (!state || state.phase === "Idle" || state.phase === "Failed") return null;
@@ -35,6 +38,9 @@ export function TalkControls({ runtime, trailing, compact = false }: TalkControl
   const allow = { ...decline, agree: true } as const;
   const stop = { type: "stop", keyboard: false } as const;
   const type = { ...stop, keyboard: true } as const;
+  const typeAfterStop = async () => (await runtime.runPromiseExit(Machine.use((machine) =>
+    machine.send(type, (current) => current.session === state.session),
+  )))._tag === "Success";
   const mute = { type: state.muted ? "unmute" : "mute" } as const;
   const open = { type: "raise", detent: "Sheet" } as const;
   const connecting = state.phase === "Starting";
@@ -45,10 +51,11 @@ export function TalkControls({ runtime, trailing, compact = false }: TalkControl
   const setSpeaker = { type: "setSpeakerMuted", muted: !speakerMuted } as const;
   const spinner = <span aria-hidden="true" className="size-4.5 shrink-0 rounded-full border-2 border-border border-t-alpha motion-safe:animate-spin" style={{ animationDuration: "900ms" }} />;
   const activity = <VoiceWaveform phase={phase} compact={compact} />;
-  const label = compact ? undefined : connecting ? expandedStatus.Starting :
-    state.phase === "Stopping" || state.phase === "Paused" ? undefined : state.muted ? "Muted" : expandedStatus[state.phase];
+  const review = state.reviewPending && state.phase === "Listening";
+  const label = review ? "Review in chat" : compact ? undefined : connecting ? expandedStatus.Starting :
+    state.phase === "Stopping" ? undefined : state.muted ? "Muted" : expandedStatus[state.phase];
   const status = (
-    <p role="status" aria-label={compact ? undefined : "Voice conversation status"} className={label === undefined ? "sr-only" : "flex items-center gap-2.25 text-sm leading-[normal] font-semibold text-foreground"}>
+    <p role="status" aria-label={compact ? undefined : "Voice conversation status"} className={cn(label === undefined ? "sr-only" : "flex min-w-0 items-center gap-2.25 text-sm leading-voice-status font-semibold text-foreground", compact && review && "pr-1 text-xs")}>
       {!compact && connecting && spinner}
       <span className={label === undefined ? undefined : "truncate"}>{label ?? (state.muted ? "Microphone muted" : compactStatus[state.phase])}</span>
     </p>
@@ -68,7 +75,7 @@ export function TalkControls({ runtime, trailing, compact = false }: TalkControl
             {!connecting && activity}
           </div>
         )}
-        {!compact && can(type) && <Button variant="ghost" size="icon" aria-label="Switch to keyboard" onClick={() => void send(type)}><Keyboard /></Button>}
+        {!compact && onKeyboard && can(type) && <Button variant="ghost" size="icon" aria-label="Switch to keyboard" onClick={(event) => onKeyboard(event.currentTarget, typeAfterStop)}><Keyboard /></Button>}
         {(!compact || !speakerConfirmed) && can({ type: "interrupt" }) && <Button variant="ghost" size="icon" aria-label="Stop speaking" onClick={() => void send({ type: "interrupt" })}><VolumeX /></Button>}
         {speakerConfirmed && <Button variant="ghost" size="icon" disabled={!can(setSpeaker)} aria-pressed={speakerMuted}
           aria-label={speakerMuted ? "Unmute speaker" : "Mute speaker"} onClick={() => void send(setSpeaker)}>
@@ -78,11 +85,7 @@ export function TalkControls({ runtime, trailing, compact = false }: TalkControl
           {state.muted ? <MicOff /> : <Mic />}
         </Button>}
         {(compact || can(stop)) && <Button size="icon" className="bg-alpha text-alpha-foreground hover:bg-alpha/90" disabled={!can(stop)} aria-label="Stop voice conversation" onClick={() => void send(stop)}>
-          {compact ? <Square className="size-2.5" fill="currentColor" /> : (
-            <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinejoin="round">
-              <path d="M7 7h10v10H7z" />
-            </svg>
-          )}
+          {compact ? <Square className="size-2.5" fill="currentColor" /> : <VoiceStopIcon />}
         </Button>}
         {trailing}
       </section>

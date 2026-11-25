@@ -1,7 +1,7 @@
 // spec/app/phone/comms.md, "Story: Address the person or Alpha from one bar"; spec/app/phone/comms.md, "Story: Never lose End"
-import { Button, Input, Mark } from "@repo/ui";
+import { Button, Input, Mark, cn } from "@repo/ui";
 import { Effect, type ManagedRuntime } from "effect";
-import { ArrowUp, Mic, PhoneOff } from "lucide-react";
+import { ArrowUp, Mic } from "lucide-react";
 import { type ReactNode, useCallback, useRef, useState } from "react";
 import type { Machine as ShellMachine } from "../../gen/app__shell.effect.vibe";
 import { useMachine as useShell } from "../../gen/app__shell.react.ts";
@@ -15,6 +15,7 @@ import { endPlace } from "../../gen/app__phone__comms.ts";
 import { useMachine as useComms } from "../../gen/app__phone__comms.react.ts";
 import { Dialer } from "./phone.vibe";
 import { CommsPrompts, commsHeld } from "./comms.vibe";
+import { Handset, hangupButton } from "./icons.ts";
 
 /** The services for the targets in the communications dock. */
 export type CommsServices = CommsMachine | BarMachine | ShellMachine | PhoneMachine | Dialer | CommsPrompts;
@@ -33,6 +34,8 @@ export interface CommsBarProps {
   filter?: QueryFilter;
   /** What the owner can write or do while the sheet is closed. */
   closed?: ReactNode | ((ask: (query: string) => void, talk: (() => void) | undefined) => ReactNode);
+  /** An app's actions beside the closed Ask Alpha field. */
+  actions?: ReactNode;
   /** The person this view is about. */
   person?: { label: string; initials: string };
 }
@@ -53,7 +56,7 @@ export function useCommsDock(runtime: ManagedRuntime.ManagedRuntime<ShellMachine
  * The owner side of the dock. While the sheet is open, Ask Alpha supplies the only composer.
  * @model spec/app/phone/comms.md
  */
-export function CommsBar({ runtime, closed, filter, person }: CommsBarProps) {
+export function CommsBar({ runtime, closed, filter, person, actions }: CommsBarProps) {
   const comms = useComms(runtime);
   const bar = useBar(runtime);
   const shell = useShell(runtime);
@@ -88,7 +91,8 @@ export function CommsBar({ runtime, closed, filter, person }: CommsBarProps) {
   const phone = view === "Phone";
   const placeholder = ending ? "Ask during call" : phone ? "Call or ask" : person ? `Ask about ${person.label.split(" ")[0]}` : "Search or ask";
   return (
-    <div data-alpha-comms-dock="" data-host-chrome="" className="sticky bottom-0 z-dock mx-[3.9%] mt-auto mb-[max(clamp(1.5rem,6.8vw,1.75rem),calc(env(safe-area-inset-bottom)_+_0.75rem))] flex min-h-[clamp(4rem,18vw,4.625rem)] shrink-0 items-center gap-1 rounded-full bg-secondary px-2 py-1.5 shadow-lg">
+    <div data-alpha-comms-dock="" data-host-chrome="" className={cn("sticky bottom-0 z-dock mx-[3.9%] mt-auto mb-[max(clamp(1.5rem,6.8vw,1.75rem),calc(env(safe-area-inset-bottom)_+_0.75rem))] flex min-h-[clamp(4rem,18vw,4.625rem)] shrink-0 items-center gap-1 rounded-dock bg-secondary py-1.5 pr-2 pl-2.25 shadow-dock dark:shadow-dock-dark",
+      person && !closed && !ending && "ring-[1.5px] ring-primary ring-inset")}>
       <Button ref={holdButton} size="icon" aria-label="Open Alpha" className="size-11 shrink-0 touch-none overflow-hidden bg-alpha text-alpha-foreground hover:bg-alpha/90" disabled={!opening}
         onPointerDown={(event) => {
           if (!event.isPrimary || event.button !== 0) return;
@@ -115,8 +119,9 @@ export function CommsBar({ runtime, closed, filter, person }: CommsBarProps) {
           if (event.detail === 0 || !skipTapRef.current) void open();
           skipTapRef.current = false;
         }}><Mark className="size-[118%]" aria-hidden /></Button>
+      {opening && !ending && actions}
       {typeof closed === "function" ? closed((query) => void open(query), ending ? undefined : talk) : closed ?? <CommsQuery runtime={runtime} phone={phone && !ending} filter={ending ? undefined : filter} placeholder={placeholder} onAsk={(query) => void open(query)} onTalk={ending ? undefined : talk} />}
-      {ending && <Button variant="destructive" size="icon" className="size-11 shrink-0" aria-label="End call" onClick={() => void bar.send(end)}><PhoneOff /></Button>}
+      {ending && <Button size="icon" className={cn("size-11 shrink-0", hangupButton)} aria-label="End call" onClick={() => void bar.send(end)}><Handset aria-hidden className="size-5 rotate-135" /></Button>}
     </div>
   );
 }
@@ -135,15 +140,15 @@ function CommsQuery({ runtime, phone, filter, placeholder, onAsk, onTalk }: { ru
   const owned = filter ?? phoneFilter;
   const query = owned?.value ?? draft;
   return (
-    <form className="flex min-w-0 flex-1 items-center gap-1 px-1" onSubmit={(event) => {
+    <form className="flex min-w-0 flex-1 items-center gap-1" onSubmit={(event) => {
       event.preventDefault();
       const value = new FormData(event.currentTarget).get("query");
       if (typeof value === "string") onAsk(value.trim());
     }}>
       <Input key={owned ? "search" : "ask"} name="query" data-alpha-composer="" aria-label={placeholder} placeholder={placeholder}
         value={query} maxLength={owned?.maxLength} onChange={(event) => (owned?.onChange ?? setDraft)(event.currentTarget.value)}
-        className="min-w-0 flex-1 border-0 bg-transparent shadow-none" />
-      {query.trim() === "" && onTalk
+        className="h-11 min-w-0 flex-1 rounded-full border-0 bg-transparent py-2.75 pr-0.5 pl-2 shadow-none focus-visible:outline-none" />
+      {(query.trim() === "" || owned) && onTalk
         ? <Button size="icon" variant="ghost" type="button" aria-label="Talk" onClick={onTalk}><Mic /></Button>
         : <Button size="icon" variant="ghost" type="submit" aria-label="Ask Alpha"><ArrowUp /></Button>}
     </form>

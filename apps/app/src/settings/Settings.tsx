@@ -14,6 +14,7 @@ import {
   type SettingsAndroidTarget,
   type SettingsAndroidTold,
   SettingsAppPage,
+  type SettingsAppPageProps,
   SettingsAppsPage,
   SettingsBatteryPage,
   SettingsDeveloperPage,
@@ -22,6 +23,7 @@ import {
   SettingsFactRow,
   type SettingsFactReading,
   SettingsGeneralPage,
+  SettingsCarrierPage,
   type SettingsNeighbour,
   SettingsNotificationsPage,
   SettingsPage,
@@ -38,7 +40,8 @@ import {
   type SettingsTextSizePickerProps,
 } from "@repo/ui";
 import type { ManagedRuntime } from "effect";
-import { type ReactNode, useState } from "react";
+import type { MailBackgroundStatus } from "@elizaos/plugin-inbox-client";
+import { type ReactNode, useState, useSyncExternalStore } from "react";
 import * as Records from "../../gen/app__account__records.ts";
 import { useMachine as useRecords } from "../../gen/app__account__records.react.ts";
 import type { Machine as RecordsMachine } from "../../gen/app__account__records.effect.vibe";
@@ -57,7 +60,7 @@ import type { Machine as PrefsMachine } from "../../gen/app__settings__preferenc
 import type * as ResetGen from "../../gen/app__settings__reset.ts";
 import { useMachine as useReset } from "../../gen/app__settings__reset.react.ts";
 import type { Machine as ResetMachine } from "../../gen/app__settings__reset.effect.vibe";
-import type { Neighbour, Page } from "../../gen/app__settings.ts";
+import { type Neighbour, type Page, passwordPage } from "../../gen/app__settings.ts";
 import { useMachine as usePages } from "../../gen/app__settings.react.ts";
 import type { Machine as PagesMachine } from "../../gen/app__settings.effect.vibe";
 import { useMachine as useDeveloper } from "../../gen/app__settings__developer.react.ts";
@@ -68,16 +71,25 @@ import { useMachine as useLayers } from "../../gen/app__shell__layers.react.ts";
 import type { Machine as LayersMachine } from "../../gen/app__shell__layers.effect.vibe";
 import { pageInert } from "../../gen/app__shell__layers.ts";
 import type { Alpha } from "../runtime/area.tsx";
+import type { Device } from "../platform/device.vibe";
+import type { SystemSettings } from "../platform/systemSettings.vibe";
 import { useTimed } from "../runtime/react.ts";
 import { untimed } from "../runtime/reactor.vibe";
 import type { Time } from "../runtime/time.vibe";
+import { useMachine as useListener } from "../../gen/app__voice__listener.react.ts";
+import type { Machine as ListenerMachine } from "../../gen/app__voice__listener.effect.vibe";
+import { ListenerControls } from "./ListenerControls.tsx";
 import type { Machine as AccessReviewMachine } from "../../gen/app__startup__access.effect.vibe";
 import { AccessReview } from "../startup/SettingsAccess.tsx";
 import { AppBack } from "../shell/AppBack.tsx";
 import { AccountStatus } from "../account/index.tsx";
+import { CalendarAccount, type CalendarConnection } from "./calendar.vibe";
+import { PasswordEntries } from "./PasswordEntries.tsx";
+import { ProtonPass } from "./ProtonPass.tsx";
+import { InboxNotices } from "../inbox/notices.vibe";
 
 /** What every Settings page reads: where the owner is, the phone's facts, the hand-overs to Android, the preferences, the reset and the developer tools. */
-export type SettingsRuntime = ManagedRuntime.ManagedRuntime<PagesMachine | FactsMachine | AccessReviewMachine | ActivityMachine | RecordsMachine | AndroidMachine | PrefsMachine | ResetMachine | DeveloperMachine | ShellMachine | LayersMachine | Time, unknown>;
+export type SettingsRuntime = ManagedRuntime.ManagedRuntime<PagesMachine | CalendarAccount | FactsMachine | AccessReviewMachine | ActivityMachine | RecordsMachine | AndroidMachine | PrefsMachine | ResetMachine | DeveloperMachine | ListenerMachine | ShellMachine | LayersMachine | Time | Device | SystemSettings | InboxNotices, unknown>;
 
 /** What the frame gives each page: the runtime, Alpha's places, and the props every page shares. */
 export interface PageProps {
@@ -99,7 +111,7 @@ export interface Common {
   readonly onPlace: (row: number) => void;
 }
 
-const pageNames: Record<Page, SettingsPageName> = {
+const pageNames: Record<Exclude<Page, "BrowserPasswordsPage" | "CarrierInfoPage">, SettingsPageName> = {
   Top: "top", General: "general", Display: "display", Sound: "sound", Notifications: "notifications", Battery: "battery",
   NetworkPage: "network", CarrierPage: "carrier", PhonePage: "phone", Privacy: "privacy", Permissions: "permissions", Apps: "apps",
   InboxApp: "inbox", WorkflowsApp: "workflows", CalendarApp: "calendar", CameraApp: "camera", PhotosApp: "photos", MapsApp: "maps", NotesApp: "notes", PasswordsPage: "passwords",
@@ -222,9 +234,11 @@ function useDevice(runtime: SettingsRuntime) {
 
 function Top({ runtime, alpha, common }: PageProps) {
   const pages = usePages(runtime).state;
+  const listener = useListener(runtime).state;
   return (
     <SettingsTopPage {...common} leading={<AppBack alpha={alpha} />} onPhone={pages?.phone ?? false}
-      developer={pages?.development ?? false} accountDetail={<AccountStatus alpha={alpha} />} />
+      developer={pages?.development ?? false} accountDetail={<AccountStatus alpha={alpha} />} micMayBeOn={listener?.mayBeOn}
+      onHandOver={(neighbour) => neighbour === "listener" ? common.onAndroid({ target: "android-home" }) : common.onHandOver(neighbour)} />
   );
 }
 
@@ -250,6 +264,8 @@ function General({ runtime, alpha, common }: PageProps) {
       reviewing={reset.state !== undefined && loading(reset.state.review)}
       onErase={reset.can(erase) ? () => void reset.send(erase) : undefined}
       said={reset.state && saidNames[reset.state.said]}
+      home={facts && roleWords[FactsGen.roleWord(facts, facts.home)]}
+      assistant={facts && roleWords[FactsGen.roleWord(facts, facts.assistant)]}
       requestingHome={facts !== undefined && loading(facts.request)}
       onRequestHome={can(request) ? () => void send(request) : undefined}
       updates={alpha.slot("settings/update")}
@@ -281,7 +297,7 @@ function Display({ runtime, common }: PageProps) {
   );
 }
 
-// spec/app/settings/preferences.md, "Story: Decide whether Alpha asks before it acts"; spec/app/settings/preferences.md, "When the device preferences cannot be read, the owner can recover them: the phone resets them to its defaults, and they are read again"; spec/app/settings/index.md, "Set up Alpha access opens all permissions in review, and each row on Permissions opens that one access"
+// spec/app/settings/preferences.md, "Story: Decide whether Alpha asks before it acts"; spec/app/settings/preferences.md, "When the device preferences cannot be read, the owner can recover them: the phone resets them to its defaults, and they are read again"; spec/app/settings/index.md, "Set up Alpha access opens all permissions in review, and each row on Permissions opens that one access"; spec/app/settings/index.md, "Each page links to what another area owns there"
 function Privacy({ runtime, alpha, common }: PageProps) {
   const device = useDevice(runtime);
   const { can, send } = usePages(runtime);
@@ -292,7 +308,8 @@ function Privacy({ runtime, alpha, common }: PageProps) {
     <>
       {recovery}
       <SettingsPrivacyPage {...common} {...shown} onSetUpAccess={can(review) ? () => void send(review) : undefined}>
-        {alpha.slot("settings/listening")}
+        {alpha.slot("settings/voice")}
+        <ListenerControls runtime={runtime} common={common} />
       </SettingsPrivacyPage>
     </>
   );
@@ -314,34 +331,35 @@ function Permissions({ runtime, common }: PageProps) {
   );
 }
 
-// spec/app/settings/facts.md, "Set as Home is offered when the newest answer reported a Home role that Alpha can take and does not hold, one request at a time"
-function Phone({ runtime, alpha, common }: PageProps) {
-  const { state, can, send } = useTimed(runtime, useFacts);
-  if (!state) return null;
-  const request = { type: "requestHome", at: untimed } as const;
+function Phone({ alpha, common }: PageProps) {
   return (
-    <SettingsPhonePage
-      {...common}
-      home={roleWords[FactsGen.roleWord(state, state.home)]}
-      assistant={roleWords[FactsGen.roleWord(state, state.assistant)]}
-      requesting={loading(state.request)}
-      onRequestHome={can(request) ? () => void send(request) : undefined}
-    >
+    <SettingsPhonePage told={common.told} onBack={common.onBack}>
       {alpha.slot("settings/phone")}
     </SettingsPhonePage>
   );
 }
 
 // spec/app/settings/android.md, "Each Android page is offered on the Settings page it belongs to"
-function Passwords({ runtime, common }: PageProps) {
+function Passwords({ runtime, common, alpha }: PageProps) {
   const service = reading(useFacts(runtime).state, "AutofillService");
+  const settings = usePages(runtime).state;
   const canChoose = service.word === "reported" && (service.value === "None" || service.value === "Other");
   return (
-    <SettingsPage title="Password manager" onBack={common.onBack} backLabel="Back to Apps" told={common.told} actions={common.actions}>
-      <ListGroup heading="Autofill">
-        <SettingsFactRow title="Autofill service" reading={service} />
-        {canChoose ? <SettingsAndroidRow title="Use for autofill" target="password-autofill" starting={common.starting} onAndroid={common.onAndroid} /> : null}
-      </ListGroup>
+    <SettingsPage title="Password manager" onBack={common.onBack} backLabel={settings?.page === "BrowserPasswordsPage" ? "Back to Settings" : "Back to Apps"} told={common.told} actions={common.actions}>
+      {settings?.phone ? (
+        <>
+          <PasswordEntries runtime={runtime} />
+          {service.word === "reported" ? <ListGroup heading="Autofill">
+            <SettingsFactRow title="Autofill service" reading={service} />
+            {canChoose ? <SettingsAndroidRow title="Use for autofill" target="password-autofill" starting={common.starting} onAndroid={common.onAndroid} /> : null}
+          </ListGroup> : null}
+          <ProtonPass runtime={runtime} alpha={alpha} />
+        </>
+      ) : (
+        <ListGroup heading="Other">
+          <SettingsFactRow title="Proton Pass" reading={{ word: "reported", value: "Browser" }} />
+        </ListGroup>
+      )}
     </SettingsPage>
   );
 }
@@ -354,7 +372,6 @@ function Apps({ runtime, common }: PageProps) {
     <SettingsAppsPage
       {...common}
       image={pages?.image ?? false}
-      onPhone={pages?.phone ?? false}
       onOpenApp={(app) => {
         const open = { type: "openView", view: appViews[app] } as const;
         if (shell.can(open)) void shell.send(open);
@@ -363,15 +380,42 @@ function Apps({ runtime, common }: PageProps) {
   );
 }
 
+const calendarStatuses: Record<CalendarConnection, NonNullable<SettingsAppPageProps["calendarStatus"]>> = {
+  Checking: "checking", NoGrant: "not-connected", ReadOnly: "read-only", Writable: "connected", Unchecked: "unchecked",
+};
+
+const inboxWatchPhases: Record<MailBackgroundStatus["status"], NonNullable<SettingsAppPageProps["inboxWatch"]>["phase"]> = {
+  "web-unavailable": "off", unavailable: "stopped", disabled: "off", waiting: "waiting",
+  "watching-new-mail": "watching", "catching-up": "catchingUp", "history-expired": "expired",
+  unsupported: "stopped", retrying: "retrying", "grant-unavailable": "noLongerAllowed", "capacity-reached": "stopped",
+};
+const inboxCheckedAt = new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "short" });
+const noInboxWatch = () => undefined;
+const noInboxChanges = () => noInboxWatch;
+
 function App({ runtime, common, app }: PageProps & { app: "inbox" | "workflows" | "calendar" | "camera" | "photos" | "maps" | "notes" }) {
   const facts = useFacts(runtime).state;
+  const phone = usePages(runtime).state?.phone;
   const device = useDevice(runtime);
+  const calendar = runtime.runSync(CalendarAccount);
+  const status = useSyncExternalStore(calendar.subscribe, calendar.snapshot, calendar.snapshot);
+  const notices = app === "inbox" ? runtime.runSync(InboxNotices) : undefined;
+  const watching = useSyncExternalStore(notices?.subscribe ?? noInboxChanges, notices?.snapshot ?? noInboxWatch, noInboxWatch);
+  const delivery = watching?.delivery;
   return (
     <>
     {device?.recovery}
     <SettingsAppPage
       {...common}
       app={app}
+      onPhone={phone}
+      calendarStatus={app === "calendar" ? calendarStatuses[status] : undefined}
+      inboxWatch={notices?.supported && delivery ? {
+        phase: delivery.notificationsAllowed === false ? "noLongerAllowed" : inboxWatchPhases[delivery.status],
+        account: watching?.account,
+        checkedAt: delivery.lastSyncAt ? inboxCheckedAt.format(delivery.lastSyncAt) : undefined,
+        onSettings: () => void runtime.runPromise(notices.settings()),
+      } : undefined}
       grants={grants(facts)}
       read={device?.read}
       images={device?.images}
@@ -390,7 +434,7 @@ function About({ runtime, alpha, common }: PageProps) {
   const activity = useActivity(runtime).state;
   const agent = activity === undefined ? undefined : agentWords[ActivityGen.agentWord(activity.connection)];
   return (
-    <SettingsAboutPage {...common} onPhone={pages?.phone} agent={agent} alphaVersion={reading(facts, "Versions")} androidVersion={reading(facts, "AndroidVersion")} storage={reading(facts, "Storage")}>
+    <SettingsAboutPage {...common} onPhone={pages?.phone} agent={agent} alphaVersion={reading(facts, "Versions")} androidVersion={reading(facts, "AndroidVersion")}>
       {alpha.slot("settings/about")}
     </SettingsAboutPage>
   );
@@ -399,10 +443,12 @@ function About({ runtime, alpha, common }: PageProps) {
 // spec/app/settings/developer.md, "Export diagnostics shares the log and Alpha's diagnostics, one export at a time, with ten seconds to start"
 function Developer({ runtime, common }: PageProps) {
   const { state, can, send } = useTimed(runtime, useDeveloper);
+  const facts = useFacts(runtime).state;
   const startExport = { type: "startExport", at: untimed } as const;
   return (
     <SettingsDeveloperPage
       {...common}
+      version={reading(facts, "Versions")}
       exporting={state !== undefined && loading(state.exporting)}
       onExport={can(startExport) ? () => void send(startExport) : undefined}
     />
@@ -476,15 +522,16 @@ export type Drawn = (props: PageProps) => ReactNode;
 const drawn: Partial<Record<Page, Drawn>> = {
   Top,
   General,
+  CarrierInfoPage: ({ common }) => <SettingsCarrierPage fields={[]} onPhone={false} onBack={common.onBack} />,
   Display,
   Sound: ({ runtime, common }) => {
     const facts = useFacts(runtime).state;
     return <SettingsSoundPage {...common} sound={reading(facts, "Sound")} media={reading(facts, "MediaVolume")} ring={reading(facts, "RingVolume")} alarm={reading(facts, "AlarmVolume")} />;
   },
-  Notifications: ({ runtime, common }) => {
+  Notifications: ({ runtime, alpha, common }) => {
     const facts = useFacts(runtime).state;
     const pages = usePages(runtime).state;
-    return <SettingsNotificationsPage {...common} onPhone={pages?.phone} alerts={reading(facts, "Alerts")} doNotDisturb={reading(facts, "Sound")} collection={reading(facts, "CollectionStatus")} channels={facts?.alerts ?? []} />;
+    return <SettingsNotificationsPage {...common} onPhone={pages?.phone} alerts={reading(facts, "Alerts")} doNotDisturb={reading(facts, "Sound")} collectionPolicy={alpha.slot("settings/notification-collection")} channels={facts?.alerts ?? []} />;
   },
   Battery: ({ runtime, common }) => <SettingsBatteryPage {...common} battery={reading(useFacts(runtime).state, "Battery")} />,
   PhonePage: Phone,
@@ -492,6 +539,7 @@ const drawn: Partial<Record<Page, Drawn>> = {
   Permissions,
   Apps,
   PasswordsPage: Passwords,
+  BrowserPasswordsPage: Passwords,
   InboxApp: (props) => <App {...props} app="inbox" />,
   WorkflowsApp: (props) => <App {...props} app="workflows" />,
   CalendarApp: (props) => <App {...props} app="calendar" />,
@@ -514,6 +562,8 @@ export function Settings({ runtime, alpha, further }: { runtime: SettingsRuntime
   const { state, cause, can, send } = usePages(runtime);
   const android = useTimed(runtime, useAndroid);
   const facts = useTimed(runtime, useFacts);
+  const [entered, setEntered] = useState<{ page?: Page; depth: number; opened: boolean }>({ depth: 0, opened: false });
+  if (state && entered.page !== state.page) setEntered({ page: state.page, depth: state.places.length, opened: state.places.length > entered.depth });
   if (cause) return <Banner variant="destructive" className="m-4">Alpha could not open Settings</Banner>;
   if (!state) return null;
   const page = state.page;
@@ -521,12 +571,13 @@ export function Settings({ runtime, alpha, further }: { runtime: SettingsRuntime
   const start = android.state && loading(android.state.start) ? { target: targetNames[android.state.target], channel: android.state.channel || undefined } : undefined;
   const refresh = { type: "refresh", at: untimed } as const;
   const common: Common = {
-    actions: state.phone && (page === "Top" || page === "General" || page === "PasswordsPage") && facts.can(refresh)
+    actions: state.development && state.phone && (page === "Top" || page === "General" || passwordPage(page)) && facts.can(refresh)
       ? <Button variant="ghost" size="sm" onClick={() => void facts.send(refresh)}>Refresh</Button>
       : undefined,
     onBack: can(goBack) ? () => void send(goBack) : undefined,
     onOpen: (name) => {
-      const open = { type: "open", page: pagesNamed[name] } as const;
+      const target = name === "carrier" && !state.phone ? "CarrierInfoPage" : pagesNamed[name];
+      const open = { type: "open", page: target } as const;
       if (can(open)) void send(open);
     },
     onHandOver: (name) => {
@@ -536,10 +587,10 @@ export function Settings({ runtime, alpha, further }: { runtime: SettingsRuntime
     starting: start,
     onAndroid: ({ target, channel }) => {
       const handOff = { type: "handOff", page, target: targetsNamed[target], channel: channel ?? "", at: untimed } as const;
-      if (android.can(handOff)) void android.send(handOff);
+      if ((!passwordPage(page) || state.phone) && android.can(handOff)) void android.send(handOff);
     },
     told: android.state && toldWords[android.state.told],
-    place: state.places[state.places.length - 1] ?? 0,
+    place: entered.opened && (state.places[state.places.length - 1] ?? 0) === 0 ? -1 : state.places[state.places.length - 1] ?? 0,
     onPlace: (focused) => {
       if (focused !== (state.places[state.places.length - 1] ?? 0)) void send({ type: "focus", focused });
     },

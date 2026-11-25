@@ -1,6 +1,6 @@
-// spec/app/home/index.md, "Story: Open an app"; spec/app/home/cards.md, "The row holds the agenda, Messages, Phone, mail, brief and Workflows cards in that order, each only when drawn, and is not drawn when none is"; spec/app/home/index.md, "On the assistant alone Home shows no tile and no card"; spec/app/home/index.md, "Story: Edit Home"; spec/app/home/index.md, "Story: Pull down for notifications"
+// spec/app/home/index.md, "Story: Open an app"; spec/app/home/cards.md, "The row holds the agenda, Messages, Phone, Workflows, mail and brief cards in that order, each only when drawn, and is not drawn when none is"; spec/app/home/index.md, "On the assistant alone Home shows no tile and no card"; spec/app/home/index.md, "Story: Edit Home"; spec/app/home/index.md, "Story: Pull down for notifications"
 import type { InstalledApp } from "@elizaos/os-bridges";
-import { AppsDrawer, type DrawerApp, HomeScreen, type HomeTileItem, InstalledAppIcon } from "@repo/ui";
+import { AppsDrawer, type AppsDrawerProps, type DrawerApp, HomeScreen, type HomeTileItem, InstalledAppIcon } from "@repo/ui";
 import { useCallback, useSyncExternalStore } from "react";
 import * as Home from "../../gen/app__home.ts";
 import { useMachine as useHome } from "../../gen/app__home.react.ts";
@@ -15,7 +15,7 @@ import { back } from "../shell/shell.vibe";
 import { views } from "../shell/views.tsx";
 import { useDayCards } from "./Cards.tsx";
 import { catalog, labelOf } from "./catalog.vibe";
-import { told } from "./home.vibe";
+import { chooseApp, told } from "./home.vibe";
 import { launcherHeld, openNotifications, watchHomePull } from "./pull.vibe";
 import { waiting } from "./waiting.vibe";
 import type { HomeMachines } from "./index.tsx";
@@ -82,11 +82,25 @@ export function HomePage({ runtime, alpha }: Shown<HomeMachines | Resident>) {
     return app && app.packageName !== "ai.alphacompute.alphaphone" ? [drawerApp(id, app)] : [];
   }) : [];
   const openInstalled = (app: string) => offered({ type: "openApp", app, now: untimed })?.();
-  const opening = h.handoff.ask.tag === "OpenApp" && h.handoff.attempt.outcome === "Sent" ? h.handoff.ask.app : undefined;
+  const opening = h.handoff.ask.tag !== "Shade" && h.handoff.attempt.outcome === "Sent" ? h.handoff.ask.app : undefined;
+  const selected = drawer.state;
+  const menuApp = selected?.menu;
+  const menu: AppsDrawerProps["menu"] = selected && menuApp && catalogApps.some(({ id }) => id === menuApp) ? {
+    app: menuApp,
+    actions: {
+      onHome: h.tiles.favourites.some((tile) => tile.tag === "Installed" && tile.app === menuApp),
+      add: home.can({ type: "pinInstalled", app: menuApp, shell: s, drawer: selected }, owner)
+        ? () => { void runtime.runPromise(chooseApp(menuApp, "Pin")); } : undefined,
+      info: home.can({ type: "showAppInfo", app: menuApp, shell: s, drawer: selected, now: untimed }, owner)
+        ? () => { void runtime.runPromise(chooseApp(menuApp, "Info")); } : undefined,
+      close: () => { if (drawer.can({ type: "closeMenu" })) void drawer.send({ type: "closeMenu" }); },
+    },
+  } : undefined;
   const deck = (
     <HomeScreen
       launcher={h.host === "AsLauncher"}
       cards={Home.showsCards(h) ? day : []}
+      appCards={Home.showsCards(h) && alpha.slot("home/cards")}
       tiles={ready(h.tiles) ? Home.tilesShown(h, s).map((tile) => tileItem(tile, known.apps, tile.tag === "Own" ? waits.get(tile.view) : undefined, h.editing)) : undefined}
       editing={h.editing}
       onOpenTile={(id) => {
@@ -118,12 +132,11 @@ export function HomePage({ runtime, alpha }: Shown<HomeMachines | Resident>) {
     <>
       <div inert={showingApps || undefined} className="contents">
         {deck}
-        {Home.showsCards(h) && alpha.slot("home/cards")}
       </div>
       {showingApps && (
         <AppsDrawer apps={catalogApps} query={drawer.state?.query ?? ""}
           catalog={h.installed.read.status === "Failed" ? "unavailable" : h.installed.read.status === "Loaded" ? "ready" : "reading"}
-          opening={opening} notice={notice}
+          opening={opening} notice={notice} hold={hold} menu={menu}
           onSearch={(query) => {
             const event = { type: "search", query, open: showingApps } as const;
             if (drawer.can(event)) void drawer.send(event);
@@ -131,6 +144,13 @@ export function HomePage({ runtime, alpha }: Shown<HomeMachines | Resident>) {
           onClose={() => { if (shell.can(closeDrawer)) void shell.send(closeDrawer); }}
           onBack={() => { void alpha.runtime.runPromise(back()); }}
           onOpen={openInstalled}
+          onOpenMenu={(app) => {
+            const event = { type: "openMenu", app, open: showingApps, listed: catalogApps.map(({ id }) => id) } as const;
+            if (drawer.can(event)) {
+              void drawer.send(event);
+              void alpha.runtime.runPromise(feel("LongPress"));
+            }
+          }}
           onRetry={offered({ type: "tryAgain", shell: s })} />
       )}
     </>

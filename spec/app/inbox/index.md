@@ -27,6 +27,17 @@ holds, never more than was read.
 > As the owner, I want the mail of the account, folder and search I chose,
 > and never a list that was read for another.
 
+### Only a card with a positive attachment hint shows a paperclip
+
+A mail row shows and announces that it has attachments when Cloud gave
+the card a positive attachment hint. An older card without a hint and a
+card with a false hint show no paperclip. The row uses the list response.
+Opening the message reads the available attachments.
+
+```quint
+pure def showsAttachment(positiveHint: bool): bool = positiveHint
+```
+
 ### The list is for one account, folder and search, and remembers the last list it showed and the credential it was read under
 
 Account 0 is no account, and credential 0 none. What is kept through a
@@ -40,7 +51,7 @@ import read as R from "../../kit/read"
 import access.* from "./access"
 
 type Folder = Incoming | Starred | Sent | DraftsFolder | AllMail | Archived | Spam | Trashed
-type Failure = Fine | Offline | Revoked | Unreachable
+type Failure = Fine | Offline | Revoked | Unreachable | LeaseNeeded
 type Selection = { account: int, folder: Folder, query: str }
 type Linked = { account: int, credential: int, grant: Grant }
 type Count = { account: int, unread: int, more: bool, at: int, fresh: bool }
@@ -491,7 +502,8 @@ A list kept under a credential the account no longer has is dropped.
 Replacing the selected credential clears the live list, its unread count,
 and the read in flight. With read access the first page is
 read when access is new, or when nothing fresh is on screen. Without it
-the screen is emptied. A failed check changes nothing.
+the screen is emptied. A failed check changes nothing. An answer ends a
+wait for the mail lease, as it ends a withdrawal.
 
 ```quint
 pure def keptOutlived(connected: List[Linked], s: Mailbox): bool =
@@ -514,7 +526,7 @@ pure def accountsAnswered(s: Mailbox, ticket: int, ok: bool, connected: List[Lin
   val rotated = stays and previous != 0 and linkOf(connected, account).credential != previous
   val was = readable(s) and stays and not(rotated)
   val stamped = if (keptOutlived(connected, s)) withoutKept(told) else told
-  val fresh = { ...stamped, connected: connected, checked: ticket, failure: if (s.failure == Revoked) Fine else s.failure }
+  val fresh = { ...stamped, connected: connected, checked: ticket, failure: if (s.failure == Revoked or s.failure == LeaseNeeded) Fine else s.failure }
   val placed =
     if (rotated) {
       ...emptied(account, fresh), list: { ...fresh.list, status: R::Idle }
@@ -526,6 +538,38 @@ pure def accountsAnswered(s: Mailbox, ticket: int, ok: bool, connected: List[Lin
   else if (not(searchableIn(placed.selected.folder, placed))) { state: placed, out: List() }
   else if (not(was) or (placed.list.status != R::Loading and (placed.pages == 0 or placed.saved))) asking(0, placed)
   else { state: placed, out: List() }
+```
+
+### A check the phone holds back for want of the mail lease keeps the session and everything kept, and asks for one more sign-in
+
+A phone signed in before mail leases existed cannot check the accounts
+until the owner signs in once more for mail
+([platform](../platform/index.md)). That is not a sign-out: the owner stays
+signed in, and the accounts, the selection, the lists kept and the count
+stay as they were, the count no longer fresh, as after any read that did
+not answer, while the list asks the owner to sign in. The next check that
+answers ends the wait.
+
+Discovered by the journey: a held check that kept the count fresh broke "A
+fresh count is of the account selected, from a list read afresh that has
+not failed since; a failed or saved list never reports one", so the phone
+refused its own kept Inbox state.
+
+```quint
+pure def canAccountsHeld(s: Mailbox, ticket: int): bool = canAccountsAnswered(s, ticket)
+
+pure def accountsHeld(s: Mailbox, ticket: int): Moved =
+  { state: { ...s, accounts: R::answer(s.accounts, false), failure: LeaseNeeded, count: { ...s.count, fresh: false } }, out: List() }
+
+pure def stepAHeldCheckForgetsNothing(before: Mailbox, via: str, after: Mailbox): bool =
+  via == "accountsHeld" implies (
+    after.signedIn == before.signedIn and after.connected == before.connected and after.selected == before.selected
+      and after.kept == before.kept and after.keptPages == before.keptPages and after.keptCredential == before.keptCredential
+      and after.count.account == before.count.account and after.count.unread == before.count.unread and not(after.count.fresh)
+      and after.pages == before.pages and after.revision == before.revision
+  )
+
+pure def sometimesTheMailLeaseIsNeeded(s: Mailbox): bool = s.signedIn and s.failure == LeaseNeeded
 ```
 
 ### The owner chooses among the connected accounts, each under its own grant
@@ -666,8 +710,9 @@ pure def sometimesTheSavedListIsShownOffline(s: Mailbox): bool =
 
 ### Attention says whether the owner is signed out, has no account, is being checked, or has a count of unread messages, fresh or no longer fresh, or could not be read
 
-Only counts, a time and whether there are more leave Inbox: no sender,
-subject or body.
+Attention itself is only counts, a time and whether there are more. Home's
+mail card also shows the senders and subjects of the first unread messages
+Inbox loaded, and which account it read when; no body ever leaves Inbox.
 
 ```quint
 type Standing = SignedOut | NotConnected | Checking | Ready | Stale | Unavailable

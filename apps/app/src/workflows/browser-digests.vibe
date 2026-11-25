@@ -1,13 +1,13 @@
 // spec/app/digests/index.md, "Story: See my digests"; spec/app/digests/index.md, "Story: Receive results without losing or repeating one"; spec/app/digests/index.md, "Story: Keep digests to their owner and through a restart"
 import * as KeyValueStore from "effect/persistence/KeyValueStore"
-import { type WorkflowRequest, workflowHttpError, hostedDigestProtocol } from "@elizaos/plugin-workflow-client"
+import { hostedDigestProtocol } from "@elizaos/plugin-workflow-client"
 import * as Digests from "../../gen/app__digests.effect.vibe"
 import { Machine as Listing } from "../../gen/app__workflows__list.effect.vibe"
 import { Agent } from "../platform/agent.vibe"
 import { Device, native } from "../platform/device.vibe"
 import { type ResidentOwner, launchOwnerAt, sameResidentOwner } from "../platform/owner.vibe"
 import { applying, started, together } from "../runtime/reactor.vibe"
-import { WorkflowsApi } from "./api.vibe"
+import { checkedWorkflowRequest, WorkflowsApi } from "./api.vibe"
 import { DigestHistory, digestScope } from "./brief.vibe"
 import { Rows } from "./list.vibe"
 
@@ -86,13 +86,7 @@ const checks = started(effect {
       const current = Effect.provideService(launchOwnerAt(), Agent, agent) catch () => undefined
       return sameResidentOwner(identity, current) && (try allowed)
     }
-    const checked: WorkflowRequest = effect (path: string, body: unknown) => {
-      if (!(try ownsRequest)) throw workflowHttpError(0, {})
-      const received = try request(path, body)
-      if (!(try ownsRequest)) throw workflowHttpError(0, {})
-      return received
-    }
-    const protocol = hostedDigestProtocol(checked)
+    const protocol = hostedDigestProtocol(checkedWorkflowRequest(request, ownsRequest))
     const capabilities = protocol.capabilities() catch () => undefined
     if (capabilities?.digests && (try allowed)) try inbox.sync(identity, protocol)
   }

@@ -1,4 +1,6 @@
+// spec/app/browser/index.md, "Story: Let the agent open a page"
 import { type ExecutorCall, NOT_DISPATCHED, type DeviceOperation } from "@elizaos/agent";
+import { Effect } from "effect";
 import type { Alpha } from "../runtime/area.tsx";
 import type { ReviewAuthority } from "./media-review.vibe";
 
@@ -10,17 +12,38 @@ export async function executeMedia(alpha: Alpha, operation: DeviceOperation, cal
     const { phoneAction } = await import("../phone/agent.vibe");
     return alpha.runtime.runPromise(phoneAction(operation, authority.current, authority.phone));
   }
-  if (operation.type === "sms_reply_selected" || operation.type === "sms_compose") {
-    const { messageAction } = await import("../messages/agent.vibe");
+  if (operation.type === "sms_compose") {
+    const { composeDraftOnly, messageAction } = await import("../messages/agent.vibe");
+    if (!composeDraftOnly(operation)) {
+      const { sendReviewedCompose } = await import("../messages/agent-send.vibe");
+      return alpha.runtime.runPromise(sendReviewedCompose(operation, call, authority.current, authority.composeLine, authority.sms, authority.phone, authority.approvedText));
+    }
     return alpha.runtime.runPromise(messageAction(operation, authority.target, authority.current, authority.continueDraft, authority.phone));
+  }
+  if (operation.type === "sms_reply_selected") {
+    const { messageAction } = await import("../messages/agent.vibe");
+    return alpha.runtime.runPromise(messageAction(operation, authority.target, authority.current));
   }
   if (operation.type === "sms_send") {
     const { reviewAgentSms } = await import("../messages/agent-send.vibe");
-    return alpha.runtime.runPromise(reviewAgentSms(operation, call, authority.current, authority.sms));
+    return alpha.runtime.runPromise(reviewAgentSms(operation, call, authority.current, authority.sms, authority.approvedText));
   }
   if (operation.type === "messages_read_selected") {
     const { shareSelectedMessage } = await import("../messages/agent.vibe");
     return alpha.runtime.runPromise(shareSelectedMessage(authority.target, authority.current));
+  }
+  if (operation.type === "voicemail_read_selected") {
+    const { shareSelectedVoicemail } = await import("../contacts/reads.vibe");
+    return alpha.runtime.runPromise(shareSelectedVoicemail(authority.voicemail, authority.current));
+  }
+  if (operation.type === "voicemail_delete_selected") {
+    if (authority.voicemailDeletion === undefined) return refused;
+    const { deleteReviewedVoicemail } = await import("../phone/agent.vibe");
+    return alpha.runtime.runPromise(deleteReviewedVoicemail(authority.voicemailDeletion, authority.current));
+  }
+  if (operation.type === "sms_latest_sender") {
+    const { shareLatestSender } = await import("../contacts/reads.vibe");
+    return alpha.runtime.runPromise(shareLatestSender(operation, authority.current));
   }
   if (operation.type === "camera_capture_photo") {
     const [{ default: camera }, { requestCapture }] = await Promise.all([import("../camera/index.tsx"), import("../camera/camera.vibe")]);
@@ -32,9 +55,25 @@ export async function executeMedia(alpha: Alpha, operation: DeviceOperation, cal
     if (media === undefined || mediaId === undefined || media.width <= 0 || media.height <= 0) return undefined;
     return { kind: "applied", result: { version: 1, kind: operation.type, operationId: call.operationId, mediaId, libraryId: media.libraryId, width: Math.round(media.width), height: Math.round(media.height), mime: "image/jpeg" } };
   }
+  if (operation.type === "read_selected_notes" || operation.type === "create_note") {
+    const { createWorkflowNote, selectedWorkflowNotes } = await import("../notes/workflow-device.vibe");
+    if (operation.type === "create_note") return alpha.runtime.runPromise(createWorkflowNote(operation, call, authority.current));
+    const result = await alpha.runtime.runPromise(selectedWorkflowNotes(operation, authority.current));
+    return result === undefined ? refused : { kind: "applied", result };
+  }
+  if (operation.type === "read_calendar_range") {
+    const { readWorkflowCalendar } = await import("../calendar/workflow-device.vibe");
+    const current = Effect.tryPromise(authority.current).pipe(Effect.orElseSucceed(() => false));
+    const result = await alpha.runtime.runPromise(readWorkflowCalendar(operation, current));
+    return result === undefined ? refused : { kind: "applied", result };
+  }
+  if (operation.type === "browser_navigate") {
+    const [{ default: browser }, { openApproved }] = await Promise.all([import("../browser/index.tsx"), import("../browser/agent.vibe")]);
+    return (await browser.runtime(alpha).runPromise(openApproved(operation.url, authority.current))) ? { kind: "applied" } : refused;
+  }
   if (operation.type.startsWith("files_")) {
     const [{ default: files }, { fileAction }] = await Promise.all([import("../files/index.tsx"), import("../files/agent.vibe")]);
-    return files.runtime(alpha).runPromise(fileAction(operation, call, authority.files, authority.current));
+    return files.runtime(alpha).runPromise(fileAction(operation, call, authority.files, authority.current, authority.reportFiles));
   }
   if (operation.type.startsWith("notes_")) {
     const { executeNotes, notesOperation } = await import("../notes/device-actions.vibe");

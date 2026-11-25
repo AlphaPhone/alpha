@@ -5,7 +5,7 @@ The split stage of [Phone](./), [Messages](../messages/) and
 bottom bar that addresses the person on screen or Alpha, a stage that lays
 the app's view out above the conversation sheet instead of covering it,
 sheet heights closed, open and full, End never covered, and at most one
-proposal at a time that acts only on the owner's tap. The sheet's own fitted
+proposal at a time that acts only on the owner's confirmation. The sheet's own fitted
 heights, drag and motion are the shell's (AC-07); this spec keeps what the
 telephony screens decide: who the bar addresses, which view the stage shows
 and what it returns to, where End is, what Alpha may propose and when it
@@ -270,6 +270,12 @@ After a call proposal is approved the stage switches to the call with a
 before the tap. An approved proposal is done and can never be approved
 again.
 
+The addressed SMS review may also take the owner's next explicit spoken
+confirmation, for the same fully visible card in the same Talk session.
+The phone checks the exact approved text and SIM against the claimed
+operation before dispatching it. The voice rule for this exception is in
+[Talk](../voice/).
+
 ```quint
 pure def canProposalApproved(c: Comms, proposalId: str, by: Actor): bool =
   by == Owner and proposalId != "" and proposalId == openId(c.proposal) and openLive(c.proposal) and not(c.emergency and openActs(c.proposal))
@@ -324,7 +330,8 @@ pure def sometimesARestoredProposalWaits(c: Comms): bool = openId(c.proposal) !=
 
 The briefing comes from what the view read: missed calls and new voicemail
 on Phone; Messages and Contacts give none, since their rows never enter the
-agent's context. With nothing known it is absent.
+agent's context. It appears as a facts card that Alpha does not sign. With
+nothing known it is absent.
 
 ```quint
 pure def canBriefingShown(c: Comms, key: str, by: Actor): bool = by == Device and c.height != SheetClosed and key == c.key and key != c.briefed

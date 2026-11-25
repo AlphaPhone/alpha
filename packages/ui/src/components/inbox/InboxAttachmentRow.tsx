@@ -18,28 +18,31 @@ export type InboxAttachmentRowProps = {
 };
 
 /**
- * One attachment of a message: its name and size on a rounded tile that opens it, and saving it, each reviewed first.
+ * One attachment of a message: its name and size on a rounded tile that reviews opening it, or saving it where it has no
+ * preview; a file that can be both opened and saved keeps a separate save beside the tile.
  *
  * @model spec/app/inbox/message.md
  */
 export function InboxAttachmentRow({ name, size, onOpen, onSave, saveUnconfirmed = false, browserDownload = false }: InboxAttachmentRowProps) {
+  const saveLabel = browserDownload ? "Download" : "Save to Files";
+  const detail = onOpen ? `${size} · Review attachment` : onSave && !saveUnconfirmed ? `${size} · No preview · ${saveLabel}` : size;
   return (
     <div className="flex max-w-full items-center gap-2">
       <button
         type="button"
-        aria-description="Open attachment"
-        disabled={!onOpen}
-        onClick={onOpen}
+        disabled={!onOpen && !onSave}
+        onClick={onOpen ?? onSave}
         className={cn(focusRing, "flex max-w-full min-w-0 items-center gap-3 rounded-tile bg-secondary py-3 pr-4.5 pl-3.5 text-left text-secondary-foreground")}
       >
+        {onOpen || onSave ? <span className="sr-only">{onOpen ? "Open " : "Save "}</span> : null}
         <span aria-hidden className="flex size-10 shrink-0 items-center justify-center rounded-sm bg-background text-primary"><File className="size-5" /></span>
         <span className="flex min-w-0 flex-col">
-          <span className="truncate text-sm leading-tight font-semibold">{name}</span>
-          <span className="mt-0.5 text-xs leading-tight text-muted-foreground">{size}</span>
+          <span className="truncate text-sm font-semibold">{name}</span>{" "}
+          <span className="text-fine text-muted-foreground">{detail}</span>
         </span>
       </button>
       {saveUnconfirmed ? <StatusDot status="warn" label={browserDownload ? "Save not confirmed, check your downloads" : "Save not confirmed, look in Files"} /> : null}
-      {onSave && !saveUnconfirmed ? (
+      {onOpen && onSave && !saveUnconfirmed ? (
         <button type="button" aria-label={`Save ${name}`} onClick={onSave} className={cn(focusRing, "flex size-11 shrink-0 items-center justify-center rounded-full text-muted-foreground active:bg-accent")}><Download aria-hidden className="size-5" /></button>
       ) : null}
     </div>

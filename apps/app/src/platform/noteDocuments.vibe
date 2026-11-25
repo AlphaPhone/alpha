@@ -1,5 +1,6 @@
 // spec/app/notes/transfer.md, "Story: Import and export a text file"
 import { registered } from "./device.vibe"
+import { saveBrowserCopy } from "./inboxAttachments.vibe"
 
 module checked {
   import { registerPlugin } from "@capacitor/core"
@@ -16,6 +17,19 @@ module checked {
   }
 }
 import { type Android, client } from checked
+
+module browser {
+  /** @throws {never} */
+  export function textBlob(text: string): Blob {
+    return new Blob([text], { type: "text/plain;charset=utf-8" })
+  }
+}
+import { textBlob } from browser
+
+/** Ask the browser to save the exact text. It does not report the disk outcome. */
+export effect function downloadText(name: string, text: string): boolean!! {
+  return try saveBrowserCopy(name, textBlob(text))
+}
 
 const Result = Schema.Struct({
   status: Schema.Literals(["picked", "cancelled", "unavailable", "unreadable", "exported", "unverified", "failed"]),

@@ -1,7 +1,7 @@
 // spec/app/reminders/index.md, "Story: Organize reminders across smart views and custom lists"
+import type { ReminderListColor, ReminderListIcon, ReminderPriority } from "@repo/launcher-records";
 import { cn } from "@repo/ui";
-import { Bookmark, Briefcase, Heart, Home, ListTodo, ShoppingCart, Star, Zap } from "lucide-react";
-import type { ReminderListColor, ReminderListIcon, ReminderPriority } from "./store.ts";
+import { Bookmark, BriefcaseBusiness, Heart, House, ListChecks, ShoppingCart, Star, Zap } from "lucide-react";
 
 /** All selectable semantic colors for custom reminder lists. */
 export const LIST_COLORS: readonly ReminderListColor[] = ["accent", "blue", "green", "amber", "rose", "violet"];
@@ -58,9 +58,9 @@ export function ListIcon({ icon, className }: { readonly icon: ReminderListIcon;
   const cls = cn("size-4 shrink-0", className);
   switch (icon) {
     case "home":
-      return <Home aria-hidden className={cls} />;
+      return <House aria-hidden className={cls} />;
     case "work":
-      return <Briefcase aria-hidden className={cls} />;
+      return <BriefcaseBusiness aria-hidden className={cls} />;
     case "shopping":
       return <ShoppingCart aria-hidden className={cls} />;
     case "heart":
@@ -72,7 +72,7 @@ export function ListIcon({ icon, className }: { readonly icon: ReminderListIcon;
     case "bolt":
       return <Zap aria-hidden className={cls} />;
     case "list":
-      return <ListTodo aria-hidden className={cls} />;
+      return <ListChecks aria-hidden className={cls} />;
   }
 }
 

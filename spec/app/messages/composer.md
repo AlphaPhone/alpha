@@ -261,8 +261,11 @@ pure def undo(c: Composer): Composer = { ...c, slot: { author: Nobody, draft: D:
 
 The agent may ask for a reply to the conversation open on screen, or for a
 draft to a number the owner wrote, whose conversation Messages opens first,
-as a number handed to it. Its text becomes Alpha's draft there, for the
-owner to edit and send. A draft already written, or one held by a send, is
+as a number handed to it. After the owner reviewed the latest sender’s full
+number and the agent's reply named its Android thread, a follow-up draft
+uses that exact thread only while Android still shows the same sole
+recipient there. Its text becomes Alpha's draft there, for the owner to
+edit and send. A draft already written, or one held by a send, is
 left as it is, and the agent is told the draft is occupied; with no
 conversation open it is told none is selected.
 
@@ -273,6 +276,23 @@ pure def agentDrafted(c: Composer, thread: int): Composer =
   if (c.slot.author == Nobody and not(bound(c)))
     { ...c, slot: { author: AlphaWrote, draft: D::edit(c.slot.draft) }, suggestion: { ...c.suggestion, status: R::Idle } }
   else c
+```
+
+### An addressed send names the exact number, text and SIM before it can send
+
+When the agent proposes sending to a number or a contact, the owner sees
+the exact number, message and SIM. For a contact, the owner first chooses
+the number on the phone. The review uses the selected line in Messages
+or Android's default text line outside Messages. On approval it sends
+through Android only if the chosen number and SIM still match the review.
+An explicit request for an editable draft stays in the composer.
+
+```quint
+pure def addressedSend(draft: bool, recipient: str, body: str, shownSim: int, currentSim: int): bool =
+  not(draft) and recipient != "" and body != "" and shownSim >= 0 and shownSim == currentSim
+
+pure def lawAnAddressedDraftCannotSend(recipient: str, body: str, sim: int): bool =
+  not(addressedSend(true, recipient, body, sim, sim))
 ```
 
 ### Alpha writes a draft only where the owner had written nothing, and a draft of Alpha's saved meanwhile replaces the owner's only by the owner's choice

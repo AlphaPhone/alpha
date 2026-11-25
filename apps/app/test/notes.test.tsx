@@ -35,8 +35,34 @@ const rendered = (assert: () => unknown) => vi.waitFor(async () => {
 
 const control = (name: string) => rendered(() => expect(button(name)).toBeDefined());
 
+async function chooseNotesOption(menu: string, title: string, enabled = false) {
+  await control(menu);
+  await drawn(() => button(menu)?.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true })));
+  const option = () => [...document.querySelectorAll<HTMLElement>("[role=menuitem]")].find((entry) => entry.textContent?.trim() === title);
+  await rendered(() => {
+    if (enabled) expect(option()?.getAttribute("aria-disabled")).toBeNull();
+    else expect(option()).toBeDefined();
+  });
+  await drawn(() => option()?.click());
+}
+
+async function openNamedShoppingNote(world: Scene) {
+  world.notes.notes.push(note("shopping", "shopping list", "", Date.now(), { kind: "list", data: { items: [{ t: "milk", done: false }] } }));
+  world.notes.target = "shopping";
+  const { alpha } = await open(world, only("assistant", "view:Notes"));
+  return { alpha, runtime: assistant.runtime(alpha) };
+}
+
+async function openSavedVoiceNote(world: Scene) {
+  const { alpha, runtime } = await openNotesFromHome(world);
+  await until(alpha, runtime, List, (state) => state.read.status === "Loaded");
+  await press("Open Design sync");
+  await until(alpha, runtime, Voice, (state) => state.showing);
+  return { alpha, runtime };
+}
+
 async function openNotesFromHome(world: Scene) {
-  const { alpha } = await open(world, only("home", "view:Notes"));
+  const { alpha } = await open(world, only("home", "view:Notes", "notice"));
   const runtime = home.runtime(alpha);
   await rendered(async () => {
     expect((await runtime.runPromise(Home.use((machine) => machine.get()))).tiles.load.status).toBe("Loaded");
@@ -80,12 +106,7 @@ describe("Notes", () => {
     const runtime = notes.runtime(alpha);
     await until(alpha, runtime, List, (state) => state.read.status === "Loaded");
 
-    await control("Notes options");
-    await drawn(() => button("Notes options")?.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true })));
-    const recentlyDeleted = () => [...document.querySelectorAll<HTMLElement>("[role=menuitem]")]
-      .find((entry) => entry.textContent?.trim() === "Recently deleted");
-    await rendered(() => expect(recentlyDeleted()).toBeDefined());
-    await drawn(() => recentlyDeleted()?.click());
+    await chooseNotesOption("Notes options", "Recently deleted");
     await until(alpha, runtime, Trash, (state) => state.showing && state.read.status === "Loaded" && state.entries.length === 1);
 
     const row = button(deleted.title);
@@ -114,6 +135,22 @@ describe("Notes", () => {
     expect(world.notes.notes).toContainEqual(deleted);
     expect(dialog()).toBeNull();
     expect(button(`Open ${deleted.title}`)).toBeDefined();
+
+    // spec/app/notes/editor.md, "Story: Delete the note I am writing"
+    await press(`Open ${deleted.title}`);
+    await until(alpha, runtime, Editor, (state) => state.showing && !state.deleting);
+    const version = world.notes.revision;
+    world.notes.deleteRequests = [];
+    world.notes.deleteAtRevision = false;
+    await chooseNotesOption("More", "Delete");
+    await until(alpha, runtime, Editor, (state) => state.showing && state.told === "WasRefused");
+    expect([world.notes.revision, world.notes.trash, world.notes.deleteRequests]).toEqual([version, [], []]);
+
+    world.notes.deleteAtRevision = true;
+    await chooseNotesOption("More", "Delete");
+    await until(alpha, runtime, Editor, (state) => !state.showing && !state.deleting);
+    expect([world.notes.revision, world.notes.trash.map(({ note }) => note.id), world.notes.deleteRequests])
+      .toEqual([version + 1, [deleted.id], [{ id: deleted.id, expectedRevision: version }]]);
   });
 
   it("Keeps editor changes in the resident agent (spec/app/notes/editor.md, \"Story: Write a note\")", async () => {
@@ -157,6 +194,144 @@ describe("Notes", () => {
     await until(alpha, runtime, List, (s) => s.read.status === "Loaded" && s.version === world.notes.revision + 1);
   });
 
+  it("Pins the exact saved voice note from More (spec/app/notes/voice.md, \"Pinning writes the chosen flag over the revision shown\")", async () => {
+    const world = scene();
+    const { alpha, runtime } = await openSavedVoiceNote(world);
+    const saved = () => world.notes.notes.find((row) => row.id === "sync");
+    const original = saved();
+    if (original === undefined) throw new Error("The fixture needs a saved voice note");
+
+    await chooseNotesOption("More", "Pin", true);
+    await rendered(() => expect(saved()?.format).toEqual({ ...original.format, data: { ...original.format?.data, pinned: true } }));
+    await until(alpha, runtime, List, (state) => state.read.status === "Loaded" && state.version === world.notes.revision + 1);
+    await until(alpha, runtime, Voice, (state) => state.showing && state.revision === world.notes.revision + 1);
+    expect(world.notes.trash).toEqual([]);
+
+    await chooseNotesOption("More", "Unpin", true);
+    await rendered(() => expect(saved()?.format).toEqual({ ...original.format, data: { ...original.format?.data, pinned: false } }));
+    await until(alpha, runtime, List, (state) => state.read.status === "Loaded" && state.version === world.notes.revision + 1);
+    await until(alpha, runtime, Voice, (state) => state.showing && state.revision === world.notes.revision + 1);
+    const previouslyShown = saved();
+    world.notes.revision++;
+    await chooseNotesOption("More", "Pin", true);
+    await rendered(() => expect(document.body.textContent).toContain("The pin couldn’t be changed."));
+    expect(saved()).toEqual(previouslyShown);
+  });
+
+  it("Pins the open note from its own menu, as v121's note menu held Pin (spec/app/notes/index.md, \"Story: Organise my notes\")", async () => {
+    const world = scene();
+    const { alpha, runtime } = await openNotesFromHome(world);
+    await until(alpha, runtime, List, (state) => state.read.status === "Loaded");
+    // Rows carry no menu of their own, as v121's had none.
+    expect(button("Gift ideas · Priya options")).toBeUndefined();
+    await press("Open Gift ideas · Priya");
+    await until(alpha, runtime, Editor, (state) => state.showing && state.draft.sync === "Kept");
+    const pinned = () => (world.notes.notes.find((row) => row.id === "gifts")?.format?.data as { readonly pinned?: boolean } | undefined)?.pinned;
+    await chooseNotesOption("More", "Pin", true);
+    await rendered(() => expect(pinned()).toBe(true));
+    await until(alpha, runtime, List, (state) => state.read.status === "Loaded" && state.version === world.notes.revision + 1);
+    await chooseNotesOption("More", "Unpin", true);
+    await rendered(() => expect(pinned()).toBe(false));
+  });
+
+  it("Copies only the exact saved voice note after choosing Copy text (spec/app/notes/voice.md, \"Story: Share the text of a saved voice note\")", async () => {
+    const world = scene();
+    const { alpha, runtime } = await openSavedVoiceNote(world);
+    const copy = vi.spyOn(navigator.clipboard, "writeText").mockResolvedValue(undefined);
+    try {
+      const reopenShare = async () => {
+        await drawn(() => button("More")?.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true })));
+        const share = () => [...document.querySelectorAll<HTMLElement>("[role=menuitem]")].find((item) => item.textContent?.trim() === "Share");
+        await rendered(() => expect(share()?.getAttribute("aria-disabled")).toBeNull());
+        await drawn(() => share()?.click());
+        await control("Close share");
+      };
+      await reopenShare();
+      await press("Close share");
+      expect(copy).not.toHaveBeenCalled();
+      await reopenShare();
+      await pressOnTop("Copy text");
+      await rendered(() => expect(copy).toHaveBeenCalledTimes(1));
+      expect(copy.mock.calls[0]?.[0]).toContain("Voice note text (audio not included)");
+      expect(copy.mock.calls[0]?.[0]).toContain("Notifications stay as icons until unlock");
+      expect(copy.mock.calls[0]?.[0]).not.toContain("Enclave launch");
+      await reopenShare();
+      world.notes.revision++;
+      await pressOnTop("Copy text");
+      await rendered(() => expect(document.body.textContent).toContain("Sharing is unavailable."));
+      expect(copy).toHaveBeenCalledTimes(1);
+    } finally { copy.mockRestore(); }
+  });
+
+  it("Selects notes and only moves the reviewed notes after confirmation (spec/app/notes/index.md, \"Story: Select and delete notes\")", async () => {
+    const world = scene();
+    world.now = Date.now();
+    world.notes.deleteRequests = [];
+    const { alpha, runtime } = await openNotesFromHome(world);
+    await until(alpha, runtime, List, (state) => state.read.status === "Loaded");
+    await chooseNotesOption("Notes options", "Select", true);
+    expect(button("Delete selected notes")?.disabled).toBe(true);
+    await press("Select Enclave launch");
+    await press("Select Groceries");
+    expect(button("Select Enclave launch")?.getAttribute("aria-pressed")).toBe("true");
+    await press("Delete selected notes");
+    await control("Cancel");
+    expect(world.notes.trash).toEqual([]);
+    await press("Cancel");
+    await control("Delete selected notes");
+    expect(button("Select Groceries")?.getAttribute("aria-pressed")).toBe("true");
+
+    await press("Delete selected notes");
+    await control("Delete");
+    world.notes.revision++;
+    await press("Delete");
+    await until(alpha, runtime, List, (state) => state.selectionResult === "RefusedSelection" && state.read.status === "Loaded" && state.version === world.notes.revision + 1);
+    expect(world.notes.trash).toEqual([]);
+
+    await press("Delete selected notes");
+    await control("Delete");
+    const confirmedRevision = world.notes.revision;
+    await press("Delete");
+    await until(alpha, runtime, List, (state) => state.selection === "NoSelection" && state.read.status === "Loaded" && state.rows.length === 4);
+    expect(world.notes.trash.map(({ note }) => note.id)).toEqual(["enclave", "groceries"]);
+    expect(world.notes.deleteRequests).toEqual([
+      { id: "enclave", expectedRevision: confirmedRevision },
+      { id: "groceries", expectedRevision: confirmedRevision + 1 },
+    ]);
+    await control("Open Design sync");
+    expect(button("Open Groceries")).toBeUndefined();
+    await control("Undo");
+    await press("Undo");
+    await until(alpha, runtime, List, (state) => state.read.status === "Loaded" && state.rows.length === 6);
+    expect(world.notes.trash).toEqual([]);
+    await control("Open Groceries");
+  });
+
+  it("Stops the reviewed selection on refusal and keeps the remaining notes selected (spec/app/notes/index.md, \"Confirmation moves only the reviewed notes to Recently deleted and stops if a deletion is refused or unknown\")", async () => {
+    const world = scene();
+    world.notes.deleteRequests = [];
+    const { alpha, runtime } = await openNotesFromHome(world);
+    await until(alpha, runtime, List, (state) => state.read.status === "Loaded");
+    await chooseNotesOption("Notes options", "Select", true);
+    await press("Select Enclave launch");
+    await press("Select Groceries");
+    await press("Select Design sync");
+    world.notes.refuseDiscardId = "groceries";
+    await press("Delete selected notes");
+    await control("Delete");
+    await press("Delete");
+    await until(alpha, runtime, List, (state) => state.selectionResult === "RefusedSelection" && state.read.status === "Loaded");
+    expect(world.notes.trash.map(({ note }) => note.id)).toEqual(["enclave"]);
+    expect(world.notes.deleteRequests.map(({ id }) => id)).toEqual(["enclave", "groceries"]);
+    await rendered(() => {
+      expect(button("Select Groceries")?.getAttribute("aria-pressed")).toBe("true");
+      expect(button("Select Design sync")?.getAttribute("aria-pressed")).toBe("true");
+      expect(button("Select Enclave launch")).toBeUndefined();
+    });
+    await press("Done");
+    await control("Open Groceries");
+  });
+
   it("Read and use the transcript (spec/app/notes/voice.md, \"Story: Read and use the transcript\")", async () => {
     const world = scene();
     world.ask.metadata = [];
@@ -175,6 +350,7 @@ describe("Notes", () => {
     const transcript = world.notes.notes.find((note) => note.id === "sync")?.format?.data.lines;
     if (!Array.isArray(transcript)) throw new Error("The fixture needs a saved transcript");
     const words = transcript.map((line) => typeof line === "object" && line !== null && "t" in line && typeof line.t === "string" ? line.t : "").join("\n");
+    await control("Copy text");
     await press("Copy text");
     await rendered(async () => expect(await navigator.clipboard.readText()).toBe(words));
 
@@ -214,7 +390,7 @@ describe("Notes", () => {
     expect(button("Remove Design sync")).toBeUndefined();
   });
 
-  it("Reviews a generated transcript before saving it (spec/app/notes/voice.md, \"Story: Read and use the transcript\")", async () => {
+  it("Reviews a generated transcript before saving it (spec/app/notes/voice.md, \"Story: Read and use the transcript\"; spec/app/assistant/cards.md, \"The owner reviews the summary before it can be saved\")", async () => {
     const world = scene();
     world.phone = true;
     const recordingId = "retained-recording";
@@ -231,7 +407,7 @@ describe("Notes", () => {
       windows.push(request.offsetMs);
       return Promise.resolve(request.offsetMs === 0 ? "The door closes at dusk." : "Send a reminder on Thursday.");
     };
-    const { alpha } = await open(world, only("view:Notes"));
+    const { alpha } = await open(world, only("assistant", "view:Notes"));
     const runtime = notes.runtime(alpha);
     await drawn(() => runtime.runPromise(Effect.flatMap(Shell, (shell) => shell.send({ type: "openView", view: "Notes" }))));
     await until(alpha, runtime, List, (state) => state.read.status === "Loaded");
@@ -261,24 +437,52 @@ describe("Notes", () => {
     expect(world.notes.playing).toBeUndefined();
     await drawn(() => runtime.runPromise(Effect.flatMap(Shell, (shell) => shell.send({ type: "openView", view: "Notes" }))));
     await drawn(() => vi.waitFor(() => expect(button("Open Field recording")).toBeDefined()));
+
+    // spec/app/assistant/cards.md, "The owner reviews the summary before it can be saved"
+    await press("Open Field recording");
+    await until(alpha, runtime, Voice, (state) => state.showing && state.added === 2);
+    const ask = assistant.runtime(alpha);
+    await until(alpha, ask, Composer, (state) => state.slot === "Open");
+    await control("Ask Alpha about this transcript");
+    await press("Ask Alpha about this transcript");
+    await until(alpha, ask, Conversation, (state) => state.ready && state.context.selected);
+    world.ask.nextReplyChunks = ["The door closes at dusk."];
+    const before = world.notes.notes.find((one) => one.id === noteId);
+    await press("Send");
+    const review = /^Review summary note/;
+    await rendered(() => expect(button(review)).toBeDefined());
+    await press(review);
+    await control("Save recording summary");
+    expect(document.querySelector<HTMLTextAreaElement>("textarea[name=summary]")?.value).toBe("The door closes at dusk.");
+    await pressOnTop("Cancel");
+    expect(world.notes.revision).toBe(revision + 1);
+    await press(review);
+    await control("Save recording summary");
+    await fill("Summary", "The door closes at dusk on Thursday.");
+    await fill("Action items", "Check the door");
+    await pressOnTop("Save recording summary");
+    await rendered(() => expect(document.body.textContent).toContain("Recording summary saved."));
+    expect(world.notes.notes.find((one) => one.id === noteId)).toMatchObject({
+      title: before?.title, body: before?.body,
+      format: { kind: "voice", data: { ...before?.format?.data, summary: ["The door closes at dusk on Thursday."], actions: [{ t: "Check the door", done: false }] } },
+    });
+    expect(world.notes.revision).toBe(revision + 2);
+    expect(button("Save recording summary")).toBeUndefined();
   });
 
   it("The agent opens the note I named, and only that, only for my request now (spec/app/notes/index.md, \"The agent opens the one note the owner named, as the list last read it, once for the owner's current request, and is told whether it opened\"; spec/app/notes/note.md, \"Only the owner opens a dialog or a question in Notes; a note is opened by the owner, or by the agent for the one the owner just named; and nothing opens while anything else of Notes is open\"; spec/app/assistant/index.md, \"Story: Let Alpha open what it is talking about\")", async () => {
     const world = scene();
-    world.notes.notes.push(note("shopping", "shopping list", "", Date.now(), { kind: "list", data: { items: [{ t: "milk", done: false }] } }));
-    world.notes.target = "shopping";
-    const { alpha } = await open(world, only("assistant", "view:Notes"));
-    const runtime = assistant.runtime(alpha);
+    const { alpha, runtime } = await openNamedShoppingNote(world);
     await until(alpha, runtime, Composer, (s) => s.slot === "Open");
     await until(alpha, runtime, Conversation, (s) => s.ready);
     const editor = () => alpha.runtime.runPromise(Effect.flatMap(Editor, (e) => e.get()));
     const list = () => alpha.runtime.runPromise(Effect.flatMap(List, (l) => l.get()));
     const results = () => world.notes.views.filter((one) => one.path === "result").map((one) => one.body.result);
-    const ask = async (text: string, actions: boolean) => {
+    const ask = async (text: string, actions: boolean, viewId = "notes") => {
       world.ask.nextReplyChunks = ["Here it is."];
-      world.ask.nextActions = actions ? (metadata) => [prepared(String((metadata as { viewClientId?: unknown }).viewClientId), "notes", true)] : undefined;
+      world.ask.nextActions = actions ? (metadata) => [prepared(String((metadata as { viewClientId?: unknown }).viewClientId), viewId, viewId === "notes")] : undefined;
       const turn = (await runtime.runPromise(Effect.flatMap(Conversation, (c) => c.get()))).turn.send.id + 1;
-      // spec/app/shell/index.md, "Ask Alpha rises to typing, a sheet or the full screen, never over the drawer": over an app the dock is compact, and Type opens the field.
+      // spec/app/shell/index.md, "Ask Alpha rises to typing, a sheet or the full screen": over an app the dock is compact, and Type opens the field.
       await rendered(() => expect(composerField()).not.toBeNull());
       if (composerField()?.hidden) {
         await press("Type");
@@ -376,14 +580,30 @@ describe("Notes", () => {
     expect([results()[2], editorTitle()]).toEqual([{ switched: true, shown: { kind: "saved-note", noteId: "shopping" } }, "shopping list"]);
     // spec/app/notes/index.md, "The agent opens the one note the owner named, as the list last read it, once for the owner's current request, and is told whether it opened": a delivery succeeded only where the view switched.
     expect(world.notes.views.filter((one) => one.path === "result").map((one) => one.body.success)).toEqual([true, false, true]);
+
+    // spec/app/assistant/index.md, "A complete reply may open one view, once, while the screen it was asked from still shows": a reply that prepared another of Alpha's apps opens it in front, and the agent is told it switched.
+    const shell = () => alpha.runtime.runPromise(Effect.flatMap(Shell, (machine) => machine.get()));
+    await ask("open Calendar", true, "calendar");
+    await drawn(() => vi.waitFor(() => expect(results()).toHaveLength(4)));
+    expect(world.notes.views.at(-2)).toMatchObject({ path: "claim", body: { viewId: "calendar" } });
+    expect(world.notes.views.at(-2)?.body).not.toHaveProperty("targetProtocol");
+    expect([results()[3], showing(await shell(), "Calendar")]).toEqual([{ switched: true }, true]);
+    // spec/app/assistant/index.md, "A complete reply may take the owner Home, once, as it may open a view": a reply that prepared Home leaves every app, and Ask Alpha stays as it was.
+    const panel = (await shell()).assistant;
+    await ask("go home", true, "home");
+    await drawn(() => vi.waitFor(() => expect(results()).toHaveLength(5)));
+    expect(world.notes.views.at(-2)).toMatchObject({ path: "claim", body: { viewId: "home" } });
+    expect([results()[4], (await shell()).trail, (await shell()).assistant]).toEqual([{ switched: true }, [], panel]);
+    // spec/app/assistant/index.md, "A complete reply may open one view, once, while the screen it was asked from still shows": "Open the browser." from Home, which VIEWS answers with the browser view, brings Browser forward.
+    await ask("Open the browser.", true, "browser");
+    await drawn(() => vi.waitFor(() => expect(results()).toHaveLength(6)));
+    expect(world.notes.views.at(-2)).toMatchObject({ path: "claim", body: { viewId: "browser" } });
+    expect([results()[5], showing(await shell(), "Browser")]).toEqual([{ switched: true }, true]);
   });
 
   it("The agent opens the note I named aloud (spec/app/assistant/context.md, \"A spoken turn carries what a typed turn sent at that moment would, the view claim included\"; spec/app/notes/index.md, \"The agent opens the one note the owner named, as the list last read it, once for the owner's current request, and is told whether it opened\")", async () => {
     const world = { ...scene(), phone: true };
-    world.notes.notes.push(note("shopping", "shopping list", "", Date.now(), { kind: "list", data: { items: [{ t: "milk", done: false }] } }));
-    world.notes.target = "shopping";
-    const { alpha } = await open(world, only("assistant", "view:Notes"));
-    const runtime = assistant.runtime(alpha);
+    const { alpha, runtime } = await openNamedShoppingNote(world);
     await until(alpha, runtime, Conversation, (s) => s.ready && s.observing);
     await until(alpha, runtime, Talk, (s) => s.warmed);
     await drawn(() => runtime.runPromise(Talk.use((v) => v.send({ type: "chooseNetworkSpeech", agree: false }))));
@@ -395,13 +615,14 @@ describe("Notes", () => {
     world.ask.nextActions = (metadata) => [prepared(String((metadata as { viewClientId?: unknown }).viewClientId), "notes", true)];
     await drawn(() => Promise.resolve(world.voice.emitLocal?.("liveCaptureTranscript", { captureId: world.voice.activeMicSession, final: { turnId: "spoken", text: "open my shopping list note", mode: "device" } })));
     const results = () => world.notes.views.filter((one) => one.path === "result").map((one) => one.body.result);
-    await drawn(() => vi.waitFor(() => expect(world.ask.said).toEqual(["open my shopping list note"])));
+    await rendered(() => expect(world.ask.said).toEqual(["open my shopping list note"]));
     expect(world.ask.metadata[0]).toMatchObject({ viewDelivery: "completed-action", voiceUi: { uiNotesEditor: "saved-note-v1" } });
-    await drawn(() => vi.waitFor(() => expect(results()).toHaveLength(1)));
-    expect(results()).toEqual([{ switched: true, shown: { kind: "saved-note", noteId: "shopping" } }]);
+    await rendered(() => expect(world.notes.views[0]).toMatchObject({ path: "claim", body: { viewId: "notes", targetProtocol: "saved-note-v1" } }));
     await rendered(async () => {
+      expect(results()).toEqual([{ switched: true, shown: { kind: "saved-note", noteId: "shopping" } }]);
+      const shell = await alpha.runtime.runPromise(Shell.use((machine) => machine.get()));
       const editor = await alpha.runtime.runPromise(Editor.use((machine) => machine.get()));
-      expect([editor.showing, editorTitle()]).toEqual([true, "shopping list"]);
+      expect([showing(shell, "Notes"), editor.showing, editorTitle()]).toEqual([true, true, "shopping list"]);
     });
   });
 });

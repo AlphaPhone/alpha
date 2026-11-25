@@ -208,12 +208,21 @@ it('Keeps a trail from before the Apps drawer while reopening (spec/app/shell/in
   localStorage.setItem("alpha/app/shell/index@1", JSON.stringify(earlier));
   const { alpha } = await open(scene(), only("home"));
   await until(alpha, alpha.runtime, Shell, (state) => state.trail.at(-1) === "Notes" && state.assistant === "Bar");
-  expect(JSON.parse(localStorage.getItem("alpha/app/shell/index@2") ?? "null")).toMatchObject({ trail: ["Notes"], drawer: false, assistant: "Bar" });
+  expect(JSON.parse(localStorage.getItem("alpha/app/shell/index@4") ?? "null")).toMatchObject({ trail: ["Notes"], drawer: false, assistant: "Bar" });
+  await closeAll();
+  localStorage.setItem("alpha/app/shell/index@2", JSON.stringify({ ...earlier, trail: ["Files"], drawer: false }));
+  const reopened = await open(scene(), only("home"));
+  await until(reopened.alpha, reopened.alpha.runtime, Shell, (state) => state.trail.at(-1) === "Files" && state.assistant === "Bar");
+  await closeAll();
+  localStorage.setItem("alpha/app/shell/index@3", JSON.stringify({ ...earlier, trail: ["Calendar"], drawer: false, route: 20 }));
+  const beforeTalkMark = await open(scene(), only("home"));
+  await until(beforeTalkMark.alpha, beforeTalkMark.alpha.runtime, Shell, (state) => state.trail.at(-1) === "Calendar" && state.assistant === "Bar");
+  expect(JSON.parse(localStorage.getItem("alpha/app/shell/index@4") ?? "null")).toMatchObject({ trail: ["Calendar"], route: 21, spokenRoute: 0 });
 });
 
 // spec/app/platform/index.md, "Story: Keep my phone's state across restarts"
 it("Keep my phone's state across restarts: a kept value Alpha can no longer read is set aside, and no copy waiting is written over (spec/app/platform/index.md, \"Story: Keep my phone's state across restarts\")", async () => {
-  const kept = "alpha/app/shell/index@2";
+  const kept = "alpha/app/shell/index@4";
   let waiting: [string, string][] = [];
   const storedAsides = (): [string, string][] => Array.from({ length: localStorage.length }, (_, index) => localStorage.key(index))
     .filter((key): key is string => key !== null && key.startsWith(`${kept}.unreadable`))

@@ -1,7 +1,13 @@
 import { Toast } from "../Toast.tsx";
 
-const verbs = { archive: "Archived", trash: "Moved to Trash", unarchive: "Moved back to the Inbox", untrash: "Taken out of Trash" } as const;
-const nouns = { archive: "archive", trash: "move it to Trash", unarchive: "move it back", untrash: "take it out" } as const;
+const verbs = {
+  archive: "Archived", trash: "Moved to Trash", unarchive: "Moved back to the Inbox", untrash: "Taken out of Trash",
+  star: "Starred", unstar: "Removed stars from", markRead: "Marked as read", markUnread: "Marked as unread",
+} as const;
+const nouns = {
+  archive: "archive", trash: "move it to Trash", unarchive: "move it back", untrash: "take it out",
+  star: "star", unstar: "remove stars from", markRead: "mark as read", markUnread: "mark as unread",
+} as const;
 
 export type InboxChangeToastProps = {
   /** What was done to the messages. */

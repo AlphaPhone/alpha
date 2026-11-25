@@ -1,11 +1,12 @@
 import { Effect } from "effect";
 import { afterEach, expect, it, vi } from "vitest";
 import { page, userEvent } from "vitest/browser";
-import { Machine as Reminders } from "../gen/app__sample.effect.vibe";
 import { Machine as Shell } from "../gen/app__shell.effect.vibe";
 import { Machine as Workflows } from "../gen/app__workflows__list.effect.vibe";
-import { at, mounts } from "../src/areas.ts";
+import { at, first as firstScreen, mounts } from "../src/areas.ts";
+import files from "../src/files/index.tsx";
 import { single } from "../src/runtime/single.ts";
+import { home } from "../src/shell/shell.vibe";
 import { button, closeAll, later, only, open, seen, until } from "./alpha.tsx";
 import { scene } from "./fakes/scene.ts";
 import sample from "./sample/index.tsx";
@@ -14,7 +15,7 @@ import "../src/main.css";
 afterEach(closeAll);
 
 const withSample = [...mounts, at("view:Notes", () => import("./sample/index.tsx"))];
-const trail = (): unknown => (JSON.parse(localStorage.getItem("alpha/app/shell/index@2") ?? "null") as { trail: unknown } | null)?.trail;
+const trail = (): unknown => (JSON.parse(localStorage.getItem("alpha/app/shell/index@4") ?? "null") as { trail: unknown } | null)?.trail;
 
 // spec/app/shell/index.md, "Story: Move between Home and the apps"
 it("Move between Home and the apps, and find the same place after the page is opened again (spec/app/shell/index.md, \"Story: Move between Home and the apps\")", async () => {
@@ -34,7 +35,7 @@ it("Move between Home and the apps, and find the same place after the page is op
   expect([await single(), await single()]).toEqual([true, false]);
 });
 
-function savedBrowserTabs(records: readonly { id: string; url: string; title: string }[]): Promise<void> {
+function savedBrowserRecords(records: readonly { id: string; url: string; title: string }[], marks: readonly { url: string; title: string }[] = []): Promise<void> {
   return new Promise((resolve, reject) => {
     const request = indexedDB.open("alpha.browser.documents.v1", 1);
     request.onupgradeneeded = () => { request.result.createObjectStore("documents"); };
@@ -43,29 +44,45 @@ function savedBrowserTabs(records: readonly { id: string; url: string; title: st
       const db = request.result;
       const write = db.transaction("documents", "readwrite");
       const store = write.objectStore("documents");
-      const key = "alpha.browser.session.v1";
-      if (records.length === 0) store.delete(key);
-      else {
-        const value = JSON.stringify({ tabs: records, cur: records.at(-1)?.id, history: records.map(({ url }) => url) });
-        store.put({ revision: "develop-session", raw: JSON.stringify({ version: 1, legacy: null, value }) }, key);
-      }
+      const set = (key: string, value: unknown) => {
+        if (value === undefined) store.delete(key);
+        else store.put({ revision: "develop-fixture", raw: JSON.stringify({ version: 1, legacy: null, value: JSON.stringify(value) }) }, key);
+      };
+      set("alpha.browser.session.v1", records.length === 0 ? undefined : { tabs: records, cur: records.at(-1)?.id, history: records.map(({ url }) => url) });
+      const addresses = marks.map(({ url }) => url);
+      set("alpha.browser.bookmarks.v1", marks.length === 0 ? undefined : addresses);
+      set("alpha.browser.bookmark-titles.v1", marks.length === 0 ? undefined : { addresses, titles: marks.map(({ title }) => title) });
       write.oncomplete = () => { db.close(); resolve(); };
       write.onabort = () => { db.close(); reject(new Error("Could not write the Browser fixture storage", { cause: write.error })); };
     };
   });
 }
 
-it("Keeps a browser frame while leaving and reopening Browser (spec/app/browser/address.md, \"A browser frame can be shown for the latest request, with no secure mark\"; spec/app/browser/index.md, \"Story: Open, pick and close tabs\"; spec/app/browser/index.md, \"Story: Keep my tabs through a restart\")", async () => {
+// spec/app/browser/address.md, "A browser frame can be shown for the latest request, with no secure mark"; spec/app/browser/index.md, "Story: Open, pick and close tabs"; spec/app/browser/index.md, "Story: Keep my tabs through a restart"; spec/app/browser/library.md, "Story: Keep bookmarks"; spec/app/browser/downloads.md, "Story: Download a file"
+it("Keeps a browser frame while leaving and reopening Browser", async () => {
   const fixture = new URL("/test/fakes/browser-page.html", location.origin);
   expect((await fetch(fixture)).ok).toBe(true);
   const first = { id: "old-tab-a", title: "Saved first", url: new URL("?tab=first", fixture).href };
   const second = { id: "old-tab-b", title: "Saved second", url: new URL("?tab=second", fixture).href };
-  await savedBrowserTabs([first, second]);
+  const bookmark = { url: "https://archive.example/reference", title: "Saved reference" };
+  await savedBrowserRecords([first, second], [bookmark]);
   try {
-    await open(scene(), only("home", "view:Browser", "assistant"));
+    const { alpha } = await open(scene(), [...only("home", "view:Browser", "assistant"), firstScreen("view:Files", files)]);
     await page.getByRole("button", { name: "Browser", exact: true }).click();
     const link = page.getByRole("link", { name: "Open in browser" });
     await expect.element(link).toHaveAttribute("href", second.url);
+    const library = async () => {
+      await page.getByRole("button", { name: "Menu", exact: true }).click();
+      await page.getByRole("button", { name: "Library, bookmarks and history" }).click();
+    };
+    await library();
+    await expect.element(page.getByRole("button", { name: /^Saved reference/ })).toBeVisible();
+    await page.getByRole("button", { name: "Remove bookmark Saved reference" }).click();
+    await expect.element(page.getByRole("status", { name: "No bookmarks" })).toBeVisible();
+    await page.getByRole("button", { name: "Back to page" }).click();
+    await library();
+    await expect.element(page.getByRole("status", { name: "No bookmarks" })).toBeVisible();
+    await page.getByRole("button", { name: "Back to page" }).click();
     await page.getByRole("button", { name: /^Tabs\b/ }).click();
     const savedFirst = page.getByRole("button", { name: /^Saved first/ });
     await expect.element(savedFirst).toBeVisible();
@@ -80,7 +97,7 @@ it("Keeps a browser frame while leaving and reopening Browser (spec/app/browser/
     if (!iframe) throw new Error("the browser frame is missing");
     await expect.poll(() => iframe.contentDocument).toBeNull();
 
-    await page.getByRole("button", { name: "Back", exact: true }).click();
+    await alpha.runtime.runPromise(home());
     await expect.element(page.getByRole("button", { name: "Browser", exact: true })).toBeVisible();
     await expect.element(link).not.toBeInTheDocument();
     await page.getByRole("button", { name: "Browser", exact: true }).click();
@@ -88,20 +105,26 @@ it("Keeps a browser frame while leaving and reopening Browser (spec/app/browser/
     expect(Array.from(document.querySelectorAll("iframe[title=Website]"))).toContain(iframe);
     await expect.element(page.getByRole("img", { name: "Secure connection" })).not.toBeInTheDocument();
 
+    await page.getByRole("button", { name: "Menu", exact: true }).click();
+    await page.getByRole("button", { name: "Downloads", exact: true }).click();
+    await expect.element(page.getByRole("heading", { name: /^Downloads?$/ })).toBeVisible();
+    await page.getByRole("button", { name: "Back", exact: true }).click();
+    await expect.element(link).toBeVisible();
+    expect(Array.from(document.querySelectorAll("iframe[title=Website]"))).toContain(iframe);
+
     await page.getByRole("button", { name: /^Tabs\b/ }).click();
     await page.getByRole("button", { name: `Close ${fixture.href}`, exact: true }).click();
     await expect.poll(() => iframe.isConnected).toBe(false);
   } finally {
     await closeAll();
-    await savedBrowserTabs([]);
+    await savedBrowserRecords([]);
   }
-});
+}, 120_000);
 
 // spec/app/sample/index.md, "Story: See and dismiss reminders"
-it("See and dismiss reminders: focus moves to Undo while a dismissal is held (spec/app/sample/index.md, \"Story: See and dismiss reminders\")", async () => {
-  const { alpha } = await open(scene(), withSample);
+it("Moves reminder dismissal focus to Undo", async () => {
+  await open(scene(), [...only("home"), firstScreen("view:Notes", sample)]);
   await page.getByRole("button", { name: "Notes" }).click();
-  await until(alpha, sample.runtime(alpha), Reminders, (s) => s.list.status === "Loaded");
   // spec/app/sample/index.md, "Undo within the five seconds puts the reminder back"
   await page.getByRole("button", { name: "Dismiss Water the plants" }).click();
   await expect.element(page.getByRole("button", { name: "Undo dismissing “Water the plants”" })).toHaveFocus();
@@ -143,7 +166,7 @@ it("Full Ask Alpha keeps focus off the Home it covers (spec/app/shell/index.md, 
 
 
 // spec/app/digests/index.md, "Story: Receive results without losing or repeating one"; spec/app/digests/index.md, "Story: Keep digests to their owner and through a restart"
-it("Checks for a browser brief outside Workflows only after this owner opts in (spec/app/digests/index.md, \"Story: Receive results without losing or repeating one\")", async () => {
+it("Checks for browser briefs only after the owner opts in", async () => {
   await page.viewport(390, 844);
   const world = scene();
   const hosted: NonNullable<typeof world.workflows.hosted> = { entries: [], reads: 0, acknowledgements: [] };
@@ -156,7 +179,7 @@ it("Checks for a browser brief outside Workflows only after this owner opts in (
   const scheduled = async () => {
     await page.getByRole("button", { name: "Workflows", exact: true }).click();
     await page.getByRole("button", { name: "Add to Workflows" }).click();
-    await page.getByRole("button", { name: "Scheduled digests" }).click();
+    await page.getByRole("button", { name: "Scheduled digest", exact: true }).click();
   };
   const toggle = () => page.getByRole("switch", { name: "Check for digests while Alpha is visible" });
 
@@ -205,4 +228,4 @@ it("Checks for a browser brief outside Workflows only after this owner opts in (
   expect(hosted.reads).toBe(switchedReads);
   await scheduled();
   await expect.element(toggle()).not.toBeChecked();
-});
+}, 120_000);

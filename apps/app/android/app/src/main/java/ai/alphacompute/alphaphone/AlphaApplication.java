@@ -2,6 +2,7 @@
 package ai.alphacompute.alphaphone;
 
 import ai.eliza.os.agent.AgentService;
+import ai.eliza.plugins.signin.CredentialPolicy.Notice;
 import ai.eliza.plugins.signin.CredentialReader;
 import android.app.Application;
 
@@ -18,7 +19,18 @@ public final class AlphaApplication extends Application {
   super.onCreate();
   AlphaAgentCredentials credentials = new AlphaAgentCredentials(this);
   AgentService.useCredentials(credentials);
-  listening = credentials.reader().listen(notice -> AgentService.credentialChanged(this));
+  boolean main = getPackageName().equals(getProcessName());
+  CredentialReader reader = credentials.reader();
+  HostedDigestDelivery digests = main ? HostedDigestDelivery.start(this, reader) : null;
+  InboxNoticeDelivery inbox = main ? InboxNoticeDelivery.get(this) : null;
+  if (inbox != null) inbox.resume();
+  listening = reader.listen(notice -> {
+   if (main) AlphaNotificationOwner.observe(this, reader, notice);
+   if (digests != null) digests.custodyChanged(notice);
+   if (inbox != null && (notice instanceof Notice.Announce || notice instanceof Notice.SignedOutNotice || notice instanceof Notice.ExpiredNotice)) inbox.resume();
+   AgentService.credentialChanged(this);
+  });
+  if (main) AlphaNotificationOwner.observe(this, reader, null);
   AlphaNotificationChannels.describe(this);
  }
 }

@@ -289,15 +289,19 @@ pure def sometimesNoTextSizeOnThisPhone(s: Preferences): bool = s.notice == Size
 > As the owner, I want Alpha to ask me before it acts unless I turned that
 > off, and to keep asking whenever it cannot tell what I chose.
 
-### Ask before Alpha acts covers the agent's actions on the web, with the camera and on photos
+### Ask before Alpha acts covers the agent's actions on the web, with the camera, in Photos and Files, its reading of the latest texter's number and its text drafts
 
-The approvals area asks it before carrying one out. Writing a note and
-moving between Alpha's own screens are never held for it.
+The approvals area asks it before carrying one out. Settings names the
+covered actions under the switch as Alpha's earlier build did: Web, Camera,
+Photos, the texter's number and text drafts. A text Alpha drafts is only
+ever sent by the owner's own tap. Writing a note and moving between Alpha's
+own screens are never held for it.
 
 ```quint
-type Act = WebAction | CameraAction | PhotosAction | NoteWrite | InAppMove
+type Act = WebAction | CameraAction | PhotosAction | FilesAction | TexterNumberRead | TextDraft | NoteWrite | InAppMove
 
-pure def governed(act: Act): bool = act == WebAction or act == CameraAction or act == PhotosAction
+pure def governed(act: Act): bool =
+  act == WebAction or act == CameraAction or act == PhotosAction or act == FilesAction or act == TexterNumberRead or act == TextDraft
 ```
 
 ### The device preferences are read when Alpha starts, when Settings opens, when Alpha comes back while Settings shows, and after a change the phone did not answer in time, with ten seconds to answer, never while a change or a recovery is in flight
@@ -411,7 +415,10 @@ eliza's agent takes the owner's consent to change Gmail and to edit
 Calendar only from its launch (the pinned eliza's
 `spec/os/agentService/config.md`, "A launch carries the Google consent the
 owner saved, else the host file's"). On a phone the shell tells Alpha's
-host the consent each answered read gives; the host keeps it for every
+host the consent each answered read gives, and again the consent each save
+the host took gives, taking it from Settings only once any save before it
+has finished, so the last consent the host is told is the one Settings
+shows even when a read answers just as a save starts; the host keeps it for every
 launch, restarts a running or starting agent only when it changed, and
 keeps what it had when it cannot. A consent the host refused is told again
 at the next read. Until the phone has answered the first read, Alpha has

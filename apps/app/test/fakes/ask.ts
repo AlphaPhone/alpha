@@ -1,5 +1,7 @@
 // spec/app/ask/index.md, "Story: Talk to my agent"
 import type { TurnReply } from "@elizaos/agent";
+import type { DraftAddress } from "../../src/assistant/draft-device.vibe";
+import type { Faked } from "./phone.ts";
 import type { Route } from "./routes.ts";
 
 export interface AskScene {
@@ -21,6 +23,8 @@ export interface AskScene {
   holdLists: boolean;
   readonly heldLists: (() => void)[];
   acknowledgment?: string;
+  /** The next reply holds after its acknowledgment and tool frames, before any text, until the test runs its entry in `turns`. */
+  holdAfterTools?: boolean;
   metadata?: unknown[];
   spokenFiles?: { readonly channel: unknown; readonly images: readonly unknown[] | undefined }[];
   /** The failure fields of the resident's terminal reply. */
@@ -31,17 +35,63 @@ export interface AskScene {
   nextActions?: (metadata: unknown) => readonly unknown[];
   /** When set, emits a `reply_ready` frame before `done` and awaits this promise before emitting `done`. */
   holdDoneAfterReady?: Promise<void>;
+  /** The agent is older than any direct-request mode: a turn that states one is refused whole, as eliza's agent refuses an invalid voice view context. */
+  knowsNoActionMode?: boolean;
   cloudWarmCalls: number;
+  /** The fake native store, which survives disposal of the WebView runtime. */
+  readonly drafts: Map<string, string>;
+  beforeDraftExchange?: () => Promise<void>;
+  refusedDraftExchanges: number;
+  /** Whether the agent's status says it can answer, and each warm-up it was asked for, with the headers it came with. */
+  canRespond: boolean;
+  warmUps: Record<string, string>[];
+  warmUpFails: boolean;
+  statusReads: number;
 }
 
 export interface Kept {
   readonly roomId: string;
   readonly title: string;
-  readonly messages: { id: string; role: "user" | "assistant"; text: string }[];
+  readonly messages: { id: string; role: "user" | "assistant"; text: string; failureKind?: string; cloudCode?: string }[];
 }
 
 export function askScene(): AskScene {
-  return { opened: 0, said: [], down: false, stalled: false, turns: new Map(), kept: new Map(), searchDown: false, pagesDown: false, pagesMissing: false, pageReads: 0, listReads: 0, holdLists: false, heldLists: [], cloudWarmCalls: 0 };
+  return { opened: 0, said: [], down: false, stalled: false, turns: new Map(), kept: new Map(), searchDown: false, pagesDown: false, pagesMissing: false, pageReads: 0, listReads: 0, holdLists: false, heldLists: [], cloudWarmCalls: 0, drafts: new Map(), refusedDraftExchanges: 0, canRespond: true, warmUps: [], warmUpFails: false, statusReads: 0 };
+}
+
+/** A storage address within the fake phone's already verified local account. */
+export function draftKey(owner: string, agent: string, conversation?: string, room?: string) {
+  return JSON.stringify([owner, agent, conversation ?? null, room ?? null]);
+}
+
+/** AlphaAssistantDraft derives the slot after admitting the supplied owner, agent and epoch as assertions. */
+export function alphaAssistantDraft(scene: AskScene, authority: () => Pick<DraftAddress, "owner" | "agent" | "epoch">): Faked {
+  function admitted(assertion: DraftAddress) {
+    const current = authority();
+    if (assertion.owner !== current.owner || assertion.agent !== current.agent || assertion.epoch !== current.epoch ||
+      (assertion.conversation === undefined) !== (assertion.room === undefined)) return undefined;
+    return draftKey(current.owner, current.agent, assertion.conversation, assertion.room);
+  }
+  return () => ({
+    read(address: DraftAddress) {
+      const key = admitted(address);
+      if (key === undefined) return Promise.resolve({ status: "denied" });
+      const raw = scene.drafts.get(key);
+      return Promise.resolve(raw === undefined ? { status: "read" } : { status: "read", raw });
+    },
+    async exchange(address: DraftAddress & { expected?: string; next?: string }) {
+      const key = admitted(address);
+      if (key !== undefined) await scene.beforeDraftExchange?.();
+      if (key === undefined || admitted(address) !== key) {
+        scene.refusedDraftExchanges += 1;
+        return { status: "denied" };
+      }
+      if (scene.drafts.get(key) !== address.expected) return { status: "conflict" };
+      if (address.next === undefined) scene.drafts.delete(key);
+      else scene.drafts.set(key, address.next);
+      return { status: "landed" };
+    },
+  });
 }
 
 const encoder = new TextEncoder();
@@ -69,31 +119,46 @@ function reply(scene: AskScene, room: string, text: string, keep: (said: string)
       if (scene.acknowledgment !== undefined) controller.enqueue(frame({ type: "acknowledgment", text: scene.acknowledgment }));
       if (scene.acknowledgment !== undefined) controller.enqueue(frame({ type: "tool", name: "CALENDAR", label: "Using Calendar" }));
       if (scene.stalled) {
-        controller.enqueue(frame({ type: "token", text: "Thinking" }));
+        for (const piece of custom ?? ["Thinking"]) controller.enqueue(frame({ type: "token", text: piece }));
         scene.turns.set(room, () => controller.close());
         return;
       }
-      if (custom !== undefined && custom.length > 0) {
-        for (const piece of custom) controller.enqueue(frame({ type: "token", text: piece, ...(provisional ? { provisional } : {}) }));
-        const full = custom.join("");
-        keep(full);
-        if (holdDone !== undefined) {
-          controller.enqueue(frame({ type: "reply_ready", fullText: full, actionResults: actions }));
-          void holdDone.then(() => {
-            controller.enqueue(frame({ type: "done", fullText: full, ...named(scene.said.length), actionResults: actions }));
-            controller.close();
-          });
+      const answer = () => {
+        for (const { action } of actions as readonly { readonly action?: unknown }[]) {
+          if (typeof action === "string") controller.enqueue(frame({ type: "tool", name: action, label: "Working" }));
+        }
+        if (custom !== undefined && custom.length > 0) {
+          for (const piece of custom) controller.enqueue(frame({ type: "token", text: piece, ...(provisional ? { provisional } : {}) }));
+          const full = custom.join("");
+          keep(full);
+          if (holdDone !== undefined) {
+            controller.enqueue(frame({ type: "reply_ready", fullText: full, actionResults: actions }));
+            void holdDone.then(() => {
+              controller.enqueue(frame({ type: "done", fullText: full, ...named(scene.said.length), actionResults: actions }));
+              controller.close();
+            });
+            return;
+          }
+          controller.enqueue(frame({ type: "done", fullText: full, ...named(scene.said.length), actionResults: actions }));
+          controller.close();
           return;
         }
-        controller.enqueue(frame({ type: "done", fullText: full, ...named(scene.said.length), actionResults: actions }));
+        controller.enqueue(frame({ type: "token", text: "You said: " }));
+        controller.enqueue(frame({ type: "token", text }));
+        keep(`You said: ${text}`);
+        controller.enqueue(frame({ type: "done", fullText: `You said: ${text}`, ...named(scene.said.length) }));
         controller.close();
+      };
+      if (scene.holdAfterTools) {
+        scene.holdAfterTools = false;
+        controller.enqueue(frame({ type: "status", activity: "Working" }));
+        scene.turns.set(room, () => {
+          scene.turns.delete(room);
+          answer();
+        });
         return;
       }
-      controller.enqueue(frame({ type: "token", text: "You said: " }));
-      controller.enqueue(frame({ type: "token", text }));
-      keep(`You said: ${text}`);
-      controller.enqueue(frame({ type: "done", fullText: `You said: ${text}`, ...named(scene.said.length) }));
-      controller.close();
+      answer();
     },
     cancel: () => void scene.turns.delete(room),
   });
@@ -122,7 +187,20 @@ export function askRoutes(scene: AskScene): Route[] {
       if (scene.pagesDown) return Response.json({ error: "starting" }, { status: 503 });
       if (scene.pagesMissing) return Response.json({ error: "unknown_conversation" }, { status: 404 });
       const one = scene.kept.get(id);
-      return one === undefined ? Response.json({ error: "unknown_conversation" }, { status: 404 }) : Response.json({ messages: one.messages.map((message) => ({ ...message, timestamp: 0 })) });
+      if (one === undefined) return Response.json({ error: "unknown_conversation" }, { status: 404 });
+      const messages = one.messages.map((message, at) => ({ ...message, timestamp: at + 1 }));
+      const around = url.searchParams.get("around");
+      if (around !== null) {
+        const pivot = messages.findIndex((message) => message.id === around);
+        return pivot < 0 ? Response.json({ error: "unknown_message" }, { status: 404 })
+          : Response.json({ messages: messages.slice(Math.max(0, pivot - 100), pivot + 101) });
+      }
+      const before = url.searchParams.get("before");
+      if (before === null) return Response.json({ messages: messages.slice(-200), hasMore: messages.length > 200 });
+      const beforeId = url.searchParams.get("beforeId");
+      const older = messages.filter(({ timestamp, id }) => timestamp < Number(before) || (timestamp === Number(before) && beforeId !== null && id < beforeId));
+      const limit = Math.min(50, Math.max(1, Number(url.searchParams.get("limit") ?? 50)));
+      return Response.json({ messages: older.slice(-limit), hasMore: older.length > limit });
     },
     (request, url) => {
       if (request.method !== "GET" || url.pathname !== "/api/conversations/messages/search") return;
@@ -156,10 +234,12 @@ export function askRoutes(scene: AskScene): Route[] {
         scene.metadata?.push(body.metadata);
         scene.spokenFiles?.push({ channel: body.channelType, images: body.images });
         if (body.text !== body.text.trim()) return Response.json({ error: "invalid_message" }, { status: 400 });
+        if (scene.knowsNoActionMode === true && JSON.stringify(body.metadata ?? {}).includes('"agentActionMode"')) return Response.json({ error: "VOICE_UI_CONTEXT_INVALID" }, { status: 400 });
         if (found[2] === undefined) return Response.json({ text: `You said: ${body.text}`, ...named(scene.said.length) });
         scene.said.push(body.text);
         keep("user", body.text);
         Object.assign(messages.at(-1) ?? {}, { clientMessageId: (body as { clientMessageId?: string }).clientMessageId });
+        if (scene.refusal !== undefined) messages.push({ id: `m${scene.said.length}a`, role: "assistant", text: "", failureKind: scene.refusal.failureKind, ...(scene.refusal.cloudCode === undefined ? {} : { cloudCode: scene.refusal.cloudCode }) });
         return reply(scene, `r${found[1]}`, body.text, (said) => keep("assistant", said), body.metadata);
       });
     },
@@ -173,7 +253,16 @@ export function askRoutes(scene: AskScene): Route[] {
         return Response.json({ aborted: stop !== undefined, roomId: room, reason, outcome: stop === undefined ? "nothingRunning" : "stopped" });
       });
     },
-    (request, url) => (request.method === "GET" && url.pathname === "/api/status" ? Response.json({ serverInstanceId: "alpha-fake" }) : undefined),
+    (request, url) => {
+      if (request.method !== "GET" || url.pathname !== "/api/status") return;
+      scene.statusReads += 1;
+      return Response.json({ serverInstanceId: "alpha-fake", canRespond: scene.canRespond });
+    },
+    (request, url) => {
+      if (request.method !== "POST" || url.pathname !== "/api/turns/warm") return;
+      scene.warmUps.push(Object.fromEntries([...request.headers].filter(([name]) => name.startsWith("x-eliza-"))));
+      return scene.warmUpFails ? Response.json({ error: "warm_up_failed" }, { status: 500 }) : Response.json({ started: true }, { status: 202 });
+    },
     (request, url) => {
       if (request.method !== "POST" || (url.pathname !== "/api/turns/warm" && url.pathname !== "/api/cloud/warm")) return;
       scene.cloudWarmCalls += 1;

@@ -1,0 +1,51 @@
+// spec/app/startup/access.md, "Story: Walk through each access in order"; "Progress is saved whole, and only the newest save's answer counts"
+import * as KeyValueStore from "effect/persistence/KeyValueStore"
+import * as Access from "../../gen/app__startup__access.effect.vibe"
+import * as Steps from "../../gen/app__startup__steps.effect.vibe"
+import { storeKey, untimed } from "../runtime/reactor.vibe"
+
+export const accessVersion = 1
+
+const legacyProgress = "alpha:startup-permission-walkthrough:v1"
+const legacyPrompts = "alpha.startup-permissions.v1"
+const carried = Schema.fromJsonString(Schema.Struct({
+  version: Schema.Literal(4),
+  status: Schema.Literals(["pending", "completed"]),
+  step: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
+  choices: Schema.optionalKey(Schema.Array(Schema.Literals(["allowed", "continued", "skipped"]))),
+}))
+const remembered = Schema.fromJsonString(Schema.Struct({
+  attempted: Schema.Record(Schema.String, Schema.Literal(true)),
+}))
+
+/** Only durable steps from a previously installed Android walkthrough can be carried over. */
+export effect function legacyAccessSteps(): number!!KeyValueStore.KeyValueStore {
+  const raw = (try KeyValueStore.KeyValueStore).get(legacyProgress) catch () => undefined
+  if (raw === undefined) return 0
+  const read = Schema.decodeUnknownEffect(carried)(raw) catch () => undefined
+  if (read === undefined || (read.choices !== undefined && read.choices.length !== read.step)) return 0
+  const count = Steps.everyKey.length
+  if (read.status === "completed" ? read.step !== count : read.step >= count) return 0
+  return read.step
+}
+
+/** A previous step's actual native asking survives an app upgrade, even if Android still offers a rationale. */
+export effect function legacyAccessAsked(key: Steps.Key): boolean!!KeyValueStore.KeyValueStore {
+  const raw = (try KeyValueStore.KeyValueStore).get(legacyPrompts) catch () => undefined
+  if (raw === undefined) return false
+  const read = Schema.decodeUnknownEffect(remembered)(raw) catch () => undefined
+  return read?.attempted[key.toLowerCase()] === true
+}
+
+/** Confirm the pending record before the model authorizes the Android prompt. */
+export effect function savedAccess(ticket: number): Access.Event!!KeyValueStore.KeyValueStore {
+  const key = storeKey(Access.Machine.key, accessVersion)
+  const stored = effect {
+    const raw = try (try KeyValueStore.KeyValueStore).get(key)
+    if (raw === undefined) return false
+    const parsed = try Effect.try({ try: () => JSON.parse(raw) as unknown, catch: () => new Error("Invalid access progress") })
+    const state = try Access.decodeState(parsed)
+    return Access.canSaved(state, ticket)
+  } catch () => false
+  return { type: "saved", ticket, ok: stored, now: untimed }
+}

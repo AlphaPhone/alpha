@@ -1,0 +1,54 @@
+// spec/app/inbox/notices.md, "Story: Hear about new mail"; spec/app/inbox/notices.md, "Story: Open my message from a notice"
+import { createMailBackground, NoticeBridgeFailed, type MailBackgroundNative } from "@elizaos/plugin-inbox-client"
+import { registered } from "./device.vibe"
+
+const pluginName = "AlphaInboxNotices"
+
+module capacitor {
+  import { registerPlugin, type PluginListenerHandle } from "@capacitor/core"
+  import type { Effect } from "effect"
+  import type { MailBackgroundNative } from "@elizaos/plugin-inbox-client"
+
+  type Port = {
+    [Method in Exclude<keyof MailBackgroundNative, "notices" | "consume" | "releaseQuestion">]: (...args: Parameters<MailBackgroundNative[Method]>) =>
+      Promise<Effect.Success<ReturnType<MailBackgroundNative[Method]>>>
+  } & {
+    consume(input: { readonly token: string }): Promise<void>
+    releaseQuestion(input: { readonly token: string }): Promise<void>
+    addListener(event: "changed", heard: () => void): Promise<PluginListenerHandle>
+  }
+
+  let held: Port | undefined
+  /** @throws {never} */
+  export function bridge(name: string): Port {
+    return (held ??= registerPlugin<Port>(name))
+  }
+}
+import { bridge } from capacitor
+
+function requested<A>(call: () => Promise<A>): A!NoticeBridgeFailed {
+  return tryPromise({ try: call, catch: (cause) => new NoticeBridgeFailed({ cause }) })
+}
+
+function phone(): MailBackgroundNative {
+  const api = bridge(pluginName)
+  return {
+    configure: (selection) => requested(() => api.configure(selection)),
+    withdraw: (selection) => requested(() => api.withdraw(selection)),
+    status: () => requested(() => api.status()),
+    pending: () => requested(() => api.pending()),
+    consume: (token) => requested(() => api.consume({ token })),
+    releaseQuestion: (token) => requested(() => api.releaseQuestion({ token })),
+    notificationSettings: () => requested(() => api.notificationSettings()),
+    notices: Stream.callback<void, NoticeBridgeFailed>((queue) => Effect.asVoid(acquireRelease(
+      requested(() => api.addListener("changed", () => { Queue.offerUnsafe(queue, undefined) })),
+      (listening) => ignore(requested(() => listening.remove())),
+    ))),
+  }
+}
+
+export function backgroundMail() {
+  return createMailBackground({ available: registered(pluginName), native: phone })
+}
+
+export const inboxNoticesAvailable = () => registered(pluginName)

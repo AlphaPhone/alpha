@@ -54,7 +54,7 @@ const PATCHES: Readonly<Record<string, { readonly patch: Patch; readonly manifes
   "chip": { patch: "Chip", manifest: "@elizaos/os/aosp/sense/systemui/chip/manifest.json", file: "@elizaos/os/aosp/sense/systemui/chip/listening-chip.patch" },
   "ops": { patch: "Ops", manifest: "@elizaos/os/aosp/sense/systemui/manifest.json", file: "@elizaos/os/aosp/sense/systemui/microphone-ops.patch" },
   "assist": { patch: "Assist", manifest: "@elizaos/os/aosp/sense/systemui/assist/manifest.json", file: "@elizaos/os/aosp/sense/systemui/assist/assist-identity.patch" },
-  "protected-power": { patch: "ProtectedPower", manifest: "aosp/branding/power-voice/manifest.json", file: "aosp/branding/power-voice/alpha-protected-power-voice.patch" },
+  "protected-power": { patch: "ProtectedPower", manifest: "@elizaos/os/aosp/sense/systemui/power/manifest.json", file: "@elizaos/os/aosp/sense/systemui/power/protected-power-voice.patch" },
   "soong-memory": { patch: "SoongMemory", manifest: "aosp/build-host/manifest.json", file: "aosp/build-host/soong-memory.patch" },
   "sense-policy": { patch: "SensePolicy", manifest: "aosp/branding/sense-policy/manifest.json", file: "aosp/branding/sense-policy/alpha-sense-policy.patch" },
 };
@@ -65,7 +65,7 @@ const OTA_COMMANDS: Readonly<Record<string, OtaCommand>> = {
 };
 
 const USAGE = [
-  "pnpm aosp stage --target cuttlefish|pixel10a --apk FILE --aosp-source DIR --output NEW_DIR [--development [--owner-telephony]] [--descriptor FILE] [--factory-image FILE (pixel10a)] [--listener-apk FILE --listener-descriptor FILE [--listener-qualification FILE]] [--patch chip|ops|assist|protected-power|soong-memory|sense-policy ...] [--aapt PATH] [--apksigner PATH]",
+  "pnpm aosp stage --target cuttlefish|pixel10a --apk FILE --aosp-source DIR --output NEW_DIR [--development [--owner-telephony]] [--descriptor FILE] [--factory-image FILE (pixel10a)] [--listener-apk FILE --listener-descriptor FILE [--listener-qualification FILE --listener-voice-host FILE --listener-voice-host-sha256 SHA256 --listener-models FILE --listener-models-sha256 SHA256]] [--patch chip|ops|assist|protected-power|soong-memory|sense-policy ...] [--aapt PATH] [--apksigner PATH]",
   "pnpm aosp ota check|apply|status|fallback|stock-archive|verify-stock|retain-known-good [eliza's operator options]",
   "pnpm aosp verify --target pixel10a|cuttlefish --serial SERIAL --user N --expected FILE [--adb PATH] [--out NEW_FILE]",
   "pnpm aosp sign --request FILE [--dry-run]",
@@ -127,7 +127,7 @@ const patchReference = (name: string, manifest: string, file: string) =>
 /** The stage a command line asks for, read before any APK, descriptor or source. */
 export function stageRequest(argv: readonly string[]) {
   const found = flags(argv, {
-    valued: ["target", "apk", "aosp-source", "output", "descriptor", "factory-image", "listener-apk", "listener-descriptor", "listener-qualification", "aapt", "apksigner"],
+    valued: ["target", "apk", "aosp-source", "output", "descriptor", "factory-image", "listener-apk", "listener-descriptor", "listener-qualification", "listener-voice-host", "listener-voice-host-sha256", "listener-models", "listener-models-sha256", "aapt", "apksigner"],
     switches: ["development", "owner-telephony"],
     repeated: ["patch"],
   });
@@ -137,6 +137,17 @@ export function stageRequest(argv: readonly string[]) {
   if (found.values["factory-image"] !== undefined && target !== "Pixel10a") throw new UsageError({ message: "--factory-image belongs to --target pixel10a" });
   if (target === "Pixel10a" && found.values["factory-image"] === undefined) throw new UsageError({ message: "--target pixel10a needs --factory-image" });
   if (found.values["listener-descriptor"] !== undefined && found.values["listener-apk"] === undefined) throw new UsageError({ message: "--listener-descriptor needs --listener-apk" });
+  const voiceHost = found.values["listener-voice-host"];
+  const voiceHostHash = found.values["listener-voice-host-sha256"];
+  const models = found.values["listener-models"];
+  const modelsHash = found.values["listener-models-sha256"];
+  const speech = voiceHost !== undefined && voiceHostHash !== undefined && models !== undefined && modelsHash !== undefined
+    && /^[0-9a-f]{64}$/.test(voiceHostHash) && /^[0-9a-f]{64}$/.test(modelsHash)
+    ? { voiceHost: { file: voiceHost, sha256: voiceHostHash }, models: { file: models, sha256: modelsHash } }
+    : undefined;
+  if ([voiceHost, voiceHostHash, models, modelsHash].some((input) => input !== undefined)
+    && (speech === undefined || found.values["listener-apk"] === undefined))
+    throw new UsageError({ message: "Listener speech needs its APK, both reviewed files, and their SHA-256 digests" });
   const named = found.repeated.patch ?? [];
   const unknown = named.filter((name) => !Object.hasOwn(PATCHES, name));
   if (unknown.length) throw new UsageError({ message: `--patch takes ${Object.keys(PATCHES).join(", ")}, not ${unknown.join(", ")}` });
@@ -149,12 +160,13 @@ export function stageRequest(argv: readonly string[]) {
     ownerTelephony: found.switches.has("owner-telephony"),
     listener: found.values["listener-apk"] !== undefined && found.values["listener-descriptor"] !== undefined,
     qualified: found.values["listener-qualification"] !== undefined,
+    speechPinned: speech !== undefined,
     patches: named.flatMap((name) => PATCHES[name]?.patch ?? []),
     branding: false,
   };
   const problems = stageProblems(stage);
   if (problems.length) throw new StageRefused({ problems, message: `Refusing the ${stage.target} ${stage.mode} stage: ${problems.join(", ")}` });
-  return { found, stage, apk, source, output };
+  return { found, stage, apk, source, output, speech };
 }
 
 interface Launcher { readonly moduleName: string; readonly packageName: string }
@@ -176,7 +188,7 @@ const launcherDescriptor = (found: Flags, stage: Stage, apk: string, apksigner: 
 });
 
 const stage = (argv: readonly string[]) => Effect.gen(function* () {
-  const { found, stage, apk, source, output } = yield* attempt(() => stageRequest(argv));
+  const { found, stage, apk, source, output, speech } = yield* attempt(() => stageRequest(argv));
   const aapt = found.values.aapt ?? "aapt";
   const apksigner = found.values.apksigner ?? "apksigner";
   const { descriptor, launcher } = yield* launcherDescriptor(found, stage, apk, apksigner);
@@ -184,10 +196,10 @@ const stage = (argv: readonly string[]) => Effect.gen(function* () {
   const lockFile = place(stage.target === "Pixel10a" ? STOCK_SOURCE_LOCK : SHARED_SOURCE_LOCK);
   const profile = { name: stage.target === "Pixel10a" ? "pixel10a" : "cuttlefish", file: lockFile, sha256: yield* attempt(() => sha256File(lockFile)) };
   const patches = yield* attempt(() => [patchReference("soong-app-native", SOONG_APP_NATIVE.manifest, SOONG_APP_NATIVE.file),
-    ...(found.repeated.patch ?? []).flatMap((name) => { const known = PATCHES[name]; return known === undefined ? [] : [patchReference(name, known.manifest, known.file)]; })]);
+    ...(found.repeated.patch ?? []).flatMap((name) => { const known = PATCHES[name]; return known === undefined ? [] : [patchReference(known.patch === "ProtectedPower" ? "power" : name, known.manifest, known.file)]; })]);
   const factory = found.values["factory-image"];
   const sourceOptions = { profile, sourceRoot: source, ...(factory === undefined ? {} : { factory }), patches };
-  const verdict = stage.target === "Pixel10a" ? yield* verifyDeviceSource(sourceOptions) : yield* verifySource(sourceOptions);
+  yield* (stage.target === "Pixel10a" ? verifyDeviceSource(sourceOptions) : verifySource(sourceOptions));
   const provisioning = {
     assistant: listenerImage(stage) ? { tag: "ListenerAssistant" as const, power: true } : { tag: "NoAssistant" as const },
     requires: { autofill: true, allFilesAccess: true },
@@ -224,11 +236,12 @@ const stage = (argv: readonly string[]) => Effect.gen(function* () {
     if (listenerApk !== undefined) yield* stageListener({
       output, launcher: { apk: join(output, "Launcher.apk"), descriptor: descriptorFile }, apk: listenerApk,
       ...(listenerDescriptor === undefined ? {} : { descriptor: listenerDescriptor }),
+      ...(speech === undefined ? {} : { speech }),
       ...SENSE, policyCertificate: place(LISTENER_CERTIFICATE), sdkCommit: ((yield* attempt(() => json("../../eliza.lock.json"))) as { readonly commit: string }).commit,
       source: sourceOptions, production, aapt, apksigner,
       ...(qualification === undefined ? {} : { activation: provisioning, qualification: { file: qualification, sha256: yield* attempt(() => sha256File(qualification)) } }),
     });
-    const product = yield* composeProduct({ output, descriptor: place(PRODUCTS[stage.target]), source: verdict.state, purpose: production ? "Production" : "Development", provisioning });
+    const product = yield* composeProduct({ output, descriptor: place(PRODUCTS[stage.target]), source: sourceOptions, purpose: production ? "Production" : "Development", provisioning });
     return { staged: staged.evidence, product, imageTelephony: imageTelephony(stage), claims: "staging only: not an image build, a boot, an update or acceptance" };
   }), Effect.sync(() => rmSync(scratch, { recursive: true, force: true })));
 });

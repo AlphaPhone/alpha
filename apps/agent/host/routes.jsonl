@@ -18,6 +18,7 @@
 { "method": "POST", "path": "/api/client-devices/proposals/{id}/decision" }
 { "method": "POST", "path": "/api/client-devices/proposals/{id}/claim" }
 { "method": "POST", "path": "/api/client-devices/proposals/{id}/receipt" }
+{ "method": "POST", "path": "/api/client-devices/proposals/{id}/read-completion" }
 { "method": "POST", "path": "/api/client-devices/proposals/{id}/reconciliation" }
 { "method": "GET", "path": "/api/approvals" }
 { "method": "POST", "path": "/api/approvals/{id}/resolve" }
@@ -27,7 +28,7 @@
 { "method": "PATCH", "path": "/api/lifeops/calendar/events/{eventId}" }
 { "method": "DELETE", "path": "/api/lifeops/calendar/events/{eventId}" }
 { "method": "POST", "path": "/api/lifeops/calendar/events/{eventId}/response" }
-{ "method": "GET", "path": "/api/notifications" }
+{ "method": "GET", "path": "/api/notifications", "query": [{ "key": "category", "accepts": { "kind": "pinned", "value": "workflow" } }, { "key": "limit", "accepts": { "kind": "pinned", "value": "50" } }] }
 { "method": "POST", "path": "/api/notifications/{id}/read" }
 { "method": "GET", "path": "/api/scheduled-tasks" }
 { "method": "GET", "path": "/api/alpha/clock" }
@@ -62,7 +63,6 @@
 { "method": "POST", "path": "/api/notes/interact" }
 { "method": "POST", "path": "/api/notes/trash/erase" }
 { "method": "GET", "path": "/api/notes/trash/recordings" }
-{ "method": "POST", "path": "/api/notes/trash/recordings/complete" }
 { "method": "GET", "path": "/api/workflow/status" }
 { "method": "GET", "path": "/api/workflow/hosted/loops" }
 { "method": "POST", "path": "/api/workflow/hosted/loops" }
@@ -73,6 +73,7 @@
 { "method": "GET", "path": "/api/workflow/workflows/{id}/executions" }
 { "method": "GET", "path": "/api/workflow/executions/{id}" }
 { "method": "GET", "path": "/api/workflow/executions/{id}/approvals" }
+{ "method": "GET", "path": "/api/workflow/executions/{id}/phone-review" }
 { "method": "POST", "path": "/api/workflow/executions/{id}/approvals/{nodeId}/{iteration}" }
 { "method": "POST", "path": "/api/workflow/workflows/{id}/activate" }
 { "method": "POST", "path": "/api/workflow/workflows/{id}/deactivate" }
@@ -101,3 +102,12 @@
 { "method": "POST", "path": "/api/scheduled-tasks/{id}/skip" }
 { "method": "POST", "path": "/api/scheduled-tasks/{id}/reopen" }
 { "method": "POST", "path": "/api/scheduled-tasks/{id}/fire" }
+{ "method": "GET", "path": "/api/wallet" }
+{ "method": "POST", "path": "/api/wallet" }
+{ "method": "POST", "path": "/api/wallet/switch" }
+{ "method": "GET", "path": "/api/wallet/holdings" }
+{ "method": "GET", "path": "/api/wallet/activity" }
+{ "method": "GET", "path": "/api/wallet/requests" }
+{ "method": "POST", "path": "/api/wallet/requests" }
+{ "method": "POST", "path": "/api/wallet/requests/{id}/review" }
+{ "method": "POST", "path": "/api/wallet/requests/{id}/decide" }

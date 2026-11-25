@@ -19,7 +19,7 @@ export type NotesListProps = Omit<ComponentProps<"div">, "children"> & {
   onRetry?: () => void;
 };
 
-const heading = "px-2 pt-2 pb-0.5 text-meta leading-tight font-semibold text-muted-foreground";
+const heading = "px-2 pt-2 pb-0.5 text-caption font-semibold text-muted-foreground";
 
 /** The Notes list: the pinned notes first, then the rest, narrowed to a folder when asked, or why there are none. */
 export function NotesList({ state, pinned = [], others = [], filter, onClearFilter, message = "Agent offline", onRetry, className, ...props }: NotesListProps) {
@@ -41,10 +41,10 @@ export function NotesList({ state, pinned = [], others = [], filter, onClearFilt
           <div className="flex flex-col items-center gap-2.5 px-2 py-12 text-center">
             <span aria-hidden className="relative flex text-muted-foreground">
               <StickyNote className="size-7" />
-              <span className="absolute -top-0.5 left-1/2 -ml-px h-8 w-0.5 -rotate-45 rounded-full bg-current" />
+              <span className="absolute -top-0.5 left-1/2 -ml-px h-8 w-0.5 -rotate-45 rounded-clip bg-current" />
             </span>
             <h2 className="sr-only">Notes unavailable</h2>
-            <p role="status" className="m-0 text-body leading-normal font-semibold">{message}</p>
+            <p role="status" className="m-0 text-body leading-chat font-semibold">{message}</p>
             {onRetry && (
               <button type="button" onClick={onRetry} className={cn(focusRing, "inline-flex min-h-12 items-center gap-2 rounded-full bg-secondary px-5 font-semibold")}>
                 <RotateCw aria-hidden className="size-4.5" />
@@ -56,7 +56,7 @@ export function NotesList({ state, pinned = [], others = [], filter, onClearFilt
         {state === "listed" && pinned.length + others.length === 0 && (
           <div role="status" className="flex flex-col items-center gap-2.5 px-2 py-12 text-muted-foreground">
             <StickyNote aria-hidden className="size-7" />
-            <h2 className="m-0 text-body leading-normal font-semibold">{filter === undefined ? "No notes" : "No matches"}</h2>
+            <h2 className="m-0 text-body leading-chat font-semibold">{filter === undefined ? "No notes" : "No matches"}</h2>
           </div>
         )}
         {state === "listed" && pinned.length > 0 && <div className={heading}>Pinned</div>}

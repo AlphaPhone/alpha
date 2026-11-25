@@ -1,0 +1,143 @@
+// spec/app/notices/collection.md, "Story: Manage collection in Settings"
+import type { MirrorStatus, NoticesClient } from "@elizaos/os-bridges"
+import * as Collection from "../../gen/app__notices__collection.effect.vibe"
+import type { Actor } from "../../gen/app__approvals__operation.ts"
+import * as Settings from "../../gen/app__settings.effect.vibe"
+import * as Shell from "../../gen/app__shell.effect.vibe"
+import * as Layers from "../../gen/app__shell__layers.effect.vibe"
+import { Device, registered } from "../platform/device.vibe"
+import { CLOUD_ENVIRONMENT, signInAccounts, VoiceBridge } from "../platform/voice.vibe"
+import { noticesOf } from "../platform/systemSettings.vibe"
+import { type Job, answer, contained, reacting, started, stop, together } from "../runtime/reactor.vibe"
+
+type Surroundings = Device | Settings.Machine | Shell.Machine | Layers.Machine
+
+effect function owner(): (string | undefined)!! {
+  if (!registered("ElizaNotifications") || !registered("ElizaSignIn")) return undefined
+  const status = timeout(tryPromise(() => signInAccounts().status({ environment: CLOUD_ENVIRONMENT })), "5 seconds") catch () => undefined
+  const account = status?.account
+  return account?.kind === "signedIn" ? JSON.stringify([account.userId, account.organizationId]) : undefined
+}
+
+function onPage(shell: Shell.Shell, page: Settings.Settings, layers: Layers.Layers): boolean {
+  return Shell.showing(shell, "Settings") && shell.assistant !== "Full" && page.page === "Notifications" && !Layers.pageInert(layers)
+}
+
+effect function inFront(): boolean!!Surroundings {
+  const shell = try (try Shell.Machine).get()
+  const page = try (try Settings.Machine).get()
+  const layers = try (try Layers.Machine).get()
+  return onPage(shell, page, layers) && (try (try Device).showing())
+}
+
+const visit = started(effect {
+  const shell = try Shell.Machine
+  const settings = try Settings.Machine
+  const layers = try Layers.Machine
+  const device = try Device
+  const voice = try VoiceBridge
+  const machine = try Collection.Machine
+  const route = Stream.map(Stream.zipLatest(Stream.zipLatest(shell.changes, settings.changes), layers.changes),
+    ([[shown, page], covers]) => onPage(shown, page, covers))
+  const visible = Stream.concat(Stream.fromEffect(device.showing()), device.visible)
+  const front = Stream.changes(Stream.map(Stream.zipLatest(route, visible), ([page, shown]) => page && shown))
+  const viewChanged = Stream.merge(Stream.map(front, () => false), Stream.map(voice.signIns, () => true))
+  try Stream.runForEach(viewChanged, effect (accountChanged) => {
+    const opened = try inFront()
+    const old = try machine.get()
+    if (old.panel.here && (!opened || accountChanged)) try contained(machine.send({ type: "policyVisit", here: false }, "Phone"), "retire notification collection Settings")
+    if (opened && (!old.panel.here || accountChanged)) try contained(machine.send({ type: "policyVisit", here: true }, "Phone"), "open notification collection Settings")
+  })
+}, "watch notification collection Settings")
+
+function report(status: MirrorStatus): Collection.PolicyReport {
+  return {
+    revision: status.revision, enabled: status.enabled, paused: status.paused,
+    access: status.accessGranted, connected: status.connected, history: status.history,
+    historyUnavailable: status.historyUnavailable, apps: status.apps.map(({ packageName, label, available, preview }) =>
+      ({ packageName, label, available, preview })),
+  }
+}
+
+function apply(client: NoticesClient, asked: Collection.PolicySelection, policy: MirrorStatus): Promise<unknown> {
+  const expectedRevision = policy.revision
+  const packageName = asked.packageName
+  const selected = policy.apps.map((app) => ({ packageName: app.packageName, preview: app.preview }))
+  switch (asked.command) {
+    case "EnableCollection": return client.setMirrorPolicy({ expectedRevision, enabled: true })
+    case "DisableCollection": return client.setMirrorPolicy({ expectedRevision, enabled: false })
+    case "ResumeCollection": return client.resumeMirror(expectedRevision)
+    case "EnableHistory": return client.setMirrorPolicy({ expectedRevision, history: true })
+    case "DisableHistory": return client.setMirrorPolicy({ expectedRevision, history: false })
+    case "ClearPolicyHistory": return client.clearMirrorHistory(expectedRevision)
+    case "AddApp": return client.setMirrorPolicy({ expectedRevision, apps: [...selected, { packageName, preview: false }] })
+    case "RemoveApp": return client.setMirrorPolicy({ expectedRevision, apps: selected.filter((app) => app.packageName !== packageName) })
+    case "EnablePreview":
+    case "DisablePreview": return client.setMirrorPolicy({ expectedRevision, apps: selected.map((app) =>
+      app.packageName === packageName ? { ...app, preview: asked.command === "EnablePreview" } : app) })
+    case "NoPolicyChange": return Promise.resolve(undefined)
+  }
+}
+
+type ReadWork = Surroundings | Collection.Machine
+const unseen = Collection.noPolicy
+
+function answerPolicy(ticket: number, status: MirrorStatus | undefined, failed: boolean): Collection.Event {
+  return { type: "policyReported", ticket, report: status === undefined ? unseen : report(status), failed }
+}
+
+effect function stillHere(ticket: number, scope: string): boolean!!ReadWork {
+  if (!(try inFront()) || (try owner()) !== scope) return false
+  const { panel } = try (try Collection.Machine).get()
+  return panel.here && panel.serial === ticket && (try inFront())
+}
+
+effect function policy(ticket: number, change: boolean): Collection.Event!!ReadWork {
+  const scope = try owner()
+  if (scope === undefined || !(try stillHere(ticket, scope))) return answerPolicy(ticket, undefined, false)
+  const { panel } = try (try Collection.Machine).get()
+  const client = noticesOf()
+  const previous = timeout(tryPromise(() => client.mirrorStatus()), "5 seconds") catch () => undefined
+  if (!(try stillHere(ticket, scope))) return answerPolicy(ticket, undefined, false)
+  if (!change || previous === undefined || previous.revision !== panel.report.revision)
+    return answerPolicy(ticket, previous, change)
+  const applied = effect {
+    try timeout(tryPromise(() => apply(client, panel.selection, previous)), "10 seconds")
+    return true
+  } catch () => false
+  if (!(try stillHere(ticket, scope))) return answerPolicy(ticket, undefined, false)
+  const fresh = timeout(tryPromise(() => client.mirrorStatus()), "5 seconds") catch () => undefined
+  return answerPolicy(ticket, (try stillHere(ticket, scope)) ? fresh : undefined, !applied)
+}
+
+effect function choices(ticket: number): Collection.Event!!ReadWork {
+  const failed: Collection.Event = { type: "policyApps", ticket, failed: true, choices: [] }
+  const scope = try owner()
+  if (scope === undefined || !(try stillHere(ticket, scope))) return failed
+  const items = timeout(tryPromise(() => noticesOf().mirrorChoices()), "5 seconds") catch () => undefined
+  if (items === undefined || !(try stillHere(ticket, scope))) return failed
+  return { type: "policyApps", ticket, failed: false, choices: items }
+}
+
+effect function history(ticket: number): Collection.Event!!ReadWork {
+  const failed: Collection.Event = { type: "policyHistory", ticket, failed: true, history: [] }
+  const scope = try owner()
+  if (scope === undefined || !(try stillHere(ticket, scope))) return failed
+  const items = timeout(tryPromise(() => noticesOf().mirrorHistory()), "5 seconds") catch () => undefined
+  if (items === undefined || !(try stillHere(ticket, scope))) return failed
+  return { type: "policyHistory", ticket, failed: false, history: items.map(({ id, appLabel, at, state }) =>
+    ({ id, appLabel, at: Math.trunc(at), word: state })) }
+}
+
+function carry(fx: Collection.Effect): Job<Collection.Event, ReadWork, [Actor]> {
+  const { act, ticket } = fx
+  switch (act) {
+    case "ReadPolicy": return answer("read notification policy", policy(ticket, false), answerPolicy(ticket, undefined, true), "Phone")
+    case "ApplyPolicy": return answer("apply notification policy", policy(ticket, true), answerPolicy(ticket, undefined, true), "Phone")
+    case "ReadPolicyApps": return answer("read notification choices", choices(ticket), { type: "policyApps", ticket, failed: true, choices: [] }, "Phone")
+    case "ReadPolicyHistory": return answer("read notification history", history(ticket), { type: "policyHistory", ticket, failed: true, history: [] }, "Phone")
+    default: return stop("notification listing")
+  }
+}
+
+export const collectionSettings = together(reacting(Collection, { carry }), visit)

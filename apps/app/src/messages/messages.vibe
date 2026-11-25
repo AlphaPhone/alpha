@@ -7,13 +7,13 @@ import type { Effect as Out, Event, Need, Page } from "../../gen/app__messages.e
 import { CarrierSetup } from "../platform/carrier.vibe"
 import { registered } from "../platform/device.vibe"
 import { SystemSettings } from "../platform/systemSettings.vibe"
-import { Telephony, TelephonyRefused, namesOf, readAddressBook, telephony } from "../platform/telephony.vibe"
+import { Telephony, deletionRefused, namesOf, readAddressBook, telephony } from "../platform/telephony.vibe"
 import type { Machine as Toasts } from "../../gen/app__notices__toasts.effect.vibe"
 import { type Said, offer, withdraw } from "../notices/toasts.vibe"
 import { type Job, Whole, answer, contained, hearing, reacting, run, started, together } from "../runtime/reactor.vibe"
 import { Time } from "../runtime/time.vibe"
-import { Dialer, grantOf, prefilled } from "../phone/phone.vibe"
-import { Machine as PhoneMachine } from "../../gen/app__phone.effect.vibe"
+import { type Dialer, dialing, grantOf } from "../phone/phone.vibe"
+import { type Machine as PhoneMachine } from "../../gen/app__phone.effect.vibe"
 import { Callers } from "../phone/voicemail.vibe"
 import { on, visiting } from "../phone/visit.vibe"
 import { displayNumber, matches } from "../phone/words.ts"
@@ -40,6 +40,8 @@ export interface Conversation {
   readonly id: string
   readonly addresses: ReadonlyArray<string>
 }
+
+export type CopyReport = (outcome: "copied" | "failed" | undefined) => void
 
 /**
  * The numbers Messages gives conversations, kept across restarts so that a draft saved for a number still names its
@@ -109,6 +111,7 @@ export interface Texts {
   readonly messages: ReadonlyArray<MessageRow>
   readonly messagesNext: MessageCursor | undefined
   readonly chosen: string
+  readonly copyRequest: { readonly row: MessageRow; readonly report: CopyReport } | undefined
   readonly deleteTarget: MessageDeleteReference | undefined
   readonly choices: ReadonlyArray<AddressBookContact>
   readonly choicesNext: string | undefined
@@ -116,7 +119,7 @@ export interface Texts {
   readonly names: ReadonlyMap<string, string>
 }
 
-const empty: Texts = { threads: [], threadsNext: undefined, sought: "", messagesThread: 0, messages: [], messagesNext: undefined, chosen: "", deleteTarget: undefined, choices: [], choicesNext: undefined, typed: "", names: new Map() }
+const empty: Texts = { threads: [], threadsNext: undefined, sought: "", messagesThread: 0, messages: [], messagesNext: undefined, chosen: "", copyRequest: undefined, deleteTarget: undefined, choices: [], choicesNext: undefined, typed: "", names: new Map() }
 
 /** A conversation's title: the contacts' names for its numbers, and readable numbers for the rest. */
 export function titleOf(addresses: ReadonlyArray<string>, names: ReadonlyMap<string, string>): string {
@@ -222,10 +225,21 @@ effect function prompted(need: Need): Event!!Telephony {
   return { type: "accessReported", need, grant: grantOf(need === "SmsAccess" ? status?.permissions.sms : status?.permissions.contacts) }
 }
 
-/** The message the owner chose in the open conversation, as the phone listed it. */
-effect function chosen(): Option.Option<MessageRow>!!Inbox {
-  const held = try (try Inbox).get()
-  return Option.fromNullishOr(held.messages.find((row) => row.id === held.chosen))
+// spec/app/messages/index.md, "Keep clipboard feedback on the selected message's menu"
+effect function copySelected(): void!!(Inbox | CarrierSetup) {
+  const inbox = try Inbox
+  const held = try inbox.get()
+  const request = held.copyRequest
+  if (request === undefined) return
+  try inbox.set({ copyRequest: undefined })
+  const row = request.row
+  const body = row.id === held.chosen && held.messages.includes(row) && !("incomplete" in row) ? row.body : ""
+  const copied = body !== "" && (try (try CarrierSetup).copy(body))
+  try sync(() => request.report(copied ? "copied" : "failed"))
+  if (copied) {
+    try sleep("1400 millis")
+    try sync(() => request.report(undefined))
+  }
 }
 
 /** A staged receipt is the authority for whether the delete happened, until Android settles it. */
@@ -250,24 +264,25 @@ effect function removed(id: number): Event!!(Telephony | Inbox | Messages.Machin
   const one = (try inbox.get()).deleteTarget
   if (one === undefined) return { type: "removed", id, done: false, known: true }
   const machine = try Messages.Machine
-  return effect {
-    const answered = try telephony("deleteMessage", (c) => c.messages.deleteMessage(one))
-    if (answered.status !== "queued") return { type: "removed", id, done: answered.status === "not-found", known: true } satisfies Event
-    const staged = answered.deletion
-    const client = try (try Telephony).clients()
-    try offer("Message deletion queued", "messages", id, effect {
-      const outcome = tryPromise(() => client.deletions.undo(staged)) catch () => undefined
-      if (outcome?.kind === "Kept") {
-        try inbox.set({ deleteTarget: undefined })
-        try ignore(machine.send({ type: "removed", id, done: false, known: true }))
-        try ignore(machine.send({ type: "arrived" }))
-      }
-    })
-    try ignore(machine.send({ type: "arrived" }))
-    const outcome = try settledDeletion(id, staged)
-    try withdraw("messages", id)
-    return outcome
-  } catch (failure) => ({ type: "removed", id, done: false, known: !(failure instanceof TelephonyRefused && failure.code === undefined && failure.tag === "") } satisfies Event)
+  const answer = try Effect.result(telephony("deleteMessage", (c) => c.messages.deleteMessage(one)))
+  if (Result.isFailure(answer)) return { type: "removed", id, done: false, known: deletionRefused(answer.failure) }
+  const report = answer.success
+  if (report.status !== "queued") return { type: "removed", id, done: report.status === "not-found", known: true }
+  const staged = report.deletion
+  const phone = try Telephony
+  const undo = Effect.provideService(effect {
+    const outcome = telephony("undo message deletion", (c) => c.deletions.undo(staged)) catch () => undefined
+    if (outcome?.kind === "Kept") {
+      try inbox.set({ deleteTarget: undefined })
+      try ignore(machine.send({ type: "removed", id, done: false, known: true }))
+      try ignore(machine.send({ type: "arrived" }))
+    }
+  }, Telephony, phone)
+  try offer("Message deletion queued", "messages", id, undo)
+  try ignore(machine.send({ type: "arrived" }))
+  const outcome = try settledDeletion(id, staged)
+  try withdraw("messages", id)
+  return outcome
 }
 
 /** The open conversation's numbers. */
@@ -278,12 +293,7 @@ effect function numbers(thread: number): ReadonlyArray<string>!!Conversations {
 
 // spec/app/messages/index.md, "Copy puts a message's text on the clipboard, Call opens Phone with the number, and a message Alpha cannot show opens in the messaging app; none changes anything here"
 effect function called(thread: number): void!!(Conversations | Dialer | PhoneMachine | Shell) {
-  const number = (try numbers(thread))[0] ?? ""
-  const handed = prefilled(number)
-  if (handed === undefined) return
-  try (try Dialer).set({ digits: handed.digits })
-  try ignore((try PhoneMachine).send(handed.event))
-  try ignore((try Shell).send({ type: "openView", view: "Phone" }))
+  try ignore(dialing((try numbers(thread))[0] ?? ""))
 }
 
 /** The messaging app, opened on the conversation's numbers, for what Alpha cannot show or send. */
@@ -304,10 +314,7 @@ function carry(fx: Out): Job<Event, Telephony | Inbox | Conversations | Messages
     });
     when { tag: "Prompt", let need }: answer("prompt", prompted(need), { type: "accessReported", need, grant: "Unasked" });
     when { tag: "OpenSettings" }: run("settings", effect { try (try SystemSettings).open("AppPermissions", "") });
-    when { tag: "CopyText" }: run("copy", effect {
-      const row = try chosen()
-      if (Option.isSome(row) && !("incomplete" in row.value)) try (try CarrierSetup).copy(row.value.body)
-    });
+    when { tag: "CopyText" }: run("copy", copySelected());
     when { tag: "OpenPhone" }: run("call", effect { try called((try (try Messages.Machine).get()).thread) });
     when { tag: "OpenMessagingApp" }: run("elsewhere", effect { try elsewhere((try (try Messages.Machine).get()).thread) });
     when { tag: "RemoveMessage", let id }: answer(`remove ${id}`, removed(id), { type: "removalLost" });

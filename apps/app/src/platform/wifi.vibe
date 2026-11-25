@@ -10,8 +10,13 @@ module held {
   export function client(): ReturnType<typeof wifiClient> {
     return (made ??= wifiClient())
   }
+
+  export async function activeTransport() {
+    const { System } = await import("@elizaos/os-bridges")
+    return (await System.getSystemFacts()).wifiActive
+  }
 }
-import { client } from held
+import { activeTransport, client } from held
 
 /** One network a scan found: its name, how strong it is, and its security as Android parsed it. */
 export interface Nearby {
@@ -33,6 +38,8 @@ export service WiFi {
   join(name: string, security: Security, passphrase: Redacted.Redacted<string>): Joined!!
   /** Whether the phone is online, as Android reports it, or none where it could not say. */
   connectivity(): Option.Option<{ readonly online: boolean; readonly validated: boolean; readonly portal: boolean }>!!
+  /** Whether the active network uses Wi-Fi, when Android could identify its transport. */
+  usingWifi(): Option.Option<boolean>!!
 }
 
 const securities: Readonly<Record<WiFiSecurity, Security>> = { open: "OpenNet", owe: "EnhancedOpen", wpa2: "Wpa2", wpa3: "Wpa3", eap: "Enterprise", wep: "Wep" }
@@ -64,6 +71,7 @@ export const phoneWiFi = Layer.succeed(WiFi, {
   scan: scanned,
   join: joined,
   connectivity: () => Effect.map(Effect.option(tryPromise(() => client().getConnectivity())), Option.map((read) => ({ online: read.online, validated: read.validated, portal: read.captivePortal }))),
+  usingWifi: () => Effect.map(Effect.orElseSucceed(tryPromise(activeTransport), () => undefined), Option.fromUndefinedOr),
 })
 
 /** A browser has no Wi-Fi of its own. */
@@ -71,5 +79,6 @@ export const browserWiFi = Layer.succeed(WiFi, {
   scan: () => succeed<Scanned>({ scan: "ScanUnavailable", networks: [] }),
   join: () => succeed<Joined>("JoinRefused"),
   connectivity: () => succeed(Option.none()),
+  usingWifi: () => succeed(Option.none<boolean>()),
 })
 

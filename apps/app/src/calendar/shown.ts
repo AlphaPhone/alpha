@@ -2,7 +2,8 @@
 import type { Source } from "../../gen/app__calendar.ts";
 import { rowShown } from "../../gen/app__calendar__presentation.ts";
 import type { Cancellation, OwnAnswer } from "../../gen/app__calendar__writing.ts";
-import { civilDay } from "./time.ts";
+import { civilDay, utcStart } from "./time.ts";
+import { externalStore } from "../runtime/store.ts";
 
 /** One of an event's people: the organizer, or a guest with the reply the calendar gave. */
 export interface Person {
@@ -26,6 +27,8 @@ export interface Row {
   readonly end: number;
   readonly allDay: boolean;
   readonly recurring: boolean;
+  /** How it repeats, such as "Repeats every weekday", or "" for an event that does not. */
+  readonly repeat: string;
   /** The event's own page, where the presentation rules offer it, or "". */
   readonly link: string;
   readonly video: string;
@@ -56,8 +59,7 @@ const seen = new Map<string, { readonly content: string; readonly revision: numb
 const windows = new Map<Source, ReadonlyArray<Row>>();
 const last = new Map<number, Row>();
 const cut = new Set<Source>();
-const listeners = new Set<() => void>();
-let version = 0;
+const version = externalStore(0);
 let present = false;
 
 /** The number an event keeps for the life of the page, so the open event stays the same one across reads. @throws {never} */
@@ -94,26 +96,44 @@ function revised(source: Source, row: Read): number {
 }
 
 /** Whether `row` falls on civil `day`: an all-day event by its dates, a timed one by its instants. @throws {never} */
+const weekdays: Readonly<Record<string, string>> = { MO: "Mon", TU: "Tue", WE: "Wed", TH: "Thu", FR: "Fri", SA: "Sat", SU: "Sun" };
+const units: Readonly<Record<string, readonly [string, string]>> = { DAILY: ["daily", "days"], WEEKLY: ["weekly", "weeks"], MONTHLY: ["monthly", "months"], YEARLY: ["yearly", "years"] };
+
+/** One plain line for a repeating event from its RRULE lines; a rule this cannot read still says that the event repeats. @throws {never} */
+export function repeatText(recurrence: ReadonlyArray<string>, recurring: boolean): string {
+  const rules = recurrence.filter((rule) => rule.startsWith("RRULE:"));
+  if (rules.length !== 1) return recurring || recurrence.length > 0 ? "Repeats" : "";
+  const parts = new Map((rules[0] ?? "").slice(6).split(";").map((part) => part.split("=") as [string, string]));
+  const unit = units[parts.get("FREQ") ?? ""];
+  const interval = Number(parts.get("INTERVAL") ?? 1);
+  if (!unit || !Number.isInteger(interval) || interval < 1) return "Repeats";
+  const days = parts.get("BYDAY")?.split(",") ?? [];
+  if (parts.get("FREQ") === "WEEKLY" && days.length > 0 && days.every((day) => day in weekdays)) {
+    if (interval === 1 && days.join(",") === "MO,TU,WE,TH,FR") return "Repeats every weekday";
+    return `${interval === 1 ? "Repeats weekly" : `Repeats every ${interval} weeks`} on ${days.map((day) => weekdays[day]).join(", ")}`;
+  }
+  return interval === 1 ? `Repeats ${unit[0]}` : `Repeats every ${interval} ${unit[1]}`;
+}
+
 export function onDay(row: Pick<Row, "begin" | "end">, day: number): boolean {
   const first = civilDay(row.begin);
   const last = civilDay(Math.max(row.begin, row.end - 1));
   return first <= day && day <= last;
 }
 
+/** Android stores an all-day event's civil dates at UTC midnight. @throws {never} */
+export function androidWindowOf({ begin, end, allDay }: Pick<Row, "begin" | "end" | "allDay">): { begin: number; end: number } {
+  return allDay ? { begin: utcStart(civilDay(begin)), end: utcStart(civilDay(end)) } : { begin, end };
+}
+
 function told(): void {
-  version += 1;
-  for (const listener of [...listeners]) listener();
+  version.set(version.snapshot() + 1);
 }
 
 /** The rows each source last gave, as an external store a screen reads without an effect. */
 export const shown = {
-  snapshot: (): number => version,
-  subscribe(listener: () => void): () => void {
-    listeners.add(listener);
-    return () => {
-      listeners.delete(listener);
-    };
-  },
+  snapshot: version.snapshot,
+  subscribe: version.subscribe,
   /** Keep what `source` answered for the window around `day`, numbered; the rows that fall on `day`. @throws {never} */
   keep(source: Source, day: number, read: ReadonlyArray<Read>, partial = false): ReadonlyArray<Row> {
     if (partial) cut.add(source);

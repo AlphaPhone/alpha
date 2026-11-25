@@ -10,6 +10,12 @@ time, and opening a hit in its conversation around its message, which
 > there are more, and open one where it was said, never seeing hits for a
 > search I have left behind.
 
+Choosing Search raises [Ask Alpha](../shell/index.md) to the full screen
+before search opens. Closing search or opening a hit leaves that height.
+From a contact card's closed dock, Search covers the card and dismissing
+it returns to the same card and dock. Choosing a hit raises Ask Alpha to
+the full screen. Leaving that card retires its Search.
+
 ### Search is open or closed, with the words asked, the hits shown and whether there are more
 
 The hits come from a [read](../../kit/read.md): only the newest asking is
@@ -20,9 +26,10 @@ for begins.
 import read as R from "../../kit/read"
 import extend as X from "./extend"
 
-type Search = { open: bool, words: str, hits: R::Read, asked: int, shown: int, more: bool }
+type Origin = Conversations | ContactDock({ route: int, person: str })
+type Search = { open: bool, origin: Origin, words: str, hits: R::Read, asked: int, shown: int, more: bool }
 
-pure val initial: Search = { open: false, words: "", hits: R::unread, asked: 0, shown: 0, more: false }
+pure val initial: Search = { open: false, origin: Conversations, words: "", hits: R::unread, asked: 0, shown: 0, more: false }
 
 pure val pageSize = 20
 ```
@@ -33,7 +40,7 @@ A page of hits for the words, from a position, and a hit opened in its
 conversation around its message.
 
 ```quint
-type Effect = Find({ words: str, from: int, ticket: int }) | Open({ conversation: int, message: int })
+type Effect = Find({ words: str, from: int, ticket: int }) | Open({ conversation: int, message: int, origin: Origin })
 type Moved = { state: Search, out: List[Effect] }
 
 pure def finding(words: str, from: int, s: Search): Moved =
@@ -51,6 +58,8 @@ pure val hitValues = Set(1, 4, 25)
 pure val wordsValues = Set("", "lunch", "flight")
 pure val conversationValues = Set(1, 2)
 pure val messageValues = Set(1, 3)
+pure val routeValues = Set(0, 1, 2)
+pure val personValues = Set("", "contact:1", "contact:2")
 pure val weight_found = 4
 ```
 
@@ -59,7 +68,19 @@ pure val weight_found = 4
 ```quint
 pure def canOpenSearch(s: Search): bool = not(s.open)
 
-pure def openSearch(s: Search): Search = { ...closeSearch(s), open: true, words: "", asked: 0 }
+pure def openSearch(s: Search): Search = { ...closeSearch(s), open: true, origin: Conversations, words: "", asked: 0 }
+```
+
+### Search from a closed Contact remembers the card that opened it
+
+```quint
+pure def canOpenContactSearch(s: Search, route: int, person: str): bool =
+  canOpenSearch(s) and route >= 0 and person != ""
+
+pure def openContactSearch(s: Search, route: int, person: str): Search =
+  { ...openSearch(s), origin: ContactDock({ route: route, person: person }) }
+
+pure def sometimesSearchOverContact(s: Search): bool = s.open and s.origin != Conversations
 ```
 
 ### Words are searched from the first hit, and empty words are not searched
@@ -103,7 +124,7 @@ pure def canOpenHit(s: Search, hit: int, conversation: int, message: int, here: 
     and (here or (not(replying) and not(holding)))
 
 pure def openHit(s: Search, hit: int, conversation: int, message: int, here: bool, replying: bool, holding: bool): Moved =
-  { state: closeSearch(s), out: List(Open({ conversation: conversation, message: message })) }
+  { state: { ...closeSearch(s), origin: Conversations }, out: List(Open({ conversation: conversation, message: message, origin: s.origin })) }
 ```
 
 ### Closing search leaves its asking behind
@@ -117,7 +138,7 @@ pure def closeSearch(s: Search): Search = { ...s, open: false, hits: X::dropped(
 ### Another owner or agent session leaves search behind, words and hits
 
 ```quint
-pure def switchSession(s: Search): Search = { ...closeSearch(s), words: "", asked: 0 }
+pure def switchSession(s: Search): Search = { ...closeSearch(s), origin: Conversations, words: "", asked: 0 }
 ```
 
 ### Hits are shown only while search is open, and only for an answer that came
@@ -148,7 +169,7 @@ pure def stepAPageAddsToTheHitsBeforeIt(before: Search, via: str, after: Search)
 ```quint
 pure def stepALeftAskingIsNeverAnswered(before: Search, via: str, after: Search): bool =
   after.hits.ticket >= before.hits.ticket
-    and ((via == "closeSearch" or via == "openHit" or via == "openSearch" or via == "switchSession")
+    and ((via == "closeSearch" or via == "openHit" or via == "openSearch" or via == "openContactSearch" or via == "switchSession")
       implies (after.hits.status == R::Idle and after.shown == 0))
     and (via == "switchSession" implies (not(after.open) and after.words == ""))
 ```

@@ -1,4 +1,5 @@
 // spec/app/reminders/index.md, "Story: Organize reminders across smart views and custom lists"; spec/app/reminders/index.md, "Story: Create, update, flag, move, complete and delete reminders with Undo"
+import type { ReminderItemRecord, ReminderListColor, ReminderListIcon, ReminderListRecord } from "@repo/launcher-records";
 import {
   Banner,
   Button,
@@ -16,23 +17,21 @@ import {
   cn,
 } from "@repo/ui";
 import {
-  AlertCircle,
-  ArrowLeft,
-  CalendarClock,
+  Bell,
+  Calendar,
   CalendarDays,
   Check,
-  CheckCircle2,
+  ChevronLeft,
+  CircleCheck,
   Clock,
-  EllipsisVertical,
-  Flag,
+  Ellipsis,
   Inbox,
-  ListPlus,
-  MoreHorizontal,
   Plus,
-  RefreshCw,
   Repeat,
   SlidersHorizontal,
+  Star,
   Trash2,
+  Undo2,
 } from "lucide-react";
 import { useState, useSyncExternalStore } from "react";
 import type { DeleteMode, SmartView, SortKey } from "../../gen/app__reminders.ts";
@@ -63,10 +62,6 @@ import {
   groupScheduledItems,
   isItemOverdue,
   listActiveCount,
-  type ReminderItemRecord,
-  type ReminderListColor,
-  type ReminderListIcon,
-  type ReminderListRecord,
   remindersStore,
   searchReminders,
   selectViewItems,
@@ -80,12 +75,12 @@ const SMART_META: readonly {
   readonly label: string;
   readonly badgeClass: string;
 }[] = [
-  { view: "TodayView", label: "Today", badgeClass: "bg-info text-primary-foreground" },
-  { view: "ScheduledView", label: "Scheduled", badgeClass: "bg-destructive text-destructive-foreground" },
-  { view: "AllView", label: "All", badgeClass: "bg-foreground text-background" },
-  { view: "FlaggedView", label: "Flagged", badgeClass: "bg-warn text-primary-foreground" },
-  { view: "OverdueView", label: "Overdue", badgeClass: "bg-destructive text-destructive-foreground" },
-  { view: "CompletedView", label: "Completed", badgeClass: "bg-ok text-primary-foreground" },
+  { view: "TodayView", label: "Today", badgeClass: "bg-alpha text-alpha-foreground" },
+  { view: "ScheduledView", label: "Scheduled", badgeClass: "bg-background text-foreground" },
+  { view: "AllView", label: "All", badgeClass: "bg-background text-foreground" },
+  { view: "FlaggedView", label: "Flagged", badgeClass: "bg-background text-foreground" },
+  { view: "OverdueView", label: "Overdue", badgeClass: "bg-background text-foreground" },
+  { view: "CompletedView", label: "Completed", badgeClass: "bg-background text-foreground" },
 ];
 
 const SORT_LABELS: Readonly<Record<SortKey, string>> = {
@@ -98,17 +93,17 @@ const SORT_LABELS: Readonly<Record<SortKey, string>> = {
 function SmartGlyph({ view }: { readonly view: SmartView }) {
   switch (view) {
     case "TodayView":
-      return <CalendarDays aria-hidden className="size-4" />;
+      return <CalendarDays aria-hidden className="size-4.5" />;
     case "ScheduledView":
-      return <CalendarClock aria-hidden className="size-4" />;
+      return <Calendar aria-hidden className="size-4.5" />;
     case "AllView":
-      return <Inbox aria-hidden className="size-4" />;
+      return <Inbox aria-hidden className="size-4.5" />;
     case "FlaggedView":
-      return <Flag aria-hidden className="size-4" />;
+      return <Star aria-hidden className="size-4.5" />;
     case "OverdueView":
-      return <AlertCircle aria-hidden className="size-4" />;
+      return <Bell aria-hidden className="size-4.5" />;
     case "CompletedView":
-      return <CheckCircle2 aria-hidden className="size-4" />;
+      return <CircleCheck aria-hidden className="size-4.5" />;
   }
 }
 
@@ -208,9 +203,9 @@ function ReminderRow({
         aria-label={item.flagged ? `Unflag ${item.title}` : `Flag ${item.title}`}
         aria-pressed={item.flagged}
         onClick={() => onToggleFlag(item.id)}
-        className={item.flagged ? "text-warn" : "text-muted-foreground"}
+        className={item.flagged ? "text-primary [&_svg]:fill-current" : "text-muted-foreground"}
       >
-        <Flag className="size-4" />
+        <Star className="size-4.5" />
       </Button>
     </div>
   );
@@ -331,7 +326,7 @@ function RemindersOverview({
             key={tile.view}
             type="button"
             onClick={() => onOpenSmart(tile.view)}
-            className="flex flex-col gap-2 rounded-tile border border-border bg-card p-3 text-left transition-colors hover:bg-secondary/60"
+            className="flex flex-col gap-2 rounded-tile bg-secondary p-3 text-left transition-colors active:bg-accent"
           >
             <div className="flex items-center justify-between gap-2">
               <span className={cn("flex size-8 items-center justify-center rounded-full", tile.badgeClass)}>
@@ -347,7 +342,7 @@ function RemindersOverview({
       <div className="flex items-center justify-between pt-1">
         <h2 className="text-sm font-semibold tracking-caps text-muted-foreground uppercase">My Lists</h2>
         <Button type="button" variant="ghost" size="sm" onClick={onNewList}>
-          <ListPlus aria-hidden className="size-4" />
+          <Plus aria-hidden className="size-4.5" />
           New list
         </Button>
       </div>
@@ -374,7 +369,7 @@ function RemindersOverview({
                   <Menu>
                     <MenuTrigger asChild>
                       <Button type="button" variant="ghost" size="icon" aria-label={`Manage ${list.name}`}>
-                        <MoreHorizontal className="size-4" />
+                        <Ellipsis className="size-4.5" />
                       </Button>
                     </MenuTrigger>
                     <MenuContent>
@@ -391,7 +386,7 @@ function RemindersOverview({
 
       <div className="flex justify-end pt-2">
         <Button type="button" onClick={onNewReminder}>
-          <Plus aria-hidden className="size-4" />
+          <Plus aria-hidden className="size-4.5" />
           New reminder
         </Button>
       </div>
@@ -446,7 +441,7 @@ function RemindersDetail({
       ) : completedCount > 0 ? (
         <div className="flex justify-end">
           <Button type="button" variant="secondary" size="sm" onClick={onClearCompleted}>
-            <Trash2 aria-hidden className="size-4" />
+            <Trash2 aria-hidden className="size-4.5" />
             Clear completed
           </Button>
         </div>
@@ -461,7 +456,7 @@ function RemindersDetail({
           </p>
           {!isCompletedView ? (
             <Button type="button" onClick={onNewReminder}>
-              <Plus aria-hidden className="size-4" />
+              <Plus aria-hidden className="size-4.5" />
               New reminder
             </Button>
           ) : null}
@@ -511,7 +506,7 @@ function RemindersDetail({
           <Menu>
             <MenuTrigger asChild>
               <Button type="button" variant="ghost" size="sm">
-                <EllipsisVertical aria-hidden className="size-4" />
+                <Ellipsis aria-hidden className="size-4.5" />
                 List options
               </Button>
             </MenuTrigger>
@@ -567,7 +562,7 @@ function SortFilterMenu({
         </MenuItem>
         {canClearCompleted ? (
           <MenuItem destructive onSelect={onClearCompleted}>
-            <Trash2 aria-hidden className="size-4" />
+            <Trash2 aria-hidden className="size-4.5" />
             Clear completed
           </MenuItem>
         ) : null}
@@ -580,7 +575,6 @@ function SortFilterMenu({
 export function Reminders({ runtime }: Shown<Resident | RemindersMachines>) {
   const { state, can, send } = useTimed(runtime, useRemindersMachine);
   const storeView = useSyncExternalStore((listener) => remindersStore.subscribe(listener), remindersStore.snapshot);
-  const [drilledIn, setDrilledIn] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const [listDialog, setListDialog] = useState<{ readonly open: boolean; readonly editing: ReminderListRecord | null }>({ open: false, editing: null });
   const [deletingList, setDeletingList] = useState<ReminderListRecord | null>(null);
@@ -600,28 +594,24 @@ export function Reminders({ runtime }: Shown<Resident | RemindersMachines>) {
   const activeListId = activeList?.id ?? DEFAULT_LIST_ID;
   const activeTitle = searching
     ? "Search"
-    : !drilledIn
-      ? "Reminders"
-      : state.view.tag === "Smart"
-        ? smartTitle(state.view.view)
-        : (activeList?.name ?? "Reminders");
+    : activeView.tag === "Smart"
+      ? smartTitle(activeView.view)
+      : activeList?.name ?? "Reminders";
 
   function openSmart(view: SmartView) {
     if (can({ type: "selectSmartView", view })) void send({ type: "selectSmartView", view });
-    setDrilledIn(true);
   }
 
   function openCustomList(list: ReminderListRecord) {
     const specId = remindersStore.specIdForList(list.id);
     if (specId > 0 && can({ type: "selectCustomList", listId: specId })) void send({ type: "selectCustomList", listId: specId });
-    setDrilledIn(true);
   }
 
   function openNewEditor() {
-    const presetDue = drilledIn && state?.view.tag === "Smart" && (state.view.view === "TodayView" || state.view.view === "ScheduledView")
+    const presetDue = activeView.tag === "Smart" && (activeView.view === "TodayView" || activeView.view === "ScheduledView")
       ? todayStr
       : null;
-    const presetFlag = drilledIn && state?.view.tag === "Smart" && state.view.view === "FlaggedView";
+    const presetFlag = activeView.tag === "Smart" && activeView.view === "FlaggedView";
     void runtime.runPromise(beginNewReminder(activeListId, { dueDate: presetDue, flagged: presetFlag }));
   }
 
@@ -646,7 +636,7 @@ export function Reminders({ runtime }: Shown<Resident | RemindersMachines>) {
   }
 
   function handleQuickAdd(title: string, dueDate: string | null) {
-    const flagged = drilledIn && state?.view.tag === "Smart" && state.view.view === "FlaggedView";
+    const flagged = activeView.tag === "Smart" && activeView.view === "FlaggedView";
     void runtime.runPromise(createReminderItem({ listId: activeListId, title, dueDate, flagged }));
   }
 
@@ -660,7 +650,6 @@ export function Reminders({ runtime }: Shown<Resident | RemindersMachines>) {
 
   function handleDeleteList(listId: string, mode: DeleteMode) {
     void runtime.runPromise(deleteReminderList(listId, mode));
-    if (activeList?.id === listId) setDrilledIn(false);
   }
 
   const wireFilter = {
@@ -669,10 +658,10 @@ export function Reminders({ runtime }: Shown<Resident | RemindersMachines>) {
     priority: specToPriority(state.filter.priority),
   };
 
-  const detailItems = drilledIn
+  const detailItems = activeView.tag !== "Overview"
     ? selectViewItems(
         snapshot.items,
-        state.view.tag === "Smart" ? { kind: "smart", view: state.view.view } : { kind: "list", listId: activeListId },
+        activeView.tag === "Smart" ? { kind: "smart", view: activeView.view } : { kind: "list", listId: activeListId },
         wireFilter,
         state.sort,
         hiddenIds,
@@ -681,7 +670,7 @@ export function Reminders({ runtime }: Shown<Resident | RemindersMachines>) {
     : [];
 
   const searchMatches = searching ? sortReminders(searchReminders(snapshot.items, searchQuery, hiddenIds), state.sort) : [];
-  const defaultQuickDue = drilledIn && state.view.tag === "Smart" && (state.view.view === "TodayView" || state.view.view === "ScheduledView")
+  const defaultQuickDue = activeView.tag === "Smart" && (activeView.view === "TodayView" || activeView.view === "ScheduledView")
     ? todayStr
     : null;
 
@@ -689,10 +678,10 @@ export function Reminders({ runtime }: Shown<Resident | RemindersMachines>) {
     <>
       <div className="flex flex-1 flex-col gap-3.5 px-4 pt-2 pb-32">
         <div className="flex items-center justify-between gap-2">
-          {drilledIn && !searching ? (
+          {activeView.tag !== "Overview" && !searching ? (
             <div className="flex min-w-0 items-center gap-2">
-              <Button type="button" variant="ghost" size="icon" aria-label="All lists" onClick={() => setDrilledIn(false)}>
-                <ArrowLeft />
+              <Button type="button" variant="ghost" size="icon" aria-label="All lists" onClick={() => void send({ type: "showLists" })}>
+                <ChevronLeft />
               </Button>
               <h2 className="truncate text-lg font-semibold text-foreground">{activeTitle}</h2>
             </div>
@@ -711,7 +700,7 @@ export function Reminders({ runtime }: Shown<Resident | RemindersMachines>) {
             </div>
           )}
           <div className="flex shrink-0 items-center gap-1">
-            {drilledIn && !searching ? (
+            {activeView.tag !== "Overview" && !searching ? (
               <SortFilterMenu
                 sort={state.sort}
                 showCompleted={state.filter.showCompleted}
@@ -740,7 +729,7 @@ export function Reminders({ runtime }: Shown<Resident | RemindersMachines>) {
             variant="warn"
             action={(
               <Button type="button" variant="secondary" size="sm" onClick={() => void runtime.runPromise(refreshRemindersList())}>
-                <RefreshCw aria-hidden className="size-3.5" />
+                <Undo2 aria-hidden className="size-4.5" />
                 Retry
               </Button>
             )}
@@ -766,7 +755,7 @@ export function Reminders({ runtime }: Shown<Resident | RemindersMachines>) {
               <p className="text-sm text-muted-foreground">No reminders matched “{searchQuery.trim()}”.</p>
             </EmptyState>
           )
-        ) : !drilledIn ? (
+        ) : activeView.tag === "Overview" ? (
           <RemindersOverview
             counts={counts}
             lists={snapshot.lists}

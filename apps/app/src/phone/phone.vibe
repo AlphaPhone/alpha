@@ -4,10 +4,11 @@ import type { PhoneNumber, TelephonyCallLogEntry, TelephonyPermissionState } fro
 import { normalizePhoneNumber } from "@elizaos/os-bridges"
 import * as Phone from "../../gen/app__phone.effect.vibe"
 import type { Carrier, DialMode, DialNumberKind, Effect as Out, Event, Telecom, Typed } from "../../gen/app__phone.effect.vibe"
+import { Machine as Shell } from "../../gen/app__shell.effect.vibe"
 import type { Grant } from "../../gen/kit__permission.ts"
 import { Calls } from "../platform/calls.vibe"
 import { SystemSettings } from "../platform/systemSettings.vibe"
-import { Telephony, TelephonyAbsent, TelephonyRefused, namesOf, readAddressBook, telephony } from "../platform/telephony.vibe"
+import { type Telephony, TelephonyAbsent, TelephonyRefused, namesOf, readAddressBook, telephony } from "../platform/telephony.vibe"
 import { type Job, answer, applying, contained, hearing, reacting, run, started, together } from "../runtime/reactor.vibe"
 import { on, visiting } from "./visit.vibe"
 import { judge, matches } from "./words.ts"
@@ -189,11 +190,21 @@ export function prefilled(number: string): { readonly digits: string; readonly e
   return digits === "" || typed === "Blank" ? undefined : { digits, event: { type: "prefill", digits: digits.length, typed } }
 }
 
+/** Phone, opened with `number` on the keypad where the keypad can hold it: nothing is dialed. */
+export effect function dialing(number: string): boolean!!(Dialer | Phone.Machine | Shell) {
+  const handed = prefilled(number)
+  if (handed === undefined) return false
+  try (try Dialer).set({ digits: handed.digits })
+  try ignore((try Phone.Machine).send(handed.event))
+  try ignore((try Shell).send({ type: "openView", view: "Phone" }))
+  return true
+}
+
 // spec/app/phone/index.md, "The phone says whether a call is live, whether it may be an emergency call, and whether the carrier is ready"
 const Reading = Schema.Struct({ inCall: Schema.NullOr(Schema.Boolean), emergency: Schema.NullOr(Schema.Boolean), emergencyLive: Schema.Boolean, carrier: Schema.optional(Schema.Boolean) })
 
 /** Telecom's call-state reading as Phone takes it: a call it cannot rule out as an emergency call may be one, and without a reading Alpha cannot tell. */
-export function telecomOf(raw: unknown): { readonly telecom: Telecom; readonly carrier: Carrier } {
+function telecomOf(raw: unknown): { readonly telecom: Telecom; readonly carrier: Carrier } {
   const row = Option.getOrUndefined(Schema.decodeUnknownOption(Reading)(raw))
   const carrier = row?.carrier === true ? "CarrierReady" : row?.carrier === false ? "CarrierUnavailable" : "CarrierUnknown"
   if (row === undefined || row.inCall === null) return { telecom: "CallUnknown", carrier }

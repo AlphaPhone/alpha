@@ -1,5 +1,7 @@
 // spec/app/notes/actions.md, "Story: Share a note, or make a reminder or event from it"; spec/app/notes/actions.md, "Nothing is sent or scheduled from Notes: only the note open under the menu is handed over, as a draft, once per choice"
 import { noteShareText } from "@elizaos/plugin-notes-client"
+import * as Voice from "../../gen/app__notes__voice.effect.vibe"
+import { Machine as Transfer } from "../../gen/app__notes__transfer.effect.vibe"
 import * as Actions from "../../gen/app__notes__actions.effect.vibe"
 import { Machine as Editor } from "../../gen/app__notes__editor.effect.vibe"
 import type { Actor } from "../../gen/app__notes__note.effect.vibe"
@@ -8,11 +10,14 @@ import { Machine as Composer } from "../../gen/app__inbox__drafts.effect.vibe"
 import { Machine as Shell, showing } from "../../gen/app__shell.effect.vibe"
 import { Letters, begin } from "../inbox/composer.vibe"
 import type { Mail } from "../inbox/gmail.vibe"
+import { Device, native, shareSystemText } from "../platform/device.vibe"
 import { NoteDevice } from "../platform/noteDevice.vibe"
+import { downloadText } from "../platform/noteDocuments.vibe"
 import type { Agent } from "../platform/agent.vibe"
 import { NoteStore } from "../platform/notes.vibe"
 import { ownerAt } from "../platform/owner.vibe"
 import { type Job, reacting, run, untimed } from "../runtime/reactor.vibe"
+import { type NotesSelection, savedVoiceRecord } from "./selection.vibe"
 import { NoteContent, numberOf } from "./content.vibe"
 
 const phone: Actor = "Phone"
@@ -48,6 +53,35 @@ effect function share(fx: Extract<Actions.Effect, { readonly tag: "Hands" }>): v
   const { title, text } = noteShareText(saved)
   if (fx.channel === "Email" && (try email(title, text))) return
   try ignore((try NoteDevice).share(fx.channel, title, text))
+}
+
+type VoiceShare = Extract<Voice.Effect, { readonly tag: "Shares" }>
+export type VoiceSharePorts = NotesSelection | NoteStore | Transfer | Inbox | Composer | Mail | Letters
+
+// spec/app/notes/voice.md, "Story: Share the text of a saved voice note"
+export effect function shareVoice(fx: VoiceShare): Voice.Event!!VoiceSharePorts {
+  const unavailable: Voice.Event = { type: "textShared", ticket: fx.ticket, notice: "ShareUnavailable" }
+  const done: Voice.Event = { ...unavailable, notice: "NoShareNotice" }
+  const voice = try Voice.Machine
+  if (!Voice.canTextShared(try voice.get(), fx.ticket, "ShareUnavailable", phone)) return unavailable
+  const shown = (try (try NoteContent).collection()).noteByNumber.get(fx.note)
+  if (shown === undefined) return unavailable
+  const saved = try savedVoiceRecord({ owner: fx.owner, number: fx.note, opened: fx.opened,
+    record: { kind: "canonical-note", id: shown.id, revision: String(fx.revision - 1) } })
+  if (saved === undefined || !Voice.canTextShared(try voice.get(), fx.ticket, "ShareUnavailable", phone)) return unavailable
+  const { title, text } = noteShareText(saved)
+  if (fx.destination === "EmailText") return (try email(title, text)) ? done : unavailable
+  if (fx.destination === "SystemShare") return (try shareSystemText(title, text)) ? done : unavailable
+  if (fx.destination === "CopyText") {
+    const copied = !text.includes("\0") && new TextEncoder().encode(text).length <= 65536 && (try (try Device).copyText(text))
+    return copied ? { ...done, notice: "Copied" } : unavailable
+  }
+  if (native()) {
+    const queued = (try Transfer).send({ type: "exportNote", note: fx.note, revision: fx.revision }, "Owner") catch () => undefined
+    return queued === undefined ? unavailable : done
+  }
+  const name = `${title.replace(/[^\p{L}\p{N} ._-]+/gu, "_").trim().slice(0, 140) || "Note"}.txt`
+  return (try downloadText(name, text)) ? done : unavailable
 }
 
 function carry(fx: Actions.Effect): Job<Actions.Event, Scope, [Actor]> {

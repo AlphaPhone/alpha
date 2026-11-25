@@ -1,19 +1,35 @@
+import { createScanPdf } from "@elizaos/plugin-files-client";
 import { Effect, ManagedRuntime, Option } from "effect";
 import { expect, it } from "vitest";
-import twoPages from "../../../legacy/android/app/src/androidTest/assets/inbox-fixtures/two-page.pdf?url";
+import { page, userEvent } from "vitest/browser";
 import { Documents } from "../src/platform/documents.vibe";
 import { Files } from "../src/platform/files.vibe";
 import { browserLibrary } from "../src/platform/library.vibe";
+import { closeAll, later, only, open } from "./alpha.tsx";
+import { scene } from "./fakes/scene.ts";
+import "../src/main.css";
+
+function choose(input: HTMLInputElement, file: File): void {
+  const items = new DataTransfer();
+  items.items.add(file);
+  input.files = items.files;
+  input.dispatchEvent(new Event("change", { bubbles: true }));
+}
+
+async function scannedPage(width: number): Promise<Blob> {
+  const canvas = new OffscreenCanvas(width, 50);
+  const paint = canvas.getContext("2d");
+  if (!paint) throw new Error("The scan fixture has no canvas context");
+  paint.fillRect(0, 0, width, 50);
+  return canvas.convertToBlob({ type: "image/png" });
+}
 
 async function pick(file: File, runtime: ManagedRuntime.ManagedRuntime<Documents | Files, never>) {
   const pending = runtime.runPromise(Effect.flatMap(Documents, (documents) => documents.pick()));
   await expect.poll(() => document.querySelector("input[type=file]")).toBeInstanceOf(HTMLInputElement);
   const chooser = document.querySelector<HTMLInputElement>("input[type=file]");
   if (!chooser) throw new Error("no browser file chooser");
-  const items = new DataTransfer();
-  items.items.add(file);
-  chooser.files = items.files;
-  chooser.dispatchEvent(new Event("change"));
+  choose(chooser, file);
   return Option.getOrThrow(await pending);
 }
 
@@ -55,11 +71,11 @@ it("imports a chosen file, opens its text, and finds it again in a new browser l
   }
 });
 
-
 // spec/app/files/preview.md, "A page is shown only when the worker drew it in isolation and handed it over unwritable"
 it("draws the selected PDF one page at a time", async () => {
-  const response = await fetch(twoPages);
-  const file = new File([await response.blob()], `alpha-pdf-${crypto.randomUUID()}.pdf`, { type: "application/pdf" });
+  const images = await Promise.all([scannedPage(40), scannedPage(60)]);
+  const bytes = await Effect.runPromise(createScanPdf({ title: "Files preview", creator: "Alpha" }, images));
+  const file = new File([bytes], `alpha-pdf-${crypto.randomUUID()}.pdf`, { type: "application/pdf" });
   const runtime = ManagedRuntime.make(browserLibrary);
   try {
     const id = await pick(file, runtime);
@@ -76,5 +92,44 @@ it("draws the selected PDF one page at a time", async () => {
     await expect(fetch(second.imageUri)).rejects.toThrow();
   } finally {
     await runtime.dispose();
+  }
+});
+
+it('Reorder pages after the clock advances (spec/app/files/scan.md, "Story: Arrange the pages")', async () => {
+  const { alpha } = await open(scene(), only("home", "view:Files"));
+  try {
+    await page.getByRole("button", { name: "Files", exact: true }).click();
+    const tools = page.getByRole("button", { name: "Files tools", exact: true });
+    await expect.element(tools).toBeVisible();
+    const trigger = tools.element();
+    if (!(trigger instanceof HTMLButtonElement)) throw new Error("Files tools is not a button");
+    trigger.focus();
+    await userEvent.keyboard("{ArrowDown}");
+    const menu = page.getByRole("menu", { name: "Files tools", exact: true });
+    await menu.getByRole("menuitem", { name: "Scan document", exact: true }).click();
+    const scanner = page.getByRole("dialog", { name: "Scan document", exact: true });
+    await expect.element(scanner).toBeVisible();
+    const image = (number: number) => scanner.getByRole("img", { name: `Document page ${number}`, exact: true });
+    const input = document.querySelector<HTMLInputElement>('input[aria-label="Add page"]');
+    if (!input) throw new Error("The scanner has no image picker");
+    for (const width of [40, 60]) {
+      const blob = await scannedPage(width);
+      choose(input, new File([blob], `scan-${width}.png`, { type: blob.type }));
+      await expect.element(image(width === 40 ? 1 : 2)).toBeVisible();
+    }
+    const first = image(1).element().getAttribute("src");
+    const second = image(2).element().getAttribute("src");
+    if (!first || !second || first === second) throw new Error("The scanner did not open two distinct pages");
+    await later(alpha, 10_000);
+    await scanner.getByRole("button", { name: "Move page 1 later", exact: true }).click();
+    await expect.element(image(1)).toHaveAttribute("src", second);
+    await expect.element(image(2)).toHaveAttribute("src", first);
+  } finally {
+    await closeAll();
+    await new Promise<void>((resolve, reject) => {
+      const removed = indexedDB.deleteDatabase("alpha-scan-pages");
+      removed.onsuccess = () => resolve();
+      removed.onerror = () => reject(new Error("Could not remove the test scan draft", { cause: removed.error }));
+    });
   }
 });

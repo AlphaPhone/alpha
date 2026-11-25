@@ -219,6 +219,9 @@ pure def sometimesSignInBlocked(s: Site): bool = s.blocked and s.tries == maxTri
 
 ### Clearing a site's data needs a loaded site, and runs one at a time
 
+The confirmation binds the loaded page and its navigation. If the page leaves
+or reloads before the clearing begins, the confirmation sends no clearing.
+
 ```quint
 pure def canClearSite(s: Site, origin: int, loaded: bool): bool = loaded and not(s.clearing) and origin != 0
 

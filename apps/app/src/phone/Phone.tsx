@@ -2,7 +2,7 @@
 import type { TelephonyCallLogEntry } from "@elizaos/os-bridges";
 import { Alert, Button, Chip, Input, Spinner, Tabs, TabsContent, cn, focusRing } from "@repo/ui";
 import { Effect, type ManagedRuntime } from "effect";
-import { ArrowDownLeft, ArrowUpRight, Delete, Phone as Call } from "lucide-react";
+import { Phone as Handset } from "lucide-react";
 import { memo, useCallback, useRef } from "react";
 import { Machine as PhoneMachine, type Tab } from "../../gen/app__phone.effect.vibe";
 import { dialable, historyFailed, logNeeded, noCalls, noMatchingCalls } from "../../gen/app__phone.ts";
@@ -19,6 +19,7 @@ import { CommsBar, type CommsServices } from "./CommsBar.tsx";
 import { CallAvatar } from "./CallAvatar.tsx";
 import { PhoneTabs } from "./PhoneTabs.tsx";
 import { VoicemailTab } from "./VoicemailTab.tsx";
+import { CallIn, CallOut, EraseDigit } from "./icons.ts";
 
 export interface PhoneProps {
   runtime: ManagedRuntime.ManagedRuntime<PhoneMachine | VoicemailMachine | Dialer | Voicemails | Player | CommsServices | Time, unknown>;
@@ -39,7 +40,7 @@ const RecentRow = memo(function RecentRow({ row, now, enabled, call, first }: {
   const title = callerTitle(row.number, row.cachedName);
   const took = missed.has(row.type);
   const outgoing = row.type === "outgoing";
-  const Icon = outgoing ? ArrowUpRight : ArrowDownLeft;
+  const Icon = outgoing ? CallOut : CallIn;
   const direction = took ? "missed" : outgoing ? "outgoing" : "incoming";
   const date = shortWhen(row.date, now);
   const label = `${row.number ? "Call " : ""}${title}`;
@@ -49,7 +50,7 @@ const RecentRow = memo(function RecentRow({ row, now, enabled, call, first }: {
       onClick={() => call(row.number)}>
       <CallAvatar name={title} />
       <span className="flex min-w-0 flex-1 flex-col gap-0.5">
-        <span className={cn("truncate text-body font-semibold leading-snug", took && "text-destructive")}>{title}</span>
+        <span className={cn("truncate text-md font-semibold", took && "text-destructive")}>{title}</span>
         <span className="flex items-center gap-1 text-sm text-muted-foreground"><Icon aria-hidden className="size-3.5" />{date}</span>
       </span>
     </button>
@@ -118,29 +119,29 @@ export function Phone({ runtime, alpha }: PhoneProps) {
           {state.sought && dialer.filterLabel !== "" && <div className="px-4 pb-2"><Chip onClear={clearSearch} clearLabel={`Clear filter ${dialer.filterLabel}`}>{dialer.filterLabel}</Chip></div>}
           {state.recents.status === "Loading" && rows.length === 0 && <div className="flex justify-center p-5"><Spinner label="Reading recent calls" /></div>}
           {logNeeded(state) && state.recents.status !== "Loading" && (
-            <div className="flex flex-col items-center gap-3 p-5">
-              <p role="status" className="text-muted-foreground">Phone needs access to your call log</p>
-              {can({ type: "allow" }) ? <Button size="lg" onClick={() => void send({ type: "allow" })}>Allow</Button> : can({ type: "goToSettings" }) && <Button variant="outline" onClick={() => void send({ type: "goToSettings" })}>Open Settings</Button>}
-            </div>
+            <>
+              <p role="status" className="m-5 text-center text-muted-foreground">Off</p>
+              <div className="flex justify-center pb-5">
+                {can({ type: "allow" }) ? <Button className="h-13 bg-foreground px-7 text-lg text-background hover:bg-foreground/90" onClick={() => void send({ type: "allow" })}>Allow</Button> : can({ type: "goToSettings" }) && <Button variant="outline" onClick={() => void send({ type: "goToSettings" })}>Open Settings</Button>}
+              </div>
+            </>
           )}
           {historyFailed(state) && <div className="flex flex-col items-center gap-2 p-5"><p role="status" className="text-muted-foreground">Couldn’t load</p>{can({ type: "retry" }) && <Button variant="ghost" className="underline" onClick={() => void send({ type: "retry" })}>Retry call history</Button>}</div>}
-          {noCalls(state) && <p role="status" className="p-5 text-center text-muted-foreground">{noMatchingCalls(state) ? "No matching calls" : state.chip === "MissedCalls" ? "No missed calls" : "No recent calls."}</p>}
+          {noCalls(state) && <p role="status" className="m-5 text-center text-muted-foreground">{noMatchingCalls(state) ? "No matching calls" : state.chip === "MissedCalls" ? "No missed calls" : "No recent calls."}</p>}
           {state.chip === "MissedCalls" && can({ type: "pickChip", chip: "AllCalls" }) && <div className="px-4 pb-2"><Chip clearLabel="Show all calls" onClear={() => void send({ type: "pickChip", chip: "AllCalls" })}>Missed</Chip></div>}
           {rows.length > 0 && <div role="group" aria-label="Recent calls">{rows.map((row, index) => <RecentRow key={row.id} row={row}
             now={now} enabled={can({ type: "dialRecent", number: row.number })} call={dialRecent} first={index === 0} />)}</div>}
-          {state.chip === "AllCalls" && state.recents.status === "Loaded" && rows.length > 0 && can({ type: "pickChip", chip: "MissedCalls" }) &&
-            <div className="px-4 py-2"><Button variant="ghost" size="sm" className="text-muted-foreground" onClick={() => void send({ type: "pickChip", chip: "MissedCalls" })}>Missed</Button></div>}
         </TabsContent>
         <TabsContent value="Keypad" data-alpha-phone-keypad="" className="min-h-0 flex-1 overflow-y-auto rounded-none">
           <div className="mx-auto flex min-h-full max-w-103 flex-col pb-3.5 [--dial-key:clamp(3rem,18.93vw,4.875rem)]">
             <div className="flex min-h-20 flex-1 flex-col items-center justify-center gap-1.5 px-6 py-1">
               <Input type="tel" inputMode="none" autoComplete="off" maxLength={40} aria-label="Phone number" data-alpha-phone-number=""
                 value={dialer.digits} onChange={(event) => edit(event.currentTarget.value)} disabled={waiting}
-                className="h-12 px-0 text-center text-keypad-number font-medium tabular-nums border-transparent bg-transparent shadow-none" />
+                className="h-11 rounded-none border-0 bg-transparent px-0.5 py-px text-center text-keypad-number font-medium tabular-nums shadow-none" />
               {state.matched && dialer.matched !== "" && (
-                <Button size="icon" variant="secondary" className="w-auto max-w-full gap-2 px-3.5 text-sm" aria-label={`Call ${dialer.matched}`}
+                <Button size="icon" variant="secondary" className="w-auto max-w-full gap-2 px-3.5 text-base font-normal" aria-label={`Call ${dialer.matched}`}
                   disabled={!can(match)} onClick={() => void send(match)}>
-                  <span className="truncate">{dialer.matched}</span><span className="shrink-0 text-muted-foreground tabular-nums">{displayNumber(dialer.matchedNumber)}</span>
+                  <span className="truncate font-semibold">{dialer.matched}</span><span className="shrink-0 text-muted-foreground tabular-nums">{displayNumber(dialer.matchedNumber)}</span>
                 </Button>
               )}
               {state.carrier === "CarrierUnavailable" && state.numberKind === "OrdinaryNumber" && (
@@ -173,9 +174,9 @@ export function Phone({ runtime, alpha }: PhoneProps) {
             <div className="grid shrink-0 grid-cols-3 items-center justify-items-center gap-x-[min(5.825vw,1.5rem)] px-[min(10.68vw,2.75rem)] pt-[min(3.88vw,1rem)]">
               <Button className="col-start-2 size-(--dial-key) bg-dial text-dial-foreground hover:bg-dial/90 active:bg-dial/80 disabled:opacity-100"
                 size="icon" data-alpha-phone-call="" aria-label="Call" disabled={!can({ type: "dialTyped" }) || !dialable(state)}
-                onClick={() => void send({ type: "dialTyped" })}><Call className="size-7.5" /></Button>
-              {dialer.digits !== "" && <Button variant="ghost" size="icon" aria-label="Delete digit" className="col-start-3 size-14"
-                disabled={waiting || !can({ type: "takeBack", typed: judge(dialer.digits.slice(0, -1)) })} onClick={() => changeDigit()}><Delete className="size-6.5" /></Button>}
+                onClick={() => void send({ type: "dialTyped" })}><Handset className="size-7.5" /></Button>
+              {dialer.digits !== "" && <Button variant="ghost" size="icon" aria-label="Delete digit" className="col-start-3 size-14 rounded-none"
+                disabled={waiting || !can({ type: "takeBack", typed: judge(dialer.digits.slice(0, -1)) })} onClick={() => changeDigit()}><EraseDigit className="size-6.5" /></Button>}
             </div>
           </div>
         </TabsContent>

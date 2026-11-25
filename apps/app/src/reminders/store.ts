@@ -1,67 +1,16 @@
 // spec/app/reminders/index.md, "Story: Organize reminders across smart views and custom lists"
+import type { ReminderItemRecord, ReminderListRecord, ReminderPriority, ReminderRecurrence, RemindersSnapshot } from "@repo/launcher-records";
 import type { Priority, SmartView, SortKey } from "../../gen/app__reminders.ts";
 import type { Repeat } from "../../gen/app__reminders__recurrence.ts";
-import { type ReminderRecurrence, civilDayFromString, civilDayNumber, dueInstantMs } from "./recurrence.ts";
+import { externalStore } from "../runtime/store.ts";
+import { civilDayFromString, civilDayNumber, dueInstantMs } from "./recurrence.ts";
 
-export type { ReminderRecurrence };
-
-/** Semantic color token choices for custom reminder lists. */
-export type ReminderListColor = "accent" | "blue" | "green" | "amber" | "rose" | "violet";
-
-/** Icon identifiers for custom reminder lists. */
-export type ReminderListIcon = "list" | "home" | "work" | "shopping" | "heart" | "star" | "bookmark" | "bolt";
-
-/** Wire priority values shared with the resident agent. */
-export type ReminderPriority = "none" | "low" | "medium" | "high";
-
-/** One custom or default reminder list record. */
-export interface ReminderListRecord {
-  readonly id: string;
-  readonly name: string;
-  readonly color: ReminderListColor;
-  readonly icon: ReminderListIcon;
-  readonly isDefault: boolean;
-  readonly order: number;
-  readonly createdAtMs: number;
-  readonly updatedAtMs: number;
-}
-
-/** One checklist subtask nested inside a reminder. */
-export interface ReminderSubtaskRecord {
-  readonly id: string;
-  readonly title: string;
-  readonly done: boolean;
-}
-
-/** One rich reminder item record matching the shared agent wire contract. */
-export interface ReminderItemRecord {
-  readonly id: string;
-  readonly listId: string;
-  readonly title: string;
-  readonly notes: string;
-  readonly dueDate: string | null;
-  readonly dueMinute: number | null;
-  readonly alertMinutes: number | null;
-  readonly recurrence: ReminderRecurrence;
-  readonly priority: ReminderPriority;
-  readonly flagged: boolean;
-  readonly subtasks: readonly ReminderSubtaskRecord[];
-  readonly completed: boolean;
-  readonly completedAtMs: number | null;
-  readonly snoozedUntilMs: number | null;
-  readonly notifiedAtMs: number | null;
-  readonly agentTaskId: string | null;
-  readonly revision: number;
-  readonly createdAtMs: number;
-  readonly updatedAtMs: number;
-}
-
-/** Full reminders snapshot synced with the resident agent and cached locally. */
-export interface RemindersSnapshot {
-  readonly version: number;
-  readonly updatedAtMs: number;
-  readonly lists: readonly ReminderListRecord[];
-  readonly items: readonly ReminderItemRecord[];
+/** Keep the actual completed due instant, including when a repeat immediately moves on. @throws {never} */
+export function withReminderCompletion(item: ReminderItemRecord, completedAtMs: number): ReminderItemRecord {
+  const dueAtMs = dueInstantMs(item.dueDate, item.dueMinute);
+  if (dueAtMs === null) return item;
+  const record = { revision: item.revision, dueAtMs, completedAtMs };
+  return { ...item, history: [...(item.history ?? []), record].slice(-32) };
 }
 
 /** Filter parameters applied to a reminder list view. */
@@ -281,12 +230,7 @@ function emptyStoreView(): RemindersStoreView {
   };
 }
 
-let current: RemindersStoreView = emptyStoreView();
-const listeners = new Set<() => void>();
-
-function notify(): void {
-  for (const listener of [...listeners]) listener();
-}
+const { snapshot: current, subscribe, set: publish } = externalStore<RemindersStoreView>(emptyStoreView());
 
 function assignSpecIds(
   lists: readonly ReminderListRecord[],
@@ -351,63 +295,65 @@ export function normalizeSnapshot(snapshot: RemindersSnapshot): RemindersSnapsho
 /** Synchronous external store for Reminders data, read by screens with `useSyncExternalStore`. */
 export const remindersStore = {
   /** @throws {never} */
-  snapshot: (): RemindersStoreView => current,
+  snapshot: current,
   /** @throws {never} */
-  subscribe(listener: () => void): () => void {
-    listeners.add(listener);
-    return () => { listeners.delete(listener); };
-  },
+  subscribe,
   /** @throws {never} */
   reset(): void {
-    current = emptyStoreView();
-    notify();
+    publish(emptyStoreView());
   },
   /** @throws {never} */
   replace(snapshot: RemindersSnapshot, syncError: string | null = null): RemindersStoreView {
     const normalized = normalizeSnapshot(snapshot);
-    const ids = assignSpecIds(normalized.lists, normalized.items, current.listSpecIds, current.itemSpecIds);
-    current = { snapshot: normalized, hiddenIds: current.hiddenIds, syncError, ...ids };
-    notify();
-    return current;
+    const { listSpecIds, itemSpecIds, hiddenIds } = current();
+    const ids = assignSpecIds(normalized.lists, normalized.items, listSpecIds, itemSpecIds);
+    publish({ snapshot: normalized, hiddenIds, syncError, ...ids });
+    return current();
   },
   /** @throws {never} */
   setHidden(hiddenIds: ReadonlySet<string>): void {
-    current = { ...current, hiddenIds: new Set(hiddenIds) };
-    notify();
+    publish({ ...current(), hiddenIds: new Set(hiddenIds) });
   },
   /** @throws {never} */
   setSyncError(syncError: string | null): void {
-    current = { ...current, syncError };
-    notify();
+    publish({ ...current(), syncError });
   },
   /** @throws {never} */
   findItem(id: string): ReminderItemRecord | undefined {
-    return current.snapshot.items.find((item) => item.id === id);
+    return current().snapshot.items.find((item) => item.id === id);
   },
   /** @throws {never} */
   findItemBySpecId(specId: number): ReminderItemRecord | undefined {
-    for (const [id, num] of current.itemSpecIds) {
-      if (num === specId) return current.snapshot.items.find((item) => item.id === id);
+    for (const [id, num] of current().itemSpecIds) {
+      if (num === specId) return current().snapshot.items.find((item) => item.id === id);
     }
     return undefined;
   },
   /** @throws {never} */
   findList(id: string): ReminderListRecord | undefined {
-    return current.snapshot.lists.find((list) => list.id === id);
+    return current().snapshot.lists.find((list) => list.id === id);
   },
   /** @throws {never} */
   findListBySpecId(specId: number): ReminderListRecord | undefined {
-    for (const [id, num] of current.listSpecIds) {
-      if (num === specId) return current.snapshot.lists.find((list) => list.id === id);
+    for (const [id, num] of current().listSpecIds) {
+      if (num === specId) return current().snapshot.lists.find((list) => list.id === id);
     }
     return undefined;
   },
+  /** Keep under the reminder `id` the number the Reminders machine gave it. @throws {never} */
+  numberItem(id: string, specId: number): void {
+    publish({ ...current(), itemSpecIds: new Map([...current().itemSpecIds, [id, specId]]) });
+  },
+  /** Keep under the list `id` the number the Reminders machine gave it. @throws {never} */
+  numberList(id: string, specId: number): void {
+    publish({ ...current(), listSpecIds: new Map([...current().listSpecIds, [id, specId]]) });
+  },
   /** @throws {never} */
   specIdForItem(id: string): number {
-    return current.itemSpecIds.get(id) ?? 0;
+    return current().itemSpecIds.get(id) ?? 0;
   },
   /** @throws {never} */
   specIdForList(id: string): number {
-    return current.listSpecIds.get(id) ?? 1;
+    return current().listSpecIds.get(id) ?? 1;
   },
 };

@@ -81,6 +81,33 @@ function messageOf(found: GmailReadResult, original: MailCard): MailMessage {
 
 const at = (page: GmailThreadPage, position: number) => position < page.offset ? undefined : page.messages[position - page.offset]
 
+// spec/app/inbox/message.md, "Opening a row reads the exact message chosen while its account may be read"
+/** Find the selected message's position after its body is shown, using one provider revision across all pages. */
+export effect function locateThread(account: number, anchor: MailCard): ({ readonly position: number; readonly thread: number } | undefined)!ThreadFault!(Cloud | Mail | ThreadPages) {
+  if (anchor.threadId === "") return undefined
+  const ledger = try Mail
+  const grant = ledger.grant(account)
+  if (grant === undefined) return undefined
+  const cache = try ThreadPages
+  const source = { account, generation: ledger.generation(account), threadId: anchor.threadId }
+  const client = provider(try Cloud)
+  const initial = try client.gmailThread(grant, source.threadId)
+  if (initial.total < 2) return undefined
+  let page = initial
+  while (ledger.generation(account) === source.generation) {
+    const offset = page.messages.findIndex((item) => item.message.id === anchor.id)
+    if (offset >= 0) {
+      cache.keep(source, initial)
+      if (page.offset !== initial.offset) cache.keep(source, page)
+      return { position: page.offset + offset, thread: initial.total }
+    }
+    if (page.nextOffset === null || page.nextOffset <= page.offset) return undefined
+    page = try client.gmailThread(grant, source.threadId, { offset: page.nextOffset, historyId: initial.historyId })
+    if (page.total !== initial.total) return undefined
+  }
+  return undefined
+}
+
 /** Resolve a position within the frozen provider revision, or discover the latest position on open. */
 export effect function threadMessage(account: number, anchor: MailCard, position: number, newest: boolean): Position!ThreadFault!(Cloud | Mail | ThreadPages) {
   const ledger = try Mail

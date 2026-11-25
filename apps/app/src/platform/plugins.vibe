@@ -14,6 +14,7 @@ import { type Calls, browserCalls, phoneCalls } from "./calls.vibe"
 import { type Telephony, browserTelephony, phoneTelephony } from "./telephony.vibe"
 import { type VoiceBridge, browserVoiceBridge, phoneVoiceBridge } from "./voice.vibe"
 import { type Documents, phoneDocuments } from "./documents.vibe"
+import { type InboxAttachmentFiles, phoneInboxAttachments } from "./inboxAttachments.vibe"
 import { browserLibrary } from "./library.vibe"
 import { type Navigation, browserNavigation, phoneNavigation } from "./navigation.vibe"
 import { type TabHost, browserTabHost, phoneTabHost } from "./browser.vibe"
@@ -35,6 +36,7 @@ export type Plugins =
   | Calls
   | VoiceBridge
   | Documents
+  | InboxAttachmentFiles
   | Navigation
   | TabHost
 
@@ -55,6 +57,7 @@ export const phonePlugins = Layer.mergeAll(
   phoneCalls,
   phoneVoiceBridge,
   phoneDocuments,
+  phoneInboxAttachments,
   phoneNavigation,
   phoneTabHost,
 )

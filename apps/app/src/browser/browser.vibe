@@ -5,12 +5,21 @@ import * as Tabs from "../../gen/app__browser.effect.vibe"
 import type { Browser, Effect as TabsOut, Event as TabsEvent } from "../../gen/app__browser.effect.vibe"
 import * as Address from "../../gen/app__browser__address.effect.vibe"
 import type { Effect as PageOut, Event as PageEvent, Page } from "../../gen/app__browser__address.effect.vibe"
+import * as Share from "../../gen/app__browser__share.effect.vibe"
+import type { Event as ShareEvent } from "../../gen/app__browser__share.effect.vibe"
+import { Machine as Settings } from "../../gen/app__settings.effect.vibe"
 import { Machine as Shell, showing } from "../../gen/app__shell.effect.vibe"
+import type { BrowserPageGuard } from "@elizaos/os-bridges"
 import { BrowserDownloadsHandoff, TabHost, hosted } from "../platform/browser.vibe"
 import { readWebBrowsing, saveWebBrowsing } from "../platform/browserWeb.vibe"
 import type { Install } from "../runtime/attempts.vibe"
 import { type Job, Whole, answer, contained, due, reacting, run, started, stream, together, untimed, whole } from "../runtime/reactor.vibe"
-import type { Time } from "../runtime/time.vibe"
+import { Time } from "../runtime/time.vibe"
+
+/** Whether Browser is on the shell's active view. */
+export effect function browserInFront(): boolean!!Shell {
+  return showing(try (try Shell).get(), "Browser")
+}
 
 module page {
   import { addressFacts, isSecureWebAddress } from "@elizaos/os-bridges"
@@ -71,6 +80,19 @@ const failedRestore = (ticket: number): TabsEvent => ({ type: "restored", ticket
 /** A tab's page: its own machine, made when the tab is first asked for and ended with the tab. */
 export type PageRuntime = ManagedRuntime.ManagedRuntime<Address.Machine | Time, unknown>
 
+/** What Alpha's tab host says of a failed tab beyond eliza's state: the HTTPS address another browser may still reach. */
+schema Stranded { readonly id: string; readonly elsewhereUrl?: string }
+
+/** The address each native tab's failed page may open at in another browser, as the host last said it; none once a load starts. */
+const elsewhere = new Map<string, string>()
+
+export type HistoryRow = { readonly url: string; readonly stamp: number; readonly title?: string; readonly at?: number }
+type HistoryEdit = { readonly ticket: number; readonly stamps: ReadonlySet<number> }
+export type HistoryChange =
+  | { readonly kind: "visited"; readonly count: number }
+  | { readonly kind: "edited"; readonly ticket: number; readonly ok: boolean; readonly count: number; readonly remaining: number }
+  | { readonly kind: "wiped" }
+
 /**
  * Each open tab's page: its machine, the address its next load opens, and what the tab host last said of it, which
  * `TabHost`'s session holds by the tab's id.
@@ -86,22 +108,34 @@ export service Pages {
   stood(tab: number, index: number): void!!
   end(tab: number): void!!
   /** The saved and newly committed normal-tab addresses in recent-first order. */
-  visits(): readonly string[]!!
-  keepVisits(history: readonly string[]): void!!
-  visit(url: string): void!!
+  history(): readonly HistoryRow[]!!
+  keepVisits(addresses: readonly string[], times: Readonly<Record<string, number>> | undefined, titles: ReadonlyMap<string, string>): void!!
+  visit(url: string, at: number, title: string | undefined): void!!
+  readonly historyChanges: Stream.Stream<HistoryChange>
+  historyEdit(): (HistoryEdit | undefined)!!
+  stageHistory(edit: HistoryEdit): boolean!!
+  finishHistory(edit: HistoryEdit, ok: boolean): void!!
+  wipeHistory(): void!!
+  /** Tell the Browser's Share machine, which speaks for the tab in front, of `tab`'s page: nothing for a tab behind. Whether it took it. */
+  share(tab: number, event: ShareEvent): boolean!!
 }
 
-effect function pageOf(tab: number): Page!!Pages {
+/** Read the current address machine for the exact tab. */
+export effect function pageOf(tab: number): Page!!Pages {
   const runtime = try (try Pages).of(tab)
   return try promise(() => runtime.runPromise(Address.Machine.use((machine) => machine.get())))
 }
 
-effect function tellPage(tab: number, event: PageEvent): boolean!!Pages {
+export effect function tellPage(tab: number, event: PageEvent): boolean!!Pages {
   const runtime = try (try Pages).of(tab)
   return try promise(() => runtime.runPromiseExit(Address.Machine.use((machine) => machine.send(event))).then((ended) => Exit.isSuccess(ended)))
 }
 
-effect function tellTabs(event: TabsEvent): boolean!!Tabs.Machine {
+effect function tellShare(tab: number, event: ShareEvent): boolean!!Pages {
+  return try (try Pages).share(tab, event)
+}
+
+export effect function tellTabs(event: TabsEvent): boolean!!Tabs.Machine {
   return try ((try Tabs.Machine).send(event) |> Effect.as(%, true) |> Effect.orElseSucceed(%, () => false))
 }
 
@@ -126,7 +160,7 @@ effect function restoredFrom(ticket: number): TabsEvent!!(TabHost | Pages | Tabs
     const s = try (try Tabs.Machine).get()
     const pages = try Pages
     const adopting = host.web !== undefined && s.kept.length === 0
-    const back = restoreBrowsing(saved, { visits: try pages.visits() }, s.untouched || host.web !== undefined)
+    const back = restoreBrowsing(saved, { visits: (try pages.history()).map((row) => row.url) }, s.untouched || host.web !== undefined)
     const rows = back.restored.map((row, index) => ({ ...row, tab: adopting ? s.issued + index + 1 : tabOf(row.id) }))
     const incoming = adopting ? rows.map((row) => row.tab) : []
     const cur = rows.find((row) => row.id === back.cur)?.tab ?? 0
@@ -134,7 +168,7 @@ effect function restoredFrom(ticket: number): TabsEvent!!(TabHost | Pages | Tabs
     if (!Tabs.canRestored(s, ticket, true, shown, incoming)) return failedRestore(ticket)
     const restored: TabsEvent = { type: "restored", ticket, ok: true, shown, incoming }
     if (!Tabs.restored(s, ticket, true, shown, incoming).hydrated) return restored
-    try pages.keepVisits(back.visits)
+    try pages.keepVisits(back.visits, back.visitTimes, new Map(rows.map(({ title, url }) => [url, title])))
     for (const { tab, url, title } of rows) {
       if (adopting || s.kept.includes(tab)) {
         try pages.aim(tab, url)
@@ -147,18 +181,33 @@ effect function restoredFrom(ticket: number): TabsEvent!!(TabHost | Pages | Tabs
 
 // spec/app/browser/index.md, "A stale session is written once it has been read, one write at a time, and never while browsing data is being cleared"
 effect function written(write: number): TabsEvent!!(TabHost | Tabs.Machine | Pages) {
-  return effect {
+  const pages = try Pages
+  const edit = try pages.historyEdit()
+  const result = try contained(effect {
     const host = try TabHost
     const s = try (try Tabs.Machine).get()
-    const visits = try (try Pages).visits()
+    const history = (try pages.history()).filter((row) => !edit?.stamps.has(row.stamp))
+    const visits = history.map((row) => row.url)
+    const visitTimes = Object.fromEntries(history.flatMap(({ url, at }) => at === undefined ? [] : [[url, at]]))
     const snapshot = browsingSnapshot(
-      { tabs: s.open.map((tab) => ({ id: idOf(tab), priv: s.privates.includes(tab) })), visits, cur: idOf(s.selected) },
+      { tabs: s.open.map((tab) => ({ id: idOf(tab), priv: s.privates.includes(tab) })), visits, visitTimes, cur: idOf(s.selected) },
       (id) => host.web === undefined ? host.session.info(id) : host.web.info(id),
     )
     if (host.web === undefined) try hosted("saveBrowsingState", (plugin, session) => plugin.saveBrowsingState({ session, ...snapshot }))
     else try saveWebBrowsing(snapshot)
-    return { type: "saved", ticket: write, ok: true, now: untimed }
-  } catch () => ({ type: "saved", ticket: write, ok: false, now: untimed })
+  }, "saving the Browser session")
+  if (edit !== undefined) try pages.finishHistory(edit, result)
+  return { type: "saved", ticket: write, ok: result, now: untimed }
+}
+
+// spec/app/browser/index.md, "A history edit is carried by the same session writer"
+export effect function persistHistory(ticket: number, stamps: ReadonlySet<number>): boolean!!(Pages | Tabs.Machine) {
+  if (!Tabs.canHistoryChanged(try (try Tabs.Machine).get())) return false
+  const pages = try Pages
+  const edit = { ticket, stamps }
+  if (!(try pages.stageHistory(edit))) return false
+  if (!(try tellTabs({ type: "historyChanged" }))) try pages.finishHistory(edit, false)
+  return true
 }
 
 function carryTabs(fx: TabsOut): Job<TabsEvent, TabHost | Pages | Tabs.Machine, []> {
@@ -181,25 +230,29 @@ function carryTabs(fx: TabsOut): Job<TabsEvent, TabHost | Pages | Tabs.Machine, 
 effect function erased(): TabsEvent!!(TabHost | Pages) {
   return effect {
     const host = try TabHost
+    const pages = try Pages
+    const edit = try pages.historyEdit()
+    if (edit !== undefined) try pages.finishHistory(edit, false)
     if (host.web === undefined) try hosted("clearBrowsingData", (plugin, session) => plugin.clearBrowsingData({ session }))
     else {
       try saveWebBrowsing({})
       try sync(() => host.web?.clear())
     }
-    try (try Pages).keepVisits([])
+    try pages.wipeHistory()
     return { type: "erased", ok: true }
   } catch () => ({ type: "erased", ok: false })
 }
 
 // spec/app/browser/library.md, "A page that commits in a normal tab is counted in history, which keeps the newest hundred"
-effect function visited(tab: number, load: number): void!!(Pages | TabHost | Tabs.Machine) {
+effect function visited(tab: number, load: number): void!!(Pages | TabHost | Tabs.Machine | Time) {
   const tabs = try (try Tabs.Machine).get()
   if (!Tabs.canTouch(tabs, tab) || tabs.erasing === "Running") return
   const page = try pageOf(tab)
   const host = try TabHost
-  const url = (try sync(() => host.web?.address(idOf(tab)))) ?? host.session.info(idOf(tab))?.url
+  const info = host.web === undefined ? host.session.info(idOf(tab)) : try sync(() => host.web?.info(idOf(tab)))
+  const url = info?.url
   if (page.load !== load || page.phase !== "Shown" || !savedBrowserUrl(url)) return
-  try (try Pages).visit(url)
+  try (try Pages).visit(url, try (try Time).now(), info?.title)
   try tellTabs({ type: "touch", tab })
 }
 
@@ -212,6 +265,8 @@ effect function went(tab: number, load: number, way: Address.Way): PageEvent!!(T
     const s = try (try Tabs.Machine).get()
     const p = try pageOf(tab)
     if (!s.open.includes(tab) || p.phase !== "Loading" || p.load !== load) return failed
+    elsewhere.delete(idOf(tab))
+    try tellShare(tab, { type: "pageChanged" })
     if (!s.native.includes(tab)) try tellTabs({ type: "load", tab })
     try made(tab, Tabs.kindOf(s, tab))
     const id = idOf(tab)
@@ -232,8 +287,33 @@ effect function went(tab: number, load: number, way: Address.Way): PageEvent!!(T
   } catch () => failed
 }
 
+/** The shown page's guard, as the host last said it: the page a call is for, which the host refuses once it moved on. */
+effect function guardOf(tab: number): Option.Option<BrowserPageGuard>!!TabHost {
+  const host = try TabHost
+  const id = idOf(tab)
+  const info = host.session.info(id)
+  return info?.url === undefined || info.navigation === undefined ? Option.none() : Option.some({ session: host.session.session, id, url: info.url, navigation: info.navigation })
+}
+
+// spec/app/browser/share.md, "The other browser opens, or the owner is told that none could and the page is still here"; spec/app/browser/share.md, "Only an unreachable HTTPS address makes a failed page leave, and only from a normal tab"
+/**
+ * Open the failed page in front in another browser, at the HTTPS address the host named.
+ * A committed page leaves only through the menu's reviewed hand-off (`launchOtherBrowser` in share.vibe), never from here.
+ */
+export effect function leaving(): ShareEvent!!(TabHost | Tabs.Machine | Share.Machine) {
+  const tab = (try (try Tabs.Machine).get()).selected
+  const guard = try guardOf(tab)
+  const share = try (try Share.Machine).get()
+  const failedAt = elsewhere.get(idOf(tab))
+  if (Option.isNone(guard) || !share.stranded || failedAt === undefined) return { type: "launched", ok: false, found: true }
+  const sent = hosted("openFailedPage", (plugin) => plugin.openFailedPage({ ...guard.value, url: failedAt }))
+  const launched = effect { try sent; return { type: "launched", ok: true, found: true } as ShareEvent }
+    catch (failed) => ({ type: "launched", ok: false, found: !String((failed.cause as { message?: unknown } | undefined)?.message ?? failed.cause).includes("No other installed browser") }) as ShareEvent
+  return launched
+}
+
 function carryPage(tab: number) {
-  return (fx: PageOut): Job<PageEvent, TabHost | Pages | Tabs.Machine, []> => match (fx) {
+  return (fx: PageOut): Job<PageEvent, TabHost | Pages | Tabs.Machine | Time, []> => match (fx) {
     when { tag: "Go", let load, let way }: stream(`go ${tab}`, Stream.fromEffect(went(tab, load, way)) |> Stream.filter(%, (event) => event.type === "failed"), { type: "failed", load });
     when { tag: "Halt", let load }: run(`halt ${tab}`, effect {
       const host = try TabHost
@@ -256,7 +336,13 @@ const pages = Layer.effect(Pages, effect {
   const made = new Map<number, PageRuntime>()
   const aims = new Map<number, string>()
   const finds = new Map<number, { text: string; index: number }>()
-  let history: readonly string[] = []
+  let history: readonly HistoryRow[] = []
+  let stamp = 0
+  let editing: HistoryEdit | undefined
+  const changed = try Queue.unbounded<HistoryChange>()
+  const note = (url: string, title?: string, at?: number): HistoryRow => ({
+    url, stamp: ++stamp, ...(title === undefined || title === "" || title === url ? {} : { title }), ...(at === undefined ? {} : { at }),
+  })
   return {
     effect of(tab: number): PageRuntime!! {
       const known = made.get(tab)
@@ -274,11 +360,41 @@ const pages = Layer.effect(Pages, effect {
     seek: (tab: number, text: string) => sync(() => { finds.set(tab, { text, index: 0 }) }),
     sought: (tab: number) => sync(() => finds.get(tab) ?? { text: "", index: 0 }),
     stood: (tab: number, index: number) => sync(() => { finds.set(tab, { text: finds.get(tab)?.text ?? "", index }) }),
-    visits: () => sync(() => history),
-    keepVisits: (visits: readonly string[]) => sync(() => { history = visits }),
-    visit: (url: string) => sync(() => {
-      history = [url, ...history.filter((visit) => visit !== url)].slice(0, DEFAULT_BROWSING_LIMITS.history)
+    history: () => sync(() => history),
+    keepVisits: (urls: readonly string[], times: Readonly<Record<string, number>> | undefined, titles: ReadonlyMap<string, string>) => sync(() => {
+      const live = new Map(history.map((row) => [row.url, row]))
+      history = urls.map((url) => live.get(url) ?? note(url, titles.get(url), times?.[url]))
     }),
+    visit: (url: string, at: number, title: string | undefined) => sync(() => {
+      history = [note(url, title, at), ...history.filter((visit) => visit.url !== url)].slice(0, DEFAULT_BROWSING_LIMITS.history)
+      Queue.offerUnsafe(changed, { kind: "visited", count: history.length })
+    }),
+    historyChanges: Stream.fromQueue(changed),
+    historyEdit: () => sync(() => editing),
+    stageHistory: (edit: HistoryEdit) => sync(() => {
+      if (editing !== undefined) return false
+      editing = edit
+      return true
+    }),
+    finishHistory: (edit: HistoryEdit, ok: boolean) => sync(() => {
+      if (editing !== edit) return
+      editing = undefined
+      const count = history.length
+      const kept = history.filter((one) => !edit.stamps.has(one.stamp))
+      if (ok) history = kept
+      Queue.offerUnsafe(changed, { kind: "edited", ticket: edit.ticket, ok, count, remaining: count - kept.length })
+    }),
+    wipeHistory: () => sync(() => {
+      history = []
+      Queue.offerUnsafe(changed, { kind: "wiped" })
+    }),
+    effect share(tab: number, event: ShareEvent): boolean!! {
+      const context = try area.context
+      const tabs = Context.getOption(context as Context.Context<Tabs.Machine>, Tabs.Machine)
+      const machine = Context.getOption(context as Context.Context<Share.Machine>, Share.Machine)
+      if (Option.isNone(tabs) || Option.isNone(machine) || (try tabs.value.get()).selected !== tab) return false
+      return try (machine.value.send(event) |> Effect.as(%, true) |> Effect.orElseSucceed(%, () => false))
+    },
     effect end(tab: number): void!! {
       const runtime = made.get(tab)
       made.delete(tab)
@@ -301,11 +417,12 @@ const tabs = reacting(Tabs, {
 const told = started(effect {
   const host = try TabHost
   try Stream.runForEach(host.told, effect (said) => {
-    if (said.kind === "framed") {
+    if (said.kind === "framed" || said.kind === "frameBlocked") {
       const { id, load } = said.request
       const tab = tabOf(id)
       if ((try (try Tabs.Machine).get()).open.includes(tab) && (try sync(() => host.web?.current(id, load))) === said.request) {
-        try tellPage(tab, { type: "framed", load })
+        if (said.kind === "framed") try tellPage(tab, { type: "framed", load })
+        else if (try tellPage(tab, { type: "frameBlocked", load })) try sync(() => host.web?.blocked(said.request))
       }
       return
     }
@@ -336,11 +453,25 @@ const told = started(effect {
     const tab = tabOf(change.id)
     const p = try pageOf(tab)
     const { info } = change
-    if (p.phase === "Shown" && info.loading === true && change.documentChanged) try tellPage(tab, { type: "followed" })
+    if (p.phase === "Shown" && info.loading === true && change.documentChanged && (try tellPage(tab, { type: "followed" }))) try tellShare(tab, { type: "pageChanged" })
     const now = try pageOf(tab)
     if (now.phase !== "Loading") return
-    if ((info.error ?? "") !== "") try tellPage(tab, { type: "failed", load: now.load })
-    else if (info.loading !== true && change.committedPage) try tellPage(tab, { type: "committed", load: now.load, secure: secure(info.url ?? "") })
+    if ((info.error ?? "") !== "") {
+      const stranded = Schema.decodeUnknownOption(Stranded)(said.raw)
+      const failedAt = Option.isSome(stranded) ? (stranded.value.elsewhereUrl ?? "") : ""
+      if (failedAt === "") elsewhere.delete(change.id)
+      else elsewhere.set(change.id, failedAt)
+      if (try tellPage(tab, { type: "failed", load: now.load })) try tellShare(tab, { type: "pageFailed", failure: failedAt === "" ? "Refused" : "Unreachable", https: secure(failedAt === "" ? (info.url ?? "") : failedAt) })
+    }
+    else if (info.loading !== true && (try sync(() => host.session.pageBinding(change.id))) !== undefined) {
+      // spec/app/browser/address.md, "A page that replaces its own address at its own origin, without loading another document, is still the same load": a single-page site's Back or Forward settles in place, and the native commit says so.
+      const before = URL.parse(change.previous?.url ?? "")
+      const after = URL.parse(info.url ?? "")
+      if (before !== null && after !== null && before.href !== after.href && info.committed === true && change.previous?.loading !== true) {
+        try tellPage(tab, { type: "readdressed", load: now.load, sameOrigin: before.origin === after.origin, sameDocument: true })
+      }
+      try tellPage(tab, { type: "committed", load: now.load, secure: secure(info.url ?? "") })
+    }
   })
 }, "the tab host")
 
@@ -373,12 +504,39 @@ effect function present(tab: number, host: TabHost.Shape): void!! {
     : plugin.value.present({ session: host.session.session, id: idOf(tab), ...place })))
 }
 
+// spec/app/settings/index.md, "The owner can open Password manager from the Browser menu"
+/** Open Password manager with the Settings root as its parent. */
+export const openPasswords: void!!(Tabs.Machine | Shell | Settings) = effect {
+  const shell = try Shell
+  const tabs = try Tabs.Machine
+  if (!showing(try shell.get(), "Browser") || (try tabs.get()).layer !== "Menu") return
+  if (!(try contained(tabs.send({ type: "uncover" }, (before) => before.layer === "Menu"), "closing the Browser menu"))) return
+  if (try contained(shell.send({ type: "openView", view: "Settings" }, (before) => showing(before, "Browser")), "opening Settings")) {
+    if (showing(try shell.get(), "Settings")) try contained((try Settings).send({ type: "openBrowserPasswords" }), "opening Password manager")
+  }
+}
+
+// spec/app/browser/share.md, "Story: Open the page in another browser"
+/** Place the current native tab before its plugin opens an Android action for it. */
+export effect function presentForAction(id: string): boolean!!(TabHost | Tabs.Machine | Shell) {
+  const tabs = try (try Tabs.Machine).get()
+  const position = placeOfPage()
+  if (position === undefined || idOf(tabs.selected) !== id || !Tabs.pageShown(tabs) || !showing(try (try Shell).get(), "Browser")) return false
+  return try contained(hosted("present", (plugin, session) => plugin.present({ session, id, ...position })), "showing the Browser page")
+}
+
 // spec/app/browser/downloads.md, "Story: Download a file"
-/** Open the current native Browser's Downloads list after its menu closes. */
+/** Open the phone's Browser downloads, or enter Files from the enclosing browser. */
 export const openDownloads: void!!(Tabs.Machine | Shell | TabHost) = effect {
-  if (!showing(try (try Shell).get(), "Browser") || (try (try Tabs.Machine).get()).layer !== "Menu") return
+  const shell = try Shell
+  if (!showing(try shell.get(), "Browser") || (try (try Tabs.Machine).get()).layer !== "Menu") return
   if (!(try tellTabs({ type: "uncover" }))) return
-  try contained(hosted("downloads", (plugin, session) => plugin.downloads({ session })), "opening Browser downloads")
+  if ((try TabHost).web !== undefined) {
+    if (!(try contained(shell.send({ type: "goHome" }), "opening Files as an app"))) return
+    if ((try shell.get()).trail.length === 0) try contained(shell.send({ type: "openView", view: "Files" }), "opening Files from Browser")
+  } else {
+    try contained(hosted("downloads", (plugin, session) => plugin.downloads({ session })), "opening Browser downloads")
+  }
 }
 
 /** Draw the page shown where the Browser marks its place, once that place is drawn. */
@@ -391,18 +549,18 @@ export const placed: void!!(Tabs.Machine | Shell | TabHost) = effect {
 /** The Browser's tabs, kept across restarts, and each tab's page, carried out through the phone's tab host. */
 export const browser = Layer.provideMerge(together(tabs, told, shown), pages)
 
-// spec/app/messages/index.md, "Only the newest read of the open conversation is shown, and it marks the shown messages read only where Alpha is the phone's SMS app"; spec/app/browser/index.md, "Story: Open, pick and close tabs"
-/** A link the owner tapped in Messages opens in one selected normal Browser tab through the address machine. */
-export effect function openMessageLink(href: string): boolean!!(Tabs.Machine | Pages | Shell | TabHost) {
+// spec/app/messages/index.md, "Only the newest read of the open conversation is shown, and it marks the shown messages read only where Alpha is the phone's SMS app"; spec/app/inbox/message.md, "Only an https link without credentials in it can be reviewed and opened; any other link stays text"; spec/app/browser/index.md, "Story: Open, pick and close tabs"
+/** A link the owner chose from a message or Ask Alpha opens in one selected normal tab. */
+export effect function openMessageLink(href: string, from: "Messages" | "Inbox" | "Ask Alpha" = "Messages", current: Effect.Effect<boolean> = succeed(true)): boolean!!(Tabs.Machine | Pages | Shell | TabHost) {
   const address = messageHref(href)
   const shell = try Shell
-  if (address === undefined || Option.isNone((try TabHost).plugin) || !showing(try shell.get(), "Messages")) return false
+  if (address === undefined || Option.isNone((try TabHost).plugin) || (from !== "Ask Alpha" && !showing(try shell.get(), from)) || !(try current)) return false
   const input = inputOf(address)
   if (Address.verdict(input) !== "Open") return false
   if (!(try contained(shell.send({ type: "openView", view: "Browser" }), "opening a Message link"))) return false
   const tabs = try Tabs.Machine
   const steady = try race(Stream.runHead(Stream.filter(tabs.changes, Tabs.steady)), Effect.as(sleep(2500), Option.none()))
-  if (Option.isNone(steady) || !showing(try shell.get(), "Browser")) return false
+  if (Option.isNone(steady) || !showing(try shell.get(), "Browser") || !(try current)) return false
   const before = try tabs.get()
   if (!Tabs.canOpenTab(before, "Normal") || !(try tellTabs({ type: "openTab", kind: "Normal" }))) return false
   const tab = before.issued + 1

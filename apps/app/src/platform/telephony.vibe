@@ -2,7 +2,7 @@
 import type { DeferredDeletionsClient, StagedDeletion } from "@elizaos/os-bridges"
 import type { AddressBookClient, ContactNamesClient, NameSurface } from "@elizaos/os-bridges"
 import type { MessagesClient, MmsBinding, MmsSendResult, OperationId } from "@elizaos/os-bridges"
-import type { PhoneClient, PhoneNumber } from "@elizaos/os-bridges"
+import type { PhoneClient, PhoneNumber, TelephonySubscription } from "@elizaos/os-bridges"
 
 module held {
   import { registerPlugin } from "@capacitor/core"
@@ -13,7 +13,7 @@ module held {
   import { messagesClient, type MessagesNativePlugin } from "@elizaos/os-bridges"
   import { parseMmsSendResult, type MmsBinding, type OperationId } from "@elizaos/os-bridges"
   import { phoneClient, type PhoneNativePlugin, type PhoneNumber } from "@elizaos/os-bridges"
-  import { composerPlugin } from "./composerPort.vibe"
+  import { approvedSmsPlugin, composerPlugin, type SmsApproval } from "./composerPort.vibe"
 
   type OwnerDialPlugin = PhoneNativePlugin & {
     classifyDialNumber(input: { number: PhoneNumber }): Promise<unknown>
@@ -56,7 +56,7 @@ module held {
   function make() {
     const journal = registerPlugin<Journal>("ElizaActionJournal")
     const nativePhone = registerPlugin<OwnerDialPlugin & MessagesNativePlugin>("ElizaTelephony")
-    const addressBook = addressBookPlugin()
+    const addressBook = addressBookPlugin("ElizaContacts")
     return {
       deletions: createDeferredDeletions(journal),
       deletionReceipt: (staged: StagedDeletion) => deletionReceipt(journal, staged),
@@ -66,6 +66,8 @@ module held {
       messages: messagesClient(nativePhone, journal),
       composer: (trustedTap: boolean, signal: AbortSignal, current: () => Promise<boolean>) =>
         messagesClient(composerPlugin(nativePhone, trustedTap, signal, current), journal),
+      approvedSms: (approval: SmsApproval, signal: AbortSignal, current: () => Promise<boolean>) =>
+        messagesClient(approvedSmsPlugin(nativePhone, approval, signal, current), journal),
       async mmsReceipt(binding: MmsBinding, operation: OperationId, hash: string) {
         const raw = await nativePhone.mmsSendResult({ operationId: operation })
         return parseMmsSendResult(raw, binding, operation, hash)
@@ -91,6 +93,7 @@ module held {
 }
 import { clients, codeOf, tagOf, type AndroidDialKind, type TelephonyDeletionPhase } from held
 import { registered } from "./device.vibe"
+import type { SmsApproval } from "./composerPort.vibe"
 
 /** eliza's clients of an Alpha image's telephony: calls, the call log and voicemail; conversations and sends; the address book. */
 export interface TelephonyClients {
@@ -99,6 +102,7 @@ export interface TelephonyClients {
   ownerDialScreen(number: PhoneNumber): Promise<boolean>
   readonly messages: MessagesClient
   composer(trustedTap: boolean, signal: AbortSignal, current: () => Promise<boolean>): MessagesClient
+  approvedSms(approval: SmsApproval, signal: AbortSignal, current: () => Promise<boolean>): MessagesClient
   /** Reads the native record and checks it against the original review digest, without the picture bytes. */
   mmsReceipt(binding: MmsBinding, operation: OperationId, hash: string): Promise<MmsSendResult | undefined>
   readonly contacts: AddressBookClient
@@ -117,6 +121,18 @@ export error TelephonyAbsent { method: string }
  */
 export error TelephonyRefused { method: string; code: string | undefined; tag: string; cause: unknown }
 
+/** These bridge results prove that Android did not stage a telephony deletion. */
+export function deletionRefused(failure: TelephonyAbsent | TelephonyRefused): boolean {
+  if (failure instanceof TelephonyAbsent) return true
+  if (failure.tag === "BridgeUnavailable" || failure.tag === "InvalidMessageRequest"
+    || failure.tag === "PhoneRequestRefused" || failure.tag === "VoicemailRefused") return true
+  const cause = failure.cause
+  if (failure.method === "deleteVoicemail" && (failure.tag === "NativeRejection" || failure.tag === "MalformedReply")
+    && typeof cause === "object" && cause !== null && "method" in cause
+    && (cause.method === "status" || cause.method === "voicemailStatus")) return true
+  return failure.code === "invalid" || failure.code === "permission-required" || failure.code === "role-required"
+}
+
 /** The phone's telephony, through eliza's clients of the image's plugins; absent off the image. */
 export service Telephony {
   clients(): TelephonyClients!TelephonyAbsent
@@ -130,10 +146,15 @@ export effect function namesOf(surface: NameSurface, numbers: ReadonlyArray<stri
   return new Map(named.flatMap((one) => (one.name === null ? [] : [[one.number, one.name as string] as const])))
 }
 
+/** The SIM a text goes out on when none was picked: the phone's default for texts or its only SIM; with several and no default, none. */
+export function textingDefault(sims: ReadonlyArray<TelephonySubscription>): number | undefined {
+  return sims.find((one) => one.defaultSms)?.id ?? (sims.length === 1 ? sims[0].id : undefined)
+}
+
 /** One call of eliza's clients: refused before the phone where there is no image, and typed where the phone refused. */
-export effect function telephony<A>(method: string, run: (clients: TelephonyClients) => Promise<A>): A!(TelephonyAbsent | TelephonyRefused)!Telephony {
+export effect function telephony<A>(method: string, run: (clients: TelephonyClients, signal: AbortSignal) => Promise<A>): A!(TelephonyAbsent | TelephonyRefused)!Telephony {
   const found = try (try Telephony).clients()
-  return try nativeCall(method, () => run(found))
+  return try nativeCall(method, (signal) => run(found, signal))
 }
 
 effect function nativeCall<A>(method: string, call: (signal: AbortSignal) => Promise<A>): A!TelephonyRefused {

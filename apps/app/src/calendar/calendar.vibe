@@ -11,23 +11,31 @@ import { pageOffered } from "../../gen/app__calendar__presentation.ts"
 import { type Provider, answersOffered, cancellation, mutability, ownAnswer } from "../../gen/app__calendar__writing.ts"
 import type * as Changes from "../../gen/app__calendar__agent.effect.vibe"
 import type * as Linking from "../../gen/app__calendar__link.effect.vibe"
+import type * as Reopen from "../../gen/app__calendar__reminderReopen.effect.vibe"
+import type { Machine as Toasts } from "../../gen/app__notices__toasts.effect.vibe"
 import type { AndroidCalendarEvent } from "@elizaos/os-bridges"
 import { Agent } from "../platform/agent.vibe"
+import type { Said } from "../notices/toasts.vibe"
 import type { Cloud } from "../platform/cloud.vibe"
+import type { Device } from "../platform/device.vibe"
 import { Machine as Settings } from "../../gen/app__settings.effect.vibe"
 import { PhoneCalendar } from "../platform/calendar.vibe"
 import { type Failure, ask } from "../platform/remote.vibe"
 import { SystemSettings } from "../platform/systemSettings.vibe"
+import { remindersStore } from "../reminders/store.ts"
 import { type Job, answer, contained, due, following, hearing, reacting, run, started, together, untimed } from "../runtime/reactor.vibe"
 import { Time } from "../runtime/time.vibe"
-import { type Person, type Read, shown } from "./shown.ts"
+import { type Person, type Read, androidWindowOf, onDay, repeatText, shown } from "./shown.ts"
+import { datedReminders } from "./reminders.ts"
 import { civilDay, dayStart, feedParams, localDate, openLink, plainHttps, readWindow } from "./time.ts"
 
 /** An event of the phone's calendars as the screen shows it. */
 function phoneRow(event: AndroidCalendarEvent): Read {
+  const begin = event.allDay ? localDate(new Date(event.begin).toISOString()) : event.begin
+  const end = event.allDay ? localDate(new Date(event.end).toISOString()) : event.end
   return {
     key: event.id, calendarId: event.calendarId, title: event.title ?? "", place: event.location ?? "", notes: event.body ?? "",
-    begin: event.begin, end: event.end, allDay: event.allDay, recurring: event.recurring, link: "", video: "",
+    begin, end, allDay: event.allDay, recurring: event.recurring, repeat: repeatText([], event.recurring), link: "", video: "",
     people: [], answer: "NotInvited", answerable: false, managed: false, series: "", editable: true, cancel: "OrganizerCancel", version: "",
   }
 }
@@ -56,6 +64,7 @@ schema FeedEvent {
   readonly provider: string
   readonly attendees: ReadonlyArray<FeedAttendee>
   readonly recurringEventId?: string | null
+  readonly recurrence?: ReadonlyArray<string> | null
   readonly updatedAt: string
   readonly metadata: { readonly etag?: string; readonly managed?: boolean }
   readonly organizer: { readonly self?: boolean } | null
@@ -94,7 +103,7 @@ function googleRow(event: FeedEvent): Read {
   }))
   return {
     key: event.id, calendarId: event.calendarId, title: event.title, place: event.location, notes: event.description,
-    begin, end, allDay: event.isAllDay, recurring,
+    begin, end, allDay: event.isAllDay, recurring, repeat: repeatText(event.recurrence ?? [], recurring),
     link: pageOffered(event.provider === "google", plainHttps(page), false) ? page : "", video: event.conferenceLink ?? "",
     people, answer, answerable: answersOffered(mode, answer, true, managed(event), recurring), managed: managed(event), series: event.recurringEventId ?? "",
     editable: mutability(providers[event.provider] ?? "IcsProvider", versionOf(event) !== "") === "Editable", cancel: mode,
@@ -173,7 +182,10 @@ effect function hand(id: number, to: "Maps" | "AndroidCalendar" | "VideoCall" | 
   if (to === "Maps") return try (try Shell.Machine).send({ type: "openView", view: "Maps" })
   if (to === "VideoCall") return openLink(row.video)
   if (to === "GoogleCalendar") return row.source === "Google" ? openLink(row.link) : false
-  if (row.source === "Phone") return try (try PhoneCalendar).open(row.key, row.begin, row.end)
+  if (row.source === "Phone") {
+    const dates = androidWindowOf(row)
+    return try (try PhoneCalendar).open(row.key, dates.begin, dates.end)
+  }
 }
 
 function carry(fx: Out): Job<Event, PhoneCalendar | Agent | SystemSettings | Shell.Machine | Settings | Time | KeyValueStore.KeyValueStore, []> {
@@ -202,7 +214,7 @@ effect function today(): Event!!Time {
   return { type: "dayBegins", day: civilDay(try (try Time).now()) }
 }
 
-// spec/app/calendar/index.md, "When the date changes, a calendar on today moves to the new today, and any other day stays the same date"; spec/app/calendar/index.md, "While Calendar is in front it reads again once a minute, never during a read"
+// spec/app/calendar/index.md, "When the date changes, a calendar on today moves to the new today, and any other day stays the same date"; spec/app/calendar/index.md, "While Calendar is in front it reads again once a minute, never during a read and never under an open event"
 const kept = reacting(View, {
   open: Effect.map(today(), (event) => [event] as const),
   carry,
@@ -241,8 +253,33 @@ const widened = following(Canvas.Machine, (canvas) => canvas.wide, View.Machine,
 // spec/app/calendar/index.md, "A read asked for during a write waits for it, and follows it once"
 const writing = following(Writes.Machine, (form) => inFlight(form), View.Machine, (busy): Event => ({ type: "writeChanged", writing: busy }))
 
+// spec/app/calendar/index.md, "Story: See reminders among my events"
+const localReminders = Stream.callback<void>((queue) => acquireRelease(sync(() => {
+  const publish = () => { Queue.offerUnsafe(queue, undefined) }
+  const unsubscribe = remindersStore.subscribe(publish)
+  publish()
+  return unsubscribe
+}), (unsubscribe) => sync(unsubscribe)))
+
+const reminders = started(effect {
+  const view = try View.Machine
+  const visiting = Stream.changesWith(view.changes, (before, after) => before.front === after.front && before.anchor === after.anchor && before.reminder === after.reminder)
+  try Stream.runForEach(Stream.zipLatest(visiting, localReminders), () => effect {
+    const state = try view.get()
+    if (!state.front) return
+    const rows = datedReminders(remindersStore.snapshot())
+    const count = rows.filter((row) => onDay(row, state.anchor)).length
+    if (View.canRemindersChanged(state, state.anchor, count)) {
+      try contained(view.send({ type: "remindersChanged", day: state.anchor, count }), "showing the day's reminders")
+    }
+    if (View.canCloseReminder(state) && !rows.some((row) => row.id === state.reminder)) {
+      try contained(view.send({ type: "closeReminder" }), "closing a reminder that went away")
+    }
+  })
+}, "reading reminders for Calendar")
+
 /** Calendar's view: in memory, told today by Alpha's time and the shell, and what it may read by Android and the agent. */
-export const calendar = together(kept, told, fronted, returned, widened, writing)
+export const calendar = together(kept, told, fronted, returned, widened, writing, reminders)
 
 /** Every machine of the Calendar area, which its screen reads, and Alpha's time. */
-export type Calendared = View.Machine | Writes.Machine | Changes.Machine | Linking.Machine | Held.Machine | Cloud | Time | KeyValueStore.KeyValueStore
+export type Calendared = View.Machine | Writes.Machine | Changes.Machine | Linking.Machine | Held.Machine | Canvas.Machine | Reopen.Machine | Shell.Machine | Cloud | Device | Time | KeyValueStore.KeyValueStore | Toasts | Said

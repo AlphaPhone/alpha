@@ -5,7 +5,7 @@ import { type CalendarScene, calendarRoutes, calendarScene } from "./calendar.ts
 import { type ClockScene, clockRoutes, clockScene } from "./clock.ts";
 import { type MapsScene, mapsRoutes, mapsScene } from "./maps.ts";
 import { type NotesScene, notesRoutes, notesScene } from "./notes.ts";
-import { cloudRoutes } from "./cloud.ts";
+import { type CheckoutScene, cloudRoutes } from "./cloud.ts";
 import { type InboxScene, inboxRoutes, inboxScene } from "./inbox.ts";
 import { type PlatformScene, platformRoutes, platformScene } from "./platform.ts";
 import { type RemindersScene, remindersRoutes, remindersScene } from "./reminders.ts";
@@ -16,19 +16,23 @@ import { type LauncherScene, launcherScene } from "./launcher.ts";
 import { type SettingsScene, settingsScene } from "./settings.ts";
 import { type FilesScene, filesScene } from "./files.ts";
 import { type PhotosScene, photosScene } from "./photos.ts";
+import type { MailLeaseScene } from "./phone.ts";
 import { type TelephonyScene, telephonyRoutes, telephonyScene } from "./telephony.ts";
 import { textReviewRoute } from "./text-review.ts";
 import { type UpdateScene, updateScene } from "./update.ts";
 import { type VoiceScene, voiceScene } from "./voice.ts";
 import { type BrowserScene, browserScene } from "./browser.ts";
+import { type WalletScene, walletRoutes, walletScene } from "./wallet.ts";
 
 export interface Scene {
   phone: boolean;
   image: boolean;
   now: number;
   signedIn: boolean;
-  /** Whether the phone holds a device lease for mail and calendar: a phone signed in before mail leases existed holds none. */
-  mailLease: boolean;
+  checkout?: CheckoutScene;
+  /** The phone's device lease for mail and calendar: a phone signed in before mail leases existed holds none. */
+  readonly mailLease: MailLeaseScene;
+  residentAvailable: boolean;
   readonly secrets: Map<string, string>;
   readonly slots: Set<string>;
   readonly sample: SampleScene;
@@ -50,12 +54,13 @@ export interface Scene {
   readonly update: UpdateScene;
   readonly voice: VoiceScene;
   readonly browser: BrowserScene;
+  readonly wallet: WalletScene;
 }
 
 export function scene(): Scene {
   return {
-    phone: false, image: false, now: 0, signedIn: true, secrets: new Map(), slots: new Set(),
-    mailLease: true,
+    phone: false, image: false, now: 0, signedIn: true, residentAvailable: true, secrets: new Map(), slots: new Set(),
+    mailLease: { held: true, answer: "SignsIn", asked: 0, heldBack: 0 },
     sample: sampleScene(),
     ask: askScene(),
     launcher: launcherScene(),
@@ -75,6 +80,7 @@ export function scene(): Scene {
     update: updateScene(),
     voice: voiceScene(),
     browser: browserScene(),
+    wallet: walletScene(),
   };
 }
 
@@ -85,6 +91,7 @@ export function services(world: Scene) {
   const review = world.telephony.textReview;
   return {
     agent: answering([
+      () => world.residentAvailable ? undefined : new Response(null, { status: 503 }),
       health,
       ...sampleRoutes(world.sample),
       ...askRoutes(world.ask),
@@ -96,9 +103,10 @@ export function services(world: Scene) {
       ...workflowRoutes(world.workflows),
       ...platformRoutes(world.platform),
       ...telephonyRoutes(world.telephony),
+      ...walletRoutes(world.wallet, () => world.now),
     ]),
     cloud: answering([
-      ...cloudRoutes(() => world.signedIn),
+      ...cloudRoutes(() => world.signedIn, () => world.now, world.checkout),
       ...inboxRoutes(world.inbox),
       ...mapsRoutes(world.maps, () => world.now),
     ]),

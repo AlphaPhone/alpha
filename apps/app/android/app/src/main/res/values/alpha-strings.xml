@@ -7,4 +7,11 @@
     <string name="alpha_channel_group_mail_briefs">Mail and briefs</string>
     <string name="alpha_channel_group_workflows">Workflows</string>
     <string name="alpha_channel_group_ongoing">Ongoing activity</string>
+    <string name="alpha_gmail_channel_name">New Gmail messages</string>
+    <string name="alpha_gmail_channel_description">Tells you when new unread mail arrives. Never shows the sender or subject. Android may delay checks.</string>
+    <string name="alpha_gmail_title">New mail in Gmail</string>
+    <string name="alpha_gmail_text">Tap to open Inbox.</string>
+    <string name="alpha_gmail_public_title">Alpha Phone</string>
+    <string name="alpha_gmail_public_text">Tap to open.</string>
+    <string name="alpha_gmail_ask">Ask Alpha</string>
 </resources>

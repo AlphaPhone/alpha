@@ -1,6 +1,7 @@
-import { Newspaper } from "lucide-react";
+import { ChevronRight } from "lucide-react";
+import { cn } from "../../lib/cn.ts";
 import { Avatar } from "../Avatar.tsx";
-import { AssistantCardFrame, type AssistantCardFrameProps } from "./AssistantCardFrame.tsx";
+import { AssistantCardRows, type AssistantCardFrameProps } from "./AssistantCardFrame.tsx";
 
 export type AssistantDigestRow = {
   /** Keeps the row in place between replies. */
@@ -18,21 +19,20 @@ export type AssistantDigestCardProps = Pick<AssistantCardFrameProps, "settled" |
   rows: AssistantDigestRow[];
 };
 
-/** A digest of messages a reply gives; pressing its head opens the inbox. */
-export function AssistantDigestCard({ title, rows, ...frame }: AssistantDigestCardProps) {
+/** A digest of messages a reply gives, a row for each message under one another; pressing it opens the inbox. */
+export function AssistantDigestCard({ title, rows, onOpen, settled = false }: AssistantDigestCardProps) {
   return (
-    <AssistantCardFrame icon={<Newspaper />} title={title} {...frame}>
-      <ul className="flex flex-col gap-3">
-        {rows.map((row) => (
-          <li key={row.id} className="flex items-center gap-3">
-            <Avatar name={row.who} size="sm" />
-            <span className="flex min-w-0 flex-1 flex-col">
-              <span className="text-sm font-semibold">{row.who}</span>
-              <span className="truncate text-sm text-muted-foreground">{row.text}</span>
-            </span>
-          </li>
-        ))}
-      </ul>
-    </AssistantCardFrame>
+    <AssistantCardRows title={title} onOpen={onOpen} settled={settled}>
+      {rows.map((row) => (
+        <span key={row.id} className="flex items-center gap-3 border-b border-border px-4 py-3 last:border-b-0">
+          <Avatar name={row.who} className="size-8.5 bg-accent text-xs font-bold" />
+          <span className="flex min-w-0 flex-1 flex-col">
+            <span className={cn("truncate text-sm font-semibold", settled && "text-muted-foreground")}>{row.who}</span>
+            <span className="truncate text-caption text-muted-foreground">{row.text}</span>
+          </span>
+          <ChevronRight aria-hidden className="size-3.5 shrink-0 text-muted-foreground" />
+        </span>
+      ))}
+    </AssistantCardRows>
   );
 }

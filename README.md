@@ -51,7 +51,10 @@ command and that pack's agent, with every plugin and action the phone's pack
 allows, as processes of that run, with a scripted model in place of a paid
 one, and stops them with it; the journeys run the same pack.
 `ALPHA_DEV_MODEL=cerebras` asks Cerebras's own API on the owner's key
-instead, so the agent's real tools run on a real model. `ALPHA_FAKES=1 pnpm dev`
+instead, so the agent's real tools run on a real model. `ALPHA_PHONE=1 pnpm dev`
+reaches them through the fake phone's plugins, so Home draws Phone, Messages
+and Contacts as on an Alpha image, though sign-in, Calendar, Files and Cloud
+speech are then the fake phone's. `ALPHA_FAKES=1 pnpm dev`
 serves the app over the journeys' fakes instead, and `ALPHA_FAKES=phone` over
 the fake phone's plugins.
 

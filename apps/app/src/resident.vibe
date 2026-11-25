@@ -9,6 +9,7 @@ import { haptics } from "./shell/haptics.vibe"
 import { canvas } from "./shell/canvas.vibe"
 import { focus } from "./shell/focus.vibe"
 import { mailbox } from "./inbox/mailbox.vibe"
+import { notices as inboxNotices } from "./inbox/notices.vibe"
 import { mailQuestions } from "./inbox/mail-context.vibe"
 import { operations } from "./inbox/operations.vibe"
 import { composer as inboxComposer } from "./inbox/composer.vibe"
@@ -32,6 +33,8 @@ import { remindersResident } from "./reminders/reminders.vibe"
 import { listing as workflowList } from "./workflows/list.vibe"
 import { digestBrief } from "./workflows/brief.vibe"
 import { browserDigestDelivery } from "./workflows/browser-digests.vibe"
+import { nativeDigestDelivery } from "./workflows/native-digests.vibe"
+import { nativeApprovalOwner } from "./workflows/native-approval.vibe"
 
 /**
  * The machines that live from launch to exit: those another area follows or tells, and those that must act while
@@ -48,6 +51,7 @@ const machines = together(
   preferences,
   updating,
   mailbox,
+  inboxNotices,
   mailQuestions,
   operations,
   inboxComposer,
@@ -71,6 +75,8 @@ const machines = together(
   workflowList,
   digestBrief,
   browserDigestDelivery,
+  nativeDigestDelivery,
+  nativeApprovalOwner,
 )
 
 /** The resident machines, closed: each machine one of them follows or tells is among them. */
