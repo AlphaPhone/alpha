@@ -74,22 +74,28 @@ pure def canOpenDigests(l: Listing): bool =
 
 pure def openDigests(l: Listing): Listing = { ...l, place: ListingDigests({ adding: l.place == ListingAdd, result: 0 }) }
 
-pure def canOpenDigestResult(l: Listing, result: int): bool = match l.place {
-  | ListingDigests(d) => result >= 1 and d.result == 0
-  | _ => false
-}
+pure def canOpenDigestResult(l: Listing, result: int): bool =
+  val place = l.place
+  match place {
+    | ListingDigests(d) => result >= 1 and d.result == 0
+    | _ => false
+  }
 
-pure def openDigestResult(l: Listing, result: int): Listing = match l.place {
-  | ListingDigests(d) => { ...l, place: ListingDigests({ ...d, result: result }) }
-  | _ => l
-}
+pure def openDigestResult(l: Listing, result: int): Listing =
+  val place = l.place
+  match place {
+    | ListingDigests(d) => { ...l, place: ListingDigests({ ...d, result: result }) }
+    | _ => l
+  }
 
 pure def canClosePlace(l: Listing): bool = l.place != ListingRows
 
-pure def closePlace(l: Listing): Listing = match l.place {
-  | ListingDigests(d) => { ...l, place: if (d.result >= 1) ListingDigests({ ...d, result: 0 }) else if (d.adding) ListingAdd else ListingRows }
-  | _ => { ...l, place: ListingRows }
-}
+pure def closePlace(l: Listing): Listing =
+  val place = l.place
+  match place {
+    | ListingDigests(d) => { ...l, place: if (d.result >= 1) ListingDigests({ ...d, result: 0 }) else if (d.adding) ListingAdd else ListingRows }
+    | _ => { ...l, place: ListingRows }
+  }
 
 pure def alwaysOnlyTheListShowsFilters(l: Listing): bool = l.sheet implies l.place == ListingRows
 ```
