@@ -6,6 +6,7 @@ import { Machine as Shell } from "../gen/app__shell.effect.vibe";
 import { Machine as Workflows } from "../gen/app__workflows__list.effect.vibe";
 import { at, mounts } from "../src/areas.ts";
 import { single } from "../src/runtime/single.ts";
+import { home } from "../src/shell/shell.vibe";
 import { button, closeAll, later, only, open, seen, until } from "./alpha.tsx";
 import { scene } from "./fakes/scene.ts";
 import sample from "./sample/index.tsx";
@@ -66,7 +67,7 @@ it("Keeps a browser frame while leaving and reopening Browser", async () => {
   const bookmark = { url: "https://archive.example/reference", title: "Saved reference" };
   await savedBrowserRecords([first, second], [bookmark]);
   try {
-    await open(scene(), only("home", "view:Browser", "view:Files", "assistant"));
+    const { alpha } = await open(scene(), only("home", "view:Browser", "view:Files", "assistant"));
     await page.getByRole("button", { name: "Browser", exact: true }).click();
     const link = page.getByRole("link", { name: "Open in browser" });
     await expect.element(link).toHaveAttribute("href", second.url);
@@ -96,7 +97,7 @@ it("Keeps a browser frame while leaving and reopening Browser", async () => {
     if (!iframe) throw new Error("the browser frame is missing");
     await expect.poll(() => iframe.contentDocument).toBeNull();
 
-    await page.getByRole("button", { name: "Back", exact: true }).click();
+    await alpha.runtime.runPromise(home());
     await expect.element(page.getByRole("button", { name: "Browser", exact: true })).toBeVisible();
     await expect.element(link).not.toBeInTheDocument();
     await page.getByRole("button", { name: "Browser", exact: true }).click();
