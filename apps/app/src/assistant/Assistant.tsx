@@ -471,6 +471,7 @@ export function Assistant({ runtime, messageActions, speech, canReadAloud = fals
         }}
         composer={{
           ...speechProps,
+          ...(live && !open ? { variant: "bar" as const } : {}),
           voice: renderVoice?.({ compactDock: compact, atBar: assistantDetent === "Bar", onKeyboard }),
           onDictate: onComms || inFlight(talking.turn) || !speech?.onDictate ? undefined : () => {
             openWithFocus(false);

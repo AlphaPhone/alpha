@@ -14,7 +14,7 @@ export type AssistantConversationProps = Omit<ComponentProps<"section">, "childr
   transcript: AssistantTranscriptProps;
   /** The dictation recorder within the open conversation. */
   voicePanel?: ReactNode;
-  /** The composer at the foot. */
+  /** The composer at the foot; its variant follows the detent unless given, as a sheet pulled up from the bar keeps the bar under it. */
   composer: AssistantComposerProps;
   /** How far Ask Alpha is raised: resting on its bar, open as a half-screen sheet, or filling the screen. */
   detent?: "bar" | "sheet" | "full";
@@ -50,7 +50,7 @@ export function AssistantConversation({ header, attachmentNotice, transcript, vo
         {panel}
         <AssistantTranscript {...transcript} className={cn("flex-1", transcript.className)} />
       </div>
-      <AssistantComposer {...composer} voice={panel ? undefined : composer.voice} hidden={Boolean(panel) || composer.hidden} variant={resting ? "bar" : "sheet"} />
+      <AssistantComposer {...composer} voice={panel ? undefined : composer.voice} hidden={Boolean(panel) || composer.hidden} variant={composer.variant ?? (resting ? "bar" : "sheet")} />
     </section>
   );
 }
