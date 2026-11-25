@@ -81,6 +81,8 @@ pure def stepAnArchiveFollowsTheReviewShown(before: Records, after: Records, out
 
 ### Records all archived start the agent again; some kept are read again and can be tried again; an unknown outcome asks for a phone restart
 
+When no archive was sent, Alpha discards the reviewed count and requires a new reading before another confirmation.
+
 ```quint
 pure def canArchived(r: Records, ticket: int): bool = A::canConclude(r.attempt, ticket)
 
@@ -88,7 +90,8 @@ pure def archived(r: Records, ticket: int, result: Archived): Moved =
   val concluded = { ...r, attempt: A::conclude(r.attempt, result == AllArchived, result != ArchiveUnknown) }
   if (result == SomeArchived and r.showing) asking(concluded.kept, concluded)
   else if (result == AllArchived) { state: { ...concluded, showing: false }, out: List(Cleared) }
-  else { state: { ...concluded, showing: if (result == ArchiveUnknown) false else concluded.showing }, out: List() }
+  else if (result == NoneArchived) { state: { ...concluded, kept: 0, review: R::answer(concluded.review, false) }, out: List() }
+  else { state: { ...concluded, showing: false }, out: List() }
 
 pure def phoneMustRestart(r: Records): bool = r.attempt.outcome == A::Unknown
 ```
