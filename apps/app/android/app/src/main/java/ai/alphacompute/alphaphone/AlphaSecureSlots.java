@@ -15,6 +15,10 @@ final class AlphaSecureSlots {
    "pattern", Pattern.quote(DeviceExecutionJournal.SLOT),
    "access", "nativeOnly",
    "limit", DeviceExecutionJournal.SLOT_BYTES
+  ), Map.of(
+   "pattern", Pattern.quote(AlphaTelephony.JOURNAL_SLOT),
+   "access", "nativeOnly",
+   "limit", AlphaTelephony.JOURNAL_BYTES
   ))
  ));
  private static AlphaSecureSlots shared;
