@@ -25,6 +25,19 @@ const choose = (name: string) => drawn(() => {
   row.click();
 });
 
+/** Open the workflow actions disclosure and choose its visible action. */
+const pressWorkflowAction = (name: string) => drawn(() => {
+  const opener = document.querySelector<HTMLElement>("summary[aria-label='Workflow actions']");
+  const menu = opener?.parentElement;
+  if (opener === null || !(menu instanceof HTMLDetailsElement)) throw new Error("no workflow actions disclosure");
+  expect(menu.open).toBe(false);
+  opener.click();
+  expect(menu.open).toBe(true);
+  const action = [...menu.querySelectorAll("button")].find((one) => one.textContent === name);
+  if (action === undefined) throw new Error(`no workflow action ${name}`);
+  action.click();
+});
+
 /** Press a button inside the open workflow change review. */
 const pressInReview = (name: string) => drawn(() => {
   const found = [...document.querySelectorAll("[aria-label='Review workflow change'] button")].find((one) => one.textContent === name);
@@ -291,13 +304,13 @@ describe("Workflows", () => {
     await until(alpha, area, Definition, (state) => state.detail.status === "Loaded");
     await until(alpha, area, Sheet, (state) => state.history.status === "Loaded");
 
-    await press("Remove workflow");
+    await pressWorkflowAction("Remove workflow");
     expect(document.querySelector("[aria-label='Review workflow change']")?.textContent).toContain("Keeps history; stops future runs.");
     await pressInReview("Cancel");
     await until(alpha, area, Definition, (state) => !state.review.showing);
     expect(world.workflows.changes).toEqual([]);
 
-    await press("Remove workflow");
+    await pressWorkflowAction("Remove workflow");
     await pressInReview("Remove");
     await until(alpha, area, Definition, (state) => state.removed && state.detail.status === "Loaded" && !state.change.live);
     expect(world.workflows.changes).toEqual([{ operation: "remove", version: "monthly-statement-v3" }]);
@@ -313,7 +326,7 @@ describe("Workflows", () => {
 
     await choose("Monthly statement");
     await until(alpha, area, Definition, (state) => state.detail.status === "Loaded" && state.removed);
-    await press("Restore workflow");
+    await pressWorkflowAction("Restore workflow");
     expect(document.querySelector("[aria-label='Review workflow change']")?.textContent).toContain("Restore paused; review before enabling.");
     await pressInReview("Confirm restore");
     await until(alpha, area, Definition, (state) => !state.removed && state.detail.status === "Loaded" && !state.change.live);
