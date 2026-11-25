@@ -106,6 +106,9 @@ export service Pages {
   seek(tab: number, text: string): void!!
   sought(tab: number): { readonly text: string; readonly index: number }!!
   stood(tab: number, index: number): void!!
+  /** Whether the native tab currently requests the desktop version of pages. */
+  desktop(tab: number): boolean!!
+  setDesktop(tab: number, enabled: boolean): void!!
   end(tab: number): void!!
   /** The saved and newly committed normal-tab addresses in recent-first order. */
   history(): readonly HistoryRow[]!!
@@ -336,6 +339,7 @@ const pages = Layer.effect(Pages, effect {
   const made = new Map<number, PageRuntime>()
   const aims = new Map<number, string>()
   const finds = new Map<number, { text: string; index: number }>()
+  const desktops = new Set<number>()
   let history: readonly HistoryRow[] = []
   let stamp = 0
   let editing: HistoryEdit | undefined
@@ -360,6 +364,11 @@ const pages = Layer.effect(Pages, effect {
     seek: (tab: number, text: string) => sync(() => { finds.set(tab, { text, index: 0 }) }),
     sought: (tab: number) => sync(() => finds.get(tab) ?? { text: "", index: 0 }),
     stood: (tab: number, index: number) => sync(() => { finds.set(tab, { text: finds.get(tab)?.text ?? "", index }) }),
+    desktop: (tab: number) => sync(() => desktops.has(tab)),
+    setDesktop: (tab: number, enabled: boolean) => sync(() => {
+      if (enabled) desktops.add(tab)
+      else desktops.delete(tab)
+    }),
     history: () => sync(() => history),
     keepVisits: (urls: readonly string[], times: Readonly<Record<string, number>> | undefined, titles: ReadonlyMap<string, string>) => sync(() => {
       const live = new Map(history.map((row) => [row.url, row]))
@@ -400,6 +409,7 @@ const pages = Layer.effect(Pages, effect {
       made.delete(tab)
       aims.delete(tab)
       finds.delete(tab)
+      desktops.delete(tab)
       if (runtime !== undefined) try promise(() => runtime.dispose())
     },
   }
@@ -537,6 +547,19 @@ export const openDownloads: void!!(Tabs.Machine | Shell | TabHost) = effect {
   } else {
     try contained(hosted("downloads", (plugin, session) => plugin.downloads({ session })), "opening Browser downloads")
   }
+}
+
+/** Toggle desktop-site mode on the native tab and reload its page if committed. */
+export effect function toggleDesktopSite(tab: number): boolean!!(TabHost | Pages | Tabs.Machine) {
+  const host = try TabHost
+  if (host.web !== undefined || Option.isNone(host.plugin)) return false
+  const current = try (try Tabs.Machine).get()
+  if (!current.native.includes(tab)) return false
+  const store = try Pages
+  const next = !(try store.desktop(tab))
+  const ok = try contained(hosted("setDesktopSite", (plugin, session) => plugin.setDesktopSite({ session, id: idOf(tab), enabled: next })), "toggling desktop site")
+  if (ok) try store.setDesktop(tab, next)
+  return ok
 }
 
 /** Draw the page shown where the Browser marks its place, once that place is drawn. */
