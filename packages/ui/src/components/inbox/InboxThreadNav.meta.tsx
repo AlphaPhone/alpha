@@ -13,12 +13,12 @@ export const meta: ComponentMeta<InboxThreadNavProps> = {
       onOlder.mockClear();
       onNewer.mockClear();
       const canvas = within(canvasElement);
-      await userEvent.click(canvas.getByRole("button", { name: "Previous message" }));
-      await userEvent.click(canvas.getByRole("button", { name: "Next message" }));
+      await userEvent.click(canvas.getByRole("button", { name: "Earlier messages" }));
+      await userEvent.click(canvas.getByRole("button", { name: "More messages" }));
       await expect([onOlder.mock.calls.length, onNewer.mock.calls.length]).toEqual([1, 1]);
     },
     Oldest: async ({ canvasElement }: { canvasElement: HTMLElement }) => {
-      await expect(within(canvasElement).getByRole("button", { name: "Previous message" })).toBeDisabled();
+      await expect(within(canvasElement).queryByRole("button", { name: "Earlier messages" })).toBeNull();
     },
   },
 };
