@@ -7,6 +7,7 @@ import { Menu, MenuContent, MenuItem, MenuTrigger } from "../Menu.tsx";
 import { Textarea } from "../Textarea.tsx";
 import { AssistantDraftNotice, type AssistantDraftNoticeProps } from "./AssistantDraftNotice.tsx";
 import type { AssistantAttachment } from "./AssistantAttachmentChip.tsx";
+import { type AssistantDrag, useAssistantDrag } from "./AssistantGrabber.tsx";
 import { AssistantPendingAttachments } from "./AssistantPendingAttachments.tsx";
 import { AssistantQuoteBar } from "./AssistantQuoteBar.tsx";
 
@@ -65,9 +66,11 @@ export type AssistantComposerProps = Omit<ComponentProps<"div">, "children" | "o
   leading?: ReactNode;
   /** The mark in the closed dock when it also acts as the gesture handle. */
   opener?: ReactNode;
+  /** On the bar, its background (and the whole pill) moves Ask Alpha like the handle: a drag up opens the sheet. */
+  drag?: AssistantDrag;
   /** The target or action named in the field. */
   placeholder?: string;
-  /** Called when the field takes focus: on the bar this opens Ask Alpha as a sheet. */
+  /** Called when the field takes focus: on the bar this raises it to typing. */
   onFocusField?: () => void;
   /** Ref to the composer field so a tap on the resting bar can focus it synchronously. */
   fieldRef?: Ref<HTMLTextAreaElement>;
@@ -94,13 +97,15 @@ function keepComposerFocus(event: PointerEvent<HTMLButtonElement>) {
  */
 export function AssistantComposer({
   variant = "sheet", value, onValueChange, closed = false, notice, unavailable, attachments = [], limit = 4, quote, editing = false, lift,
-  onSend, onStop, stopping = false, onAttach, onSearch, onNew, making = false, onHistory, onTalk, onDictate, voice, voiceNotice, onOpen, onType, leading, opener, placeholder, onFocusField, fieldRef, onRemoveAttachment, onPreviewAttachment, onUnquote, className, style, ...props
+  onSend, onStop, stopping = false, onAttach, onSearch, onNew, making = false, onHistory, onTalk, onDictate, voice, voiceNotice, onOpen, onType, leading, opener, drag, placeholder, onFocusField, fieldRef, onRemoveAttachment, onPreviewAttachment, onUnquote, className, style, ...props
 }: AssistantComposerProps) {
   const written = value.trim() !== "" || attachments.length > 0;
   const bar = variant === "bar";
   const compact = bar && onType !== undefined;
   const targeting = !bar && placeholder !== undefined;
   const acting = Boolean(onAttach || onSearch || onNew || making || onHistory) && !closed;
+  const dragging = useAssistantDrag(drag ?? {});
+  const moves = bar && drag !== undefined;
   return (
     <div role={compact ? "group" : undefined} aria-label={compact ? "Assistant controls" : undefined} data-alpha-compact-dock={compact ? "" : undefined} data-host-chrome={bar ? "" : undefined} className={cn("flex shrink-0 flex-col gap-2", bar ? "mx-4 mb-[max(1.75rem,calc(max(var(--alpha-native-inset-bottom,0px),env(safe-area-inset-bottom))_+_0.75rem))]" : "mx-3 mb-[max(1.875rem,calc(max(var(--alpha-native-inset-bottom,0px),env(safe-area-inset-bottom))_+_0.75rem))]", className)} style={lift ? { marginBottom: lift, ...style } : style} {...props}>
       {notice ? <AssistantDraftNotice {...notice} /> : null}
@@ -110,7 +115,8 @@ export function AssistantComposer({
       {!compact && editing ? <AssistantQuoteBar kind="editing" /> : null}
       {voiceNotice}
       {voice}
-      <div hidden={Boolean(voice)} className={cn("items-center bg-secondary", voice ? "hidden" : "flex", compact ? "touch-none gap-0.5 self-center rounded-dock-compact p-1.25 shadow-dock-compact dark:shadow-dock-compact-dark" : bar ? "min-h-18.5 touch-pan-y gap-1 rounded-dock py-1.5 pr-2 pl-2.25 shadow-dock dark:shadow-dock-dark" : "min-h-17 touch-pan-y gap-1.5 rounded-sheet py-1.5 pr-1.5 pl-5")}>
+      <div hidden={Boolean(voice)} {...(compact && moves ? dragging : {})} className={cn("items-center bg-secondary", voice ? "hidden" : "flex", compact ? "touch-none gap-0.5 self-center rounded-dock-compact p-1.25 shadow-dock-compact dark:shadow-dock-compact-dark" : bar ? cn("min-h-18.5 touch-pan-y gap-1 rounded-dock py-1.5 pr-2 pl-2.25 shadow-dock dark:shadow-dock-dark", moves && "relative isolate") : "min-h-17 touch-pan-y gap-1.5 rounded-sheet py-1.5 pr-1.5 pl-5")}>
+        {!compact && moves ? <span aria-hidden data-alpha-bar-drag="" className="absolute inset-0 z-[-1] touch-none rounded-[inherit]" {...dragging} /> : null}
         {leading}
         {bar ? opener ?? (onOpen ? (
           <Button size="icon" aria-label="Open conversation" className="overflow-hidden bg-alpha text-alpha-foreground hover:bg-alpha/90" onClick={onOpen}><Mark aria-hidden className="size-[118%]" /></Button>

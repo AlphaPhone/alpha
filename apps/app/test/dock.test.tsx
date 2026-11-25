@@ -97,6 +97,39 @@ describe("Ask Alpha dock and shell navigation", () => {
     expect((await runtime.runPromise(Effect.flatMap(Shell, (m) => m.get()))).assistant).toBe("Bar");
   });
 
+  // spec/app/assistant/dock.md, "Story: Drag Ask Alpha where I want it"; spec/app/assistant/dock.md, "A drag released asks the shell once for where it landed, and keeps a sheet's height"
+  it("the sheet follows the finger from the bar's background and lands where the drag is released (spec/app/assistant/dock.md, \"Story: Drag Ask Alpha where I want it\")", async () => {
+    const { runtime } = await mountDock({ view: "Home", flush: underAct });
+    const section = () => document.querySelector<HTMLElement>("section[aria-label='Ask Alpha']");
+    const at = (type: string, y: number, target: EventTarget = window) =>
+      act(() => { target.dispatchEvent(new PointerEvent(type, { bubbles: true, clientY: y, pointerId: 5, pointerType: "touch" })); });
+    const shell = () => runtime.runPromise(Effect.flatMap(Shell, (m) => m.get()));
+    const pressed = () => runtime.runPromise(Effect.flatMap(Dock, (m) => Stream.runHead(Stream.filter(m.changes, (s) => s.gesture === "Pressed"))));
+
+    const background = document.querySelector<HTMLElement>("[data-alpha-bar-drag]");
+    expect(background).not.toBeNull();
+    await at("pointerdown", 700, background ?? window);
+    await act(pressed);
+    await at("pointermove", 650);
+    await at("pointermove", 500);
+    expect([section()?.getAttribute("data-alpha-detent"), section()?.style.height]).toEqual(["sheet", "302px"]);
+    expect((await shell()).assistant).toBe("Bar");
+    await at("pointerup", 500);
+    await act(async () => { await runtime.runPromise(Effect.flatMap(Shell, (m) => Stream.runHead(Stream.filter(m.changes, (s) => s.assistant === "Sheet")))); });
+
+    // spec/app/assistant/dock.md, "A released drag lands on the bar, a sheet at a height, or the full screen": pulled to the floor by its handle, the open sheet follows and rests on the bar
+    const handle = document.querySelector<HTMLElement>("button[aria-label='Resize chat']");
+    expect(handle).not.toBeNull();
+    await at("pointerdown", 400, handle ?? window);
+    await act(pressed);
+    await at("pointermove", 500);
+    await at("pointermove", 740);
+    expect(section()?.style.height).toBe("102px");
+    await at("pointerup", 740);
+    await act(async () => { await runtime.runPromise(Effect.flatMap(Shell, (m) => Stream.runHead(Stream.filter(m.changes, (s) => s.assistant === "Bar")))); });
+    expect(section()?.getAttribute("data-alpha-detent")).toBe("bar");
+  });
+
   // spec/app/shell/index.md, "Agent navigation shows an admitted app or Home without lowering Ask Alpha"
   it("agent navigation moves between admitted apps and Home while keeping Ask Alpha raised (spec/app/shell/index.md, \"Agent navigation shows an admitted app or Home without lowering Ask Alpha\")", async () => {
     const { runtime } = await mountDock({ view: "Home", withToast: true, flush: underAct });

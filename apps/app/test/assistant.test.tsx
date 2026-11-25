@@ -12,16 +12,21 @@ import * as Pages from "../gen/app__settings.effect.vibe";
 import * as Prefs from "../gen/app__settings__preferences.effect.vibe";
 import { Machine as Shell } from "../gen/app__shell.effect.vibe";
 import type { Mount } from "../src/areas.ts";
+import type { Alpha } from "../src/runtime/area.tsx";
 import assistant from "../src/assistant/index.tsx";
 import { untimed } from "../src/runtime/reactor.vibe";
-import { button, closeAll, fill, hardware, later, open, press, pressOnTop, underAct, until } from "./alpha.tsx";
+import { button, closeAll, fill, hardware, later, open, press, underAct, until } from "./alpha.tsx";
 import { scene } from "./fakes/scene.ts";
 
 underAct();
 afterEach(closeAll);
 
-/** Ask Alpha in full, alone at its place: the journeys draw no other screen. */
-const mounts: Mount[] = [{ at: "assistant", load: () => import("../src/assistant/index.tsx") }];
+/** Ask Alpha in full, with Settings for Agent activity, where its New chat and Chat history are. */
+const mounts: Mount[] = [
+  { at: "assistant", load: () => import("../src/assistant/index.tsx") },
+  { at: "view:Settings", load: () => import("../src/settings/index.tsx") },
+  { at: "settings/activity", load: () => import("../src/assistant/settingsActivity.tsx") },
+];
 
 const lines = () => [...document.querySelectorAll("section[aria-label='Ask Alpha'] [role=log] article")].map((line) => line.querySelector("span:not([aria-hidden])")?.textContent);
 const rows = (list: string) => document.querySelector(`section[aria-label='${list}'] > div`)?.children.length ?? 0;
@@ -64,8 +69,27 @@ function chatAction(item: string) {
   });
 }
 
-/** Open the list of conversations, from the chat actions. */
-const chatsList = () => chatAction("Chat history");
+/** Settings > About > Agent activity, where New chat and Chat history live as they did in v121. */
+async function activity(alpha: Alpha) {
+  const page = await alpha.runtime.runPromise(Effect.flatMap(Pages.Machine, (pages) => pages.get()));
+  if (page.page === "Activity" && button("History")) return;
+  await alpha.runtime.runPromise(Effect.exit(Effect.flatMap(Shell, (shell) => shell.send({ type: "openView", view: "Settings" }))));
+  await alpha.runtime.runPromise(Effect.exit(Effect.flatMap(Pages.Machine, (pages) => pages.send({ type: "open", page: "About" }))));
+  await alpha.runtime.runPromise(Effect.exit(Effect.flatMap(Pages.Machine, (pages) => pages.send({ type: "open", page: "Activity" }))));
+  await until(alpha, alpha.runtime, Pages.Machine, (s) => s.page === "Activity");
+}
+
+/** Open the list of conversations, from History on Agent activity. */
+async function chatsList(alpha: Alpha) {
+  await activity(alpha);
+  await press("History");
+}
+
+/** Start a new conversation, from New on Agent activity. */
+async function newChat(alpha: Alpha) {
+  await activity(alpha);
+  await press("New");
+}
 
 /** Click the row of the list named `list` whose text starts with `text`. */
 function row(list: string, text: string) {
@@ -146,9 +170,9 @@ describe.each([["a browser", false], ["a phone", true]])("in %s", (_where, phone
     expect(lines()).toEqual(["Hello", "You said: Hello", "Again", "You said: Again"]);
 
     // spec/app/assistant/chats.md, "The newest list says which conversations there are, and a conversation no longer listed stops showing"
-    chatsList();
+    await chatsList(alpha);
     await until(alpha, runtime, Chats, (s) => s.list.status === "Loaded");
-    expect(rows("Chats")).toBe(2);
+    expect(rows("Chat history")).toBe(2);
 
     // spec/app/assistant/index.md, "A sensitive screen is never sent, and no reply is awaited over one": Settings showing carrier identifiers is a sensitive screen (on a phone).
     if (phone) {
@@ -326,16 +350,16 @@ describe.each([["a browser", false], ["a phone", true]])("in %s", (_where, phone
     runtime = assistant.runtime(fifth.alpha);
     await vi.waitFor(() => expect(world.ask.heldLists.length).toBe(1));
     world.ask.holdLists = false;
-    chatsList();
+    await chatsList(fifth.alpha);
     await until(fifth.alpha, runtime, Chats, (s) => s.chosen === 0 && s.list.status === "Loaded" && s.page.status === "Idle");
     expect([document.querySelector("[role=log] [aria-busy]"), document.body.textContent?.includes("Messages did not load")]).toEqual([null, false]);
     for (const release of world.ask.heldLists.splice(0)) release();
 
     // spec/app/assistant/chats.md, "A list asked before a conversation was made is left behind, so its answer never takes that conversation away": the list read asked before New chat answers after the conversation was made.
     world.ask.holdLists = true;
-    chatsList();
+    await chatsList(fifth.alpha);
     await vi.waitFor(() => expect(world.ask.heldLists.length).toBe(1));
-    await pressOnTop("New chat");
+    await newChat(fifth.alpha);
     await until(fifth.alpha, runtime, Chats, (s) => s.chosen > 0 && s.make.outcome === "Confirmed" && s.page.status === "Loaded");
     const chats = () => runtime.runPromise(Effect.flatMap(Chats, (machine) => machine.get()));
     const made = (await chats()).chosen;
@@ -352,9 +376,9 @@ describe.each([["a browser", false], ["a phone", true]])("in %s", (_where, phone
     world.ask.kept.set("c1", { roomId: "r1", title: "Ask Alpha", messages: [] });
     world.ask.opened = 1;
     const { alpha, runtime } = await openAssistant(world);
-    chatsList();
+    await chatsList(alpha);
     await until(alpha, runtime, Chats, (s) => s.list.status === "Loaded");
-    row("Chats", "Ask Alpha");
+    row("Chat history", "Ask Alpha");
     await until(alpha, runtime, Composer, (s) => s.binding.conversation === 1 && s.slot === "Open");
 
     // spec/app/assistant/index.md, "Stop reply ends a streaming reply, and takes back a message nothing was heard of"

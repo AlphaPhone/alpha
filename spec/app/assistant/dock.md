@@ -13,6 +13,11 @@ which a stray click is ignored, and the height a sheet was left at.
 > away, with one press doing one thing, and the composer never hidden by
 > the keyboard.
 
+As in Alpha before VibeStack, the sheet follows the finger while it is
+dragged, and the handle, the background of the bar and the whole pill can
+be dragged; a press on the bar or the pill that does not move is the tap of
+the control under it.
+
 ### A released drag lands on the bar, a sheet at a height, or the full screen
 
 Near the top it fills the screen and near the floor it goes to the bar;
