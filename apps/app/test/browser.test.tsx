@@ -370,6 +370,7 @@ describe("The Browser on a phone", () => {
     const again = await onBrowser(first.world);
     await until(again.alpha, again.runtime, Tabs, (s) => s.hydrated);
     expect(again.runtime.runSync(Effect.flatMap(Pages, (pages) => pages.history())).map((row) => row.url)).toEqual(kept);
+  });
 
   it("The agent's page opens only on my Open on the Browser's card, even an address I typed, and a card left from an earlier request never opens (spec/app/browser/index.md, \"Story: Let the agent open a page\"; spec/app/browser/index.md, \"The agent opens only an HTTPS address with no user name or password in it, in a new normal tab, one at a time\"; spec/app/browser/index.md, \"The agent gives its tab up when it is done\"; spec/app/assistant/index.md, \"A complete reply may open one view, once, while the screen it was asked from still shows\")", async () => {
     const world = { ...scene(), phone: true, image: true };
