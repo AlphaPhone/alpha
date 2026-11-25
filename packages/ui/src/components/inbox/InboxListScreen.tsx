@@ -139,7 +139,7 @@ export function InboxListScreen({
         </div>
       ) : null}
       {state === "signedOut" && onStateAction ? <Button variant="secondary" size="sm" className="ml-1 self-start px-3 font-medium" onClick={onStateAction}>Connect Eliza Cloud</Button> : null}
-      {notice ? <InboxNotice kind={notice} onAction={onNoticeAction} /> : null}
+      {notice ? <InboxNotice kind={notice} onAction={onNoticeAction} plain /> : null}
       {rows.length === 0 && loading ? <InboxListState kind="loading" />
         : state && rows.length === 0 ? <InboxListState kind={state === "empty" ? emptyIn[folder] : state} onAction={onStateAction} />
         : <InboxList rows={rows} loading={loading} onLoadMore={onLoadMore} loadingMore={loadingMore} />}
