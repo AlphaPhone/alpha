@@ -3,9 +3,32 @@ lemma RemoveKeeps(s: Scan, image: int, by_: Actor)
 {
 }
 
-lemma MoveKeeps(s: Scan, image: int, by_: Actor)
-  ensures moveToEnd(s, image, by_).pages == ProofLib.Filter((p: app__files__scanDraft_Page) => (p.image != image), s.pages) + ProofLib.Filter((p: app__files__scanDraft_Page) => (p.image == image), s.pages)
+lemma SwapKeeps(pages: seq<app__files__scanDraft_Page>, at: int)
+  requires 0 <= at && at + 1 < |pages|
+  requires pages[at].image != pages[at + 1].image
+  ensures |swappedPages(pages, at)| == |pages|
+  ensures swappedPages(pages, at)[at] == pages[at + 1]
+  ensures swappedPages(pages, at)[at + 1] == pages[at]
+  ensures forall p :: p in swappedPages(pages, at) ==> p in pages
 {
+  var swapped := swappedPages(pages, at);
+  assert pages[at] in pages;
+  assert pages[at + 1] in pages;
+  assert swapped[at] == pages[at + 1];
+  assert swapped[at + 1] == pages[at];
+  forall p | p in swapped ensures p in pages {
+    var k :| 0 <= k < |swapped| && swapped[k] == p;
+    assert pages[k] in pages;
+    assert p == pages[at + 1] || p == pages[at] || p == pages[k];
+  }
+}
+
+lemma lawAdjacentPagesSwapWhole_ensures(pages: seq<app__files__scanDraft_Page>, at: int, earlier: int, later: int)
+  ensures (lawAdjacentPagesSwapWhole(pages, at, earlier, later) == true)
+{
+  if adjacentPages(pages, at, earlier, later) {
+    SwapKeeps(pages, at);
+  }
 }
 
 lemma ResumeImages(s: Scan, by_: Actor)
@@ -47,33 +70,28 @@ lemma remove_ensures(s: Scan, image: int, by_: Actor)
   }
 }
 
-lemma moveToEnd_ensures(s: Scan, image: int, by_: Actor)
-  ensures (inv(s) ==> canMoveToEnd(s, image, by_) ==> alwaysPagesShowImagesMade(moveToEnd(s, image, by_)))
-  ensures (inv(s) ==> canMoveToEnd(s, image, by_) ==> alwaysTextStaysWithItsPage(moveToEnd(s, image, by_)))
-  ensures (inv(s) ==> canMoveToEnd(s, image, by_) ==> alwaysTheReviewsAreNotAhead(moveToEnd(s, image, by_)))
-  ensures (inv(s) ==> canMoveToEnd(s, image, by_) ==> alwaysADeletedDraftLeavesNoPages(moveToEnd(s, image, by_)))
-  ensures (inv(s) ==> canMoveToEnd(s, image, by_) ==> alwaysTheDraftKeepsItsRules(moveToEnd(s, image, by_)))
-  ensures (inv(s) ==> canMoveToEnd(s, image, by_) ==> alwaysNoTextIsReadDuringAnExport(moveToEnd(s, image, by_)))
-  ensures (inv(s) ==> canMoveToEnd(s, image, by_) ==> alwaysAClosedScanReadsNothing(moveToEnd(s, image, by_)))
-  ensures (inv(s) ==> canMoveToEnd(s, image, by_) ==> stepResumeBringsBackWhatWasSaved(s, "moveToEnd", moveToEnd(s, image, by_)))
-  ensures (inv(s) ==> canMoveToEnd(s, image, by_) ==> stepOnlyReadTextIsUsed(s, moveToEnd(s, image, by_), []))
-  ensures (inv(s) ==> canMoveToEnd(s, image, by_) ==> stepASaveCarriesThePagesShown(s, moveToEnd(s, image, by_), []))
-  ensures (inv(s) ==> canMoveToEnd(s, image, by_) ==> stepOnlyTheOwnerDeletesADraft(s, "moveToEnd", moveToEnd(s, image, by_), []))
-  ensures (inv(s) ==> canMoveToEnd(s, image, by_) ==> stepExportingFreezesThePages(s, moveToEnd(s, image, by_)))
-  ensures (inv(s) ==> canMoveToEnd(s, image, by_) ==> stepAnUncertainExportIsNotRetried(s, "moveToEnd", moveToEnd(s, image, by_), []))
-  ensures (inv(s) ==> canMoveToEnd(s, image, by_) ==> stepAnUnknownExportStaysLocked(s, "moveToEnd", moveToEnd(s, image, by_)))
-  ensures (inv(s) ==> canMoveToEnd(s, image, by_) ==> stepEachIsSentOncePerNumber(s, moveToEnd(s, image, by_), []))
-  ensures (inv(s) ==> canMoveToEnd(s, image, by_) ==> stepOnlyItsOwnPickerKeepsTheScan(s, "moveToEnd", moveToEnd(s, image, by_)))
-  ensures (inv(s) ==> canMoveToEnd(s, image, by_) ==> stepARestartLeavesNothingUnderWay(s, "moveToEnd", moveToEnd(s, image, by_)))
+lemma swapPages_ensures(s: Scan, at: int, earlier: int, later: int, by_: Actor)
+  ensures (inv(s) ==> canSwapPages(s, at, earlier, later, by_) ==> alwaysPagesShowImagesMade(swapPages(s, at, earlier, later, by_)))
+  ensures (inv(s) ==> canSwapPages(s, at, earlier, later, by_) ==> alwaysTextStaysWithItsPage(swapPages(s, at, earlier, later, by_)))
+  ensures (inv(s) ==> canSwapPages(s, at, earlier, later, by_) ==> alwaysTheReviewsAreNotAhead(swapPages(s, at, earlier, later, by_)))
+  ensures (inv(s) ==> canSwapPages(s, at, earlier, later, by_) ==> alwaysADeletedDraftLeavesNoPages(swapPages(s, at, earlier, later, by_)))
+  ensures (inv(s) ==> canSwapPages(s, at, earlier, later, by_) ==> alwaysTheDraftKeepsItsRules(swapPages(s, at, earlier, later, by_)))
+  ensures (inv(s) ==> canSwapPages(s, at, earlier, later, by_) ==> alwaysNoTextIsReadDuringAnExport(swapPages(s, at, earlier, later, by_)))
+  ensures (inv(s) ==> canSwapPages(s, at, earlier, later, by_) ==> alwaysAClosedScanReadsNothing(swapPages(s, at, earlier, later, by_)))
+  ensures (inv(s) ==> canSwapPages(s, at, earlier, later, by_) ==> stepResumeBringsBackWhatWasSaved(s, "swapPages", swapPages(s, at, earlier, later, by_)))
+  ensures (inv(s) ==> canSwapPages(s, at, earlier, later, by_) ==> stepOnlyReadTextIsUsed(s, swapPages(s, at, earlier, later, by_), []))
+  ensures (inv(s) ==> canSwapPages(s, at, earlier, later, by_) ==> stepASaveCarriesThePagesShown(s, swapPages(s, at, earlier, later, by_), []))
+  ensures (inv(s) ==> canSwapPages(s, at, earlier, later, by_) ==> stepOnlyTheOwnerDeletesADraft(s, "swapPages", swapPages(s, at, earlier, later, by_), []))
+  ensures (inv(s) ==> canSwapPages(s, at, earlier, later, by_) ==> stepExportingFreezesThePages(s, swapPages(s, at, earlier, later, by_)))
+  ensures (inv(s) ==> canSwapPages(s, at, earlier, later, by_) ==> stepAnUncertainExportIsNotRetried(s, "swapPages", swapPages(s, at, earlier, later, by_), []))
+  ensures (inv(s) ==> canSwapPages(s, at, earlier, later, by_) ==> stepAnUnknownExportStaysLocked(s, "swapPages", swapPages(s, at, earlier, later, by_)))
+  ensures (inv(s) ==> canSwapPages(s, at, earlier, later, by_) ==> stepEachIsSentOncePerNumber(s, swapPages(s, at, earlier, later, by_), []))
+  ensures (inv(s) ==> canSwapPages(s, at, earlier, later, by_) ==> stepOnlyItsOwnPickerKeepsTheScan(s, "swapPages", swapPages(s, at, earlier, later, by_)))
+  ensures (inv(s) ==> canSwapPages(s, at, earlier, later, by_) ==> stepARestartLeavesNothingUnderWay(s, "swapPages", swapPages(s, at, earlier, later, by_)))
 {
-  if inv(s) && canMoveToEnd(s, image, by_) {
-    MoveKeeps(s, image, by_);
-    forall p | p in ProofLib.Filter((p: app__files__scanDraft_Page) => (p.image != image), s.pages) ensures p in s.pages {
-      ProofLib.FilterMember((p: app__files__scanDraft_Page) => (p.image != image), s.pages, p);
-    }
-    forall p | p in ProofLib.Filter((p: app__files__scanDraft_Page) => (p.image == image), s.pages) ensures p in s.pages {
-      ProofLib.FilterMember((p: app__files__scanDraft_Page) => (p.image == image), s.pages, p);
-    }
+  if inv(s) && canSwapPages(s, at, earlier, later, by_) {
+    SwapKeeps(s.pages, at);
+    assert swapPages(s, at, earlier, later, by_).pages == swappedPages(s.pages, at);
   }
 }
 

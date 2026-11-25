@@ -235,6 +235,8 @@ export function Calendar({ runtime, alpha }: CalendarProps) {
   const open = s.open === 0 ? undefined : shown.find(s.open);
   const cut = s.connected && shown.partial("Google");
   const free = dayEmptiness(!cut, allows(s.access) && s.phoneLimited, View.empty(s)) === "DayFree";
+  const disconnected = s.owner === 0 && !shown.present() && statusAction(s.connected, false) === "OfferSettings"
+    && visible.length === 0 && s.reminders === 0;
   const searching = s.overlay === "Search";
   const listing = searching || s.layout === "Agenda";
   const month = s.overlay === "MonthDialog" || s.overlay === "LayoutMenu";
@@ -251,11 +253,11 @@ export function Calendar({ runtime, alpha }: CalendarProps) {
     key: row.id, title: row.title || "Untitled event", sub: row.place || (row.video ? "Video call" : ""), time: clock(Math.max(row.begin, dayStart(day))),
     label: `${row.title || "Untitled event"}, ${clock(row.begin)}`, ...placed, tone: row.answer === "AnswerAwaited" ? "invite" : "plain", stripe: stripe(row), onOpen: openRow(row),
   });
-  const dayEmpty = (text: string) => (
+  const dayEmpty = (text: string, offerSettings = false) => (
     <>
       <CalendarIcon aria-hidden className="size-7" />
       {text}
-      {statusAction(s.connected, false) === "OfferSettings" && view.can({ type: "openAccountSettings" }) ? (
+      {offerSettings && view.can({ type: "openAccountSettings" }) ? (
         <button type="button" aria-label="Open Calendar settings" onClick={send({ type: "openAccountSettings" })}
           className="mt-1.5 flex min-h-11 items-center gap-1.5 rounded-full bg-secondary px-4 text-sm leading-plain font-semibold text-foreground">
           <Settings aria-hidden className="size-4.5" />Settings
@@ -318,7 +320,8 @@ export function Calendar({ runtime, alpha }: CalendarProps) {
             <CalendarTimeline hours={hours}
               blocks={columns.length > 0 ? [] : lanes(rows, s.anchor).map((placed) => block(placed.row, s.anchor, placed))}
               now={s.anchor === s.today && columns.length === 0 ? now : undefined}
-              empty={columns.length > 0 ? (columns.every((day) => dayRows(day).length === 0) && free ? dayEmpty("Free on these days") : undefined)
+              empty={disconnected ? dayEmpty("Not connected", true)
+                : columns.length > 0 ? (columns.every((day) => dayRows(day).length === 0) && free ? dayEmpty("Free on these days") : undefined)
                 : free && s.reminders === 0 ? dayEmpty(s.anchor === s.today ? "Nothing scheduled today" : "Free all day") : undefined}
               columns={columns.length > 0 ? (
                 <div data-alpha-calendar-days="" className="absolute inset-y-0 right-4 left-15 grid" style={{ gridTemplateColumns: `repeat(${columns.length}, minmax(0, 1fr))` }}>
@@ -419,7 +422,7 @@ function Month({ runtime }: CalendarProps) {
   };
   const offered = views.filter(({ layout }) => layout !== "Columns" || s.wide);
   return (
-    <CalendarMonthPanel month={firstDate.getMonth()} year={firstDate.getFullYear()}
+    <CalendarMonthPanel wide={s.wide} month={firstDate.getMonth()} year={firstDate.getFullYear()}
       months={Array.from({ length: 12 }, (_, at) => ({ value: at, label: monthOnly.format(new Date(2000, at, 1)) }))}
       years={Array.from({ length: 11 }, (_, at) => firstDate.getFullYear() - 5 + at).map((year) => ({ value: year, label: String(year) }))}
       onMonth={(month) => toMonth(firstDate.getFullYear(), month)} onYear={(year) => toMonth(year, firstDate.getMonth())}

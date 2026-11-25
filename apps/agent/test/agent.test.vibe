@@ -21,9 +21,16 @@ function phoneAgent(run: Run, state: string) {
 
 const client = (running: Running) => createRuntimeJsonClient({ bridge: () => socketBridge(running), startupTimeoutMs: 120_000, pollMs: 100, requestTimeoutMs: 60_000 })
 
-/** A path of the host file's list with each placeholder named: the conversation's id, its room's for the turn routes, and an event no calendar holds. */
+/** A concrete path that probes route admission without targeting an existing record outside the test conversation. */
 const filled = (route: string, conversation: ConversationRecord) => {
-  const path = route.replace("{id}", conversation.id).replace("{roomId}", conversation.roomId).replace("{eventId}", "no-such-event")
+  const path = route
+    .replace("{id}", conversation.id)
+    .replace("{roomId}", conversation.roomId)
+    .replace("{eventId}", "no-such-event")
+    .replace("{nodeId}", "review")
+    .replace("{iteration}", "0")
+    .replace("{mutationId}", conversation.id)
+    .replace("{submissionId}", conversation.id)
   return path === "/api/scheduled-tasks" ? `${path}?ownerVisibleOnly=1` : path
 }
 
@@ -40,15 +47,27 @@ schema Interacted { success: boolean; result: { state?: { notes: { title: string
 schema Approvals { approvals: Schema.Unknown[] }
 
 describe("Build the pack only from the pinned eliza", () => {
-  // spec/agent/index.md, "A pack is admitted only when its manifest names the pinned commit, Node 26, no local inference, the plugins it carries, the Alpha product plugin, a pinned workflow worker and every allowed action"
+  // spec/agent/index.md, "A pack is admitted only when its manifest names the pinned commit, Node 26, the local speech module, the plugins it carries, the Alpha product plugin, a pinned workflow worker and every allowed action"
   // spec/agent/index.md, "Every package the bundle carries is the pinned eliza's, except the pack's entry and Alpha's product plugin"
+  // spec/agent/index.md, "Only Android's native speech transport can call the resident recognizer"
   // spec/agent/index.md, "The agent may run the actions the old phone's agent ran plus Alpha's Clock and Reminders actions, and every other action the bundle registers is listed as refused with its reason"
   it("Build the pack only from the pinned eliza", () => {
     const built = manifest()
     const registered = built.actions.map(({ name }) => name)
     const { actions, plugins } = policy()
     expect({ plugins: [...built.plugins].sort(), productPlugin: built.productPlugin, localInference: built.localInference, worker: /^[a-f0-9]{64}$/.test(built.workflowWorkerSha256 ?? "") })
-      .toEqual({ plugins: [...packedPlugins].sort(), productPlugin: productPluginName, localInference: false, worker: true })
+      .toEqual({ plugins: [...packedPlugins].sort(), productPlugin: productPluginName, localInference: true, worker: true })
+    const native = listed("nativeRoutes")
+    expect(native).toEqual([
+      { method: "GET", path: "/api/alpha-speech/scope", stream: false },
+      { method: "POST", path: "/api/asr/local-inference/live", stream: false },
+      { method: "GET", path: "/api/alpha-runtime/scope", stream: false },
+      { method: "GET", path: "/api/workflow/status", stream: false },
+      { method: "GET", path: "/api/workflow/hosted/results", stream: false,
+        query: [{ key: "clientId", accepts: { kind: "pattern", pattern: "[A-Za-z0-9][A-Za-z0-9_-]{0,127}" } }] },
+      { method: "POST", path: "/api/workflow/hosted/results/ack", stream: false, maxBodyBytes: 1024 },
+    ])
+    expect(listed().some(({ path }) => ["/api/alpha-speech/scope", "/api/asr/local-inference/live", "/api/alpha-runtime/scope"].includes(path))).toBe(false)
     expect(plugins.product).toBe(productPluginName)
     expect(entryCarried(built.packages.map(({ name }) => name))).toBe(true)
     expect(built.packages.filter(({ name }) => name.startsWith("@repo/") || name.startsWith("@alphacompute/") || name === productPluginName).map(({ name }) => name).sort())

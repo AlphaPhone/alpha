@@ -210,6 +210,62 @@ pure def lawAHoldForSignInReadsAs401(status: int): bool = cloudStatusOf(true, st
 pure def lawOtherwiseTheCloudsStatusStands(status: int): bool = cloudStatusOf(false, status) == status
 ```
 
+### A mail or calendar request the phone holds back for want of its mail lease reads as the cloud's own refusal of the device key there, never as a sign-out
+
+A phone signed in before mail leases existed holds a key and no lease, so
+its cloud plugin sends no mail or calendar request (eliza's
+`mail-lease-upgrade-required`), and the owner is still signed in. Alpha
+reads that as the answer the cloud gives the device key on a mail route,
+`403` with reason `device_key_not_allowed`, through eliza's cloud client as
+through a plain read, so an area tells a phone that needs one more sign-in
+for mail from an owner who signed out, and forgets nothing it keeps. Such a
+request never left the phone.
+
+```quint
+type Hold = HeldForSignIn | HeldForMailLease
+type HeldAnswer = { status: int, reason: str }
+
+pure val leaseRefusalStatus = 403
+pure val leaseRefusalCode = "access_denied"
+pure val leaseRefusalReason = "device_key_not_allowed"
+
+pure def heldAnswer(hold: Hold): HeldAnswer =
+  if (hold == HeldForSignIn) { status: signInStatus, reason: "" } else { status: leaseRefusalStatus, reason: leaseRefusalReason }
+
+pure def lawAHoldForTheLeaseIsNeverASignOut(hold: Hold): bool =
+  (hold == HeldForMailLease) implies (heldAnswer(hold).status != signInStatus and heldAnswer(hold).reason == leaseRefusalReason)
+```
+
+### The owner's tap on a mail sign-in control starts the phone's one more sign-in for mail where the phone wants it, then reads again once
+
+The controls are the ones Inbox already shows when it cannot read mail for
+want of a sign-in, the mail lease included: Connect Eliza Cloud and
+Reconnect. A tap on one
+first asks the phone for the sign-in that gives this phone its mail lease
+(eliza's `upgradeMailLease`, a Google sign-in in the browser), which the
+phone starts only for a phone signed in before mail leases existed, and
+only because the owner tapped. Once the owner has signed in, the screen
+reads again, once. If the owner cancels, or the sign-in ends without one,
+the screen stays as it was and says nothing more. Where the phone wants no
+such sign-in, the control does what it always did. The lease is the
+phone's, so Calendar's Google row, which offers no control while it could
+not check, reads Google again by itself the next time Calendar reads.
+
+```quint
+type MailSignIn = SignedInForMail | MailSignInEnded | MailSignInNotWanted
+type AfterTap = ReadAgain | StayAsItWas | AsAlways
+
+pure def afterMailSignIn(answer: MailSignIn): AfterTap = match answer {
+  | SignedInForMail => ReadAgain
+  | MailSignInEnded => StayAsItWas
+  | MailSignInNotWanted => AsAlways
+}
+
+pure def lawOnlyASignInReadsAgain(answer: MailSignIn): bool = (afterMailSignIn(answer) == ReadAgain) iff (answer == SignedInForMail)
+
+pure def lawAnEndedSignInLeavesTheScreenAsItWas(answer: MailSignIn): bool = (answer == MailSignInEnded) implies (afterMailSignIn(answer) == StayAsItWas)
+```
+
 ## Story: Send while my phone has a network
 
 > As the owner, I want a message to go out whenever Android says my phone

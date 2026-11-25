@@ -5,6 +5,8 @@ import ai.eliza.plugins.messages.VoicemailPcm;
 import ai.eliza.plugins.messages.VoicemailStore;
 import ai.eliza.plugins.media.RecordingWindow;
 import ai.eliza.plugins.passwords.PasswordSurfaces;
+import ai.eliza.plugins.signin.CredentialReader;
+import ai.eliza.os.agent.AgentCredentials.Account;
 import ai.eliza.voice.LocalSpeechBridgePlugin;
 import ai.eliza.voice.RecordingPcm;
 import android.Manifest;
@@ -22,6 +24,7 @@ import com.getcapacitor.annotation.Permission;
 import java.io.IOException;
 import java.util.Arrays;
 import java.util.Base64;
+import java.util.Objects;
 import java.util.function.BooleanSupplier;
 
 @CapacitorPlugin(name = "AlphaVoiceCloud",
@@ -36,6 +39,8 @@ public final class AlphaLocalSpeechPlugin extends LocalSpeechBridgePlugin {
    retireSpeechAuthority();
   }
  };
+ private CredentialReader.Subscription speechOwner;
+ private Account heldSpeechOwner;
  private final Object voicemailLock = new Object();
  private VoicemailRead activeVoicemail, nextVoicemail;
 
@@ -46,6 +51,24 @@ public final class AlphaLocalSpeechPlugin extends LocalSpeechBridgePlugin {
  @Override public void load() {
   super.load();
   PasswordSurfaces.addListener(secretSurface);
+  var credentials = new AlphaAgentCredentials(getContext());
+  heldSpeechOwner = AlphaTalkTransport.signedInAccount(credentials);
+  speechOwner = credentials.reader().listen(notice -> mainHandler().post(() -> {
+   if (destroyed()) return;
+   Account current = AlphaTalkTransport.signedInAccount(credentials);
+   if (!Objects.equals(current, heldSpeechOwner)) {
+    heldSpeechOwner = current;
+    retireSpeechAuthority();
+   }
+  }));
+ }
+
+ @Override protected ResidentRoute residentRoute(String ownerId) {
+  return () -> AlphaTalkTransport.open(getContext());
+ }
+
+ @Override protected boolean residentTransport() {
+  return AlphaTalkTransport.available();
  }
 
  @Override protected boolean sensitiveSurfaceActive() {
@@ -160,6 +183,7 @@ public final class AlphaLocalSpeechPlugin extends LocalSpeechBridgePlugin {
 
  @Override protected void handleOnDestroy() {
   PasswordSurfaces.removeListener(secretSurface);
+  if (speechOwner != null) speechOwner.close();
   stopVoicemailRead();
   super.handleOnDestroy();
  }

@@ -81,6 +81,16 @@ export function audioIdOf(note: StickyNote): string {
   return typeof audio === "object" && audio !== null && "audioId" in audio && typeof audio.audioId === "string" ? audio.audioId : ""
 }
 
+/** The saved transcript's original words, in the note's order. */
+export function transcriptText(note: StickyNote): string {
+  const format = note.format
+  if (format?.kind !== "voice") return ""
+  if (note.body.trim() !== "") return note.body
+  const audio = format.data.audio
+  if (typeof audio === "object" && audio !== null && "transcript" in audio && typeof audio.transcript === "string" && audio.transcript !== "") return audio.transcript
+  return (projectAuthoredNoteContent(format)?.lines ?? []).map((line) => line.text).join("\n")
+}
+
 /** What the saved voice note offers for reading. The audio stays with the phone. */
 export function savedVoice(note: StickyNote) {
   const format = note.format
