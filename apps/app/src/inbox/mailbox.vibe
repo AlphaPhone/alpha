@@ -11,6 +11,7 @@ import { waiting } from "../home/waiting.vibe"
 import { civilDay } from "../calendar/time.ts"
 import { fromAreas } from "../home/cards.vibe"
 import { Device } from "../platform/device.vibe"
+import { leaseRefusalReason } from "../../gen/app__platform.effect.vibe"
 import { Cloud } from "../platform/cloud.vibe"
 import { type Job, answer, contained, reacting, started, stream, together, untimed } from "../runtime/reactor.vibe"
 import { Mail, asked, connections, failureOf, mail, page } from "./gmail.vibe"
@@ -25,14 +26,15 @@ export const ownerChanges = Stream.unwrap(effect {
   return Stream.drop(Stream.changes(owners), 1)
 })
 
-// spec/app/inbox/index.md, "The answer names the connected accounts, their credentials and grants; the account chosen stays selected while it is connected, else the one account that may be read, else none and the owner chooses"
+// spec/app/inbox/index.md, "The answer names the connected accounts, their credentials and grants; the account chosen stays selected while it is connected, else the one account that may be read, else none and the owner chooses"; spec/app/inbox/index.md, "A check the phone holds back for want of the mail lease keeps the session and everything kept, and asks for one more sign-in"
 effect function checked(ticket: number): Event!!(Cloud | Mail | Inbox.Machine | KeyValueStore.KeyValueStore) {
   const list = try Inbox.Machine
   const ledger = try Mail
   const reply = effect { return { accounts: try connections() } }
-    catch (cause) => ({ signedOut: protocolFailure(cause)?.status === 401 })
+    catch (cause) => ({ signedOut: protocolFailure(cause)?.status === 401, held: protocolFailure(cause)?.reason === leaseRefusalReason })
   if (!Inbox.canAccountsAnswered(try list.get(), ticket)) return { type: "accountsAnswered", ticket, ok: false, connected: [] }
   if ("signedOut" in reply) {
+    if (reply.held) return { type: "accountsHeld", ticket }
     if (reply.signedOut) {
       try ledger.forget()
       try ignore((try KeyValueStore.KeyValueStore).remove(owner))
