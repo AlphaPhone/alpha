@@ -145,40 +145,41 @@ function parseTimerDurationMs(params: Record<string, unknown>): number | undefin
 
 /**
  * The one alarm the model named: by id, by label, or by its time; an update names it by id, since its label and time are the new ones.
- * When it named none, only an alarm that is the sole candidate: the only alarm, or for snooze and dismiss the only one
- * ringing. Nothing is guessed: a ringing alarm never wins over the one named.
+ * A label that names no single alarm leaves the time to name it. When neither names one, only the sole candidate is acted on:
+ * for snooze and dismiss the only alarm ringing, and when the model named nothing at all, the only alarm. Nothing is guessed:
+ * a ringing alarm never wins over the one named.
  */
 function findAlarmTarget(alarms: readonly ClockAlarmRecord[], params: Record<string, unknown>, op: string): ClockAlarmRecord | undefined {
   const id = readString(params, "id");
   if (id !== undefined) return alarms.find((entry) => entry.id === id);
   if (op === "update") return alarms.length === 1 ? alarms[0] : undefined;
   const label = readString(params, "label")?.toLowerCase();
-  if (label !== undefined) {
-    const byLabel = alarms.filter((entry) => entry.label.toLowerCase() === label);
-    return byLabel.length === 1 ? byLabel[0] : undefined;
-  }
+  const byLabel = label === undefined ? [] : alarms.filter((entry) => entry.label.toLowerCase() === label);
+  if (byLabel.length === 1) return byLabel[0];
   const time = parseAlarmTime(params);
-  if (time !== undefined) {
-    const byTime = alarms.filter((entry) => entry.hour === time.hour && entry.minute === time.minute);
-    return byTime.length === 1 ? byTime[0] : undefined;
-  }
+  const byTime = time === undefined ? [] : alarms.filter((entry) => entry.hour === time.hour && entry.minute === time.minute);
+  if (byTime.length === 1) return byTime[0];
   const ringing = alarms.filter((entry) => entry.phase === "ringing");
   if ((op === "snooze" || op === "dismiss") && ringing.length === 1) return ringing[0];
-  return alarms.length === 1 ? alarms[0] : undefined;
+  return label === undefined && time === undefined && alarms.length === 1 ? alarms[0] : undefined;
 }
 
-/** The one timer the model named, by id or label; when it named none, only the sole timer, or for dismiss the only one ringing. */
+const liveTimer = (timer: ClockTimerRecord) => timer.status === "running" || timer.status === "paused" || timer.status === "ringing";
+
+/**
+ * The one timer the model named, by id or label; a label that names no single timer leaves the ringing check. When the model
+ * named none, only the sole candidate: for dismiss the only timer ringing, else the only live one, as the Clock context lists them.
+ */
 function findTimerTarget(timers: readonly ClockTimerRecord[], params: Record<string, unknown>, op: string): ClockTimerRecord | undefined {
   const id = readString(params, "id");
   if (id !== undefined) return timers.find((entry) => entry.id === id);
   const label = readString(params, "label")?.toLowerCase();
-  if (label !== undefined) {
-    const byLabel = timers.filter((entry) => entry.label.toLowerCase() === label);
-    return byLabel.length === 1 ? byLabel[0] : undefined;
-  }
+  const byLabel = label === undefined ? [] : timers.filter((entry) => entry.label.toLowerCase() === label);
+  if (byLabel.length === 1) return byLabel[0];
   const ringing = timers.filter((entry) => entry.status === "ringing");
   if (op === "dismiss" && ringing.length === 1) return ringing[0];
-  return timers.length === 1 ? timers[0] : undefined;
+  const live = timers.filter(liveTimer);
+  return label === undefined && live.length === 1 ? live[0] : undefined;
 }
 
 function inferAlarmOp(params: Record<string, unknown>): string {
