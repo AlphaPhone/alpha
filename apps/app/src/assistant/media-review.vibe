@@ -9,6 +9,7 @@ import { Machine as Shell, showing } from "../../gen/app__shell.effect.vibe"
 import type { FileReview } from "../files/agent.vibe"
 import type { MessageDraftTarget } from "../messages/agent.vibe"
 import { readAgentSms } from "../messages/agent-send.vibe"
+import { currentSmsSelection, type MessageSmsRequest, type SmsSelection, type SmsSelectionContext } from "../messages/agent-sim.vibe"
 import { notesOperation, notesOperationWords } from "../notes/device-actions.vibe"
 import { phoneContactChoices, phoneQuery, pickPhoneContact, type NamedPhoneReview, type ReviewedPhoneContact } from "../phone/named-review.vibe"
 import { displayNumber } from "../phone/words.ts"
@@ -28,6 +29,7 @@ export service MediaExecutors {
 export interface ReviewAuthority {
   readonly current: () => Promise<boolean>
   readonly target?: MessageDraftTarget
+  readonly sms?: SmsSelection
   readonly files?: FileReview
   readonly phone?: ReviewedPhoneContact
 }
@@ -35,6 +37,7 @@ export interface ReviewAuthority {
 interface ApprovalScope {
   readonly active: boolean!!
   readonly target?: MessageDraftTarget
+  readonly sms?: SmsSelection
   readonly files?: FileReview
   readonly phone?: ReviewedPhoneContact
 }
@@ -118,6 +121,7 @@ const needsMessage = (operation: DeviceOperation): boolean => operation.type ===
 
 interface DeviceActionReply {
   readonly clientMessageId: string
+  readonly sms?: MessageSmsRequest
   readonly actionResults: readonly { readonly action: string; readonly data: unknown }[]
 }
 
@@ -163,6 +167,7 @@ export interface MediaCard {
   readonly title: string
   readonly detail: string
   readonly target?: MessageDraftTarget
+  readonly sms?: SmsSelection
   readonly files?: FileReview
   readonly reviewRequest?: string
   readonly phone?: NamedPhoneReview
@@ -340,6 +345,8 @@ export const mediaReview = Layer.effect(MediaReview, effect {
   const telephony = try Telephony
   const messages = try Messages
   const shell = try Shell
+  const smsContext = try Effect.context<SmsSelectionContext>()
+  const sameSms = (selection: SmsSelection) => Effect.provideContext(currentSmsSelection(selection), smsContext)
   const lock = try Semaphore.make(1)
   let latest: Session | undefined
   const scopes = new Map<string, ApprovalScope>()
@@ -348,7 +355,7 @@ export const mediaReview = Layer.effect(MediaReview, effect {
     const scope = scopes.get(call.proposalId)
     if (scope === undefined || !(try scope.active)) return { kind: "refused", code: NOT_DISPATCHED }
     return try executors.execute(operation, call, { current: () => runPromise(scope.active), ...(scope.target === undefined ? {} : { target: scope.target }),
-      ...(scope.files === undefined ? {} : { files: scope.files }), ...(scope.phone === undefined ? {} : { phone: scope.phone }) })
+      ...(scope.sms === undefined ? {} : { sms: scope.sms }), ...(scope.files === undefined ? {} : { files: scope.files }), ...(scope.phone === undefined ? {} : { phone: scope.phone }) })
   })
   const readBack = (operation: DeviceOperation, call: ExecutorCall) => operation.type === "sms_send"
     ? runPromise(readAgentSms(operation, call) |> Effect.provideService(%, Device, device) |> Effect.provideService(%, Telephony, telephony))
@@ -466,6 +473,8 @@ export const mediaReview = Layer.effect(MediaReview, effect {
         if (request === undefined ? !(comms && currentReview && commsFromReply(proposal, opened, actions)) : request !== message) return undefined
         const selected = needsMessage(op)
         if (selected && bound === undefined) return undefined
+        const sms = op.type === "sms_send" ? reply.sms?.selection : undefined
+        if (op.type === "sms_send" && reply.sms !== undefined && (sms === undefined || sms.subscription.id !== op.subscriptionId || !(try sameSms(sms)))) return undefined
         const named = op.type === "files_open" || op.type === "files_share" || op.type === "files_move" || op.type === "files_trash" || op.type === "files_folder_create"
         let files: FileReview | undefined
         if (named) {
@@ -481,13 +490,15 @@ export const mediaReview = Layer.effect(MediaReview, effect {
           files = pinnedFiles.get(proposal.id)?.files
           if (files === undefined) return undefined
         }
-        const labelled = words(op)
+        const detail = words(op)
+        const labelled = sms === undefined ? detail : { ...detail, detail: `SIM ${sms.subscription.slot + 1}\n${detail.detail}` }
         const query = phoneQuery(op)
         if (query !== undefined && (!(try reviewContext(revision)) || !(try enrollmentIsCurrent(opened)) || !(try reviewContext(revision)))) return undefined
         const phone = query === undefined ? undefined : try Effect.provideService(phoneContactChoices(query), Telephony, telephony)
         if (phone !== undefined && (opened !== latest || !(try reviewContext(revision)))) return undefined
         const card: MediaCard = { id: proposal.id, digest: proposal.digest, operation: op, expiresAt, message, conversation, revision, enrollmentId: opened.identity.enrollmentId, ...labelled,
           ...(selected && bound !== undefined ? { target: bound } : {}),
+          ...(sms === undefined ? {} : { sms }),
           ...(request === undefined || phone !== undefined ? { reviewRequest: reply.clientMessageId } : {}),
           ...(phone === undefined ? {} : { phone }),
           ...(files === undefined ? {} : { files, detail: op.type === "files_folder_create" ? labelled.detail : files.targets.map((target) => target.path).join(", ")
@@ -532,7 +543,7 @@ export const mediaReview = Layer.effect(MediaReview, effect {
         const showing = (try conversation.get()).context
         const chosen = (try chats.get()).chosen
         const time = try Clock.currentTimeMillis
-        if (session !== latest || (card.target !== undefined && !sameTarget(card.target, try messageTarget()))
+        if (session !== latest || (card.target !== undefined && !sameTarget(card.target, try messageTarget())) || (card.sms !== undefined && !(try sameSms(card.sms)))
           || card.enrollmentId !== session.identity.enrollmentId || card.conversation !== chosen
           || card.revision !== showing.revision || showing.sensitive || time >= card.expiresAt) return false
         return card.reviewRequest === undefined || (board.lastSentId === card.reviewRequest && (try reviewContext(card.revision)))
@@ -554,7 +565,7 @@ export const mediaReview = Layer.effect(MediaReview, effect {
           return
         }
         scopes.set(card.id, { active: current(held), ...(card.target === undefined ? {} : { target: card.target }), ...(card.files === undefined ? {} : { files: card.files }),
-          ...(card.phone?.tag === "Exact" ? { phone: card.phone.selected } : {}) })
+          ...(card.sms === undefined ? {} : { sms: card.sms }), ...(card.phone?.tag === "Exact" ? { phone: card.phone.selected } : {}) })
         const { id, digest, expiresAt, operation } = card
         const result = (tryPromise(() => held.execute.approve({ id, digest, expiresAt, operation }, { live: true, nonsensitive: true, exact: true, forceReview: true, requestEligible: true, reviewed: true }))
           |> ensuring(%, sync(() => { scopes.delete(card.id) }))) catch () => undefined

@@ -405,6 +405,71 @@ describe("Messages on an Alpha image", () => {
     }
   });
 
+  it("Reviews a Messages text only with the exact SIM the owner had selected (spec/app/messages/composer.md, \"The phone says how many SIMs it has, and with more than one the owner picks one, which needs SIM access\")", async () => {
+    const world = image();
+    const first = world.telephony.subscriptions[0]!;
+    const second = { ...first, id: 8, slot: 1, defaultSms: false, displayName: "Personal line", carrierName: "Personal carrier" };
+    world.telephony.subscriptions = [first, second];
+    world.ask.metadata = [];
+    const sms = { type: "sms_send", recipients: ["+14155550100"], body: "Meet at the front door", subscriptionId: second.id } as const;
+    const review = textReview(world.notes.owner, "text-with-sim", sms);
+    world.telephony.textReview = review;
+    const { alpha } = await openImage(world);
+    const runtime = assistant.runtime(alpha);
+    await openMessages(alpha);
+    await ready(alpha.runtime, Phone, "Known call state", (state) => state.telecom === "NoCall");
+    await ready(alpha.runtime, Messages, "Conversations ready", (state) => state.list.status === "Loaded" && state.threads === 1);
+    await press("Maya Chen");
+    await ready(alpha.runtime, Messages, "Maya conversation loaded", (state) => state.pane === "Conversation" && state.page.status === "Loaded");
+    await ready(alpha.runtime, Composer, "SIMs visible", (state) => state.sims === 2 && state.simInfo.grant === "Granted");
+    await ready(runtime, Conversation, "Ask Alpha sees Messages", (state) => state.ready && state.context.showing.tag === "App" && state.context.showing.view === "Messages");
+
+    const ask = async () => {
+      await press("Open Alpha");
+      await ready(alpha.runtime, Shell, "Ask Alpha sheet", (state) => state.assistant === "Sheet");
+      await vi.waitFor(() => expect(document.querySelector('textarea[aria-label="Ask Alpha"]')).not.toBeNull());
+      const reads = review.pendingReads;
+      world.ask.nextReplyChunks = ["Review the text on your phone."];
+      world.ask.nextActions = () => [{ action: "PROPOSE_DEVICE_ACTION", data: { proposalId: review.proposal.id, state: "pending", executed: false, approvalRequired: true, awaitingUserInput: true } }];
+      await write("Ask Alpha", "Text +14155550100: Meet at the front door");
+      await vi.waitFor(() => expect(button("Send")?.disabled).toBe(false));
+      await press("Send");
+      await ready(runtime, Conversation, "The proposed text has been read", (state) => review.pendingReads > reads && state.turn.reply === "Complete");
+      const metadata = world.ask.metadata?.at(-1) as { observation?: { selectedObject?: unknown } } | undefined;
+      return metadata?.observation?.selectedObject;
+    };
+    const giveBack = async () => {
+      await press("Back to texting Maya Chen");
+      await ready(alpha.runtime, Shell, "The Messages composer is visible", (state) => state.assistant === "Bar");
+    };
+    const choose = async (label: string) => {
+      await giveBack();
+      await vi.waitFor(() => expect(button(label)).toBeDefined());
+      await press(label);
+    };
+
+    expect(await ask()).toBeUndefined();
+    expect(button("Approve")).toBeUndefined();
+    await choose("SIM 1");
+    expect(await ask()).toEqual({ kind: "sms-subscription", id: String(first.id), revision: expect.stringMatching(/^[a-f0-9-]{36}$/u) });
+    expect(button("Approve")).toBeUndefined();
+    await giveBack();
+    await press("Back");
+    await ready(alpha.runtime, Messages, "Conversation closed", (state) => state.pane === "Threads");
+    await press("Maya Chen");
+    await ready(alpha.runtime, Messages, "Conversation reopened", (state) => state.pane === "Conversation" && state.page.status === "Loaded");
+    expect(await ask()).toBeUndefined();
+    expect(button("Approve")).toBeUndefined();
+    await choose("SIM 2");
+    expect(await ask()).toEqual({ kind: "sms-subscription", id: String(second.id), revision: expect.stringMatching(/^[a-f0-9-]{36}$/u) });
+    await vi.waitFor(() => expect(button("Approve")).toBeDefined());
+
+    world.telephony.subscriptions = [first, { ...second, carrierName: "Replacement carrier" }];
+    await press("Approve");
+    await vi.waitFor(() => expect(review.receipts).toEqual([expect.objectContaining({ outcome: "failed", operationId: review.proposal.id })]));
+    expect([review.confirmations, world.telephony.sent]).toEqual([[], []]);
+  });
+
   it("Opens the exact notified conversation and follows an owner's safe link tap (spec/app/messages/index.md, \"A message notification opens its exact conversation once access is available\"; spec/app/messages/index.md, \"Story: Read a conversation\")", async () => {
     const world = image();
     world.telephony.texts.push({ id: 2, thread: 23, address: "+14155550122", box: "inbox", date: 1_700_000_060_000, body: "Lunch? http://news.example/lunch or https://example-user@private.example/lunch", read: false });

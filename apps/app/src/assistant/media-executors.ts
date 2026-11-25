@@ -16,7 +16,7 @@ export async function executeMedia(alpha: Alpha, operation: DeviceOperation, cal
   }
   if (operation.type === "sms_send") {
     const { reviewAgentSms } = await import("../messages/agent-send.vibe");
-    return alpha.runtime.runPromise(reviewAgentSms(operation, call, authority.current));
+    return alpha.runtime.runPromise(reviewAgentSms(operation, call, authority.current, authority.sms));
   }
   if (operation.type === "messages_read_selected") {
     const { shareSelectedMessage } = await import("../messages/agent.vibe");

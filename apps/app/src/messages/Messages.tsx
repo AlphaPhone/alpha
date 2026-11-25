@@ -2,11 +2,10 @@
 import { MMS_ATTACHMENT_TYPES, MMS_MAX_BODY, MMS_MAX_RECIPIENTS } from "@elizaos/os-bridges";
 import type { MessageRow, ThreadRow } from "@elizaos/os-bridges";
 import { normalizePhoneNumber } from "@elizaos/os-bridges";
-import type { TelephonySubscription } from "@elizaos/os-bridges";
 import { Alert, Avatar, Banner, Button, Chip, ConfirmDialog, Input, Menu, MenuContent, MenuItem, MenuTrigger, SearchField, Spinner, Textarea } from "@repo/ui";
-import type { Layer, ManagedRuntime } from "effect";
+import { Effect, type Layer, type ManagedRuntime } from "effect";
 import { ArrowUp, Camera, ChevronDown, ChevronLeft, ChevronUp, CircleAlert, Copy, Image as PictureIcon, ImagePlus, Mic, Pencil, Phone as Call, Plus, RefreshCw, Search, Send, Sparkles, Square, Trash2, X } from "lucide-react";
-import { memo, useCallback, useMemo, useRef, useState, type MouseEvent, type PointerEvent } from "react";
+import { memo, useCallback, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type MouseEvent, type PointerEvent } from "react";
 import { clear } from "../../gen/app__phone.ts";
 import { useMachine as usePhone } from "../../gen/app__phone.react.ts";
 import { content, noMatches, noThreads, smsNeeded, threadsFailed } from "../../gen/app__messages.ts";
@@ -355,7 +354,9 @@ function Compose({ runtime, title, addresses, thread }: MessagesProps & { title:
   const picturesInput = useRef<HTMLInputElement>(null);
   const cameraInput = useRef<HTMLInputElement>(null);
   const focus = useRef(false);
-  const [simChoice, selectSim] = useState<{ thread: number; subscription: TelephonySubscription }>();
+  const subscriptionChoice = useMemo(() => runtime.runSync(Effect.map(Drafts, (drafts) => drafts.subscriptionChoice)), [runtime]);
+  const simChoice = useSyncExternalStore(subscriptionChoice.subscribe, subscriptionChoice.get, subscriptionChoice.get);
+  useLayoutEffect(() => () => subscriptionChoice.leave(thread), [subscriptionChoice, thread]);
   const selectedSim = simChoice?.thread === thread ? simChoice.subscription : undefined;
   const { state, can, send } = composer;
   if (!state || !phone || state.thread !== thread || addresses.length === 0) return <CommsBar runtime={runtime} />;
@@ -482,7 +483,7 @@ function Compose({ runtime, title, addresses, thread }: MessagesProps & { title:
               return <Button key={subscription.id} size="sm" aria-pressed={picked} variant={picked ? "primary" : "secondary"} disabled={!canPick && !samePosition}
                 onClick={() => {
                   if (!canPick && !samePosition) return;
-                  selectSim({ thread, subscription });
+                  subscriptionChoice.pick(thread, subscription);
                   if (canPick) void send(pick);
                 }}>{`SIM ${subscription.slot + 1}`}</Button>;
             })}

@@ -53,6 +53,19 @@ interface MmsReceiptBinding {
   readonly attachments: MmsBinding["attachments"]
 }
 
+/** The SIM the owner picked for this conversation, held only while Alpha is open. */
+export interface PickedSubscription {
+  readonly thread: number
+  readonly subscription: TelephonySubscription
+}
+
+interface SubscriptionChoice {
+  readonly get: () => PickedSubscription | undefined
+  readonly subscribe: (listener: () => void) => () => void
+  readonly pick: (thread: number, subscription: TelephonySubscription) => void
+  readonly leave: (thread: number) => void
+}
+
 /** The texts behind the composer: each conversation's draft, saved on the phone, the pictures of the open one, and the send in hand. */
 export service Drafts {
   text(thread: number): string!!
@@ -62,6 +75,7 @@ export service Drafts {
   setPictures(pictures: ReadonlyArray<Picture>): void!!
   subscriptions(): ReadonlyArray<TelephonySubscription>!!
   setSubscriptions(subscriptions: ReadonlyArray<TelephonySubscription>): void!!
+  readonly subscriptionChoice: SubscriptionChoice
   offeredPicture(): (PictureOffer | undefined)!!
   setOfferedPicture(offer: PictureOffer | undefined): void!!
   outgoing(): Option.Option<Outgoing>!!
@@ -142,6 +156,26 @@ const drafts = Layer.effect(Drafts, effect {
   const store = try KeyValueStore.KeyValueStore
   let pictures: ReadonlyArray<Picture> = []
   let subscriptions: ReadonlyArray<TelephonySubscription> = []
+  let picked: PickedSubscription | undefined
+  const simListeners = new Set<() => void>()
+  const showPick = () => { for (const listener of simListeners) listener() }
+  const subscriptionChoice: SubscriptionChoice = {
+    get: () => picked,
+    subscribe: (listener) => {
+      simListeners.add(listener)
+      return () => { simListeners.delete(listener) }
+    },
+    pick: (thread, subscription) => {
+      if (picked?.thread === thread && sameSubscription(picked.subscription, subscription)) return
+      picked = { thread, subscription }
+      showPick()
+    },
+    leave: (thread) => {
+      if (picked?.thread !== thread) return
+      picked = undefined
+      showPick()
+    },
+  }
   let offeredPicture: PictureOffer | undefined
   let sending = { direct: false, pictures: false }
   let outgoing: Option.Option<Outgoing> = Option.fromNullishOr(keptSend(store.get(outgoingKey) catch () => undefined))
@@ -155,6 +189,7 @@ const drafts = Layer.effect(Drafts, effect {
     setPictures: (next: ReadonlyArray<Picture>) => sync(() => { pictures = next }),
     subscriptions: () => sync(() => subscriptions),
     setSubscriptions: (next: ReadonlyArray<TelephonySubscription>) => sync(() => { subscriptions = next }),
+    subscriptionChoice,
     offeredPicture: () => sync(() => offeredPicture),
     setOfferedPicture: (offer: PictureOffer | undefined) => sync(() => { offeredPicture = offer }),
     outgoing: () => sync(() => outgoing),
