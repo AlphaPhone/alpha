@@ -59,7 +59,7 @@ module kept {
   /** @throws {never} */
   export function textFromBase64(data: string): string | undefined {
     try {
-      return new TextDecoder("utf-8", { fatal: true }).decode(Uint8Array.fromBase64(data))
+      return new TextDecoder("utf-8", { fatal: true }).decode(Uint8Array.from(atob(data), (byte) => byte.charCodeAt(0)))
     } catch {
       return undefined
     }

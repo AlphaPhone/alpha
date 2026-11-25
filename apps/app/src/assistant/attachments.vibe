@@ -4,7 +4,6 @@ import * as Limits from "../../gen/app__assistant__attachments.effect.vibe"
 import { Machine as Conversation } from "../../gen/app__assistant.effect.vibe"
 import { Machine as Shell } from "../../gen/app__shell.effect.vibe"
 import { contained } from "../runtime/reactor.vibe"
-import { reencodeImage } from "./image-encode.ts"
 import { Talk } from "./talk.vibe"
 
 /** The owner's explicitly selected file. `data` contains raw base64. */
@@ -25,15 +24,17 @@ export effect function attachToAlpha(file: Attachment): boolean!!MediaHandoff {
 }
 
 module web {
+  import { reencodeImage } from "./image-encode.ts"
+
   /** Convert already selected bytes to a JPEG accepted by the agent. */
-  export async function jpeg(file: Attachment, cap: number): Promise<string | undefined> {
-    const binary = atob(file.data)
+  export async function jpeg(data: string, mimeType: string, cap: number): Promise<string | undefined> {
+    const binary = atob(data)
     const bytes = Uint8Array.from(binary, (char) => char.charCodeAt(0))
-    return reencodeImage(new Blob([bytes], { type: file.mimeType }), [2048, 1600, 1280, 1024], [85, 72, 60], cap)
+    return reencodeImage(new Blob([bytes], { type: mimeType }), [2048, 1600, 1280, 1024], [85, 72, 60], cap)
   }
 
   /** Store one message's files before the turn is sent. A later turn replaces the staging record. */
-  export async function keepFiles(files: ReadonlyArray<Attachment>): Promise<void> {
+  export async function keepFiles(files: ReadonlyArray<unknown>): Promise<void> {
     const db = await new Promise<IDBDatabase>((resolve, reject) => {
       const open = indexedDB.open("alpha-chat-attachments", 1)
       open.onupgradeneeded = () => { open.result.createObjectStore("pending") }
@@ -75,7 +76,7 @@ export effect function stageAttachment(file: Attachment): boolean!!(Talk | Compo
   if (!image && !documents.has(type)) return false
   if (!Limits.fits(image ? "Image" : "Document", rawLength(file.data), file.name.length) || !base64.test(file.data)) return false
   const convert = image && Limits.reencoded("Image", rawLength(file.data), images.has(type))
-  const data = convert ? tryPromise(() => jpeg(file, Limits.imageBase64Cap)) catch () => undefined : file.data
+  const data = convert ? tryPromise(() => jpeg(file.data, file.mimeType, Limits.imageBase64Cap)) catch () => undefined : file.data
   if (data === undefined || data === "") return false
   const { board, attachmentLock } = try Talk
   return try attachmentLock.withPermits(1)(effect {

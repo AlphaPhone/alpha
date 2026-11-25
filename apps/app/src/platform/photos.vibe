@@ -3,6 +3,7 @@ import type { DeviceLibraryClient, PhotosClient } from "@elizaos/os/bridges/defi
 import { registered } from "./device.vibe"
 
 module native {
+  import type { DeviceLibraryClient, PhotosClient } from "@elizaos/os/bridges/definitions/media"
   import { deviceLibraryClient, deviceLibraryPlugin, photosClient, photosPlugin } from "@elizaos/os/bridges/media"
 
   /** @throws {never} */
@@ -17,20 +18,20 @@ module native {
 }
 import { phoneLibrary, reviewedLibrary } from native
 
-/** A browser capture, stored in the origin with its original pixels and optional camera thumbnail. */
-export interface BrowserCapture {
-  readonly id: string
-  readonly mimeType: string
-  readonly size: number
-  readonly name: string
-  readonly width: number
-  readonly height: number
-  readonly created: number
-  readonly duration?: number
-  readonly thumbnail?: string
-}
-
 module browser {
+  /** A browser capture, stored in the origin with its original pixels and optional camera thumbnail. */
+  export interface BrowserCapture {
+    readonly id: string
+    readonly mimeType: string
+    readonly size: number
+    readonly name: string
+    readonly width: number
+    readonly height: number
+    readonly created: number
+    readonly duration?: number
+    readonly thumbnail?: string
+  }
+
   const event = "alpha:photos-captured"
   const store = "captures"
   const originals = "originals"
@@ -199,8 +200,8 @@ module browser {
       && (!("thumbnail" in row) || row.thumbnail === undefined || typeof row.thumbnail === "string")
   }
 }
-import { browserCaptures, browserOriginal, captureEvent, latestBrowserCapture, page, saveBrowserCapture } from browser
-export { latestBrowserCapture, saveBrowserCapture }
+import { type BrowserCapture, browserCaptures, browserOriginal, captureEvent, latestBrowserCapture, page, saveBrowserCapture } from browser
+export { type BrowserCapture, latestBrowserCapture, saveBrowserCapture }
 
 /** The phone's permitted library and its reviewed read surface, or the captures saved in this browser. */
 export service PhotosPort {
@@ -232,7 +233,7 @@ export const phonePhotos = Layer.sync(PhotosPort, () => {
   const phone = registered(photosName) ? Option.some(phoneLibrary(photosName)) : Option.none<PhotosClient>()
   const reviewed = registered(reviewedName) ? Option.some(reviewedLibrary(reviewedName)) : Option.none<DeviceLibraryClient>()
   const changes = Option.isNone(phone) ? Stream.empty : Stream.callback<void>((queue) => acquireRelease(
-    tryPromise(() => phone.value.onLibraryChanged(() => { Queue.offerUnsafe(queue, undefined) })) catch () => undefined,
+    effect { return tryPromise(() => phone.value.onLibraryChanged(() => { Queue.offerUnsafe(queue, undefined) })) catch () => undefined },
     (handle) => handle === undefined ? Effect.void : ignore(tryPromise(() => handle.remove())),
   ))
   return { phone, reviewed, changes, captures: () => succeed([]), original: () => succeed(undefined), ...entry() }

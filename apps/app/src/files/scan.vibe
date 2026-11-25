@@ -352,7 +352,7 @@ export effect function reviewCalendarEvent(ticket: number) {
 module notes {
   import { createNotesClient, type NotesClient, type NotesTransport } from "@elizaos/plugin-notes/client"
   import { Effect } from "effect"
-  import { HttpClientRequest } from "effect/unstable/http"
+  import { HttpClientRequest } from "effect/http"
   import type { Remote } from "../platform/remote.vibe"
 
   /** Run the SDK client on the same authenticated agent transport as Notes. @throws {never} */

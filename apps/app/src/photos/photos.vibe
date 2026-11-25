@@ -112,11 +112,11 @@ const operations = { Favorite: "favorite", Unfavorite: "unfavorite", Trash: "tra
 export effect function changedItems(change: Change, items: readonly number[]) {
   const { phone } = try PhotosPort
   const rows = try targets(items)
-  if (Option.isNone(phone) || rows.length !== items.length) return { done: [], stale: items, declined: false, known: true }
+  if (Option.isNone(phone) || rows.length !== items.length) return { done: [], stale: [...items], declined: false, known: true }
   const asked = rows.map((row) => row.item)
   if (change === "Share") {
     const shared = tryPromise(() => asked.length === 1 && asked[0] !== undefined ? phone.value.share(asked[0]) : phone.value.shareMany(asked)) catch () => undefined
-    return { done: shared?.status === "opened" ? items : [], stale: [], declined: false, known: shared !== undefined }
+    return { done: shared?.status === "opened" ? [...items] : [], stale: [], declined: false, known: shared !== undefined }
   }
   const attempted = try exit(tryPromise(() => phone.value.changeMany(operations[change], asked)))
   const reply = Exit.isSuccess(attempted) ? attempted.value : undefined
@@ -125,7 +125,7 @@ export effect function changedItems(change: Change, items: readonly number[]) {
     const cause = typeof failure === "object" && failure !== null && "cause" in failure ? failure.cause : failure
     const code = typeof cause === "object" && cause !== null && "code" in cause ? cause.code : undefined
     if (code === "LIBRARY_DECLINED") return { done: [], stale: [], declined: true, known: true }
-    if (code === "LIBRARY_STALE") return { done: [], stale: items, declined: false, known: true }
+    if (code === "LIBRARY_STALE") return { done: [], stale: [...items], declined: false, known: true }
   }
   const knownRows: Row[] = []
   const knownNumbers: number[] = []
@@ -160,17 +160,15 @@ effect function albumWritten(request: WriteAlbum): Library.Event!!(PhotosPort | 
   const refusal: Library.Event = { type: "albumWritten", attempt: request.attempt, known: true, confirmed: false }
   if (Option.isNone(phone) || rows.length !== request.items.length) return refusal
   let update: AlbumChange | undefined
-  if (request.change === "Create") {
-    const first = rows[0]?.item
-    update = first === undefined ? { operation: "create", name: request.name } : { operation: "create", name: request.name, mediaId: first.id, mediaRevision: first.revision }
-  } else if (album !== undefined && request.change === "Rename") update = { operation: "rename", id: album.id, revision: album.revision, name: request.name }
+  if (request.change === "Create") update = { operation: "create", name: request.name }
+  else if (album !== undefined && request.change === "Rename") update = { operation: "rename", id: album.id, revision: album.revision, name: request.name }
   else if (album !== undefined && request.change === "Delete") update = { operation: "delete", id: album.id, revision: album.revision }
   if (update === undefined && album === undefined) return refusal
   const planned = update
   const reply = planned === undefined ? album : (tryPromise(() => phone.value.changeAlbum(planned)) catch () => undefined)
   if (reply === undefined) return { ...refusal, known: false }
   let current = reply
-  for (const { item } of request.change === "Create" ? rows.slice(1) : request.change === "Add" || request.change === "Remove" ? rows : []) {
+  for (const { item } of request.change === "Create" || request.change === "Add" || request.change === "Remove" ? rows : []) {
     const operation = request.change === "Remove" ? "remove" : "add"
     const { id, revision } = current
     const next = tryPromise(() => phone.value.changeAlbum({ operation, id, revision, mediaId: item.id, mediaRevision: item.revision })) catch () => undefined

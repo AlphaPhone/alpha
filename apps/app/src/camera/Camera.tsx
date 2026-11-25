@@ -29,7 +29,7 @@ function Viewfinder({ state, native, zoom, focusAt, bind }: {
   native: boolean;
   zoom: (tenths: number) => void;
   focusAt: (point: Point) => void;
-  bind: (video: HTMLVideoElement) => () => void;
+  bind: (video: HTMLVideoElement | null) => (() => void) | undefined;
 }) {
   const pointersRef = useRef(new Map<number, Point>());
   const pinchRef = useRef<{ distance: number; zoom: number } | undefined>(undefined);
