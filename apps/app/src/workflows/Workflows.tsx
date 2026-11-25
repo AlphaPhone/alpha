@@ -34,7 +34,7 @@ import { Filters, kinds, statuses } from "./Filters.tsx";
 import { History } from "./History.tsx";
 import type { HistoryWordsPort } from "./history.vibe";
 import type { DefinitionWords } from "./lifecycle.vibe";
-import { Rows, type WorkflowRow, refresh } from "./list.vibe";
+import { Rows, type WorkflowRow, refresh, shownUnder } from "./list.vibe";
 
 const remoteConnection = "Connect your remote agent in Settings.";
 const signedOutChoices = [
@@ -89,7 +89,7 @@ export function Workflows({ runtime, alpha }: Shown<Resident | Rows | Machine | 
     aria-label="Clock alarms" aria-haspopup="dialog" trailing={<ChevronRight aria-hidden className="size-5" />}
     onClick={showClock} />;
   const read = () => void runtime.runPromiseExit(refresh());
-  const snapshot = state === undefined ? undefined : runtime.runSync(Effect.flatMap(Rows, (rows) => rows.view(state.owner)));
+  const snapshot = state === undefined ? undefined : shownUnder(runtime.runSync(Effect.flatMap(Rows, (rows) => rows.view(state.owner))), state.status);
   const kind = state?.kind;
   const status = state?.status;
   const rows = useMemo(
