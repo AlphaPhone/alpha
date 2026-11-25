@@ -1,4 +1,4 @@
-// spec/app/notes/index.md, "Story: See my notes"; spec/app/notes/index.md, "The agent opens the one note the owner named, as the list shows it now, once for the owner's current turn, and is told whether it opened"
+// spec/app/notes/index.md, "Story: See my notes"; spec/app/notes/index.md, "The agent opens the one note the owner named, as the list last read it, once for the owner's current request, and is told whether it opened"
 import { parseNoteFormat } from "@elizaos/plugin-notes/format";
 import type { NotesSnapshot, StickyNote } from "@elizaos/plugin-notes/types";
 import { Schema } from "effect";

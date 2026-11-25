@@ -83,8 +83,8 @@ pure val weight_written = 3
 Nothing being written to another voice note may be on its way, and nothing
 may still be playing. The agent opens only the one note the owner just
 named, as Notes lets it (Notes, "The agent opens the one note the owner
-named, as the list shows it now, once for the owner's current turn, and is
-told whether it opened"); an owner's tap carries no request.
+named, as the list last read it, once for the owner's current request, and
+is told whether it opened"); an owner's tap carries no request.
 
 ```quint
 pure def canOpenVoice(v: VoiceNote, note: int, revision: int, segments: int, heard: int, summary: int, covered: bool, req: Request, by: Actor): bool =

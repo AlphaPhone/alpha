@@ -91,8 +91,8 @@ as the list shows it, at its revision and with its source (Notes, "The
 owner opens a note the list shows, when nothing else of Notes is open, and
 it opens as listed"). The agent opens only the one note the owner just named, as
 Notes lets it (Notes, "The agent opens the one note the owner named, as the
-list shows it now, once for the owner's current turn, and is told whether
-it opened"); an owner's tap carries no request. The agent's note may take
+list last read it, once for the owner's current request, and is told
+whether it opened"); an owner's tap carries no request. The agent's note may take
 the place of a note open with nothing unsaved and no deletion on its way,
 which then closes as Close closes a saved note; nothing of the owner's is
 lost. A new note needs the
