@@ -1,0 +1,45 @@
+// spec/app/browser/library.md, "The library is read when it opens and again on request, never under a write"; "The latest read gives the bookmarks and history, says it could not read them, or finds the bookmark list damaged and offers once to replace it"
+import { bookmarkBrowserUrl } from "@elizaos/os-bridges"
+import * as Library from "../../gen/app__browser__library.effect.vibe"
+import { TabHost, hosted } from "../platform/browser.vibe"
+import { answer, reacting } from "../runtime/reactor.vibe"
+import { Pages } from "./browser.vibe"
+
+export type Bookmark = { readonly url: string; readonly title?: string }
+
+/** The native bookmark rows that go with the last accepted library count. */
+export service LibraryRows {
+  bookmarks(): readonly Bookmark[]!!
+  keep(bookmarks: readonly Bookmark[]): void!!
+}
+
+const rows = Layer.sync(LibraryRows, () => {
+  let stored: readonly Bookmark[] = []
+  return {
+    bookmarks: () => sync(() => stored),
+    keep: (bookmarks: readonly Bookmark[]) => sync(() => { stored = bookmarks }),
+  }
+})
+
+effect function load(ticket: number): Library.Event!!(TabHost | Pages | LibraryRows | Library.Machine) {
+  return effect {
+    const saved = try hosted("bookmarks", (plugin, session) => plugin.bookmarks({ session }))
+    const urls = [...new Set(saved.urls.filter(bookmarkBrowserUrl))].slice(0, Library.maxMarks)
+    const bookmarks = urls.map((url) => {
+      const title = saved.entries?.find((entry) => entry.url === url)?.title
+      return title ? { url, title } : { url }
+    })
+    const visits = try (try Pages).visits()
+    const current = try (try Library.Machine).get()
+    if (Library.canLoaded(current, ticket, bookmarks.length, visits.length)) try (try LibraryRows).keep(bookmarks)
+    return { type: "loaded", ticket, ok: true, damaged: false, count: bookmarks.length, entries: visits.length }
+  } catch () => ({ type: "loaded", ticket, ok: false, damaged: false, count: 0, entries: 0 })
+}
+
+/** The Browser's library reads the phone's saved bookmarks and its current visit list. */
+export const library = Layer.provideMerge(reacting(Library, {
+  carry: (fx: Library.Effect) => match (fx) {
+    when { tag: "Load", let ticket }: answer("read library", load(ticket), { type: "loaded", ticket, ok: false, damaged: false, count: 0, entries: 0 } as Library.Event);
+    when { tag: "Write", let write }: answer("write library", Effect.succeed({ type: "written", ticket: write, ok: false } as Library.Event), { type: "written", ticket: write, ok: false } as Library.Event);
+  },
+}), rows)
