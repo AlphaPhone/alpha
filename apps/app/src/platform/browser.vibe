@@ -1,11 +1,10 @@
 // spec/app/browser/index.md, "The Browser holds its open tabs, which are private, the one shown, their native tabs, the saved session and its writer, and what covers the page"
-import type { BrowserTabHostPlugin, BrowserTabHostListener } from "@elizaos/os/bridges/definitions/tab-host"
-import type { BrowserTabSession } from "@elizaos/os/bridges/tab-host"
+import type { BrowserTabHostPlugin, BrowserTabHostListener, BrowserTabSession } from "@elizaos/os-bridges"
 import { registered } from "./device.vibe"
 
 module held {
-  import type { BrowserTabHostPlugin } from "@elizaos/os/bridges/definitions/tab-host"
-  import { BrowserTabSession, tabHostPlugin } from "@elizaos/os/bridges/tab-host"
+  import type { BrowserTabHostPlugin } from "@elizaos/os-bridges"
+  import { BrowserTabSession, tabHostPlugin } from "@elizaos/os-bridges"
 
   let made: BrowserTabHostPlugin | undefined
   /** eliza's client of Alpha's tab host, made once: Capacitor registers a plugin a single time for the life of the page. @throws {never} */

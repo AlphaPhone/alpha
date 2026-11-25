@@ -1,5 +1,5 @@
 // spec/app/camera/index.md, "Story: Open the camera"; spec/app/camera/index.md, "Story: Leave and come back"; spec/app/camera/index.md, "Story: Frame the shot"; spec/app/camera/index.md, "Story: Take photos and videos"; spec/app/camera/index.md, "Story: Let Alpha take a photo"
-import type { PhotosClient } from "@elizaos/os/bridges/definitions/media"
+import type { PhotosClient } from "@elizaos/os-bridges"
 import * as Camera from "../../gen/app__camera.effect.vibe"
 import * as Film from "../../gen/app__camera__recording.effect.vibe"
 import * as Shell from "../../gen/app__shell.effect.vibe"

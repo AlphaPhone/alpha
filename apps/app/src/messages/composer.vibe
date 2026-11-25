@@ -1,8 +1,6 @@
 // spec/app/messages/composer.md, "Story: Keep my draft"; spec/app/messages/composer.md, "Story: Let Alpha suggest a draft"; spec/app/messages/composer.md, "Story: Send a message"; spec/app/messages/sending.md, "Story: Send a message once"; spec/app/messages/sending.md, "Story: Know whether it arrived"
 import * as KeyValueStore from "effect/persistence/KeyValueStore"
-import { MMS_ATTACHMENT_TYPES, MMS_MAX_BODY, MMS_MAX_RECIPIENTS, MMS_MAX_TOTAL_BYTES } from "@elizaos/os/bridges/definitions/messages"
-import type { MmsAttachmentType, MmsReview, OperationId, SmsReview, SmsSendResult, SmsSendStatus } from "@elizaos/os/bridges/messages"
-import type { PhoneNumber } from "@elizaos/os/bridges/phone"
+import { MMS_ATTACHMENT_TYPES, MMS_MAX_BODY, MMS_MAX_RECIPIENTS, MMS_MAX_TOTAL_BYTES, type MmsAttachmentType, type MmsReview, type OperationId, type SmsReview, type SmsSendResult, type SmsSendStatus, type PhoneNumber } from "@elizaos/os-bridges"
 import * as Composer from "../../gen/app__messages__composer.effect.vibe"
 import type { Effect as Out, Event } from "../../gen/app__messages__composer.effect.vibe"
 import type { Effect as SendOut } from "../../gen/app__messages__sending.effect.vibe"
@@ -53,7 +51,7 @@ const draftKey = (thread: number) => `alpha/messages/draft/${thread}@1`
 const outgoingKey = "alpha/messages/outgoing@1"
 
 module text {
-  import { type OperationId, operationIdOf } from "@elizaos/os/bridges/definitions/messages"
+  import { type OperationId, operationIdOf } from "@elizaos/os-bridges"
 
   /** What the store kept for the send in hand, without its pictures' bytes, which are never kept: only that it had some. @throws {never} */
   export function keptSend(raw: string | undefined): { thread: number; to: string[]; body: string; sim: number | null; pictures: never[]; pictured: boolean; operation: OperationId | undefined; status: undefined } | undefined {

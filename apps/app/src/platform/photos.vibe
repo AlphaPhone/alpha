@@ -1,10 +1,10 @@
 // spec/app/photos/index.md, "Story: Browse the library"; spec/app/photos/viewer.md, "Story: Look at a photo or video"
-import type { DeviceLibraryClient, PhotosClient } from "@elizaos/os/bridges/definitions/media"
+import type { DeviceLibraryClient, PhotosClient } from "@elizaos/os-bridges"
 import { registered } from "./device.vibe"
 
 module native {
-  import type { DeviceLibraryClient, PhotosClient } from "@elizaos/os/bridges/definitions/media"
-  import { deviceLibraryClient, deviceLibraryPlugin, photosClient, photosPlugin } from "@elizaos/os/bridges/media"
+  import { deviceLibraryClient, deviceLibraryPlugin, photosClient, photosPlugin } from "@elizaos/os-bridges"
+  import type { DeviceLibraryClient, PhotosClient } from "@elizaos/os-bridges"
 
   let library: PhotosClient | undefined
   let reviewed: DeviceLibraryClient | undefined

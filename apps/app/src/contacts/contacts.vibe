@@ -1,5 +1,5 @@
 // spec/app/contacts/index.md, "Story: Browse my contacts"; spec/app/contacts/index.md, "Story: Look at one contact"; spec/app/contacts/index.md, "Story: Add or change a contact"; spec/app/contacts/index.md, "Story: Delete a contact"; spec/app/contacts/index.md, "Story: Know what happened to my change"
-import { type AddressBookContact, type ContactCursor, type ContactDetail, type ContactDraft, type ContactDraftProblem, contactDraftProblem, isContactId } from "@elizaos/os/bridges/contacts"
+import { type AddressBookContact, type ContactCursor, type ContactDetail, type ContactDraft, type ContactDraftProblem, contactDraftProblem, isContactId } from "@elizaos/os-bridges"
 import { Machine as Comms, type Event as CommsEvent } from "../../gen/app__phone__comms.effect.vibe"
 import * as Contacts from "../../gen/app__contacts.effect.vibe"
 import type { Change, Effect as Out, Event, Sheet } from "../../gen/app__contacts.effect.vibe"

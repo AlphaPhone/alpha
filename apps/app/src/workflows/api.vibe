@@ -1,6 +1,6 @@
 // spec/app/workflows/list.md, "The list is read from the agent for the owner signed in, one reading at a time"; spec/app/workflows/index.md, "Story: Open a workflow"
-import { RuntimeRequestError } from "@elizaos/agent/client"
-import { type WorkflowClient, type WorkflowRequest, workflowClient, workflowHttpError } from "@elizaos/plugin-workflow/client"
+import { RuntimeRequestError } from "@elizaos/agent"
+import { type WorkflowClient, type WorkflowRequest, workflowClient, workflowHttpError } from "@elizaos/plugin-workflow-client"
 import { Agent } from "../platform/agent.vibe"
 import { ask } from "../platform/remote.vibe"
 

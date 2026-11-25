@@ -1,5 +1,5 @@
 // spec/app/workflows/sheet.md, "Story: See a workflow's history"; spec/app/workflows/sheet.md, "Story: Read a run's sheet"; spec/app/workflows/sheet.md, "Story: Keep the sheet to its owner"
-import type { RemoteWorkflow, WorkflowApproval, WorkflowRun } from "@elizaos/plugin-workflow/client"
+import type { RemoteWorkflow, WorkflowApproval, WorkflowRun } from "@elizaos/plugin-workflow-client"
 import * as Listing from "../../gen/app__workflows__list.effect.vibe"
 import * as Sheet from "../../gen/app__workflows__sheet.effect.vibe"
 import type { Effect as Out, Event, Output } from "../../gen/app__workflows__sheet.effect.vibe"
@@ -111,7 +111,7 @@ import { said } from speech
 export { canSpeak } from speech
 
 module handoff {
-  import type { WorkflowRun } from "@elizaos/plugin-workflow/client"
+  import type { WorkflowRun } from "@elizaos/plugin-workflow-client"
 
   /** The identity of the reviewed run, ready to attach without putting its private output in chat. @throws {never} */
   export function runReference(run: WorkflowRun): string {

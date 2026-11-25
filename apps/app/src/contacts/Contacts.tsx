@@ -1,7 +1,7 @@
 // spec/app/contacts/index.md, "Story: Browse my contacts"; spec/app/contacts/index.md, "Story: Give Alpha access to my contacts"; spec/app/contacts/index.md, "Story: Look at one contact"; spec/app/contacts/index.md, "Story: Add or change a contact"; spec/app/contacts/index.md, "Story: Delete a contact"; spec/app/contacts/index.md, "Story: Know what happened to my change"
 import { Alert, AppHeader, Avatar, Banner, Button, Chip, ConfirmDialog, Input, ListGroup, ListRow, SearchField, Spinner, Tabs, TabsContent, Textarea } from "@repo/ui";
 import { Effect, type ManagedRuntime } from "effect";
-import { CONTACT_MAX_ADDRESS, CONTACT_MAX_NAME, CONTACT_MAX_NOTES, CONTACT_MAX_NUMBER } from "@elizaos/os/bridges/contacts";
+import { CONTACT_MAX_ADDRESS, CONTACT_MAX_NAME, CONTACT_MAX_NOTES, CONTACT_MAX_NUMBER } from "@elizaos/os-bridges";
 import { ArrowLeft, Check, ChevronDown, ChevronLeft, Mail, MessageSquare, Minus, NotebookText, Pencil, Phone as Call, Plus, Search, Trash2, X } from "lucide-react";
 import { useMemo } from "react";
 import type { Machine as ContactsMachine } from "../../gen/app__contacts.effect.vibe";

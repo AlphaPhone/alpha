@@ -1,6 +1,5 @@
 // spec/app/phone/index.md, "Story: See my recent calls"; spec/app/phone/index.md, "Story: Type a number"; spec/app/phone/index.md, "Story: Call a number"; spec/app/phone/index.md, "Story: Know when a call is live"
-import type { AddressBookRow } from "@elizaos/os/bridges/contacts"
-import type { TelephonyCallLogEntry, TelephonyPermissionState } from "@elizaos/os/bridges/phone"
+import type { AddressBookRow, TelephonyCallLogEntry, TelephonyPermissionState } from "@elizaos/os-bridges"
 import * as Phone from "../../gen/app__phone.effect.vibe"
 import type { Effect as Out, Event, Telecom, Typed } from "../../gen/app__phone.effect.vibe"
 import type { Grant } from "../../gen/kit__permission.ts"

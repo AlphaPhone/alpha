@@ -1,5 +1,5 @@
 import { AppHeader, Toast } from "@repo/ui";
-import { Effect, Layer, ManagedRuntime, Stream } from "effect";
+import { Effect, Layer, Stream } from "effect";
 import { HttpClient, HttpClientResponse } from "effect/http";
 import { createRoot } from "react-dom/client";
 import { Machine as Composer } from "../gen/app__assistant__composer.effect.vibe";
@@ -59,7 +59,7 @@ export async function mountDock({ view = "Browser", withToast = false, flush }: 
   closers.push(async () => {
     await run(() => { reactRoot.unmount(); });
     host.remove();
-    await runtime.dispose();
+    await root.dispose();
   });
   await run(async () => {
     if (view === "Browser") await runtime.runPromise(Effect.flatMap(Shell, (m) => m.send({ type: "openView", view: "Browser" })));

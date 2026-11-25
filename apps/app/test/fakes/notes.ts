@@ -1,6 +1,6 @@
 // spec/app/notes/index.md, "Story: See my notes"
-import { parseNoteFormat } from "@elizaos/plugin-notes/format";
-import type { NotesSnapshot, StickyNote } from "@elizaos/plugin-notes/types";
+import { parseNoteFormat } from "@elizaos/plugin-notes-client";
+import type { NotesSnapshot, StickyNote } from "@elizaos/plugin-notes-client";
 import { Schema } from "effect";
 import type { Route } from "./routes.ts";
 

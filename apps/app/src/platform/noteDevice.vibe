@@ -1,5 +1,5 @@
 // spec/app/notes/recording.md, "Story: Record a voice note"; spec/app/notes/microphone.md, "Story: Allow the microphone for a voice note"; spec/app/notes/voice.md, "Story: Listen to a voice note"
-import type { NotesTrashRecordingCleanup } from "@elizaos/plugin-notes/types"
+import type { NotesTrashRecordingCleanup } from "@elizaos/plugin-notes-client"
 import type { Command } from "../../gen/app__notes__recording.effect.vibe"
 import type { Grant } from "../../gen/kit__permission.ts"
 import { registered } from "./device.vibe"

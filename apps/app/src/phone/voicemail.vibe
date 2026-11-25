@@ -1,6 +1,5 @@
 // spec/app/phone/voicemail.md, "Story: See my voicemail"; spec/app/phone/voicemail.md, "Story: Listen to a voicemail"; spec/app/phone/voicemail.md, "Story: Read what was said"; spec/app/phone/voicemail.md, "Story: Answer a voicemail"; spec/app/phone/voicemail.md, "Story: Delete a voicemail"
-import type { StagedDeletion } from "@elizaos/os/bridges/action-journal"
-import type { ListedVoicemail, VoicemailId, VoicemailListing } from "@elizaos/os/bridges/phone"
+import type { StagedDeletion, ListedVoicemail, VoicemailId, VoicemailListing } from "@elizaos/os-bridges"
 import { Machine as PhoneMachine, liveCall } from "../../gen/app__phone.effect.vibe"
 import * as Voicemail from "../../gen/app__phone__voicemail.effect.vibe"
 import type { Effect as Out, Event } from "../../gen/app__phone__voicemail.effect.vibe"

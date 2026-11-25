@@ -1,6 +1,6 @@
 // spec/app/calendar/index.md, "Story: See only my own account's calendar"; spec/app/calendar/index.md, "A changed owner clears the agent's rows, closes the open event and the Calendars sheet, and takes that owner's hidden calendars"; spec/app/calendar/editor.md, "Another owner signing in closes the editor; the old owner's slot keeps its edits"; spec/app/calendar/link.md, "A result shows only for the owner it ran for; another owner signing in ends setup and refuses its late answers"; spec/app/calendar/deletions.md, "Another owner signing in drops a waiting deletion unsent"
 import * as KeyValueStore from "effect/persistence/KeyValueStore"
-import { CloudError } from "@elizaos/cloud/client"
+import { CloudError } from "@elizaos/cloud"
 import * as Shell from "../../gen/app__shell.effect.vibe"
 import * as View from "../../gen/app__calendar.effect.vibe"
 import * as Editor from "../../gen/app__calendar__editor.effect.vibe"

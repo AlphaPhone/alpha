@@ -5,7 +5,7 @@ What a turn tells the agent about the phone besides the screen the
 page open in Browser, what Maps shows, the time zone, the phone actions this
 phone can carry out, and whether the owner's words go to a hosted model.
 Eliza encodes the turn context (`encodeTurnContext` of
-`@elizaos/agent/client`) and drops what a peer does not declare; no wire
+`@elizaos/agent`) and drops what a peer does not declare; no wire
 shape is restated here. The location is read through eliza's location
 bridge, and the network answer through Alpha's network-location plugin,
 only on a phone and only while "Location for Alpha" is on in Settings'

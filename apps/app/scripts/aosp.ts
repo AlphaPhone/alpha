@@ -9,7 +9,7 @@ import {
   aaptManifestTree, composeProduct, createDevelopmentLauncherDescriptor, decrypt, enrollUpdater, generate, otaMain, parseArgs, provisioningComponents,
   requireClockProduct, signRelease, signReleaseRequest, stageLauncher, stageListener, validateDescriptor, verifyDeviceSource, verifyImage, verifySecureCameraSource,
   verifySource, writeImageCapability, writeImageProvisioningOverlay, writeReleaseRecord, writeRoleOverrides, writeSecureCameraOverlay,
-} from "@elizaos/os/image";
+} from "@elizaos/os";
 import { Data, Effect } from "effect";
 import {
   alphaChannel, alphaPrivileged, channelIsAlphas, firstBootGrants, grantsAdmitted, imageTelephony, listenerImage, privilegedAdmitted, provisionsHome, readsChannel,

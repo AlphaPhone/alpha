@@ -1,9 +1,9 @@
 // spec/app/maps/connection.md, "Story: Use my location"; spec/app/maps/index.md, "Continuing past the disclosure asks Android, once"
-import type { LocationResult, LocationPermissionStatus } from "@elizaos/os/bridges/location"
+import type { LocationResult, LocationPermissionStatus } from "@elizaos/os-bridges"
 
 module held {
-  import { type LocationClient, locationClient } from "@elizaos/os/bridges/location"
-  import type { SystemClient } from "@elizaos/os/bridges/system"
+  import { type LocationClient, locationClient } from "@elizaos/os-bridges"
+  import type { SystemClient } from "@elizaos/os-bridges"
 
   let made: LocationClient | undefined
   let system: Promise<SystemClient> | undefined
@@ -13,7 +13,7 @@ module held {
   }
   /** eliza's client of the phone's `ElizaSystem` plugin, loaded at first use so Capacitor binds it after the host registers its plugins. @throws {never} */
   export function settings(): Promise<SystemClient> {
-    return (system ??= import("@elizaos/os/bridges/system").then((bridge) => bridge.systemClient()))
+    return (system ??= import("@elizaos/os-bridges").then((bridge) => bridge.systemClient()))
   }
 }
 import { client, settings } from held

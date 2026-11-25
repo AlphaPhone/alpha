@@ -1,6 +1,5 @@
 // spec/app/files/index.md, "Story: Let the agent read my files"
-import type { ExecutorCall } from "@elizaos/agent/client"
-import type { DeviceOperation } from "@elizaos/agent/operations"
+import type { ExecutorCall, DeviceOperation } from "@elizaos/agent"
 import * as Browser from "../../gen/app__files.effect.vibe"
 import type { Action, Event, Offer } from "../../gen/app__files.effect.vibe"
 import { type Place, nowhere } from "../../gen/app__files__change.effect.vibe"

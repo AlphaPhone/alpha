@@ -1,5 +1,5 @@
 // spec/app/home/cards.md, "Story: See my day at a glance"
-import type { AndroidCalendarList } from "@elizaos/os/bridges/definitions/calendar"
+import type { AndroidCalendarList } from "@elizaos/os-bridges"
 import * as Cards from "../../gen/app__home__cards.effect.vibe"
 import type { Effect as Out, Event, Flows, Item, Mail, Origin, Row } from "../../gen/app__home__cards.effect.vibe"
 import * as Shell from "../../gen/app__shell.effect.vibe"
@@ -10,7 +10,7 @@ import { ask } from "../platform/remote.vibe"
 import { type Job, answer, contained, due, following, hearing, reacting, run, untimed, together } from "../runtime/reactor.vibe"
 
 module held {
-  import { calendarClient } from "@elizaos/os/bridges/calendar"
+  import { calendarClient } from "@elizaos/os-bridges"
 
   let made: ReturnType<typeof calendarClient> | undefined
   /** eliza's client of the `ElizaCalendar` plugin, made once. @throws {never} */

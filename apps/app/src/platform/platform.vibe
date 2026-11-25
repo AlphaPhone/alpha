@@ -36,7 +36,7 @@ function messagingLayers(overrides?: MessagingLayers) {
   return Layer.mergeAll(
     overrides?.sessions ?? messagingSessions,
     overrides?.slack ?? Layer.provide(slackAt("https://slack.com"), FetchHttpClient.layer),
-    overrides?.telegram ?? Layer.provide(telegramAt("http://127.0.0.1:4190"), FetchHttpClient.layer),
+    overrides?.telegram ?? Layer.provide(telegramAt(), FetchHttpClient.layer),
   )
 }
 
