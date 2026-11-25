@@ -5,7 +5,7 @@ import { normalizePhoneNumber } from "@elizaos/os-bridges";
 import { Alert, Avatar, Banner, Button, Chip, ConfirmDialog, Input, Menu, MenuContent, MenuItem, MenuTrigger, SearchField, Spinner, Textarea } from "@repo/ui";
 import { Effect, type Layer, type ManagedRuntime } from "effect";
 import { ArrowUp, Camera, ChevronDown, ChevronLeft, ChevronUp, CircleAlert, Copy, Image as PictureIcon, ImagePlus, Mic, Pencil, Phone as Call, Plus, RefreshCw, Search, Send, Sparkles, Square, Trash2, X } from "lucide-react";
-import { memo, useCallback, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type MouseEvent, type PointerEvent } from "react";
+import { memo, useCallback, useMemo, useRef, useState, useSyncExternalStore, type MouseEvent, type PointerEvent } from "react";
 import { clear } from "../../gen/app__phone.ts";
 import { useMachine as usePhone } from "../../gen/app__phone.react.ts";
 import { content, noMatches, noThreads, smsNeeded, threadsFailed } from "../../gen/app__messages.ts";
@@ -356,7 +356,9 @@ function Compose({ runtime, title, addresses, thread }: MessagesProps & { title:
   const focus = useRef(false);
   const subscriptionChoice = useMemo(() => runtime.runSync(Effect.map(Drafts, (drafts) => drafts.subscriptionChoice)), [runtime]);
   const simChoice = useSyncExternalStore(subscriptionChoice.subscribe, subscriptionChoice.get, subscriptionChoice.get);
-  useLayoutEffect(() => () => subscriptionChoice.leave(thread), [subscriptionChoice, thread]);
+  const simControls = useCallback((node: HTMLDivElement | null) => {
+    if (node) return () => subscriptionChoice.leave(thread);
+  }, [subscriptionChoice, thread]);
   const selectedSim = simChoice?.thread === thread ? simChoice.subscription : undefined;
   const { state, can, send } = composer;
   if (!state || !phone || state.thread !== thread || addresses.length === 0) return <CommsBar runtime={runtime} />;
@@ -456,7 +458,7 @@ function Compose({ runtime, title, addresses, thread }: MessagesProps & { title:
           </div>
         </div>
       )}
-      <div data-alpha-messages-accessories className="flex max-h-[34%] shrink-0 flex-wrap gap-1.5 overflow-y-auto px-3 empty:hidden">
+      <div ref={simControls} data-alpha-messages-accessories className="flex max-h-[34%] shrink-0 flex-wrap gap-1.5 overflow-y-auto px-3 empty:hidden">
         {state.slot.draft.sync === "Conflicted" && (
           <Banner variant="warn" action={<>
             {can({ type: "keepMine" }) && <Button size="sm" onClick={() => void send({ type: "keepMine" })}>Keep mine</Button>}
