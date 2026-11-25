@@ -11,6 +11,7 @@ import { quiet } from "../../gen/app__voice.ts";
 import { useMachine as useSpeaker } from "../../gen/app__voice__output.react.ts";
 import { voiceArea } from "../messages/dictation.vibe";
 import { VoiceBridge } from "../platform/voice.vibe";
+import { VoiceEnd } from "../phone/CommsTarget.tsx";
 import { area, type Resident, type Shown } from "../runtime/area.tsx";
 import { applying, following, together, untimed } from "../runtime/reactor.vibe";
 import { keyboardVoice } from "../shell/canvas.vibe";
@@ -21,12 +22,12 @@ import { assistantBack, assisting } from "./assistant.vibe";
 import { copyMessage, emailDestination, emailMessage } from "./message-actions.vibe";
 import { dictate } from "./dictation.vibe";
 import { aloud } from "./read-aloud.vibe";
-import { beginTalk, talkFromComms } from "./voice-entry.vibe";
+import { beginTalk, commsVoicePanel, talkFromComms } from "./voice-entry.vibe";
 
 const voiceOwnsComposer = (state: VoiceState) => !quiet(state) || state.recorder.stage !== "Closed";
 
 const screens = together(
-  assisting, voiceArea, aloud, talkFromComms,
+  assisting, voiceArea, aloud, talkFromComms, commsVoicePanel,
   following(Voice, voiceOwnsComposer, Dock, (on) => ({ type: "voicing", on, now: untimed } as const)),
   applying(Voice, voiceOwnsComposer, keyboardVoice),
 );
@@ -61,7 +62,7 @@ function LiveAssistant({ runtime }: Shown<Layer.Success<typeof screens> | Reside
       onDictate: canDictate ? () => void runtime.runPromise(dictate()) : undefined,
       voice: recorder !== undefined && recorder.stage !== "Closed" && recorder.field === "ComposerField"
         ? <DictationControls runtime={runtime} />
-        : voice.state !== undefined && !quiet(voice.state) ? <TalkControls runtime={runtime} /> : undefined,
+        : voice.state !== undefined && !quiet(voice.state) ? <TalkControls runtime={runtime} trailing={<VoiceEnd runtime={runtime} />} /> : undefined,
     }}
   />;
 }

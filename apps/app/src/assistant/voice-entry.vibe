@@ -43,3 +43,18 @@ export const talkFromComms = started(effect {
       && (try phone.get()).telecom === "NoCall") try beginTalk()
   })
 }, "starting Talk from the communications bar")
+
+// spec/app/phone/comms.md, "End is beside the bar when closed, in the call card when open, in the strip when full, and on the voice panel during a voice turn"
+export const commsVoicePanel = started(effect {
+  const shell = try Shell.Machine
+  const voice = try Voice.Machine
+  const comms = try Comms
+  const open = Stream.map(shell.changes, (page) =>
+    (page.assistant === "Sheet" || page.assistant === "Full") &&
+    (Shell.showing(page, "Phone") || Shell.showing(page, "Messages") || Shell.showing(page, "Contacts")))
+  const speaking = Stream.map(voice.changes, (state) => !Voice.quiet(state))
+  const visible = Stream.changes(Stream.map(Stream.zipLatest(open, speaking), ([showing, active]) => showing && active))
+  try Stream.runForEach(visible, effect (on) => {
+    if ((try comms.get()).voice !== on) try contained(comms.send({ type: "voiceChanged", on }, "Device"), "placing End in the communications stage")
+  })
+}, "observing the communications Talk panel")
