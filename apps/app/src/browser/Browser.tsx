@@ -129,6 +129,7 @@ function Tab({ runtime, alpha, tabs, page }: BrowserProps & { tabs: State; page:
     ? runtime.runSync(Effect.map(SharePages, ({ external }) => external.page))
     : undefined;
   // spec/app/browser/share.md, "Choosing where to send the page sends it once, if it is still the page the panel opened on, and closes the panel": Email, as v121, only while Inbox can take a new email.
+  const nativeReview = reviewed !== undefined && !("load" in reviewed) ? reviewed : undefined;
   const canMail = native && canShare && binding !== undefined && runtime.runSync(mailTarget) !== undefined;
   const booked = binding !== undefined && runtime.runSync(Effect.flatMap(LibraryRows, (rows) => rows.bookmarks())).some((entry) => entry.url === binding.url);
   const canBookmark = library.can(booked ? { type: "unmark" } : { type: "mark", secure: state.secure, userInfo: false });
@@ -237,11 +238,16 @@ function Tab({ runtime, alpha, tabs, page }: BrowserProps & { tabs: State; page:
           onNewPrivate={opening("Private")}
         />
       )}
-      <ConfirmDialog open={reviewed !== undefined} title="Open private page?" confirmLabel="Open in browser"
+      <ConfirmDialog open={reviewed !== undefined && "load" in reviewed} title="Open private page?" confirmLabel="Open in browser"
         onConfirm={() => void runtime.runPromise(confirmExternal())}
         onCancel={() => void runtime.runPromise(cancelExternal())}>
         The other browser may save {reviewed ? new URL(reviewed.url).host : "this page"} in its history.
       </ConfirmDialog>
+      <BrowserReview open={nativeReview !== undefined} title="Leave private browsing?" confirmLabel="Choose browser"
+        onConfirm={() => void runtime.runPromise(confirmExternal())}
+        onCancel={() => void runtime.runPromise(cancelExternal())}>
+        {nativeReview ? `Open ${new URL(nativeReview.url).hostname} externally?\n${nativeReview.url}` : undefined}
+      </BrowserReview>
       <AgentPageCard runtime={runtime} />
       {question && <BrowserQuestion source={question.source} question={question.question} excerpt={question.excerpt}
         ready={reader.can({ type: "confirm", safe: true })}

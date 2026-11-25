@@ -398,7 +398,8 @@ describe("The Browser on a phone", () => {
     await press("Menu");
     await press("Open externally, passkeys unsupported here");
     await until(alpha, runtime, Share, (s) => s.handoff.showing);
-    expect(document.querySelector("[role=alertdialog]")?.textContent).toContain("enclave.example");
+    expect(document.querySelector("[role=alertdialog]")?.textContent).toContain("Leave private browsing?");
+    expect(document.querySelector("[role=alertdialog]")?.textContent).toContain("https://enclave.example/keys-in-hardware");
     expect(world.browser.handedOff).toEqual([]);
     await press("Cancel");
     await until(alpha, runtime, Share, (s) => !s.handoff.showing);
@@ -406,7 +407,7 @@ describe("The Browser on a phone", () => {
 
     await press("Open externally, passkeys unsupported here");
     await until(alpha, runtime, Share, (s) => s.handoff.showing);
-    await press("Open in browser");
+    await press("Choose browser");
     await until(alpha, runtime, Share, (s) => s.confirmed && !s.launching);
     expect(world.browser.handedOff.map(({ url, privateConfirmed }) => [url, privateConfirmed])).toEqual([
       ["https://enclave.example/keys-in-hardware", true],

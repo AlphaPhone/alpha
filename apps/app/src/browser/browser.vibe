@@ -458,7 +458,7 @@ const told = started(effect {
       else elsewhere.set(change.id, failedAt)
       if (try tellPage(tab, { type: "failed", load: now.load })) try tellShare(tab, { type: "pageFailed", failure: failedAt === "" ? "Refused" : "Unreachable", https: secure(failedAt === "" ? (info.url ?? "") : failedAt) })
     }
-    else if (info.loading !== true && change.committedPage) {
+    else if (info.loading !== true && (try sync(() => host.session.pageBinding(change.id))) !== undefined) {
       // spec/app/browser/address.md, "A page that replaces its own address at its own origin, without loading another document, is still the same load": a single-page site's Back or Forward settles in place, and the native commit says so.
       const before = URL.parse(change.previous?.url ?? "")
       const after = URL.parse(info.url ?? "")
