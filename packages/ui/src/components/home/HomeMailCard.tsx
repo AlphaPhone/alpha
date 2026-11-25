@@ -9,14 +9,14 @@ export type HomeMailCardProps = Omit<ComponentProps<"button">, "children" | "tit
   more?: boolean;
   /** The unread messages Inbox loaded: subject and sender, never a body. */
   lines: readonly HomeCardLine[];
-  /** Inbox's page is not up to date. */
-  notCurrent?: boolean;
+  /** Which account and when Inbox read it, or since when it is not up to date. */
+  status?: string;
 };
 
-/** The mail card: the unread count over who wrote and about what; a press opens Inbox. */
-export function HomeMailCard({ unread, more = false, lines, notCurrent = false, ...props }: HomeMailCardProps) {
+/** The mail card: the unread count over who wrote and about what, and when it was read; a press opens Inbox. */
+export function HomeMailCard({ unread, more = false, lines, status = "", ...props }: HomeMailCardProps) {
   return (
-    <HomeCard title={`${unread}${more ? "+" : ""} unread`} icon={<Inbox />} notCurrent={notCurrent ? "Not up to date" : undefined} {...props}>
+    <HomeCard title={`${unread}${more ? "+" : ""} unread`} icon={<Inbox />} status={status} {...props}>
       <HomeCardLines lines={lines} />
     </HomeCard>
   );
