@@ -2,7 +2,7 @@
   "schema": 2,
   "sdk": { "min": 29, "target": 36, "compile": 36 },
   "releaseMinify": true,
-  "kotlin": false,
+  "kotlin": true,
   "nativeLibraries": "extract-16k",
   "manifest": { "root": "consumer", "path": "android/app/manifests/main/AndroidManifest.xml" },
   "manifestPlaceholders": { "appOrientation": "unspecified" },
@@ -39,10 +39,14 @@
     { "module": "phone" },
     { "module": "passwords" },
     { "module": "filesystem" },
+    { "module": "camera" },
+    { "module": "media" },
     { "module": "location" },
     { "module": "wifi" },
     { "module": "voice-io" },
-    { "module": "cloud-speech" }
+    { "module": "local-inference" },
+    { "module": "cloud-speech" },
+    { "module": "browser-surface" }
   ],
   "modules": [
     { "name": "capacitor-android", "source": { "root": "dependencies", "path": "@capacitor/android/capacitor" } }
@@ -53,6 +57,7 @@
     { "configuration": "implementation", "module": "androidx.webkit:webkit", "toolchainVersion": "androidxWebkitVersion" },
     { "configuration": "testImplementation", "module": "junit:junit", "toolchainVersion": "junitVersion" }
   ],
+  "appScripts": [{ "root": "consumer", "path": "android/app/browser.gradle" }],
   "agent": {
     "host": { "root": "consumer", "path": "android/agent/host.json" },
     "character": { "root": "consumer", "path": "android/agent/character.json" },

@@ -1,6 +1,7 @@
-import { PenLine, RefreshCw, SquarePen } from "lucide-react";
-import { Avatar } from "../Avatar.tsx";
+import { CheckCheck, ChevronLeft, Ellipsis, ListChecks, PenLine, Plus, RefreshCw, Search, UserRound } from "lucide-react";
+import { useRef } from "react";
 import { Button } from "../Button.tsx";
+import { Menu, MenuContent, MenuItem, MenuTrigger } from "../Menu.tsx";
 import { Screen } from "../Screen.tsx";
 import { InboxFolderBar, type InboxFolderBarProps, inboxFolders } from "./InboxFolderBar.tsx";
 import { InboxList, type InboxListProps } from "./InboxList.tsx";
@@ -13,12 +14,20 @@ export type InboxListScreenProps = Pick<InboxListProps, "rows" | "loading" | "on
   Pick<InboxFolderBarProps, "folder" | "unavailable"> &
   Pick<InboxSearchBarProps, "onSearch"> &
   Pick<InboxSelectionBarProps, "onArchive" | "onTrash" | "onRestore" | "onChooseAll"> & {
-    /** The address of the account read; the account button shows it as its picture. Left out while none is chosen. */
+    /** The address of the account whose mail is shown. */
     account?: string;
+    /** Returns from Inbox to the apps. */
+    onBack?: () => void;
+    /** Whether the list header holds its search field. */
+    searching?: boolean;
     /** What is typed in the search field. */
     search: string;
     /** Called with the search text as it is typed. */
     onSearchChange: (value: string) => void;
+    /** Opens the search field; offered when the folder can be searched. */
+    onOpenSearch?: () => void;
+    /** Closes the search and returns to the unfiltered folder. */
+    onCloseSearch?: () => void;
     /** Called with the folder chosen; offered only where mail can be read. */
     onChooseFolder?: InboxFolderBarProps["onChoose"];
     /** What the list is in need of telling: saved, out of date, missing newer mail, or access withdrawn. */
@@ -31,6 +40,12 @@ export type InboxListScreenProps = Pick<InboxListProps, "rows" | "loading" | "on
     onStateAction?: () => void;
     /** How many messages are chosen; the selection bar is shown above one or more. */
     chosen?: number;
+    /** Puts the list in selection mode, so each row chooses a message. */
+    onStartSelection?: () => void;
+    /** Leaves selection mode and clears any choices. */
+    onFinishSelection?: () => void;
+    /** Clears the choices while staying in selection mode. */
+    onClearSelection?: () => void;
     /** How many drafts are set aside; the way back to them is shown above none. */
     aside?: number;
     /** Opens the drafts set aside. */
@@ -50,23 +65,51 @@ export type InboxListScreenProps = Pick<InboxListProps, "rows" | "loading" | "on
  * @model spec/app/inbox/index.md
  */
 export function InboxListScreen({
-  account, folder, unavailable, onChooseFolder, search, onSearchChange, onSearch, notice, onNoticeAction, state, onStateAction,
-  chosen = 0, onArchive, onTrash, onRestore, onChooseAll, aside = 0, onShelf, onRefresh, onCompose, onAccount, rows, loading, onLoadMore, loadingMore,
+  account, onBack, folder, unavailable, onChooseFolder, searching = false, search, onSearchChange, onSearch, onOpenSearch, onCloseSearch,
+  notice, onNoticeAction, state, onStateAction, chosen = 0, onStartSelection, onFinishSelection, onClearSelection,
+  onArchive, onTrash, onRestore, onChooseAll, aside = 0, onShelf, onRefresh, onCompose, onAccount, rows, loading, onLoadMore, loadingMore,
 }: InboxListScreenProps) {
+  const focusSearchAfterCloseRef = useRef(false);
+  const closeSearch = () => {
+    focusSearchAfterCloseRef.current = true;
+    onCloseSearch?.();
+  };
   const actions = (
     <>
       {onRefresh || loading ? <Button variant="ghost" size="icon" aria-label="Refresh" loading={loading} disabled={!onRefresh} onClick={onRefresh}><RefreshCw /></Button> : null}
-      {onCompose ? <Button variant="ghost" size="icon" aria-label="Compose" onClick={onCompose}><SquarePen /></Button> : null}
-      {onAccount ? <Button variant="ghost" size="icon" aria-label={account ? `Account ${account}` : "Account"} onClick={onAccount}><Avatar name={account ?? "?"} size="sm" /></Button> : null}
+      <Button variant="ghost" size="icon" aria-label="Search email" disabled={!onOpenSearch} onClick={onOpenSearch} ref={(button) => {
+        if (button && focusSearchAfterCloseRef.current) {
+          focusSearchAfterCloseRef.current = false;
+          button.focus();
+        }
+      }}><Search /></Button>
+      <Button variant="ghost" size="icon" aria-label="Compose" disabled={!onCompose} onClick={onCompose}><Plus /></Button>
+      {onStartSelection || onFinishSelection || onAccount || (aside > 0 && onShelf) ? (
+        <Menu>
+          <MenuTrigger asChild><Button variant="ghost" size="icon" aria-label="Mail options"><Ellipsis /></Button></MenuTrigger>
+          <MenuContent>
+            {onStartSelection || onFinishSelection ? <MenuItem onSelect={onFinishSelection ?? onStartSelection}><ListChecks />{onFinishSelection ? "Finish selection" : "Select emails"}</MenuItem> : null}
+            {onFinishSelection && (onChooseAll || onClearSelection) ? (
+              <MenuItem onSelect={onChooseAll ?? onClearSelection}><CheckCheck />{onChooseAll ? "Select all shown" : "Deselect all"}</MenuItem>
+            ) : null}
+            {onAccount ? <MenuItem onSelect={onAccount}><UserRound />{account ?? "Gmail accounts"}</MenuItem> : null}
+            {aside > 0 && onShelf ? <MenuItem onSelect={onShelf}><PenLine />Drafts set aside ({aside})</MenuItem> : null}
+          </MenuContent>
+        </Menu>
+      ) : null}
     </>
   );
   return (
-    <Screen title={inboxFolders[folder]} actions={actions}>
-      <InboxSearchBar value={search} onValueChange={onSearchChange} onSearch={onSearch} />
-      <InboxFolderBar folder={folder} unavailable={unavailable} onChoose={onChooseFolder} />
+    <Screen
+      title={chosen > 0 ? `${chosen} selected` : inboxFolders[folder]}
+      leading={searching || onBack ? <Button variant="ghost" size="icon" aria-label={searching ? "Back to inbox" : "Back to apps"} className="ml-1" onClick={searching ? closeSearch : onBack}><ChevronLeft className="size-5" /></Button> : undefined}
+      titleControl={searching ? <InboxSearchBar value={search} onValueChange={onSearchChange} onSearch={onSearch} onClose={closeSearch} focusOnOpen /> : undefined}
+      actions={searching ? undefined : actions}
+      className="[&_header>h1]:font-sans [&_header>h1]:text-xl [&_header>h1]:font-semibold [&_header>h1]:pl-0.5 [&_main>div]:gap-2 [&_main>div]:pt-1"
+    >
+      {searching ? null : <InboxFolderBar folder={folder} unavailable={unavailable} onChoose={onChooseFolder} />}
       {notice ? <InboxNotice kind={notice} onAction={onNoticeAction} /> : null}
-      {aside > 0 && onShelf ? <Button variant="secondary" size="sm" onClick={onShelf} className="self-start"><PenLine />{aside}<span className="sr-only"> drafts set aside</span></Button> : null}
-      {chosen > 0 ? <InboxSelectionBar count={chosen} onArchive={onArchive} onTrash={onTrash} onRestore={onRestore} onChooseAll={onChooseAll} /> : null}
+      {chosen > 0 ? <InboxSelectionBar count={chosen} onArchive={onArchive} onTrash={onTrash} onRestore={onRestore} /> : null}
       {state && rows.length === 0 && !loading ? <InboxListState kind={state} onAction={onStateAction} /> : <InboxList rows={rows} loading={loading} onLoadMore={onLoadMore} loadingMore={loadingMore} />}
     </Screen>
   );

@@ -35,10 +35,12 @@ lemma retract_ensures(s: Toasts, area: string, about: int)
   ensures (inv(s) ==> canRetract(s, area, about) ==> alwaysOnlyBehindAnUndoToastsWait(retract(s, area, about)))
   ensures (inv(s) ==> canRetract(s, area, about) ==> alwaysToastsAreNumbered(retract(s, area, about)))
   ensures (inv(s) ==> canRetract(s, area, about) ==> alwaysAToastIsShownOnTop(retract(s, area, about)))
+  ensures (inv(s) ==> canRetract(s, area, about) ==> alwaysFewNoticesAreKept(retract(s, area, about)))
   ensures (inv(s) ==> canRetract(s, area, about) ==> stepAToastGoesOnlyInItsTime(s, "retract", retract(s, area, about)))
   ensures (inv(s) ==> canRetract(s, area, about) ==> stepNoToastIsRefused(s, "retract", retract(s, area, about)))
   ensures (inv(s) ==> canRetract(s, area, about) ==> stepAnUndoIsNeverPushedAside(s, "retract", retract(s, area, about)))
   ensures (inv(s) ==> canRetract(s, area, about) ==> stepUndoIsPassedOnOnce(s, "retract", retract(s, area, about), []))
+  ensures (inv(s) ==> canRetract(s, area, about) ==> stepAKeptNoticeLeavesOnlyWhenDismissedOrPushedOut(s, "retract", retract(s, area, about)))
 {
   if inv(s) && canRetract(s, area, about) && !(s.showing && offers(s.current, area, about)) {
     RetractKeepsTheRest(s, area, about);
@@ -50,6 +52,39 @@ lemma retract_ensures(s: Toasts, area: string, about: int)
     }
     if |s.undos| == 0 {
       ProofLib.FilterNil(p, s.undos);
+    }
+  }
+}
+
+lemma FilterNeverGrows<T>(p: T -> bool, xs: seq<T>)
+  ensures |ProofLib.Filter(p, xs)| <= |xs|
+{
+  if |xs| > 0 {
+    FilterNeverGrows(p, xs[1..]);
+  }
+}
+
+lemma dismiss_ensures(s: Toasts, area: string, about: int)
+  ensures (inv(s) ==> canDismiss(s, area, about) ==> alwaysTheScaleNeverShortens(dismiss(s, area, about)))
+  ensures (inv(s) ==> canDismiss(s, area, about) ==> alwaysAToastStaysItsTime(dismiss(s, area, about)))
+  ensures (inv(s) ==> canDismiss(s, area, about) ==> alwaysOnlyBehindAnUndoToastsWait(dismiss(s, area, about)))
+  ensures (inv(s) ==> canDismiss(s, area, about) ==> alwaysToastsAreNumbered(dismiss(s, area, about)))
+  ensures (inv(s) ==> canDismiss(s, area, about) ==> alwaysAToastIsShownOnTop(dismiss(s, area, about)))
+  ensures (inv(s) ==> canDismiss(s, area, about) ==> alwaysFewNoticesAreKept(dismiss(s, area, about)))
+  ensures (inv(s) ==> canDismiss(s, area, about) ==> stepAToastGoesOnlyInItsTime(s, "dismiss", dismiss(s, area, about)))
+  ensures (inv(s) ==> canDismiss(s, area, about) ==> stepNoToastIsRefused(s, "dismiss", dismiss(s, area, about)))
+  ensures (inv(s) ==> canDismiss(s, area, about) ==> stepAnUndoIsNeverPushedAside(s, "dismiss", dismiss(s, area, about)))
+  ensures (inv(s) ==> canDismiss(s, area, about) ==> stepUndoIsPassedOnOnce(s, "dismiss", dismiss(s, area, about), []))
+  ensures (inv(s) ==> canDismiss(s, area, about) ==> stepAKeptNoticeLeavesOnlyWhenDismissedOrPushedOut(s, "dismiss", dismiss(s, area, about)))
+{
+  if inv(s) && canDismiss(s, area, about) {
+    var target := Kept(area := area, about := about);
+    var p := (k: Kept) => (k != target);
+    var after := dismiss(s, area, about);
+    assert after.kept == ProofLib.Filter(p, s.kept);
+    FilterNeverGrows(p, s.kept);
+    forall k | k in after.kept ensures k in s.kept {
+      ProofLib.FilterMember(p, s.kept, k);
     }
   }
 }

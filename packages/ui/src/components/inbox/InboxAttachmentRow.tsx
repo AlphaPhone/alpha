@@ -14,6 +14,8 @@ export type InboxAttachmentRowProps = {
   onSave?: () => void;
   /** A save of it may have happened and could not be confirmed: it is not offered again, and the owner is pointed to Files. */
   saveUnconfirmed?: boolean;
+  /** The save used the browser's downloads instead of Files. */
+  browserDownload?: boolean;
 };
 
 /**
@@ -21,7 +23,7 @@ export type InboxAttachmentRowProps = {
  *
  * @model spec/app/inbox/message.md
  */
-export function InboxAttachmentRow({ name, size, onOpen, onSave, saveUnconfirmed = false }: InboxAttachmentRowProps) {
+export function InboxAttachmentRow({ name, size, onOpen, onSave, saveUnconfirmed = false, browserDownload = false }: InboxAttachmentRowProps) {
   return (
     <ListRow
       title={name}
@@ -29,7 +31,7 @@ export function InboxAttachmentRow({ name, size, onOpen, onSave, saveUnconfirmed
       leading={<FileText />}
       trailing={
         <>
-          {saveUnconfirmed ? <StatusDot status="warn" label="Save not confirmed, look in Files" /> : null}
+          {saveUnconfirmed ? <StatusDot status="warn" label={browserDownload ? "Save not confirmed, check your downloads" : "Save not confirmed, look in Files"} /> : null}
           {onOpen ? <Button variant="ghost" size="icon" aria-label={`Open ${name}`} onClick={onOpen}><ExternalLink /></Button> : null}
           {onSave && !saveUnconfirmed ? <Button variant="ghost" size="icon" aria-label={`Save ${name}`} onClick={onSave}><Download /></Button> : null}
         </>

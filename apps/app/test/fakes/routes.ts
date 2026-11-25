@@ -35,3 +35,13 @@ export function feed(opened: (send: (data: unknown) => void) => () => void): Res
   });
   return new Response(body, { headers: { "content-type": "text/event-stream" } });
 }
+
+/** Parse a request JSON body into a plain record, returning an empty object on missing or invalid JSON. */
+export async function readJsonBody(request: Request): Promise<Record<string, unknown>> {
+  try {
+    const parsed = (await request.json()) as unknown;
+    return typeof parsed === "object" && parsed !== null ? (parsed as Record<string, unknown>) : {};
+  } catch {
+    return {};
+  }
+}

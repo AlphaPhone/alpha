@@ -2,11 +2,12 @@
 import { parseProfile, type CloudEnvironment, type CloudProfile } from "@elizaos/cloud/profile"
 import { ChildProcess } from "effect/process"
 import { ChildProcessSpawner } from "effect/process/ChildProcessSpawner"
+import type { Hosts } from "../gen/cloud.effect.vibe"
 import { Machine, machine, paymentKeyFits, secretsFileAccepted } from "../gen/cloud__rollout.effect.vibe"
 import apiTemplate from "../wrangler/api.template.json" with { type: "json" }
 import edgeTemplate from "../wrangler/edge.template.json" with { type: "json" }
 import { entryOf, registrationAt } from "./alpha.vibe"
-import { candidateProblems, candidates } from "./candidate.vibe"
+import { candidateProblems, candidates, type CandidateUnknown } from "./candidate.vibe"
 import { reconcileResources } from "./cloudflare.vibe"
 import { base64urlBytes, entitlementKey, entitlementPublicKey, randomKey } from "./keys.ts"
 import { PROFILE_ASSET } from "./profile-asset.ts"
@@ -16,9 +17,9 @@ import { assetsDirectory, leakedElizaHost, renderEnvironment, type CloudResource
 export error OperatorFailed { problem: string }
 
 /** The secrets each environment's operator supplies. */
-export const providedSecrets = ["DATABASE_URL", "RESEND_API_KEY", "GOOGLE_CLIENT_SECRET", "GOOGLE_CONNECT_CLIENT_SECRET", "STRIPE_SECRET_KEY", "STRIPE_WEBHOOK_SECRET", "CEREBRAS_API_KEY", "CARTESIA_API_KEY", "GOOGLE_MAPS_API_KEY"]
+const providedSecrets = ["DATABASE_URL", "RESEND_API_KEY", "GOOGLE_CLIENT_SECRET", "GOOGLE_CONNECT_CLIENT_SECRET", "STRIPE_SECRET_KEY", "STRIPE_WEBHOOK_SECRET", "CEREBRAS_API_KEY", "CARTESIA_API_KEY", "GOOGLE_MAPS_API_KEY"]
 /** The secrets the operator command generates once and keeps in the secrets file; it never rotates one. */
-export const internalSecrets = ["CLOUD_DIGEST_KEY", "CLOUD_SEALING_KEY", "CLOUD_ENTITLEMENT_KEY", "EMAIL_CODE_SECRET", "GOOGLE_CONNECT_TOKEN_KEY"]
+const internalSecrets = ["CLOUD_DIGEST_KEY", "CLOUD_SEALING_KEY", "CLOUD_ENTITLEMENT_KEY", "EMAIL_CODE_SECRET", "GOOGLE_CONNECT_TOKEN_KEY"]
 /** The API Worker's secrets, each by the secrets file entry it is read from. */
 const workerSecretSource: Readonly<Record<string, string>> = {
   CLOUD_DIGEST_KEY: "CLOUD_DIGEST_KEY", CLOUD_SEALING_KEY: "CLOUD_SEALING_KEY", CLOUD_ENTITLEMENT_KEY: "CLOUD_ENTITLEMENT_KEY",
@@ -37,7 +38,7 @@ export effect function packageDirectory() {
 }
 
 /** The NAME=value lines of a secrets file, quotes removed. */
-export function parseSecrets(text: string): Record<string, string> {
+function parseSecrets(text: string): Record<string, string> {
   const values: Record<string, string> = {}
   for (const line of text.split("\n")) {
     const match = /^\s*([A-Z][A-Z0-9_]*)\s*=\s*(.*?)\s*$/.exec(line)
@@ -139,7 +140,7 @@ export effect function privateDirectory() {
 }
 
 /** The JSON a file holds, refused when it is missing or not JSON. */
-export effect function readJson(file: string): unknown!OperatorFailed!FileSystem.FileSystem {
+effect function readJson(file: string): unknown!OperatorFailed!FileSystem.FileSystem {
   const fs = try FileSystem.FileSystem
   const text = fs.readFileString(file) catch effect () => { throw new OperatorFailed({ problem: `cannot read ${file}` }) }
   return try Effect.try({ try: () => JSON.parse(text) as unknown, catch: () => new OperatorFailed({ problem: `${file} is not JSON` }) })
@@ -149,7 +150,7 @@ export effect function readJson(file: string): unknown!OperatorFailed!FileSystem
 export error CandidateRefused { problems: ReadonlyArray<string> }
 
 /** The completed profile of Alpha's own cloud in `file`, accepted by eliza and keeping every rule of the candidate. */
-export effect function profiled(file: string) {
+export effect function profiled(file: string): { readonly profile: CloudProfile; readonly hosts: Record<CloudEnvironment, Hosts> }!(OperatorFailed | CandidateUnknown | CandidateRefused)!(FileSystem.FileSystem | Path.Path) {
   const profile = parseProfile(try readJson(file)) catch effect (refusal) => { throw new OperatorFailed({ problem: `${file}: ${refusal.problem}` }) }
   const hosts = try candidates()
   const problems = candidateProblems(profile, hosts)

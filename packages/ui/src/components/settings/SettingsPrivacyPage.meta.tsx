@@ -20,7 +20,7 @@ export const meta: ComponentMeta<SettingsPrivacyPageProps> = {
     onOpen,
     onSetUpAccess,
     onAskFirstChange,
-    shares: { "agent-location": true, "browser-page": true, "gmail-changes": false, "calendar-edits": true },
+    shares: { "agent-location": true, "browser-page": true, "gmail-changes": false, "calendar-edits": true, "telegram-context": false, "slack-context": true },
     onShareChange,
     onHandOver: fn(),
     children: (
@@ -44,7 +44,7 @@ export const meta: ComponentMeta<SettingsPrivacyPageProps> = {
       onAskFirstChange.mockClear();
       const canvas = within(canvasElement);
       await userEvent.click(canvas.getByRole("button", { name: "Permissions" }));
-      await userEvent.click(canvas.getByRole("button", { name: "Set up Alpha access" }));
+      await userEvent.click(canvas.getByRole("button", { name: "Access setup" }));
       await userEvent.click(canvas.getByRole("switch", { name: /Ask before Alpha acts/ }));
       await expect([onOpen.mock.calls, onSetUpAccess.mock.calls.length, onAskFirstChange.mock.calls]).toEqual([[["permissions"]], 1, [[false]]]);
     },

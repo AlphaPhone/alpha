@@ -1,4 +1,4 @@
-import { type PointerEvent, useRef } from "react";
+import { type MouseEvent, type PointerEvent, useRef } from "react";
 import { Check, Paperclip } from "lucide-react";
 import { cn, focusRing } from "../../lib/cn.ts";
 import { Avatar } from "../Avatar.tsx";
@@ -18,58 +18,72 @@ export type InboxMessageRowProps = {
   attachment?: boolean;
   /** Is among the messages chosen for archiving or Trash. */
   chosen?: boolean;
+  /** The list is in selection mode and pressing the row chooses it. */
+  selecting?: boolean;
   /** Opens the message. */
   onOpen?: () => void;
-  /** Chooses or unchooses the message; offered only on a list read afresh, so a saved list leaves it out and the avatar is only a picture. */
+  /** Chooses or unchooses the message while selecting from a list read afresh. */
   onChosenChange?: (chosen: boolean) => void;
-  /** Called by a swipe sideways, which chooses the message alone to be archived; offered only where choosing is. */
+  /** Called by a left swipe, which chooses the message alone for archive review. */
   onSwipe?: () => void;
 };
 
 const swipeDistance = 72;
 
 /**
- * One message of the list: its sender, subject, first words and time. The avatar, where choosing is offered, chooses
- * the message for archiving or Trash; a swipe sideways chooses it alone.
+ * One message of the list: its sender, subject, first words and time. Pressing the row opens it or chooses it in
+ * selection mode; a left swipe chooses it alone for archive review.
  *
  * @model spec/app/inbox/index.md
  */
-export function InboxMessageRow({ sender, subject, snippet, time, unread = false, attachment = false, chosen = false, onOpen, onChosenChange, onSwipe }: InboxMessageRowProps) {
-  const swipeFromRef = useRef<number | undefined>(undefined);
-  const start = (event: PointerEvent) => {
-    swipeFromRef.current = event.clientX;
+export function InboxMessageRow({ sender, subject, snippet, time, unread = false, attachment = false, chosen = false, selecting = false, onOpen, onChosenChange, onSwipe }: InboxMessageRowProps) {
+  const swipeFromRef = useRef<{ pointer: number; x: number; y: number } | undefined>(undefined);
+  const suppressClickRef = useRef(false);
+  const start = (event: PointerEvent<HTMLButtonElement>) => {
+    suppressClickRef.current = false;
+    if (!onSwipe || selecting || !event.isPrimary || event.button !== 0) return;
+    swipeFromRef.current = { pointer: event.pointerId, x: event.clientX, y: event.clientY };
   };
-  const end = (event: PointerEvent) => {
-    if (onSwipe && swipeFromRef.current !== undefined && Math.abs(event.clientX - swipeFromRef.current) >= swipeDistance) onSwipe();
+  const end = (event: PointerEvent<HTMLButtonElement>) => {
+    const from = swipeFromRef.current;
+    if (from?.pointer !== event.pointerId) return;
     swipeFromRef.current = undefined;
+    const left = from.x - event.clientX;
+    if (Math.abs(left) >= swipeDistance && Math.abs(left) > Math.abs(from.y - event.clientY)) {
+      suppressClickRef.current = true;
+      if (left > 0) onSwipe?.();
+    }
   };
-  const picture = chosen ? (
-    <span role="img" aria-label={sender} className="flex size-10 items-center justify-center rounded-full bg-primary text-primary-foreground">
-      <Check aria-hidden className="size-5" />
-    </span>
-  ) : (
-    <Avatar name={sender} />
-  );
+  const activate = (event: MouseEvent<HTMLButtonElement>) => {
+    if (suppressClickRef.current && event.detail !== 0) return;
+    if (selecting) onChosenChange?.(!chosen);
+    else onOpen?.();
+  };
   return (
-    <div onPointerDown={start} onPointerUp={end} onPointerCancel={() => { swipeFromRef.current = undefined; }} className={cn("flex items-center gap-1 pr-2 pl-1 touch-pan-y", chosen && "bg-accent")}>
-      {onChosenChange ? (
-        <button type="button" aria-pressed={chosen} onClick={() => onChosenChange(!chosen)} className={cn(focusRing, "flex size-12 shrink-0 items-center justify-center rounded-full")}>
-          <span className="sr-only">Choose</span>
-          {picture}
-        </button>
-      ) : (
-        <span className="flex size-12 shrink-0 items-center justify-center">{picture}</span>
-      )}
-      <button type="button" onClick={onOpen} className={cn(focusRing, "flex min-h-16 min-w-0 flex-1 flex-col justify-center rounded-lg py-2 pr-1 pl-2 text-left")}>
-        <span className="flex items-baseline gap-2">
+    <button type="button" role={selecting ? "checkbox" : undefined} aria-checked={selecting ? chosen : undefined}
+      aria-label={`${unread ? "Unread, " : ""}${sender}, ${subject}${attachment ? ", has attachments" : ""}`}
+      disabled={selecting ? !onChosenChange : !onOpen} onClick={activate}
+      onPointerDown={start} onPointerUp={end} onPointerCancel={() => { swipeFromRef.current = undefined; }}
+      className={cn(focusRing, "flex w-full touch-pan-y items-start gap-3.5 px-5 py-3 text-left focus-visible:-outline-offset-focus", chosen && "bg-accent")}
+    >
+      {selecting ? (
+        <span aria-hidden className={cn("mt-2 flex size-6 shrink-0 items-center justify-center rounded-full border", chosen ? "border-primary bg-primary text-primary-foreground" : "border-input")}>
+          {chosen ? <Check className="size-4" /> : null}
+        </span>
+      ) : null}
+      <Avatar name={sender} className="size-11" />
+      <span className="flex min-w-0 flex-1 flex-col">
+        <span className="flex items-center gap-1.5">
           <span className={cn("min-w-0 flex-1 truncate text-base", unread ? "font-bold" : "font-medium")}>{sender}</span>
-          {attachment ? <Paperclip role="img" aria-label="Has attachment" className="size-4 shrink-0 self-center text-muted-foreground" /> : null}
+          {attachment ? <Paperclip aria-hidden className="size-3.5 shrink-0 text-muted-foreground" /> : null}
           <span className="shrink-0 text-xs text-muted-foreground">{time}</span>
         </span>
-        <span className={cn("truncate text-sm", unread ? "font-semibold" : "font-normal")}>{subject}</span>
-        <span className="truncate text-sm text-muted-foreground">{snippet}</span>
-      </button>
-      {unread ? <span role="img" aria-label="Unread" className="size-2.5 shrink-0 rounded-full bg-primary" /> : <span className="size-2.5 shrink-0" />}
-    </div>
+        <span className="mt-0.5 flex items-center gap-2">
+          <span data-inbox-subject="" className="min-w-0 flex-1 truncate text-sm">{subject}</span>
+          <span aria-hidden className={cn("size-2 shrink-0 rounded-full", unread && "bg-primary")} />
+        </span>
+        <span className="mt-0.5 truncate text-sm text-muted-foreground">{snippet}</span>
+      </span>
+    </button>
   );
 }

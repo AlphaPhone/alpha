@@ -1,4 +1,5 @@
 // spec/app/shell/index.md, "Story: Move between Home and the apps"
+import { scanEntry } from "./files/scanEntry.vibe"
 import { together, whole } from "./runtime/reactor.vibe"
 import { pages } from "./settings/pages.vibe"
 import { preferences } from "./settings/preferences.vibe"
@@ -8,6 +9,7 @@ import { haptics } from "./shell/haptics.vibe"
 import { canvas } from "./shell/canvas.vibe"
 import { focus } from "./shell/focus.vibe"
 import { mailbox } from "./inbox/mailbox.vibe"
+import { mailQuestions } from "./inbox/mail-context.vibe"
 import { operations } from "./inbox/operations.vibe"
 import { composer as inboxComposer } from "./inbox/composer.vibe"
 import { adding } from "./inbox/adding.vibe"
@@ -23,7 +25,9 @@ import { composer as messagesComposer } from "./messages/composer.vibe"
 import { messages } from "./messages/messages.vibe"
 import { contacts } from "./contacts/contacts.vibe"
 import { requests } from "./contacts/requests.vibe"
-import { voicing } from "./voice/voice.vibe"
+import { clockResident } from "./clock/sync.vibe"
+import { remindersResident } from "./reminders/reminders.vibe"
+import { listing as workflowList } from "./workflows/list.vibe"
 
 /**
  * The machines that live from launch to exit: those another area follows or tells, and those that must act while
@@ -31,6 +35,7 @@ import { voicing } from "./voice/voice.vibe"
  * any order: they find each other once all are built. Lines are only ever added.
  */
 const machines = together(
+  scanEntry,
   shell,
   toasts,
   haptics,
@@ -39,6 +44,7 @@ const machines = together(
   preferences,
   updating,
   mailbox,
+  mailQuestions,
   operations,
   inboxComposer,
   adding,
@@ -54,7 +60,9 @@ const machines = together(
   paging,
   focus,
   reports,
-  voicing,
+  clockResident,
+  remindersResident,
+  workflowList,
 )
 
 /** The resident machines, closed: each machine one of them follows or tells is among them. */

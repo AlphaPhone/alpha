@@ -366,7 +366,7 @@ describe("Talk from Ask Alpha's composer (spec/app/voice/index.md, \"Story: Hold
       [{ environment: "production", credentialId: "cred-owner-9" }], true, undefined,
     ]);
 
-    await press("Stop talking");
+    await press("Stop voice conversation");
     await drawnUntil(alpha, alpha.runtime, Voice.Machine, (s) => s.phase === "Idle" && s.mic === "Off");
     await drawnUntil(alpha, area, Dock, (s) => !s.voice);
     expect([world.voice.activeMicSession, world.voice.stopCloudSpeechCalls > 0, button("Talk") !== undefined]).toEqual([undefined, true, true]);
@@ -378,7 +378,7 @@ describe("Talk from Ask Alpha's composer (spec/app/voice/index.md, \"Story: Hold
     await press("Talk");
     await drawnUntil(alpha, alpha.runtime, Voice.Machine, (s) => s.phase === "Listening" && s.mic === "On" && s.network);
     expect(world.voice.cloudStarts.map((one) => one.credentialId)).toEqual(["cred-owner-9", "cred-owner-10"]);
-    await press("Stop talking");
+    await press("Stop voice conversation");
     await drawnUntil(alpha, alpha.runtime, Voice.Machine, (s) => s.phase === "Idle");
 
     world.signedIn = false;
@@ -397,7 +397,7 @@ describe("Talk from Ask Alpha's composer (spec/app/voice/index.md, \"Story: Hold
     await press("Talk");
     await drawnUntil(alpha, alpha.runtime, Voice.Machine, (s) => s.phase === "Failed" || s.phase === "Idle");
     const after = await alpha.runtime.runPromise(Effect.flatMap(Voice.Machine, (m) => m.get()));
-    expect([after.mic, after.network, world.voice.cloudStarts, world.voice.relayWarmups, document.querySelector("[role=alertdialog], [role=alert]"), button("Talk") !== undefined]).toEqual([
+    expect([after.mic, after.network, world.voice.cloudStarts, world.voice.relayWarmups, document.querySelector("[role=alertdialog], [role=alert], [role=note]"), button("Talk") !== undefined]).toEqual([
       "Off", false, [], [], null, true,
     ]);
   });

@@ -33,6 +33,7 @@ import {
   SettingsPage,
 } from "@repo/ui";
 import type { ManagedRuntime } from "effect";
+import { RotateCw } from "lucide-react";
 import { type ReactNode, useState } from "react";
 import type * as AndroidGen from "../../gen/app__settings__android.ts";
 import { useMachine as useAndroid } from "../../gen/app__settings__android.react.ts";
@@ -443,10 +444,12 @@ export function Settings({ runtime, alpha, further }: { runtime: SettingsRuntime
   const Shown = further[page] ?? drawn[page];
   const refresh = { type: "refresh", at: untimed } as const;
   return (
-    <section aria-label="Settings" className="flex h-full flex-col">
+    <section aria-label="Settings" className="relative flex h-full flex-col">
       {facts.state && facts.state.read.read.status === "Failed" ? <Banner variant="warn">The phone did not answer</Banner> : null}
-      {facts.can(refresh) && page !== "Licences" ? <Button variant="ghost" size="sm" className="self-end" onClick={() => void facts.send(refresh)}>Refresh</Button> : null}
       {Shown ? <Shown runtime={runtime} alpha={alpha} common={common} /> : null}
+      {facts.can(refresh) && page !== "Licences" && page !== "Activity" && page !== "NetworkPage" ? (
+        <Button variant="ghost" size="icon" aria-label="Refresh" className="absolute top-1 right-2 in-data-[alpha-launcher]:top-12 text-muted-foreground" onClick={() => void facts.send(refresh)}><RotateCw /></Button>
+      ) : null}
     </section>
   );
 }
