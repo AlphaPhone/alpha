@@ -155,7 +155,7 @@ function TrashScreen({ runtime, collection }: { readonly runtime: Runtime; reado
           {state.question === "AskFull" ? "Recently deleted is full." : state.question === "AskEmpty" ? "Permanently delete every note in Recently deleted?" : "Permanently delete this note?"}
           <div className="mt-2 flex gap-2">
             {owner({ type: "cancel" }) && <Button variant="secondary" onClick={() => send({ type: "cancel" })}>Cancel</Button>}
-            {state.question !== "AskFull" && owner({ type: "confirm", storage: true }) && <Button variant="destructive" onClick={() => send({ type: "confirm", storage: true })}>Delete forever</Button>}
+            {state.question !== "AskFull" && owner({ type: "confirm", storage: true, now: untimed }) && <Button variant="destructive" onClick={() => send({ type: "confirm", storage: true, now: untimed })}>Delete forever</Button>}
           </div>
         </Alert>}
         {opened ? <article className="pb-4"><h2 className="font-display text-2xl">{titleOf(opened.note)}</h2><p className="whitespace-pre-wrap">{opened.note.body}</p></article> : state.entries.map((entry) => {
@@ -264,7 +264,7 @@ function NotesList({ alpha, runtime }: { readonly alpha: Alpha; readonly runtime
   const transfer = useTransfer(runtime);
   const hasDocuments = runtime.runSync(NoteDocuments.use((device) => Effect.succeed(device.available)));
   const hasMic = runtime.runSync(NoteDevice.use((device) => Effect.succeed(device.available)));
-  const content = runtime.runSync(NoteContent.asEffect());
+  const content = runtime.runSync(NoteContent);
   const data = useSyncExternalStore(content.subscribe, content.snapshot, content.snapshot);
   const [form, setForm] = useState<Form>();
   const [folderName, setFolderName] = useState("");

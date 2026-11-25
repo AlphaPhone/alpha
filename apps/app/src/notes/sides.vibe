@@ -11,7 +11,7 @@ import { type Job, answer, reacting, run, together } from "../runtime/reactor.vi
 import { NoteContent, audioIdOf, formatChanged, numberOf } from "./content.vibe"
 
 module web {
-  /** A linked page must still be its original HTTP(S) address. */
+  /** A linked page must still be its original HTTP(S) address. @throws {never} */
   export function pageOf(value: unknown): string {
     if (typeof value !== "string" || !/^https?:\/\//i.test(value)) return ""
     try {
@@ -49,9 +49,12 @@ effect function removed(fx: Extract<Link.Effect, { readonly tag: "Removes" }>): 
   const row = snapshot.noteByNumber.get(fx.note)
   if (row === undefined || owner !== snapshot.owner || numberOf("owner", owner) !== fx.owner || snapshot.version !== fx.base) return failure
   const format = formatChanged(row, { url: null, domain: null })
-  const result = (try NoteStore).update({ id: row.id, expectedRevision: fx.base - 1, format: { kind: "text", data: format.data } }) catch (error) => error
+  const result = effect {
+    try (try NoteStore).update({ id: row.id, expectedRevision: fx.base - 1, format: { kind: "text", data: format.data } })
+    return { ...failure, ok: true }
+  } catch (error) => ({ ...failure, known: error.known })
   try ignore((try Notes).send({ type: "storeChanged" }, phone))
-  return "known" in result ? { ...failure, known: result.known } : { ...failure, ok: true }
+  return result
 }
 
 function linkOut(fx: Link.Effect): Job<Link.Event, Agent | Notes | NoteContent | NoteStore, [Actor]> {
@@ -73,7 +76,7 @@ effect function played(fx: Extract<Voice.Effect, { readonly tag: "Plays" }>): Vo
   const saved = device.describe(audioId) catch () => undefined
   if (saved === undefined || saved.audioId !== audioId || saved.noteId !== note.id) return failed
   const segments = note.format?.data.segments
-  const offset = Array.isArray(segments) ? segments.slice(0, fx.from).reduce((before, row) =>
+  const offset = Array.isArray(segments) ? segments.slice(0, fx.from).reduce<number>((before, row) =>
     before + (typeof row === "object" && row !== null && "durationMs" in row && typeof row.durationMs === "number" ? row.durationMs : 0), 0) : 0
   return { ...failed, ok: try device.play(audioId, note.id, offset) }
 }

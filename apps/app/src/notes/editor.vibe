@@ -6,8 +6,9 @@ import type { Actor } from "../../gen/app__notes__note.effect.vibe"
 import { NoteStore } from "../platform/notes.vibe"
 import { type Agent } from "../platform/agent.vibe"
 import { ownerAt } from "../platform/owner.vibe"
+import { fresh } from "../runtime/attempts.vibe"
 import { type Job, answer, reacting, run, started, together, untimed } from "../runtime/reactor.vibe"
-import { type DraftWords, NoteContent, creationId, formatOf, fromSaved, hasContent, newWords, numberOf, wordsOf } from "./content.vibe"
+import { type DraftWords, NoteContent, formatOf, fromSaved, hasContent, newWords, numberOf, wordsOf } from "./content.vibe"
 
 export type Fields = Pick<DraftWords, "title" | "body" | "items" | "kind">
 
@@ -54,14 +55,14 @@ effect function saveDraft(by: "Owner" | "Phone") {
 }
 
 export service NoteEditor {
-  newNote(kind: Fields["kind"], available: boolean, folder: number, covered: boolean): void!!
+  newNote(kind: Fields["kind"], available: boolean, folder: number, covered: boolean): void!!(Agent | Editor.Machine | NoteContent)
   typed(fields: Partial<Fields>): void!!
-  save(): void!!
-  close(): void!!
-  takeSaved(): void!!
-  keepMine(): void!!
-  keepAsNew(): void!!
-  discard(): void!!
+  save(): void!!(Editor.Machine | NoteContent)
+  close(): void!!(Editor.Machine | NoteContent)
+  takeSaved(): void!!(Agent | Editor.Machine | NoteContent | List.Machine)
+  keepMine(): void!!(Editor.Machine | NoteContent)
+  keepAsNew(): void!!(Editor.Machine | NoteContent)
+  discard(): void!!Agent
   settled(initial: DraftWords, id: string, revision: number): void!!
 }
 
@@ -107,7 +108,7 @@ const typing = Layer.effect(NoteEditor, effect {
       const current = (editor.send({ type: "keepAsNew" }, "Owner") catch () => undefined)?.state
       const draft = try read.draft()
       if (current === undefined || draft === undefined) return
-      const retained = { ...draft, id: "", made: current.made, creation: creationId(), base: 0 }
+      const retained = { ...draft, id: "", made: current.made, creation: fresh(), base: 0 }
       try read.showDraft(retained)
       try ignore(read.keepDraft(retained))
       try saveDraft("Owner")

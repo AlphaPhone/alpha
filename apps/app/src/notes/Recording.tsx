@@ -13,7 +13,7 @@ function elapsed(seconds: number) {
 
 export function Recording({ alpha, runtime }: { readonly alpha: Alpha; readonly runtime: Alpha["runtime"] }) {
   const recording = useMachine(runtime);
-  const display = runtime.runSync(RecordingDisplay.asEffect());
+  const display = runtime.runSync(RecordingDisplay);
   const { seconds, peak } = useSyncExternalStore(display.subscribe, display.snapshot, display.snapshot);
   const state = recording.state;
   if (state === undefined) return null;

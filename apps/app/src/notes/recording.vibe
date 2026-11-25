@@ -149,8 +149,8 @@ effect function capture(fx: Extract<Rec.Effect, { readonly tag: "Captures" }>): 
 
 effect function command(fx: Extract<Rec.Effect, { readonly tag: "Tells" }>): void!!Scope {
   const tape = try currentTape()
-  const id = tape?.recordingId
-  if (id === undefined) return
+  if (tape === undefined || tape.recordingId === undefined) return
+  const id = tape.recordingId
   const state = tape.state
   const device = try NoteDevice
   const moved = fx.command === "Pause" && state === "paused" || fx.command === "Resume" && state === "recording" || fx.command === "End" && state === "stopped"
@@ -169,13 +169,15 @@ effect function commitRecording(fx: Extract<Rec.Effect, { readonly tag: "Finishe
   const identity = ownerAt() catch () => ""
   if (identity === "" || numberOf("owner", identity) !== fx.owner) return failed
   const device = try NoteDevice
-  const tape = try currentTape()
-  const id = tape?.recordingId
-  if (id === undefined || (tape.segments?.length ?? 0) === 0) return failed
+  let tape = try currentTape()
+  if (tape === undefined || tape.recordingId === undefined) return failed
+  const id = tape.recordingId
   if (tape.state === "recording" || tape.state === "paused") {
     const ended = device.command(id, "End") catch () => undefined
-    if (ended === undefined) return failed
+    if (ended?.recordingId !== id || ended.state !== "stopped") return failed
+    tape = ended
   }
+  if ((tape.segments?.length ?? 0) === 0) return failed
   const store = try NoteStore
   const collection = try (try NoteContent).collection()
   const folder = collection.folderByNumber.get(fx.folder)
@@ -291,9 +293,9 @@ const updates = started(effect {
       try ignore(recorder.send({ type: "pause", take: state.take }, "Owner"))
     }
   }
-  const poll = Stream.fromEffectSchedule(device.status() catch () => undefined, Schedule.spaced("1 second"))
+  const poll = Stream.fromEffectSchedule(effect { return device.status() catch () => undefined }, Schedule.spaced("1 second"))
   const playing = Stream.changes(Stream.map(recorder.changes, (state) => state.phase === "Recording" || state.phase === "Stopping"))
-  const ticks = Stream.switchMap(playing, (polling) => polling ? Stream.filterMap(poll, Option.fromNullishOr) : Stream.empty)
+  const ticks = Stream.switchMap(playing, (polling) => polling ? Stream.filter(poll, (tape): tape is Tape => tape !== undefined) : Stream.empty)
   const opened = Stream.merge(device.openAsked, Stream.as(Stream.filter(devicePage.visible, (front) => front), undefined))
   try fork.scoped Stream.runForEach(opened, effect () => {
     if (try device.consumeOpen()) try ignore(shell.send({ type: "openView", view: "Notes" }))
