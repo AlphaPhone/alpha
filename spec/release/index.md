@@ -28,7 +28,7 @@ type Stage =
 type Channel = {
   stage: Stage, number: int, attempt: int, lastNumber: int, floor: int, pointer: int,
   plan: int, reviewed: bool, signers: int, rotation: bool,
-  deliveredAt: int, qualifiedAt: int, uploadedAt: int, apkVerified: bool, pointerRead: bool,
+  deliveredAt: int, qualifiedAt: int, uploadedAt: int, reused: bool, apkVerified: bool, pointerRead: bool,
 }
 
 pure val legacyFloor = 75
@@ -36,7 +36,7 @@ pure val receiptHours = 24
 pure val initial: Channel = {
   stage: NoCandidate, number: 0, attempt: 0, lastNumber: 0, floor: legacyFloor, pointer: 0,
   plan: 0, reviewed: false, signers: 0, rotation: false,
-  deliveredAt: 0, qualifiedAt: 0, uploadedAt: 0, apkVerified: false, pointerRead: false,
+  deliveredAt: 0, qualifiedAt: 0, uploadedAt: 0, reused: false, apkVerified: false, pointerRead: false,
 }
 
 pure def rank(stage: Stage): int =
@@ -59,7 +59,22 @@ pure def canBuild(s: Channel, number: int, attempt: int, blockers: Blockers): bo
 
 pure def build(s: Channel, number: int, attempt: int, blockers: Blockers): Channel =
   { ...s, stage: Built, number: number, attempt: attempt, lastNumber: number, plan: 0, reviewed: false, signers: 0,
-    rotation: false, deliveredAt: 0, qualifiedAt: 0, uploadedAt: 0, apkVerified: false, pointerRead: false }
+    rotation: false, deliveredAt: 0, qualifiedAt: 0, uploadedAt: 0, reused: false, apkVerified: false, pointerRead: false }
+```
+
+### A build its verification found not distributable is no candidate, and its run number is spent
+
+```quint
+pure def canRefuseBuild(s: Channel, number: int, blockers: Blockers): bool =
+  not(inFlight(s)) and number > s.lastNumber and not(distributable(blockers))
+
+pure def refuseBuild(s: Channel, number: int, blockers: Blockers): Channel = { ...s, lastNumber: number }
+```
+
+### A refused build can spend its number
+
+```quint
+pure def sometimesARefusedBuildSpentItsNumber(s: Channel): bool = s.stage == NoCandidate and s.lastNumber > 0
 ```
 
 ### A build is a candidate only when its verification recorded it distributable: no test mocks, the production bundle audit passed, Alpha's one signer, the runtime packaged with its notices, an on-device voice slot, and for an image its platform certificate
@@ -163,8 +178,10 @@ pure def review(s: Channel): Channel = { ...s, reviewed: true }
 pure def canSign(s: Channel, guarded: bool, signers: int, rotation: bool): bool =
   s.stage == Planned and s.reviewed and guarded and s.plan == s.attempt
 
+pure def oneKey(signers: int, rotation: bool): bool = signers == 1 and not(rotation)
+
 pure def sign(s: Channel, guarded: bool, signers: int, rotation: bool): Channel =
-  if (signers == 1 and not(rotation)) { ...s, stage: Signed, signers: signers, rotation: rotation }
+  if (oneKey(signers, rotation)) { ...s, stage: Signed, signers: signers, rotation: rotation }
   else { ...s, stage: Abandoned }
 ```
 
@@ -182,7 +199,7 @@ upgraded in place.
 
 ```quint
 pure def alwaysOneSignerNoRotation(s: Channel): bool =
-  rank(s.stage) >= 4 implies (s.signers == 1 and not(s.rotation))
+  rank(s.stage) >= 4 implies oneKey(s.signers, s.rotation)
 ```
 
 ### The protected keys are proven to be the enrolled ones: each of the nine OS certificates, the two verified-boot keys and Alpha's app key pairs with its committed public identity, none is a test key, and no two are the same
@@ -253,15 +270,21 @@ pure def lawADebuggableApkIsRefused(apk: Apk, number: int): bool = apk.debuggabl
 ### The APK is uploaded while the receipt is valid, above the floor and the published version; one already on the channel is never overwritten, only reused
 
 A delivery that failed half way is retried with the same candidate: the APK
-it left is read back like a new one, and a damaged one never verifies, so
-that release is abandoned for a higher version. Only an admitted APK is
-uploaded.
+it left is reused, never uploaded again or replaced, and read back like a
+new one, so a damaged one never verifies and that release is abandoned for
+a higher version. Only an admitted APK is uploaded.
 
 ```quint
 pure def canUpload(s: Channel, now: int, existing: bool, apk: Apk): bool =
   s.stage == Qualified and receiptValid(s, now) and s.number > s.floor and s.number > s.pointer and admitted(apk, s.number)
 
-pure def upload(s: Channel, now: int, existing: bool, apk: Apk): Channel = { ...s, stage: Uploaded, uploadedAt: now }
+pure def upload(s: Channel, now: int, existing: bool, apk: Apk): Channel = { ...s, stage: Uploaded, uploadedAt: now, reused: existing }
+```
+
+### An APK the channel already kept is verified like a new upload before the manifest names it
+
+```quint
+pure def alwaysAReusedApkIsVerifiedFirst(s: Channel): bool = (s.reused and rank(s.stage) >= 9) implies s.apkVerified
 ```
 
 ### Qualification and upload both happen before the receipt expires
@@ -273,6 +296,10 @@ pure def alwaysWithinTheReceipt(s: Channel): bool =
 ```
 
 ### The anonymous download must return the exact size and digest before anything else moves
+
+Every read of the channel is anonymous, over HTTPS: a redirect to plain
+HTTP or to an address that carries credentials is refused, and no answer is
+read past its bound, 64 KiB for a manifest and 2 GiB for an APK.
 
 ```quint
 pure def canVerifyDownload(s: Channel): bool = s.stage == Uploaded
@@ -326,6 +353,19 @@ pure def stepThePublishedVersionOnlyAdvances(before: Channel, via: str, after: C
     and (via == "movePointer" implies (before.number > before.floor and before.number > before.pointer))
 ```
 
+### The channel's retained APKs raise the floor: a candidate is numbered, and a release published, only above every APK any writer keeps there
+
+`alpha-phone-<version>.apk` names each APK the channel keeps, whoever
+uploaded it; the highest is read before a candidate is built and again
+before an upload, as `retainElsewhere`.
+
+```quint
+pure def retainedFloor(versions: List[int]): int = versions.foldl(0, (top, v) => if (v > top) v else top)
+
+pure def lawTheFloorIsAtLeastEveryRetainedApk(versions: List[int]): bool =
+  versions.every(v => v <= retainedFloor(versions))
+```
+
 ### The floor never falls
 
 ```quint
@@ -341,6 +381,33 @@ pure def record(s: Channel): Channel = { ...s, stage: Recorded, floor: if (s.num
 
 pure def alwaysRecordedAfterReadBack(s: Channel): bool =
   s.stage == Recorded implies (s.pointerRead and s.floor >= s.number and s.pointer == s.number)
+```
+
+### A manifest names the release by a version name of 1 to 64 characters with no control character, and by notes of at most 500, as phones show them
+
+A name or notes a phone would not show are refused when the manifest is
+written, not published for phones to drop.
+
+```quint
+pure val maxName = 64
+pure val maxNotes = 500
+
+pure def manifestNamed(name: int, control: bool, notes: int): bool = name >= 1 and name <= maxName and not(control) and notes <= maxNotes
+
+pure def lawOverlongNotesAreRefused(name: int, notes: int): bool = notes > maxNotes implies not(manifestNamed(name, false, notes))
+```
+
+### The channel is healthy only while its manifest names a launcher of Alpha's one key, above the retired channel and the last recorded release, at an address it keeps, served with exactly its size and digest
+
+`pnpm release status` reads the channel anonymously, as a phone does.
+
+```quint
+type Served = { launcher: bool, signer: bool, version: int, recorded: int, kept: bool, exact: bool }
+
+pure def channelHealthy(c: Served): bool =
+  c.launcher and c.signer and c.version > legacyFloor and c.version >= c.recorded and c.kept and c.exact
+
+pure def lawAnotherSignerIsUnhealthy(served: Served): bool = not(channelHealthy({ ...served, signer: false }))
 ```
 
 ### Phones read the launcher channel from the stable release of Alpha's repository, eliza-research/alpha, known by its permanent id; APKs kept under the repository's earlier names stay valid
@@ -434,6 +501,8 @@ pure val signersValues = Set(1, 2)
 pure val nowValues = Set(0, 10, 23, 24, 30)
 pure val versionValues = Set(76, 77, 79)
 pure val namedValues = Set(0, 76, 77, 78, 80)
+pure val versionsValues = Set(List(), List(76, 80), List(80, 76, 79))
+pure val servedValues = Set({ launcher: true, signer: true, version: 80, recorded: 79, kept: true, exact: true }, { launcher: true, signer: false, version: 80, recorded: 79, kept: true, exact: true })
 pure val tookIt: Readback = { sameInstall: true, advanced: true, exact: true, selfInitiated: true, homeKept: true, offerKept: true }
 pure val compareValues = Set({ forThePin: true, reached: true }, { forThePin: true, reached: false }, { forThePin: false, reached: true })
 pure val custodyValues = Set({ pairs: 12, matching: 12, distinct: true, testKeys: false }, { pairs: 12, matching: 11, distinct: true, testKeys: false })

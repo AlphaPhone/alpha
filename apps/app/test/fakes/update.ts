@@ -1,6 +1,7 @@
 // spec/app/update/index.md, "Story: Check for updates"; spec/app/update/page.md, "Story: Open Alpha while an update is pending"
 import type { Faked } from "./phone.ts";
 import { rejection } from "./phone.ts";
+import type { Route } from "./routes.ts";
 
 /** One release as Alpha's update channel describes it (`alpha-update/v1`). */
 export interface ChannelRelease {
@@ -24,7 +25,8 @@ export interface UpdateState {
   canContinue?: boolean;
   automatic?: boolean;
   outcome?: string;
-  resumeEligible?: boolean;
+  resume?: boolean;
+  idle?: boolean;
 }
 
 /** What the fake phone's own updater holds, and how it behaves; a journey changes it between steps. */
@@ -43,6 +45,10 @@ export interface UpdateScene {
   installHeld?: Promise<void>;
   /** While set, `updateState` cannot be read. */
   stateUnreadable?: boolean;
+  /** While set, a check waits for it before the channel answers. */
+  checkHeld?: Promise<void>;
+  /** Each time a page asked the agent whether it is up, by the scene's clock. */
+  readonly health: number[];
   readonly checks: number[];
   readonly installs: Array<{ apkUrl: string; sha256: string; sizeBytes: number; versionCode: number; automatic?: boolean; manifestSha256?: string }>;
   readonly answers: Array<{ activationId: string; ready: boolean }>;
@@ -63,7 +69,7 @@ export const release = (versionCode: number, overrides: Partial<ChannelRelease> 
 export function updateScene(): UpdateScene {
   return {
     version: 120, signer, permission: "supported", unreadable: false, state: {},
-    checks: [], installs: [], answers: [], continued: [], opened: [],
+    checks: [], installs: [], answers: [], continued: [], opened: [], health: [],
   };
 }
 
@@ -75,8 +81,10 @@ export function alphaDevice(scene: UpdateScene, now: () => number): Faked {
       snapshot: () => Promise.resolve({ appVersionCode: scene.version, appSigner: scene.signer, appAutomaticUpdates: scene.permission }),
       checkForUpdate: () => {
         scene.checks.push(now());
-        if (scene.unreadable) return Promise.reject(rejection("Update check failed"));
-        return Promise.resolve({ ...(scene.manifest === undefined ? {} : { manifest: scene.manifest }), ...(scene.digest === undefined ? {} : { manifestSha256: scene.digest }) });
+        return (scene.checkHeld ?? Promise.resolve()).then(() => {
+          if (scene.unreadable) throw rejection("Update check failed");
+          return { ...(scene.manifest === undefined ? {} : { manifest: scene.manifest }), ...(scene.digest === undefined ? {} : { manifestSha256: scene.digest }) };
+        });
       },
       installUpdate: (options: UpdateScene["installs"][number]) => {
         scene.installs.push(options);
@@ -102,4 +110,12 @@ export function alphaDevice(scene: UpdateScene, now: () => number): Faked {
 /** Android says an update is ready to activate, or has settled, as the plugin's events do. */
 export function tell(scene: UpdateScene, event: "alphaUpdateReady" | "alphaUpdateSettled") {
   (scene as UpdateScene & { tell?: (name: string) => void }).tell?.(event);
+}
+
+/** The agent's health route as the update scene sees it: each request is counted, and the agent's own route answers it. */
+export function updateRoutes(scene: UpdateScene, now: () => number): Route[] {
+  return [(request, url) => {
+    if (request.method === "GET" && url.pathname === "/api/health") scene.health.push(now());
+    return undefined;
+  }];
 }

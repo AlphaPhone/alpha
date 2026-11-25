@@ -1,5 +1,8 @@
 // spec/app/update/index.md, "Alpha holds what the phone reports, the owner's activity, the check, the saved offer and whether an install is under way"; spec/app/update/index.md, "A signed-out phone resting on its untouched sign-in card is idle; a card touched in any way is an open screen"; spec/app/update/page.md, "When every area has saved its drafts the page answers ready, and otherwise it refuses"
 import type { SignInCard } from "../../gen/app__update.effect.vibe"
+import * as Recorder from "../../gen/app__notes__recording.effect.vibe"
+import * as Voice from "../../gen/app__voice.effect.vibe"
+import { applying } from "../runtime/reactor.vibe"
 
 module web {
   const nonText = new Set(["checkbox", "radio", "button", "submit", "reset", "range", "color", "file", "image", "hidden"])
@@ -83,3 +86,17 @@ export const engagements = Layer.effect(Engagements, effect {
     }),
   }
 })
+
+/** Reports `engagement` as `area`'s part of the owner's activity. */
+function reporting(area: string): (engagement: Partial<Engagement>) => void!!Engagements {
+  return (engagement: Partial<Engagement>) => effect { try (try Engagements).report(area, engagement) }
+}
+
+// spec/app/update/index.md, "Alpha holds what the phone reports, the owner's activity, the check, the saved offer and whether an install is under way"; spec/app/voice/index.md, "Story: Hold a spoken conversation"
+/** A voice machine's part, reported under `area`: a conversation under way, and a recording open for a field of chat or Messages. */
+export function voiceReported(area: string) {
+  return applying(Voice.Machine, (voice) => ({ voice: Voice.talking(voice), recording: voice.recorder.stage !== "Closed" }), reporting(area))
+}
+
+/** Notes' part: a recording that is not yet kept or dropped. */
+export const notesReported = applying(Recorder.Machine, (recorder) => ({ recording: Recorder.unfinished(recorder) }), reporting("notes"))

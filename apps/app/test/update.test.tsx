@@ -6,9 +6,12 @@ import { Machine as Layers } from "../gen/app__shell__layers.effect.vibe";
 import { type Engagement, Engagements } from "../src/update/activity.vibe";
 import * as Updates from "../gen/app__update.effect.vibe";
 import * as Page from "../gen/app__update__page.effect.vibe";
+import * as Voice from "../gen/app__voice.effect.vibe";
+import { dictate } from "../src/assistant/dictation.vibe";
+import assistant from "../src/assistant/index.tsx";
 import { button, closeAll, drawn, hardware, later, open, press, seen, underAct, until } from "./alpha.tsx";
 import { scene } from "./fakes/scene.ts";
-import { apk, manifestDigest, release, tell } from "./fakes/update.ts";
+import { apk, manifestDigest, release, signer, tell } from "./fakes/update.ts";
 
 underAct();
 afterEach(closeAll);
@@ -31,7 +34,7 @@ function phoneWith(offered: readonly ReturnType<typeof release>[], digest: strin
   return world;
 }
 
-/** What another area reports to updates, as that area does. */
+/** What the account reports to updates, as its sign-in card will once the account area draws it. */
 const report = (alpha: Awaited<ReturnType<typeof open>>["alpha"], area: string, engagement: Partial<Engagement>) =>
   alpha.runtime.runPromise(Effect.flatMap(Engagements, (reports) => reports.report(area, engagement)));
 
@@ -128,21 +131,64 @@ describe("Updates", () => {
     await until(alpha, alpha.runtime, Updates.Machine, (s) => s.note === "CouldNotCheck");
     expect([(await updatesOf(alpha)).offer.release.version, (await updatesOf(alpha)).offer.manifest]).toEqual([121, 0]);
     // spec/app/update/index.md, "A check is due fifteen minutes after one that was answered, a minute after one that failed, and at once before the first or when the clock went back"
-    world.update.unreadable = false;
     world.update.manifest = undefined;
     world.update.digest = undefined;
     const before = world.update.checks.length;
     await later(alpha, 59_000);
     expect(world.update.checks.length).toBe(before);
     await later(alpha, 2_000);
+    await until(alpha, alpha.runtime, Updates.Machine, (s) => world.update.checks.length > before && s.check.status !== "Loading");
+    // spec/app/update/index.md, "Checks that keep failing are tried again after a minute, then two, four and eight, and then every fifteen": a second failure waits two minutes.
+    expect((await updatesOf(alpha)).misses).toBe(2);
+    await later(alpha, 110_000);
+    expect(world.update.checks.length).toBe(before + 1);
+    world.update.unreadable = false;
+    await later(alpha, 20_000);
     // spec/app/update/index.md, "Only the answer to the newest check is taken: a complete manifest replaces the offer, a withdrawn one removes it, and anything else keeps it"
     await until(alpha, alpha.runtime, Updates.Machine, (s) => s.checked === "Fine" && s.offer.release.version === 0);
     expect(button("Install update")).toBeUndefined();
   });
 
+  it("Only a complete manifest of well-formed releases is understood, and a check that never answers is unreadable (spec/app/update/index.md, \"Story: Read the update channel\")", async () => {
+    const world = phoneWith([release(121)]);
+    world.update.permission = "permission-required";
+    const { alpha } = await open(world);
+    await until(alpha, alpha.runtime, Updates.Machine, (s) => s.checked === "Fine" && s.offer.release.version === 121);
+    await general(alpha);
+    /** Asks for a check from Settings while the channel serves `manifest`, and waits for what Settings says. */
+    const checking = async (manifest: unknown) => {
+      world.update.manifest = JSON.stringify(manifest);
+      const before = world.update.checks.length;
+      await press("Check for updates");
+      await until(alpha, alpha.runtime, Updates.Machine, (s) => world.update.checks.length > before && s.note !== "Silent");
+      return updatesOf(alpha);
+    };
+    // spec/app/update/index.md, "A release is well formed only with a signer, a version, an HTTPS address of at most 2048 characters without credentials, a digest, and a size of at most 2 GiB"; spec/app/update/index.md, "A check that fails never replaces the saved offer"
+    for (const broken of [
+      { apkUrl: "http://releases.alphacompute.cc/alpha-122.apk" }, { apkUrl: "https://owner:secret@releases.alphacompute.cc/alpha-122.apk" },
+      { sha256: "B".repeat(64) }, { sha256: "b".repeat(63) }, { signerSha256: signer.toUpperCase() }, { sizeBytes: 0 },
+    ]) expect(await checking(release(122, broken))).toMatchObject({ note: "CouldNotCheck", checked: "Missed", offer: { release: { version: 121 }, manifest: 0 } });
+    // spec/app/update/index.md, "An index of more than 16 releases is not complete"
+    const seventeen = Array.from({ length: 17 }, (_, at) => release(122, { signerSha256: at === 0 ? signer : at.toString(16).padStart(64, "e") }));
+    expect(await checking({ schema: "alpha-update/index-v1", releases: seventeen })).toMatchObject({ note: "CouldNotCheck", offer: { release: { version: 121 } } });
+    // spec/app/update/index.md, "A version name is shown only when it has 1 to 64 characters, and notes only when they have at most 500": a name with a control character counts as none.
+    expect(await checking(release(122, { versionName: "1.122\u0007" }))).toMatchObject({ note: "Ready", offer: { release: { version: 122, name: 0, versionName: "" } } });
+    expect([document.body.textContent?.includes("Version 1.122"), document.body.textContent?.includes("122")]).toEqual([false, true]);
+    // spec/app/update/index.md, "Every check and every install ends, so Settings never waits on one for ever": a check the channel never answers is unreadable after a minute.
+    world.update.checkHeld = new Promise<void>(() => {});
+    const before = world.update.checks.length;
+    await press("Check for updates");
+    await until(alpha, alpha.runtime, Updates.Machine, (s) => world.update.checks.length > before && s.check.status === "Loading");
+    await later(alpha, 60_000);
+    await until(alpha, alpha.runtime, Updates.Machine, (s) => s.note === "CouldNotCheck" && s.check.status !== "Loading");
+    expect((await updatesOf(alpha)).offer.release.version).toBe(122);
+  });
+
   it("Alpha updates itself while the phone rests on Home, and waits while it is busy (spec/app/update/index.md, \"Story: Install an update\")", async () => {
     const world = phoneWith([release(121)]);
     world.update.installAnswer = "starting";
+    world.voice.onDevice = false;
+    world.voice.credentialId = "cred-owner-9";
     const { alpha } = await open(world);
     // spec/app/update/index.md, "An automatic update starts only on screen, with the owner idle, the phone quiet, Android's permission, and an offer from a check that succeeded"
     await until(alpha, alpha.runtime, Updates.Machine, (s) => s.deferrals === 1);
@@ -155,21 +201,28 @@ describe("Updates", () => {
     await press("Settings");
     await later(alpha, 60_000);
     expect(world.update.installs.length).toBe(1);
-    // spec/app/update/index.md, "The owner is idle only on Home with nothing open, not typing, no voice, no dialog and the connection not busy, and the phone is quiet only with Alpha in front, no call and normal audio": a recording another area reports keeps it waiting too.
-    await report(alpha, "notes", { recording: true });
-    await until(alpha, alpha.runtime, Updates.Machine, (s) => s.activity.recording);
+    // spec/app/update/index.md, "The owner is idle only on Home with nothing open, not typing, no voice, no dialog and the connection not busy, and the phone is quiet only with Alpha in front, no call and normal audio"; spec/app/update/index.md, "Alpha holds what the phone reports, the owner's activity, the check, the saved offer and whether an install is under way": a voice conversation, as voice reports it, keeps it waiting too.
     await alpha.back();
-    await later(alpha, 120_000);
+    await until(alpha, assistant.runtime(alpha), Voice.Machine, (s) => s.route.account === "CloudAccount" && s.route.consent && s.warmed);
+    await press("Talk");
+    await until(alpha, alpha.runtime, Updates.Machine, (s) => s.activity.voice);
+    await later(alpha, 1_000);
     expect(world.update.installs.length).toBe(1);
+    await press("Stop voice conversation");
+    await until(alpha, alpha.runtime, Updates.Machine, (s) => !s.activity.voice);
+    await alpha.back();
+    await until(alpha, alpha.runtime, Updates.Machine, (s) => !s.activity.voice && !s.activity.open);
     // spec/app/update/index.md, "A signed-out phone resting on its untouched sign-in card is idle; a card touched in any way is an open screen"
     await report(alpha, "account", { card: "Touched" });
-    await report(alpha, "notes", {});
-    await until(alpha, alpha.runtime, Updates.Machine, (s) => !s.activity.recording && s.activity.open);
+    await until(alpha, alpha.runtime, Updates.Machine, (s) => s.activity.open);
     await later(alpha, 120_000);
     expect(world.update.installs.length).toBe(1);
+    const field = document.body.appendChild(document.createElement("input"));
+    await drawn(() => field.focus());
     await report(alpha, "account", { card: "Resting" });
     await until(alpha, alpha.runtime, Updates.Machine, (s) => s.deferrals === 0 && !s.installing);
-    expect(world.update.installs.length).toBe(2);
+    expect([world.update.installs.length, (await updatesOf(alpha)).activity.typing]).toEqual([2, false]);
+    field.remove();
   });
 
   it("A restart keeps the offer and the last check (spec/app/update/index.md, \"Story: Start again where Alpha left off\")", async () => {
@@ -212,12 +265,24 @@ describe("An open page during an update (spec/app/update/page.md, \"Story: Save 
     await press("Continue update");
     await until(alpha, alpha.runtime, Page.Machine, (s) => !s.continuing);
     expect([world.update.continued, world.update.answers.length]).toEqual([["a1"], 1]);
+    // spec/app/update/page.md, "An update read under another bridge is never taken up or answered by this page"
+    world.update.state = { pending: true, phase: "preparing", activationId: "a2", bridgeId: "b2" };
+    await later(alpha, 1_000);
+    await until(alpha, alpha.runtime, Page.Machine, (s) => !s.canContinue && s.activation !== 0);
+    expect([world.update.answers.length, document.body.textContent?.includes("Updating Alpha…")]).toEqual([1, true]);
+    // spec/app/update/page.md, "An unknown outcome lets a page go only once Android's updater is idle, and then neither reconnects nor explains"
+    world.update.state = { activationId: "a1", bridgeId: "b1", outcome: "rolled-back" };
+    await later(alpha, 1_000);
+    expect((await alpha.runtime.runPromise(Page.Machine.use((page) => page.get()))).activation).not.toBe(0);
     // spec/app/update/page.md, "The update settles for this page when nothing is pending, or with the outcome of its own activation"
-    world.update.state = { activationId: "a1", bridgeId: "b1", outcome: "canceled", resumeEligible: true };
+    const reconnects = world.update.health.length;
+    world.update.state = { activationId: "a1", bridgeId: "b1", outcome: "canceled", resume: true, idle: true };
     tell(world.update, "alphaUpdateSettled");
     // spec/app/update/page.md, "A page reconnects only after a cancelled update it was ready for"
     await until(alpha, alpha.runtime, Page.Machine, (s) => s.activation === 0 && !s.frozen);
     await until(alpha, alpha.runtime, Layers, (s) => s.holds.length === 0);
+    await later(alpha, 0);
+    expect(world.update.health.length).toBeGreaterThan(reconnects);
     expect(document.body.textContent).not.toContain("Updating Alpha…");
     await alpha.back();
     expect((await alpha.runtime.runPromise(Shell.use((shell) => shell.get()))).trail).toEqual([]);
@@ -227,7 +292,11 @@ describe("An open page during an update (spec/app/update/page.md, \"Story: Save 
     const world = { ...scene(), phone: true };
     const { alpha } = await open(world);
     await until(alpha, alpha.runtime, Page.Machine, (s) => s.mount === "Mounted");
-    await report(alpha, "notes", { recording: true });
+    // spec/app/update/index.md, "Alpha holds what the phone reports, the owner's activity, the check, the saved offer and whether an install is under way": a recording opened for Ask Alpha's composer, as voice reports it.
+    const area = assistant.runtime(alpha);
+    await until(alpha, area, Voice.Machine, (s) => s.warmed);
+    await drawn(() => document.querySelector<HTMLTextAreaElement>("textarea[data-alpha-composer]")?.focus());
+    await drawn(() => area.runPromise(dictate()));
     await until(alpha, alpha.runtime, Updates.Machine, (s) => s.activity.recording);
     world.update.state = { pending: true, phase: "preparing", activationId: "a3", bridgeId: "b3" };
     tell(world.update, "alphaUpdateReady");
@@ -235,11 +304,14 @@ describe("An open page during an update (spec/app/update/page.md, \"Story: Save 
     await until(alpha, alpha.runtime, Page.Machine, (s) => s.reply === "Refused");
     expect(world.update.answers).toEqual([{ activationId: "a3", ready: false }]);
     // spec/app/update/page.md, "The refusal is explained only for a manual update this page itself refused"
-    world.update.state = { activationId: "a3", bridgeId: "b3", outcome: "failed" };
+    const reconnects = world.update.health.length;
+    world.update.state = { activationId: "a3", bridgeId: "b3", outcome: "failed", idle: true };
     tell(world.update, "alphaUpdateSettled");
     await until(alpha, alpha.runtime, Page.Machine, (s) => s.activation === 0 && s.notice);
     await later(alpha, 0);
     expect(document.body.textContent).toContain("Finish your changes, then try updating again.");
+    // spec/app/update/page.md, "A page reconnects only after a cancelled update it was ready for": a failure is no reason to.
+    expect(world.update.health.length).toBe(reconnects);
   });
 
   it("a page that cannot read the update holds, and a browser has no update to wait for (spec/app/update/page.md, \"A page that cannot read the update state holds rather than mount\")", async () => {
@@ -265,7 +337,7 @@ describe("An open page during an update (spec/app/update/page.md, \"Story: Save 
     // spec/app/update/page.md, "A page that was not mounted mounts its editors only once no update is pending"
     await until(alpha, alpha.runtime, Page.Machine, (s) => s.mount === "Holding" && s.reply === "Readied");
     expect([world.update.answers, document.body.textContent?.includes("Updating Alpha…")]).toEqual([[{ activationId: "a7", ready: true }], true]);
-    world.update.state = { activationId: "a7", bridgeId: "b7", outcome: "installed" };
+    world.update.state = { activationId: "a7", bridgeId: "b7", outcome: "installed", idle: true };
     await later(alpha, 1_000);
     await until(alpha, alpha.runtime, Page.Machine, (s) => s.mount === "Mounted");
   });

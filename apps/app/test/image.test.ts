@@ -6,9 +6,13 @@ import { join } from "node:path";
 import { Cause, Effect, Exit } from "effect";
 import { afterEach, describe, expect, it } from "vitest";
 import { alphaPrivileged, firstBootGrants } from "../gen/app__image.ts";
+import * as Channel from "../gen/release.ts";
 import { aosp, otaArguments, place } from "../scripts/aosp.ts";
 import { inventory, licences } from "../scripts/licences.ts";
-import { type Adb, type Offer, type ToolsPin, avbMetadata, compareUrl, compared, custodyProof, kept, osBuildOf, osPlanOf, osSignedOf, pilotUpdate, readBack, release } from "../scripts/release.ts";
+import {
+  type Adb, type ChannelPort, type Offer, type ToolsPin, ReleaseRefused, apkUrl, avbMetadata, compareUrl, compared, custodyProof, kept, ledger, manifestUrl, osBuildOf, osPlanOf, osSignedOf,
+  pilotUpdate, publishRelease, readBack, release,
+} from "../scripts/release.ts";
 
 const scratches: string[] = [];
 afterEach(() => { for (const directory of scratches.splice(0)) rmSync(directory, { recursive: true, force: true }); });
@@ -143,13 +147,41 @@ describe("Ship what Alpha is built from, with its licences (spec/app/image/licen
   }, 300_000);
 });
 
-/** What a `pnpm release` command answered: its result, or the tag and words of the failure it ended with. */
-async function released(...argv: string[]) {
-  const exit = await Effect.runPromiseExit(release(argv));
+const channelBase = manifestUrl().slice(0, manifestUrl().lastIndexOf("/") + 1);
+
+/**
+ * Alpha's channel on GitHub as a journey keeps it: the stable release's assets by name, and what anyone downloads
+ * from their addresses. An upload under a kept name fails unless it clobbers, as `gh release upload` does.
+ */
+function channelAt(assets: Record<string, Uint8Array> = {}, recordFile = place("aosp/signing/release-signer.json")) {
+  const uploads: string[] = [];
+  const port: ChannelPort = {
+    listed: Effect.sync(() => Object.keys(assets)),
+    upload: (file, name, clobber) => Effect.suspend(() => {
+      if (Object.hasOwn(assets, name) && !clobber) return Effect.fail(new ReleaseRefused({ message: `${name} already exists` }));
+      assets[name] = readFileSync(file);
+      uploads.push(name);
+      return Effect.void;
+    }),
+    read: (url, bound) => Effect.suspend(() => {
+      const bytes = url.startsWith(channelBase) ? assets[url.slice(channelBase.length)] : undefined;
+      if (bytes === undefined || bytes.length > bound) return Effect.fail(new ReleaseRefused({ message: `${url} answered 404` }));
+      return Effect.succeed({ size: bytes.length, sha256: digestOf(bytes), bytes });
+    }),
+    recordFile,
+  };
+  return { assets, uploads, port };
+}
+const json = (value: unknown) => new TextEncoder().encode(JSON.stringify(value));
+
+/** What a `pnpm release` command answered over `port`: its result, or the tag and words of the failure it ended with. */
+const releasedOver = (port: ChannelPort) => async (...argv: string[]) => {
+  const exit = await Effect.runPromiseExit(release(argv, port));
   if (Exit.isSuccess(exit)) return { ok: true as const, value: exit.value as Record<string, unknown> };
   const failure = Cause.squash(exit.cause) as { _tag?: string; message?: string };
   return { ok: false as const, tag: failure._tag, said: failure.message ?? "" };
-}
+};
+const released = releasedOver(channelAt().port);
 
 describe("Qualify and publish a release (spec/release/index.md, \"Story: Qualify and publish a release\")", () => {
   it("names the one launcher channel, and keeps the APKs of the repository's earlier names (spec/release/index.md, \"Phones read the launcher channel from the stable release of Alpha's repository, eliza-research/alpha, known by its permanent id; APKs kept under the repository's earlier names stay valid\")", async () => {
@@ -169,6 +201,76 @@ describe("Qualify and publish a release (spec/release/index.md, \"Story: Qualify
     const mocked = await released("blockers", "--apk-manifest", write(directory, "mocked.json", { apks: [{ variant: "launcher", build: "release", testMocks: true }] }));
     const empty = await released("blockers", "--apk-manifest", write(directory, "empty.json", { apks: [] }));
     expect([mocked.ok, mocked.ok ? "" : mocked.said.includes("\"mocks\":true"), empty.ok]).toEqual([false, true, false]);
+  });
+
+  it("uploads the admitted APK once, moves the manifest only after anyone downloads exactly its bytes, reads it back and records it (spec/release/index.md, \"The manifest is moved only after the download was verified, with the APK still in the channel's final inventory, the channel unchanged since publishing began, and the version above the floor and the published version as they are then\")", async () => {
+    const directory = scratch();
+    const recordFile = join(directory, "release-signer.json");
+    copyFileSync(place("aosp/signing/release-signer.json"), recordFile);
+    const channel = channelAt({ "alpha-update-stable.json": json({ versionCode: 121 }), "alpha-phone-121.apk": json("alpha 121") }, recordFile);
+    const now = Math.floor(Date.now() / 3_600_000);
+    /** A run at Qualified for `number`, its receipt delivered `age` hours ago, and its APK's bytes and admitted facts. */
+    const qualified = (number: number, age = 0) => {
+      const file = join(directory, `run-${number}.json`);
+      const state: Channel.Channel = { ...Channel.initial, stage: "Qualified", number, attempt: 1, lastNumber: number, plan: 1, reviewed: true, signers: 1, deliveredAt: now - age, qualifiedAt: now - age };
+      write(directory, `run-${number}.json`, { state, taken: [] });
+      const apk = join(directory, `alpha-phone-${number}.apk`);
+      writeFileSync(apk, `alpha ${number} signed`);
+      const bytes = readFileSync(apk);
+      const manifestFile = write(directory, `manifest-${number}.json`, { schema: "alpha-update/v1", versionCode: number, apkUrl: apkUrl(number), sha256: digestOf(bytes), sizeBytes: bytes.length });
+      const read = { sha256: digestOf(bytes), apk: { launcher: true, signer: true, version: number, debuggable: false, bytes: bytes.length, entries: true } };
+      return { run: ledger<Channel.Channel, Channel.Event>(Channel, file), file, apk, manifestFile, read };
+    };
+    const published = async (release: ReturnType<typeof qualified>, port: ChannelPort = channel.port) => {
+      const exit = await Effect.runPromiseExit(publishRelease({ ...release, port }));
+      return Exit.isSuccess(exit) ? { ok: true as const, state: exit.value } : { ok: false as const, said: String(Cause.squash(exit.cause)) };
+    };
+    // spec/release/index.md, "The anonymous download must return the exact size and digest before anything else moves"; spec/release/index.md, "Reading the manifest back settles it: naming this release confirms it, naming an older one sends the same candidate back to repair it, and naming a newer one means another release overtook this one"
+    const first = qualified(122);
+    expect(await published(first)).toMatchObject({ ok: true, state: { stage: "Published", pointer: 122, pointerRead: true, reused: false } });
+    expect(channel.uploads).toEqual(["alpha-phone-122.apk", "alpha-update-stable.json"]);
+    // spec/release/index.md, "Recording the release raises the floor to its version, only once the manifest was read back naming it"
+    expect(await releasedOver(channel.port)("record", "--run", first.file, "--manifest", first.manifestFile)).toMatchObject({ ok: true, value: { lastRelease: { versionCode: 122 }, state: { stage: "Recorded", floor: 122 } } });
+    expect((JSON.parse(readFileSync(recordFile, "utf8")) as { lastRelease: { versionCode: number } }).lastRelease.versionCode).toBe(122);
+    // spec/release/index.md, "The APK is uploaded while the receipt is valid, above the floor and the published version; one already on the channel is never overwritten, only reused": a damaged APK left by a delivery that failed half way is reused, never verifies, and nothing moves.
+    channel.assets["alpha-phone-123.apk"] = json("half an upload");
+    const damaged = qualified(123);
+    expect(await published(damaged)).toMatchObject({ ok: false, said: expect.stringContaining("not the admitted APK") });
+    expect([channel.uploads.length, damaged.run.state.stage, damaged.run.state.reused, JSON.parse(new TextDecoder().decode(channel.assets["alpha-update-stable.json"]))]).toEqual([2, "Uploaded", true, { schema: "alpha-update/v1", versionCode: 122, apkUrl: apkUrl(122), sha256: first.read.sha256, sizeBytes: first.read.apk.bytes }]);
+    // spec/release/index.md, "Qualification and upload both happen before the receipt expires"
+    const stale = qualified(124, 30);
+    expect(await published(stale)).toMatchObject({ ok: false, said: expect.stringContaining("refuses the upload") });
+    // spec/release/index.md, "The channel's retained APKs raise the floor: a candidate is numbered, and a release published, only above every APK any writer keeps there"
+    channel.assets["alpha-phone-130.apk"] = json("alpha 130");
+    expect(await published(qualified(125))).toMatchObject({ ok: false, said: expect.stringContaining("refuses the upload") });
+    delete channel.assets["alpha-phone-130.apk"];
+    // spec/release/index.md, "A manifest that did not take can be repaired by the same candidate": a manifest that still names the older release sends the candidate back, and moving it again settles it.
+    const stuck = { ...channel.port, upload: (file: string, name: string, clobber: boolean) => name === "alpha-update-stable.json" ? Effect.void : channel.port.upload(file, name, clobber) };
+    const repaired = qualified(126);
+    expect(await published(repaired, stuck)).toMatchObject({ ok: true, state: { stage: "Verified", pointer: 122 } });
+    expect(await published(repaired)).toMatchObject({ ok: true, state: { stage: "Published", pointer: 126, pointerRead: true } });
+    // spec/release/index.md, "Another release can overtake this one"
+    const overtaking = { ...channel.port, upload: (file: string, name: string, clobber: boolean) => name === "alpha-update-stable.json" ? Effect.sync(() => { channel.assets[name] = json({ versionCode: 140 }); }) : channel.port.upload(file, name, clobber) };
+    expect(await published(qualified(127), overtaking)).toMatchObject({ ok: true, state: { stage: "Abandoned", pointer: 140, floor: 140 } });
+  });
+
+  it("refuses a manifest whose name or notes a phone would not show (spec/release/index.md, \"A manifest names the release by a version name of 1 to 64 characters with no control character, and by notes of at most 500, as phones show them\")", async () => {
+    const directory = scratch();
+    const long = await released("manifest", "--apk", join(directory, "alpha-phone-122.apk"), "--version", "122", "--notes", "x".repeat(501), "--out", join(directory, "m.json"));
+    expect(long).toMatchObject({ ok: false, tag: "UsageError", said: expect.stringContaining("notes of at most 500") });
+  });
+
+  it("reports the channel healthy only for a launcher of Alpha's one key above every floor, kept and served exactly (spec/release/index.md, \"The channel is healthy only while its manifest names a launcher of Alpha's one key, above the retired channel and the last recorded release, at an address it keeps, served with exactly its size and digest\")", async () => {
+    const reviewed = (JSON.parse(readFileSync(place("aosp/signing/release-signer.json"), "utf8")) as { signerSha256: string }).signerSha256;
+    const apk = json("alpha 122");
+    const offer = { schema: "alpha-update/v1", variant: "launcher", versionCode: 122, signerSha256: reviewed, apkUrl: apkUrl(122), sha256: digestOf(apk), sizeBytes: apk.length };
+    const status = (manifest: unknown) => releasedOver(channelAt({ "alpha-update-stable.json": json(manifest), "alpha-phone-122.apk": apk }).port)("status");
+    expect(await status(offer)).toMatchObject({ ok: true, value: { versionCode: 122, kept: true, exact: true } });
+    for (const unhealthy of [{ signerSha256: digest("another key") }, { variant: "companion" }, { sha256: digest("other bytes") }])
+      expect(await status({ ...offer, ...unhealthy })).toMatchObject({ ok: false, said: expect.stringContaining("not healthy") });
+    // spec/release/index.md, "Phones read the launcher channel from the stable release of Alpha's repository, eliza-research/alpha, known by its permanent id; APKs kept under the repository's earlier names stay valid": the Android build reads the manifest from the very address the release publishes.
+    const host = JSON.parse(readFileSync(place("android/host.json"), "utf8")) as { buildConfigFields: { name: string; value: unknown }[] };
+    expect(host.buildConfigFields.find((field) => field.name === "ALPHA_UPDATE_MANIFEST_URL")?.value).toBe(manifestUrl());
   });
 
   it("moves nothing for an APK it cannot admit (spec/release/index.md, \"An APK is admitted to the channel only as Alpha's launcher, first signed by Alpha's one key, at the candidate's version, not debuggable, of at most 2 GiB, and with only the entries a release may hold\")", async () => {
@@ -199,11 +301,13 @@ describe("Build a candidate and sign it (spec/release/index.md, \"Story: Build a
     expect(compareUrl(lock)).toBe(`https://api.github.com/repos/elizaOS/eliza/compare/${lock.commit}...${lock.branch}`);
     expect([compared({ ...lock, status: "diverged", mergeBase: digest("older") }, lock), compared({ ...lock, commit: "0".repeat(40), status: "ahead", mergeBase: lock.commit }, lock)])
       .toEqual([{ forThePin: true, reached: false }, { forThePin: false, reached: true }]);
-    expect(await candidate("122", verified, write(directory, "diverged.json", { ...lock, status: "diverged", mergeBase: "0".repeat(40) }))).toMatchObject({ ok: false, tag: "ReleaseRefused", said: expect.stringContaining("\"upstream\":true") });
-    expect(await candidate("122", verified, write(directory, "another.json", { ...lock, branch: "main", status: "ahead", mergeBase: lock.commit }))).toMatchObject({ ok: false, tag: "ReleaseRefused" });
+    expect(await candidate("121", verified, write(directory, "diverged.json", { ...lock, status: "diverged", mergeBase: "0".repeat(40) }))).toMatchObject({ ok: false, tag: "ReleaseRefused", said: expect.stringContaining("\"upstream\":true") });
+    expect(await candidate("121", verified, write(directory, "another.json", { ...lock, branch: "main", status: "ahead", mergeBase: lock.commit }))).toMatchObject({ ok: false, tag: "ReleaseRefused" });
     const stage = () => (JSON.parse(readFileSync(run, "utf8")) as { state: { stage: string; attempt: number; reviewed: boolean } }).state;
     // spec/release/index.md, "A build is a candidate only when its verification recorded it distributable: no test mocks, the production bundle audit passed, Alpha's one signer, the runtime packaged with its notices, an on-device voice slot, and for an image its platform certificate"
-    expect(await candidate("122", write(directory, "mocked.json", { apks: [candidateRow({ testMocks: true })] }))).toMatchObject({ ok: false, tag: "ReleaseRefused" });
+    expect(await candidate("121", write(directory, "mocked.json", { apks: [candidateRow({ testMocks: true })] }))).toMatchObject({ ok: false, tag: "ReleaseRefused" });
+    // spec/release/index.md, "A build its verification found not distributable is no candidate, and its run number is spent"
+    expect(await candidate("121", verified)).toMatchObject({ ok: false, tag: "ReleaseRefused" });
     // spec/release/index.md, "A candidate is built only when none is in flight, numbered by a run above every run before it, the floor and the published version"
     expect(await candidate("74", verified)).toMatchObject({ ok: false, tag: "ReleaseRefused" });
     expect(await candidate("122", verified)).toMatchObject({ ok: true, value: { stage: "Built", number: 122 } });
@@ -249,9 +353,9 @@ function replyFor(answers: readonly [RegExp, () => string][], line: string) {
 }
 
 /** A pilot phone at the other end of adb: Home's holder, Alpha's installed version and data, and every command it was sent. */
-function pilotPhone({ install = (): void => undefined } = {}) {
+function pilotPhone({ install = (): void => undefined, agentLog = "1790000003.000 ElizaAgent: Detached agent health check passed" } = {}) {
   const apk = digest("alpha 122");
-  const phone = { holders: [PACKAGE], activity: `${PACKAGE}/.MainActivity`, version: 121, sent: [] as string[] };
+  const phone = { holders: [PACKAGE], activity: `${PACKAGE}/.MainActivity`, version: 121, started: false, sent: [] as string[] };
   const adb: Adb = (args) => {
     const line = args.join(" ");
     phone.sent.push(line);
@@ -267,14 +371,15 @@ function pilotPhone({ install = (): void => undefined } = {}) {
       [/^shell cmd package query-activities /, () => `${STOCK}\n${PACKAGE}/.MainActivity`],
       [/^shell dumpsys package /, () => `versionCode=${phone.version} minSdk=35\n  userId=10234\n  firstInstallTime=2026-11-01 10:00:00`],
       [/^shell am force-stop /, () => ""],
-      [/^shell ps -A -o PID,NAME$/, () => "PID NAME\n1 init"],
+      [/^shell ps -A -o PID,NAME$/, () => `PID NAME\n1 init${phone.started ? `\n2 ${PACKAGE}` : ""}`],
       [/^shell run-as /, () => `${digest("notes")}  ./files/notes.db\nREADBACK_EXIT=0`],
       [/^shell content query /, () => "No content provider found"],
       [/^shell pm path /, () => "package:/data/app/alpha/base.apk"],
       [/^shell sha256sum /, () => `${apk}  /data/app/alpha/base.apk`],
       [/^shell date \+%s$/, () => "1790000000"],
-      [/^shell am start /, () => ""],
-      [/^shell logcat /, () => "1790000003.000 ElizaAgent: Detached agent health check passed"],
+      [/^shell am start /, () => { phone.started = true; return ""; }],
+      [/^shell logcat /, () => agentLog],
+      [/^shell dumpsys activity services /, () => "ACTIVITY MANAGER SERVICES (dumpsys activity services)"],
     ], line);
   };
   return { phone, adb, apk: { file: "alpha-phone-122.apk", sha256: apk, versionCode: 122 } };
@@ -288,7 +393,7 @@ describe("Update a pilot phone by cable (spec/release/pilot.md, \"Story: Update 
       // spec/release/pilot.md, "A run claims the phone's lock, and no other run can start until it is released"
       try { pilotUpdate({ adb, serial: "pilot-1", apk, locks }); } catch (failure) { second = failure as { _tag?: string; message?: string }; }
     } });
-    const update = pilotUpdate({ adb, serial: "pilot-1", apk, locks, agentAttempts: 1 });
+    const update = pilotUpdate({ adb, serial: "pilot-1", apk, locks });
     expect([second?._tag, second?.message?.includes("another pilot run holds this phone")]).toEqual(["ReleaseRefused", true]);
     // spec/release/pilot.md, "A pilot update claims the phone, reads its data, installs, checks, restores Home and starts the agent, in that order"
     expect(update.state).toMatchObject({ leg: "Done", locked: false, moved: true, restoration: "Restored", before: "Inventory", verified: true, stopped: true, agent: "Running", passed: true, home: "AlphaHome" });
@@ -298,12 +403,18 @@ describe("Update a pilot phone by cable (spec/release/pilot.md, \"Story: Update 
     expect([at("shell cmd role add-role-holder --user 0 android.app.role.HOME com.android.launcher3") < at("shell run-as"), at("shell run-as") < at("install -r"),
       at("install -r") < at(`shell cmd role add-role-holder --user 0 android.app.role.HOME ${PACKAGE}`), at(`shell cmd role add-role-holder --user 0 android.app.role.HOME ${PACKAGE}`) < at("shell am start")])
       .toEqual([true, true, true, true]);
-    expect(pilotUpdate({ adb: pilotPhone().adb, serial: "pilot-1", apk, locks, agentAttempts: 1 }).state.leg).toBe("Done");
+    expect(pilotUpdate({ adb: pilotPhone().adb, serial: "pilot-1", apk, locks }).state.leg).toBe("Done");
+  });
+
+  it("fails a run whose agent never says it is running, even with Alpha's process up (spec/release/pilot.md, \"A run passes only when the agent came back\")", () => {
+    const { adb, apk } = pilotPhone({ agentLog: "" });
+    const update = pilotUpdate({ adb, serial: "pilot-3", apk, locks: scratch() });
+    expect([update.state.leg, update.state.agent, update.state.passed]).toEqual(["Done", "NotVerified", false]);
   });
 
   it("never takes an installer that did not return as installed, and then gives Home back without starting the agent", () => {
     const { phone, adb, apk } = pilotPhone({ install: () => { throw new Error("adb: device offline"); } });
-    const update = pilotUpdate({ adb, serial: "pilot-2", apk, locks: scratch(), agentAttempts: 1 });
+    const update = pilotUpdate({ adb, serial: "pilot-2", apk, locks: scratch() });
     // spec/release/pilot.md, "An installer that does not return is never taken as installed"; spec/release/pilot.md, "The agent is started only after a verified install, a clean stop and Home restored or never moved"
     expect(update.state).toMatchObject({ leg: "Done", dispatched: true, returned: false, verified: false, agent: "Unstarted", passed: false, restoration: "Restored" });
     expect([update.failures, phone.sent.some((line) => line.startsWith("shell am start"))]).toEqual([["adb: device offline"], false]);

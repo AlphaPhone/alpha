@@ -15,10 +15,9 @@ import {
 import { Data, Effect } from "effect";
 import * as Channel from "../gen/release.ts";
 import {
-  type Apk, type Blockers, type Compare, type Custody, type Readback, admitted, channelManifest, channelRepository, channelRepositoryId, channelTag, clear, distributable, earlierRepositories, maxApkBytes,
-  custodyProven, retiredTag, updatedItself, upstreamBlocks,
+  type Apk, type Blockers, type Compare, type Custody, type Readback, admitted, channelHealthy, channelManifest, channelRepository, channelRepositoryId, channelTag, clear, distributable,
+  earlierRepositories, legacyFloor, manifestNamed, maxApkBytes, custodyProven, retainedFloor, retiredTag, updatedItself, upstreamBlocks,
 } from "../gen/release.ts";
-import { pilotPassed } from "../gen/app__image.ts";
 import * as Pilot from "../gen/release__pilot.ts";
 import { type OsBuild, type OsPlan, type OsSigned, osBuildAdmitted, osPlanAdmitted, osSignedKept } from "../gen/release__os.ts";
 
@@ -37,7 +36,7 @@ const USAGE = [
   "pnpm release channel",
   "pnpm release blockers --apk-manifest FILE [--platform-certificate HEX]",
   "pnpm release admit --apk FILE --version N",
-  "pnpm release manifest --apk FILE --version N [--notes TEXT] --out NEW_FILE",
+  "pnpm release manifest --apk FILE --version N [--notes TEXT] --out NEW_FILE   (notes of at most 500 characters)",
   "pnpm release upstream --out NEW_FILE",
   "pnpm release candidate --run FILE --number N --attempt N --apk-manifest FILE --upstream FILE [--platform-certificate HEX]",
   "pnpm release rerun|abandon --run FILE",
@@ -71,7 +70,7 @@ const sha256File = (file: string) => sha256(readFileSync(file));
 const hours = () => Math.floor(Date.now() / 3_600_000);
 
 interface SignerRecord { readonly signerSha256: string; readonly lastRelease?: { readonly versionCode: number | null }; readonly apkSigningRotation?: unknown }
-const signerRecord = () => JSON.parse(readFileSync(SIGNER, "utf8")) as SignerRecord;
+const signerRecord = (file: string = SIGNER) => JSON.parse(readFileSync(file, "utf8")) as SignerRecord;
 /** The release signer Alpha enrolled: its one key. */
 const reviewedSigner = () => signerRecord().signerSha256;
 
@@ -216,23 +215,89 @@ const admit = (file: string, version: number) => Effect.gen(function* () {
   return read;
 });
 
-/** What `url` serves to anyone, without credentials. */
-const fetched = (url: string) => Effect.tryPromise({
-  try: async () => {
-    const response = await fetch(url, { redirect: "follow" });
-    if (!response.ok) throw new Error(`${url} answered ${response.status}`);
-    return new Uint8Array(await response.arrayBuffer());
-  },
-  catch: (cause) => new ReleaseRefused({ message: cause instanceof Error ? cause.message : String(cause) }),
-});
+/** The most a manifest or a compare read from the network may hold. */
+const MANIFEST_BYTES = 64 * 1024;
+const REDIRECTS = 5;
 
-/** The version the stable manifest names now, or 0 where there is none. */
-const named = Effect.map(Effect.exit(fetched(manifestUrl())), (read) =>
-  read._tag === "Success" ? (JSON.parse(new TextDecoder().decode(read.value)) as { readonly versionCode?: number }).versionCode ?? 0 : 0);
+/** What an anonymous read of an address served: its size and digest, and its bytes when it was read whole. */
+export interface Served { readonly size: number; readonly sha256: string; readonly bytes: Uint8Array }
+
+/**
+ * Alpha's channel as a release reads and writes it: the names of the assets its GitHub release keeps, an upload
+ * under one name, and what anyone reads from an address, read no further than `bound` bytes. `recordFile` is where
+ * the last recorded release is kept.
+ */
+export interface ChannelPort {
+  readonly listed: Effect.Effect<readonly string[], ReleaseRefused>;
+  readonly upload: (file: string, name: string, clobber: boolean) => Effect.Effect<unknown, ReleaseRefused>;
+  readonly read: (url: string, bound: number) => Effect.Effect<Served, ReleaseRefused>;
+  readonly recordFile: string;
+}
+
+const refused = (cause: unknown) => new ReleaseRefused({ message: cause instanceof Error ? cause.message : String(cause) });
+
+/** Whether `url` is read anonymously: HTTPS, with neither a user nor a password. */
+const anonymous = (url: string) => {
+  const at = URL.canParse(url) ? new URL(url) : undefined;
+  return at !== undefined && at.protocol === "https:" && at.username === "" && at.password === "";
+};
+
+/**
+ * What `url` serves to anyone: over HTTPS only, through at most five redirects that stay HTTPS and carry no
+ * credentials, hashed as it streams and refused once it passes `bound` bytes.
+ */
+const anonymousRead = (url: string, bound: number) => Effect.tryPromise({
+  try: async () => {
+    let at = url;
+    for (let hop = 0; hop <= REDIRECTS; hop++) {
+      if (!anonymous(at)) throw new Error(`${at} is not an anonymous HTTPS address`);
+      const response = await fetch(at, { redirect: "manual" });
+      const next = response.headers.get("location");
+      if (response.status >= 300 && response.status < 400 && next !== null) {
+        await response.body?.cancel();
+        at = new URL(next, at).href;
+        continue;
+      }
+      if (!response.ok || response.body === null) throw new Error(`${at} answered ${response.status}`);
+      const hash = createHash("sha256");
+      const kept: Uint8Array[] = [];
+      let size = 0;
+      for await (const chunk of response.body) {
+        size += chunk.length;
+        if (size > bound) throw new Error(`${at} serves more than ${bound} bytes`);
+        hash.update(chunk);
+        if (bound <= MANIFEST_BYTES) kept.push(chunk);
+      }
+      return { size, sha256: hash.digest("hex"), bytes: Buffer.concat(kept) };
+    }
+    throw new Error(`${url} redirects more than ${REDIRECTS} times`);
+  },
+  catch: refused,
+});
 
 const gh = (...args: string[]) => attempt(() => execFileSync("gh", args, { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }));
 const repository = `--repo=${channelRepository}`;
-const listed = Effect.map(gh("release", "view", channelTag, repository, "--json", "assets", "--jq", ".assets[].name"), (names) => names.split("\n"));
+
+/** The channel on GitHub: its stable release through `gh`, and what anyone downloads from it. */
+export const githubChannel: ChannelPort = {
+  listed: Effect.map(gh("release", "view", channelTag, repository, "--json", "assets", "--jq", ".assets[].name"), (names) => names.split("\n").filter((name) => name !== "")),
+  upload: (file, name, clobber) => gh("release", "upload", channelTag, `${file}#${name}`, ...(clobber ? ["--clobber"] : []), repository),
+  read: anonymousRead,
+  recordFile: SIGNER,
+};
+
+const text = (served: Served) => new TextDecoder().decode(served.bytes);
+
+/** The version the stable manifest names now, or 0 where there is none. */
+const named = (port: ChannelPort) => Effect.map(Effect.exit(port.read(manifestUrl(), MANIFEST_BYTES)), (read) =>
+  read._tag === "Success" ? (JSON.parse(text(read.value)) as { readonly versionCode?: number }).versionCode ?? 0 : 0);
+
+/** The versions of the APKs the channel keeps, `alpha-phone-<version>.apk`, whoever uploaded them. */
+const retainedVersions = (names: readonly string[]) =>
+  names.flatMap((name) => /^alpha-phone-([1-9][0-9]{0,8})\.apk$/.exec(name)?.[1] ?? []).map(Number);
+
+/** The control characters a phone does not show in a version name. */
+const controlled = (name: string) => [...name].some((character) => (character.codePointAt(0) ?? 0) <= 0x1f || character.codePointAt(0) === 0x7f);
 
 /** Whether a keystore is held as the protected environment holds it: an absolute, owner-only file outside every Git tree, with its password given. */
 function guardedKeystore(file: string) {
@@ -249,62 +314,107 @@ interface Plan { readonly number: number; readonly attempt: number; readonly uns
 
 const runOf = (file: string) => ledger<Channel.Channel, Channel.Event>(Channel, file);
 
+/**
+ * Publishes the qualified release `run` holds, or moves the manifest again for one whose read-back named an older
+ * release: the admitted APK is uploaded unless the channel already keeps one under
+ * its name, which is reused and never replaced; anyone's download of it must be exactly the admitted bytes; only then,
+ * with the APK still kept and the manifest unchanged since publishing began, is the manifest moved, and it is read back.
+ * The channel's retained APKs and the manifest's version raise the floor first.
+ */
+export const publishRelease = ({ run, port, apk, manifestFile, read }: {
+  readonly run: ReturnType<typeof runOf>; readonly port: ChannelPort; readonly apk: string; readonly manifestFile: string;
+  readonly read: { readonly sha256: string; readonly apk: Apk };
+}) => Effect.gen(function* () {
+  const number = run.state.number;
+  const name = `alpha-phone-${number}.apk`;
+  const named0 = yield* named(port);
+  const kept0 = yield* port.listed;
+  for (const version of [named0, retainedFloor(retainedVersions(kept0.filter((asset) => asset !== name)))])
+    if (run.can({ type: "retainElsewhere", version })) yield* attempt(() => run.take({ type: "retainElsewhere", version }));
+  if (run.state.stage !== "Verified") {
+    const existing = kept0.includes(name);
+    const upload = { type: "upload" as const, now: hours(), existing, apk: read.apk };
+    if (!run.can(upload)) return yield* new ReleaseRefused({ message: `the spec refuses the upload of ${number}: ${JSON.stringify(run.state)}` });
+    if (!existing) yield* port.upload(apk, name, false);
+    yield* attempt(() => run.take(upload));
+    const served = yield* port.read(apkUrl(number), maxApkBytes);
+    const exact = served.size === read.apk.bytes && served.sha256 === read.sha256;
+    yield* attempt(() => run.take({ type: "verifyDownload", exact }));
+    if (!exact) return yield* new ReleaseRefused({ message: "the anonymous download is not the admitted APK; the manifest is not moved" });
+  }
+  const move = { type: "movePointer" as const, present: (yield* port.listed).includes(name), unchanged: (yield* named(port)) === named0 };
+  if (!run.can(move)) return yield* new ReleaseRefused({ message: `the manifest is not moved: ${JSON.stringify(move)} at ${JSON.stringify(run.state)}` });
+  yield* port.upload(manifestFile, channelManifest, true);
+  yield* attempt(() => run.take(move));
+  const after = yield* named(port);
+  return yield* attempt(() => run.take({ type: "readBack", named: after }));
+});
+
 const commands = {
-  channel: () => Effect.succeed({ repository: channelRepository, repositoryId: channelRepositoryId, tag: channelTag, manifestUrl: manifestUrl() }),
-  blockers: (argv: readonly string[]) => Effect.gen(function* () {
+  channel: (_argv: readonly string[], _port: ChannelPort) => Effect.succeed({ repository: channelRepository, repositoryId: channelRepositoryId, tag: channelTag, manifestUrl: manifestUrl() }),
+  blockers: (argv: readonly string[], port: ChannelPort) => Effect.gen(function* () {
     const found = yield* attempt(() => flags(argv, ["apk-manifest", "platform-certificate"]));
     const [file = ""] = yield* attempt(() => found.need("apk-manifest"));
     const { rows, blockers } = yield* attempt(() => recordedBlockers(file, found.values["platform-certificate"], true));
     if (!distributable(blockers)) return yield* new ReleaseRefused({ message: `not distributable: ${JSON.stringify(blockers)}` });
     return { distributable: true, rows, blockers };
   }),
-  admit: (argv: readonly string[]) => Effect.gen(function* () {
+  admit: (argv: readonly string[], port: ChannelPort) => Effect.gen(function* () {
     const found = yield* attempt(() => flags(argv, ["apk", "version"]));
     const [file = "", version = ""] = yield* attempt(() => found.need("apk", "version"));
     return yield* admit(file, yield* attempt(() => whole(version, "version")));
   }),
-  manifest: (argv: readonly string[]) => Effect.gen(function* () {
+  manifest: (argv: readonly string[], _port: ChannelPort) => Effect.gen(function* () {
     const found = yield* attempt(() => flags(argv, ["apk", "version", "notes", "out"]));
     const [file = "", version = "", out = ""] = yield* attempt(() => found.need("apk", "version", "out"));
     const number = yield* attempt(() => whole(version, "version"));
-    const read = yield* admit(file, number);
     const notes = found.values.notes;
+    const shown = (name: string) => manifestNamed([...name].length, controlled(name), [...(notes ?? "")].length);
+    if (!shown("1")) return yield* new UsageError({ message: `phones show notes of at most 500 characters, not ${[...(notes ?? "")].length}` });
+    const read = yield* admit(file, number);
+    if (!shown(read.versionName)) return yield* new ReleaseRefused({ message: `phones show a version name of 1 to 64 characters with no control character, not ${JSON.stringify(read.versionName)}` });
     const manifest = {
-      schema: "alpha-update/v1", versionCode: number, ...(read.versionName === "" ? {} : { versionName: read.versionName }), ...(notes === undefined ? {} : { notes }),
+      schema: "alpha-update/v1", versionCode: number, versionName: read.versionName, ...(notes === undefined ? {} : { notes }),
       variant: "launcher", signerSha256: reviewedSigner(), apkUrl: apkUrl(number), sha256: read.sha256, sizeBytes: read.apk.bytes,
     };
     yield* attempt(() => writeFileSync(out, `${JSON.stringify(manifest, null, 2)}\n`, { flag: "wx" }));
     return manifest;
   }),
-  upstream: (argv: readonly string[]) => Effect.gen(function* () {
+  upstream: (argv: readonly string[], port: ChannelPort) => Effect.gen(function* () {
     const [out = ""] = yield* attempt(() => flags(argv, ["out"]).need("out"));
     const lock = yield* attempt(() => elizaLock());
-    const answer = JSON.parse(new TextDecoder().decode(yield* fetched(compareUrl(lock)))) as { readonly status?: string; readonly merge_base_commit?: { readonly sha?: string } };
+    const answer = JSON.parse(text(yield* port.read(compareUrl(lock), MANIFEST_BYTES))) as { readonly status?: string; readonly merge_base_commit?: { readonly sha?: string } };
     const record: UpstreamRecord = { ...lock, status: answer.status ?? "", mergeBase: answer.merge_base_commit?.sha ?? "" };
     yield* attempt(() => writeFileSync(out, `${JSON.stringify(record, null, 2)}\n`, { flag: "wx" }));
     if (upstreamBlocks(compared(record, lock))) return yield* new ReleaseRefused({ message: `${lock.branch} does not reach the eliza pin ${lock.commit}; the compare is ${out}` });
     return record;
   }),
-  candidate: (argv: readonly string[]) => Effect.gen(function* () {
+  candidate: (argv: readonly string[], port: ChannelPort) => Effect.gen(function* () {
     const found = yield* attempt(() => flags(argv, ["run", "number", "attempt", "apk-manifest", "upstream", "platform-certificate"]));
     const [file = "", number = "", tried = "", recorded = "", upstream = ""] = yield* attempt(() => found.need("run", "number", "attempt", "apk-manifest", "upstream"));
     const reached = compared(yield* attempt(() => JSON.parse(readFileSync(upstream, "utf8")) as Partial<UpstreamRecord>), yield* attempt(() => elizaLock()));
     const event = { type: "build" as const, number: yield* attempt(() => whole(number, "number")), attempt: yield* attempt(() => whole(tried, "attempt")),
       blockers: { ...(yield* attempt(() => recordedBlockers(recorded, found.values["platform-certificate"], false))).blockers, upstream: upstreamBlocks(reached) } };
     const run = yield* attempt(() => runOf(file));
-    const floor = (yield* attempt(() => signerRecord())).lastRelease?.versionCode ?? 0;
-    if (run.can({ type: "retainElsewhere", version: floor })) yield* attempt(() => run.take({ type: "retainElsewhere", version: floor }));
+    const recorded = (yield* attempt(() => signerRecord(port.recordFile))).lastRelease?.versionCode ?? 0;
+    for (const version of [recorded, retainedFloor(retainedVersions(yield* port.listed))])
+      if (run.can({ type: "retainElsewhere", version })) yield* attempt(() => run.take({ type: "retainElsewhere", version }));
+    if (!distributable(event.blockers)) {
+      const refusal = { type: "refuseBuild" as const, number: event.number, blockers: event.blockers };
+      if (run.can(refusal)) yield* attempt(() => run.take(refusal));
+      return yield* new ReleaseRefused({ message: `${event.number} is no candidate, and its number is spent: ${JSON.stringify(event.blockers)}` });
+    }
     return yield* attempt(() => run.take(event));
   }),
-  rerun: (argv: readonly string[]) => Effect.gen(function* () {
+  rerun: (argv: readonly string[], port: ChannelPort) => Effect.gen(function* () {
     const [file = ""] = yield* attempt(() => flags(argv, ["run"]).need("run"));
     return yield* attempt(() => runOf(file).take({ type: "rerun" }));
   }),
-  abandon: (argv: readonly string[]) => Effect.gen(function* () {
+  abandon: (argv: readonly string[], port: ChannelPort) => Effect.gen(function* () {
     const [file = ""] = yield* attempt(() => flags(argv, ["run"]).need("run"));
     return yield* attempt(() => runOf(file).take({ type: "abandon" }));
   }),
-  mirror: (argv: readonly string[]) => Effect.gen(function* () {
+  mirror: (argv: readonly string[], port: ChannelPort) => Effect.gen(function* () {
     const [file = "", apk = "", to = ""] = yield* attempt(() => flags(argv, ["run", "apk", "to"]).need("run", "apk", "to"));
     const run = yield* attempt(() => runOf(file));
     return yield* attempt(() => {
@@ -320,7 +430,7 @@ const commands = {
       return { mirrored: target, sha256: sha256File(target), state: run.take(event) };
     });
   }),
-  plan: (argv: readonly string[]) => Effect.gen(function* () {
+  plan: (argv: readonly string[], port: ChannelPort) => Effect.gen(function* () {
     const [file = "", apk = "", out = ""] = yield* attempt(() => flags(argv, ["run", "apk", "out"]).need("run", "apk", "out"));
     const run = yield* attempt(() => runOf(file));
     return yield* attempt(() => {
@@ -331,7 +441,7 @@ const commands = {
       return { plan, planSha256: sha256File(out), state: run.take(event) };
     });
   }),
-  review: (argv: readonly string[]) => Effect.gen(function* () {
+  review: (argv: readonly string[], port: ChannelPort) => Effect.gen(function* () {
     const [file = "", planFile = "", approved = ""] = yield* attempt(() => flags(argv, ["run", "plan", "plan-sha256"]).need("run", "plan", "plan-sha256"));
     const run = yield* attempt(() => runOf(file));
     return yield* attempt(() => {
@@ -341,7 +451,7 @@ const commands = {
       return run.take({ type: "review" });
     });
   }),
-  sign: (argv: readonly string[]) => Effect.gen(function* () {
+  sign: (argv: readonly string[], port: ChannelPort) => Effect.gen(function* () {
     const found = yield* attempt(() => flags(argv, ["run", "plan", "apk", "out", "keystore", "key-label", "apksigner"]));
     const [file = "", planFile = "", apk = "", out = "", keystore = "", label = ""] = yield* attempt(() => found.need("run", "plan", "apk", "out", "keystore", "key-label"));
     const run = yield* attempt(() => runOf(file));
@@ -368,7 +478,7 @@ const commands = {
     yield* attempt(() => state.stage === "Signed" ? renameSync(partial, out) : rmSync(partial, { force: true }));
     return { signed: state.stage === "Signed" ? out : undefined, state };
   }),
-  deliver: (argv: readonly string[]) => Effect.gen(function* () {
+  deliver: (argv: readonly string[], port: ChannelPort) => Effect.gen(function* () {
     const [file = "", apk = "", recorded = "", to = ""] = yield* attempt(() => flags(argv, ["run", "apk", "apk-manifest", "to"]).need("run", "apk", "apk-manifest", "to"));
     const run = yield* attempt(() => runOf(file));
     if (!run.can({ type: "deliver", now: hours() })) return yield* new ReleaseRefused({ message: "no signed release waits to be delivered" });
@@ -385,7 +495,7 @@ const commands = {
       return { delivered: target, receipt, state };
     });
   }),
-  qualify: (argv: readonly string[]) => Effect.gen(function* () {
+  qualify: (argv: readonly string[], port: ChannelPort) => Effect.gen(function* () {
     const [file = "", apk = "", evidence = ""] = yield* attempt(() => flags(argv, ["run", "apk", "evidence"]).need("run", "apk", "evidence"));
     const run = yield* attempt(() => runOf(file));
     return yield* attempt(() => {
@@ -394,7 +504,7 @@ const commands = {
       return { receipt, state: run.take({ type: "qualify", now: hours(), passed }) };
     });
   }),
-  publish: (argv: readonly string[]) => Effect.gen(function* () {
+  publish: (argv: readonly string[], port: ChannelPort) => Effect.gen(function* () {
     const found = yield* attempt(() => flags(argv, ["run", "apk", "manifest"], ["execute"]));
     const [file = "", apk = "", manifestFile = ""] = yield* attempt(() => found.need("run", "apk", "manifest"));
     const run = yield* attempt(() => runOf(file));
@@ -405,25 +515,9 @@ const commands = {
       return yield* new ReleaseRefused({ message: "the manifest does not name exactly this APK" });
     const plan = { upload: `alpha-phone-${number}.apk`, verify: apkUrl(number), then: manifestUrl() };
     if (!found.on.has("execute")) return { plan, executed: false };
-    const named0 = yield* named;
-    if (run.can({ type: "retainElsewhere", version: named0 })) yield* attempt(() => run.take({ type: "retainElsewhere", version: named0 }));
-    const existing = (yield* listed).includes(plan.upload);
-    const upload = { type: "upload" as const, now: hours(), existing, apk: read.apk };
-    if (!run.can(upload)) return yield* new ReleaseRefused({ message: `the spec refuses the upload of ${number}: ${JSON.stringify(run.state)}` });
-    if (!existing) yield* gh("release", "upload", channelTag, `${apk}#${plan.upload}`, repository);
-    yield* attempt(() => run.take(upload));
-    const served = yield* fetched(apkUrl(number));
-    const exact = served.length === read.apk.bytes && sha256(served) === read.sha256;
-    yield* attempt(() => run.take({ type: "verifyDownload", exact }));
-    if (!exact) return yield* new ReleaseRefused({ message: "the anonymous download is not the admitted APK; the manifest is not moved" });
-    const move = { type: "movePointer" as const, present: (yield* listed).includes(plan.upload), unchanged: (yield* named) === named0 };
-    if (!run.can(move)) return yield* new ReleaseRefused({ message: `the manifest is not moved: ${JSON.stringify(move)} at ${JSON.stringify(run.state)}` });
-    yield* gh("release", "upload", channelTag, `${manifestFile}#${channelManifest}`, "--clobber", repository);
-    yield* attempt(() => run.take(move));
-    const after = yield* named;
-    return { plan, executed: true, state: yield* attempt(() => run.take({ type: "readBack", named: after })) };
+    return { plan, executed: true, state: yield* publishRelease({ run, port, apk, manifestFile, read: { sha256: read.sha256, apk: read.apk } }) };
   }),
-  record: (argv: readonly string[]) => Effect.gen(function* () {
+  record: (argv: readonly string[], port: ChannelPort) => Effect.gen(function* () {
     const [file = "", manifestFile = ""] = yield* attempt(() => flags(argv, ["run", "manifest"]).need("run", "manifest"));
     const run = yield* attempt(() => runOf(file));
     return yield* attempt(() => {
@@ -431,19 +525,23 @@ const commands = {
       if (manifest.versionCode !== run.state.number) throw new ReleaseRefused({ message: `${manifestFile} names ${manifest.versionCode}, not ${run.state.number}` });
       const state = run.take({ type: "record" });
       const lastRelease = { versionCode: state.number, versionName: manifest.versionName ?? null, recordedAt: new Date().toISOString().slice(0, 10) };
-      writeFileSync(SIGNER, `${JSON.stringify({ ...signerRecord(), lastRelease }, null, 2)}\n`);
+      writeFileSync(port.recordFile, `${JSON.stringify({ ...signerRecord(port.recordFile), lastRelease }, null, 2)}\n`);
       return { lastRelease, state };
     });
   }),
-  status: () => Effect.gen(function* () {
-    const manifest = JSON.parse(new TextDecoder().decode(yield* fetched(manifestUrl()))) as { readonly versionCode: number; readonly apkUrl: string; readonly sha256: string; readonly sizeBytes: number };
-    const served = yield* fetched(manifest.apkUrl);
-    return {
-      versionCode: manifest.versionCode, kept: kept(manifest.apkUrl, manifest.versionCode),
-      exact: served.length === manifest.sizeBytes && sha256(served) === manifest.sha256,
+  status: (_argv: readonly string[], port: ChannelPort) => Effect.gen(function* () {
+    const manifest = JSON.parse(text(yield* port.read(manifestUrl(), MANIFEST_BYTES))) as Partial<Offer> & { readonly variant?: string };
+    const version = Number.isSafeInteger(manifest.versionCode) ? manifest.versionCode ?? 0 : 0;
+    const served = yield* port.read(manifest.apkUrl ?? "", maxApkBytes);
+    const facts = {
+      launcher: manifest.variant === "launcher", signer: manifest.signerSha256 === reviewedSigner(), version,
+      recorded: (yield* attempt(() => signerRecord(port.recordFile))).lastRelease?.versionCode ?? 0,
+      kept: kept(manifest.apkUrl ?? "", version), exact: served.size === manifest.sizeBytes && served.sha256 === manifest.sha256,
     };
+    if (!channelHealthy(facts)) return yield* new ReleaseRefused({ message: `the channel is not healthy: ${JSON.stringify({ ...facts, legacyFloor })}` });
+    return { versionCode: version, ...facts };
   }),
-  pilot: (argv: readonly string[]) => Effect.gen(function* () {
+  pilot: (argv: readonly string[], port: ChannelPort) => Effect.gen(function* () {
     const found = yield* attempt(() => flags(argv, ["serial", "apk", "version", "record", "stock-home"]));
     const [serial = "", file = "", version = "", out = ""] = yield* attempt(() => found.need("serial", "apk", "version", "record"));
     const read = yield* admit(file, yield* attempt(() => whole(version, "version")));
@@ -460,21 +558,21 @@ const commands = {
     if (problems.length > 0) return yield* new ReleaseRefused({ message: `the pilot update is refused: ${problems.join(", ")}` });
     const update = yield* attempt(() => pilotUpdate({ adb, serial, apk: { file, sha256: read.sha256, versionCode: read.apk.version }, stockHome: found.values["stock-home"] }));
     yield* attempt(() => writeFileSync(out, `${JSON.stringify(update, null, 2)}\n`, { flag: "wx" }));
-    if (!pilotPassed(update.state)) return yield* new ReleaseRefused({ message: `the pilot update did not pass; its record is ${out}` });
+    if (!Pilot.runPassed(update.state)) return yield* new ReleaseRefused({ message: `the pilot update did not pass; its record is ${out}` });
     return update;
   }),
-  readback: (argv: readonly string[]) => Effect.gen(function* () {
+  readback: (argv: readonly string[], port: ChannelPort) => Effect.gen(function* () {
     const found = yield* attempt(() => flags(argv, ["serial", "record", "before"]));
     const [serial = "", out = ""] = yield* attempt(() => found.need("serial", "record"));
     const adb: Adb = (args) => execFileSync("adb", ["-s", serial, ...args], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"], timeout: 120_000 });
-    const offer = yield* publicOffer;
+    const offer = yield* publicOffer(port);
     const before = found.values.before === undefined ? undefined : yield* attempt(() => (JSON.parse(readFileSync(found.values.before ?? "", "utf8")) as { readonly observed: Observed }).observed);
     const read = yield* attempt(() => readBack({ adb, offer, before }));
     yield* attempt(() => writeFileSync(out, `${JSON.stringify(read, null, 2)}\n`, { flag: "wx" }));
     if (read.readback !== undefined && !read.passed) return yield* new ReleaseRefused({ message: `the phone did not update itself to ${offer.versionCode}; its record is ${out}` });
     return read;
   }),
-  custody: (argv: readonly string[]) => Effect.gen(function* () {
+  custody: (argv: readonly string[], port: ChannelPort) => Effect.gen(function* () {
     const found = yield* attempt(() => flags(argv, ["out", "scratch"]));
     const [out = ""] = yield* attempt(() => found.need("out"));
     const secrets = Object.fromEntries(CUSTODY_SECRETS.map((name) => [name, process.env[name] ?? ""]));
@@ -484,14 +582,14 @@ const commands = {
     if (!custodyProven(proof.custody)) return yield* new ReleaseRefused({ message: `the protected keys are not the enrolled ones; the proof is ${out}` });
     return proof;
   }),
-  "os-plan": (argv: readonly string[]) => Effect.gen(function* () {
+  "os-plan": (argv: readonly string[], port: ChannelPort) => Effect.gen(function* () {
     const found = yield* attempt(() => flags(argv, ["plan", "plan-sha256"]));
     const [file = "", reviewed = ""] = yield* attempt(() => found.need("plan", "plan-sha256"));
     const { plan, facts } = yield* attempt(() => osPlanOf(readFileSync(file), reviewed, toolsPin()));
     if (!osPlanAdmitted({ ...facts, inputs: true })) return yield* new ReleaseRefused({ message: `the OS signing plan is not admitted: ${JSON.stringify(facts)}` });
     return { admitted: true, targetFiles: plan.targetFiles, otaTools: plan.otaTools, outputObject: plan.outputObject };
   }),
-  "os-sign": (argv: readonly string[]) => Effect.gen(function* () {
+  "os-sign": (argv: readonly string[], port: ChannelPort) => Effect.gen(function* () {
     const found = yield* attempt(() => flags(argv, ["plan", "plan-sha256", "target-files", "ota-tools", "work", "scratch"]));
     const [file = "", reviewed = "", target = "", tools = "", work = ""] = yield* attempt(() => found.need("plan", "plan-sha256", "target-files", "ota-tools", "work"));
     const secrets = Object.fromEntries(CUSTODY_SECRETS.slice(0, 3).map((name) => [name, process.env[name] ?? ""]));
@@ -542,16 +640,17 @@ function running(adb: Adb) {
     .filter((name) => name === PACKAGE || (name.startsWith(`${PACKAGE}:`) && name !== `${PACKAGE}:integrity`));
 }
 
-/** Starts Alpha and reads the resident agent's own log until it reports running, refusing, or neither. */
-function startedAgent(adb: Adb, user: string, attempts: number): Pilot.Agent {
+/**
+ * Starts Alpha and waits on the resident agent's own log, from the start on, for its first word of running or of a
+ * refusal: logcat itself waits and ends at that line, or the adb call's own time limit ends it with neither.
+ */
+function startedAgent(adb: Adb, user: string): Pilot.Agent {
   const since = adb(["shell", "date", "+%s"]).trim();
   adb(["shell", "am", "start", "-W", "--user", user, "-n", `${PACKAGE}/.MainActivity`]);
-  for (let tried = 0; tried < attempts; tried++) {
-    const log = adb(["shell", "logcat", "-d", "-v", "epoch", "-T", `${since}.000`, "-s", "ElizaAgent:V"]);
-    if (AGENT_REFUSED.test(log)) return "RefusedStart";
-    if (AGENT_RUNNING.test(log)) return "Running";
-    Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 2000);
-  }
+  const word = `${AGENT_RUNNING.source}|${AGENT_REFUSED.source}`;
+  const log = quiet(adb, ["shell", "logcat", "-v", "epoch", "-T", `${since}.000`, "-s", "ElizaAgent:V", "-e", `'${word}'`, "-m", "1"]);
+  if (AGENT_REFUSED.test(log)) return "RefusedStart";
+  if (AGENT_RUNNING.test(log)) return "Running";
   return running(adb).includes(PACKAGE) && !/ElizaAgentService/.test(adb(["shell", "dumpsys", "activity", "services", PACKAGE])) ? "NotVerified" : "NotRunning";
 }
 
@@ -570,7 +669,6 @@ interface PilotRequest {
   readonly apk: { readonly file: string; readonly sha256: string; readonly versionCode: number };
   readonly stockHome?: string | undefined;
   readonly locks?: string;
-  readonly agentAttempts?: number;
 }
 
 /**
@@ -578,7 +676,7 @@ interface PilotRequest {
  * hands Home to the stock launcher while Alpha holds it, reads Alpha's data, installs in place, reads it back,
  * restores Home and starts the agent only after a clean result. Its record says what each step found.
  */
-export function pilotUpdate({ adb, serial, apk, stockHome, locks = PILOT_LOCKS, agentAttempts = 150 }: PilotRequest) {
+export function pilotUpdate({ adb, serial, apk, stockHome, locks = PILOT_LOCKS }: PilotRequest) {
   const release = claimed(locks, serial);
   let state = Pilot.initial;
   const taken: Pilot.Event[] = [];
@@ -648,7 +746,7 @@ export function pilotUpdate({ adb, serial, apk, stockHome, locks = PILOT_LOCKS, 
     }
     const restored = homeOf(adb, user);
     take({ type: "restoreHome", restored: restored.home === "AlphaHome" && restored.activity === original.activity, home: restored.home });
-    if (can({ type: "startAgent", agent: "Running" })) take({ type: "startAgent", agent: startedAgent(adb, user, agentAttempts) });
+    if (can({ type: "startAgent", agent: "Running" })) take({ type: "startAgent", agent: startedAgent(adb, user) });
     else take({ type: "skipStart" });
     take({ type: "recordRun" });
     take({ type: "release" });
@@ -661,10 +759,10 @@ export function pilotUpdate({ adb, serial, apk, stockHome, locks = PILOT_LOCKS, 
 /** The launcher release the channel offers anyone now, its APK's bytes read back as the offer describes them. */
 export interface Offer { readonly versionCode: number; readonly sha256: string; readonly sizeBytes: number; readonly apkUrl: string; readonly signerSha256: string }
 
-const publicOffer = Effect.gen(function* () {
-  const offer = JSON.parse(new TextDecoder().decode(yield* fetched(manifestUrl()))) as Offer;
-  const served = yield* fetched(offer.apkUrl);
-  if (!kept(offer.apkUrl, offer.versionCode) || offer.signerSha256 !== reviewedSigner() || served.length !== offer.sizeBytes || sha256(served) !== offer.sha256)
+const publicOffer = (port: ChannelPort) => Effect.gen(function* () {
+  const offer = JSON.parse(text(yield* port.read(manifestUrl(), MANIFEST_BYTES))) as Offer;
+  const served = yield* port.read(offer.apkUrl, maxApkBytes);
+  if (!kept(offer.apkUrl, offer.versionCode) || offer.signerSha256 !== reviewedSigner() || served.size !== offer.sizeBytes || served.sha256 !== offer.sha256)
     return yield* new ReleaseRefused({ message: `the channel's offer is not an APK of Alpha's one key served exactly as described: ${JSON.stringify(offer)}` });
   return offer;
 });
@@ -1136,7 +1234,8 @@ export async function runCli(program: Effect.Effect<unknown, unknown, never>, us
   }
 }
 
-/** One `pnpm release` command, as an effect over Node's services. */
-export const release = (argv: readonly string[]) => dispatch(commands, argv, (message) => new UsageError({ message }));
+/** One `pnpm release` command over `port`, GitHub's channel unless a journey gives its own, as an effect over Node's services. */
+export const release = (argv: readonly string[], port: ChannelPort = githubChannel) =>
+  dispatch(Object.fromEntries(Object.entries(commands).map(([name, command]) => [name, (rest: readonly string[]) => command(rest, port)])), argv, (message) => new UsageError({ message }));
 
 if (import.meta.main) await runCli(release(process.argv.slice(2)), USAGE, (failure) => failure instanceof UsageError);

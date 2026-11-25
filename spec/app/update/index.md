@@ -42,8 +42,8 @@ pure val noRelease: Release = {
 pure val maxBytes = Rel::maxApkBytes
 pure val maxUrl = 2048
 pure val maxReleases = 16
-pure val maxName = 64
-pure val maxNotes = 500
+pure val maxName = Rel::maxName
+pure val maxNotes = Rel::maxNotes
 ```
 
 ### A release is well formed only with a signer, a version, an HTTPS address of at most 2048 characters without credentials, a digest, and a size of at most 2 GiB
@@ -127,13 +127,17 @@ pure def offerNotes(s: Updates): str =
 The phone reports the installed version, its signing root and the install
 permission. The owner's activity is reported by the shell and the other
 areas; whether Alpha is in front (not behind another app or Ask Alpha's
-own surface), whether a call is up and whether audio is in its normal mode
-are reported by the phone. A voice turn, a step of the connection to the
-agent, a Notes or chat recording and the sign-in card are reported by their
-areas. `asked` says the running check came from Settings; `note` is what
-Settings says after such a check. `deferrals` counts the automatic updates
-Android put off in a row, and `retryAt` is when the next may start. Times
-are Alpha's, in milliseconds.
+own surface) and whether a call is up are reported by the phone. A voice
+turn and a recording in chat or Messages are reported by voice, a Notes
+recording by Notes, and a step of the connection to the agent and the
+sign-in card by the account. The page reads no audio mode: audio counts as
+normal while no call is up, and Alpha's updater itself reads Android's
+audio mode, the window's focus (which the notification shade takes) and the
+lock before it commits ([Install](./install.md)). `asked` says the running
+check came from Settings; `note` is what Settings says after such a check.
+`misses` counts the checks that failed in a row, `deferrals` the automatic
+updates Android put off in a row, and `retryAt` is when the next may start.
+Times are Alpha's, in milliseconds.
 
 ```quint
 type Permission = Unsupported | Required | Starting | Supported
@@ -144,7 +148,7 @@ type Activity = {
 }
 type Updates = {
   installed: int, signer: int, permission: Permission, visible: bool, activity: Activity,
-  check: R::Read, asked: bool, checked: Checked, checkedAt: int,
+  check: R::Read, asked: bool, checked: Checked, checkedAt: int, misses: int,
   offer: Offer, installing: bool, automatic: bool, note: Note, deferrals: int, retryAt: int,
 }
 
@@ -153,7 +157,7 @@ pure val unknownActivity: Activity = {
 }
 pure val initial: Updates = {
   installed: 0, signer: 0, permission: Unsupported, visible: false, activity: unknownActivity,
-  check: R::unread, asked: false, checked: Never, checkedAt: 0,
+  check: R::unread, asked: false, checked: Never, checkedAt: 0, misses: 0,
   offer: noOffer, installing: false, automatic: false, note: Silent, deferrals: 0, retryAt: 0,
 }
 ```
@@ -207,7 +211,7 @@ pure def sometimesAnOfferApplies(s: Updates): bool = applies(s)
 > found and when it last checked, and never to wait on a check or an install
 > it can no longer finish.
 
-### A restart keeps the installed version, the signing root, the saved offer, the last check and the deferrals, and forgets the permission, the owner's activity, a check or install under way, and the note
+### A restart keeps the installed version, the signing root, the saved offer, the last check, the failed checks and the deferrals, and forgets the permission, the owner's activity, a check or install under way, and the note
 
 The permission and the activity are read again, after a reboot too, when
 Android may be starting once more. A check under way is taken as failed, so
@@ -217,7 +221,7 @@ that succeeds before an automatic update.
 ```quint
 pure def restart(s: Updates): Updates =
   {
-    ...initial, installed: s.installed, signer: s.signer, checked: s.checked, checkedAt: s.checkedAt,
+    ...initial, installed: s.installed, signer: s.signer, checked: s.checked, checkedAt: s.checkedAt, misses: s.misses,
     offer: { ...s.offer, manifest: 0 }, check: if (s.check.status == R::Loading) R::answer(s.check, false) else s.check,
     deferrals: s.deferrals, retryAt: s.retryAt,
   }
@@ -245,26 +249,45 @@ pure def observeActivity(s: Updates, activity: Activity): Updates = { ...s, acti
 
 ### A check is due fifteen minutes after one that was answered, a minute after one that failed, and at once before the first or when the clock went back
 
+Each further failure in a row doubles the wait, up to fifteen minutes, as
+for an automatic update Android put off: a channel that cannot be reached is
+not asked every minute for as long as Alpha is on screen.
+
 ```quint
 pure val interval = 900000
 pure val retry = 60000
 
-pure def dueAfter(checked: Checked, checkedAt: int, now: int): bool =
-  checked == Never or now < checkedAt or now - checkedAt >= (if (checked == Missed) retry else interval)
+pure def dueAfter(checked: Checked, misses: int, checkedAt: int, now: int): bool =
+  checked == Never or now < checkedAt or now - checkedAt >= (if (checked == Missed) backoff(misses) else interval)
 ```
 
 ### An answered check is not repeated within fifteen minutes
 
 ```quint
-pure def lawAnAnsweredCheckWaitsFifteenMinutes(checkedAt: int, now: int): bool =
-  (now >= checkedAt and now - checkedAt < interval) implies not(dueAfter(Fine, checkedAt, now))
+pure def lawAnAnsweredCheckWaitsFifteenMinutes(misses: int, checkedAt: int, now: int): bool =
+  (now >= checkedAt and now - checkedAt < interval) implies not(dueAfter(Fine, misses, checkedAt, now))
 ```
 
 ### A failed check is tried again after one minute, not before
 
 ```quint
 pure def lawAFailedCheckRetriesAfterAMinute(checkedAt: int): bool =
-  dueAfter(Missed, checkedAt, checkedAt + retry) and not(dueAfter(Missed, checkedAt, checkedAt + retry - 1))
+  dueAfter(Missed, 1, checkedAt, checkedAt + retry) and not(dueAfter(Missed, 1, checkedAt, checkedAt + retry - 1))
+```
+
+### Checks that keep failing are tried again after a minute, then two, four and eight, and then every fifteen
+
+```quint
+pure def lawRepeatedFailuresWaitLonger(misses: int, checkedAt: int): bool =
+  (misses >= 1 and misses < maxDeferrals) implies not(dueAfter(Missed, misses + 1, checkedAt, checkedAt + backoff(misses)))
+
+pure def alwaysMissesAreBounded(s: Updates): bool = s.misses >= 0 and s.misses <= maxDeferrals and (s.checked == Missed implies s.misses >= 1)
+```
+
+### A check can fail twice in a row
+
+```quint
+pure def sometimesTwoChecksFailedInARow(s: Updates): bool = s.misses >= 2
 ```
 
 ### Alpha checks on its own only while on screen, when a check is due, and never during another check or an install
@@ -278,7 +301,7 @@ type Acted = { state: Updates, out: List[Effect] }
 
 pure def free(s: Updates): bool = s.check.status != R::Loading and not(s.installing)
 
-pure def canPoll(s: Updates, now: int): bool = s.visible and dueAfter(s.checked, s.checkedAt, now) and free(s)
+pure def canPoll(s: Updates, now: int): bool = s.visible and dueAfter(s.checked, s.misses, s.checkedAt, now) and free(s)
 
 pure def poll(s: Updates, now: int): Acted =
   val c = R::ask(s.check)
@@ -330,7 +353,8 @@ pure def answer(s: Updates, ticket: int, reply: Reply, now: int): Updates =
     | Unreadable => kept
     | Answered(f) => if (ok) offerFrom({ index: f.index, releases: f.releases, manifest: f.manifest }, s.signer) else kept
   }
-  val after = { ...s, check: R::answer(s.check, ok), checked: if (ok) Fine else Missed, checkedAt: now, offer: offer }
+  val misses = if (ok) 0 else if (s.misses >= maxDeferrals) maxDeferrals else s.misses + 1
+  val after = { ...s, check: R::answer(s.check, ok), checked: if (ok) Fine else Missed, checkedAt: now, misses: misses, offer: offer }
   { ...after, note: if (not(s.asked)) s.note else if (not(ok)) CouldNotCheck else if (applies(after)) Ready else NothingNew }
 ```
 
@@ -383,16 +407,23 @@ The required sign-in card of a phone that is signed out rests on Home at
 its first step, with nothing typed and nothing in flight, and focuses its
 own empty field. That is neither an open screen nor typing, so a phone
 handed to someone new still updates on its own; any entry, a later step or
-work in flight blocks.
+work in flight blocks. Only the card's own field is focused on a Home with
+nothing open, so the focus a resting card reports is never the owner's
+typing.
 
 ```quint
 type SignInCard = NoCard | Resting | Touched
 
 pure def withSignIn(activity: Activity, card: SignInCard): Activity =
-  if (card == Touched) { ...activity, open: true } else activity
+  if (card == Touched) { ...activity, open: true }
+  else if (card == Resting) { ...activity, typing: false }
+  else activity
 
 pure def lawARestingCardIsNoActivity(activity: Activity): bool =
-  withSignIn(activity, Resting) == activity
+  withSignIn(activity, Resting) == { ...activity, typing: false }
+
+pure def lawARestingCardsFocusKeepsHomeIdle(activity: Activity): bool =
+  ownerIdle({ ...activity, typing: false }) implies ownerIdle(withSignIn({ ...activity, typing: true }, Resting))
 
 pure def lawATouchedCardBlocks(activity: Activity): bool =
   not(ownerIdle(withSignIn(activity, Touched)))
@@ -584,8 +615,11 @@ pure def sometimesAManualInstall(s: Updates): bool = s.installing and not(s.auto
 
 Unsupported is an Android older than 12. Required means Alpha may neither
 update itself nor ask Android to install. Starting means the phone booted
-less than 30 seconds ago. The permission comes from the phone in
-`observePhone`.
+less than 30 seconds ago. Supported means the owner allowed installs from
+Alpha, or the launcher is the one an Alpha image installed, which Android
+grants the install of its own updates without asking: a phone handed to
+someone new updates on its own, while a launcher installed by hand asks
+once. The permission comes from the phone in `observePhone`.
 
 ```quint
 pure def automaticStatus(s: Updates): str =

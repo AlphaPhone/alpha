@@ -10,7 +10,8 @@
     { "name": "launcher", "manifest": { "root": "consumer", "path": "android/app/manifests/launcher/AndroidManifest.xml" } }
   ],
   "buildConfigFields": [
-    { "name": "AOSP_BUILD", "type": "boolean", "value": false }
+    { "name": "AOSP_BUILD", "type": "boolean", "value": false },
+    { "name": "ALPHA_UPDATE_MANIFEST_URL", "type": "String", "value": "https://github.com/eliza-research/alpha/releases/download/app-stable-alphacompute/alpha-update-stable.json" }
   ],
   "buildTypes": {
     "release": {

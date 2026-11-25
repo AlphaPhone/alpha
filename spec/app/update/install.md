@@ -5,7 +5,9 @@ What happens after Alpha decides to install an offer from
 stage it, every open [page](./page.md) saves its drafts, the resident agent
 is paused, and only then is the update committed. Android's answer, or what
 Alpha finds when it starts again, settles it. A version only ever advances:
-there is no rollback.
+there is no rollback. Alpha's updater on the phone carries this machine out:
+the page asks it to install and reads what became of it, as
+[Updates](./index.md) and [Page](./page.md) say.
 
 ## Story: Download the update
 
@@ -14,8 +16,9 @@ there is no rollback.
 
 ### An install holds its target, the version it started from, its pages, the paused agent and the commit
 
-The target is the offered version, the APK's digest and size, and the
-phone's signing root. The baseline is the version installed when it began.
+The target is the offered version, the download address the manifest
+gives for it (a number standing for the address), the APK's digest and
+size, and the phone's signing root. The baseline is the version installed when it began.
 What survives a restart is the target, the baseline, the session, the pause
 record, the stopped agent, the commit and a kept confirmation; the open
 pages, the cached file and the foreground are lost.
@@ -27,7 +30,7 @@ type Phase =
   | Quiet | Fetching | Rehashing | Admitting | Activating
   | Stopping | Rechecking | Stopped | Committing | Confirming | Unsettled | Ended
 type Outcome = Undecided | Installed | Cancelled | Failed
-type Target = { version: int, digest: int, bytes: int, signer: int }
+type Target = { version: int, url: int, digest: int, bytes: int, signer: int }
 type Install = {
   phase: Phase, outcome: Outcome, target: Target, baseline: int, automatic: bool, boot: int,
   ticket: int, cache: int, verified: bool, session: int,
@@ -37,7 +40,7 @@ type Install = {
 }
 type Activation = { activation: int }
 type Effect =
-  | Fetch({ ticket: int, digest: int, bytes: int })
+  | Fetch({ ticket: int, url: int, digest: int, bytes: int })
   | Rehash({ ticket: int, digest: int })
   | Evict
   | Stage({ version: int, digest: int, signer: int, boot: int })
@@ -46,11 +49,11 @@ type Effect =
   | Recheck(Activation)
   | Commit({ id: int })
   | OpenConfirmation
-  | ResumeAgent
+  | ResumeAgent(Activation)
   | Reconnect(Activation)
 type Moved = { state: Install, out: List[Effect] }
 
-pure val noTarget: Target = { version: 0, digest: 0, bytes: 0, signer: 0 }
+pure val noTarget: Target = { version: 0, url: 0, digest: 0, bytes: 0, signer: 0 }
 pure val initial: Install = {
   phase: Quiet, outcome: Undecided, target: noTarget, baseline: 0, automatic: false, boot: 1,
   ticket: 0, cache: 0, verified: false, session: 0,
@@ -67,24 +70,25 @@ pure def endedAs(how: Outcome, s: Install): Install =
 ### An install begins only when none is under way, for a version above the installed one
 
 A file kept from an earlier attempt with the same digest is re-hashed
-before it is used; otherwise the APK is downloaded over HTTPS.
+before it is used; otherwise the APK is downloaded over HTTPS from the
+address the manifest gave.
 
 ```quint
-pure def canBegin(s: Install, version: int, digest: int, bytes: int, signer: int, installed: int): bool =
+pure def canBegin(s: Install, version: int, url: int, digest: int, bytes: int, signer: int, installed: int): bool =
   (s.phase == Quiet or s.phase == Ended) and not(s.paused) and version > installed and installed >= 0
-    and digest > 0 and bytes > 0 and signer > 0
+    and url > 0 and digest > 0 and bytes > 0 and signer > 0
 
-pure def begin(s: Install, version: int, digest: int, bytes: int, signer: int, installed: int, automatic: bool): Moved =
+pure def begin(s: Install, version: int, url: int, digest: int, bytes: int, signer: int, installed: int, automatic: bool): Moved =
   val ticket = s.ticket + 1
   val reuse = s.cache == digest
   val started = {
     ...s, phase: if (reuse) Rehashing else Fetching, outcome: Undecided,
-    target: { version: version, digest: digest, bytes: bytes, signer: signer }, baseline: installed,
+    target: { version: version, url: url, digest: digest, bytes: bytes, signer: signer }, baseline: installed,
     automatic: automatic, ticket: ticket, verified: false, session: 0, waiting: Set(), ready: Set(),
     activation: s.activation + 1, refused: false, rechecked: false, commit: A::plan(s.activation + 1),
     kept: false, progress: 0, tapped: false,
   }
-  { state: started, out: List(if (reuse) Rehash({ ticket: ticket, digest: digest }) else Fetch({ ticket: ticket, digest: digest, bytes: bytes })) }
+  { state: started, out: List(if (reuse) Rehash({ ticket: ticket, digest: digest }) else Fetch({ ticket: ticket, url: url, digest: digest, bytes: bytes })) }
 ```
 
 ### A download is kept only with exactly the offered size and digest, and anything else is evicted and fails the install
@@ -110,8 +114,18 @@ pure def rehashed(s: Install, ticket: int, digest: int): Moved =
   if (digest == s.target.digest) { state: { ...s, phase: Admitting, verified: true }, out: List() }
   else {
     state: { ...s, phase: Fetching, cache: 0, ticket: again },
-    out: List(Evict, Fetch({ ticket: again, digest: s.target.digest, bytes: s.target.bytes })),
+    out: List(Evict, Fetch({ ticket: again, url: s.target.url, digest: s.target.digest, bytes: s.target.bytes })),
   }
+```
+
+### A download is only ever of the offered address, digest and size
+
+```quint
+pure def stepTheDownloadIsTheOffer(before: Install, after: Install, out: List[Effect]): bool =
+  out.every(e => match e {
+    | Fetch(f) => f.url == after.target.url and f.digest == after.target.digest and f.bytes == after.target.bytes and f.url > 0
+    | _ => true
+  })
 ```
 
 ### A kept file is used only after it is re-hashed
@@ -318,7 +332,7 @@ An automatic update then re-checks before committing.
 pure def canAgentStopped(s: Install, activation: int): bool = s.phase == Stopping and activation == s.activation
 
 pure def agentStopped(s: Install, activation: int, confirmed: bool): Moved =
-  if (not(confirmed)) { state: endedAs(Failed, s), out: List(ResumeAgent) }
+  if (not(confirmed)) { state: endedAs(Failed, s), out: List(ResumeAgent({ activation: s.activation })) }
   else if (s.automatic) { state: { ...s, phase: Rechecking, stopped: true }, out: List(Recheck({ activation: s.activation })) }
   else { state: { ...s, phase: Stopped, stopped: true }, out: List() }
 ```
@@ -355,7 +369,22 @@ pure val fair_agentStopped = "weak"
 
 ```quint
 pure def stepTheAgentResumesOnlyWhenReleased(before: Install, after: Install, out: List[Effect]): bool =
-  out.some(e => match e { | ResumeAgent => true | _ => false }) implies not(after.paused)
+  out.some(e => match e { | ResumeAgent(r) => true | _ => false }) implies not(after.paused)
+```
+
+### The agent's pause is held by the update that sealed it, and released only by that update, once its outcome is decided
+
+Another activation, or anything else that claims the pause, never resumes
+the agent.
+
+```quint
+pure def mayResume(s: Install, claimant: int): bool = claimant == s.activation and s.outcome != Undecided
+
+pure def lawAForeignOwnerNeverReleases(s: Install, claimant: int): bool =
+  claimant != s.activation implies not(mayResume(s, claimant))
+
+pure def stepOnlyTheOwnerResumesTheAgent(before: Install, after: Install, out: List[Effect]): bool =
+  out.every(e => match e { | ResumeAgent(r) => before.paused and mayResume(after, r.activation) | _ => true })
 ```
 
 ## Story: Re-check before an automatic update
@@ -365,12 +394,36 @@ pure def stepTheAgentResumesOnlyWhenReleased(before: Install, after: Install, ou
 
 ### An automatic update commits only if the owner is still idle, the manifest has the identical digest and offer, and Android still allows it; otherwise it is cancelled and pages reconnect
 
+The updater reads, afresh: Alpha's own Home in front with the window's
+focus (the notification shade takes it), on an unlocked phone; Android's
+audio in its normal mode; the call state, which must be readable and show no
+call; the phone past its first 30 seconds; the manifest naming the same
+bytes; and Android's permission. An update that does not pass is cancelled,
+and [Updates](./index.md) tries again after its backoff, so it waits through
+a call, an unreadable call state and the first 30 seconds after boot.
+
 ```quint
+type CallState = NoCall | OnACall | CallUnknown
+type Recheck = { front: bool, audio: bool, call: CallState, booted: bool, sameOffer: bool, permitted: bool }
+
+pure def stillIdle(r: Recheck): bool =
+  r.front and r.audio and r.call == NoCall and r.booted and r.sameOffer and r.permitted
+
 pure def canRechecked(s: Install): bool = s.phase == Rechecking
 
-pure def rechecked(s: Install, idle: bool, sameOffer: bool, permitted: bool): Moved =
-  if (idle and sameOffer and permitted) { state: { ...s, phase: Stopped, rechecked: true }, out: List() }
-  else { state: endedAs(Cancelled, s), out: List(ResumeAgent, Reconnect({ activation: s.activation })) }
+pure def rechecked(s: Install, check: Recheck): Moved =
+  if (stillIdle(check)) { state: { ...s, phase: Stopped, rechecked: true }, out: List() }
+  else { state: endedAs(Cancelled, s), out: List(ResumeAgent({ activation: s.activation }), Reconnect({ activation: s.activation })) }
+```
+
+### An unreadable call state, a call, other audio, the shade or the first 30 seconds after boot keep an automatic update from committing
+
+```quint
+pure def lawAnUnreadableCallBlocks(r: Recheck): bool = not(stillIdle({ ...r, call: CallUnknown })) and not(stillIdle({ ...r, call: OnACall }))
+
+pure def lawTheFirstThirtySecondsBlock(r: Recheck): bool = not(stillIdle({ ...r, booted: false }))
+
+pure def lawOtherAudioOrTheShadeBlocks(r: Recheck): bool = not(stillIdle({ ...r, audio: false })) and not(stillIdle({ ...r, front: false }))
 ```
 
 ### An automatic update that was committed had passed its re-check
@@ -446,8 +499,8 @@ pure def androidAnswered(s: Install, verdict: Verdict): Moved =
   if (verdict == NeedsOwner) { state: { ...s, phase: Confirming, kept: true }, out: List() }
   else if (verdict == Succeeded) { state: { ...endedAs(Installed, s), commit: A::conclude(s.commit, true, true) }, out: List() }
   else if (verdict == Aborted)
-    { state: { ...endedAs(Cancelled, s), commit: A::conclude(s.commit, false, true) }, out: List(ResumeAgent, Reconnect({ activation: s.activation })) }
-  else { state: { ...endedAs(Failed, s), commit: A::conclude(s.commit, false, true) }, out: List(ResumeAgent) }
+    { state: { ...endedAs(Cancelled, s), commit: A::conclude(s.commit, false, true) }, out: List(ResumeAgent({ activation: s.activation }), Reconnect({ activation: s.activation })) }
+  else { state: { ...endedAs(Failed, s), commit: A::conclude(s.commit, false, true) }, out: List(ResumeAgent({ activation: s.activation })) }
 ```
 
 ### Alpha knows whether it is in the foreground, how far Android's progress is, and when the owner tapped Continue update
@@ -542,8 +595,8 @@ pure def reconcile(s: Install, seen: Seen, installed: int): Moved =
     { state: { ...endedAs(Installed, s), commit: if (sent) A::conclude(s.commit, true, true) else s.commit }, out: List() }
   else if (seen != Waiting and installed == s.baseline)
     if (sent)
-      { state: { ...endedAs(Cancelled, s), commit: A::conclude(s.commit, false, true) }, out: List(ResumeAgent, Reconnect({ activation: s.activation })) }
-    else { state: endedAs(Failed, s), out: List(ResumeAgent) }
+      { state: { ...endedAs(Cancelled, s), commit: A::conclude(s.commit, false, true) }, out: List(ResumeAgent({ activation: s.activation }), Reconnect({ activation: s.activation })) }
+    else { state: endedAs(Failed, s), out: List(ResumeAgent({ activation: s.activation })) }
   else if (seen == Waiting) { state: { ...s, phase: if (s.kept) Confirming else s.phase }, out: List() }
   else
     { state: { ...s, phase: Unsettled, commit: if (s.commit.outcome == A::Sent) A::conclude(s.commit, false, false) else s.commit }, out: List() }
@@ -574,6 +627,11 @@ pure def sometimesCancelledAfterRestart(s: Install): bool =
 ```quint
 pure val versionValues = Set(2, 3)
 pure val digestValues = Set(1, 2)
+pure val urlValues = Set(1, 2)
+pure val calm: Recheck = { front: true, audio: true, call: NoCall, booted: true, sameOffer: true, permitted: true }
+pure val checkValues =
+  Set(calm).union(Set({ ...calm, call: CallUnknown })).union(Set({ ...calm, call: OnACall }))
+    .union(Set({ ...calm, booted: false })).union(Set({ ...calm, front: false })).union(Set({ ...calm, sameOffer: false }))
 pure val bytesValues = Set(1, 2)
 pure val signerValues = Set(1)
 pure val installedValues = Set(1, 2, 3)

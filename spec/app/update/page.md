@@ -15,15 +15,16 @@ unfreezes, reconnects after a cancel, and explains a refusal.
 
 The update is pending under an activation number, preparing (pages are
 saving) or paused (the agent is paused and the update is being committed).
-`acknowledged` is the last activation the page took up and `answered` the
-last one it answered.
+Android reads it for one bridge, the page's connection to Alpha's updater,
+also a number. `acknowledged` is the last activation the page took up and
+`answered` the last one it answered.
 
 ```quint
 type Mount = Opening | Holding | Mounted
 type Stage = NoUpdate | Preparing | Paused
 type Reply = Unanswered | Readied | Refused
 type Page = {
-  mount: Mount, activation: int, stage: Stage, automatic: bool, canContinue: bool,
+  mount: Mount, activation: int, bridge: int, stage: Stage, automatic: bool, canContinue: bool,
   acknowledged: int, answered: int, reply: Reply, frozen: bool, flushing: bool, continuing: bool, notice: bool,
 }
 type Activation = { activation: int }
@@ -31,7 +32,7 @@ type Effect = Answer({ activation: int, ready: bool }) | Flush(Activation) | Con
 type Moved = { state: Page, out: List[Effect] }
 
 pure val initial: Page = {
-  mount: Opening, activation: 0, stage: NoUpdate, automatic: false, canContinue: false,
+  mount: Opening, activation: 0, bridge: 0, stage: NoUpdate, automatic: false, canContinue: false,
   acknowledged: 0, answered: 0, reply: Unanswered, frozen: false, flushing: false, continuing: false, notice: false,
 }
 ```
@@ -40,20 +41,24 @@ pure val initial: Page = {
 
 A page that is not mounted holds and shows the update. Having no editors, it
 answers a preparing activation ready at once. A mounted page freezes its
-navigation and asks every area to save its drafts.
+navigation and asks every area to save its drafts. An update read under
+another bridge than the one the page took its update up under keeps the
+page holding, without Continue update, and is neither taken up nor
+answered.
 
 ```quint
-pure def canRead(s: Page, activation: int, stage: Stage): bool =
-  activation > 0 and stage != NoUpdate and activation >= s.acknowledged and activation >= s.activation
+pure def canRead(s: Page, activation: int, bridge: int, stage: Stage): bool =
+  activation > 0 and bridge > 0 and stage != NoUpdate and activation >= s.acknowledged and activation >= s.activation
 
-pure def read(s: Page, activation: int, stage: Stage, canContinue: bool, automatic: bool): Moved =
+pure def read(s: Page, activation: int, bridge: int, stage: Stage, canContinue: bool, automatic: bool): Moved =
   val acknowledge = stage == Preparing and activation != s.acknowledged
   val shown = {
-    ...s, activation: activation, stage: stage, automatic: automatic, canContinue: stage == Paused and canContinue,
+    ...s, activation: activation, bridge: bridge, stage: stage, automatic: automatic, canContinue: stage == Paused and canContinue,
     mount: if (s.mount == Mounted) Mounted else Holding, frozen: s.mount == Mounted,
     flushing: s.flushing and activation == s.activation,
   }
-  if (not(acknowledge)) { state: shown, out: List() }
+  if (s.activation != 0 and bridge != s.bridge) { state: { ...s, canContinue: false }, out: List() }
+  else if (not(acknowledge)) { state: shown, out: List() }
   else if (s.mount == Mounted)
     { state: { ...shown, acknowledged: activation, reply: Unanswered, flushing: true }, out: List(Flush({ activation: activation })) }
   else
@@ -106,6 +111,25 @@ pure def editorsMounted(s: Page): bool = s.mount == Mounted
 
 pure def stepAFreshPageMountsOnlyWhenSettled(before: Page, via: str, after: Page): bool =
   (before.mount != Mounted and after.mount == Mounted) implies (via == "endUpdate" and after.activation == 0)
+```
+
+### An update read under another bridge is never taken up or answered by this page
+
+```quint
+pure def lawAnotherBridgeIsOnlyHeld(s: Page, activation: int, bridge: int, stage: Stage, canContinue: bool, automatic: bool): bool =
+  (s.activation != 0 and bridge != s.bridge) implies
+    read(s, activation, bridge, stage, canContinue, automatic) == { state: { ...s, canContinue: false }, out: List() }
+```
+
+### While an update is pending or the page holds, Android's activation is read again every second
+
+So Continue update shows, and the page lets go, within a second of
+Android's change even when Android's own word of it is lost.
+
+```quint
+pure val readEvery = 1000
+
+pure def following(s: Page): bool = s.activation != 0 or s.mount != Mounted
 ```
 
 ### A page can hold with Continue update offered
@@ -227,22 +251,27 @@ pure def sometimesSaving(s: Page): bool = s.flushing
 
 On a cancelled update that this page was ready for, and that Android says
 may resume, the page reconnects. When a manual update fails after this page
-refused, the page says "Finish your changes, then try updating again".
+refused, the page says "Finish your changes, then try updating again". An
+outcome is taken only under the page's own bridge, or once Android's updater
+is idle; an outcome Android does not name is unknown, and the page keeps
+holding until the updater is idle, then lets go without reconnecting or
+explaining anything.
 
 ```quint
-type Settlement = Gone | WasInstalled | WasCancelled | WasFailed
+type Settlement = Gone | WasInstalled | WasCancelled | WasFailed | Unknown
 
-pure def canEndUpdate(s: Page, activation: int, ending: Settlement): bool =
-  s.mount == Opening or (s.mount == Holding and s.activation == 0)
-    or (s.activation != 0 and (ending == Gone or activation == s.activation))
+pure def canEndUpdate(s: Page, activation: int, bridge: int, ending: Settlement, idle: bool): bool =
+  (ending != Unknown or idle) and (
+    s.mount == Opening or (s.mount == Holding and s.activation == 0)
+      or (s.activation != 0 and (bridge == s.bridge or idle) and (ending == Gone or ending == Unknown or activation == s.activation)))
 
-pure def endUpdate(s: Page, activation: int, ending: Settlement, resume: bool): Moved =
+pure def endUpdate(s: Page, activation: int, bridge: int, ending: Settlement, resume: bool, idle: bool): Moved =
   val exact = activation == s.activation and activation == s.acknowledged and s.mount == Mounted
   val reconnect = exact and ending == WasCancelled and resume and s.reply == Readied
   val notice = exact and ending == WasFailed and s.reply == Refused and not(s.automatic)
   {
     state: {
-      ...s, mount: Mounted, activation: 0, stage: NoUpdate, canContinue: false,
+      ...s, mount: Mounted, activation: 0, bridge: 0, stage: NoUpdate, canContinue: false,
       frozen: false, flushing: false, continuing: false, notice: notice,
     },
     out: (if (reconnect) List(Reconnect({ activation: activation })) else List()).concat(if (notice) List(Toast) else List()),
@@ -265,6 +294,16 @@ pure def stepReconnectOnlyAfterReady(before: Page, after: Page, out: List[Effect
   out.every(e => match e { | Reconnect(r) => before.reply == Readied and before.mount == Mounted | _ => true })
 ```
 
+### An unknown outcome lets a page go only once Android's updater is idle, and then neither reconnects nor explains
+
+```quint
+pure def lawAnUnknownOutcomeWaitsForIdle(s: Page, activation: int, bridge: int): bool =
+  not(canEndUpdate(s, activation, bridge, Unknown, false))
+
+pure def lawAnUnknownOutcomeIsQuiet(s: Page, activation: int, bridge: int, resume: bool): bool =
+  endUpdate(s, activation, bridge, Unknown, resume, true).out == List()
+```
+
 ### A page can tell its owner to finish their changes
 
 ```quint
@@ -275,6 +314,8 @@ pure def sometimesNoticeShown(s: Page): bool = s.notice
 
 ```quint
 pure val activationValues = Set(1, 2, 3)
+pure val bridgeValues = Set(1, 2)
+pure val endingValues = Set(Gone, WasInstalled, WasCancelled, WasFailed, Unknown)
 pure val calm: Engaged = { voice: false, connecting: false, call: false, recording: false, idle: true }
 pure val engagedValues =
   Set(calm).union(Set({ ...calm, idle: false })).union(Set({ ...calm, call: true, idle: false }))

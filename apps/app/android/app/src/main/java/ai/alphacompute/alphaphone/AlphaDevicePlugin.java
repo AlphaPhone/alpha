@@ -255,8 +255,8 @@ public final class AlphaDevicePlugin extends Plugin {
   * Self-update without a system dialog is supported from Android 12. Android still decides at commit.
   * An image may allow-list INSTALL_SELF_UPDATES (signature|privileged) for its preinstalled launcher. Android then admits
   * Alpha's update of itself, and only that, without the owner's install-unknown-apps choice. Android grants it to an
-  * update only when the image's own launcher also declares it. The launcher does not declare it yet: the shared image
-  * stager must first admit it to its reviewed privileged set. Until then every install needs that choice once.
+  * update only when the image's own launcher also declares it. The launcher declares it; an image grants it once the
+  * shared image stager admits it to its reviewed privileged set. A launcher installed by hand never holds it and asks once.
   */
  static String automaticUpdateStatus(Context context){
   if(Build.VERSION.SDK_INT<31)return "unsupported";

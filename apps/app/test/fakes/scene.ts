@@ -17,7 +17,7 @@ import { type SettingsScene, settingsScene } from "./settings.ts";
 import { type FilesScene, filesScene } from "./files.ts";
 import { type PhotosScene, photosScene } from "./photos.ts";
 import { type TelephonyScene, telephonyRoutes, telephonyScene } from "./telephony.ts";
-import { type UpdateScene, updateScene } from "./update.ts";
+import { type UpdateScene, updateRoutes, updateScene } from "./update.ts";
 import { type VoiceScene, voiceScene } from "./voice.ts";
 import { type BrowserScene, browserScene } from "./browser.ts";
 
@@ -80,6 +80,7 @@ const health: Route = (request, url) => (request.method === "GET" && url.pathnam
 export function services(world: Scene) {
   return {
     agent: answering([
+      ...updateRoutes(world.update, () => world.now),
       health,
       ...sampleRoutes(world.sample),
       ...askRoutes(world.ask),

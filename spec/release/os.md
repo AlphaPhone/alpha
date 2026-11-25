@@ -14,7 +14,7 @@ release owner updates an image by hand, and four drills prove recovery.
 > signing, trust, security, the update engine and physical recovery have
 > all been proven.
 
-### The channel is pinned to its manifest, hosts, product, device, OTA certificate and AVB key, with no key rotation and no data wipe
+### The channel is pinned to its manifest, hosts, product, device, OTA certificate and AVB key, with no key rotation, no data wipe and no downgrade
 
 The manifest is `alpha-os-update.json` under the release tagged `os-pilot`
 of Alpha's repository, eliza-research/alpha, where the launcher channel
@@ -22,7 +22,7 @@ also lives ([Release](./index.md)).
 
 ```quint
 type Profile = {
-  manifest: str, hosts: str, product: str, device: str, certificate: str, avb: str, rotate: bool, wipe: bool,
+  manifest: str, hosts: str, product: str, device: str, certificate: str, avb: str, rotate: bool, wipe: bool, downgrade: bool,
 }
 type Gate = SignedImage | ChannelGate | Trust | Selinux | Engine | PhysicalRecovery | CacheRetention | CandidateRecovery
 type Drill = SignedUpdate | InterruptedUpdate | CompatibleRollback | StockRecovery
@@ -47,7 +47,7 @@ pure val pinned: Profile = {
   product: "alpha_stallion_phone", device: "stallion",
   certificate: "66046a0729fe8d14b9bb53051b2225b396f7bcb07b2a757eac6fc799b1aee11e",
   avb: "ef17e93cb331c37187cb15c666c09b3861d539f8b24662f4fa3fd7314d806daa",
-  rotate: false, wipe: false,
+  rotate: false, wipe: false, downgrade: false,
 }
 pure val noGates: Gates = {
   signedImage: false, channel: false, trust: false, selinux: false, engine: false, recovery: false,
@@ -87,7 +87,7 @@ pure def everyGate(g: Gates): bool =
 ```quint
 pure def isPinned(p: Profile): bool =
   p.manifest == pinned.manifest and p.hosts == pinned.hosts and p.product == pinned.product and p.device == pinned.device
-    and p.certificate == pinned.certificate and p.avb == pinned.avb and not(p.rotate) and not(p.wipe)
+    and p.certificate == pinned.certificate and p.avb == pinned.avb and not(p.rotate) and not(p.wipe) and not(p.downgrade)
 
 pure def canStage(s: Os, profile: Profile): bool = not(s.staged) and isPinned(profile)
 
