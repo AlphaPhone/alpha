@@ -37,9 +37,26 @@ final class AlphaSecureSlots {
  synchronized String read(String slot) throws Exception {
   String current = store.get(slot);
   if (settled.contains(slot) || !AlphaEarlier.JOURNALS.matcher(slot).matches()) return current;
-  String kept = adopted(slot, current);
+  String earlier;
+  try {
+   earlier = AlphaEarlier.read(context, slot);
+  } catch (Exception unreadable) {
+   earlier = null;
+  }
+  if (earlier != null && current == null && !copied(slot, earlier)) return earlier;
   settled.add(slot);
-  return kept;
+  if (earlier == null) return current;
+  try { AlphaEarlier.clear(context, slot, earlier); } catch (Exception clearedOnTheNextRun) { }
+  return current == null ? earlier : current;
+ }
+
+ private boolean copied(String slot, String value) {
+  try {
+   store.set(slot, value);
+   return value.equals(store.get(slot));
+  } catch (Exception refused) {
+   return false;
+  }
  }
 
  synchronized void write(String slot, String value) throws Exception {
@@ -49,21 +66,5 @@ final class AlphaSecureSlots {
   }
   store.remove(slot);
   if (AlphaEarlier.JOURNALS.matcher(slot).matches()) AlphaEarlier.remove(context, slot);
- }
-
- private String adopted(String slot, String current) throws Exception {
-  String earlier;
-  try {
-   earlier = AlphaEarlier.read(context, slot);
-  } catch (Exception unreadable) {
-   return current;
-  }
-  if (earlier == null) return current;
-  if (current == null) {
-   store.set(slot, earlier);
-   if (!earlier.equals(store.get(slot))) throw new IllegalStateException("The earlier journal was not moved");
-  }
-  try { AlphaEarlier.clear(context, slot, earlier); } catch (Exception clearedOnTheNextRun) { }
-  return current == null ? earlier : current;
  }
 }

@@ -87,19 +87,21 @@ workflow notices (`workflow-notice-delivery:v1`,
 Alpha wrote, so the copy is the value as it is. This Alpha keeps them in
 the phone's secure store, and the first time a run of the app reads one
 of them it is moved there by the rule above. Where the earlier store holds
-one that could not be copied, the reading fails: a text or action recorded
-only there is never taken as absent and done a second time. One that
-cannot be read at all stays where it is, and the reading goes on from
-this Alpha's store. Removing such a slot from this Alpha's store clears
-its earlier place too.
+one that could not be copied, the reading gives the earlier value as it
+is, and the move is tried again at the next reading: a text or action
+recorded only there is never taken as absent and done a second time. One
+that cannot be read at all stays where it is, and the reading goes on
+from this Alpha's store. Removing such a slot from this Alpha's store
+clears its earlier place too.
 
 ```quint
-type JournalReading = ReadsCurrent | ReadingFails
+type JournalReading = ReadsCurrent | ReadsEarlier
 
-pure def journalReadingOf(a: Adoption): JournalReading = if (a == NotAdopted) ReadingFails else ReadsCurrent
+pure def journalReadingOf(a: Adoption): JournalReading = if (a == NotAdopted) ReadsEarlier else ReadsCurrent
 
-pure def lawAJournalHeldOnlyInTheEarlierStoreIsReadOnlyOnceCopied(copied: bool): bool =
-  journalReadingOf(adoptionOf(true, false, copied)) == ReadsCurrent implies copied
+pure def lawAJournalHeldOnlyInTheEarlierStoreIsNeverReadAsEmpty(copied: bool): bool =
+  val a = adoptionOf(true, false, copied)
+  journalReadingOf(a) == ReadsEarlier or a == Adopted
 ```
 
 ### A slot of the earlier store that no area moves stays where it is: only the area that moves a slot clears it, or erasing Alpha's data
