@@ -46,6 +46,8 @@ jobs:
       - run: pnpm --filter @repo/app android build --release
       - name: Build the candidate, mirror it and plan its signing
         working-directory: apps/app
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           private="$RUNNER_TEMP/candidate"
           pnpm -s release upstream --out "$private/upstream.json"
