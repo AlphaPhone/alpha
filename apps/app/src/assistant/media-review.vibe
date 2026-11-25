@@ -410,7 +410,11 @@ export const mediaReview = Layer.effect(MediaReview, effect {
             + (op.type === "files_move" ? ` → ${op.dest || "Internal storage"}` : "") }) }
       }, { concurrency: 4 })
       const firstRead = cards.find((card) => card?.operation.type === "messages_read_selected")
-      return cards.filter((card) => card !== undefined && (card.operation.type !== "messages_read_selected" || card === firstRead))
+      const shown: MediaCard[] = []
+      for (const card of cards) {
+        if (card !== undefined && (card.operation.type !== "messages_read_selected" || card === firstRead)) shown.push(card)
+      }
+      return shown
     },
     effect decide(card: MediaCard, approve: boolean) {
       const { board } = try Talk
