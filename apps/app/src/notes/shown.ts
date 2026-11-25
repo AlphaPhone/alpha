@@ -13,7 +13,7 @@ export interface Stored {
       readonly pinned?: boolean;
       readonly folderId?: string;
       readonly items?: ReadonlyArray<{ readonly t: string; readonly done?: boolean }>;
-      readonly lines?: ReadonlyArray<{ readonly s?: string; readonly t: string }>;
+      readonly lines?: ReadonlyArray<{ readonly s?: string; readonly t: string; readonly at?: number }>;
       readonly summary?: ReadonlyArray<string>;
       readonly actions?: ReadonlyArray<{ readonly t: string; readonly done?: boolean }>;
       readonly audio?: { readonly durationMs?: number };
@@ -38,6 +38,8 @@ const origins: Record<Kind, Origin> = { Text: "Written", Checklist: "Written", V
 const numbers = new Map<string, number>();
 const notes = new Map<number, Stored>();
 const named = new Map<number, string>();
+const ids = new Map<number, string>();
+const pages = new Map<number, string>();
 
 /** The number this session gives `key`, the same each time it is asked. @throws {never} */
 function numbered(key: string): number {
@@ -51,27 +53,33 @@ function numbered(key: string): number {
 /** The source a note points back to: its recording, its page, or nothing. @throws {never} */
 function sourceOf(note: Stored, kind: Kind): Source {
   if (kind === "Voice") return { tie: "AudioLink", id: numbered(`audio:${note.id}`), mark: 0 };
-  if (kind === "Link") return { tie: "PageLink", id: numbered(`page:${note.format?.data.url ?? note.id}`), mark: 0 };
+  if (kind === "Link") {
+    const url = note.format?.data.url ?? "";
+    const page = numbered(`page:${url || note.id}`);
+    pages.set(page, url);
+    return { tie: "PageLink", id: page, mark: 0 };
+  }
   return { tie: "NoLink", id: 0, mark: 0 };
 }
 
-/** The revision of a note: the second it last changed, which a later change always passes. @throws {never} */
-function revisionOf(note: Stored): number {
-  return Math.max(1, Math.floor(Date.parse(note.updatedAt) / 1000) || 1);
-}
-
-/** The notes and folders of a reading as the list numbers them; each note is kept to be shown by its number. @throws {never} */
-export function keep(stored: ReadonlyArray<Stored>, filed: ReadonlyArray<Filed>): { readonly rows: Row[]; readonly folders: Folder[] } {
+/**
+ * The notes and folders of a reading as the list numbers them; each note is kept to be shown by its number. A note's
+ * revision is the store's, which every write passes, so a write over any older one is refused as overtaken.
+ * @throws {never}
+ */
+export function keep(stored: ReadonlyArray<Stored>, filed: ReadonlyArray<Filed>, revision: number): { readonly rows: Row[]; readonly folders: Folder[] } {
   notes.clear();
+  ids.clear();
   const folders = filed.map((folder) => ({ id: numbered(`folder:${folder.id}`), name: folder.name }));
   for (const folder of filed) named.set(numbered(`folder:${folder.id}`), folder.name);
   const rows = stored.map((note): Row => {
     const kind = kinds[note.format?.kind ?? "text"];
     const id = numbered(`note:${note.id}`);
     notes.set(id, note);
+    ids.set(id, note.id);
     const folder = note.format?.data.folderId ?? "";
     return {
-      id, revision: revisionOf(note), kind, origin: origins[kind], source: sourceOf(note, kind),
+      id, revision: Math.max(1, revision), kind, origin: origins[kind], source: sourceOf(note, kind),
       folder: folder === "" ? 0 : numbered(`folder:${folder}`), pinned: note.format?.data.pinned === true,
     };
   });
@@ -86,4 +94,19 @@ export function noteOf(id: number): Stored | undefined {
 /** The name of the folder numbered `id`. @throws {never} */
 export function folderName(id: number): string {
   return named.get(id) ?? "";
+}
+
+/** The store's own id of the note numbered `id`, as last read. @throws {never} */
+export function storedId(id: number): string | undefined {
+  return ids.get(id);
+}
+
+/** The number the list gives the store's note `id`. @throws {never} */
+export function numberOf(id: string): number {
+  return numbered(`note:${id}`);
+}
+
+/** The address of the page numbered `id`, or "". @throws {never} */
+export function pageOf(id: number): string {
+  return pages.get(id) ?? "";
 }

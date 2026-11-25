@@ -11,9 +11,6 @@ export const meta: ComponentMeta<HomeTileProps> = {
     Badge: { label: "Inbox", icon: <Mail className="size-6" />, badge: "3 unread" },
     Editing: { editing: true },
     "Editing while saving": { editing: true, onRemove: undefined },
-    "Drop before": { editing: true, drop: "before" },
-    "Drop after": { editing: true, drop: "after" },
-    Dragging: { editing: true, dragging: true },
   },
   play: {
     Editing: async ({ canvasElement }: { canvasElement: HTMLElement }) => {

@@ -353,3 +353,22 @@ pure def stepOnlyAMessageOfTheConversationShowingIsReadAloud(before: Chats, via:
     | _ => true
   })
 ```
+
+## Story: Reuse words from a message
+
+> As the owner, I want to copy a recorded message and review Alpha's
+> answer before using it in an email draft.
+
+### Only text in the recorded message showing can be copied; only an answer from Alpha can be offered to Inbox
+
+The offer carries text only. Inbox displays it with its destination
+before the owner chooses whether it goes into a draft.
+
+```quint
+pure def copyableText(recorded: bool, blank: bool): bool = recorded and not(blank)
+
+pure def textForEmail(recorded: bool, blank: bool, mine: bool): bool = copyableText(recorded, blank) and not(mine)
+
+pure def lawOnlyRecordedTextCanBeReused(blank: bool, mine: bool): bool =
+  not(copyableText(false, blank)) and not(textForEmail(false, blank, mine)) and not(textForEmail(true, blank, true))
+```

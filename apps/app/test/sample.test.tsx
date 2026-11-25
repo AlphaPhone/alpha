@@ -88,7 +88,7 @@ describe.each([["a browser", false], ["a phone", true]])("in %s", (_where, phone
     await press("Refresh");
     await until(alpha, reminders, Reminders, (s) => s.list.status === "Loaded");
 
-    // spec/app/shell/index.md, "Back closes one layer: the drawer, then Ask Alpha by a step, then the app on top": a Back the store does not take changes nothing, and neither the buttons nor what follows the shell stop for it.
+    // spec/app/shell/index.md, "Back closes one layer: Ask Alpha by a step, then the app on top": a Back the store does not take changes nothing, and neither the buttons nor what follows the shell stop for it.
     refusing = shellKept;
     await hardware("back");
     expect((await alpha.runtime.runPromise(Shell.use((shell) => shell.get()))).trail).toEqual(["Notes"]);

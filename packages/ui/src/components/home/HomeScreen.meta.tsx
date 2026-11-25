@@ -1,16 +1,15 @@
-import { expect, fireEvent, fn, screen, userEvent, within } from "storybook/test";
+import { expect, fn, screen, userEvent, within } from "storybook/test";
 import type { ComponentMeta } from "vibestack/stories";
 import { homeCards } from "./HomeCardRow.meta.tsx";
 import type { HomeScreenProps } from "./HomeScreen.tsx";
 import { hiddenApps, homeTiles } from "./HomeTileGrid.meta.tsx";
 
 const unbadged = homeTiles.map(({ badge: _badge, ...tile }) => tile);
-const onPullDown = fn();
 const onOpenTile = fn();
-const editing: Partial<HomeScreenProps> = { editing: true, tiles: unbadged, onOpenTile: undefined, onBeginEditing: undefined, onOpenDrawer: undefined, onPullDown: undefined };
+const editing: Partial<HomeScreenProps> = { editing: true, tiles: unbadged, onOpenTile: undefined, onBeginEditing: undefined };
 
 export const meta: ComponentMeta<HomeScreenProps> = {
-  args: { cards: homeCards, tiles: homeTiles, hidden: hiddenApps, onPullDown, onOpenTile },
+  args: { cards: homeCards, tiles: homeTiles, hidden: hiddenApps, onOpenTile },
   decorator: (story) => <div className="h-dvh">{story()}</div>,
   examples: {
     "Reading saved tiles": { tiles: undefined, cards: [], onBeginEditing: undefined },
@@ -19,23 +18,15 @@ export const meta: ComponentMeta<HomeScreenProps> = {
     "Saving a change": { ...editing, onRemoveTile: undefined, onMoveTile: undefined, onShowHidden: undefined },
     "Not saved": { ...editing, notice: { tag: "TellNotSaved" } },
     "Empty Home": { tiles: [], cards: [] },
-    "As an app": { onPullDown: undefined },
-    "In a browser": { onOpenDrawer: undefined, onBeginEditing: undefined, onPullDown: undefined },
-    "Assistant only": { tiles: [], cards: [], onOpenDrawer: undefined, onBeginEditing: undefined, onPullDown: undefined },
+    "In a browser": { onBeginEditing: undefined },
+    "Assistant only": { tiles: [], cards: [], onBeginEditing: undefined },
   },
   play: {
     Default: async ({ canvasElement }: { canvasElement: HTMLElement }) => {
-      onPullDown.mockClear();
       onOpenTile.mockClear();
       const canvas = within(canvasElement);
-      const heading = canvas.getByRole("heading", { level: 1, name: "Home" });
-      const zone = heading.parentElement!;
-      await fireEvent.pointerDown(zone, { isPrimary: true, clientX: 100, clientY: 40, pointerId: 1 });
-      await fireEvent.pointerUp(zone, { isPrimary: true, clientX: 104, clientY: 140, pointerId: 1 });
-      await fireEvent.pointerDown(zone, { isPrimary: true, clientX: 100, clientY: 40, pointerId: 1 });
-      await fireEvent.pointerUp(zone, { isPrimary: true, clientX: 100, clientY: 60, pointerId: 1 });
       await userEvent.click(canvas.getByRole("button", { name: "Settings" }));
-      await expect([onPullDown.mock.calls.length, onOpenTile.mock.calls]).toEqual([1, [["Settings"]]]);
+      await expect(onOpenTile.mock.calls).toEqual([["Settings"]]);
     },
     "Add to Home": async () => {
       const sheet = await screen.findByRole("dialog", { name: "Add to Home" });

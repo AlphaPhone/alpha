@@ -3,7 +3,7 @@ import { Readable } from "node:stream";
 import type { ReadableStream as NodeStream } from "node:stream/web";
 import type { Plugin } from "vite";
 import type { Answering } from "./routes.ts";
-import { agentEvent } from "./calendar.ts";
+import { seedReferenceWeek } from "./calendar.ts";
 import { type Scene, scene, services } from "./scene.ts";
 import { notices } from "./settings.ts";
 
@@ -20,13 +20,10 @@ async function relay(answer: Answering, incoming: IncomingMessage, outgoing: Ser
 
 /**
  * What the dev server shows beyond the journeys' empty world, as develop's browser fixture does: the agent's calendar
- * holds "Design review" at 3:00 PM, today until it ends and then tomorrow.
+ * holds develop's reference week, "Design review" at 3:00 PM today among it.
  */
 function developed(world: Scene): Scene {
-  const review = new Date();
-  review.setHours(15, 0, 0, 0);
-  if (Date.now() >= review.getTime() + 3_600_000) review.setDate(review.getDate() + 1);
-  world.calendar.events.push(agentEvent("Design review", review.getTime(), review.getTime() + 3_600_000));
+  seedReferenceWeek(world.calendar, Date.now());
   return world;
 }
 
