@@ -236,7 +236,11 @@ function posted(ticket: number, told: boolean, context: Conversation.Context): S
     }
     const finishing = Conversation.canFinish(try (try Conversation.Machine).get(), ticket)
     if (result?.kind === "Replied" && finishing) {
-      if (result.reply.userMessageId !== undefined) board.rename(mine, result.reply.userMessageId)
+      if (result.reply.userMessageId !== undefined) {
+        board.messageNumber(result.reply.userMessageId)
+        board.rename(mine, result.reply.userMessageId)
+      }
+      board.messageNumber(result.reply.messageId)
       board.append({ id: result.reply.messageId, mine: false, text: result.reply.text })
     }
     if (event.type === "refuse") board.drop(mine)
