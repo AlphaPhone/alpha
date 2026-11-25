@@ -125,7 +125,7 @@ it("Choose a phone contact for the email I’m writing (spec/app/inbox/adding.md
   const { alpha } = await openInbox(world);
   const runtime = inbox.runtime(alpha);
   await until(alpha, alpha.runtime, Shell, (state) => state.contacts);
-  await tile("Inbox");
+  await openInboxFromHome(alpha);
   await until(alpha, runtime, List, (state) => state.list.status === "Loaded");
   await press("Compose");
   await until(alpha, runtime, Writing, (state) => state.open && state.letter.kind === "Fresh");
