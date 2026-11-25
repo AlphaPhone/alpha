@@ -7,6 +7,7 @@ import { Machine as Chats } from "../../gen/app__assistant__chats.effect.vibe"
 import { Machine as Messages } from "../../gen/app__messages.effect.vibe"
 import { Machine as Shell, type Detent, type View, agentOpenView, canAgentOpenFilesFrom, showing } from "../../gen/app__shell.effect.vibe"
 import * as Layers from "../../gen/app__shell__layers.effect.vibe"
+import { changeCard } from "../../gen/app__files.effect.vibe"
 import * as Prefs from "../../gen/app__settings__preferences.effect.vibe"
 import type { FileActionReport, FileReview, FilesReadContext } from "../files/agent.vibe"
 import { latestSenderResult, sameVoicemail, selectedVoicemail, type VoicemailReadContext, type VoicemailTarget } from "../contacts/reads.vibe"
@@ -313,6 +314,16 @@ export interface MediaCard {
   readonly files?: FileReview
   readonly reviewRequest?: string
   readonly phone?: NamedPhoneReview
+  /** Why the card can only be declined here: a Files change waiting for Files to be opened. */
+  readonly notice?: string
+}
+
+const openFilesNotice = "Open Files to review this action."
+
+/** What a Files card names: the reviewed paths, and a move's destination. */
+function filesDetail(operation: DeviceOperation, files: FileReview, words: string): string {
+  return operation.type === "files_folder_create" ? words
+    : files.targets.map((target) => target.path).join(", ") + (operation.type === "files_move" ? ` → ${operation.dest || "Internal storage"}` : "")
 }
 
 function visibleCards(entries: readonly ({ card: MediaCard; fromTerminal: boolean } | undefined)[], terminalCurrent: boolean): readonly MediaCard[] {
@@ -430,6 +441,8 @@ export service MediaReview {
   pending(session: Session, message: string, conversation: number, revision: number, target: MessageDraftTarget | undefined, reply: DeviceActionReply): readonly MediaCard[]!!Conversation
   choosePhone(card: MediaCard, choice: number): void!!(Talk | Conversation | Chats)
   decide(card: MediaCard, approve: boolean): void!!(Talk | Conversation | Chats)
+  /** Builds, for Files as it now shows, the card of each Files change that waited for Files to be opened. */
+  reviewInFiles(): void!!(Talk | Conversation | Chats)
   /** Same enrollment and custody as the cards, without exposing its tokens or action payloads. */
   history(): (readonly ActivityProposal[] | undefined)!!
   /** Acts only against the exact current proposal and the local receipt the SDK can verify. */
@@ -754,6 +767,7 @@ function pendingProposals(context: PendingReviewContext): MediaReview.Shape["pen
       if (op.type === "sms_send" && reply.sms !== undefined && (sms === undefined || sms.subscription.id !== op.subscriptionId || !(try sameSms(sms)))) return undefined
       const named = op.type === "files_open" || op.type === "files_share" || op.type === "files_move" || op.type === "files_trash" || op.type === "files_folder_create"
       let files: FileReview | undefined
+      let notice: string | undefined
       if (named) {
         const existing = pinnedFiles.get(proposal.id)
         if (existing !== undefined && existing.digest !== proposal.digest) return undefined
@@ -765,7 +779,11 @@ function pendingProposals(context: PendingReviewContext): MediaReview.Shape["pen
           pinnedFiles.set(proposal.id, { digest: proposal.digest, files: resolved, expiresAt })
         }
         files = pinnedFiles.get(proposal.id)?.files
-        if (files === undefined) return undefined
+        // spec/app/files/index.md, "A change the agent proposes while Files is not on screen shows a notice to open Files, and its card is built in Files, for Files as it then shows"
+        const { showing: screen } = (try view.get()).context
+        const filesShown = screen.tag === "App" && screen.view === "Files"
+        if (op.type !== "files_open" && changeCard(filesShown, files !== undefined, true, true) === "ChangeNotice") notice = openFilesNotice
+        else if (files === undefined) return undefined
       }
       const detail = words(op)
       const labelled = sms === undefined ? detail : { ...detail, detail: `SIM ${sms.subscription.slot + 1}\n${detail.detail}` }
@@ -780,8 +798,8 @@ function pendingProposals(context: PendingReviewContext): MediaReview.Shape["pen
         ...(request === undefined || origin !== undefined || filesOperation || phone !== undefined || op.type === "sms_compose" || op.type === "sms_send" ? { reviewRequest: reply.clientMessageId } : {}),
         ...(origin === undefined ? {} : { read: { origin, pageTicket: reply.pageTicket } }),
         ...(phone === undefined ? {} : { phone }),
-        ...(files === undefined ? {} : { files, detail: op.type === "files_folder_create" ? labelled.detail : files.targets.map((target) => target.path).join(", ")
-          + (op.type === "files_move" ? ` → ${op.dest || "Internal storage"}` : "") }) }
+        ...(files === undefined ? {} : { files, detail: filesDetail(op, files, labelled.detail) }),
+        ...(notice === undefined ? {} : { notice }) }
       return { card, fromTerminal: request === undefined && origin === undefined }
     }, { concurrency: 4 })
     const visible = visibleCards(cards, currentReview && isLatest(opened) && (try reviewContext(revision, view)))
@@ -981,6 +999,41 @@ export const mediaReview = Layer.effect(MediaReview, effect {
         board.change({ media: board.snapshot().media.map((one) => one === card ? { ...card, phone, detail } : one) })
       })
     },
+    // spec/app/files/index.md, "A change the agent proposes while Files is not on screen shows a notice to open Files, and its card is built in Files, for Files as it then shows"
+    effect reviewInFiles() {
+      const { board } = try Talk
+      const view = try Conversation
+      const chats = try Chats
+      try lock.withPermits(1)(effect {
+        const chosen = (try chats.get()).chosen
+        const waiting = board.snapshot().media.filter((card) => card.notice !== undefined && card.conversation === chosen)
+        const { context } = try view.get()
+        if (waiting.length === 0 || context.sensitive || context.showing.tag !== "App" || context.showing.view !== "Files") return
+        const opened = try session()
+        if (opened === undefined || (try executors.readyFiles()) === undefined || !(try enrollmentIsCurrent(opened))) return
+        const answer = try proposals(opened)
+        if (answer === undefined) return
+        const at = try Clock.currentTimeMillis
+        const built = new Map<MediaCard, MediaCard | undefined>()
+        for (const card of waiting) {
+          const open = answer.some((one) => one.id === card.id && one.digest === card.digest && one.state === "pending" && one.payload.workflow === undefined
+            && fromThisEnrollment(one, opened) && Date.parse(one.expiresAt) > at && at < card.expiresAt)
+          const latest = card.reviewRequest !== undefined && card.reviewRequest === board.lastSentId
+          const files = open && latest ? try executors.reviewFiles(card.operation) : undefined
+          const { notice: _waited, ...rest } = card
+          built.set(card, changeCard(true, files !== undefined, open, latest) === "ChangeReviewed" && files !== undefined
+            ? { ...rest, revision: context.revision, files, detail: filesDetail(card.operation, files, card.detail) } : undefined)
+          if (files !== undefined && pinnedFiles.size < 256) pinnedFiles.set(card.id, { digest: card.digest, files, expiresAt: card.expiresAt })
+        }
+        const now = try view.get()
+        if (!isLatest(opened) || now.context.revision !== context.revision || (try chats.get()).chosen !== chosen) return
+        board.change({ media: board.snapshot().media.flatMap((card) => {
+          if (!built.has(card)) return [card]
+          const fresh = built.get(card)
+          return fresh === undefined ? [] : [fresh]
+        }) })
+      })
+    },
     effect decide(card: MediaCard, approve: boolean) {
       const { board } = try Talk
       const conversation = try Conversation
@@ -1027,7 +1080,8 @@ export const mediaReview = Layer.effect(MediaReview, effect {
         return (try canStage(session)) && (try enrollmentIsCurrent(session)) && (try canStage(session))
       }
       try lock.withPermits(1)(effect {
-        if (!board.snapshot().media.includes(card) || (approve && namedReviewQuery(card.operation) !== undefined && card.phone?.tag !== "Exact")) return
+        if (!board.snapshot().media.includes(card) || (approve && card.notice !== undefined)
+          || (approve && namedReviewQuery(card.operation) !== undefined && card.phone?.tag !== "Exact")) return
         const held = try session()
         const live = held !== undefined && (try current(held))
         if (card.phone !== undefined && !board.snapshot().media.includes(card)) return
