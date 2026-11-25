@@ -1,5 +1,5 @@
 // @vitest-environment happy-dom
-import { CloudError, isCredentialInvalid } from "@elizaos/cloud/client";
+import { CloudError, isCredentialInvalid } from "@elizaos/cloud";
 import { Effect, Exit, Fiber, Layer, Option, Redacted, Stream } from "effect";
 import * as HttpClientRequest from "effect/http/HttpClientRequest";
 import { afterEach, describe, expect, it, vi } from "vitest";

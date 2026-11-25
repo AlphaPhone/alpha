@@ -1,5 +1,5 @@
 // spec/app/photos/trash.md, "Story: See what I deleted"; spec/app/photos/trash.md, "Story: Recover photos"; spec/app/photos/trash.md, "Story: Delete photos forever"
-import type { TrashConfirmation } from "@elizaos/os/bridges/definitions/media"
+import type { TrashConfirmation } from "@elizaos/os-bridges"
 import * as Trash from "../../gen/app__photos__trash.effect.vibe"
 import * as Library from "../../gen/app__photos.effect.vibe"
 import type { Actor } from "../../gen/app__photos__actor.effect.vibe"

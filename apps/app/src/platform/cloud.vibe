@@ -1,14 +1,14 @@
 // spec/kit/read.md, "Story: Read from outside"; spec/app/platform/index.md, "A cloud request the phone holds back for want of a sign-in reads as the cloud's own 401"; spec/app/platform/index.md, "A request is refused for want of a network only when Android confirms the app's network is down"
-import { createCloudClient } from "@elizaos/cloud/client"
-import { BridgeUnavailable } from "@elizaos/os/bridges/bridge"
-import { CloudRefused } from "@elizaos/os/bridges/cloud"
-import type { CloudClient as Relay, CloudFailure, CloudMethod, CloudPath, CloudRequest } from "@elizaos/os/bridges/definitions/cloud"
+import { createCloudClient } from "@elizaos/cloud"
+import { BridgeUnavailable } from "@elizaos/os-bridges"
+import { CloudRefused } from "@elizaos/os-bridges"
+import type { CloudClient as Relay, CloudFailure, CloudMethod, CloudPath, CloudRequest } from "@elizaos/os-bridges"
 import { cloudStatusOf, refusedOffline, replied } from "../../gen/app__platform.effect.vibe"
 import { type Failure, type Remote, type Wired, Refused, Unreachable, Unsent, parsed, patience, refusal, remoteAt } from "./remote.vibe"
 import { WiFi, phoneWiFi } from "./wifi.vibe"
 
 module held {
-  import { cloudClient } from "@elizaos/os/bridges/cloud"
+  import { cloudClient } from "@elizaos/os-bridges"
 
   let made: ReturnType<typeof cloudClient> | undefined
   /** eliza's client of the plugin, made once: Capacitor registers a plugin a single time for the life of the page. @throws {never} */

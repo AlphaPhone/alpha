@@ -1,5 +1,5 @@
 // spec/app/home/index.md, "Story: Open an app"; spec/app/home/cards.md, "The row holds the agenda, Messages, Phone, mail, brief and Workflows cards in that order, each only when drawn, and is not drawn when none is"; spec/app/home/index.md, "On the assistant alone Home shows no tile and no card"; spec/app/home/index.md, "Story: Edit Home"; spec/app/home/index.md, "Story: Pull down for notifications"
-import type { InstalledApp } from "@elizaos/os/bridges/definitions/system";
+import type { InstalledApp } from "@elizaos/os-bridges";
 import { HomeScreen, type HomeTileItem, InstalledAppIcon } from "@repo/ui";
 import { useCallback, useSyncExternalStore } from "react";
 import * as Home from "../../gen/app__home.ts";

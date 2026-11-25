@@ -1,7 +1,8 @@
-import type { AgentEvents, AgentRequest, AgentStatus, AgentStreamRequest, ElizaAgentPlugin } from "@elizaos/os/bridges/definitions/agent";
-import type { ElizaCloudPlugin, NativeCloudRequest } from "@elizaos/os/bridges/definitions/cloud";
-import type { ElizaSecureStorePlugin, ElizaSecureStoreResult } from "@elizaos/os/bridges/definitions/secure-store";
+import type { AgentEvents, AgentRequest, AgentStatus, AgentStreamRequest, ElizaAgentPlugin } from "@elizaos/os-bridges";
+import type { ElizaCloudPlugin, NativeCloudRequest } from "@elizaos/os-bridges";
+import type { ElizaSecureStorePlugin, ElizaSecureStoreResult } from "@elizaos/os-bridges";
 import type { Answering } from "./routes.ts";
+import { clearPluginHeaders, pluginHeader } from "./capacitor.ts";
 
 /**
  * A plugin as its Java or Kotlin answers the page: each method of eliza's definition `P`. The phone is faked once, at
@@ -203,7 +204,12 @@ export function plugIn(plugins: Readonly<Record<string, Faked>>): () => void {
   const made = Object.fromEntries(Object.entries(plugins).map(([name, make]) => [name, make((event, data) => { for (const hear of [...heard(name, event).values()]) hear(data); }) as Record<string, (options: unknown) => unknown>]));
   let listeners = 0;
   page.androidBridge = {};
-  capacitor.PluginHeaders = Object.entries(made).map(([name, methods]) => ({ name, methods: [...Object.keys(methods).map((method) => ({ name: method, rtype: "promise" })), { name: "addListener" }, { name: "removeListener" }] }));
+  clearPluginHeaders();
+  capacitor.PluginHeaders = Object.entries(made).map(([name, methods]) => {
+    const header = pluginHeader(name);
+    header.methods.splice(0, header.methods.length, ...Object.keys(methods).map((method) => ({ name: method, rtype: "promise" })), { name: "addListener" }, { name: "removeListener" });
+    return header;
+  });
   capacitor.nativePromise = (name, method, options) => Promise.resolve().then(() => {
     const call = made[name]?.[method];
     if (call === undefined) throw rejection(`${name}.${method} is not implemented`, "UNIMPLEMENTED");
@@ -217,6 +223,7 @@ export function plugIn(plugins: Readonly<Record<string, Faked>>): () => void {
   };
   return () => {
     hearing.clear();
+    clearPluginHeaders();
     delete page.androidBridge;
     delete capacitor.PluginHeaders;
     delete capacitor.nativePromise;

@@ -1,5 +1,5 @@
 // spec/app/calendar/index.md, "Story: See my days"; spec/app/calendar/index.md, "Story: See only my own account's calendar"
-import type { AndroidCalendarEvent, AndroidCalendarList, AndroidCalendarPlugin, AndroidCalendarRow } from "@elizaos/os/bridges/definitions/calendar";
+import type { AndroidCalendarEvent, AndroidCalendarList, AndroidCalendarPlugin, AndroidCalendarRow } from "@elizaos/os-bridges";
 import { type Faked, plugin, rejection } from "./phone.ts";
 import type { Route } from "./routes.ts";
 

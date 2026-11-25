@@ -1,5 +1,5 @@
 // spec/app/contacts/agent.md, "Story: Let the agent read what I have open"; spec/app/messages/composer.md, "The agent's draft goes into the open conversation's draft only while it is empty, and never sends"
-import { type DeviceOperation, readResult } from "@elizaos/agent/operations"
+import { type DeviceOperation, readResult } from "@elizaos/agent"
 import { Machine as Shell } from "../../gen/app__shell.effect.vibe"
 import { Machine as ContactsMachine } from "../../gen/app__contacts.effect.vibe"
 import { type Opened, readOf, senderSaid } from "../../gen/app__contacts__agent.effect.vibe"

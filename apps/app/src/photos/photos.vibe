@@ -1,5 +1,5 @@
 // spec/app/photos/index.md, "Story: Browse the library"; spec/app/photos/index.md, "Story: Give Photos access"; spec/app/photos/index.md, "Story: Change albums from what I am looking at"; spec/app/photos/index.md, "Story: Select photos"
-import type { AlbumChange, LibraryAccess, MediaPage, PhotosClient, Reviewed } from "@elizaos/os/bridges/definitions/media"
+import type { AlbumChange, LibraryAccess, MediaPage, PhotosClient, Reviewed } from "@elizaos/os-bridges"
 import * as Library from "../../gen/app__photos.effect.vibe"
 import type { Actor } from "../../gen/app__photos__actor.effect.vibe"
 import * as Viewer from "../../gen/app__photos__viewer.effect.vibe"

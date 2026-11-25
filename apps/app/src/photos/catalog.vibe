@@ -1,5 +1,5 @@
 // spec/app/photos/index.md, "Only the newest read's answer is shown, only while Photos is showing, and a further page only adds older items"
-import type { MediaCursor, MediaItem, OwnedAlbum, Reviewed } from "@elizaos/os/bridges/definitions/media"
+import type { MediaCursor, MediaItem, OwnedAlbum, Reviewed } from "@elizaos/os-bridges"
 import type { BrowserCapture } from "../platform/photos.vibe"
 
 /** The payload behind a numbered item. Its native revision is the one shown to the owner. */

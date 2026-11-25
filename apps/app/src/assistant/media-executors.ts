@@ -1,6 +1,6 @@
-import type { ExecutorCall } from "@elizaos/agent/client";
-import { NOT_DISPATCHED } from "@elizaos/agent/client";
-import type { DeviceOperation } from "@elizaos/agent/operations";
+import type { ExecutorCall } from "@elizaos/agent";
+import { NOT_DISPATCHED } from "@elizaos/agent";
+import type { DeviceOperation } from "@elizaos/agent";
 import type { Alpha } from "../runtime/area.tsx";
 import type { ReviewAuthority } from "./media-review.vibe";
 

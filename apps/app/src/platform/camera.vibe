@@ -1,12 +1,12 @@
 // spec/app/camera/index.md, "Story: Open the camera"; spec/app/camera/index.md, "Story: Frame the shot"; spec/app/camera/index.md, "Story: Take photos and videos"
 import type { Grant } from "../../gen/kit__permission.ts"
 import type { Lens, Mode } from "../../gen/app__camera.ts"
-import type { CameraDevice, CameraPreviewResult } from "@elizaos/os/bridges/camera"
+import type { CameraDevice, CameraPreviewResult } from "@elizaos/os-bridges"
 import { registered } from "./device.vibe"
 
 module native {
   import { Capacitor, registerPlugin } from "@capacitor/core"
-  import { type CameraClient, cameraClient, cameraPlugin } from "@elizaos/os/bridges/camera"
+  import { type CameraClient, cameraClient, cameraPlugin } from "@elizaos/os-bridges"
 
   let plugin: ReturnType<typeof cameraPlugin> | undefined
   let client: CameraClient | undefined

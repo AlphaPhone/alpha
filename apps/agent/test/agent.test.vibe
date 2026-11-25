@@ -1,6 +1,6 @@
 // spec/agent/index.md, "Story: Run Alpha's agent on the phone"
 // eslint-disable-next-line @typescript-eslint/consistent-type-imports -- ConversationRecord is the schema `schema Created` decodes with, a value the projection ESLint reads does not show
-import { ConversationRecord, TurnController, createRuntimeJsonClient } from "@elizaos/agent/client"
+import { ConversationRecord, TurnController, createRuntimeJsonClient } from "@elizaos/agent"
 import { describe, expect, it } from "@effect/vitest"
 import { configurationExit, coreActions, entryCarried, packedPlugins, productPluginName, refusedActions, workerAdmitted } from "../gen/agent.effect.vibe"
 import { type Running, call, launchFor, listed, manifest, pinnedWorker, policy, ready, socketBridge, startPhoneAgent, startRun } from "./phone.ts"
@@ -21,9 +21,19 @@ function phoneAgent(run: Run, state: string) {
 
 const client = (running: Running) => createRuntimeJsonClient({ bridge: () => socketBridge(running), startupTimeoutMs: 120_000, pollMs: 100, requestTimeoutMs: 60_000 })
 
-/** A path of the host file's list with each placeholder named: the conversation's id, its room's for the turn routes, and an event no calendar holds. */
-const filled = (route: string, conversation: ConversationRecord) =>
-  route.replace("{id}", conversation.id).replace("{roomId}", conversation.roomId).replace("{eventId}", "no-such-event")
+/** A path of the host file's list with each placeholder named: the conversation's, task's or trigger's id, its room's for the turn routes, and an event no calendar holds. */
+const filled = (route: string, conversation: ConversationRecord, taskId: string, triggerId: string) => {
+  const withQuery = route === "/api/scheduled-tasks" ? `${route}?ownerVisibleOnly=1` : route
+  const id = route.startsWith("/api/scheduled-tasks/") ? taskId : route.startsWith("/api/triggers/") ? triggerId : conversation.id
+  return withQuery
+    .replace("{id}", id)
+    .replace("{roomId}", conversation.roomId)
+    .replace("{eventId}", "no-such-event")
+    .replace("{nodeId}", "node-1")
+    .replace("{iteration}", "1")
+    .replace("{mutationId}", "no-such-mutation")
+    .replace("{submissionId}", "no-such-submission")
+}
 
 /** The agent's own answer to a route no module or plugin serves. */
 const unserved = { status: 404, body: { error: "not_found" } }
@@ -36,6 +46,8 @@ schema Listed { conversations: { id: string }[] }
 schema Replied { fullText: string }
 schema Interacted { success: boolean; result: { state?: { notes: { title: string; body: string }[] } } }
 schema Approvals { approvals: Schema.Unknown[] }
+schema ScheduledTasks { tasks: { taskId: string }[] }
+schema CreatedTrigger { trigger: { id: string } }
 
 describe("Build the pack only from the pinned eliza", () => {
   // spec/agent/index.md, "A pack is admitted only when its manifest names the pinned commit, Node 26, no local inference, the plugins it carries, the Alpha product plugin, a pinned workflow worker and every allowed action"
@@ -77,8 +89,17 @@ describe("Run Alpha's agent on the phone", () => {
       try promise(() => controller.bind(opened))
       const result = try promise(() => controller.send({ text: "Remember the word heron." }, { stream: { onPreview: () => {} } }))
       try Effect.try(() => expect(result.kind === "Replied" ? result.reply.text : result.kind).toContain("You said: Remember the word heron."))
+      const seededReminder = try promise(() => call(first, "POST", "/api/alpha/reminders/items", { title: "Route probe", dueDate: "2026-12-01", dueTime: "09:00" }))
+      try Effect.try(() => expect(seededReminder.status).toBe(201))
+      const scheduled = try Schema.decodeUnknownEffect(Schema.fromJsonString(ScheduledTasks))((try promise(() => call(first, "GET", "/api/scheduled-tasks?ownerVisibleOnly=1"))).body)
+      const taskId = scheduled.tasks[0]?.taskId ?? "missing-task"
+      const seededTrigger = try promise(() => call(first, "POST", "/api/triggers", {
+        kind: "prompt", displayName: "Route probe", instructions: "Ping", timezone: "UTC", wakeMode: "inject_now", enabled: false, triggerType: "cron", cronExpression: "0 9 * * *",
+      }))
+      try Effect.try(() => expect(seededTrigger.status).toBe(201))
+      const triggerId = (try Schema.decodeUnknownEffect(Schema.fromJsonString(CreatedTrigger))(seededTrigger.body)).trigger.id
       for (const route of try Effect.try(() => listed())) {
-        const target = filled(route.path, opened)
+        const target = filled(route.path, opened, taskId, triggerId)
         const status = route.stream === true
           ? try promise(async () => {
             const streamed = await runtime.stream(target, { text: "Again." })

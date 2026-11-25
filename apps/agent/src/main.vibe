@@ -1,9 +1,8 @@
 // spec/agent/index.md, "Story: Build the pack only from the pinned eliza"; spec/agent/index.md, "Story: Run Alpha's agent on the phone"
 import * as NodeRuntime from "@effect/platform-node/NodeRuntime"
 import * as NodeServices from "@effect/platform-node/NodeServices"
-import { readBundleManifest } from "@elizaos/agent/bundle"
-import { decodeLaunchDocument } from "@elizaos/agent/launch"
-import { defineRoutes } from "@elizaos/agent"
+import { readBundleManifest } from "@elizaos/agent-host"
+import { decodeLaunchDocument, defineRoutes } from "@elizaos/agent"
 import { deployment } from "@repo/deployment"
 import { pinnedCheckout, pinnedPack } from "@repo/eliza-harness"
 import {
@@ -26,8 +25,8 @@ module node {
   }
 
   /** eliza's bundle builder of the clone at `dir`: the entry it ships imports that clone's agent, so the builder must be the same tree's. */
-  export function builderOf(dir: string): Promise<typeof import("@elizaos/agent/bundle")> {
-    return import(pathToFileURL(`${dir}/packages/agent/dist/src/bundle/build.js`).href) as Promise<typeof import("@elizaos/agent/bundle")>
+  export function builderOf(dir: string): Promise<typeof import("@elizaos/agent-host")> {
+    return import(pathToFileURL(`${dir}/packages/agent-host/dist/src/index.js`).href) as Promise<typeof import("@elizaos/agent-host")>
   }
 }
 import { builderOf, root, words } from node
@@ -58,7 +57,7 @@ const alphaOwned = (name: string) => name.startsWith("@repo/") || name.startsWit
 export function entrySource(bundled: readonly string[], hosted: readonly { name: string; module: string }[], product: { name: string; module: string }): string {
   const allHosted = [...hosted, product]
   return [
-    `import { runAgentCli } from "@elizaos/agent/cli"`,
+    `import { runAgentCli } from "@elizaos/agent-host"`,
     ...bundled.map((name, index) => `import * as plugin${index} from ${JSON.stringify(name)}`),
     ...allHosted.map(({ name, module }, index) => `import { ${module} as host${index} } from ${JSON.stringify(name)}`),
     "",

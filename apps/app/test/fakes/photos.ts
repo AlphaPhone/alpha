@@ -1,5 +1,5 @@
 // spec/app/photos/index.md, "Story: Browse the library"; spec/app/photos/viewer.md, "Story: Look at a photo or video"
-import type { LibraryAccess, PhotosPlugin } from "@elizaos/os/bridges/definitions/media";
+import type { LibraryAccess, PhotosPlugin } from "@elizaos/os-bridges";
 import { plugin, type Faked } from "./phone.ts";
 
 const photo = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+T5XQAAAAASUVORK5CYII=";

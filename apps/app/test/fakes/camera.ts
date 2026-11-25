@@ -1,5 +1,5 @@
 // spec/app/camera/index.md, "Story: Open the camera"; spec/app/camera/index.md, "Story: Take photos and videos"
-import type { CameraGrant, CameraPlugin, CameraPreviewOptions, CameraPreviewResult, CameraSettings, PhotoCaptureOptions } from "@elizaos/os/bridges/definitions/camera";
+import type { CameraGrant, CameraPlugin, CameraPreviewOptions, CameraPreviewResult, CameraSettings, PhotoCaptureOptions } from "@elizaos/os-bridges";
 import { plugin, rejection, type Faked } from "./phone.ts";
 
 /** The camera reported by Android, with the native preview and camera output independently observable. */

@@ -1,5 +1,5 @@
 // spec/app/files/preview.md, "Story: Look at a file"; spec/app/files/preview.md, "Story: Act on the file I am looking at"; spec/app/files/preview.md, "Story: Get a file back when access was lost"; spec/app/files/recent.md, "Story: Find what I opened lately"
-import type { SelectedDocumentsClient, SelectionId } from "@elizaos/os/bridges/definitions/media"
+import type { SelectedDocumentsClient, SelectionId } from "@elizaos/os-bridges"
 import * as KeyValueStore from "effect/persistence/KeyValueStore"
 import * as Browser from "../../gen/app__files.effect.vibe"
 import * as Shown from "../../gen/app__files__preview.effect.vibe"

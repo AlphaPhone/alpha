@@ -1,5 +1,5 @@
 // spec/app/phone/index.md, "Each digit, or each digit taken back, is judged by the phone and looked up among the contacts on the phone"; spec/app/messages/index.md, "The filter chip and the search start a new list, and Retry reads it again"
-import { normalizePhoneNumber } from "@elizaos/os/bridges/definitions/phone";
+import { normalizePhoneNumber } from "@elizaos/os-bridges";
 import type { Typed } from "../../gen/app__phone.ts";
 
 /** Numbers every network routes to emergency services, as Android's own list starts. */
