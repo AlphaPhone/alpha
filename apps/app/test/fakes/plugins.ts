@@ -49,7 +49,7 @@ export function plugins(world: Scene, services: { readonly agent: Answering; rea
     ElizaCloudSpeech: elizaCloudSpeech(world.voice),
     ElizaSignIn: elizaSignIn(world.voice, () => world.signedIn, world.mailLease),
     AlphaBrowser: alphaBrowser(world.browser),
-    ...(world.notes.audio.size > 0 ? { AlphaNotes: alphaNotes(world.notes) } : {}),
+    AlphaNotes: alphaNotes(world.notes),
     ...(world.workflows.nativeDigests === undefined ? {} : { AlphaHostedDigestDelivery: alphaHostedDigests(world.workflows.nativeDigests) }),
   };
 }

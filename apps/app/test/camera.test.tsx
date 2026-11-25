@@ -13,6 +13,9 @@ import { scene } from "./fakes/scene.ts";
 underAct();
 afterEach(closeAll);
 
+/** The recording timer as the owner reads it: the elapsed time, then the time left once a limit is a minute away. */
+const timerText = () => document.querySelector("[role='timer']")?.textContent;
+
 describe("Camera on a phone", () => {
   it("Frame the shot and take photos and videos (spec/app/camera/index.md, \"Story: Frame the shot\")", async () => {
     const world = { ...scene(), phone: true };
@@ -37,11 +40,19 @@ describe("Camera on a phone", () => {
     // spec/app/camera/index.md, "Story: Take photos and videos"
     await press("Video mode");
     await until(alpha, runtime, Machine, (state) => state.mode === "Video");
-    await press("Record video");
+    await press("Start recording");
     await until(alpha, runtime, Machine, (state) => state.film.stage === "Running");
+    // spec/app/camera/recording.md, "Story: Read the clock"
+    expect(timerText()).toBe("0:00");
+    await later(alpha, 1000);
+    await until(alpha, runtime, Machine, (state) => state.film.elapsed === 1);
+    expect(timerText()).toBe("0:01");
+    await later(alpha, 240_000);
+    await until(alpha, runtime, Machine, (state) => state.film.elapsed === 241);
+    expect(timerText()).toBe("4:01 · 0:59 left");
     await hardware("back");
     await until(alpha, runtime, Machine, (state) => state.film.stage === "Saved");
-    expect(button("Record video")).toBeDefined();
+    expect(button("Start recording")).toBeDefined();
     expect(world.camera.savedVideos).toHaveLength(1);
 
     // spec/app/camera/index.md, "Story: Leave and come back"
@@ -62,16 +73,16 @@ describe("Camera on a phone", () => {
     await press("Camera");
     await until(alpha, runtime, Machine, (state) => state.phase === "Ready");
     await press("Video mode");
-    await press("Record video");
+    await press("Start recording");
     await until(alpha, runtime, Machine, (state) => state.film.stage === "Opening");
 
     await press("Back to apps");
     await hardware("back");
-    expect(button("Video mode")).toBeDefined();
+    expect(button("Viewfinder. Tap to focus or pinch to zoom")).toBeDefined();
     expect(world.camera.savedVideos).toHaveLength(0);
     await drawn(recorderOpened);
     await until(alpha, runtime, Machine, (state) => state.film.stage === "Saved");
-    expect(button("Record video")).toBeDefined();
+    expect(button("Start recording")).toBeDefined();
     expect(world.camera.savedVideos).toHaveLength(1);
 
     await hardware("back");
@@ -109,7 +120,7 @@ describe("Camera on a phone", () => {
     await press("Camera");
     await until(alpha, runtime, Machine, (state) => state.phase === "Ready");
     await press("Video mode");
-    await press("Record video");
+    await press("Start recording");
     await until(alpha, runtime, Machine, (state) => state.film.stage === "Running");
 
     const image = world.photos.rows[0]?.image ?? "";
@@ -124,7 +135,7 @@ describe("Camera on a phone", () => {
     });
     await press("Stop recording");
     await until(alpha, runtime, Machine, (state) => state.film.stage === "Saved");
-    const tile = button("Open last capture in Photos");
+    const tile = button("Open last video");
     expect(tile?.disabled).toBe(false);
     expect(tile?.querySelector("img")).toBeNull();
     await expect.poll(() => world.photos.readCount).toBe(1);
@@ -142,7 +153,7 @@ describe("Camera on a phone", () => {
     if (kind === "video") {
       await press("Video mode");
       await until(alpha, runtime, Machine, (state) => state.mode === "Video");
-      await press("Record video");
+      await press("Start recording");
       await until(alpha, runtime, Machine, (state) => state.film.stage === "Running");
       await press("Stop recording");
       await until(alpha, runtime, Machine, (state) => state.film.stage === "Saved");
@@ -159,7 +170,7 @@ describe("Camera on a phone", () => {
       width: 1280, height: 720, size: 10_000, date: 1795401800000, revision: "owned-capture",
       ...(kind === "video" ? { path: playback, duration: 1 } : {}),
     });
-    await press("Open last capture in Photos");
+    await press(`Open last ${kind}`);
     await until(alpha, photosArea.runtime(alpha), Viewer, (state) => state.read.status === "Loaded");
     if (kind === "video") expect(document.querySelector("video")?.getAttribute("src")).toBe(playback);
     else expect(document.querySelector('img[alt="Owned still.jpg"]')).not.toBeNull();
@@ -180,7 +191,7 @@ describe("Camera on a phone", () => {
       id: "m:a0b1-c2d3:i:1", name: "Different still.jpg", owned: false, kind: "image", image: "",
       width: 1280, height: 720, size: 10_000, date: 1795401800000, revision: "different-capture",
     });
-    await press("Open last capture in Photos");
+    await press("Open last photo");
     await until(alpha, photosArea.runtime(alpha), Library, (state) => state.visible && state.library.status === "Loaded" && state.access.grant === "Granted");
     expect([Boolean(button("Different still.jpg")), world.photos.readCount]).toEqual([true, 1]);
     expect((await photosArea.runtime(alpha).runPromise(Effect.flatMap(Viewer, (viewer) => viewer.get()))).open).toBe(0);
@@ -197,7 +208,7 @@ describe("Camera on a phone", () => {
     if (kind === "video") {
       await press("Video mode");
       await until(alpha, runtime, Machine, (state) => state.mode === "Video");
-      await press("Record video");
+      await press("Start recording");
       await until(alpha, runtime, Machine, (state) => state.film.stage === "Running");
       await press("Stop recording");
       await until(alpha, runtime, Machine, (state) => state.film.stage === "Saved");
@@ -223,7 +234,7 @@ describe("Camera on a phone", () => {
       name: "Just captured", owned: true,
     });
 
-    await press("Open last capture in Photos");
+    await press(`Open last ${kind}`);
     const photos = photosArea.runtime(alpha);
     await until(alpha, photos, Viewer, (state) => state.read.status === "Loaded");
     if (kind === "video") expect(document.querySelector("video")?.getAttribute("src")).toBe(playback);
@@ -256,7 +267,7 @@ describe("Camera on a phone", () => {
     const library = photosArea.runtime(alpha);
     await press("Camera");
     await until(alpha, runtime, Machine, (state) => state.phase === "Ready" && state.last > 0);
-    await press("Open last capture in Photos");
+    await press("Open last photo");
     await until(alpha, library, Viewer, (state) => state.read.status === "Loaded");
     expect(document.querySelector('img[alt="Camera.jpg"]')).not.toBeNull();
     expect(world.photos.readCount).toBe(1);
@@ -277,7 +288,7 @@ describe("Camera on a phone", () => {
 
     await press("Back to Camera");
     await until(alpha, runtime, Machine, (state) => state.showing && state.phase === "Ready");
-    await press("Open last capture in Photos");
+    await press("Open last photo");
     await until(alpha, library, Viewer, (state) => state.read.status === "Loaded" && state.origin === "CameraCapture");
     await hardware("back");
     await until(alpha, runtime, Machine, (state) => state.showing && state.phase === "Ready");
@@ -308,7 +319,7 @@ describe("Camera on a phone", () => {
     const library = photosArea.runtime(alpha);
     await press("Camera");
     await until(alpha, camera.runtime(alpha), Machine, (state) => state.phase === "Ready" && state.last > 0);
-    await press("Open last capture in Photos");
+    await press("Open last photo");
     await until(alpha, library, Viewer, (state) => state.read.status === "Loaded");
     await drawn(() => {
       capture.size += 1;
@@ -338,6 +349,6 @@ describe("Camera on a phone", () => {
     await until(alpha, runtime, Machine, (state) => state.agent.stage === "Over");
     expect(await outcome).toMatchObject({ result: "Taken", media: { libraryId: "image-1" } });
     expect(world.camera.photos).toHaveLength(1);
-    expect(button("Open last capture in Photos")).toBeDefined();
+    expect(button("Open last photo")).toBeDefined();
   });
 });

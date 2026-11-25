@@ -613,7 +613,7 @@ const nameBefore: (str, str) => bool
 pure def lawNoNameComesBeforeItself(label: str): bool = not(nameBefore(label, label))
 
 pure def precedes(order: Order, first: F::Item, second: F::Item): bool =
-  if (order == ByName) nameBefore(first.name, second.name)
+  if (order == ByName) first.name != second.name and nameBefore(first.name, second.name)
   else if (order == ByDate) first.revision > second.revision
   else first.bytes > second.bytes
 
@@ -709,16 +709,22 @@ pure def sometimesAFilterFollowedTheOwner(s: Files): bool = S::finding(s.search)
 ### An explicit request to open or filter Files may act directly on the same idle Files view
 
 The phone remembers the place and the list and search tickets when the
-owner sends a typed or spoken request from Files. Only an exact, authorized Files
-command asks for direct execution on its turn. When the resident returns
-that message's matching direct proposal, the phone may carry it out once if
-the owner allows direct action, the same place and tickets still show
-and the open viewer is empty. A different request, an unreadable
-preference, or a work item in progress keeps the usual review. A spoken
-request uses its own current voice turn and conversation, and an attached
-document does not authorize a direct action. The agent gets a result
-receipt without the opened file's contents. An open
-counts only when that folder loaded or that file could be shown.
+owner sends a typed or spoken request from Files. Each authorized turn
+from Files asks for direct Files execution on that turn, for Files alone
+(`direct-files-v1`); the agent decides from the owner's words whether they
+asked for a filter or an open, and the phone never matches those words.
+When the resident returns that message's one direct filter or open, the
+phone may carry it out once if the owner allows direct action, the same
+place and tickets still show and the open viewer is empty. A turn whose
+reply proposes nothing leaves Files as it is; any other Files proposal, an
+unreadable preference, or a work item in progress keeps the usual review. A
+spoken request uses its own current voice turn and conversation,
+declares only the Files capabilities and, since voice shows no review card,
+asks for a filter or an open only (`direct-files-only-v1`): the agent
+refuses a change by voice and has the owner ask for it in the chat, where
+its card shows. An attached document does not authorize a direct action. The agent gets a result receipt without the
+opened file's contents. An open counts only when that folder loaded or
+that file could be shown.
 
 ```quint
 pure def freeForDirectRead(s: Files): bool =
@@ -730,9 +736,12 @@ pure def freeForDirectRead(s: Files): bool =
 
 ### An exact Files request from another screen may open Files once after the typed reply finishes
 
-With direct Files actions allowed, a typed request naming a file or
-folder path, or an explicit filter, can open Files after the same turn
-finishes. Positions only name results that already show in Files.
+With direct Files actions allowed, each authorized turn from a screen that
+may bring Files forward asks for direct Files execution, as a turn from
+Files does, and the agent's one direct filter, or open by path, can open
+Files after the same turn finishes. Positions only name results that
+already show in Files, so an open by position never starts from another
+screen. Every other proposal of the turn keeps its card.
 Closing Ask Alpha, leaving the source or Files, or asking another
 question cancels the continuation. Files first loads its storage and
 settles its listing. The exact item then has to open or the filter finish
@@ -905,6 +914,34 @@ pure def sometimesTheAgentFiltered(s: Files): bool = S::finding(s.search) == S::
 > As the owner, I want to select items and make a folder, rename, move,
 > copy, share or delete them, one change at a time, a deletion only after I
 > confirmed what goes, and the agent's request only as I approved it.
+
+### A change the agent proposes while Files is not on screen shows a notice to open Files, and its card is built in Files, for Files as it then shows
+
+A share, move, deletion or new folder the agent proposes while Files is not
+on screen cannot be reviewed there, since the approvals area builds a Files
+card only from what Files shows. The request instead shows the notice
+"Open Files to review this action." with Decline only, as the earlier Alpha
+did, and nothing runs. When the owner opens Files, the area reads the request
+again. If it is still open, unexpired, from this enrollment and an answer to
+the latest message sent, the area builds its card afresh for Files as it now
+shows, and approving it holds to that screen as every card does. A request
+that is no longer open, or that Files cannot review, leaves no card. Alpha
+never opens Files for the request itself.
+
+```quint
+type ChangeCard = ChangeHidden | ChangeNotice | ChangeReviewed
+pure def changeCard(filesShown: bool, reviewable: bool, stillOpen: bool, latest: bool): ChangeCard =
+  if (not(stillOpen) or not(latest)) ChangeHidden
+  else if (not(filesShown)) ChangeNotice
+  else if (reviewable) ChangeReviewed
+  else ChangeHidden
+pure def lawOnlyFilesOnScreenBuildsTheCard(reviewable: bool, stillOpen: bool, latest: bool): bool =
+  changeCard(false, reviewable, stillOpen, latest) != ChangeReviewed
+pure def lawAStaleRequestLeavesNoCard(filesShown: bool, reviewable: bool): bool =
+  changeCard(filesShown, reviewable, false, true) == ChangeHidden and changeCard(filesShown, reviewable, true, false) == ChangeHidden
+pure def lawAnOpenLatestRequestAwayFromFilesShowsTheNotice(reviewable: bool): bool =
+  changeCard(false, reviewable, true, true) == ChangeNotice
+```
 
 ### The owner selects items of the place showing, all of them, or none, and a changed selection closes the sheets, telling the owner a share sheet sent nothing, and voids the delete confirmation
 

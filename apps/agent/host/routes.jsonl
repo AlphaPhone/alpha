@@ -8,6 +8,7 @@
 { "method": "POST", "path": "/api/conversations/{id}/messages/stream", "stream": true }
 { "method": "POST", "path": "/api/conversations/{id}/fork" }
 { "method": "POST", "path": "/api/turns/{roomId}/abort" }
+{ "method": "POST", "path": "/api/turns/warm" }
 { "method": "GET", "path": "/api/client-devices/capabilities" }
 { "method": "POST", "path": "/api/client-devices/register" }
 { "method": "GET", "path": "/api/client-devices/context" }
@@ -15,6 +16,7 @@
 { "method": "POST", "path": "/api/client-devices/proposals/{id}/decision" }
 { "method": "POST", "path": "/api/client-devices/proposals/{id}/claim" }
 { "method": "POST", "path": "/api/client-devices/proposals/{id}/receipt" }
+{ "method": "POST", "path": "/api/client-devices/proposals/{id}/read-completion" }
 { "method": "POST", "path": "/api/client-devices/proposals/{id}/reconciliation" }
 { "method": "GET", "path": "/api/approvals" }
 { "method": "POST", "path": "/api/approvals/{id}/resolve" }
@@ -98,3 +100,12 @@
 { "method": "POST", "path": "/api/scheduled-tasks/{id}/skip" }
 { "method": "POST", "path": "/api/scheduled-tasks/{id}/reopen" }
 { "method": "POST", "path": "/api/scheduled-tasks/{id}/fire" }
+{ "method": "GET", "path": "/api/wallet" }
+{ "method": "POST", "path": "/api/wallet" }
+{ "method": "POST", "path": "/api/wallet/switch" }
+{ "method": "GET", "path": "/api/wallet/holdings" }
+{ "method": "GET", "path": "/api/wallet/activity" }
+{ "method": "GET", "path": "/api/wallet/requests" }
+{ "method": "POST", "path": "/api/wallet/requests" }
+{ "method": "POST", "path": "/api/wallet/requests/{id}/review" }
+{ "method": "POST", "path": "/api/wallet/requests/{id}/decide" }

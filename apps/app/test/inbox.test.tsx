@@ -42,7 +42,7 @@ const confirm = (name: string) => drawn(() => {
 const menu = (item: string, label = "More actions") => drawn(() => {
   button(label)?.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
 }).then(() => drawn(() => {
-  const found = [...document.querySelectorAll("[role=menuitem]")].find((one) => one.textContent === item);
+  const found = [...document.querySelectorAll("[role=menuitem],[role=menuitemradio]")].find((one) => one.textContent === item);
   if (!(found instanceof HTMLElement)) throw new Error(`no ${item} in the menu`);
   found.click();
 }));
@@ -137,11 +137,22 @@ describe.each([["a browser", false], ["a phone", true]])("in %s", (_where, phone
     const visited = vi.spyOn(window, "open").mockReturnValue(null);
     await press("https://northpoint.test/room");
     await until(alpha, runtime, Shown, (s) => s.link === 1);
+    expect([world.browser.tabs.size, visited.mock.calls.length]).toEqual([0, 0]);
     step("8");
-    await confirm("Open");
+    await confirm("Open link");
     await until(alpha, runtime, Shown, (s) => s.link === 0);
     step("9");
-    expect(visited).toHaveBeenCalledWith("https://northpoint.test/room", "_blank", "noopener,noreferrer");
+    if (phone) {
+      await until(alpha, alpha.runtime, Shell, (state) => showing(state, "Browser"));
+      await vi.waitFor(() => {
+        const places = [...world.browser.tabs.values()].filter((tab) => tab.committed && !tab.private).map((tab) => tab.history.at(-1));
+        expect([places, visited.mock.calls.length]).toEqual([["https://northpoint.test/room"], 0]);
+      }, { timeout: 12_000 });
+      await hardware("back");
+      await until(alpha, alpha.runtime, Shell, (state) => showing(state, "Inbox"));
+    } else {
+      expect(visited).toHaveBeenCalledWith("https://northpoint.test/room", "_blank", "noopener,noreferrer");
+    }
 
     // spec/app/inbox/message.md, "An attachment is reviewed before it is opened or saved, and one use is in flight at a time"
     await action("Open agenda.txt");
@@ -155,7 +166,7 @@ describe.each([["a browser", false], ["a phone", true]])("in %s", (_where, phone
     await until(alpha, runtime, Shown, (s) => s.attachment === 0);
 
     // spec/app/inbox/marking.md, "The owner marks a message read or unread; while another mark is in flight the owner is told it is still in progress, and a message whose last mark was unconfirmed is marked again only after the list was read afresh"
-    await menu("Mark as unread");
+    await menu("Mark unread");
     await until(alpha, runtime, Marks, (s) => s.told === "Marked");
     step("10");
     expect(world.inbox.changes).toEqual(["mark-read g1", "mark-unread g1"]);
@@ -165,7 +176,7 @@ describe.each([["a browser", false], ["a phone", true]])("in %s", (_where, phone
 
     // spec/app/inbox/sending.md, "Archive and Trash are held for the undo window, and only the owner's Undo before it ends sends nothing"
     await choose("Standup notes");
-    await action("Archive");
+    await menu("Archive", "Mail options");
     await confirm("Yes");
     await until(alpha, runtime, Changes, (s) => s.undo.holding === "Held");
     step("12");
@@ -178,7 +189,7 @@ describe.each([["a browser", false], ["a phone", true]])("in %s", (_where, phone
 
     // spec/app/inbox/sending.md, "A recorded operation sends its one request, for its own account under that account's grant now, exactly as reviewed: a draft while it is at the revision shown and its hand-over is written to the phone, archive and Trash once the undo window has passed"
     await choose("Standup notes");
-    await action("Archive");
+    await menu("Archive", "Mail options");
     await confirm("Yes");
     await later(alpha, 10_000);
     await until(alpha, runtime, Changes, (s) => s.attempt.outcome === "Confirmed");
@@ -191,7 +202,7 @@ describe.each([["a browser", false], ["a phone", true]])("in %s", (_where, phone
     await drawn(() => [...document.querySelectorAll("[role=toolbar] button, nav button, button")].find((found) => found.textContent === "Archive" && !found.hasAttribute("aria-label"))?.dispatchEvent(new MouseEvent("click", { bubbles: true })));
     await until(alpha, runtime, List, (s) => s.selected.folder === "Archived" && s.list.status === "Loaded");
     await choose("Standup notes");
-    await press("Move back");
+    await menu("Restore to Inbox", "Mail options");
     await confirm("Yes");
     await until(alpha, runtime, Changes, (s) => s.kind === "Unarchive" && s.attempt.outcome === "Confirmed");
     expect(world.inbox.changes.at(-1)).toBe("unarchive g4");
@@ -227,6 +238,7 @@ describe.each([["a browser", false], ["a phone", true]])("in %s", (_where, phone
 it("Connect Gmail and keep to its grant (spec/app/inbox/index.md, \"Story: Connect Gmail and keep to its grant\")", async () => {
   const world = { ...scene(), phone: true };
   world.inbox.google = undefined;
+  world.inbox.offline = true;
   const { alpha } = await open(world);
   const runtime = inbox.runtime(alpha);
 
@@ -240,8 +252,14 @@ it("Connect Gmail and keep to its grant (spec/app/inbox/index.md, \"Story: Conne
   world.signedIn = true;
   await hardware("home");
 
-  // spec/app/inbox/index.md, "The owner can be signed out, have no account connected, have several to choose from, lack read access, be asked to reconnect Gmail, and a check can be asked again before the last answers"
+  // spec/app/inbox/index.md, "The answer names the connected accounts, their credentials and grants; the account chosen stays selected while it is connected, else the one account that may be read, else none and the owner chooses": a failed check changes nothing, and with nothing listed the list says mail could not be read and offers to check again
   await press("Inbox");
+  await until(alpha, runtime, List, (s) => s.accounts.status === "Failed");
+  expect([rows(), told()]).toEqual([[], expect.stringContaining("Mail could not be read")]);
+  world.inbox.offline = false;
+
+  // spec/app/inbox/index.md, "The owner can be signed out, have no account connected, have several to choose from, lack read access, be asked to reconnect Gmail, and a check can be asked again before the last answers"
+  await press("Try again");
   await until(alpha, runtime, List, (s) => s.accounts.status === "Loaded" && s.connected.length === 0);
   expect(told()).toContain("Connect Gmail");
 
@@ -288,6 +306,30 @@ it("Connect Gmail and keep to its grant (spec/app/inbox/index.md, \"Story: Conne
   const signedIn = await runtime.runPromise(List.use((list) => list.get()));
   expect([world.mailLease.held, world.mailLease.asked, world.mailLease.heldBack, signedIn.accounts.ticket, signedIn.signedIn, await generation()])
     .toEqual([true, 2, heldBack, after.accounts.ticket + 1, true, kept]);
+
+  // spec/app/inbox/index.md, "A check the phone holds back for want of the mail lease keeps the session and everything kept, and asks for one more sign-in": with mail on screen, the list keeps its saved rows and asks to Reconnect above them.
+  world.inbox.google = { email: "owner@gmail.test", connection: "grant-2", capabilities: ["google.basic_identity", "google.gmail.triage", "google.gmail.send", "google.gmail.manage"] };
+  await hardware("home");
+  await tile("Inbox");
+  await until(alpha, runtime, List, (s) => s.list.status === "Loaded" && s.pages >= 1);
+  const shown = rows();
+  expect(shown.length).toBeGreaterThan(0);
+  world.mailLease.held = false;
+  await hardware("home");
+  await tile("Inbox");
+  await until(alpha, runtime, List, (s) => s.failure === "LeaseNeeded");
+  expect([rows(), Boolean(button("Reconnect Gmail")), told().includes("Connect Eliza Cloud")]).toEqual([shown, true, false]);
+
+  // spec/app/inbox/message.md, "Only the newest read's answer is shown, while its account may still be read; a read that fails says why": a message the phone cannot read for want of the lease closes, back to the list and its Reconnect, never a Retry that cannot work.
+  await row(shown[0] ?? "");
+  await until(alpha, runtime, Shown, (s) => s.message === 0 && s.fault === "Revoked");
+  await until(alpha, runtime, List, (s) => s.failure === "LeaseNeeded" && s.accounts.status === "Failed");
+  expect([Boolean(button("Retry")), Boolean(button("Reconnect Gmail")), rows()]).toEqual([false, true, shown]);
+
+  // spec/app/platform/index.md, "The owner's tap on a mail sign-in control starts the phone's one more sign-in for mail where the phone wants it, then reads again once": Reconnect over the saved rows starts the sign-in for mail, and the list is read again with the lease.
+  await press("Reconnect Gmail");
+  await until(alpha, runtime, List, (s) => s.failure === "Fine" && s.accounts.status === "Loaded" && s.list.status === "Loaded");
+  expect([world.mailLease.held, world.mailLease.asked, Boolean(button("Reconnect Gmail")), rows()]).toEqual([true, 3, false, shown]);
 });
 
 it("Send a draft I reviewed (spec/app/inbox/sending.md, \"Story: Send a draft I reviewed\"; spec/app/inbox/drafts.md, \"Story: Write a message\"; spec/app/inbox/drafts.md, \"Story: Set a draft aside or discard it\"; spec/app/inbox/adding.md, \"Story: Add files and people to my draft\"; spec/app/inbox/suggestion.md, \"Story: Review what is offered into my email\"; spec/app/inbox/sending.md, \"Story: Save my draft to Gmail, or delete it there, knowingly\")", async () => {
@@ -390,8 +432,8 @@ it("Send a draft I reviewed (spec/app/inbox/sending.md, \"Story: Send a draft I 
   const again = await open(world);
   const restored = inbox.runtime(again.alpha);
   await until(again.alpha, restored, Writing, (s) => !s.open && s.shelf.shelved.length === 1);
-  await press("1 drafts set aside");
-  await press("Keep these words.No recipient");
+  await menu("Drafts", "More folders");
+  await press("Draft, (No subject)");
   await until(again.alpha, restored, Writing, (s) => s.open);
   expect([
     document.querySelector<HTMLInputElement>('input[aria-label="To"]')?.value,

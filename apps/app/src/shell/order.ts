@@ -17,6 +17,7 @@ const listed = {
   Contacts: true,
   Files: true,
   Workflows: true,
+  Wallet: true,
   Settings: true,
 } satisfies Record<View, true>;
 

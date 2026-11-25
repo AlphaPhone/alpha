@@ -30,7 +30,7 @@ export service NoteStore {
   read(): NotesSnapshot!NotesFailed
   create(input: { readonly content: string; readonly format: NoteFormat; readonly creationId: string; readonly color?: StickyNote["color"] }): NotesInteractResult!NotesFailed
   update(input: { readonly id: string; readonly expectedRevision: number; readonly content?: string; readonly format: NoteFormat }): NotesInteractResult!NotesFailed
-  discard(id: string): NotesInteractResult!NotesFailed
+  discard(id: string, expectedRevision: number): NotesInteractResult!NotesFailed
   recover(id: string, expectedRevision: number): NotesInteractResult!NotesFailed
   erase(review: NotesTrashErase): { readonly erased: number; readonly recordingCleanup: readonly NotesTrashRecordingCleanup[]; readonly state: NotesSnapshot }!NotesFailed
   cleanup(): readonly NotesTrashRecordingCleanup[]!NotesFailed
@@ -50,7 +50,8 @@ export const noteStore = Layer.effect(NoteStore, effect {
       tryPromise({ try: (signal) => client.interact("create-note", { ...input, forceNew: true }, signal), catch: failed }),
     update: (input: { readonly id: string; readonly expectedRevision: number; readonly content?: string; readonly format: NoteFormat }) =>
       tryPromise({ try: (signal) => client.interact("update-note", { ...input }, signal), catch: failed }),
-    discard: (id: string) => tryPromise({ try: (signal) => client.interact("delete-note", { id }, signal), catch: failed }),
+    discard: (id: string, expectedRevision: number) =>
+      tryPromise({ try: (signal) => client.interact("delete-note", { id, expectedRevision }, signal), catch: failed }),
     recover: (id: string, expectedRevision: number) =>
       tryPromise({ try: (signal) => client.interact("restore-note", { id, expectedRevision }, signal), catch: failed }),
     erase: (review: NotesTrashErase) => tryPromise({ try: (signal) => client.eraseTrash(review, signal), catch: failed }),

@@ -1,4 +1,5 @@
-import { Calendar, Camera, Clock, Folder, Globe, Hash, Image, ListChecks, type LucideIcon, Mail, MapPin, MessageSquare, Phone, Send, Settings, StickyNote, UserRound, Workflow } from "lucide-react";
+import { CalendarGlyph } from "@repo/ui";
+import { Camera, Clock, Folder, Globe, Hash, Image, ListChecks, type LucideIcon, Mail, MapPin, MessageSquare, Phone, Send, Settings, StickyNote, UserRound, Wallet, Workflow } from "lucide-react";
 import type { View } from "../../gen/app__shell.ts";
 
 export const views = {
@@ -7,7 +8,7 @@ export const views = {
   Inbox: { label: "Inbox", icon: Mail },
   Telegram: { label: "Telegram", icon: Send },
   Slack: { label: "Slack", icon: Hash },
-  Calendar: { label: "Calendar", icon: Calendar },
+  Calendar: { label: "Calendar", icon: CalendarGlyph },
   Clock: { label: "Clock", icon: Clock },
   Reminders: { label: "Reminders", icon: ListChecks },
   Browser: { label: "Browser", icon: Globe },
@@ -18,6 +19,7 @@ export const views = {
   Contacts: { label: "Contacts", icon: UserRound },
   Files: { label: "Files", icon: Folder },
   Workflows: { label: "Workflows", icon: Workflow },
+  Wallet: { label: "Wallet", icon: Wallet },
   Settings: { label: "Settings", icon: Settings },
 } satisfies Record<View, { label: string; icon: LucideIcon }>;
 

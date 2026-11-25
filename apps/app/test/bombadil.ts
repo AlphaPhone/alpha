@@ -7,3 +7,4 @@ export * from "./bombadil/telegram.ts";
 export * from "./bombadil/slack.ts";
 export * from "./bombadil/clock.ts";
 export * from "./bombadil/reminders.ts";
+export * from "./bombadil/wallet.ts";

@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { Code, Info, LayoutGrid, Mic, RefreshCw, Settings, Shield, UserRound } from "lucide-react";
+import { Code, Info, LayoutGrid, Mic, Settings, Shield, UserRound } from "lucide-react";
 import { ListGroup } from "../ListGroup.tsx";
 import { StatusDot } from "../StatusDot.tsx";
 import { SettingsAndroidRow } from "./SettingsAndroidRow.tsx";
@@ -40,7 +40,7 @@ const links: SettingsPageLink[] = [
 ];
 
 /**
- * The first page of Settings: the account, General, Privacy, Apps and About, Android's own settings, and in a
+ * The first page of Settings: the account on its own card, General, Privacy, Apps and About, Android's own settings, and in a
  * development build the Developer page. Rows are numbered by slot, so a row keeps its place whether or not the ones
  * above it are shown.
  * @model spec/app/settings/index.md
@@ -55,9 +55,15 @@ export function SettingsTopPage({ developer = false, onPhone = true, actions, ac
           <SettingsNavRow title="Microphone may be on" icon={<Mic />} value={<StatusDot status="error" label="Needs attention" />} onOpen={onHandOver && (() => onHandOver("listener"))} {...at(0)} />
         </ListGroup>
       ) : null}
-      <ListGroup>
-        <SettingsNavRow title="Account" aria-label="Account" detail={accountDetail} icon={<UserRound />} onOpen={onHandOver && (() => onHandOver("account-and-plan"))} {...at(1)} />
-      </ListGroup>
+      <SettingsNavRow
+        title="Account"
+        aria-label="Account"
+        detail={accountDetail}
+        icon={<UserRound />}
+        className="min-h-16.5 rounded-group bg-secondary py-3 text-secondary-foreground [&>span>span]:leading-normal"
+        onOpen={onHandOver && (() => onHandOver("account-and-plan"))}
+        {...at(1)}
+      />
       {links.map((link, index) => (
         <ListGroup key={link.page}>
           <SettingsPageLinks links={[link]} first={index + 2} onOpen={onOpen} place={place} onPlace={onPlace} />
@@ -67,7 +73,6 @@ export function SettingsTopPage({ developer = false, onPhone = true, actions, ac
       {onPhone ? (
         <ListGroup>
           <SettingsAndroidRow target="android-home" title="Android settings" icon={<Settings />} {...android} {...at(7)} />
-          <SettingsAndroidRow target="accounts-sync" title="Accounts and sync" icon={<RefreshCw />} {...android} {...at(8)} />
         </ListGroup>
       ) : null}
       {children}

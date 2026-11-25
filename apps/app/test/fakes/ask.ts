@@ -33,21 +33,28 @@ export interface AskScene {
   nextReplyProvisional?: boolean;
   /** The actions the next reply says it ran, made from the turn's metadata, as eliza's agent lists them on its done frame. */
   nextActions?: (metadata: unknown) => readonly unknown[];
+  /** The agent is older than any direct-request mode: a turn that states one is refused whole, as eliza's agent refuses an invalid voice view context. */
+  knowsNoActionMode?: boolean;
   cloudWarmCalls: number;
   /** The fake native store, which survives disposal of the WebView runtime. */
   readonly drafts: Map<string, string>;
   beforeDraftExchange?: () => Promise<void>;
   refusedDraftExchanges: number;
+  /** Whether the agent's status says it can answer, and each warm-up it was asked for, with the headers it came with. */
+  canRespond: boolean;
+  warmUps: Record<string, string>[];
+  warmUpFails: boolean;
+  statusReads: number;
 }
 
 export interface Kept {
   readonly roomId: string;
   readonly title: string;
-  readonly messages: { id: string; role: "user" | "assistant"; text: string }[];
+  readonly messages: { id: string; role: "user" | "assistant"; text: string; failureKind?: string; cloudCode?: string }[];
 }
 
 export function askScene(): AskScene {
-  return { opened: 0, said: [], down: false, stalled: false, turns: new Map(), kept: new Map(), searchDown: false, pagesDown: false, pagesMissing: false, pageReads: 0, listReads: 0, holdLists: false, heldLists: [], cloudWarmCalls: 0, drafts: new Map(), refusedDraftExchanges: 0 };
+  return { opened: 0, said: [], down: false, stalled: false, turns: new Map(), kept: new Map(), searchDown: false, pagesDown: false, pagesMissing: false, pageReads: 0, listReads: 0, holdLists: false, heldLists: [], cloudWarmCalls: 0, drafts: new Map(), refusedDraftExchanges: 0, canRespond: true, warmUps: [], warmUpFails: false, statusReads: 0 };
 }
 
 /** A storage address within the fake phone's already verified local account. */
@@ -108,11 +115,14 @@ function reply(scene: AskScene, room: string, text: string, keep: (said: string)
       if (scene.acknowledgment !== undefined) controller.enqueue(frame({ type: "acknowledgment", text: scene.acknowledgment }));
       if (scene.acknowledgment !== undefined) controller.enqueue(frame({ type: "tool", name: "CALENDAR", label: "Using Calendar" }));
       if (scene.stalled) {
-        controller.enqueue(frame({ type: "token", text: "Thinking" }));
+        for (const piece of custom ?? ["Thinking"]) controller.enqueue(frame({ type: "token", text: piece }));
         scene.turns.set(room, () => controller.close());
         return;
       }
       const answer = () => {
+        for (const { action } of actions as readonly { readonly action?: unknown }[]) {
+          if (typeof action === "string") controller.enqueue(frame({ type: "tool", name: action, label: "Working" }));
+        }
         if (custom !== undefined && custom.length > 0) {
           for (const piece of custom) controller.enqueue(frame({ type: "token", text: piece, ...(provisional ? { provisional } : {}) }));
           const full = custom.join("");
@@ -199,10 +209,12 @@ export function askRoutes(scene: AskScene): Route[] {
         scene.metadata?.push(body.metadata);
         scene.spokenFiles?.push({ channel: body.channelType, images: body.images });
         if (body.text !== body.text.trim()) return Response.json({ error: "invalid_message" }, { status: 400 });
+        if (scene.knowsNoActionMode === true && JSON.stringify(body.metadata ?? {}).includes('"agentActionMode"')) return Response.json({ error: "VOICE_UI_CONTEXT_INVALID" }, { status: 400 });
         if (found[2] === undefined) return Response.json({ text: `You said: ${body.text}`, ...named(scene.said.length) });
         scene.said.push(body.text);
         keep("user", body.text);
         Object.assign(messages.at(-1) ?? {}, { clientMessageId: (body as { clientMessageId?: string }).clientMessageId });
+        if (scene.refusal !== undefined) messages.push({ id: `m${scene.said.length}a`, role: "assistant", text: "", failureKind: scene.refusal.failureKind, ...(scene.refusal.cloudCode === undefined ? {} : { cloudCode: scene.refusal.cloudCode }) });
         return reply(scene, `r${found[1]}`, body.text, (said) => keep("assistant", said), body.metadata);
       });
     },
@@ -216,7 +228,16 @@ export function askRoutes(scene: AskScene): Route[] {
         return Response.json({ aborted: stop !== undefined, roomId: room, reason, outcome: stop === undefined ? "nothingRunning" : "stopped" });
       });
     },
-    (request, url) => (request.method === "GET" && url.pathname === "/api/status" ? Response.json({ serverInstanceId: "alpha-fake" }) : undefined),
+    (request, url) => {
+      if (request.method !== "GET" || url.pathname !== "/api/status") return;
+      scene.statusReads += 1;
+      return Response.json({ serverInstanceId: "alpha-fake", canRespond: scene.canRespond });
+    },
+    (request, url) => {
+      if (request.method !== "POST" || url.pathname !== "/api/turns/warm") return;
+      scene.warmUps.push(Object.fromEntries([...request.headers].filter(([name]) => name.startsWith("x-eliza-"))));
+      return scene.warmUpFails ? Response.json({ error: "warm_up_failed" }, { status: 500 }) : Response.json({ started: true }, { status: 202 });
+    },
     (request, url) => {
       if (request.method !== "POST" || url.pathname !== "/api/cloud/warm") return;
       scene.cloudWarmCalls += 1;

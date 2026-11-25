@@ -22,6 +22,7 @@ import { textReviewRoute } from "./text-review.ts";
 import { type UpdateScene, updateScene } from "./update.ts";
 import { type VoiceScene, voiceScene } from "./voice.ts";
 import { type BrowserScene, browserScene } from "./browser.ts";
+import { type WalletScene, walletRoutes, walletScene } from "./wallet.ts";
 
 export interface Scene {
   phone: boolean;
@@ -30,6 +31,7 @@ export interface Scene {
   signedIn: boolean;
   /** The phone's device lease for mail and calendar: a phone signed in before mail leases existed holds none. */
   readonly mailLease: MailLeaseScene;
+  residentAvailable: boolean;
   readonly secrets: Map<string, string>;
   readonly slots: Set<string>;
   readonly sample: SampleScene;
@@ -51,11 +53,12 @@ export interface Scene {
   readonly update: UpdateScene;
   readonly voice: VoiceScene;
   readonly browser: BrowserScene;
+  readonly wallet: WalletScene;
 }
 
 export function scene(): Scene {
   return {
-    phone: false, image: false, now: 0, signedIn: true, secrets: new Map(), slots: new Set(),
+    phone: false, image: false, now: 0, signedIn: true, residentAvailable: true, secrets: new Map(), slots: new Set(),
     mailLease: { held: true, answer: "SignsIn", asked: 0, heldBack: 0 },
     sample: sampleScene(),
     ask: askScene(),
@@ -76,6 +79,7 @@ export function scene(): Scene {
     update: updateScene(),
     voice: voiceScene(),
     browser: browserScene(),
+    wallet: walletScene(),
   };
 }
 
@@ -86,6 +90,7 @@ export function services(world: Scene) {
   const review = world.telephony.textReview;
   return {
     agent: answering([
+      () => world.residentAvailable ? undefined : new Response(null, { status: 503 }),
       health,
       ...sampleRoutes(world.sample),
       ...askRoutes(world.ask),
@@ -97,6 +102,7 @@ export function services(world: Scene) {
       ...workflowRoutes(world.workflows),
       ...platformRoutes(world.platform),
       ...telephonyRoutes(world.telephony),
+      ...walletRoutes(world.wallet, () => world.now),
     ]),
     cloud: answering([
       ...cloudRoutes(() => world.signedIn, () => world.now),

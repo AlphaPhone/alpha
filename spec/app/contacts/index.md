@@ -101,6 +101,10 @@ pure val weight_contactRead = 4
 > a filter, and to be told plainly when there are none, when nothing
 > matches and when Alpha has no access.
 
+Contacts are grouped from A to Z by the first letter without accents, with
+other names together at the end. Names use local alphabetical order
+within each section. Section headings appear from 20 contacts.
+
 ### Contacts reads the list each time it comes to the front
 
 ```quint

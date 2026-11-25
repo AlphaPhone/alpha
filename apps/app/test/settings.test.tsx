@@ -20,6 +20,8 @@ import { type Scene, scene } from "./fakes/scene.ts";
 
 underAct();
 afterEach(closeAll);
+// spec/app/settings/index.md, "The build says once whether it is a development build, and the phone whether Alpha runs on a phone and on an Alpha image": these journeys open the development build with its developer tools.
+history.replaceState(null, "", "/?tools=1");
 
 const shipped = vi.fn(() => Promise.resolve(Response.json(notices)));
 vi.stubGlobal("fetch", ((input: RequestInfo | URL, init?: RequestInit) => (String(input).endsWith("licenses/third-party-notices.json") ? shipped() : fetch(input, init))) as typeof fetch);
@@ -49,7 +51,7 @@ async function settingsOpen(world = { ...scene(), phone: true }) {
 }
 
 describe("Settings", () => {
-  it("Find a setting and come back (spec/app/settings/index.md, \"Story: Find a setting and come back\"; spec/app/account/plan.md, \"Story: Know my plan\")", async () => {
+  it("Find a setting and come back (spec/app/settings/index.md, \"Story: Find a setting and come back\"; spec/app/account/plan.md, \"Story: Know my plan\"; spec/app/account/billing.md, \"Story: Pay in the browser\")", async () => {
     const { alpha, machines, world } = await settingsOpen();
     // spec/app/settings/index.md, "The build says once whether it is a development build, and the phone whether Alpha runs on a phone and on an Alpha image"
     await until(alpha, alpha.runtime, Pages.Machine, (s) => s.told && s.phone && !s.image && s.development);
@@ -77,6 +79,15 @@ describe("Settings", () => {
     const shownBalance = new Intl.NumberFormat(undefined, { style: "currency", currency: "USD" }).format(12.5);
     await vi.waitFor(() => expect(document.querySelector('[role="dialog"]')?.textContent).toContain(account.email));
     await vi.waitFor(() => expect(document.querySelector('[aria-label="Cloud plan"]')?.textContent).toContain(shownBalance));
+    await act(async () => document.querySelector<HTMLElement>('[role="dialog"] summary')?.click());
+    const offerPrice = new Intl.NumberFormat(undefined, { style: "currency", currency: "USD" }).format(19.5);
+    const roundUsd = new Intl.NumberFormat(undefined, { style: "currency", currency: "USD", maximumFractionDigits: 0 });
+    await vi.waitFor(() => {
+      const [plus, pro] = [...document.querySelectorAll('[aria-label="Plans"] li')].map((row) => row.textContent);
+      expect(plus).toContain(offerPrice);
+      expect(plus).toContain(roundUsd.format(16));
+      expect(pro).toContain(roundUsd.format(49));
+    });
     await hardware("back");
     await until(alpha, alpha.runtime, Layers.Machine, (state) => !Layers.listed(state, "account"));
     expect(await page(alpha)).toBe("Top");
@@ -92,10 +103,11 @@ describe("Settings", () => {
     await vi.waitFor(() => expect(button("Account")?.textContent).toContain("Signed out"));
     world.signedIn = true;
 
-    // spec/app/settings/index.md, "Each page links to what another area owns there": Agent activity offers the conversations, which the shell opens over the app.
+    // spec/app/settings/index.md, "Each page links to what another area owns there": Agent activity offers the conversations as Alpha's earlier build did, New and History; New starts one, which the shell opens over the app.
     await press("About");
     await tap("Agent activity");
-    await press("Conversations");
+    expect([Boolean(button("New conversation")), Boolean(button("Load conversations"))]).toEqual([true, true]);
+    await press("New conversation");
     await until(alpha, alpha.runtime, Shell, (s) => s.assistant === "Full");
     expect((await machines.runPromise(Facts.Machine.use((facts) => facts.get()))).read.read.status).toBe("Loaded");
     expect(world.settings.opened).toEqual([]);
@@ -193,7 +205,7 @@ describe("Settings", () => {
       await until(alpha, machines, Android.Machine, (s) => s.told === "SaidNearby");
       // spec/app/settings/android.md, "Alpha's alert, permission and photo pages open for Alpha itself, never for another app, and a channel's page names its channel"
       await tap("Notifications");
-      await tap("Alpha's alerts");
+      await tap("Notifications");
       await until(alpha, machines, Android.Machine, (s) => s.target === "AlphaAlerts" && s.start.read.status === "Loaded");
       await tap("Reminders");
       await until(alpha, machines, Android.Machine, (s) => s.target === "AlertChannel" && s.start.read.status === "Loaded");
@@ -291,7 +303,7 @@ describe("Settings", () => {
     // spec/app/settings/preferences.md, "The owner changes Ask before Alpha acts, Load images or what Alpha may share only once the phone has read them, one save at a time, with ten seconds to save"
     await tap("Ask before Alpha acts");
     await until(alpha, alpha.runtime, Prefs.Machine, (s) => s.saving.read.status === "Loaded" && Prefs.asksBeforeActing(s, "WebAction"));
-    await tap("Browser page");
+    await tap("Browser page for Alpha");
     await until(alpha, alpha.runtime, Prefs.Machine, (s) => s.saving.read.status === "Loaded" && !Prefs.allows(s, "BrowserPage"));
     // spec/app/settings/preferences.md, "Alpha shares the phone's location, the Browser page open, or Telegram or Slack screen context with a chat turn, and changes Gmail or Calendar, only when the phone read that the owner allowed it"
     await tap("Telegram screen");
@@ -309,7 +321,7 @@ describe("Settings", () => {
     const refused = await alpha.runtime.runPromise(Prefs.Machine.use((prefs) => prefs.get()));
     expect([Prefs.allows(refused, "CalendarEdits"), refused.agentGoogle]).toEqual([true, { tag: "Consents", gmailChanges: false, calendarEdits: true }]);
     expect(JSON.parse(localStorage.getItem("alpha.preferences") ?? "{}")).toEqual({ askFirst: true, images: true, shares: ["AgentLocation", "CalendarEdits", "SlackContext"] });
-    await tap("Location");
+    await tap("Location for Alpha");
     await until(alpha, alpha.runtime, Prefs.Machine, (s) => s.saving.read.status === "Loaded" && !Prefs.allows(s, "AgentLocation"));
     expect(world.settings.consents).toHaveLength(3);
     // spec/app/settings/preferences.md, "A change takes effect when the phone saved it; when the phone refuses it, Alpha says it was not saved and nothing changes; when the phone does not answer in time, Alpha says it was not saved and reads the device preferences again": a change the host takes too late is what Settings shows once the phone has finished with it.
@@ -391,7 +403,7 @@ describe("Settings", () => {
     const sharedFiles: File[] = [];
     Object.defineProperty(navigator, "canShare", { configurable: true, value: () => true });
     Object.defineProperty(navigator, "share", { configurable: true, value: (data: ShareData) => { sharedFiles.push(...(data.files ?? [])); return Promise.resolve(); } });
-    await press("Export diagnostics");
+    await press("Export");
     await until(alpha, machines, Developer.Machine, (s) => s.exporting.read.status === "Loaded");
     const text = await sharedFiles[0]?.text();
     const report = JSON.parse(text ?? "{}");
@@ -400,13 +412,13 @@ describe("Settings", () => {
       { format: "alpha-cloud-stream-timing-v1", sessions: [{ sttConnectedMs: 812, firstFrameSentMs: 815, consentRetry: true }, { sttConnectedMs: 390, firstFrameSentMs: null, consentRetry: false }] },
     ]);
     // spec/app/settings/developer.md, "Clear is offered only for a log with problems, one at a time; once the startup area answers, the log is read again": Clear asks first, and backing out clears nothing.
-    await press("Clear");
+    await press("Clear problem log");
     await press("Cancel");
     expect(world.settings.crashes.length).toBe(2);
-    await press("Clear");
+    await press("Clear problem log");
     await press("Clear log");
     await until(alpha, machines, Developer.Machine, (s) => s.log.read.status === "Loaded" && s.problems === 0);
-    expect([world.settings.crashes, Boolean(button("Clear"))]).toEqual([[], false]);
+    expect([world.settings.crashes, Boolean(button("Clear problem log"))]).toEqual([[], false]);
   });
 
   it("Erase all data (spec/app/settings/reset.md, \"Story: Erase all data\")", async () => {

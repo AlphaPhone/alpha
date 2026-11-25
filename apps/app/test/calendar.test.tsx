@@ -7,15 +7,21 @@ import { Machine as Held } from "../gen/app__calendar__deletions.effect.vibe";
 import { Machine as Shell } from "../gen/app__shell.effect.vibe";
 import { Machine as Settings } from "../gen/app__settings.effect.vibe";
 import { Machine as Link } from "../gen/app__calendar__link.effect.vibe";
+import { Machine as Reminders } from "../gen/app__reminders.effect.vibe";
 import calendar from "../src/calendar/index.tsx";
 import { civilDay, dateOf, dayStart } from "../src/calendar/time.ts";
+import { createReminderItem, resetReminderStores } from "../src/reminders/reminders.vibe";
+import { DEFAULT_LIST_ID, remindersStore } from "../src/reminders/store.ts";
 import type { Alpha } from "../src/runtime/area.tsx";
 import { button, closeAll, drawn, fill, hardware, later, only, open, press, underAct, until } from "./alpha.tsx";
 import { agentEvent, agentRequest } from "./fakes/calendar.ts";
 import { type Scene, scene } from "./fakes/scene.ts";
 
 underAct();
-afterEach(closeAll);
+afterEach(async () => {
+  await closeAll();
+  resetReminderStores();
+});
 
 const hour = 3_600_000;
 const narrowDay = new Intl.DateTimeFormat(undefined, { weekday: "narrow" });
@@ -66,11 +72,14 @@ async function fromMonth(pill: string) {
 /** Bring Calendar forward, as Home, a notice or Ask Alpha does through the shell. */
 const openCalendar = (alpha: Alpha) => alpha.runtime.runPromise(Shell.use((shell) => shell.send({ type: "openView", view: "Calendar" })));
 
+const calendarSettings = () => document.querySelector('[data-settings-page="Calendar"]');
+
 const dayButton = (day: number) => `${narrowDay.format(dateOf(day))} ${dateOf(day).getDate()}`;
 
 describe("Calendar without a connected account", () => {
   it("Shows Calendar settings on the empty standalone timeline (spec/app/calendar/presentation.md, \"Story: Know what to do when Calendar cannot read\")", async () => {
     const world = { ...morning(false), signedIn: false };
+    world.inbox.google = undefined;
     const { alpha } = await open(world, only("view:Calendar", "view:Settings"));
     const runtime = calendar.runtime(alpha);
     await openCalendar(alpha);
@@ -81,6 +90,8 @@ describe("Calendar without a connected account", () => {
     await press("Open Calendar settings");
     await until(alpha, alpha.runtime, Settings, (state) => state.page === "CalendarApp");
     expect((await alpha.runtime.runPromise(Shell.use((shell) => shell.get()))).trail).toEqual(["Calendar", "Settings"]);
+    await vi.waitFor(() => expect(calendarSettings()?.textContent).toContain("Google CalendarNot connected"));
+    expect(calendarSettings()?.textContent).not.toContain("Permissions");
   });
 
   it("Shows the granted local calendar while the account is signed out (spec/app/calendar/index.md, \"Story: Let Calendar read my phone's calendar\")", async () => {
@@ -94,6 +105,57 @@ describe("Calendar without a connected account", () => {
     expect(document.querySelector('[aria-label="Calendar timeline"]')?.textContent).not.toContain("Not connected");
     expect(button("Open Calendar settings")).toBeUndefined();
   });
+
+  it("Shows and completes the exact dated reminder in Calendar (spec/app/calendar/index.md, \"Story: See reminders among my events\")", async () => {
+    const world = { ...morning(false), signedIn: false };
+    const { alpha } = await open(world, only("view:Calendar"));
+    const runtime = calendar.runtime(alpha);
+    await openCalendar(alpha);
+    await until(alpha, runtime, View, (state) => state.front && state.anchor === world.today);
+    await until(alpha, alpha.runtime, Reminders, (state) => state.sync.status === "Loaded");
+
+    const inputs = { listId: DEFAULT_LIST_ID, title: "Bring the blue notebook", dueMinute: 570, alertMinutes: null };
+    const first = await alpha.runtime.runPromise(createReminderItem({ ...inputs, notes: "The first draft is inside.", dueDate: "2026-11-24" }));
+    await until(alpha, alpha.runtime, Reminders, (state) => state.write.outcome === "Confirmed");
+    const tomorrow = await alpha.runtime.runPromise(createReminderItem({ ...inputs, notes: "A different notebook.", dueDate: "2026-11-25" }));
+    await until(alpha, alpha.runtime, Reminders, (state) => state.write.outcome === "Confirmed");
+    if (!first || !tomorrow) throw new Error("Expected two saved reminders");
+
+    await until(alpha, runtime, View, (state) => state.reminders === 1);
+    await press(/^Bring the blue notebook,/);
+    await until(alpha, runtime, View, (state) => state.reminder > 0);
+    const detail = () => document.querySelector('[data-alpha-subview="calendar-detail"]')?.textContent;
+    expect(detail()).toContain("The first draft is inside.");
+    expect(detail()).not.toContain("A different notebook.");
+    await press("Complete reminder occurrence");
+    await vi.waitFor(() => expect(detail()).toContain("Completed · no further alarm scheduled"));
+    expect(remindersStore.findItem(first.id)?.completed).toBe(true);
+    expect(remindersStore.findItem(tomorrow.id)?.completed).toBe(false);
+
+    await hardware("back");
+    await until(alpha, runtime, View, (state) => state.reminder === 0);
+    expect(detail()).toBeUndefined();
+    expect(button(/^Bring the blue notebook,/)).toBeDefined();
+  });
+});
+
+it("Shows the newly verified Google grant when Calendar Settings reopens (spec/app/settings/index.md, \"Each page links to what another area owns there\")", async () => {
+  const world = morning(false);
+  world.inbox.google = { email: "owner@alpha.test", connection: "google-owner", capabilities: ["google.calendar.read"] };
+  const { alpha } = await open(world, only("view:Settings"));
+  await drawn(() => alpha.runtime.runPromise(Shell.use((shell) => shell.send({ type: "openView", view: "Settings" }))));
+  await until(alpha, alpha.runtime, Settings, (state) => state.page === "Top");
+  await press("Apps");
+  await press("Calendar");
+  await vi.waitFor(() => expect(calendarSettings()?.textContent).toContain("Google CalendarFinish setup"));
+
+  await press("Back to Apps");
+  await until(alpha, alpha.runtime, Settings, (state) => state.page === "Apps");
+  world.inbox.google = { email: "owner@alpha.test", connection: "google-owner", capabilities: ["google.calendar.read", "google.calendar.write"] };
+  await press("Calendar");
+  await vi.waitFor(() => expect(calendarSettings()?.textContent).toContain("Google CalendarConnected"));
+  expect(calendarSettings()?.textContent).not.toContain("Finish setup");
+  expect(world.calendar.writes).toEqual([]);
 });
 
 describe.each([["a browser", false], ["a phone", true]])("in %s", (_where, phone) => {
@@ -349,7 +411,12 @@ describe("in a browser", () => {
     await until(alpha, runtime, View, (s) => s.overlay === "Search");
     await fill("Search events", "dent");
     await tap("Dentist");
-    await until(alpha, runtime, View, (s) => s.anchor === world.today + 2 && s.overlay === "NoOverlay" && s.google.status === "Loaded");
+    await until(alpha, runtime, View, (s) => s.open !== 0 && s.overlay === "NoOverlay");
+    expect(document.querySelector("[data-alpha-subview=calendar-detail] h1")?.textContent).toBe("Dentist");
+    await press("Back to calendar");
+    await until(alpha, runtime, View, (s) => s.open === 0);
+    await press(dayButton(world.today + 2));
+    await until(alpha, runtime, View, (s) => s.anchor === world.today + 2 && s.google.status === "Loaded");
     expect(titles()).toEqual(["Dentist"]);
 
     // spec/app/calendar/index.md, "A switch of the Calendars sheet hides or shows one calendar"; spec/app/calendar/presentation.md, "A hidden calendar's rows show neither in Calendar nor on Home"

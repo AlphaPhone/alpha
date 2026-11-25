@@ -23,6 +23,7 @@ rules.
 - [Reminders](./reminders/): smart views, custom lists, due dates, recurrence, priorities, due alerts, snooze, undo and agent sync
 - [Sample reminders](./sample/): the sample area, which only its own journeys mount: a read, a feed, an undo window and an attempt outside
 - [Text size](./sample/size.md): the second sample, which only its own journeys mount: senders, an opening that asks the phone, the phone's signals and a page-wide effect
+- [Wallet](./wallet/): the wallet the agent holds: making it, what it holds, an address to be paid at, transfers reviewed and decided, and what happened
 - [Maps](./maps/): search, places, directions, guidance and the map, over Cloud Maps
 - [Phone](./phone/): calls, voicemail, phone details and Home cards, on an Alpha image
 - [Messages](./messages/): SMS and MMS threads, composer and send, on an Alpha image

@@ -113,6 +113,7 @@ type Effect =
   | Reread({ turn: int, recheck: int })
   | Arrived({ recorded: bool })
   | Navigate({ turn: int, view: S::View })
+  | NavigateHome({ turn: int })
   | NavigateFiles({ turn: int, source: List[S::View], panel: S::Detent, route: int })
   | Navigated({ turn: int, opened: bool })
 type Moved = { state: Conversation, out: List[Effect] }
@@ -489,6 +490,33 @@ pure def sometimesAReplyBreaksOff(c: Conversation): bool = c.turn.reply == Broke
 pure def sometimesTheAgentIsAwayWithACheckToDo(c: Conversation): bool = not(c.ready) and c.check == LookLater
 ```
 
+### Alpha asks the agent to warm up at launch, on return to the foreground and when Ask Alpha is raised from its bar, only while the agent can answer, and shows nothing of it
+
+The first reply after opening Alpha should come as fast as the second, so
+Alpha asks the agent to warm its model (`POST /api/turns/warm`, eliza's
+`spec/agent/conversation/planning.md`) when the owner may talk soon: when
+Ask Alpha first loads at launch, each time Alpha returns to the
+foreground, and each time Ask Alpha leaves its bar for typing, the sheet or
+the full screen. It asks only when the agent's status says it can answer
+(signed in, or on a key of the owner's, and not blocked) and no sensitive
+screen shows, where no message is sent either, and with the enrolled
+device's headers, so the warm-up builds the tools this phone's turns are
+offered; a warm-up that finds the device not yet enrolled shares the one
+enrollment a message would wait for, never a second. The agent keeps the
+warm-ups at least four minutes apart and pays for nothing more; the
+warm-up is detached and bounded as a whole, never holds the screen, and
+its answer and any failure are dropped without a word.
+
+```quint
+type WarmTrigger = Launched | Foreground | Raised
+pure def raisedFromTheBar(before: S::Detent, after: S::Detent): bool = before == S::Bar and after != S::Bar
+pure def asksWarmUp(trigger: WarmTrigger, canRespond: bool, sensitive: bool): bool = canRespond and not(sensitive)
+pure def lawAnAgentThatCannotAnswerIsNeverWarmed(trigger: WarmTrigger, sensitive: bool): bool = not(asksWarmUp(trigger, false, sensitive))
+pure def lawNoWarmUpOverASensitiveScreen(trigger: WarmTrigger, canRespond: bool): bool = not(asksWarmUp(trigger, canRespond, true))
+pure def lawEveryRaiseFromTheBarIsATrigger(after: S::Detent): bool = raisedFromTheBar(S::Bar, after) iff after != S::Bar
+pure def lawMovingAboveTheBarIsNoTrigger(before: S::Detent, after: S::Detent): bool = before != S::Bar implies not(raisedFromTheBar(before, after))
+```
+
 ## Story: Stop a reply
 
 > As the owner, I want Stop reply to end the turn at once, to take back a
@@ -787,6 +815,22 @@ pure def navigate(c: Conversation, ticket: int, view: S::View): Moved =
   { state: { ...c, opening: A::dispatch(A::record(A::plan(ticket))) }, out: List(Navigate({ turn: ticket, view: view })) }
 ```
 
+### A complete reply may take the owner Home, once, as it may open a view
+
+The agent names Home as it names any view (`spec/agent/index.md`, "The
+launch names Home and every Alpha app but Notes as a view the agent may
+show, by the id the phone opens it by"). The phone claims it once for the
+turn, on the same terms, and asks the shell to go Home.
+
+```quint
+pure def canNavigateHome(c: Conversation, ticket: int): bool =
+  ticket == c.turn.send.id and c.turn.reply == Complete and c.turn.revision == c.context.revision
+    and not(c.context.sensitive) and c.opening.id < ticket
+
+pure def navigateHome(c: Conversation, ticket: int): Moved =
+  { state: { ...c, opening: A::dispatch(A::record(A::plan(ticket))) }, out: List(NavigateHome({ turn: ticket })) }
+```
+
 ### An explicit Files continuation opens only from the same app trail and Ask Alpha panel
 
 The completed turn names its source trail and panel in the shell request.
@@ -826,6 +870,8 @@ pure def navigated(c: Conversation, ticket: int, opened: bool): Moved =
 pure def stepAViewIsOpenedOncePerTurn(before: Conversation, via: str, after: Conversation, out: List[Effect]): bool =
   out.every(e => match e {
     | Navigate(n) => before.opening.id < n.turn and n.turn == after.turn.send.id and after.opening.outcome == A::Sent
+        and not(after.context.sensitive) and after.turn.revision == after.context.revision
+    | NavigateHome(n) => before.opening.id < n.turn and n.turn == after.turn.send.id and after.opening.outcome == A::Sent
         and not(after.context.sensitive) and after.turn.revision == after.context.revision
     | NavigateFiles(n) => before.opening.id < n.turn and n.turn == after.turn.send.id and after.opening.outcome == A::Sent
         and not(after.turn.stopping) and not(after.context.sensitive) and after.turn.revision == after.context.revision

@@ -41,7 +41,7 @@ function write(text: string) {
 /** Open the menu of the message that says `text` and choose `item`, as the owner does with the keyboard. */
 function onMessage(text: string, item: string) {
   act(() => {
-    const found = [...document.querySelectorAll("[role=log] article button")].find((one) => one.textContent === text);
+    const found = [...document.querySelectorAll("[role=log] article button[aria-haspopup=menu]")].find((one) => one.nextElementSibling?.textContent === text);
     if (!(found instanceof HTMLButtonElement)) throw new Error(`no message ${text}`);
     found.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
   });
@@ -168,6 +168,12 @@ it("Keeps my phone draft through restart and leaves it with my account (spec/app
   expect(world.ask.said).toEqual([]);
 });
 
+/** Wait, on the runtime of `alpha`, until `check` holds. */
+async function settled(alpha: Awaited<ReturnType<typeof open>>["alpha"], check: () => boolean, detail: () => unknown) {
+  for (let turn = 0; turn < 2_000 && !check(); turn += 1) await drawn(() => alpha.runtime.runPromise(Effect.yieldNow));
+  if (!check()) throw new Error(`did not settle: ${JSON.stringify(detail())}`);
+}
+
 describe.each([["a browser", false], ["a phone", true]])("in %s", (_where, phone) => {
   // spec/app/assistant/index.md, "Story: Ask Alpha something"; spec/app/assistant/composer.md, "Story: Send what I wrote"; spec/app/assistant/chats.md, "Story: Start a conversation, or fork one"
   it("Ask Alpha something, in a conversation made for it (spec/app/assistant/index.md, \"Story: Ask Alpha something\")", async () => {
@@ -190,6 +196,8 @@ describe.each([["a browser", false], ["a phone", true]])("in %s", (_where, phone
     await until(alpha, runtime, Reply, (s) => s.status === "Settled" && s.final === "You said: Hello".length);
     // spec/app/assistant/index.md, "The agent is told the view, the time zone, the day only from Calendar, and whether something is selected"
     expect(world.ask.metadata).toMatchObject([{ observation: { view: "home", sensitive: false } }]);
+    // spec/app/browser/reading.md, "Only the committed page of a normal tab in front, while Browser is the open screen and Browser page for Alpha is on, is ever handed over": a turn asked on Home takes no page.
+    expect(world.ask.metadata[0]).not.toHaveProperty("browserPage");
     // spec/app/assistant/context.md, "The locator holds whether the owner allows it, the time last told, the last GPS fix and the last network answer, each read once under its ticket, and when each may be read again": a cold turn never waits for a fix, and starts one read behind it.
     expect(locationIn(world.ask.metadata[0])).toBe(undefined);
     if (phone) await until(alpha, runtime, Locator, (s) => s.gpsAt >= 0);
@@ -261,10 +269,19 @@ describe.each([["a browser", false], ["a phone", true]])("in %s", (_where, phone
     expect([(document.querySelector("section[aria-label='Ask Alpha'] [role=log]")?.textContent ?? "").includes("You’re out of plan allowance and credits, so I couldn’t reply."), Boolean(button("Manage plan"))]).toEqual([true, true]);
     world.ask.refusal = undefined;
 
-    // spec/app/assistant/chats.md, "Older or newer messages are read around a message of the conversation showing"
-    await press("Earlier");
+    // spec/app/assistant/chats.md, "Older or newer messages are read around a message of the conversation showing": the
+    // transcript offers Earlier only while messages before the first one showing exist, so here, with the first message
+    // showing, the conversation is read around it directly.
+    expect(button("Earlier")).toBeUndefined();
+    await runtime.runPromise(Effect.flatMap(Chats, (chats) => chats.send({ type: "scroll", around: 1 })));
     await until(alpha, runtime, Chats, (s) => s.around > 0 && s.page.status === "Loaded");
     expect(lines().slice(0, 2)).toEqual(["Hello", "You said: Hello"]);
+    // spec/app/assistant/reply.md, "Out of funds is refused before any output, is never spoken, and offers only Manage plan": read again from history, the refused reply is the same one line, never "Out of credits".
+    const reopened = document.querySelector("[role=log] [data-alpha-message-id='m3a']");
+    const fundingLine = "You’re out of plan allowance and credits, so I couldn’t reply.";
+    const refusedRows = [...document.querySelectorAll("[role=log] article")].filter((line) => line.textContent?.includes(fundingLine));
+    const managePlan = [...(reopened?.querySelectorAll("button") ?? [])].some((control) => control.textContent === "Manage plan");
+    expect([reopened?.textContent?.includes(fundingLine), managePlan, refusedRows.length]).toEqual([true, true, 1]);
 
     // spec/app/assistant/composer.md, "A quoted message goes with the next send, until the owner removes the quote"
     onMessage("You said: Hello", "Reply");
@@ -303,6 +320,46 @@ describe.each([["a browser", false], ["a phone", true]])("in %s", (_where, phone
       await until(alpha, runtime, Conversation, (s) => s.turn.send.id === 7 && s.turn.reply === "Complete");
       expect(locationIn(world.ask.metadata?.at(-1))).toBe(undefined);
     }
+
+    // spec/app/assistant/reply.md, "Prose is drawn with its Markdown: bold, italics, code, headings, lists and quotes; a link is a link only to an https address, and HTML reads as text"
+    const marked = "**Limes** tonight?\n> Ask [Ana](https://ana.example/) <b>now</b>\n- [one](javascript:alert(1))";
+    write(marked);
+    await press("Send");
+    await until(alpha, runtime, Reply, (s) => s.status === "Settled" && s.final === `You said: ${marked}`.length);
+    await vi.waitFor(() => expect([...document.querySelectorAll("[role=log] article")].at(-1)?.querySelector("strong")).toBeTruthy());
+    const reply = [...document.querySelectorAll("[role=log] article")].at(-1);
+    expect([reply?.querySelector("strong")?.textContent, reply?.querySelector("blockquote a")?.getAttribute("href"), reply?.querySelectorAll("a").length, reply?.querySelector("b"), reply?.querySelector("li")?.textContent, lines().at(-1)])
+      .toEqual(["Limes", "https://ana.example/", 1, null, "one", "You said: Limes tonight?Ask Ana <b>now</b>one"]);
+    // spec/app/assistant/reply.md, "Prose is drawn with its Markdown: bold, italics, code, headings, lists and quotes; a link is a link only to an https address, and HTML reads as text": Enter on the link is the link's own, and the message's press still opens its actions.
+    const link = reply?.querySelector("a");
+    act(() => { link?.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true })); });
+    expect([link?.closest("button"), document.querySelector("[role=menu]")]).toEqual([null, null]);
+    const messagePress = reply?.querySelector<HTMLButtonElement>("button[aria-haspopup=menu]");
+    expect([messagePress?.getAttribute("aria-label"), messagePress?.textContent, messagePress?.hasAttribute("aria-labelledby"), messagePress?.nextElementSibling?.textContent]).toEqual(["Message actions", "", false, "You said: Limes tonight?Ask Ana <b>now</b>one"]);
+    act(() => { messagePress?.click(); });
+    expect(document.querySelector("[role=menu]")?.getAttribute("aria-label")).toBe("Message actions");
+    act(() => { reply?.querySelector<HTMLButtonElement>("button[aria-haspopup=menu]")?.click(); });
+    // spec/app/assistant/reply.md, "Copy, quote, read aloud, use in email and Talk take the reply's plain words, without its marks"
+    if (phone) {
+      await vi.waitFor(() => onMessage("You said: Limes tonight?Ask Ana <b>now</b>one", "Copy"));
+      await vi.waitFor(() => expect(world.settings.copied.at(-1)).toBe("You said: Limes tonight?\n\nAsk Ana (https://ana.example/) <b>now</b>\n\n• one"));
+    }
+
+    // spec/app/assistant/reply.md, "The agent's turn tag is never drawn, copied, quoted, emailed or spoken, and a reply still being written holds back what may become one": the owner's own words keep it, and a link's words stay.
+    const tagged = [[["Sure.\n[answer] Paris"], "Sure.Paris", "Sure.\nParis"], [["Paris. [answer]"], "Paris.", "Paris."], [["<promise> One sec."], "One sec.", "One sec."], [["[ans", "wer] Paris"], "Paris", "Paris"], [["[answer", "](https://example.com)"], "answer", "answer (https://example.com/)"]] as const;
+    for (const [said, drawn, plain] of tagged) {
+      const { turn } = await runtime.runPromise(Effect.flatMap(Conversation, (machine) => machine.get()));
+      world.ask.nextReplyChunks = said;
+      write("Capital of France? [answer]");
+      await press("Send");
+      await until(alpha, runtime, Conversation, (s) => s.turn.send.id === turn.send.id + 1 && s.turn.reply === "Complete");
+      await until(alpha, runtime, Reply, (s) => s.status === "Settled");
+      await vi.waitFor(() => expect(lines().slice(-2)).toEqual(["Capital of France? [answer]", drawn]));
+      if (phone) {
+        await vi.waitFor(() => onMessage(drawn, "Copy"));
+        await vi.waitFor(() => expect(world.settings.copied.at(-1)).toBe(plain));
+      }
+    }
   });
 
   // spec/app/assistant/search.md, "Story: Search my conversations"; spec/app/assistant/chats.md, "Story: Open a message that search found"
@@ -326,25 +383,66 @@ describe.each([["a browser", false], ["a phone", true]])("in %s", (_where, phone
     expect(document.body.textContent?.includes("Let me look")).toBe(false);
   });
 
+  // spec/app/assistant/index.md, "Alpha asks the agent to warm up at launch, on return to the foreground and when Ask Alpha is raised from its bar, only while the agent can answer, and shows nothing of it"
+  it("Warm the agent before my first message: at launch, on return and when Ask Alpha is raised, never while it cannot answer, and without a word (spec/app/assistant/index.md, \"Alpha asks the agent to warm up at launch, on return to the foreground and when Ask Alpha is raised from its bar, only while the agent can answer, and shows nothing of it\")", async () => {
+    const world = { ...scene(), phone };
+    const { alpha, runtime } = await openAssistant(world);
+    const asked = () => world.ask.warmUps.length;
+    await settled(alpha, () => asked() === 1, asked);
+    await seen(false);
+    await seen(true);
+    await settled(alpha, () => asked() === 2, asked);
+    await alpha.runtime.runPromise(Effect.flatMap(Shell, (shell) => shell.send({ type: "raise", detent: "Sheet" })));
+    await settled(alpha, () => asked() === 3, asked);
+    await alpha.runtime.runPromise(Effect.flatMap(Shell, (shell) => shell.send({ type: "raise", detent: "Full" })));
+    world.ask.warmUpFails = true;
+    await seen(false);
+    await seen(true);
+    await settled(alpha, () => asked() === 4, asked);
+    world.ask.canRespond = false;
+    const reads = world.ask.statusReads;
+    await seen(false);
+    await seen(true);
+    await settled(alpha, () => world.ask.statusReads > reads, () => world.ask.statusReads);
+    await later(alpha, 10);
+    expect([asked(), world.ask.opened, world.ask.said, lines(), document.body.textContent?.toLowerCase().includes("warm"), new Set(world.ask.warmUps.map((headers) => JSON.stringify(headers))).size]).toEqual([4, 0, [], [], false, 1]);
+    world.ask.canRespond = true;
+    write("Hello");
+    await press("Send");
+    await until(alpha, runtime, Conversation, (s) => s.turn.reply === "Complete");
+    expect([lines(), world.ask.said]).toEqual([["Hello", "You said: Hello"], ["Hello"]]);
+  });
+
   it("Search my conversations, and open a hit where it was said (spec/app/assistant/search.md, \"Story: Search my conversations\")", async () => {
     const world = { ...scene(), phone };
-    world.ask.kept.set("c7", { roomId: "r7", title: "Lunch", messages: [{ id: "m1", role: "user", text: "Lunch on Friday?" }, { id: "m2", role: "assistant", text: "Friday at noon works." }, Object.assign({ id: "m3", role: "assistant" as const, text: "" }, { failureKind: "limit_reached" }), Object.assign({ id: "m4", role: "assistant" as const, text: "" }, { failureKind: "insufficient_credits", cloudCode: "allowance_exhausted" })] });
+    world.ask.kept.set("c7", { roomId: "r7", title: "Lunch", messages: [
+      { id: "m1", role: "user", text: "Lunch on Friday?" },
+      { id: "m2", role: "assistant", text: "Friday at noon works." },
+      { id: "m3", role: "assistant", text: "", failureKind: "limit_reached" },
+      { id: "m4", role: "assistant", text: "", failureKind: "insufficient_credits" },
+      { id: "m5", role: "assistant", text: "", failureKind: "insufficient_credits", cloudCode: "allowance_exhausted" },
+      { id: "m6", role: "assistant", text: "<promise> Friday is free." },
+      { id: "m7", role: "user", text: "Friday [answer] again?" },
+    ] });
     const { alpha, runtime } = await openAssistant(world, false);
 
     // spec/app/assistant/search.md, "Words are searched from the first hit, and empty words are not searched"
     await chatAction("Search chat");
     await fill("Search chats", "friday");
     await until(alpha, runtime, Search, (s) => s.hits.status === "Loaded" && s.words === "friday");
-    expect(rows("Results")).toBe(2);
+    expect(rows("Results")).toBe(4);
+    // spec/app/assistant/reply.md, "The agent's turn tag is never drawn, copied, quoted, emailed or spoken, and a reply still being written holds back what may become one": a hit of the agent's loses the tag, the owner's keeps it.
+    const results = document.querySelector("section[aria-label='Results']")?.textContent ?? "";
+    expect([results.includes("Friday is free."), results.includes("<promise>"), results.includes("Friday [answer] again?")]).toEqual([true, false, true]);
     // spec/app/assistant/search.md, "Opening a hit closes search and opens its conversation around its message, and another conversation only while the turn and the composer are free"
     row("Results", "Friday at noon");
     await until(alpha, runtime, Chats, (s) => s.chosen > 0 && s.around > 0 && s.page.status === "Loaded");
     expect([lines().slice(0, 2), document.querySelector("section[aria-label='Results']")]).toEqual([["Lunch on Friday?", "Friday at noon works."], null]);
     // spec/app/assistant/reply.md, "A failed reply offers the fix the agent named, and a limit reached shows its live wait, never sending the message again": a reply read again from history says why it did not finish, and to wait a moment.
     expect(document.querySelector("[role=log]")?.textContent).toContain("Too many requests. Wait a moment, then try again");
-    // spec/app/assistant/reply.md, "A failure refused before any output replaces the streamed text; any other failure is added after it": a reply kept with Cloud's funds code, read again, shows the one out-of-funds line, never spent credits.
-    const reread = document.querySelector("[role=log]")?.textContent ?? "";
-    expect([reread.includes("You’re out of plan allowance and credits, so I couldn’t reply."), reread.includes("Out of credits")]).toEqual([true, false]);
+    // spec/app/assistant/reply.md, "Out of funds is refused before any output, is never spoken, and offers only Manage plan"; spec/app/assistant/reply.md, "A failure refused before any output replaces the streamed text; any other failure is added after it": spent credits stored without Cloud's code keep their own words, and only the reply stored with it reads as the one out-of-funds line.
+    const kept = [...document.querySelectorAll("[role=log] article")].map((line) => line.textContent ?? "");
+    expect([kept.filter((text) => text.includes("Out of credits")).length, kept.filter((text) => text.includes("You’re out of plan allowance and credits, so I couldn’t reply.")).length]).toEqual([1, 1]);
 
     // spec/app/assistant/search.md, "Only the newest asking's hits are shown, a page at a time, after those already shown": a search that fails says so.
     world.ask.searchDown = true;
@@ -462,10 +560,21 @@ describe.each([["a browser", false], ["a phone", true]])("in %s", (_where, phone
 
     // spec/app/assistant/index.md, "Stop reply ends a streaming reply, and takes back a message nothing was heard of"
     world.ask.stalled = true;
+    world.ask.nextReplyChunks = ["Read [Octopus](https://en.wikipedia.org/wiki/Octopus) and **Lim", " [ans"];
     write("Take your time");
     await press("Send");
     await until(alpha, runtime, Conversation, (s) => s.turn.reply === "Streaming");
     expect(button("Send")).toBe(undefined);
+    // spec/app/assistant/reply.md, "Prose is drawn with its Markdown: bold, italics, code, headings, lists and quotes; a link is a link only to an https address, and HTML reads as text": the reply still being written holds back its open mark, and its link opens through the phone's link path.
+    // spec/app/assistant/reply.md, "The agent's turn tag is never drawn, copied, quoted, emailed or spoken, and a reply still being written holds back what may become one": the "[ans" it ends in is held back too.
+    const writing = await vi.waitFor(() => {
+      const found = document.querySelector("[data-alpha-message-id='reply'] a");
+      if (!found) throw new Error("no link in the reply being written");
+      return found;
+    });
+    const tap = new MouseEvent("click", { bubbles: true, cancelable: true });
+    act(() => { writing.dispatchEvent(tap); });
+    expect([writing.getAttribute("href"), writing.closest("[data-alpha-message-id]")?.textContent, tap.defaultPrevented]).toEqual(["https://en.wikipedia.org/wiki/Octopus", "Read Octopus and Lim", phone]);
     await press("Stop reply");
     // spec/app/assistant/index.md, "The agent's answer to the abort starts the one read of the conversation"; spec/app/assistant/index.md, "The read says the reply finished anyway, was stopped for sure, was never recorded, or to look later"
     await until(alpha, runtime, Conversation, (s) => s.turn.reply === "Stopped" && s.check !== "Aborting" && s.recheck.status !== "Loading");

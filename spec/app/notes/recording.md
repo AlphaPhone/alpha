@@ -165,7 +165,9 @@ A segment ends every thirty seconds, and when the owner pauses or stops.
 Its answer names the capture, which segment it is and the seconds it holds;
 only the next segment of the current capture counts, and a duplicate or one
 out of order is refused. Stopping finishes when its last segment is
-written; the recording is then kept as a voice note.
+written; the recording is then kept as a voice note. A new saved note names
+that capture in the recording identity and the audio record. Recovery can
+also find a voice note saved by the earlier format with a flat audio handle.
 
 ```quint
 pure def keepIt(segments: int, r: Recorder): Moved =

@@ -213,10 +213,15 @@ pure def lawAStoppedLoadNeverCommits(load: int): bool =
 
 ### Reload loads a shown, failed or stopped page again
 
-```quint
-pure def canReload(p: Page): bool = p.phase == Shown or p.phase == Failed or p.phase == Stopped
+Reload is also shown in the menu on a new tab, where it closes the menu
+without loading a page.
 
-pure def reload(p: Page): Step = { state: started(p), out: List(Go({ load: p.load + 1, way: Again })) }
+```quint
+pure def canReload(p: Page): bool = p.phase == Blank or p.phase == Shown or p.phase == Failed or p.phase == Stopped
+
+pure def reload(p: Page): Step =
+  if (p.phase == Blank) { state: p, out: List() }
+  else { state: started(p), out: List(Go({ load: p.load + 1, way: Again })) }
 ```
 
 ### A page can go on to another page by itself, through a link or a redirect

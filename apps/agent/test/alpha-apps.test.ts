@@ -158,6 +158,50 @@ describe("Alpha product plugin: Clock acts only on what the model named", () => 
     await run("CLOCK_TIMER", { action: "cancel", label: "pasta" });
     expect([store.getClock().alarms, store.getClock().timers]).toEqual([[], []]);
   });
+
+  it("snoozes or dismisses only an alarm that rings, matches a label among live timers only, and never reports a timer it could not keep", async () => {
+    const { store, run } = clockOf();
+    await run("CLOCK_ALARM", { action: "set", hour: 7, minute: 0, enabled: false });
+    const snoozedQuiet = await run("CLOCK_ALARM", { action: "snooze" });
+    const dismissedQuiet = await run("CLOCK_ALARM", { action: "dismiss" });
+    expect([snoozedQuiet?.success, dismissedQuiet?.success, store.getClock().alarms.map(({ enabled, phase }) => ({ enabled, phase }))]).toEqual([false, false, [{ enabled: false, phase: "idle" }]]);
+    const seven = store.getClock().alarms[0]?.id ?? "";
+    store.updateAlarm(seven, { phase: "ringing", enabled: true, timeZone: "UTC" });
+    const snoozed = await run("CLOCK_ALARM", { action: "snooze", id: seven });
+    expect([snoozed?.success, store.getClock().alarms[0]?.phase]).toEqual([true, "snoozed"]);
+    await run("CLOCK_ALARM", { action: "delete", id: seven });
+
+    await run("CLOCK_TIMER", { action: "start", durationSeconds: 60, label: "pasta" });
+    await run("CLOCK_TIMER", { action: "reset", label: "pasta" });
+    await run("CLOCK_TIMER", { action: "start", durationSeconds: 600, label: "pasta" });
+    const paused = await run("CLOCK_TIMER", { action: "pause", label: "pasta" });
+    expect([paused?.success, store.getClock().timers.map(({ status }) => status)]).toEqual([true, ["ready", "paused"]]);
+
+    for (let at = 0; at < 14; at++) await run("CLOCK_TIMER", { action: "start", durationSeconds: 60 + at });
+    const seventeenth = await run("CLOCK_TIMER", { action: "start", durationSeconds: 999, label: "one more" });
+    expect([seventeenth?.success, store.getClock().timers.length, store.getClock().timers.some(({ label }) => label === "one more")]).toEqual([true, 16, true]);
+    const overflow = await run("CLOCK_TIMER", { action: "start", durationSeconds: 30, label: "too many" });
+    expect([overflow?.success, store.getClock().timers.length, store.getClock().timers.some(({ label }) => label === "too many")]).toEqual([false, 16, false]);
+    for (const timer of store.getClock().timers) await run("CLOCK_TIMER", { action: "cancel", id: timer.id });
+    expect([store.getClock().alarms, store.getClock().timers]).toEqual([[], []]);
+  });
+
+  it("finds the one live timer past a finished one, and the alarm's time past a label that names none", async () => {
+    const { store, run } = clockOf();
+    await run("CLOCK_TIMER", { action: "start", durationSeconds: 60, label: "eggs" });
+    await run("CLOCK_TIMER", { action: "reset", label: "eggs" });
+    await run("CLOCK_TIMER", { action: "start", durationSeconds: 300, label: "pasta" });
+    const paused = await run("CLOCK_TIMER", { action: "pause" });
+    await run("CLOCK_ALARM", { action: "set", hour: 6, minute: 0, label: "Gym" });
+    await run("CLOCK_ALARM", { action: "set", hour: 7, minute: 0 });
+    const toggled = await run("CLOCK_ALARM", { action: "toggle", label: "gym day", hour: 7, minute: 0, enabled: false });
+    const unmatched = await run("CLOCK_ALARM", { action: "delete", label: "work" });
+    expect([paused?.success, store.getClock().timers.map(({ label, status }) => ({ label, status }))]).toEqual([true, [{ label: "eggs", status: "ready" }, { label: "pasta", status: "paused" }]]);
+    expect([toggled?.success, unmatched?.success, store.getClock().alarms.map(({ hour, enabled }) => ({ hour, enabled }))]).toEqual([true, false, [{ hour: 6, enabled: true }, { hour: 7, enabled: false }]]);
+    for (const timer of store.getClock().timers) await run("CLOCK_TIMER", { action: "cancel", id: timer.id });
+    for (const alarm of store.getClock().alarms) await run("CLOCK_ALARM", { action: "delete", id: alarm.id });
+    expect([store.getClock().alarms, store.getClock().timers]).toEqual([[], []]);
+  });
 });
 
 describe("Alpha product plugin: Clock actions, provider, and routes", () => {
@@ -168,7 +212,8 @@ describe("Alpha product plugin: Clock actions, provider, and routes", () => {
     const { runtime } = makeFakeRuntime();
     const { plugin } = createAlphaAppsPlugin({ store, timeZone: "UTC", runtime });
     expect(plugin.name).toBe(alphaAppsPluginName);
-    expect(plugin.views?.map((v) => v.id)).toEqual(["clock", "reminders"]);
+    // spec/agent/index.md, "The launch names Home and every Alpha app but Notes as a view the agent may show, by the id the phone opens it by": the product plugin loads after eliza's views module, so Clock and Reminders are the launch's views, not the plugin's.
+    expect(plugin.views).toBeUndefined();
 
     const alarmAction = plugin.actions!.find((a) => a.name === "CLOCK_ALARM")!;
     const timerAction = plugin.actions!.find((a) => a.name === "CLOCK_TIMER")!;
@@ -181,6 +226,8 @@ describe("Alpha product plugin: Clock actions, provider, and routes", () => {
     expect(setRes?.success).toBe(true);
     const alarmId = ((setRes?.data as { alarm: { id: string } }).alarm).id;
     expect(store.getClock().alarms[0]?.daysMask).toBe(62);
+    // spec/app/clock/alarms.md, "A new alarm snoozes for ten minutes until the owner picks another length, as v121's Clock did"
+    expect(store.getClock().alarms[0]?.snoozeMinutes).toBe(10);
 
     const toggleRes = await alarmAction.handler(runtime, emptyMessage("Turn off alarm"), emptyState, { parameters: { action: "toggle", id: alarmId, enabled: false } });
     expect(toggleRes?.success).toBe(true);
@@ -189,6 +236,7 @@ describe("Alpha product plugin: Clock actions, provider, and routes", () => {
     await alarmAction.handler(runtime, emptyMessage("Update alarm"), emptyState, { parameters: { action: "update", id: alarmId, hour: 8, minute: 15, enabled: true } });
     expect(store.getClock().alarms[0]?.hour).toBe(8);
 
+    store.updateAlarm(alarmId, { phase: "ringing", timeZone: "UTC" });
     const snoozeRes = await alarmAction.handler(runtime, emptyMessage("Snooze"), emptyState, { parameters: { action: "snooze", id: alarmId, snoozeMinutes: 10 } });
     expect(snoozeRes?.success).toBe(true);
     expect(store.getClock().alarms[0]?.phase).toBe("snoozed");
