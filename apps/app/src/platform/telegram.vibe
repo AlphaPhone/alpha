@@ -1,7 +1,7 @@
 // spec/kit/read.md, "Story: Read from outside"; spec/kit/attempt.md, "Story: Do something outside, once"
 import { replied } from "../../gen/app__platform.effect.vibe"
 import * as Msg from "./messaging.vibe"
-import { type Listening, type Wired, remoteAt } from "./remote.vibe"
+import { type Listening, Unsent, remoteAt } from "./remote.vibe"
 
 /** User peer identifier. */
 export schema TelegramPeerUser {
@@ -361,7 +361,6 @@ export interface TelegramSearchGlobalOpts {
 
 /** First-class Telegram user-account RPC+SSE client service (phone/code/2FA/QR user sessions only; bot tokens rejected). */
 export interface TelegramClient {
-  readonly baseUrl: string
   sendCode(phone: string): TelegramSentCode!Msg.MessagingFailure
   signIn(phone: string, phoneCodeHash: string, code: string): TelegramSignInResult!Msg.MessagingFailure
   getPassword(pendingAuthId?: string, sessionToken?: string): TelegramPasswordInfo!Msg.MessagingFailure
@@ -418,7 +417,7 @@ function telegramFailureFromBody(status: number, body: unknown, retryAfter: stri
 }
 
 effect function callTelegram<A>(
-  wired: Wired,
+  wired: Msg.MessagingWire,
   request: HttpClientRequest.HttpClientRequest,
   schema: Schema.Decoder<A>,
 ): A!Msg.MessagingFailure {
@@ -435,7 +434,7 @@ effect function callTelegram<A>(
 }
 
 effect function callTelegramAuthed<A>(
-  wired: Wired,
+  wired: Msg.MessagingWire,
   token: string,
   path: string,
   body: Readonly<Record<string, unknown>>,
@@ -447,7 +446,7 @@ effect function callTelegramAuthed<A>(
 }
 
 effect function signInUser(
-  wired: Wired,
+  wired: Msg.MessagingWire,
   phone: string,
   phoneCodeHash: string,
   code: string,
@@ -468,12 +467,13 @@ effect function signInUser(
   return { kind: "Authenticated", sessionToken: auth.session_token, user: auth.user }
 }
 
-/** Telegram user-account client over HTTP+SSE at `base`. */
-export function telegramAt(base: string) {
+/** Telegram user-account client over HTTP+SSE when an endpoint is configured. */
+export function telegramAt(base?: string) {
   return Layer.effect(Telegram, effect {
-    const wired = try remoteAt(base)
+    const wired: Msg.MessagingWire = base === undefined
+      ? { open: () => Effect.fail(new Unsent({ cause: "Telegram is not configured" })) }
+      : try remoteAt(base)
     return {
-      baseUrl: base,
       sendCode: (phone: string) => callTelegram(wired, Msg.jsonPost("/rpc/auth.sendCode", { phone_number: phone }), TelegramSentCode),
       signIn: (phone: string, phoneCodeHash: string, code: string) => signInUser(wired, phone, phoneCodeHash, code),
       getPassword: (pendingAuthId?: string, sessionToken?: string) => effect {
