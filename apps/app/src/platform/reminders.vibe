@@ -1,6 +1,6 @@
 // spec/app/notices/reminders.md, "Story: Get my reminder at its time, even after a reboot"; spec/app/platform/index.md, "Story: Reach the phone's native capabilities"
 import type {
-  AndroidReminderCancelInput, AndroidReminderCancelResult, AndroidReminderList,
+  AndroidReminderBoundOperation, AndroidReminderCancelInput, AndroidReminderCancelResult, AndroidReminderList, AndroidReminderReceipt,
   AndroidReminderPendingTap, AndroidReminderScheduleInput, AndroidReminderScheduleResult,
 } from "@elizaos/os-bridges"
 import { registered } from "./device.vibe"
@@ -29,6 +29,7 @@ export service PhoneReminders {
   schedule(input: AndroidReminderScheduleInput): AndroidReminderScheduleResult!RemindersUnread
   cancel(input: AndroidReminderCancelInput): AndroidReminderCancelResult!RemindersUnread
   list(): AndroidReminderList!RemindersUnread
+  operate(operation: AndroidReminderBoundOperation): AndroidReminderReceipt!RemindersUnread
   pendingTap(): AndroidReminderPendingTap!RemindersUnread
   consumeTap(token: string): void!RemindersUnread
 }
@@ -43,6 +44,7 @@ export const phoneReminders = Layer.sync(PhoneReminders, () => {
     schedule: (input: AndroidReminderScheduleInput) => tryPromise({ try: () => client().schedule(input), catch: (cause) => new RemindersUnread({ cause }) }),
     cancel: (input: AndroidReminderCancelInput) => tryPromise({ try: () => client().cancel(input), catch: (cause) => new RemindersUnread({ cause }) }),
     list: () => tryPromise({ try: () => client().list(), catch: (cause) => new RemindersUnread({ cause }) }),
+    operate: (operation: AndroidReminderBoundOperation) => tryPromise({ try: () => client().operate(operation), catch: (cause) => new RemindersUnread({ cause }) }),
     pendingTap: () => tryPromise({ try: () => client().pendingTap(), catch: (cause) => new RemindersUnread({ cause }) }),
     consumeTap: (token: string) => tryPromise({ try: () => client().consumeTap(token), catch: (cause) => new RemindersUnread({ cause }) }),
   }
@@ -56,6 +58,7 @@ export const browserReminders = Layer.succeed(PhoneReminders, {
   schedule: () => fail(absent()),
   cancel: () => fail(absent()),
   list: () => fail(absent()),
+  operate: () => fail(absent()),
   pendingTap: () => fail(absent()),
   consumeTap: () => fail(absent()),
 })

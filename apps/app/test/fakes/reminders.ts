@@ -1,6 +1,6 @@
 // spec/agent/index.md, "The page reaches exactly the routes its platform services call, and nothing else"
 import type {
-  AndroidReminderCancelInput, AndroidReminderRecord, AndroidReminderScheduleInput,
+  AndroidReminderBoundOperation, AndroidReminderCancelInput, AndroidReminderRecord, AndroidReminderScheduleInput,
 } from "@elizaos/os-bridges";
 import type { Faked } from "./phone.ts";
 import { type Route, readJsonBody } from "./routes.ts";
@@ -68,6 +68,7 @@ export interface RemindersScene {
   scheduled: Map<string, AndroidReminderRecord>;
   pendingTap: { token: string; reminderId: string; occurrenceId: string } | null;
   notificationsEnabled: boolean;
+  mirrorDatedItems?: boolean;
   nextId: number;
   failStatus: number | undefined;
 }
@@ -230,10 +231,11 @@ export function remindersRoutes(scene: RemindersScene, now: () => number): Route
             createdAtMs: ts,
             updatedAtMs: ts,
           };
-          scene.items = [...scene.items.filter((entry) => entry.id !== item.id), item];
+          const saved = scene.mirrorDatedItems && item.dueDate !== null ? { ...item, agentTaskId: `task-${item.id}`, revision: item.revision + 1 } : item;
+          scene.items = [...scene.items.filter((entry) => entry.id !== saved.id), saved];
           scene.version += 1;
           scene.updatedAtMs = ts;
-          return Response.json({ item, snapshot: snapshotOf(scene) }, { status: 201 });
+          return Response.json({ item: saved, snapshot: snapshotOf(scene) }, { status: 201 });
         });
       }
       const hit = /^\/api\/alpha\/reminders\/items\/([^/]+)(?:\/(complete|reopen|snooze|restore))?$/.exec(url.pathname);
@@ -307,6 +309,9 @@ export function remindersRoutes(scene: RemindersScene, now: () => number): Route
       }
       if (request.method === "POST" && sub === "snooze") {
         return readJsonBody(request).then((body) => {
+          if (body.expectedRevision !== undefined && (body.expectedRevision !== existing.revision || existing.completed || existing.dueDate === null || existing.alertMinutes === null)) {
+            return Response.json({ error: "reminder_revision_changed" }, { status: 409 });
+          }
           const ts = now();
           const until = typeof body.untilMs === "number"
             ? body.untilMs
@@ -333,7 +338,7 @@ export function elizaReminders(scene: RemindersScene, now: () => number): Faked 
         title: input.title,
         body: input.body ?? "",
         occurrenceId,
-        target: { sourceId: input.id, sourceRevision: "1", reminderId: input.id, occurrenceId, revision: "1" },
+        target: { sourceId: "reminders-store", sourceRevision: "1", reminderId: input.id, occurrenceId, revision: "1" },
         createdAt: ts,
         at: input.at,
         dueAt: input.dueAt ?? input.at,
@@ -362,6 +367,22 @@ export function elizaReminders(scene: RemindersScene, now: () => number): Faked 
       reminders: [...scene.scheduled.values()],
       notificationsEnabled: scene.notificationsEnabled,
     }),
+    operateReminder: (raw: unknown) => {
+      const { operation } = raw as AndroidReminderBoundOperation;
+      if (operation.type !== "reminder_snooze") return Promise.resolve({ status: "unknown" });
+      const { target } = operation;
+      const previous = scene.scheduled.get(target.reminderId);
+      if (previous === undefined || previous.undated || JSON.stringify(previous.target) !== JSON.stringify(target)) {
+        return Promise.resolve({ status: "unknown" });
+      }
+      const at = now() + 600_000;
+      const revision = String(Number(target.revision) + 1);
+      scene.scheduled.set(previous.id, { ...previous, at, target: { ...target, revision }, status: "scheduled" });
+      return Promise.resolve({
+        status: "succeeded",
+        result: { version: 1, kind: "reminder_snooze", sourceId: target.sourceId, reminderId: target.reminderId, occurrenceId: target.occurrenceId, revision, status: "scheduled", at, dueAt: previous.dueAt },
+      });
+    },
     pendingReminderTap: () => Promise.resolve(scene.pendingTap === null ? { pending: false } : { pending: true, ...scene.pendingTap }),
     consumeReminderTap: (raw: unknown) => {
       const token = (raw as { token?: string }).token;

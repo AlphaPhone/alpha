@@ -338,6 +338,14 @@ pure def stepReachingLeavesTheVoicemailAsItWas(before: Voicemail, via: str, afte
 
 ### Delete asks first, stops playback, and Keep closes the question
 
+The question holds the open item and the provider identity when Android
+supplies it. If Android replaced that voicemail, confirming the old
+question leaves the replacement alone. Approving a request from Alpha
+opens this same question in Phone for the exact item shown when asked.
+Only the owner's Delete tap can stage it, and only before the review
+expires and while the phone has ruled out an emergency call. Alpha reports
+the result after the same Android Undo window used for a manual deletion.
+
 ```quint
 pure def removing(s: Voicemail): bool = s.removal.outcome == A::Sent
 

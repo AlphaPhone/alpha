@@ -278,6 +278,23 @@ pure def agentDrafted(c: Composer, thread: int): Composer =
   else c
 ```
 
+### An addressed send names the exact number, text and SIM before it can send
+
+When the agent proposes sending to a number or a contact, the owner sees
+the exact number, message and SIM. For a contact, the owner first chooses
+the number on the phone. The review uses the selected line in Messages
+or Android's default text line outside Messages. On approval it sends
+through Android only if the chosen number and SIM still match the review.
+An explicit request for an editable draft stays in the composer.
+
+```quint
+pure def addressedSend(draft: bool, recipient: str, body: str, shownSim: int, currentSim: int): bool =
+  not(draft) and recipient != "" and body != "" and shownSim >= 0 and shownSim == currentSim
+
+pure def lawAnAddressedDraftCannotSend(recipient: str, body: str, sim: int): bool =
+  not(addressedSend(true, recipient, body, sim, sim))
+```
+
 ### Alpha writes a draft only where the owner had written nothing, and a draft of Alpha's saved meanwhile replaces the owner's only by the owner's choice
 
 ```quint

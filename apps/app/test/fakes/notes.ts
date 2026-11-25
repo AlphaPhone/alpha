@@ -23,6 +23,7 @@ export interface NotesScene {
   deleteRequests?: Array<{ readonly id: string; readonly expectedRevision: number | undefined }>;
   /** The note a claim of a prepared saved-note editor names, as eliza's view host hands it to the renderer it is bound to. */
   target?: string;
+  viewClaimGate?: Promise<void>;
   /** Each claim and result a renderer sent eliza's views routes, in order. */
   readonly views: { readonly path: "claim" | "result"; readonly body: Record<string, unknown> }[];
 }
@@ -216,10 +217,13 @@ export function notesRoutes(scene: NotesScene): Route[] {
       }
       if (request.method === "POST" && url.pathname === "/api/notes/interact") return request.json().then((body: unknown) => interact(scene, body));
       if (request.method === "POST" && url.pathname === "/api/views/interact-claim") {
-        return request.json().then((body: Record<string, unknown>) => {
+        return request.json().then(async (body: Record<string, unknown>) => {
+          const gate = scene.viewClaimGate;
+          const claimId = `claim-${scene.views.length + 1}`;
           scene.views.push({ path: "claim", body });
+          await gate;
           const saved = body.targetProtocol === "saved-note-v1" && scene.target !== undefined;
-          return Response.json({ claimId: `claim-${scene.views.length}`, ...(saved ? { target: { kind: "saved-note", noteId: scene.target } } : {}) });
+          return Response.json({ claimId, ...(saved ? { target: { kind: "saved-note", noteId: scene.target } } : {}) });
         });
       }
       if (request.method === "POST" && url.pathname === "/api/views/interact-result") {

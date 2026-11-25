@@ -3,15 +3,21 @@ import { Effect } from "effect";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { Machine as Shell } from "../gen/app__shell.effect.vibe";
 import { Machine as Home } from "../gen/app__home.effect.vibe";
+import { Machine as Conversation } from "../gen/app__assistant.effect.vibe";
+import { Machine as Composer } from "../gen/app__assistant__composer.effect.vibe";
 import { Machine as Contacts } from "../gen/app__contacts.effect.vibe";
 import { Machine as Agent } from "../gen/app__contacts__agent.effect.vibe";
 import { Machine as Phone } from "../gen/app__phone.effect.vibe";
+import * as Voice from "../gen/app__voice.effect.vibe";
 import { type Asking, propose, withdrawn } from "../src/contacts/requests.vibe";
 import { type Reading, answerReading } from "../src/contacts/reads.vibe";
 import { Machine as Messages } from "../gen/app__messages.effect.vibe";
-import { Machine as Composer } from "../gen/app__messages__composer.effect.vibe";
+import { Machine as MessageComposer } from "../gen/app__messages__composer.effect.vibe";
 import { at } from "../src/areas.ts";
+import assistant from "../src/assistant/index.tsx";
 import home from "../src/home/index.tsx";
+import { untimed } from "../src/runtime/reactor.vibe";
+import { placeOf } from "../src/voice/voice.vibe";
 import { button, closeAll, drawn, fill, later, only, open as openAlpha, press, underAct, until } from "./alpha.tsx";
 import { type Scene, scene } from "./fakes/scene.ts";
 
@@ -125,15 +131,22 @@ describe("Contacts on an Alpha image", () => {
     const world = image();
     const first = world.telephony.people[0];
     if (!first) throw new Error("the phone has no starting contact");
-    world.telephony.people.push(...Array.from({ length: 51 }, (_, index) =>
-      ({ ...first, id: String(index + 10), displayName: `Contact ${index + 1}` })));
+    world.telephony.people.push(
+      ...Array.from({ length: 49 }, (_, index) => ({ ...first, id: String(index + 10), displayName: `Contact ${index + 1}` })),
+      { ...first, id: "59", displayName: "7 Studio" },
+      { ...first, id: "60", displayName: "Émile Amari" },
+    );
     const { alpha } = await open(world);
     await until(alpha, alpha.runtime, Shell, (s) => s.contacts);
     await launch("Contacts");
     await until(alpha, alpha.runtime, Contacts, (s) => s.list.status === "Loaded" && s.rows === 50 && s.more);
     await press("More contacts");
     await until(alpha, alpha.runtime, Contacts, (s) => s.list.status === "Loaded" && s.rows === 53 && !s.more);
-    await press("Contact 51");
+    const accented = button("Émile Amari")?.parentElement;
+    const last = accented?.parentElement?.lastElementChild;
+    expect([accented?.querySelector("h2")?.textContent, last?.querySelector("h2")?.textContent, last?.querySelector("button")?.getAttribute("aria-label")])
+      .toEqual(["E", "#", "7 Studio"]);
+    await press("Émile Amari");
     await until(alpha, alpha.runtime, Contacts, (s) => s.opened && s.card.status === "Loaded" && s.contact === "60");
   });
 
@@ -221,7 +234,11 @@ describe("Contacts on an Alpha image", () => {
     const world = image();
     const { alpha } = await open(world);
     await until(alpha, alpha.runtime, Shell, (s) => s.image);
-    const read = (operation: Reading) => alpha.runtime.runPromise(answerReading(operation));
+    const read = async (operation: Reading) => {
+      let result: unknown;
+      await drawn(async () => { result = await alpha.runtime.runPromise(answerReading(operation)); });
+      return result;
+    };
 
     // spec/app/contacts/agent.md, "The agent reads only the conversation, voicemail or contact open on screen, as the phone last read it"
     expect([await read({ type: "messages_read_selected" }), await read({ type: "voicemail_read_selected" }), await read({ type: "contact_read_selected" }), await read({ type: "sms_reply_selected", body: "On my way" })]).toEqual([
@@ -237,12 +254,12 @@ describe("Contacts on an Alpha image", () => {
     await until(alpha, alpha.runtime, Messages, (s) => s.list.status === "Loaded" && s.threads === 1);
     await press("Maya Chen");
     await until(alpha, alpha.runtime, Messages, (s) => s.pane === "Conversation" && s.page.status === "Loaded");
-    await until(alpha, alpha.runtime, Composer, (s) => s.thread > 0);
+    await until(alpha, alpha.runtime, MessageComposer, (s) => s.thread > 0);
     expect(await read({ type: "messages_read_selected" })).toEqual({ kind: "messages-read", status: "read", participant: "Maya Chen", messages: [{ direction: "in", date: 1_700_000_050_000, body: "See you at five" }], truncated: false });
 
     // spec/app/messages/composer.md, "The agent's draft goes into the open conversation's draft only while it is empty, and never sends"
     expect(await read({ type: "sms_reply_selected", body: "On my way" })).toEqual({ kind: "sms-reply", status: "drafted" });
-    await until(alpha, alpha.runtime, Composer, (s) => s.slot.author === "AlphaWrote");
+    await until(alpha, alpha.runtime, MessageComposer, (s) => s.slot.author === "AlphaWrote");
     expect([await read({ type: "sms_reply_selected", body: "Running late" }), (document.querySelector("textarea[aria-label='Text Maya']") as HTMLTextAreaElement).value, world.telephony.sent]).toEqual([
       { kind: "sms-reply", status: "occupied" }, "On my way", [],
     ]);
@@ -255,8 +272,44 @@ describe("Contacts on an Alpha image", () => {
     // spec/app/contacts/index.md, "Searching or changing the filter chip starts a new list"
     expect(await read({ type: "contact_show", query: "Ben" })).toEqual({ kind: "contact-show", status: "shown" });
     await until(alpha, alpha.runtime, Contacts, (s) => s.front && s.sought && s.list.status === "Loaded" && s.rows === 1);
+    await drawn(() => vi.waitFor(() => expect(button("Ben Ortiz")).toBeDefined()));
     await press("Ben Ortiz");
     await until(alpha, alpha.runtime, Contacts, (s) => s.opened && s.card.status === "Loaded");
     expect(await read({ type: "contact_read_selected" })).toEqual({ kind: "contact-read", status: "read", contact: { displayName: "Ben Ortiz", phoneNumbers: ["+14155550122"], emailAddresses: [] } });
+  });
+});
+
+// spec/app/voice/index.md, "Story: Go where the conversation takes me"; spec/app/voice/index.md, "Voice keeps talking after a navigation only when it is the one the conversation asked for; any other ends it"
+describe("Talk on an Alpha image", () => {
+  it("Talk keeps listening as the agent opens the keypad, Contacts and Messages, and stops when the owner opens one himself", async () => {
+    const world = { ...image(), signedIn: false };
+    const { alpha } = await open(world);
+    await until(alpha, alpha.runtime, Shell, (s) => s.image);
+    const area = assistant.runtime(alpha);
+    await until(alpha, area, Conversation, (s) => s.ready);
+    await until(alpha, area, Composer, (s) => s.slot === "Open" && s.binding.owner > 0);
+    await until(alpha, area, Voice.Machine, (s) => s.warmed);
+
+    const voice = (event: Voice.Event) => area.runPromise(Effect.flatMap(Voice.Machine, (machine) => machine.send(event)));
+    await voice({ type: "permissionChanged", grant: "Granted" });
+    await voice({ type: "startTalking", now: untimed });
+    await until(alpha, area, Voice.Machine, (s) => s.phase === "Listening" && s.mic === "On");
+
+    for (const [turn, view] of [[1, "Phone"], [2, "Contacts"], [3, "Messages"]] as const) {
+      world.ask.nextReplyChunks = [`[NAVIGATE:${view}] Opening ${view}.`];
+      world.voice.emitLocal?.("liveCaptureTranscript", {
+        captureId: world.voice.activeMicSession,
+        final: { turnId: `comms-nav-${turn}`, text: `Open ${view}`, mode: "device" },
+      });
+      await until(alpha, area, Voice.Machine, (s) => s.sent === turn && s.phase === "Listening" && s.mic === "On" && s.followed === placeOf(view) && s.claim === 0);
+      const state = await alpha.runtime.runPromise(Effect.flatMap(Shell, (machine) => machine.get()));
+      expect(state.trail.at(-1)).toBe(view);
+      if (view === "Phone") await until(alpha, alpha.runtime, Phone, (s) => s.front);
+      if (view === "Contacts") await until(alpha, alpha.runtime, Contacts, (s) => s.front);
+      if (view === "Messages") await until(alpha, alpha.runtime, Messages, (s) => s.front);
+    }
+
+    await drawn(() => alpha.runtime.runPromise(Effect.flatMap(Shell, (machine) => machine.send({ type: "openView", view: "Phone" }))));
+    await until(alpha, area, Voice.Machine, (s) => s.phase === "Idle" && s.mic === "Off" && !s.engineHeld);
   });
 });

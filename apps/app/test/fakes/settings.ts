@@ -1,5 +1,5 @@
 // spec/app/settings/index.md, "Story: Find a setting and come back"
-import type { DataResetPlugin, AndroidRoleStatus, ElizaPasswordsPlugin, PasswordsStatus, LaunchTarget, LauncherAppsChange, NativeCrashEntry, SystemFacts, SystemHostPlugin, SystemPlugin, SystemSettingsPage, ApprovedJoinResult, ConnectOptions, ConnectivityResult, WiFiNetwork, WiFiPlugin } from "@elizaos/os-bridges";
+import type { DataResetPlugin, AndroidRoleStatus, ElizaPasswordsPlugin, ListenerStatus, PasswordEditorInput, PasswordEntrySummary, PasswordsStatus, LaunchTarget, LauncherAppsChange, NativeCrashEntry, SystemFacts, SystemHostPlugin, SystemPlugin, SystemSettingsPage, ApprovedJoinResult, ConnectOptions, ConnectivityResult, WiFiNetwork, WiFiPlugin } from "@elizaos/os-bridges";
 import type { LauncherScene } from "./launcher.ts";
 import { type Faked, plugin, rejection } from "./phone.ts";
 
@@ -13,10 +13,17 @@ export interface RecoveryScene {
   readonly tokens: string[];
 }
 
+export interface ListenerScene {
+  status: ListenerStatus;
+  readonly pauseReply: Promise<unknown>;
+  openSettings: boolean;
+}
+
 /** What the fake phone holds for Settings, and how it behaves; a journey changes it between steps. */
 export interface SettingsScene {
   facts: SystemFacts;
   recovery?: RecoveryScene;
+  listener?: ListenerScene;
   roles: AndroidRoleStatus[];
   launcher: boolean;
   version: string;
@@ -27,6 +34,9 @@ export interface SettingsScene {
   grantsHome: boolean;
   readonly opened: string[];
   readonly copied: string[];
+  passwordsUnlocked: boolean;
+  readonly passwords: PasswordEntrySummary[];
+  readonly passwordEdits: Array<PasswordEditorInput | undefined>;
   autofill: PasswordsStatus["autofill"];
   autofillDestination: Awaited<ReturnType<ElizaPasswordsPlugin["openAutofillSettings"]>>["destination"];
   crashes: NativeCrashEntry[];
@@ -54,6 +64,7 @@ export function settingsScene(): SettingsScene {
     ],
     launcher: true, version: "1.4.0",
     hostFacts: { androidRelease: "16", permissions: { Microphone: false, Calendar: true } },
+    passwordsUnlocked: false, passwords: [], passwordEdits: [],
     autofill: { supported: true, selected: "none" }, autofillDestination: "autofill-picker",
     gate: Promise.resolve(), grantsHome: true, opened: [], copied: [], crashes: [], reset: { status: "cancelled", message: "Nothing was reset." }, reviews: [],
     networks: [{ ssid: "home", bssid: "00:11:22:33:44:55", rssi: -50, frequency: 2412, capabilities: "[WPA2-PSK-CCMP]", secured: true, security: "wpa2" }],
@@ -196,10 +207,54 @@ export function alphaCarrierSetup(scene: SettingsScene): Faked {
 }
 
 
+/** The qualified image listener's status, stop receipts and explicit native settings handoff. */
+export function elizaSense(scene: SettingsScene, listener: ListenerScene): Faked {
+  return () => ({
+    status: () => Promise.resolve(listener.status),
+    pause: () => listener.pauseReply,
+    turnOff: async () => {
+      listener.status = { available: true, state: "OFF", label: "Off", consented: false, listening: false, microphoneOpen: false };
+      return { ...listener.status, saved: true };
+    },
+    openSettings: async () => {
+      if (listener.openSettings) await page(scene, "sense-settings");
+      return { opened: listener.openSettings };
+    },
+  });
+}
+
 /** Android's autofill status and provider picker through the native Passwords bridge. */
 export function elizaPasswords(scene: SettingsScene): Faked {
   return () => ({
-    status: () => Promise.resolve<PasswordsStatus>({ available: true, locked: true, unlockRemainingMs: 0, unlockSeconds: 60, biometric: false, autofill: { ...scene.autofill } }),
+    status: () => Promise.resolve<PasswordsStatus>({ available: true, locked: !scene.passwordsUnlocked, unlockRemainingMs: scene.passwordsUnlocked ? 60000 : 0, unlockSeconds: 60, biometric: false, autofill: { ...scene.autofill } }),
+    unlock: async (): ReturnType<ElizaPasswordsPlugin["unlock"]> => {
+      scene.passwordsUnlocked = true;
+      return { unlocked: true, unlockRemainingMs: 60000 };
+    },
+    lock: async (): ReturnType<ElizaPasswordsPlugin["lock"]> => {
+      scene.passwordsUnlocked = false;
+      return { locked: true };
+    },
+    list: async (): ReturnType<ElizaPasswordsPlugin["list"]> => {
+      if (!scene.passwordsUnlocked) throw rejection("locked");
+      return { entries: structuredClone(scene.passwords) };
+    },
+    openEditor: async ({ entryId, expectedRevision }: Partial<PasswordEditorInput>): ReturnType<ElizaPasswordsPlugin["openEditor"]> => {
+      if (!scene.passwordsUnlocked) throw rejection("locked");
+      if (entryId === undefined && expectedRevision === undefined) {
+        scene.passwordEdits.push(undefined);
+        scene.passwords.push({ id: "entry-new", label: "New account", username: "owner", updatedAt: 1000, revision: 1,
+          bindings: [{ kind: "web", facet: "https://other.test", display: "other.test" }] });
+        return { status: "saved", id: "entry-new", revision: 1 };
+      }
+      if (entryId === undefined || expectedRevision === undefined) throw rejection("invalid");
+      scene.passwordEdits.push({ entryId, expectedRevision });
+      const found = scene.passwords.find(({ id }) => id === entryId);
+      if (!found || found.revision !== expectedRevision) throw rejection("conflict");
+      found.label = "Updated account";
+      found.revision += 1;
+      return { status: "saved", id: found.id, revision: found.revision };
+    },
     openAutofillSettings: async (): ReturnType<ElizaPasswordsPlugin["openAutofillSettings"]> => {
       await page(scene, scene.autofillDestination);
       return { status: "opened", destination: scene.autofillDestination };

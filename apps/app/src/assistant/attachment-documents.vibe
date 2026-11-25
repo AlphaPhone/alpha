@@ -1,0 +1,102 @@
+// spec/app/assistant/attachments.md, "Story: Choose files to attach"; spec/app/assistant/attachments.md, "Only the newest listing is shown; a denied folder asks for access, and one that fails offers Retry"
+import type { FilesResult, StorageEntry, StorageVolume } from "@elizaos/os-bridges"
+import { native } from "../platform/device.vibe"
+import { called, Files } from "../platform/files.vibe"
+import { Documents, type StorageAttachmentReceipt } from "../platform/documents.vibe"
+import { documentAttachmentFile } from "./attachments.vibe"
+
+export interface AttachmentDocumentLocation {
+  readonly path: string
+  readonly volume?: string
+}
+
+export interface AttachmentDocumentRow {
+  readonly kind: "file" | "folder"
+  readonly entry: StorageEntry
+  readonly volume?: string
+}
+
+export type AttachmentDocumentListing =
+  | { readonly status: "ready"; readonly location: AttachmentDocumentLocation; readonly volumes: readonly StorageVolume[]; readonly rows: readonly AttachmentDocumentRow[]; readonly truncated: boolean }
+  | { readonly status: "denied" | "unsupported" | "failed" }
+
+export type AttachmentDocumentsAccess = "Granted" | "Denied" | "Unsupported" | "Failed"
+
+module names {
+  const names = new Intl.Collator(undefined, { numeric: true, sensitivity: "base" })
+
+  /** @throws {never} */
+  export function compareDocuments(left: StorageEntry, right: StorageEntry): number {
+    if (left.directory !== right.directory) return left.directory ? -1 : 1
+    return right.modified - left.modified || names.compare(left.name, right.name) || (left.name < right.name ? -1 : left.name > right.name ? 1 : 0)
+  }
+}
+import { compareDocuments } from names
+
+function accessOf(reply: FilesResult | undefined): AttachmentDocumentsAccess {
+  if (reply?.access === "granted" && reply.status === "ready") return "Granted"
+  if (reply?.access === "denied" || reply?.status === "denied") return "Denied"
+  if (reply?.access === "unsupported" || reply?.status === "unsupported") return "Unsupported"
+  return "Failed"
+}
+
+effect function requestAccess(settings: boolean): AttachmentDocumentsAccess!!Files {
+  if (!native() || Option.isNone((try Files).plugin)) return "Unsupported"
+  const answer = called("storageRequestAccess", (plugin) => plugin.storageRequestAccess({ settings })) catch () => undefined
+  return accessOf(answer)
+}
+
+export effect function attachmentDocumentsAccess(ask = false): AttachmentDocumentsAccess!!Files {
+  if (ask) return try requestAccess(false)
+  if (Option.isNone((try Files).plugin)) return "Unsupported"
+  const answer = called("storageState", (plugin) => plugin.storageState()) catch () => undefined
+  return accessOf(answer)
+}
+
+export effect function openAttachmentDocumentSettings(): AttachmentDocumentsAccess!!Files {
+  return try requestAccess(true)
+}
+
+export effect function listAttachmentDocuments(location: AttachmentDocumentLocation, query: string): AttachmentDocumentListing!!Files {
+  if (Option.isNone((try Files).plugin)) return { status: "unsupported" }
+  const state = called("storageState", (plugin) => plugin.storageState()) catch () => undefined
+  const access = accessOf(state)
+  if (access !== "Granted") return { status: access === "Denied" ? "denied" : access === "Unsupported" ? "unsupported" : "failed" }
+  const volumes = state?.volumes ?? []
+  const where: AttachmentDocumentLocation = location.volume !== undefined && !volumes.some((volume) => volume.id === location.volume) ? { path: "" } : location
+  const primary = where.volume === undefined || where.volume === "primary"
+  const text = query.trim()
+  const reply = (primary && text !== ""
+    ? called("storageQuery", (plugin) => plugin.storageQuery({ text, ...(where.path === "" ? {} : { folder: where.path }) }))
+    : called("storageList", (plugin) => plugin.storageList(where))) catch () => undefined
+  if (reply?.status !== "ready") return { status: reply?.status === "denied" ? "denied" : reply?.status === "unsupported" ? "unsupported" : "failed" }
+  const filter = primary ? "" : text.toLocaleLowerCase()
+  const entries = (reply.entries ?? []).filter((entry) => filter === "" || entry.name.toLocaleLowerCase().includes(filter))
+  const rows = entries.sort(compareDocuments).map((entry): AttachmentDocumentRow => ({
+    kind: entry.directory ? "folder" : "file", entry, ...(where.volume === undefined ? {} : { volume: where.volume }),
+  }))
+  return { status: "ready", location: where, volumes, rows, truncated: "truncated" in reply && reply.truncated === true }
+}
+
+export interface PickedAttachmentDocument {
+  readonly entry: StorageEntry
+  readonly volume?: string
+  readonly reviewed: StorageAttachmentReceipt
+}
+
+export effect function reviewPickedDocument(row: AttachmentDocumentRow): (PickedAttachmentDocument | undefined)!!Documents {
+  if (row.kind !== "file" || row.entry.directory) return undefined
+  const volume = row.volume === undefined ? {} : { volume: row.volume }
+  const reviewed = try (try Documents).reviewStorageAttachment({ ...row.entry, ...volume })
+  if (reviewed === undefined) return undefined
+  return { entry: row.entry, ...volume, reviewed }
+}
+
+export effect function readPickedDocument(picked: PickedAttachmentDocument): (File | undefined)!!Documents {
+  const { name, mimeType, size } = picked.entry
+  const volume = picked.volume === undefined ? {} : { volume: picked.volume }
+  const bytes = try (try Documents).readStorageAttachment({ ...picked.entry, ...volume, reviewed: picked.reviewed })
+  if (bytes === undefined || bytes.name !== name || bytes.mimeType !== mimeType) return undefined
+  const file = try documentAttachmentFile(bytes)
+  return file?.size === size ? file : undefined
+}

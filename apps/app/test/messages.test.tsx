@@ -595,9 +595,11 @@ describe("Messages on an Alpha image", () => {
     expect([review.confirmations, world.telephony.sent]).toEqual([[], []]);
   });
 
-  it("Reviews the exact number for a named text, then opens an editable draft (spec/app/contacts/agent.md, \"The owner picks the exact number or the one contact, and that one is shown\"; spec/app/messages/composer.md, \"The agent's draft goes into the open conversation's draft only while it is empty, and never sends\")", async () => {
+  it.each(["draft", "send"] as const)("Reviews the exact number for a named text and handles its %s (spec/app/contacts/agent.md, \"The owner picks the exact number or the one contact, and that one is shown\"; spec/app/messages/composer.md, \"The agent's draft goes into the open conversation's draft only while it is empty, and never sends\"; spec/app/messages/composer.md, \"An addressed send names the exact number, text and SIM before it can send\")", async (mode) => {
     const world = image();
-    const compose = { type: "sms_compose", query: "Maya", body: "Meet at the front door" } as const;
+    const body = "Meet at the front door";
+    const compose = mode === "draft" ? { type: "sms_compose", target: { kind: "contact", query: "Maya" }, draft: true, body } as const
+      : { type: "sms_compose", query: "Maya", body } as const;
     const review = textReview(world.notes.owner, "draft-for-maya", compose);
     world.telephony.textReview = review;
     const { alpha } = await openImage(world);
@@ -608,9 +610,10 @@ describe("Messages on an Alpha image", () => {
     await press("Open conversation");
     await ready(alpha.runtime, Shell, "Ask Alpha open", (state) => state.assistant === "Sheet");
 
-    world.ask.nextReplyChunks = ["Review the draft for Maya."];
+    const action = mode === "draft" ? "Open draft" : "Approve";
+    world.ask.nextReplyChunks = ["Review the text for Maya."];
     world.ask.nextActions = () => [{ action: "PROPOSE_DEVICE_ACTION", data: { proposalId: review.proposal.id, state: "pending", executed: false, approvalRequired: true, awaitingUserInput: true } }];
-    await write("Message Alpha", "Text Maya: Meet at the front door");
+    await write("Message Alpha", mode === "draft" ? "Draft a text for Maya: Meet at the front door" : "Text Maya: Meet at the front door");
     await vi.waitFor(() => expect(button("Send")?.disabled).toBe(false));
     await press("Send");
     await ready(runtime, Conversation, "The named proposal is ready", (state) => review.pendingReads === 1 && state.turn.reply === "Complete");
@@ -619,12 +622,27 @@ describe("Messages on an Alpha image", () => {
       expect(found?.textContent).toContain("Maya Chen");
       return found!;
     });
-    expect(button("Open draft")).toBeUndefined();
+    expect(button(action)).toBeUndefined();
     expect(review.decisions).toEqual([]);
     await drawn(() => choice.click());
-    await vi.waitFor(() => expect(button("Open draft")).toBeDefined());
+    await vi.waitFor(() => expect(button(action)).toBeDefined());
     expect(review.decisions).toEqual([]);
-    await press("Open draft");
+    await press(action);
+    if (mode === "send") {
+      try {
+        await vi.waitFor(() => expect(review.confirmations).toHaveLength(1));
+        const confirmation = review.confirmations[0];
+        expect(confirmation).toMatchObject({ operationId: review.proposal.id, recipients: ["+14155550100"], body, subscriptionId: 1 });
+        expect(world.telephony.sent).toEqual([]);
+        await drawn(() => confirmation.confirm());
+        await vi.waitFor(() => expect(review.receipts.at(-1)).toMatchObject({ outcome: "applied", operationId: review.proposal.id,
+          result: { kind: "sms-compose", status: "sent" } }));
+        expect(world.telephony.sent).toEqual([{ operationId: review.proposal.id, recipients: ["+14155550100"], body }]);
+      } finally {
+        for (const confirmation of review.confirmations) confirmation.confirm();
+      }
+      return;
+    }
     await ready(alpha.runtime, Composer, "The exact draft is ready", (state) => state.slot.author === "AlphaWrote");
     await vi.waitFor(() => expect(review.receipts).toEqual([{
       outcome: "applied", operationId: review.proposal.id, result: { kind: "sms-compose", status: "drafted" },
@@ -633,6 +651,63 @@ describe("Messages on an Alpha image", () => {
     await vi.waitFor(() => expect(button("Back to texting Maya Chen")).toBeDefined());
     await press("Back to texting Maya Chen");
     await vi.waitFor(() => expect(document.querySelector('[aria-label^="Message draft to Maya Chen"]')?.textContent).toContain(compose.body));
+  });
+
+  it.each([["a draft the model declared", true], ["a text to send", false]] as const)("Shows %s to a written number on its own card and sends nothing (spec/app/messages/composer.md, \"An addressed send names the exact number, text and SIM before it can send\"; spec/app/messages/composer.md, \"The agent's draft goes into the open conversation's draft only while it is empty, and never sends\")", async (_label, draft) => {
+    const world = image();
+    const body = "Can you bring ice tomorrow?";
+    const compose = draft ? { type: "sms_compose", target: { kind: "number", number: "+12025550142" }, body, draft: true } as const
+      : { type: "sms_compose", target: { kind: "number", number: "+12025550142" }, body } as const;
+    const review = textReview(world.notes.owner, draft ? "draft-to-number" : "text-to-number", compose);
+    world.telephony.textReview = review;
+    const { alpha } = await openImage(world);
+    const runtime = assistant.runtime(alpha);
+    await ready(alpha.runtime, Shell, "Alpha image admitted", (state) => state.image);
+    await ready(runtime, Conversation, "Ask Alpha ready on Home", (state) => state.ready && state.context.showing.tag === "Home");
+    await vi.waitFor(() => expect(button("Open conversation")).toBeDefined());
+    await press("Open conversation");
+    await ready(alpha.runtime, Shell, "Ask Alpha open", (state) => state.assistant === "Sheet");
+
+    world.ask.nextReplyChunks = ["Review this request on your phone before it can run."];
+    world.ask.nextActions = () => [{ action: "PROPOSE_DEVICE_ACTION", data: { proposalId: review.proposal.id, state: "pending", executed: false, approvalRequired: true, awaitingUserInput: true } }];
+    await write("Message Alpha", draft ? "Draft a text to 202-555-0142 saying, can you bring ice tomorrow?" : "text 202-555-0142 can you bring ice tomorrow?");
+    await vi.waitFor(() => expect(button("Send")?.disabled).toBe(false));
+    await press("Send");
+    await ready(runtime, Conversation, "The proposal is read", (state) => review.pendingReads >= 1 && state.turn.reply === "Complete");
+    await vi.waitFor(() => expect(button(draft ? "Open draft" : "Approve")).toBeDefined());
+    expect(document.body.textContent).toContain(draft ? "Open an editable text draft" : "Review this text on your phone");
+    expect(document.body.textContent).not.toContain(draft ? "Review this text on your phone" : "Open an editable text draft");
+    expect(button(draft ? "Approve" : "Open draft")).toBeUndefined();
+    expect([review.decisions, review.claims, review.confirmations, world.telephony.sent]).toEqual([[], [], [], []]);
+  });
+
+  it.each([["a contact's first name", "Maya", true], ["a name no contact has", "Bob", false]] as const)("Reviews a text to %s on its card and sends nothing (spec/app/contacts/agent.md, \"Only the phone answers the newest search, and the request goes on by what it found\")", async (_label, query, known) => {
+    const world = image();
+    const review = textReview(world.notes.owner, `text-${query}`, { type: "sms_compose", query, body: "I'm running late" });
+    world.telephony.textReview = review;
+    const { alpha } = await openImage(world);
+    const runtime = assistant.runtime(alpha);
+    await ready(alpha.runtime, Shell, "Alpha image admitted", (state) => state.image);
+    await ready(runtime, Conversation, "Ask Alpha ready on Home", (state) => state.ready && state.context.showing.tag === "Home");
+    await vi.waitFor(() => expect(button("Open conversation")).toBeDefined());
+    await press("Open conversation");
+    await ready(alpha.runtime, Shell, "Ask Alpha open", (state) => state.assistant === "Sheet");
+
+    world.ask.nextReplyChunks = ["Review this request on your phone before it can run."];
+    world.ask.nextActions = () => [{ action: "PROPOSE_DEVICE_ACTION", data: { proposalId: review.proposal.id, state: "pending", executed: false, approvalRequired: true, awaitingUserInput: true } }];
+    await write("Message Alpha", `text ${query} I'm running late`);
+    await vi.waitFor(() => expect(button("Send")?.disabled).toBe(false));
+    await press("Send");
+    await ready(runtime, Conversation, "The named proposal is read", (state) => review.pendingReads >= 1 && state.turn.reply === "Complete");
+    if (known) {
+      await vi.waitFor(() => expect(document.querySelector('[aria-label="Choose a phone number"] button')?.textContent).toContain("Maya Chen"));
+    } else {
+      await vi.waitFor(() => expect(document.body.textContent).toContain("No matching contact with a phone number was found."));
+      expect(document.querySelector('[aria-label="Choose a phone number"]')).toBeNull();
+    }
+    expect(button("Decline")).toBeDefined();
+    expect([button("Approve"), button("Open draft")]).toEqual([undefined, undefined]);
+    expect([review.decisions, review.claims, review.confirmations, world.telephony.sent]).toEqual([[], [], [], []]);
   });
 
   it.each(["suffix", "whole number", "open thread"] as const)("Completes the exact approved %s read in its original chat (spec/app/contacts/agent.md, \"The latest text's sender is named by its number alone, and the whole number only where the agent asked for it\"; spec/app/contacts/agent.md, \"The agent reads only the conversation, voicemail or contact open on screen, as the phone last read it\")", async (scope) => {

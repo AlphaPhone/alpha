@@ -3,6 +3,7 @@ import { ConversationRecord, TurnController, encodeTurnContext, learnPeer, notLe
 import * as KeyValueStore from "effect/persistence/KeyValueStore"
 import * as Conversation from "../../gen/app__assistant.effect.vibe"
 import * as Attachments from "../../gen/app__assistant__attachments.effect.vibe"
+import { picker } from "./attachment-picker.vibe"
 import * as Chats from "../../gen/app__assistant__chats.effect.vibe"
 import * as Composer from "../../gen/app__assistant__composer.effect.vibe"
 import * as Dock from "../../gen/app__assistant__dock.effect.vibe"
@@ -38,16 +39,17 @@ import { CommsPrompts, type CommsPrompt, commsViewOf } from "../phone/comms.vibe
 import { MailQuestions, withMail } from "../inbox/mail-context.vibe"
 import { type Job, answer, applying, contained, following, reacting, run, started, stream, together, untimed } from "../runtime/reactor.vibe"
 import { Time } from "../runtime/time.vibe"
-import { VoiceWords } from "../voice/voice.vibe"
+import { type SpokenChatContext, type SpokenChatLease, VoiceWords } from "../voice/voice.vibe"
 import { FileContext, documentObservation } from "./file-context.vibe"
 import { MediaReview, mediaReview } from "./media-review.vibe"
 import { agentWarmUp } from "./warm-up.vibe"
-import { type Attached, type Board, type Line, Talk, talk } from "./talk.vibe"
-import { Views, carried, carriedAloud, delivery, handoffs, preparedIn, resendWithoutMode } from "./views.vibe"
+import { type Attached, type Board, type DraftSeat, type HistoryBounds, type Line, Talk, talk } from "./talk.vibe"
+import { Views, carried, carriedAloud, delivery, handoffs, pageIn, preparedIn, resendWithoutMode } from "./views.vibe"
 import { attachmentAuthority, dropFiles, readFiles, rememberFiles, retireTranscript, sameBinding, stageFiles } from "./attachments.vibe"
 import { readMessage } from "./read-aloud.vibe"
 import { withoutTurnTags } from "./words.ts"
 import { type DraftAddress, exchangePhoneDraft, readPhoneDraft } from "./draft-device.vibe"
+import { offerRecordingSummary } from "./recording-summary.vibe"
 
 service Turns {
   readonly controller: TurnController
@@ -78,7 +80,13 @@ const turns = Layer.effect(Turns, effect {
 const titled = Schema.Struct({ ...ConversationRecord.fields, title: Schema.String })
 const listing = () => Schema.Struct({ conversations: Schema.Array(titled) })
 const made = () => Schema.Struct({ conversation: titled })
-const page = () => Schema.Struct({ messages: Schema.Array(Schema.Struct({ id: Schema.String, role: Schema.Literals(["user", "assistant"]), text: Schema.String, clientMessageId: Schema.optionalKey(Schema.String), failureKind: Schema.optionalKey(Schema.String), cloudCode: Schema.optionalKey(Schema.String) })) })
+const page = () => Schema.Struct({
+  messages: Schema.Array(Schema.Struct({ id: Schema.NonEmptyString, role: Schema.Literals(["user", "assistant"]), text: Schema.String,
+    timestamp: Schema.optionalKey(Schema.Int.check(Schema.isGreaterThanOrEqualTo(0))), clientMessageId: Schema.optionalKey(Schema.String),
+    failureKind: Schema.optionalKey(Schema.String), cloudCode: Schema.optionalKey(Schema.String) })),
+  hasMore: Schema.optionalKey(Schema.Boolean), hasEarlier: Schema.optionalKey(Schema.Boolean), hasLater: Schema.optionalKey(Schema.Boolean),
+})
+const pageEdge = () => Schema.Struct({ messages: Schema.Array(Schema.Struct({ id: Schema.NonEmptyString })) })
 const hits = () => Schema.Struct({ results: Schema.Array(Schema.Struct({ conversationId: Schema.NonEmptyString, roomId: Schema.NonEmptyString, messageId: Schema.String, role: Schema.Literals(["user", "assistant"]), text: Schema.String })) })
 
 // Eliza's pinned history contract projects a redacted body to this exact text.
@@ -245,8 +253,91 @@ effect function screenTold(told: boolean, context: Conversation.Context, transcr
 export const spokenScreen = started(effect {
   const { memory } = try VoiceWords
   const context = try Effect.context<ScreenContext>()
-  memory.screen = (shown) => Effect.provideContext(Effect.map(screenTold(true, shown), ({ metadata, attachment }) => ({ metadata, attachment })), context)
+  const chatContext = try Effect.context<SpokenChatContext | Composer.Machine>()
+  const { writer } = try Talk
+  memory.chat = { context: chatContext, writer, begin: (session, turn, current) => Effect.provideContext(spokenChat(session, turn, current), chatContext) }
+  memory.screen = (shown) => Effect.provideContext(Effect.map(screenTold(true, shown), ({ metadata, sms, attachment }) => ({ metadata, sms, attachment })), context)
 }, "telling voice the screen")
+
+// spec/app/voice/index.md, "Talk keeps what it sends in the selected Ask Alpha conversation"
+effect function spokenChat(session: number, turn: number, current: boolean!!): (SpokenChatLease | undefined)!!(Agent | Chats.Machine | Composer.Machine | Conversation.Machine | Talk) {
+  const { board } = try Talk
+  const agent = try Agent
+  const chats = try Chats.Machine
+  const composer = try Composer.Machine
+  const conversation = try Conversation.Machine
+  const seat = board.draftSeat
+  if (seat === undefined || !(try current) || !(try ownsSeat(board, seat))) return undefined
+  const boardChanges = Stream.callback<void>((queue) => acquireRelease(
+    sync(() => board.subscribe(() => { Queue.offerUnsafe(queue, undefined) })),
+    (off) => sync(off),
+  ))
+  const retiredSeat = Stream.filter(Stream.concat(Stream.succeed(undefined), boardChanges), () => board.draftSeat !== seat)
+  const started = try chats.get()
+  if (Chats.making(started) || Conversation.inFlight((try conversation.get()).turn)) return undefined
+  let chosen = started.chosen
+  if (chosen === 0) {
+    const empty = (writing: Composer.Composer) =>
+      writing.binding.owner === seat.number && writing.binding.conversation === 0 && writing.slot === "Open"
+      && writing.away === "Free" && !writing.unsettled && writing.draft.sync === "Kept" && !Composer.content(writing.editor)
+      && !Composer.attached(writing.editor) && board.snapshot().typed === "" && !board.sendWhenMade
+      && board.waitingRequest === undefined && board.postingRequest === undefined
+    if (!empty(try composer.get())) return undefined
+    const begin = { type: "start", replying: false, holding: false } as const
+    if (seat !== board.draftSeat || !(try current) || !(try contained(chats.send(begin, (live) =>
+      live.chosen === 0 && live.make.id === started.make.id && seat === board.draftSeat && empty(Effect.runSync(composer.get()))), "starting a chat for Talk"))) return undefined
+    const ticket = started.make.id + 1
+    const made = Stream.runHead(Stream.filter(chats.changes, (live) =>
+      live.make.id > ticket || (live.make.id === ticket && !Chats.making(live))))
+    const answer = try Effect.raceFirst(made, Effect.as(Stream.runHead(retiredSeat), Option.none<Chats.Chats>()))
+    if (Option.isNone(answer) || answer.value.make.id !== ticket || answer.value.make.outcome !== "Confirmed") return undefined
+    chosen = answer.value.chosen
+  }
+  const record = board.known(chosen)?.record
+  if (record === undefined || !(try current) || !(try ownsSeat(board, seat))) return undefined
+  const selected = effect {
+    const live = try chats.get()
+    const now = board.known(live.chosen)?.record
+    return board.draftSeat === seat && live.chosen === chosen && now?.id === record.id && now?.roomId === record.roomId
+  }
+  if (!(try selected)) return undefined
+  const retired = Stream.filterEffect(
+    Stream.merge(Stream.succeed(undefined), Stream.merge(boardChanges, Stream.as(chats.changes, undefined))),
+    () => Effect.map(selected, (matches) => !matches),
+  )
+  const verified = Effect.provideService(effect {
+    return (try selected) && (try ownsSeat(board, seat)) && (try selected)
+  }, Agent, agent)
+  return {
+    session, turn, record, authority: seat.authority, conversation: chosen, current: selected, verified, retired,
+    settle: (result, spoken) => Effect.provideService(Effect.provideService(
+      settleSpoken(board, seat, chosen, record, result, spoken, current), Chats.Machine, chats), Agent, agent),
+  }
+}
+
+effect function settleSpoken(board: Board, seat: DraftSeat, selected: number, record: ConversationRecord, result: Extract<TurnResult, { kind: "Replied" }>, spoken: string, current: boolean!!): void!!(Agent | Chats.Machine) {
+  if (!(try ownsSeat(board, seat)) || !(try current)) return
+  const chats = try Chats.Machine
+  const live = try chats.get()
+  const bound = board.known(live.chosen)?.record
+  if (live.chosen !== selected || live.around !== 0 || board.draftSeat !== seat
+    || bound?.id !== record.id || bound?.roomId !== record.roomId) return
+  const page = live.page.ticket
+  const { userMessageId, messageId, text, failureKind, cloudCode } = result.reply
+  const lines: Line[] = []
+  if (userMessageId !== undefined && userMessageId !== "") lines.push({ id: userMessageId, mine: true, text: spoken })
+  if (messageId !== "" && messageId !== userMessageId) {
+    const failure = failureKind === undefined ? undefined : Reply.readAgain(failures[failureKind] ?? "OtherFailure", cloudCode !== undefined)
+    lines.push({ id: messageId, mine: false, text, ...(failure === undefined ? {} : { failure }) })
+  }
+  const prior = board.page(page)
+  const added = lines.filter((line) => !prior.some((other) => other.id === line.id))
+  if (added.length === 0) return
+  for (const line of added) board.messageNumber(line.id)
+  board.putPage(page, selected, [...prior, ...added])
+  try ignore(chats.send({ type: "kept", messages: added.length }, (now) => board.draftSeat === seat
+    && now.chosen === selected && now.around === 0 && now.page.ticket === page))
+}
 
 effect function syncAlphaApps(): void!!(Agent | KeyValueStore.KeyValueStore | Time) {
   const ctx = try Effect.context<never>()
@@ -276,7 +367,7 @@ effect function bindArchiveAuthority(board: Board, authority: Attachments.Archiv
 }
 
 function posted(ticket: number, told: boolean, context: Conversation.Context): Stream.Stream<Conversation.Event, never, Views | Agent | KeyValueStore.KeyValueStore | Turns | Chats.Machine | Attachments.Machine | Conversation.Machine | Reply.Machine | Composer.Machine | Comms.Machine | MailQuestions | MediaReview | ScreenContext | NoteStore> {
-  return Stream.callback<Conversation.Event, never, Views | Agent | KeyValueStore.KeyValueStore | Turns | Chats.Machine | Attachments.Machine | Conversation.Machine | Reply.Machine | Composer.Machine | Comms.Machine | MailQuestions | MediaReview | ScreenContext | NoteStore>((queue) => effect {
+  const post = (queue: Queue.Queue<Conversation.Event, Cause.Done>, request: CommsPrompt | undefined) => effect {
     const { controller, streamed } = try Turns
     const { board } = try Talk
     const reply = try Reply.Machine
@@ -295,8 +386,6 @@ function posted(ticket: number, told: boolean, context: Conversation.Context): S
     }
     const chats = try history.get()
     const known = board.known(chats.chosen)
-    const request = board.postingRequest
-    board.postingRequest = undefined
     const text = (request?.text ?? board.outgoing).trim()
     const composer = try (try Composer.Machine).get()
     const held = request === undefined ? composer.held : Composer.blankMessage
@@ -402,7 +491,7 @@ function posted(ticket: number, told: boolean, context: Conversation.Context): S
         if (labelled()) board.change({ label: label ?? `Using ${name}` })
       },
     }
-    board.change({ media: [], mediaNote: undefined })
+    board.change({ media: board.snapshot().media.filter((card) => card.decision === "Deciding"), mediaNote: undefined })
     const views = try Views
     const asked = try views.begin()
     // spec/app/assistant/context.md, "A turn asked while Files shows a readable document attaches it for that turn"
@@ -453,6 +542,7 @@ function posted(ticket: number, told: boolean, context: Conversation.Context): S
     const finishing = Conversation.canFinish(try conversation.get(), ticket)
     if (result?.kind === "Replied" && finishing) {
       const prepared = told ? preparedIn(result.reply.actionResults, views.clientId) : undefined
+      const page = told ? pageIn(result.reply.actionResults, views.clientId) : undefined
       let continueFiles: Effect.Effect<void> | undefined
       if (result.reply.userMessageId !== undefined) {
         board.messageNumber(result.reply.userMessageId)
@@ -460,6 +550,10 @@ function posted(ticket: number, told: boolean, context: Conversation.Context): S
       }
       board.messageNumber(result.reply.messageId)
       board.append(pageTicket, chats.chosen, { id: result.reply.messageId, mine: false, text: result.reply.text })
+      const recordingSummary = transcript === undefined || seat === undefined || result.reply.failureKind !== undefined
+        ? undefined : try offerRecordingSummary({ source: transcript.offered, seat, conversation: chats.chosen,
+          conversationId: known.record.id, message: result.reply.messageId }, result.reply.text)
+      if (board.draftSeat === seat) board.change({ recordingSummary })
       try syncAlphaApps()
       if (enrolled !== undefined && result.reply.userMessageId !== undefined) {
         const replied = streamed(result.clientMessageId)
@@ -491,14 +585,31 @@ function posted(ticket: number, told: boolean, context: Conversation.Context): S
             ...(voicemail === undefined ? {} : { voicemail }), ...(inFiles === undefined ? {} : { directFiles: inFiles }),
             ...(outsideFiles === undefined ? {} : { outsideFiles }) })
         if (board.lastSentId === result.clientMessageId && (try conversation.get()).context.revision === context.revision
-          && (try history.get()).chosen === chats.chosen) board.change({ media })
+          && (try history.get()).chosen === chats.chosen) {
+          const deciding = board.snapshot().media.filter((card) => card.decision === "Deciding")
+          board.change({ media: [...deciding, ...media.filter((card) => !deciding.some((held) => held.id === card.id && held.digest === card.digest))] })
+        }
       }
       if (continueFiles !== undefined) try views.hold(ticket, { asked, continueFiles })
+      else if (page !== undefined) try views.hold(ticket, { asked, page })
       else if (prepared !== undefined) try views.hold(ticket, { asked, handoff: prepared })
     }
     if (event.type === "refuse") board.drop(pageTicket, mine)
     Queue.offerUnsafe(queue, event)
     Queue.endUnsafe(queue)
+  }
+  return Stream.callback<Conversation.Event, never, Views | Agent | KeyValueStore.KeyValueStore | Turns | Chats.Machine | Attachments.Machine | Conversation.Machine | Reply.Machine | Composer.Machine | Comms.Machine | MailQuestions | MediaReview | ScreenContext | NoteStore>((queue) => effect {
+    const { board, writer } = try Talk
+    const request = board.postingRequest
+    board.postingRequest = undefined
+    const { controller } = try Turns
+    const posted = try writer.withPermitsIfAvailable(1)(Effect.ensuring(post(queue, request), effect {
+      if (controller.pending) try ignore(tryPromise(() => controller.interrupt()))
+    }))
+    if (Option.isNone(posted)) {
+      Queue.offerUnsafe(queue, { type: "refuse", ticket })
+      Queue.endUnsafe(queue)
+    }
   })
 }
 
@@ -712,6 +823,36 @@ effect function newest(page: number, conversation: number): Chats.Event!!(Agent 
   return read.type === "listed" ? { type: "latest", page, ok: read.ok, ids: read.ids, conversation, ...free } : read
 }
 
+// The pinned resident returns at most this many rows on either side of an around anchor.
+const historyRadius = 100
+
+/** Prove the edges of a centered window, where a full side alone cannot say anything about the row past it. */
+effect function historyBounds(path: string, pivot: string | undefined, answer: ReturnType<typeof page>["Type"], current: boolean!!(Agent | Chats.Machine)): HistoryBounds!!(Agent | Chats.Machine) {
+  const { messages, hasMore, hasEarlier, hasLater } = answer
+  const first = messages[0]
+  const last = messages.at(-1)
+  if (first === undefined || last === undefined) return {}
+  if (pivot === undefined) return (hasEarlier ?? hasMore) === true ? { earlier: first.id } : {}
+  const center = messages.findIndex((one) => one.id === pivot)
+  if (center < 0) return {}
+  const older = effect {
+    if (hasEarlier !== undefined) return hasEarlier
+    if (center < historyRadius || first.timestamp === undefined || !(try current)) return false
+    const before = String(first.timestamp)
+    const edge = ask(Agent, HttpClientRequest.get(path, { urlParams: { before, beforeId: first.id, limit: "1" } }), pageEdge()) catch () => undefined
+    return edge?.messages.length === 1
+  }
+  const newer = effect {
+    if (hasLater !== undefined) return hasLater
+    if (messages.length - center - 1 < historyRadius || !(try current)) return false
+    const edge = ask(Agent, HttpClientRequest.get(path, { urlParams: { around: last.id } }), pageEdge()) catch () => undefined
+    const at = edge?.messages.findIndex((one) => one.id === last.id) ?? -1
+    return edge !== undefined && at >= 0 && at < edge.messages.length - 1
+  }
+  const [earlier, later] = try Effect.all([older, newer], { concurrency: "unbounded" })
+  return { ...(earlier ? { earlier: first.id } : {}), ...(later ? { later: last.id } : {}) }
+}
+
 // spec/app/assistant/chats.md, "A page of the conversation showing is taken only from the newest asking"; spec/app/assistant/chats.md, "Older or newer messages are read around a message of the conversation showing"; spec/app/assistant/chats.md, "A read of the latest messages answered 404 asks the agent's list whether the conversation is still there"; spec/app/assistant/reply.md, "A failure refused before any output replaces the streamed text; any other failure is added after it"; spec/app/assistant/reply.md, "Out of funds is refused before any output, is never spoken, and offers only Manage plan"
 /** A page of the conversation showing, each message numbered as Alpha first saw it: the page counts up to its highest number, which a scroll names. A 404 to a read of the latest messages is told as such, for the agent's list to decide. */
 effect function paged(conversation: number, around: number, ticket: number): Chats.Event!!(Agent | Talk | Chats.Machine | Attachments.Machine | Composer.Machine) {
@@ -724,7 +865,16 @@ effect function paged(conversation: number, around: number, ticket: number): Cha
     const owner = (try composer.get()).binding.owner
     const authority = seat?.authority
     const pivot = around > 0 ? board.messageId(around) : undefined
-    const { messages } = try ask(Agent, HttpClientRequest.get(`/api/conversations/${encodeURIComponent(known.record.id)}/messages`, { urlParams: pivot === undefined ? {} : { around: pivot } }), page())
+    if (around > 0 && pivot === undefined) return { type: "paged", ticket, ok: false, messages: 0 }
+    const path = `/api/conversations/${encodeURIComponent(known.record.id)}/messages`
+    const answer = try ask(Agent, HttpClientRequest.get(path, { urlParams: pivot === undefined ? {} : { around: pivot } }), page())
+    const { messages } = answer
+    if (pivot !== undefined && !messages.some((one) => one.id === pivot)) return { type: "paged", ticket, ok: false, messages: 0 }
+    const edgeCurrent = effect {
+      const live = try (try Chats.Machine).get()
+      return live.chosen === conversation && live.page.ticket === ticket && (try ownsSeat(board, seat))
+    }
+    const bounds = try historyBounds(path, pivot, answer, edgeCurrent)
     const redacted = new Set(messages.filter((one) => one.text === privateHistoryNotice).map((one) => one.id))
     const keys = messages.flatMap((one) => {
       const key = one.clientMessageId
@@ -750,7 +900,7 @@ effect function paged(conversation: number, around: number, ticket: number): Cha
         ...(attachments === undefined ? {} : { attachments }),
       }
     })
-    const preview = board.takeHistory(ticket, conversation, recorded, redacted)
+    const preview = board.takeHistory(ticket, conversation, recorded, redacted, bounds)
     if (preview !== undefined) {
       const picker = try Attachments.Machine
       try ignore(picker.send({ type: "closePreview" }, (state) => state.preview === preview && board.snapshot().preview === undefined))
@@ -1214,8 +1364,26 @@ const steppingBack = started(effect {
   })
 }, "offering Back")
 
+// spec/app/assistant/search.md, "Story: Search my conversations"; spec/app/shell/index.md, "Ask Alpha rises to typing, a sheet or the full screen"
+export effect function openChatSearch(route: number): void!!(Shell | Search.Machine | Chats.Machine) {
+  const shell = try Shell
+  const search = try Search.Machine
+  const current = try shell.get()
+  if (current.route !== route || !Search.canOpenSearch(try search.get())) return
+  const raised = current.assistant === "Full" ? current
+    : (shell.send({ type: "raise", detent: "Full" }, (showing) => showing.route === route) catch () => undefined)
+  if (raised === undefined || (try shell.get()).route !== raised.route) return
+  if (try contained(search.send({ type: "openSearch" }), "opening chat search")) {
+    try ignore((try Chats.Machine).send({ type: "browse" }))
+  }
+}
+
 // spec/app/assistant/index.md, "Back closes a review, then search, then a quote or an edit, one at a time; with none of them open Back is the shell's"
 export const assistantBack = effect {
+  const summary = (try Talk).board.snapshot().recordingSummary
+  if (summary !== undefined && (try summary.machine.get()).reviewing) {
+    return try contained(summary.machine.send({ type: "dismissSummary" }), "closing the recording summary review")
+  }
   const attachments = try Attachments.Machine
   if (Attachments.canCancel(try attachments.get())) return try contained(attachments.send({ type: "cancel" }), "closing attachments")
   if (Attachments.canClosePreview(try attachments.get())) return try contained(attachments.send({ type: "closePreview" }), "closing the attachment preview")
@@ -1253,7 +1421,7 @@ export const assisting = Layer.provideMerge(
     reacting(Search, { carry: carrySearch }),
     reacting(Reply, {}),
     reacting(Dock, { carry: carryDock }),
-    Attachments.machine(),
+    picker,
     reacting(Locator, { carry: carryLocator }),
     reached, looked, opening, saving, bound, requested, reviewedInFiles, submitted, allowing, forgetting, rested, keyboardRest, steppingBack, carried, carriedAloud, agentWarmUp,
   ),

@@ -14,8 +14,8 @@ import { Machine as Shell } from "../gen/app__shell.effect.vibe";
 import * as Layers from "../gen/app__shell__layers.effect.vibe";
 import settings from "../src/settings/index.tsx";
 import { button, closeAll, fill, hardware, later, only, open as openAlpha, press, seen, underAct, until } from "./alpha.tsx";
-import { account } from "./fakes/cloud.ts";
-import { notices } from "./fakes/settings.ts";
+import { account, checkoutSession, checkoutUrl, type CheckoutScene } from "./fakes/cloud.ts";
+import { type ListenerScene, notices } from "./fakes/settings.ts";
 import { type Scene, scene } from "./fakes/scene.ts";
 
 underAct();
@@ -51,6 +51,31 @@ async function settingsOpen(world = { ...scene(), phone: true }) {
 }
 
 describe("Settings", () => {
+  it("Recovers an unavailable browser account only after Try again", async () => {
+    const world = { ...scene(), signedIn: false };
+    const { alpha } = await settingsOpen(world);
+    await vi.waitFor(() => expect(button("Account")?.textContent).toContain("Signed out"));
+    await press("Account");
+    await vi.waitFor(() => expect(document.querySelector('[role="dialog"]')?.textContent).toContain("Unavailable"));
+
+    world.signedIn = true;
+    expect(document.querySelector('[role="dialog"]')?.textContent).not.toContain(account.email);
+    await press("Try again");
+    await vi.waitFor(() => expect(document.querySelector('[role="dialog"]')?.textContent).toContain(account.email));
+    await hardware("back");
+    await until(alpha, alpha.runtime, Layers.Machine, (state) => !Layers.listed(state, "account"));
+    expect(await page(alpha)).toBe("Top");
+
+    world.signedIn = false;
+    await act(async () => button("Account")?.focus());
+    await press("Account");
+    await vi.waitFor(() => expect(document.querySelector('[role="dialog"]')?.textContent).toContain("Unavailable"));
+    await press("Back");
+    await until(alpha, alpha.runtime, Layers.Machine, (state) => !Layers.listed(state, "account"));
+    await vi.waitFor(() => expect(document.activeElement).toBe(button("Account")));
+    expect(await page(alpha)).toBe("Top");
+  });
+
   it("Find a setting and come back (spec/app/settings/index.md, \"Story: Find a setting and come back\"; spec/app/account/plan.md, \"Story: Know my plan\"; spec/app/account/billing.md, \"Story: Pay in the browser\")", async () => {
     const { alpha, machines, world } = await settingsOpen();
     // spec/app/settings/index.md, "The build says once whether it is a development build, and the phone whether Alpha runs on a phone and on an Alpha image"
@@ -178,6 +203,44 @@ describe("Settings", () => {
     expect(recovery.starts).toBe(archived === recovery.retained ? 1 : 0);
   });
 
+  it("Reviews the price and confirms only the exact Stripe checkout (spec/app/account/billing.md, \"Story: Pay in the browser\"; spec/app/account/billing.md, \"Story: Keep billing to its sign-in\")", async () => {
+    const checkout: CheckoutScene = { starts: [], confirmations: [], opened: [], returned: null, paid: false };
+    const world = { ...scene(), phone: true, checkout };
+    await settingsOpen(world);
+    await press("Account");
+    await vi.waitFor(() => expect(document.querySelector('[aria-label="Cloud plan"]')?.textContent).toContain("No plan"));
+    await act(async () => document.querySelector<HTMLElement>('[role="dialog"] summary')?.click());
+    await vi.waitFor(() => expect(button("Review Plus subscription")).toBeTruthy());
+    await press("Review Plus subscription");
+    await vi.waitFor(() => expect(document.querySelector('[aria-label="Review subscription"]')?.textContent).toContain("$19.50"));
+    expect(checkout.starts).toEqual([]);
+    await press("Not now");
+    expect(checkout.opened).toEqual([]);
+    await press("Review Plus subscription");
+    world.voice.credentialId = "cred-new";
+    await press("Continue to Stripe");
+    await vi.waitFor(() => expect(button("Review Plus subscription")).toBeTruthy());
+    expect(checkout.starts).toEqual([]);
+    await press("Review Plus subscription");
+    await press("Continue to Stripe");
+    await vi.waitFor(() => expect(checkout.opened).toEqual([checkoutUrl]));
+    expect(checkout.starts).toHaveLength(1);
+    expect(checkout.starts[0]).toMatchObject({ planKey: "plus_monthly", presentation: "mobile", key: expect.any(String) });
+    await seen(false);
+    checkout.returned = "cs_test_other";
+    await seen(true);
+    await vi.waitFor(() => expect(checkout.returned).toBeNull());
+    expect(checkout.confirmations).toEqual([]);
+    checkout.paid = true;
+    checkout.returned = checkoutSession;
+    await act(async () => window.dispatchEvent(new Event("alpha-billing-return")));
+    await vi.waitFor(() => expect(checkout.confirmations).toEqual([checkoutSession]));
+    await vi.waitFor(() => expect(document.querySelector('[aria-label="Cloud plan"]')?.textContent).toContain("Plus"));
+    checkout.returned = checkoutSession;
+    await act(async () => window.dispatchEvent(new Event("alpha-billing-return")));
+    expect(checkout.confirmations).toEqual([checkoutSession]);
+  });
+
   it("Make Alpha the Home app (spec/app/settings/facts.md, \"Story: Make Alpha the Home app\")", async () => {
     const { alpha, machines } = await settingsOpen();
     await press("General");
@@ -213,7 +276,7 @@ describe("Settings", () => {
     });
   });
 
-  it("Choose Android autofill in Passwords (spec/app/settings/android.md, \"Story: Change what only Android can change\")", async () => {
+  it("Manage saved passwords and choose Android autofill (spec/app/settings/facts.md, \"Story: Manage my saved passwords\"; spec/app/settings/android.md, \"Story: Change what only Android can change\")", async () => {
     const { alpha, machines, world } = await settingsOpen();
     await press("Apps");
     await press("Passwords");
@@ -231,8 +294,83 @@ describe("Settings", () => {
     await seen(true);
     await until(alpha, machines, Facts.Machine, (s) => s.reported.some(({ fact, value }) => fact === "AutofillService" && value === "Alpha"));
     expect(titled("Use for autofill")).toBeUndefined();
+
+    world.settings.passwords.push({
+      id: "entry-47", revision: 4, label: "Example account", username: "owner",
+      bindings: [{ kind: "web", facet: "https://example.test", display: "example.test" }], updatedAt: 1000,
+    });
+    await vi.waitFor(() => expect(titled("Unlock")).toBeDefined());
+    await tap("Unlock");
+    await vi.waitFor(() => expect(titled("Example account")).toBeDefined());
+    await fill("Search passwords", "another site");
+    expect(titled("Example account")).toBeUndefined();
+    await fill("Search passwords", "example.test");
+    await tap("Example account");
+    await vi.waitFor(() => expect(titled("Updated account")).toBeDefined());
+    await fill("Search passwords", "");
+    await press("Add password");
+    await vi.waitFor(() => expect(titled("New account")).toBeDefined());
+    expect(world.settings.passwordEdits).toEqual([{ entryId: "entry-47", expectedRevision: 4 }, undefined]);
+
+    await seen(false);
+    await vi.waitFor(() => expect(world.settings.passwordsUnlocked).toBe(false));
+    await seen(true);
+    await vi.waitFor(() => expect(titled("Unlock")).toBeDefined());
+    expect(titled("Updated account")).toBeUndefined();
+    await tap("Unlock");
+    await vi.waitFor(() => expect(titled("Updated account")).toBeDefined());
+    await tap("Lock");
+    await vi.waitFor(() => expect(titled("Unlock")).toBeDefined());
+    expect(titled("Updated account")).toBeUndefined();
     await hardware("back");
     expect(await page(alpha)).toBe("Apps");
+  });
+
+  it("See and control the listener (spec/app/voice/listener.md, \"Story: See and control the listener\")", async () => {
+    const pause = Promise.withResolvers<unknown>();
+    const listener: ListenerScene = {
+      status: { available: true, state: "LISTENING", label: "Listening", consented: true, listening: true, microphoneOpen: true },
+      pauseReply: pause.promise,
+      openSettings: false,
+    };
+    const stock = await settingsOpen({ ...scene(), phone: true });
+    await press("Privacy");
+    await vi.waitFor(() => expect(button("Permissions")).toBeDefined());
+    expect(button("Listening settings")).toBeUndefined();
+    await stock.close();
+
+    const world = { ...scene(), phone: true, image: true };
+    world.settings.listener = listener;
+    const { alpha } = await settingsOpen(world);
+    await press("Privacy");
+    const listening = () => {
+      const row = titled("Listening");
+      return row instanceof HTMLLabelElement ? document.getElementById(row.htmlFor) : undefined;
+    };
+    await vi.waitFor(() => expect(listening()?.getAttribute("aria-checked")).toBe("true"));
+    await press("Pause listening");
+    await hardware("back");
+    expect(await page(alpha)).toBe("Top");
+    expect(button(/^Microphone may be on/)).toBeUndefined();
+    await act(async () => pause.resolve({ ...listener.status, state: "PAUSED_USER", listening: false, microphoneOpen: false, saved: false }));
+    await vi.waitFor(() => expect(button(/^Microphone may be on/)).toBeDefined());
+    await press(/^Microphone may be on/);
+    await vi.waitFor(() => expect(world.settings.opened).toEqual(["home"]));
+    await press("Privacy");
+    await press("Turn off listening");
+    await vi.waitFor(() => expect(listening()?.getAttribute("aria-checked")).toBe("false"));
+    expect(button(/^Microphone may be on/)).toBeUndefined();
+    await press("Listening settings");
+    await vi.waitFor(() => expect(document.body.textContent).toContain("Listening settings are unavailable"));
+    listener.openSettings = true;
+    await tap("Listening");
+    await vi.waitFor(() => expect(world.settings.opened).toEqual(["home", "sense-settings"]));
+    expect(listening()?.getAttribute("aria-checked")).toBe("false");
+
+    listener.status = { available: true, state: "PAUSED_CALL", label: "Paused", consented: true, listening: false, microphoneOpen: false };
+    await seen(false);
+    await seen(true);
+    await vi.waitFor(() => expect(titled("Listening")?.textContent).toContain("Paused during a call"));
   });
 
   it("Look at access again (spec/app/startup/access.md, \"Story: Look at access again\")", async () => {

@@ -9,6 +9,7 @@ import type { MailQuestion } from "../inbox/mail-context.vibe"
 import type { Sighting } from "../platform/location.vibe"
 import type { CommsPrompt } from "../phone/comms.vibe"
 import type { NoteTranscript } from "../notes/selection.vibe"
+import type { RecordingSummary } from "./recording-summary.vibe"
 
 /** One file selected by the owner, with the bytes admitted by the Ask Alpha attachment policy. */
 export interface Attached {
@@ -48,9 +49,16 @@ export interface Line {
   readonly attachments?: readonly Attached[]
 }
 
+/** The exact visible server rows which have older or newer history past them. */
+export interface HistoryBounds {
+  readonly earlier?: string
+  readonly later?: string
+}
+
 interface MessagePage {
   readonly conversation: number
   readonly lines: ReadonlyArray<Line>
+  readonly bounds?: HistoryBounds
 }
 
 /** A search hit: the conversation it is in, by its number, the message, by its number, and what it says. */
@@ -84,6 +92,7 @@ export interface Seen {
   readonly transcript: TranscriptAttachment | undefined
   readonly attachmentNotice: string
   readonly preview: { readonly ticket: number; readonly file: Attached } | undefined
+  readonly recordingSummary: RecordingSummary | undefined
   readonly media: ReadonlyArray<MediaCard>
   readonly mediaNote: { readonly conversation: number; readonly text: string } | undefined
   /** The text of a message the slot marks as sending, under review; or the saved copy of a conflict. */
@@ -145,7 +154,7 @@ export interface Board {
   line(conversation: number, message: number): Line | undefined
   putPage(ticket: number, conversation: number, lines: ReadonlyArray<Line>): void
   /** Take confirmed rows and retire loaded copies of any now-redacted attachment, returning its open preview ticket. */
-  takeHistory(ticket: number, conversation: number, lines: readonly Line[], redacted: ReadonlySet<string>): number | undefined
+  takeHistory(ticket: number, conversation: number, lines: readonly Line[], redacted: ReadonlySet<string>, bounds: HistoryBounds): number | undefined
   append(ticket: number, conversation: number, line: Line): void
   rename(ticket: number, line: Line, id: string): void
   drop(ticket: number, line: Line): void
@@ -154,6 +163,7 @@ export interface Board {
 export service Talk {
   readonly board: Board
   readonly attachmentLock: Semaphore.Semaphore
+  readonly writer: Semaphore.Semaphore
   /** Seal the previous seat, or open the verified conversation catalogue and say if it was selected before. */
   seat(next: DraftSeat | undefined): boolean!!
   /** Record which verified catalogue the settled numeric Chat state belongs to. */
@@ -193,7 +203,7 @@ export const talk = Layer.effect(Talk, effect {
   const listeners = new Set<() => void>()
   let position: { readonly ticket: number; readonly sighting: Sighting } | undefined
   let seen: Seen = {
-    pages: new Map(), reply: "", label: "", failure: undefined, typed: "", files: [], filesBinding: undefined, filesAuthority: undefined, transcript: undefined, attachmentNotice: "", preview: undefined, media: [], mediaNote: undefined, saved: "", hits: [],
+    pages: new Map(), reply: "", label: "", failure: undefined, typed: "", files: [], filesBinding: undefined, filesAuthority: undefined, transcript: undefined, attachmentNotice: "", preview: undefined, recordingSummary: undefined, media: [], mediaNote: undefined, saved: "", hits: [],
     titles: new Map(),
   }
   const keep = () => {
@@ -229,7 +239,9 @@ export const talk = Layer.effect(Talk, effect {
     waitingRequest: undefined,
     postingRequest: undefined,
     change: (patch) => {
+      const previous = seen.recordingSummary
       seen = { ...seen, ...patch }
+      if (previous !== undefined && previous !== seen.recordingSummary) runFork(previous.runtime.disposeEffect)
       for (const listener of listeners) listener()
     },
     numberOf: (record, title) => {
@@ -284,16 +296,16 @@ export const talk = Layer.effect(Talk, effect {
       return undefined
     },
     putPage: (ticket, conversation, lines) => {
-      board.change({ pages: new Map([...seen.pages, [ticket, { conversation, lines }]]) })
+      const previous = seen.pages.get(ticket)
+      const taken = previous?.conversation === conversation ? { ...previous, lines } : { conversation, lines }
+      board.change({ pages: new Map([...seen.pages, [ticket, taken]]) })
     },
-    takeHistory: (ticket, conversation, lines, redacted) => {
+    takeHistory: (ticket, conversation, lines, redacted, bounds) => {
       const incoming = new Map(lines.map((line) => [line.id, line]))
       const merged = [...lines, ...board.page(ticket).filter((line) => !incoming.has(line.id))]
-      if (redacted.size === 0) {
-        board.putPage(ticket, conversation, merged)
-        return undefined
-      }
       const pages = new Map(seen.pages)
+      pages.set(ticket, { conversation, lines: merged, bounds })
+      if (redacted.size === 0) { board.change({ pages }); return undefined }
       const preview = seen.preview
       let closed: number | undefined
       for (const [previous, page] of seen.pages) {
@@ -306,9 +318,8 @@ export const talk = Layer.effect(Talk, effect {
           updated = true
           return replacement
         })
-        if (previous !== ticket && updated) pages.set(previous, { conversation, lines: kept })
+        if (previous !== ticket && updated) pages.set(previous, { ...page, lines: kept })
       }
-      pages.set(ticket, { conversation, lines: merged })
       board.change(closed === undefined ? { pages } : { pages, preview: undefined })
       return closed
     },
@@ -348,7 +359,7 @@ export const talk = Layer.effect(Talk, effect {
     board.change({
       pages: new Map(), reply: "", label: "", failure: undefined, typed: "", saved: "",
       files: [], filesBinding: undefined, filesAuthority: undefined, transcript: undefined, attachmentNotice: "", preview: undefined,
-      hits: [], media: [], mediaNote: undefined, titles: new Map(records.map((one, at) => [at + 1, one.title])),
+      hits: [], recordingSummary: undefined, media: [], mediaNote: undefined, titles: new Map(records.map((one, at) => [at + 1, one.title])),
     })
     return key !== undefined && preceding === key && remembered.length > 0
   }
@@ -361,5 +372,5 @@ export const talk = Layer.effect(Talk, effect {
       return true
     } catch () => false
   }
-  return { board, attachmentLock: try Semaphore.make(1), seat, markSeat }
+  return { board, attachmentLock: try Semaphore.make(1), writer: try Semaphore.make(1), seat, markSeat }
 })
