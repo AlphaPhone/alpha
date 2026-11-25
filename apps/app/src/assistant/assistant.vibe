@@ -410,7 +410,7 @@ function posted(ticket: number, told: boolean, context: Conversation.Context): S
       sensitive: context.sensitive, currentTurn: Conversation.canFinish(try conversation.get(), ticket),
     }) ? [openFile] : []
     const directFiles = (requestedFiles !== undefined || outsideOrigin !== undefined) && openDocument.length === 0 && selected?.kind !== "document"
-    const metadata = { ...screen, ...(told ? delivery(views.clientId, directFiles) : {}), ...(quoted === undefined ? {} : { replyToMessageId: quoted.id }) }
+    const metadata = { ...screen, ...(told ? delivery(views.clientId, directFiles ? "direct-files-v1" : undefined) : {}), ...(quoted === undefined ? {} : { replyToMessageId: quoted.id }) }
     const images = [...files, ...openDocument].map(({ data, mimeType, name }) => ({ data, mimeType, name }))
     const result = tryPromise(() => controller.send({ text: outgoing, ...(images.length === 0 ? {} : { images }), ...(Object.keys(metadata).length === 0 ? {} : { metadata }) }, { stream: hooks, ...(enrolled === undefined ? {} : { headers: enrolled.headers }) })) catch () => undefined
     if (!(try ownsSeat(board, seat))) {

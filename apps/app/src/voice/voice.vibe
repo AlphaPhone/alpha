@@ -410,7 +410,7 @@ function sendVoiceTurn(session: number, turn: number): Stream.Stream<Voice.Event
       return
     }
     const admittedScreen = direct === undefined ? sameScreen : try atSource
-    const metadata = admittedScreen ? { ...observation?.metadata, ...(views === undefined ? {} : delivery(views.clientId, direct !== undefined)) } : {}
+    const metadata = admittedScreen ? { ...observation?.metadata, ...(views === undefined ? {} : delivery(views.clientId, direct === undefined ? undefined : "direct-files-only-v1")) } : {}
     // spec/app/assistant/reply.md, "One brief acknowledgment at most, only from the agent's acknowledgment frame, before any tool runs": it is said at once, with no hold, as the turn's first line.
     let cued = false
     let toolRan = false

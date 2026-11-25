@@ -721,7 +721,7 @@ describe("Files on a phone", () => {
   it('Opens or filters only what the owner asked for directly (spec/app/files/index.md, "An explicit request to open or filter Files may act directly on the same idle Files view")', async () => {
     const world = { ...scene(), phone: true, image: true };
     const filter = { type: "files_filter", kind: "pdf", folder: "Download" } as const;
-    const review = textReview(world.notes.owner, "reviewed-filter", filter);
+    const review = textReview(world.notes.owner, "asked-filter", filter);
     world.telephony.textReview = review;
     const { alpha, runtime } = await onFiles(world, "assistant");
     const chat = assistant.runtime(alpha);
@@ -738,7 +738,7 @@ describe("Files on a phone", () => {
       world.ask.nextReplyChunks = [proposed === "Nothing" ? "Your Downloads hold a lease and a photo." : "I found a Files action."];
       world.ask.nextActions = (metadata) => {
         expect(readTurnContext({ content: { metadata } }).voiceUi?.agentActionMode).toBe("direct-files-v1");
-        review.proposal.payload.requestMessageId = proposed === "Direct" ? `m${world.ask.said.length}u` : undefined;
+        review.proposal.payload.requestMessageId = proposed === "Nothing" ? undefined : `m${world.ask.said.length}u`;
         return proposed === "Nothing" ? [] : [{ action: "PROPOSE_DEVICE_ACTION", data: { proposalId: id, state: "pending", executed: false, approvalRequired: proposed === "Review",
           ...(proposed === "Direct" ? { awaitingDeviceExecution: true, directRequest: true } : { awaitingUserInput: true }) } }];
       };
@@ -753,10 +753,20 @@ describe("Files on a phone", () => {
     const after = runtime.runSync(Browser.use((m) => m.get()));
     expect([button("Approve"), review.decisions, review.claims, after.trail, after.search.filter]).toEqual([undefined, [], [], before.trail, before.search.filter]);
 
-    await send("reviewed-filter", "Could you tidy up my Downloads?", "Review");
-    await vi.waitFor(() => expect(button("Approve")).toBeDefined());
-    expect([review.decisions, review.claims]).toEqual([[], []]);
+    const changes = [
+      ["move-lease", "put the lease in my documents", { type: "files_move", paths: ["Download/lease.pdf"], dest: "Documents" }],
+      ["share-lease", "send the lease to someone", { type: "files_share", paths: ["Download/lease.pdf"] }],
+      ["trash-lease", "get rid of the lease", { type: "files_trash", paths: ["Download/lease.pdf"] }],
+      ["taxes-folder", "make a taxes folder in downloads", { type: "files_folder_create", parent: "Download", name: "Taxes" }],
+    ] as const;
+    for (const [id, text, change] of changes) {
+      review.proposal.payload.operation = change;
+      await send(id, text, "Review");
+      await vi.waitFor(() => expect(button("Approve")).toBeDefined());
+      expect([review.decisions, review.claims, world.files.shared, world.files.trash]).toEqual([[], [], [], []]);
+    }
 
+    review.proposal.payload.operation = filter;
     await send("asked-filter", "only the pdfs from my downloads please", "Direct");
     await vi.waitFor(() => expect(review.receipts).toEqual([expect.objectContaining({ outcome: "applied", operationId: "asked-filter" })]));
     expect(document.body.textContent).toContain("Showing 1 item in Files.");

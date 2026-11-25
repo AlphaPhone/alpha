@@ -237,7 +237,8 @@ pure def lawAPeerThatDoesNotTakeTheScreenGetsNoDay(observed: bool, onCalendar: b
 
 Each turn of a voice conversation reads the screen again when it is sent:
 the observation with its day, location and selected record, the Browser
-page beside it, the direct-request mode of approvals, and, from a screen
+page beside it, the direct-request mode of approvals (for Files filter and
+open only, since a spoken turn shows no review card), and, from a screen
 that is not sensitive, the claim of a view the agent prepares for it. Voice
 opens that view as it opens any screen it is asked for, and a saved note
 the owner names aloud opens as one named in writing would ([Notes](../notes/index.md),
