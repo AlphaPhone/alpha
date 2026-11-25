@@ -13,7 +13,7 @@ import { useMachine as useShell } from "../../gen/app__shell.react.ts";
 import type { Alpha } from "../runtime/area.tsx";
 import { Time } from "../runtime/time.vibe";
 import { Dialer, type Dialing, keypadDigits } from "./phone.vibe";
-import { Player, Voicemails } from "./voicemail.vibe";
+import type { Player, Voicemails } from "./voicemail.vibe";
 import { callerTitle, displayNumber, judge, shortWhen } from "./words.ts";
 import { CommsBar, type CommsServices } from "./CommsBar.tsx";
 import { CallAvatar } from "./CallAvatar.tsx";
@@ -45,7 +45,7 @@ const RecentRow = memo(function RecentRow({ row, now, enabled, call, first }: {
   const label = `${row.number ? "Call " : ""}${title}`;
   return (
     <button type="button" disabled={!enabled} aria-label={label} aria-description={`${direction} ${date}`} data-alpha-stage-last={first || undefined}
-      className={cn(focusRing, "flex min-h-16 w-full items-center gap-3 px-5 py-2 text-left disabled:cursor-default")}
+      className={cn(focusRing, "flex min-h-16 w-full items-center gap-3 px-5 py-2 text-left focus-visible:-outline-offset-focus disabled:cursor-default")}
       onClick={() => call(row.number)}>
       <CallAvatar name={title} />
       <span className="flex min-w-0 flex-1 flex-col gap-0.5">
@@ -61,8 +61,8 @@ export function Phone({ runtime, alpha }: PhoneProps) {
   const phone = usePhone(runtime);
   const shell = useShell(runtime);
   const voicemail = useVoicemail(runtime).state;
-  const zeroDown = useRef<number | undefined>(undefined);
-  const longZero = useRef(false);
+  const zeroDownRef = useRef<number | undefined>(undefined);
+  const longZeroRef = useRef(false);
   const dialRecent = useCallback((number: string) => {
     void runtime.runPromiseExit(Effect.flatMap(PhoneMachine, (machine) => machine.send({ type: "dialRecent", number })));
   }, [runtime]);
@@ -129,7 +129,7 @@ export function Phone({ runtime, alpha }: PhoneProps) {
           {rows.length > 0 && <div role="group" aria-label="Recent calls">{rows.map((row, index) => <RecentRow key={row.id} row={row}
             now={now} enabled={can({ type: "dialRecent", number: row.number })} call={dialRecent} first={index === 0} />)}</div>}
           {state.chip === "AllCalls" && state.recents.status === "Loaded" && rows.length > 0 && can({ type: "pickChip", chip: "MissedCalls" }) &&
-            <div className="px-4 py-2"><Button variant="ghost" size="sm" className="text-muted-foreground" onClick={() => void send({ type: "pickChip", chip: "MissedCalls" })}>Missed</Button></div>}
+            <div className="px-4 py-2"><Button variant="secondary" size="sm" className="min-h-11 rounded-full px-4" onClick={() => void send({ type: "pickChip", chip: "MissedCalls" })}>Missed</Button></div>}
         </TabsContent>
         <TabsContent value="Keypad" data-alpha-phone-keypad="" className="min-h-0 flex-1 overflow-y-auto rounded-none">
           <div className="mx-auto flex min-h-full max-w-103 flex-col pb-3.5 [--dial-key:clamp(3rem,18.93vw,4.875rem)]">
@@ -151,18 +151,18 @@ export function Phone({ runtime, alpha }: PhoneProps) {
               {keys.map(([key, letters]) => (
                 <Button key={key} variant="secondary" size="icon" aria-label={key}
                   className="size-(--dial-key) flex-col gap-px" disabled={waiting || !can({ type: "press", typed: judge(dialer.digits + key) })}
-                  onPointerDown={key === "0" ? (event) => { zeroDown.current = event.timeStamp; longZero.current = false; } : undefined}
+                  onPointerDown={key === "0" ? (event) => { zeroDownRef.current = event.timeStamp; longZeroRef.current = false; } : undefined}
                   onPointerUp={key === "0" ? (event) => {
-                    const began = zeroDown.current;
-                    zeroDown.current = undefined;
+                    const began = zeroDownRef.current;
+                    zeroDownRef.current = undefined;
                     if (began === undefined || event.timeStamp - began < 500 || dialer.digits !== "") return;
-                    longZero.current = true;
+                    longZeroRef.current = true;
                     changeDigit("+");
                   } : undefined}
-                  onPointerCancel={key === "0" ? () => { zeroDown.current = undefined; longZero.current = false; } : undefined}
+                  onPointerCancel={key === "0" ? () => { zeroDownRef.current = undefined; longZeroRef.current = false; } : undefined}
                   onContextMenu={key === "0" ? (event) => event.preventDefault() : undefined}
                   onClick={(event) => {
-                    if (key === "0" && longZero.current && event.detail !== 0) { longZero.current = false; return; }
+                    if (key === "0" && longZeroRef.current && event.detail !== 0) { longZeroRef.current = false; return; }
                     changeDigit(key);
                   }}>
                   <span className="text-keypad-digit font-medium">{key}</span>
@@ -171,7 +171,7 @@ export function Phone({ runtime, alpha }: PhoneProps) {
               ))}
             </div>
             <div className="grid shrink-0 grid-cols-3 items-center justify-items-center gap-x-[min(5.825vw,1.5rem)] px-[min(10.68vw,2.75rem)] pt-[min(3.88vw,1rem)]">
-              <Button className="col-start-2 size-(--dial-key) bg-dial text-dial-foreground hover:bg-dial/90 active:bg-dial/80 disabled:opacity-100"
+              <Button className="col-start-2 size-(--dial-key) bg-dial text-dial-foreground hover:bg-dial/90 active:bg-dial/80"
                 size="icon" data-alpha-phone-call="" aria-label="Call" disabled={!can({ type: "dialTyped" }) || !dialable(state)}
                 onClick={() => void send({ type: "dialTyped" })}><Call className="size-7.5" /></Button>
               {dialer.digits !== "" && <Button variant="ghost" size="icon" aria-label="Delete digit" className="col-start-3 size-14"

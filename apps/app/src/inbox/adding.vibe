@@ -11,17 +11,26 @@ import { ownerChanges } from "./mailbox.vibe"
 
 module web {
   /** Ask the owner for one file through the page's own picker: the file chosen, or none where the picker was put away. @throws {never} */
-  export function chooseFile(): Promise<File | undefined> {
+  export function chooseFile(onFocus?: () => void): Promise<File | undefined> {
     return new Promise((resolve) => {
       const input = document.createElement("input")
       input.type = "file"
       input.hidden = true
-      const done = (file: File | undefined) => {
+      let settled = false
+      const cleanup = () => {
+        if (onFocus) window.removeEventListener("focus", focusHandler)
         input.remove()
+      }
+      const done = (file: File | undefined) => {
+        if (settled) return
+        settled = true
+        cleanup()
         resolve(file)
       }
+      const focusHandler = () => { if (!settled && onFocus) onFocus() }
       input.addEventListener("change", () => done(input.files?.[0]))
       input.addEventListener("cancel", () => done(undefined))
+      if (onFocus) window.addEventListener("focus", focusHandler)
       document.body.append(input)
       input.click()
     })
@@ -30,9 +39,12 @@ module web {
   /** The bytes of `file`, as Gmail is sent them: base64. */
   export async function base64Of(file: File): Promise<string> {
     const bytes = new Uint8Array(await file.arrayBuffer())
-    let text = ""
-    for (const byte of bytes) text += String.fromCharCode(byte)
-    return btoa(text)
+    const chunks: string[] = []
+    const step = 0x8000
+    for (let at = 0; at < bytes.length; at += step) {
+      chunks.push(String.fromCharCode(...bytes.subarray(at, at + step)))
+    }
+    return btoa(chunks.join(""))
   }
 }
 import { base64Of, chooseFile } from web
@@ -71,7 +83,12 @@ export const incoming = Layer.sync(Incoming, () => {
 // spec/app/inbox/adding.md, "A file is attached to the draft open only once the picker gives one that fits within the room its account leaves; one too large, unreadable or without room is refused and said so"
 /** The picker's answer under `ticket`: what the owner chose, how many MiB it counts for, and whether the draft has room for it. */
 effect function picked(ticket: number): Event!!(Incoming | Drafts.Machine) {
-  const file = tryPromise({ try: () => chooseFile(), catch: () => undefined }) catch () => undefined
+  const focused = try Deferred.make<void>()
+  const pickedFile = effect {
+    return tryPromise({ try: () => chooseFile(() => { Deferred.doneUnsafe(focused, Exit.void) }), catch: () => undefined }) catch () => undefined
+  }
+  const cancelledByFocus = Effect.as(Effect.andThen(Deferred.await(focused), sleep("350 millis")), undefined)
+  const file = try.race [pickedFile, cancelledByFocus]
   if (file === undefined || file === null) return { type: "picked", ticket, result: "Cancelled", mib: 1, room: false }
   const mib = mibOf(file.size)
   if (mib > policy.mib) return { type: "picked", ticket, result: "TooLarge", mib, room: false }
@@ -91,12 +108,22 @@ effect function joined(draft: number, account: number, mib: number): void!!(Inco
   if (file === undefined) return
   const composer = try Drafts.Machine
   const words = try Letters
-  const event: Drafts.Event = draft !== 0 ? { type: "attached", now: untimed, draft, mib, policy } : { type: "startedWithFile", account, mib, policy }
-  const sent = try exit(composer.send(event, "Owner"))
-  if (!Exit.isSuccess(sent)) return
-  const into = sent.value.state.letter.id
+  const current = try composer.get()
+  const into = draft !== 0 ? draft : current.made + 1
   const before = words.words(into)
+  const event: Drafts.Event = draft !== 0 ? { type: "attached", now: untimed, draft, mib, policy } : { type: "startedWithFile", account, mib, policy }
   words.set(into, { ...before, files: [...before.files, file] })
+  const sent = try exit(composer.send(event, "Owner"))
+  if (!Exit.isSuccess(sent)) {
+    words.set(into, before)
+    return
+  }
+  const actual = sent.value.state.letter.id
+  if (actual !== into) {
+    words.set(into, before)
+    const target = words.words(actual)
+    words.set(actual, { ...target, files: [...target.files, file] })
+  }
 }
 
 function carry(fx: Out): Job<Event, Incoming | Drafts.Machine | Letters | Shell, []> {

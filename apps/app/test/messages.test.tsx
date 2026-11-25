@@ -15,6 +15,7 @@ import { Machine as Home } from "../gen/app__home.effect.vibe";
 import assistant from "../src/assistant/index.tsx";
 import { executeMedia } from "../src/assistant/media-executors.ts";
 import { readAgentSms } from "../src/messages/agent-send.vibe";
+import { answerReading } from "../src/contacts/reads.vibe";
 import { idOf, Pages } from "../src/browser/browser.vibe";
 import browser from "../src/browser/index.tsx";
 import home from "../src/home/index.tsx";
@@ -535,5 +536,30 @@ describe("Messages on an Alpha image", () => {
     const tab = runtime.runSync(Effect.map(Tabs.use((machine) => machine.get()), (state) => state.selected));
     const page = runtime.runSync(Effect.flatMap(Pages, (pages) => pages.of(tab)));
     await ready(page, Page, "Browser link page", (state) => state.phase === "Shown" && !state.secure);
+  });
+
+  it("Removes a cleared draft from storage so reopening and agent drafts see an empty composer (spec/app/messages/composer.md, \"Typing changes the draft and makes it the owner's; emptying it leaves no draft\")", async () => {
+    const world = image();
+    const { alpha } = await openImage(world);
+    await openMessages(alpha);
+    await ready(alpha.runtime, Messages, "Messages list loaded", (state) => state.list.status === "Loaded" && state.threads === 1);
+    await press("Maya Chen");
+    await ready(alpha.runtime, Composer, "Composer ready", (state) => state.thread > 0 && state.slot.author === "Nobody");
+
+    await write("Message", "Temporary draft");
+    await ready(alpha.runtime, Composer, "Owner wrote draft", (state) => state.slot.author === "OwnerWrote");
+    await write("Message", "");
+    await ready(alpha.runtime, Composer, "Owner cleared draft", (state) => state.slot.author === "Nobody");
+
+    await hardware("back");
+    await ready(alpha.runtime, Messages, "Returned to threads", (state) => state.pane === "Threads");
+    await press("Maya Chen");
+    await ready(alpha.runtime, Composer, "Reopened empty composer", (state) => state.thread > 0 && state.slot.author === "Nobody");
+    expect(document.querySelector<HTMLTextAreaElement>('textarea[aria-label="Message"]')?.value).toBe("");
+    expect(await alpha.runtime.runPromise(answerReading({ type: "sms_reply_selected", body: "Fresh reply" }))).toEqual({
+      kind: "sms-reply", status: "drafted",
+    });
+    await ready(alpha.runtime, Composer, "Agent drafted into cleared composer", (state) => state.slot.author === "AlphaWrote");
+    expect(document.querySelector<HTMLTextAreaElement>('textarea[aria-label="Message"]')?.value).toBe("Fresh reply");
   });
 });

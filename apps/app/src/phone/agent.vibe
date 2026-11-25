@@ -80,7 +80,7 @@ export effect function phoneAction(operation: DeviceOperation, current: () => Pr
       const target = try destination(operation, selected)
       if (target === undefined) return refused
       const { number, contact } = target
-      if (contact && ((try classifyDialNumber(number)) !== "OrdinaryNumber" || !(try canDispatch(current)))) return refused
+      if ((try classifyDialNumber(number)) !== "OrdinaryNumber" || !(try canDispatch(current))) return refused
       const report = telephony("dial", (client) => client.phone.dial(number)) catch (failure) => refusedBeforeDispatch(failure) ? null : undefined
       if (report === undefined) return undefined
       const status = report?.dialStatus === "DialHandedOff" ? "handed-off" : report?.dialStatus === "DialFailed" ? "failed" : "unavailable"

@@ -10,7 +10,7 @@ import { Machine as Toasts } from "../../gen/app__notices__toasts.effect.vibe"
 import { Device } from "../platform/device.vibe"
 import { VoiceBridge } from "../platform/voice.vibe"
 import { contained, started, together } from "../runtime/reactor.vibe"
-import { VoiceWords, openDictation, voiceWithCalls, voicing } from "../voice/voice.vibe"
+import { type VoiceWords, openDictation, voiceWithCalls, voicing } from "../voice/voice.vibe"
 import { Drafts } from "./composer.vibe"
 
 const remainingInMessages = (where: Messages.Messages): boolean => where.front && where.pane === "Conversation" && Messages.readable(where)
@@ -66,7 +66,8 @@ export effect function dictateMessage(thread: number): void!!(Composer.Machine |
   const said = try Said
   const opened = try openDictation("MessagesBar", effect (words: string) => {
     if (!(try editableHere)) return
-    const before = try drafts.text(thread)
+    const current = try composer.get()
+    const before = current.slot.author === "Nobody" ? "" : try drafts.text(thread)
     const next = before.trim() === "" ? words : `${before.trimEnd()} ${words}`
     if (next.length > MMS_MAX_BODY) {
       try (say("That transcription would make the message too long", true)
@@ -75,7 +76,10 @@ export effect function dictateMessage(thread: number): void!!(Composer.Machine |
       return
     }
     try drafts.write(thread, next)
-    if (!(try contained(composer.send({ type: "typeText", empty: false }), "putting dictation in the message draft")) && (try drafts.text(thread)) === next) try drafts.write(thread, before)
+    if (!(try contained(composer.send({ type: "typeText", empty: false }), "putting dictation in the message draft")) && (try drafts.text(thread)) === next) {
+      if (before === "") try drafts.drop(thread)
+      else try drafts.write(thread, before)
+    }
   })
   if (opened) try contained(voice.send({ type: "startRecording" }), "starting message dictation")
 }

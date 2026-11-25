@@ -485,4 +485,22 @@ describe("The call strip on an Alpha image", () => {
     expect(document.querySelector("[data-home-tile='view:Phone'], [data-home-tile='view:Messages'], [data-home-tile='view:Contacts']")).toBeNull();
     expect(button("End call")).toBeUndefined();
   });
+
+  it("Refuses emergency numbers in phone_dial and remembers seen missed calls across Home returns (spec/app/phone/index.md, \"Alpha never places an emergency call\"; spec/app/phone/index.md, \"Home shows the missed-calls card while there are missed calls not yet seen\")", async () => {
+    const world = image();
+    const { alpha } = await openPhoneWorld(world);
+    await until(alpha, alpha.runtime, Shell, (s) => s.image);
+    await until(alpha, alpha.runtime, Phone, (s) => s.missed === 1);
+
+    await act(async () => {
+      expect(await alpha.runtime.runPromise(phoneAction({ type: "phone_dial", target: { kind: "number", number: "911" } }, () => Promise.resolve(true)))).toMatchObject({ kind: "refused" });
+    });
+    expect([world.telephony.dialed, world.telephony.placed]).toEqual([[], []]);
+
+    await pressPhoneCard();
+    await until(alpha, alpha.runtime, Phone, (s) => s.front && s.tab === "Recents" && s.recents.status === "Loaded" && s.missed === 0);
+    await hardware("home");
+    await until(alpha, alpha.runtime, Phone, (s) => !s.front && s.missed === 0);
+    expect(world.telephony.calls.some((one) => one.type === "missed")).toBe(true);
+  });
 });

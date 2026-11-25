@@ -3,13 +3,13 @@ import { type AddressBookContact, type ContactCursor, type ContactDetail, type C
 import { Machine as Comms, type Event as CommsEvent } from "../../gen/app__phone__comms.effect.vibe"
 import * as Contacts from "../../gen/app__contacts.effect.vibe"
 import type { Change, Effect as Out, Event, Sheet } from "../../gen/app__contacts.effect.vibe"
-import { Machine as PhoneMachine } from "../../gen/app__phone.effect.vibe"
-import { Machine as Shell } from "../../gen/app__shell.effect.vibe"
+import { type Machine as PhoneMachine } from "../../gen/app__phone.effect.vibe"
+import { type Machine as Shell } from "../../gen/app__shell.effect.vibe"
 import { SystemSettings } from "../platform/systemSettings.vibe"
-import { Telephony, TelephonyRefused, readAddressBook, telephony } from "../platform/telephony.vibe"
+import { type Telephony, TelephonyRefused, readAddressBook, telephony } from "../platform/telephony.vibe"
 import { type Job, answer, applying, following, reacting, run, together } from "../runtime/reactor.vibe"
 import { Time } from "../runtime/time.vibe"
-import { Dialer, dialing, grantOf } from "../phone/phone.vibe"
+import { type Dialer, dialing, grantOf } from "../phone/phone.vibe"
 import { Callers } from "../phone/voicemail.vibe"
 import { on, visiting } from "../phone/visit.vibe"
 
@@ -52,11 +52,20 @@ const rows = Layer.sync(Rows, () => {
 /** What a contact has, as Contacts counts it: notes are counted only where the phone lets them be read and edited here. */
 export function sheetOf(found: ContactDetail | Form): Sheet {
   if ("phones" in found) {
-    return { names: found.givenName.trim() + found.familyName.trim() === "" ? 0 : 1, phones: found.phones.filter((value) => value.trim() !== "").length, emails: found.emails.filter((value) => value.trim() !== "").length, notes: found.notes === "" ? 0 : 1, notable: true }
+    return {
+      names: found.givenName.trim() + found.familyName.trim() === "" ? 0 : 1,
+      phones: Math.min(found.phones.filter((value) => value.trim() !== "").length, Contacts.maxEach),
+      emails: Math.min(found.emails.filter((value) => value.trim() !== "").length, Contacts.maxEach),
+      notes: found.notes === "" ? 0 : 1,
+      notable: true,
+    }
   }
   return {
-    names: found.displayName === "" ? 0 : 1, phones: found.phoneNumbers.length, emails: found.emailAddresses.length,
-    notes: found.notes === undefined || found.notes === "" ? 0 : 1, notable: found.notes !== undefined,
+    names: found.displayName === "" ? 0 : 1,
+    phones: Math.min(found.phoneNumbers.length, Contacts.maxEach),
+    emails: Math.min(found.emailAddresses.length, Contacts.maxEach),
+    notes: found.notes === undefined || found.notes === "" ? 0 : 1,
+    notable: found.notes !== undefined,
   }
 }
 

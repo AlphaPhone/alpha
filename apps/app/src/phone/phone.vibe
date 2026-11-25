@@ -1,4 +1,5 @@
 // spec/app/phone/index.md, "Story: See my recent calls"; spec/app/phone/index.md, "Story: Type a number"; spec/app/phone/index.md, "Story: Call a number"; spec/app/phone/index.md, "Story: Know when a call is live"
+import * as KeyValueStore from "effect/persistence/KeyValueStore"
 import type { AddressBookRow } from "@elizaos/os-bridges"
 import type { PhoneNumber, TelephonyCallLogEntry, TelephonyPermissionState } from "@elizaos/os-bridges"
 import { normalizePhoneNumber } from "@elizaos/os-bridges"
@@ -8,7 +9,7 @@ import { Machine as Shell } from "../../gen/app__shell.effect.vibe"
 import type { Grant } from "../../gen/kit__permission.ts"
 import { Calls } from "../platform/calls.vibe"
 import { SystemSettings } from "../platform/systemSettings.vibe"
-import { Telephony, TelephonyAbsent, TelephonyRefused, namesOf, readAddressBook, telephony } from "../platform/telephony.vibe"
+import { type Telephony, TelephonyAbsent, TelephonyRefused, namesOf, readAddressBook, telephony } from "../platform/telephony.vibe"
 import { type Job, answer, applying, contained, hearing, reacting, run, started, together } from "../runtime/reactor.vibe"
 import { on, visiting } from "./visit.vibe"
 import { judge, matches } from "./words.ts"
@@ -33,11 +34,27 @@ const none: Dialing = { rows: [], source: undefined, sought: "", filterLabel: ""
 export service Dialer {
   get(): Dialing!!
   set(change: Partial<Dialing>): void!!
+  seenMissedAt(): number!!
+  markMissedSeen(latest: number): void!!
 }
 
-const dialer = Layer.sync(Dialer, () => {
+const seenMissedKey = "alpha/phone/seen-missed@1"
+
+const dialer = Layer.effect(Dialer, effect {
+  const store = try KeyValueStore.KeyValueStore
   let held = none
-  return { get: () => sync(() => held), set: (change: Partial<Dialing>) => sync(() => { held = { ...held, ...change } }) }
+  const saved = Number(store.get(seenMissedKey) catch () => undefined)
+  let seenMissed = Number.isFinite(saved) && saved > 0 ? saved : 0
+  return {
+    get: () => sync(() => held),
+    set: (change: Partial<Dialing>) => sync(() => { held = { ...held, ...change } }),
+    seenMissedAt: () => sync(() => seenMissed),
+    effect markMissedSeen(latest: number): void!! {
+      if (!Number.isFinite(latest) || latest <= seenMissed) return
+      seenMissed = latest
+      try ignore(store.set(seenMissedKey, String(seenMissed)))
+    },
+  }
 })
 
 /** Android's word on a permission, as the kit's permission takes it. */
@@ -78,12 +95,12 @@ effect function readLog(ticket: number, device: boolean): Event!!(Telephony | Di
 }
 
 // spec/app/phone/index.md, "Only the newest lookup names a contact"
-effect function matchNumber(ticket: number): Event!!(Telephony | Dialer) {
+effect function matchNumber(ticket: number): Event!!(Telephony | Dialer | Phone.Machine) {
   const store = try Dialer
   const digits = (try store.get()).digits
   const query = digits.replace(/\D/g, "")
   if (query.length < 3) {
-    try store.set({ matched: "", matchedNumber: "" })
+    if (Phone.canNumberMatched(try (try Phone.Machine).get(), ticket)) try store.set({ matched: "", matchedNumber: "" })
     return { type: "numberMatched", ticket, found: false }
   }
   const page = effect {
@@ -93,7 +110,9 @@ effect function matchNumber(ticket: number): Event!!(Telephony | Dialer) {
   const found = page?.contacts.flatMap((row: AddressBookRow) => "incomplete" in row ? [] : row.phones
     .filter((number) => number.replace(/\D/g, "").includes(query))
     .map((number) => ({ name: row.name, number }))).at(0)
-  if ((try store.get()).digits === digits) try store.set({ matched: found?.name ?? "", matchedNumber: found?.number ?? "" })
+  if ((try store.get()).digits === digits && Phone.canNumberMatched(try (try Phone.Machine).get(), ticket)) {
+    try store.set({ matched: found?.name ?? "", matchedNumber: found?.number ?? "" })
+  }
   return { type: "numberMatched", ticket, found: found !== undefined }
 }
 
@@ -173,7 +192,12 @@ function carry(fx: Out): Job<Event, Telephony | Dialer | Phone.Machine | SystemS
     when { tag: "ClassifyNumber", let ticket }: answer("number classification", classifyInput(ticket), { type: "numberClassified", ticket, kind: "NumberUnknown" });
     when { tag: "AskLog" }: answer("ask", askLog(), { type: "logReported", grant: "Unasked" });
     when { tag: "OpenSettings" }: run("settings", effect { try (try SystemSettings).open("AppPermissions", "") });
-    when { tag: "MarkSeen" }: run("seen", effect {});
+    when { tag: "MarkSeen" }: run("seen", effect {
+      const store = try Dialer
+      const source = (try store.get()).source ?? []
+      const latest = source.reduce((max, entry) => (entry.type === "missed" && entry.date > max ? entry.date : max), 0)
+      if (latest > 0) try store.markMissedSeen(latest)
+    });
     when { tag: "Handoff", let ticket, let source, let number }: answer(`dial ${ticket}`, handoff(ticket, source === "TypedNumber", number), { type: "dialLost", ticket });
   }
 }

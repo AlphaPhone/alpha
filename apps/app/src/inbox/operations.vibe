@@ -5,14 +5,14 @@ import * as Sending from "../../gen/app__inbox__sending.effect.vibe"
 import type { Effect as Out, Event, Kind } from "../../gen/app__inbox__sending.effect.vibe"
 import type { Actor } from "../../gen/app__inbox__access.ts"
 import { Machine as Shell } from "../../gen/app__shell.effect.vibe"
-import { Cloud } from "../platform/cloud.vibe"
-import { Attempts } from "../runtime/attempts.vibe"
+import { type Cloud } from "../platform/cloud.vibe"
+import { type Attempts } from "../runtime/attempts.vibe"
 import { Time } from "../runtime/time.vibe"
 import { type Job, answer, contained, hearing, reacting, run, started, together, untimed } from "../runtime/reactor.vibe"
 import * as Drafts from "../../gen/app__inbox__drafts.effect.vibe"
 import type { Event as DraftEvent } from "../../gen/app__inbox__drafts.effect.vibe"
 import { Letters } from "./composer.vibe"
-import { Mail, operate, relabel } from "./gmail.vibe"
+import { type Mail, operate, relabel } from "./gmail.vibe"
 import { ownerChanges } from "./mailbox.vibe"
 
 const labels = { Archive: "archive", Trash: "trash", Unarchive: "unarchive", Untrash: "untrash" } as const
@@ -34,11 +34,14 @@ effect function changed(attempt: number, kind: Kind, account: number, messages: 
 
 // spec/app/inbox/sending.md, "A recorded operation sends its one request, for its own account under that account's grant now, exactly as reviewed: a draft while it is at the revision shown and its hand-over is written to the phone, archive and Trash once the undo window has passed"
 /** The draft `draft` sent from `account` exactly as the owner wrote it, once, under the attempt's own key. */
-effect function sent(attempt: number, account: number, draft: number): Event!!(Attempts | Cloud | Mail | Letters) {
-  const words = (try Letters).words(draft)
+effect function sent(attempt: number, account: number, draft: number, gmail: number): Event!!(Attempts | Cloud | Mail | Letters) {
+  const letters = try Letters
+  const words = letters.words(draft)
+  const copy = gmail === 0 ? undefined : letters.copy(gmail)
   const ended = try operate(attempt, account, {
     kind: "send", mode: words.mode, to: words.to, cc: words.cc, bcc: words.bcc, subject: words.subject, bodyText: words.text,
     ...(words.answers === undefined ? {} : { replyMessageId: words.answers }),
+    ...(copy?.account === account ? { draftId: copy.id, expectedDigest: copy.digest } : {}),
     ...(words.files.length === 0 ? {} : { attachments: words.files.map(({ name, mimeType, data }) => ({ name, mimeType, dataBase64: data })) }),
   })
   return { type: "answered", attempt, done: ended.done, matches: ended.known, gmail: 0 }
@@ -70,8 +73,8 @@ const toDraft = (event: DraftEvent) => effect { try ignore((try Drafts.Machine).
 
 function carry(fx: Out): Job<Event, Cloud | Mail | Letters | Inbox.Machine | Drafts.Machine | Shell, [by: Actor]> {
   return match (fx) {
-    when { tag: "Request", kind: "Send", let attempt, let access, let draft }:
-      answer(`request ${attempt}`, sent(attempt, access.account, draft), { type: "replyLost", attempt }, "World");
+    when { tag: "Request", kind: "Send", let attempt, let access, let draft, let gmail }:
+      answer(`request ${attempt}`, sent(attempt, access.account, draft, gmail), { type: "replyLost", attempt }, "World");
     when { tag: "Request", kind: "SaveDraft", let attempt, let access, let draft, let gmail }:
       answer(`request ${attempt}`, drafted(attempt, "SaveDraft", access.account, draft, gmail), { type: "replyLost", attempt }, "World");
     when { tag: "Request", kind: "ReplaceDraft", let attempt, let access, let draft, let gmail }:

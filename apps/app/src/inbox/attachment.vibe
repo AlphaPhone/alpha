@@ -49,8 +49,8 @@ module web {
     return typeof document !== "undefined" && "download" in document.createElement("a") && typeof URL.createObjectURL === "function"
   }
 
-  /** Requests a download of checked opaque bytes. A link does not report its disk outcome. @throws {never} */
-  export function download(file: OpaqueMailAttachment): boolean {
+  /** Requests a download of checked opaque bytes and returns its blob URL for delayed revocation. @throws {never} */
+  export function download(file: OpaqueMailAttachment): string | undefined {
     try {
       const bytes = Uint8Array.from(atob(file.dataBase64), (value) => value.charCodeAt(0))
       const url = URL.createObjectURL(new Blob([bytes], { type: "application/octet-stream" }))
@@ -59,15 +59,20 @@ module web {
         link.href = url
         link.download = file.name
         link.click()
-      } finally {
-        if (typeof requestAnimationFrame === "function") requestAnimationFrame(() => URL.revokeObjectURL(url))
-        else URL.revokeObjectURL(url)
+      } catch {
+        URL.revokeObjectURL(url)
+        return undefined
       }
-      return true
-    } catch { return false }
+      return url
+    } catch { return undefined }
+  }
+
+  /** Releases a previously created blob URL. @throws {never} */
+  export function revokeDownload(url: string): void {
+    URL.revokeObjectURL(url)
   }
 }
-import { download, downloads } from web
+import { download, downloads, revokeDownload } from web
 
 /** Only bounded plain text is opened in Alpha. Binary parts can be downloaded without opening them. */
 export function canPreviewAttachment(file: FilePart): boolean {
@@ -124,6 +129,9 @@ export effect function handleAttachment(request: Request): Message.Event!!(Cloud
   }
   if (!canSaveAttachment(part)) return refused
   const saved = client.gmailOpaqueAttachment(grant, id, part.partId, history) catch () => undefined
-  if (saved === undefined || !matches(part, saved) || !(try current) || !download(saved)) return refused
+  if (saved === undefined || !matches(part, saved) || !(try current)) return refused
+  const url = download(saved)
+  if (url === undefined) return refused
+  try ignore(Effect.forkDetach(Effect.andThen(sleep("60 seconds"), sync(() => revokeDownload(url)))))
   return { type: "attachmentHandled", attempt, done: false, known: false }
 }

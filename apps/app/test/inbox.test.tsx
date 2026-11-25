@@ -16,6 +16,7 @@ import { button, closeAll, drawn, fill, hardware, later, only, open, press, unde
 import { Effect } from "effect";
 import { Letters, nothing } from "../src/inbox/composer.vibe";
 import { Mail } from "../src/inbox/gmail.vibe";
+import { linkOf } from "../src/inbox/links.ts";
 import { letter } from "./fakes/inbox.ts";
 import { scene } from "./fakes/scene.ts";
 
@@ -144,7 +145,12 @@ describe.each([["a browser", false], ["a phone", true]])("in %s", (_where, phone
     expect(visited).toHaveBeenCalledWith("https://northpoint.test/room", "_blank", "noopener,noreferrer");
 
     // spec/app/inbox/message.md, "An attachment is reviewed before it is opened or saved, and one use is in flight at a time"
-    await action("Open agenda.txt");
+    await drawn(() => {
+      const found = [...document.querySelectorAll<HTMLButtonElement>('button[aria-description="Open attachment"]')]
+        .find((one) => one.textContent?.includes("agenda.txt"));
+      if (!found) throw new Error("no attachment Open agenda.txt");
+      found.click();
+    });
     await until(alpha, runtime, Shown, (s) => s.attachment === 2);
     expect([world.inbox.attachmentReads, document.querySelector("[aria-label='Attachment contents']")]).toEqual([[], null]);
     await confirm("Open");
@@ -257,7 +263,7 @@ it("Connect Gmail and keep to its grant (spec/app/inbox/index.md, \"Story: Conne
   // spec/app/platform/index.md, "A mail or calendar request the phone holds back for want of its mail lease reads as the cloud's own refusal of the device key there, never as a sign-out"; spec/app/inbox/index.md, "A check the phone holds back for want of the mail lease keeps the session and everything kept, and asks for one more sign-in": on a phone signed in before mail leases existed, opening Inbox, twice, keeps the draft, the accounts and the owner's session, and asks to sign in.
   const draft = { ...nothing, subject: "Kept through the lease" };
   await alpha.runtime.runPromise(Letters.use((letters) => Effect.andThen(Effect.sync(() => letters.set(9, draft)), letters.keep(9))));
-  const generation = () => alpha.runtime.runPromise(Mail.use((mail) => Effect.sync(() => mail.generation())));
+  const generation = () => alpha.runtime.runPromise(Effect.flatMap(Mail, (mail) => Effect.sync(() => mail.generation())));
   const kept = await generation();
   const before = await runtime.runPromise(List.use((list) => list.get()));
   world.mailLease.held = false;
@@ -305,7 +311,7 @@ it("Send a draft I reviewed (spec/app/inbox/sending.md, \"Story: Send a draft I 
 
   // spec/app/inbox/drafts.md, "Every change to the text, recipients or attachments is an edit, counted at once"; spec/app/inbox/drafts.md, "Edits are written to the phone once typing pauses, and no later than the longest wait after a burst began, one write at a time under its own ticket"
   await write("Message", "Thanks, it is all in order.");
-  await later(alpha, 10);
+  await later(alpha, 2000);
   await until(alpha, runtime, Writing, (s) => s.stored && !s.pending && s.write.status === "Loaded" && s.letter.revision >= 2);
 
   // spec/app/inbox/suggestion.md, "Only the owner puts it in, once, as it was last shown, into the draft as it still is, adding or replacing as the owner chooses; text that does not fit is refused whole and the offer stays"
@@ -314,9 +320,9 @@ it("Send a draft I reviewed (spec/app/inbox/sending.md, \"Story: Send a draft I 
   await until(alpha, runtime, Offering, (s) => s.review.showing && s.target === "ToDraft");
   await confirm("Add");
   await until(alpha, runtime, Offering, (s) => s.used === 1 && s.text === 0);
-  await later(alpha, 10);
+  await later(alpha, 2000);
   await until(alpha, runtime, Writing, (s) => s.stored && !s.pending && s.write.status === "Loaded");
-  expect((document.querySelector("textarea[aria-label=Message]") as HTMLTextAreaElement | null)?.value).toBe("Thanks, it is all in order.\n\nSee you on Friday.");
+  expect(document.querySelector<HTMLTextAreaElement>("textarea[aria-label=Message]")?.value).toBe("Thanks, it is all in order.\n\nSee you on Friday.");
 
   // spec/app/inbox/sending.md, "Story: Save my draft to Gmail, or delete it there, knowingly"
   await menu("Save to Gmail", "Draft actions");
@@ -336,7 +342,7 @@ it("Send a draft I reviewed (spec/app/inbox/sending.md, \"Story: Send a draft I 
   });
   await until(alpha, runtime, Writing, (s) => s.letter.attachments === 1);
   expect(told()).toContain("receipt.txt");
-  await later(alpha, 10);
+  await later(alpha, 2000);
   await until(alpha, runtime, Writing, (s) => s.stored && !s.pending && s.write.status === "Loaded");
 
   // spec/app/inbox/drafts.md, "Before a draft with a Gmail copy is saved over it, and whenever the draft is unsure of that copy, Gmail's copy is read, one read at a time, while its account may be read"
@@ -390,7 +396,7 @@ it("Send a draft I reviewed (spec/app/inbox/sending.md, \"Story: Send a draft I 
   const again = await open(world);
   const restored = inbox.runtime(again.alpha);
   await until(again.alpha, restored, Writing, (s) => !s.open && s.shelf.shelved.length === 1);
-  await press("1 drafts set aside");
+  await menu("Drafts set aside (1)", "Mail options");
   await press("Keep these words.No recipient");
   await until(again.alpha, restored, Writing, (s) => s.open);
   expect([
@@ -423,4 +429,26 @@ it("shows the authorized first page of unread Inbox mail on Home", async () => {
   expect(card?.textContent).not.toContain("A private message body");
   await press("Open Inbox, 1+ unread");
   await until(alpha, alpha.runtime, Shell, (state) => state.trail.at(-1) === "Inbox");
+});
+
+it("Flags bare-domain phishing link text and waits two seconds before writing draft edits to the phone (spec/app/inbox/message.md, \"Links are checked before opening\"; spec/app/inbox/drafts.md, \"Edits are written to the phone once typing pauses, and no later than the longest wait after a burst began, one write at a time under its own ticket\")", async () => {
+  expect(linkOf("https://evil.test/login", "bank.com").mismatch).toBe(true);
+  expect(linkOf("https://bank.com/login", "bank.com").mismatch).toBe(false);
+
+  const world = scene();
+  const { alpha } = await open(world, only("home", "view:Inbox"));
+  const runtime = inbox.runtime(alpha);
+  await until(alpha, home.runtime(alpha), Home, (state) => state.tiles.load.status === "Loaded");
+  await tile("Inbox");
+  await until(alpha, runtime, List, (state) => state.list.status === "Loaded");
+
+  await press("Compose");
+  await until(alpha, runtime, Writing, (state) => state.open);
+  await fill("To", "sam@okafor.example");
+  await write("Message", "Wait two seconds");
+  await later(alpha, 500);
+  const early = await runtime.runPromise(Effect.flatMap(Writing, (machine) => machine.get()));
+  expect([early.pending, early.write.status]).toEqual([true, "Idle"]);
+  await later(alpha, 1600);
+  await until(alpha, runtime, Writing, (state) => state.stored && !state.pending && state.write.status === "Loaded");
 });

@@ -1,6 +1,6 @@
 // spec/app/messages/index.md, "Story: See my conversations"; spec/app/messages/index.md, "Story: Read a conversation"; spec/app/messages/index.md, "Story: Act on a message"; spec/app/messages/index.md, "Story: Start a new message"
 import * as KeyValueStore from "effect/persistence/KeyValueStore"
-import { type StagedDeletion, type AddressBookContact, threadIdOf, type MessageCursor, type MessageDeleteReference, type MessageRow, type ThreadCursor, type ThreadId, type ThreadRow, type PhoneNumber } from "@elizaos/os-bridges"
+import { type StagedDeletion, type AddressBookContact, normalizePhoneNumber, threadIdOf, type MessageCursor, type MessageDeleteReference, type MessageRow, type ThreadCursor, type ThreadId, type ThreadRow, type PhoneNumber } from "@elizaos/os-bridges"
 import { Machine as Shell, showing } from "../../gen/app__shell.effect.vibe"
 import * as Messages from "../../gen/app__messages.effect.vibe"
 import type { Effect as Out, Event, Need, Page } from "../../gen/app__messages.effect.vibe"
@@ -10,10 +10,10 @@ import { SystemSettings } from "../platform/systemSettings.vibe"
 import { Telephony, TelephonyRefused, namesOf, readAddressBook, telephony } from "../platform/telephony.vibe"
 import type { Machine as Toasts } from "../../gen/app__notices__toasts.effect.vibe"
 import { type Said, offer, withdraw } from "../notices/toasts.vibe"
-import { type Job, Whole, answer, contained, hearing, reacting, run, started, together } from "../runtime/reactor.vibe"
+import { type Job, Whole, answer, applying, contained, hearing, reacting, run, started, together } from "../runtime/reactor.vibe"
 import { Time } from "../runtime/time.vibe"
-import { Dialer, dialing, grantOf } from "../phone/phone.vibe"
-import { Machine as PhoneMachine } from "../../gen/app__phone.effect.vibe"
+import { type Dialer, dialing, grantOf } from "../phone/phone.vibe"
+import { type Machine as PhoneMachine } from "../../gen/app__phone.effect.vibe"
 import { Callers } from "../phone/voicemail.vibe"
 import { on, visiting } from "../phone/visit.vibe"
 import { displayNumber, matches } from "../phone/words.ts"
@@ -30,6 +30,8 @@ module nativeNotice {
   let made: Transport | undefined
   /** The Alpha image's extension of the telephony plugin. @throws {never} */
   export function noticeTransport(): Transport {
+    const existing = (globalThis as { Capacitor?: { Plugins?: Record<string, Transport | undefined> } }).Capacitor?.Plugins?.ElizaTelephony
+    if (existing !== undefined) return existing
     return (made ??= registerPlugin<Transport>("ElizaTelephony"))
   }
 }
@@ -66,10 +68,13 @@ import { kept } from text
 
 const conversationsKey = "alpha/messages/conversations@1"
 
+const canonicalAddresses = (addresses: ReadonlyArray<string>) =>
+  addresses.map((one) => normalizePhoneNumber(one) ?? one.trim()).sort().join(",")
+
 const conversations = Layer.effect(Conversations, effect {
   const store = try KeyValueStore.KeyValueStore
   const known: Conversation[] = kept(store.get(conversationsKey) catch () => undefined)
-  const recipientKey = (one: Conversation) => [...one.addresses].sort().join(",")
+  const recipientKey = (one: Conversation) => canonicalAddresses(one.addresses)
   const keyOf = (one: Conversation) => (one.id !== "" ? `id:${one.id}` : `to:${recipientKey(one)}`)
   const numbers = new Map(known.map((one, at) => [keyOf(one), at + 1]))
   return {
@@ -136,6 +141,8 @@ const inbox = Layer.sync(Inbox, () => {
 
 const smsGrant = Effect.map(telephony("status", (c) => c.messages.status()), (status) => grantOf(status.permissions.sms))
 
+const maxPages = 20
+
 // spec/app/messages/index.md, "Only the newest read of the list is shown, with what Android says about SMS access"
 effect function threadsRead(ticket: number, further: boolean): Event!!(Telephony | Inbox | Conversations | Messages.Machine) {
   const store = try Inbox
@@ -144,24 +151,59 @@ effect function threadsRead(ticket: number, further: boolean): Event!!(Telephony
   const chip = (try machine.get()).chip
   const grant = smsGrant catch () => "Unasked" as const
   if (grant !== "Granted") return { type: "threadsRead", ticket, ok: true, grant, count: 0, further: false }
-  const page = telephony("threadPage", (c) => c.messages.threadPage(further ? held.threadsNext : undefined)) catch () => undefined
-  if (page === undefined) return { type: "threadsRead", ticket, ok: false, grant, count: 0, further: false }
-  const names = try namesOf("messages", page.rows.flatMap((row) => ("incomplete" in row ? [] : row.addresses)))
-  const titled = (row: ThreadRow) => ("incomplete" in row ? "" : row.addresses.map((address) => names.get(address) ?? address).join(", "))
-  const fitting = page.rows.filter((row) => "incomplete" in row || ((chip === "AllThreads" || row.unread) && matches(held.sought, `${titled(row)} ${row.snippet}`, row.addresses.join(" "))))
-  const rows = further ? [...held.threads, ...fitting] : fitting
-  if (Messages.canThreadsRead(try machine.get(), ticket, rows.length)) {
-    try store.set({ threads: rows, threadsNext: page.next ?? undefined, names: new Map([...(try store.get()).names, ...names]) })
+  const found = new Map((further ? held.threads : []).map((row) => [row.id, row] as const))
+  const names = new Map(held.names)
+  const filtering = chip === "UnreadThreads" || held.sought.trim() !== ""
+  const seen = new Set<ThreadCursor>()
+  let cursor = further ? held.threadsNext : undefined
+  let more = true
+  let pages = 0
+  const minimum = found.size
+  while (more && found.size === minimum && pages < maxPages) {
+    pages += 1
+    const position = cursor
+    const page = telephony("threadPage", (c) => c.messages.threadPage(position)) catch () => undefined
+    if (page === undefined) return { type: "threadsRead", ticket, ok: false, grant, count: 0, further: false }
+    const pageNames = try namesOf("messages", page.rows.flatMap((row) => ("incomplete" in row ? [] : row.addresses)))
+    for (const [number, name] of pageNames) names.set(number, name)
+    const titled = (row: ThreadRow) => ("incomplete" in row ? "" : row.addresses.map((address) => names.get(address) ?? address).join(", "))
+    for (const row of page.rows) {
+      const fits = "incomplete" in row
+        ? !filtering
+        : (chip === "AllThreads" || row.unread) && matches(held.sought, `${titled(row)} ${row.snippet}`, row.addresses.join(" "))
+      if (fits) found.set(row.id, row)
+    }
+    const next = page.next ?? undefined
+    more = next !== undefined && !seen.has(next)
+    if (next !== undefined) seen.add(next)
+    cursor = next
   }
-  return { type: "threadsRead", ticket, ok: true, grant, count: rows.length, further: page.next !== null }
+  const rows = Array.from(found.values())
+  if (Messages.canThreadsRead(try machine.get(), ticket, rows.length)) {
+    try store.set({ threads: rows, threadsNext: more ? cursor : undefined, names: new Map([...(try store.get()).names, ...names]) })
+  }
+  return { type: "threadsRead", ticket, ok: true, grant, count: rows.length, further: more && cursor !== undefined }
 }
 
 /** The phone's thread for a conversation Messages numbered: its own, or the listed one with exactly its numbers. */
 effect function threadOf(conversation: Conversation): Option.Option<ThreadId>!!Telephony {
   if (conversation.id !== "") return Option.some(conversation.id as ThreadId)
-  const page = telephony("threadPage", (c) => c.messages.threadPage()) catch () => undefined
-  const same = (row: ThreadRow) => !("incomplete" in row) && [...row.addresses].sort().join(",") === [...conversation.addresses].sort().join(",")
-  return Option.fromNullishOr(page?.rows.find(same)?.id)
+  const target = canonicalAddresses(conversation.addresses)
+  const same = (row: ThreadRow) => !("incomplete" in row) && canonicalAddresses(row.addresses) === target
+  const seen = new Set<ThreadCursor>()
+  let cursor: ThreadCursor | undefined
+  for (let pages = 0; pages < maxPages; pages += 1) {
+    const position = cursor
+    const page = telephony("threadPage", (c) => c.messages.threadPage(position)) catch () => undefined
+    if (page === undefined) return Option.none()
+    const match = page.rows.find(same)
+    if (match !== undefined) return Option.some(match.id)
+    const next = page.next ?? undefined
+    if (next === undefined || seen.has(next)) return Option.none()
+    seen.add(next)
+    cursor = next
+  }
+  return Option.none()
 }
 
 // spec/app/messages/index.md, "Only the newest read of the open conversation is shown, and it marks the shown messages read only where Alpha is the phone's SMS app"
@@ -170,8 +212,8 @@ effect function pageRead(ticket: number, thread: number, further: boolean): Even
   const machine = try Messages.Machine
   const held = try store.get()
   const blank: Page = { rows: 0, failed: 0, partial: 0 }
-  const grant = smsGrant catch () => "Unasked" as const
   const status = telephony("status", (c) => c.messages.status()) catch () => undefined
+  const grant = grantOf(status?.permissions.sms)
   const role = status?.roles.sms.held ?? false
   const conversation = try (try Conversations).get(thread)
   if (grant !== "Granted" || Option.isNone(conversation)) return { type: "pageRead", ticket, ok: grant === "Granted" || grant === "Unasked", grant, seen: blank, further: false, unreadShown: false, role }
@@ -183,7 +225,9 @@ effect function pageRead(ticket: number, thread: number, further: boolean): Even
   }
   const page = telephony("messagePage", (c) => c.messages.messagePage(id.value, further ? held.messagesNext : undefined)) catch () => undefined
   if (page === undefined) return { type: "pageRead", ticket, ok: false, grant, seen: blank, further: false, unreadShown: false, role }
-  const rows = further ? [...held.messages, ...page.rows] : page.rows
+  const merged = new Map((further ? held.messages : []).map((row) => [row.id, row] as const))
+  for (const row of page.rows) merged.set(row.id, row)
+  const rows = Array.from(merged.values())
   const seen: Page = {
     rows: rows.length,
     failed: rows.filter((row) => !("incomplete" in row) && row.status === "failed").length,
@@ -205,15 +249,30 @@ effect function choicesRead(ticket: number, further: boolean): Event!!(Telephony
   const status = telephony("status", (c) => c.phone.status()) catch () => undefined
   const grant = grantOf(status?.permissions.contacts)
   if (grant !== "Granted") return { type: "choicesRead", ticket, ok: true, grant, count: 0, further: false }
-  const page = effect {
+  const read = effect {
     try readAddressBook("open contacts", (c) => c.open())
-    return try readAddressBook("list contacts", (c) => c.list({ query: held.typed, limit: 20, ...(further && held.choicesNext !== undefined ? { cursor: held.choicesNext as never } : {}) }))
+    const found = new Map((further ? held.choices : []).map((row) => [row.id, row] as const))
+    const seen = new Set<string>()
+    let cursor = further ? held.choicesNext : undefined
+    let more = true
+    let pages = 0
+    const minimum = found.size
+    while (more && found.size === minimum && pages < maxPages) {
+      pages += 1
+      const position = cursor
+      const page = try readAddressBook("list contacts", (c) => c.list({ query: held.typed, limit: 20, ...(position !== undefined ? { cursor: position as never } : {}) }))
+      for (const row of page.contacts) if (!("incomplete" in row) && row.phones.length > 0) found.set(row.id, row)
+      const next = page.next ?? undefined
+      more = next !== undefined && !seen.has(next)
+      if (next !== undefined) seen.add(next)
+      cursor = next
+    }
+    return { rows: Array.from(found.values()), next: more ? cursor : undefined }
   } catch () => undefined
-  if (page === undefined) return { type: "choicesRead", ticket, ok: false, grant, count: 0, further: false }
-  const found = page.contacts.filter((row): row is AddressBookContact => !("incomplete" in row) && row.phones.length > 0)
-  const rows = further ? [...held.choices, ...found] : found
-  if (Messages.canChoicesRead(try (try Messages.Machine).get(), ticket, rows.length)) try store.set({ choices: rows, choicesNext: page.next ?? undefined })
-  return { type: "choicesRead", ticket, ok: true, grant, count: rows.length, further: page.next !== null }
+  if (read === undefined) return { type: "choicesRead", ticket, ok: false, grant, count: 0, further: false }
+  const { rows, next } = read
+  if (Messages.canChoicesRead(try (try Messages.Machine).get(), ticket, rows.length)) try store.set({ choices: rows, choicesNext: next })
+  return { type: "choicesRead", ticket, ok: true, grant, count: rows.length, further: next !== undefined }
 }
 
 // spec/app/messages/index.md, "Access that arrives reads the pane again, and access that goes forgets what it showed"
@@ -264,8 +323,10 @@ effect function removed(id: number): Event!!(Telephony | Inbox | Messages.Machin
       }
     })
     try ignore(machine.send({ type: "arrived" }))
-    const outcome = try settledDeletion(id, staged)
+    const settledEarly = Effect.as(Stream.runHead(Stream.filter(machine.changes, (s) => s.removal.id !== id || s.removal.outcome !== "Sent")), { type: "removed", id, done: false, known: true } satisfies Event)
+    const outcome = try race(settledDeletion(id, staged), settledEarly)
     try withdraw("messages", id)
+    if (outcome.type === "removed" && (outcome.done || !outcome.known)) try inbox.set({ deleteTarget: undefined })
     return outcome
   } catch (failure) => ({ type: "removed", id, done: false, known: !(failure instanceof TelephonyRefused && failure.code === undefined && failure.tag === "") } satisfies Event)
 }
@@ -294,7 +355,9 @@ function carry(fx: Out): Job<Event, Telephony | Inbox | Conversations | Messages
     when { tag: "ReadChoices", let ticket, let further }: answer("choices", choicesRead(ticket, further), { type: "choicesRead", ticket, ok: false, grant: "Unasked", count: 0, further: false });
     when { tag: "MarkRead", let thread }: run(`read ${thread}`, effect {
       const conversation = try (try Conversations).get(thread)
-      const latest = (try (try Inbox).get()).messages.reduce((at, row) => Math.max(at, row.date), 0)
+      const held = try (try Inbox).get()
+      if (held.messagesThread !== thread) return
+      const latest = held.messages.reduce((at, row) => Math.max(at, row.date), 0)
       if (Option.isSome(conversation) && conversation.value.id !== "") try ignore(telephony("markThreadRead", (c) => c.messages.markThreadRead(conversation.value.id as ThreadId, latest)))
     });
     when { tag: "Prompt", let need }: answer("prompt", prompted(need), { type: "accessReported", need, grant: "Unasked" });
@@ -326,6 +389,7 @@ const heard = hearing(arrivals, Messages.Machine, (event: Event) => event)
 /** A native notice may arrive before its WebView or Messages' permissions have finished loading. */
 const notices = started(effect {
   if (!registered("ElizaTelephony")) return
+  try ignore((try Telephony).clients())
   const transport = noticeTransport()
   const shell = try Shell
   const machine = try Messages.Machine
@@ -357,7 +421,7 @@ const notices = started(effect {
     const addresses = listed !== undefined && !("incomplete" in listed) ? listed.addresses : first !== undefined && !("incomplete" in first) ? first.addresses : []
     const names = try namesOf("messages", addresses)
     const latest = tryPromise(() => transport.smsNoticePending()) catch () => undefined
-    if (latest?.token !== token || latest?.threadId !== id || !showing(try shell.get(), "Messages")) return
+    if (latest?.token !== token || threadIdOf(latest?.threadId) !== id || !showing(try shell.get(), "Messages")) return
     const thread = try conversations.of({ id, addresses })
     if (!Messages.canOpenNotice(try machine.get(), thread)) return
     try inbox.set({ chosen: "", names: new Map([...held.names, ...names]) })
@@ -376,8 +440,9 @@ const callers = Layer.effect(Callers, effect {
     try (try Inbox).set({ typed: number })
     if (!(try contained((try Shell).send({ type: "openView", view: "Messages" }), "the number handed to Messages"))) return
     const machine = try Messages.Machine
-    const front = try Stream.runHead(Stream.filter(machine.changes, (s) => s.front))
-    if (Option.isSome(front) && front.value.pane !== "Threads") try ignore(machine.send({ type: "back" }))
+    const front = try Effect.timeoutOption(Stream.runHead(Stream.filter(machine.changes, (s) => s.front)), "3 seconds")
+    if (Option.isNone(front) || Option.isNone(front.value)) return
+    if (front.value.value.pane !== "Threads") try ignore(machine.send({ type: "back" }))
     try ignore(machine.send({ type: "newMessage" }))
     try ignore(machine.send({ type: "choose", thread, typed: true }))
   }
@@ -386,5 +451,9 @@ const callers = Layer.effect(Callers, effect {
   }
 })
 
+const resetDeleteTarget = applying(Messages.Machine, (state) => ({ pane: state.pane, thread: state.thread, front: state.front }), effect () => {
+  try (try Inbox).set({ deleteTarget: undefined })
+})
+
 /** Messages: resident, since Phone, Voicemail, Contacts and the agent hand it a number and Home reads its unread count; it reads only while its view is in front. */
-export const messages = together(machine, inbox, conversations, shown, heard, notices, callers)
+export const messages = together(machine, inbox, conversations, shown, heard, notices, callers, resetDeleteTarget)

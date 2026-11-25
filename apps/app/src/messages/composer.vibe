@@ -4,12 +4,13 @@ import { MMS_ATTACHMENT_TYPES, MMS_MAX_BODY, MMS_MAX_RECIPIENTS, MMS_MAX_TOTAL_B
 import { mmsBinding, type MmsAttachmentType, type MmsBinding, type MmsReview, type OperationId, type SmsReview, type SmsSendResult, type SmsSendStatus } from "@elizaos/os-bridges"
 import type { PhoneNumber, TelephonySubscription } from "@elizaos/os-bridges"
 import * as Composer from "../../gen/app__messages__composer.effect.vibe"
-import type { Effect as Out, Event } from "../../gen/app__messages__composer.effect.vibe"
+import type { Effect as Out, Event, Author } from "../../gen/app__messages__composer.effect.vibe"
 import type { Effect as SendOut } from "../../gen/app__messages__sending.effect.vibe"
 import { Machine as Messages, canNewPictureMessage, type Messages as MessagesState } from "../../gen/app__messages.effect.vibe"
 import { Machine as Phone, clear } from "../../gen/app__phone.effect.vibe"
 import { Machine as Shell, showing } from "../../gen/app__shell.effect.vibe"
-import { say } from "../notices/toasts.vibe"
+import type { Machine as Toasts } from "../../gen/app__notices__toasts.effect.vibe"
+import { type Said, say } from "../notices/toasts.vibe"
 import { Agent } from "../platform/agent.vibe"
 import { ask } from "../platform/remote.vibe"
 import { SystemSettings } from "../platform/systemSettings.vibe"
@@ -70,6 +71,9 @@ export service Drafts {
   text(thread: number): string!!
   write(thread: number, text: string): void!!
   drop(thread: number): void!!
+  save(thread: number, author: Author, base: number): Event!!
+  adoptSaved(thread: number): void!!
+  rebase(thread: number): void!!
   pictures(): ReadonlyArray<Picture>!!
   setPictures(pictures: ReadonlyArray<Picture>): void!!
   subscriptions(): ReadonlyArray<TelephonySubscription>!!
@@ -148,11 +152,53 @@ module text {
   export function canDigest(): boolean {
     return typeof globalThis.crypto?.subtle?.digest === "function"
   }
+
+  /** A saved draft record in `KeyValueStore`, backward-compatible with plain-string drafts. */
+  export interface StoredDraft {
+    readonly rev: number
+    readonly author: "OwnerWrote" | "AlphaWrote"
+    readonly text: string
+  }
+
+  /** @throws {never} */
+  export function readStoredDraft(raw: string | undefined): StoredDraft | undefined {
+    if (raw === undefined || raw === "") return undefined
+    try {
+      const parsed = record(JSON.parse(raw))
+      if (parsed !== undefined && parsed.v === 1 && typeof parsed.rev === "number" && Number.isSafeInteger(parsed.rev) && parsed.rev >= 0
+        && (parsed.author === "OwnerWrote" || parsed.author === "AlphaWrote") && typeof parsed.text === "string") {
+        return { rev: parsed.rev, author: parsed.author, text: parsed.text }
+      }
+    } catch {
+      return { rev: 0, author: "OwnerWrote", text: raw }
+    }
+    return { rev: 0, author: "OwnerWrote", text: raw }
+  }
+
+  /** @throws {never} */
+  export function keepStoredDraft(draft: StoredDraft): string {
+    return JSON.stringify({ v: 1, rev: draft.rev, author: draft.author, text: draft.text })
+  }
+
+  /** A distinct name when the owner attaches another file with the same filename, such as a second camera capture. @throws {never} */
+  export function uniquePictureName(name: string, taken: ReadonlySet<string>): string {
+    if (!taken.has(name)) return name
+    const dot = name.lastIndexOf(".")
+    const stem = dot > 0 ? name.slice(0, dot) : name
+    const ext = dot > 0 ? name.slice(dot) : ""
+    for (let n = 2; n < 1000; n += 1) {
+      const candidate = `${stem}-${n}${ext}`
+      if (!taken.has(candidate)) return candidate
+    }
+    return `${stem}-${taken.size + 1}${ext}`
+  }
 }
-import { canDigest, keepSend, keptSend, matchesBinding } from text
+import { canDigest, keepSend, keepStoredDraft, keptSend, matchesBinding, readStoredDraft, uniquePictureName } from text
 
 const drafts = Layer.effect(Drafts, effect {
   const store = try KeyValueStore.KeyValueStore
+  const editing = new Map<number, string>()
+  const loadedRev = new Map<number, number>()
   let pictures: ReadonlyArray<Picture> = []
   let subscriptions: ReadonlyArray<TelephonySubscription> = []
   let picked: PickedSubscription | undefined
@@ -178,12 +224,55 @@ const drafts = Layer.effect(Drafts, effect {
   let offeredPicture: PictureOffer | undefined
   let sending = { direct: false, pictures: false }
   let outgoing: Option.Option<Outgoing> = Option.fromNullishOr(keptSend(store.get(outgoingKey) catch () => undefined))
+  const storedOf = (thread: number) => Effect.map(Effect.orElseSucceed(store.get(draftKey(thread)), () => undefined), readStoredDraft)
   return {
     effect text(thread: number): string!! {
-      return (store.get(draftKey(thread)) catch () => undefined) ?? ""
+      const live = editing.get(thread)
+      if (live !== undefined) return live
+      const stored = try storedOf(thread)
+      if (!loadedRev.has(thread)) loadedRev.set(thread, stored?.rev ?? 0)
+      return stored?.text ?? ""
     },
-    write: (thread: number, text: string) => ignore(store.set(draftKey(thread), text)),
-    drop: (thread: number) => ignore(store.remove(draftKey(thread))),
+    effect write(thread: number, value: string): void!! {
+      if (!loadedRev.has(thread)) {
+        const stored = try storedOf(thread)
+        loadedRev.set(thread, stored?.rev ?? 0)
+      }
+      editing.set(thread, value)
+    },
+    effect drop(thread: number): void!! {
+      editing.delete(thread)
+      loadedRev.delete(thread)
+      try ignore(store.remove(draftKey(thread)))
+    },
+    effect save(thread: number, author: Author, base: number): Event!! {
+      if (author === "Nobody") {
+        editing.delete(thread)
+        loadedRev.delete(thread)
+        try ignore(store.remove(draftKey(thread)))
+        return { type: "draftSaved" }
+      }
+      const stored = try storedOf(thread)
+      const localText = editing.get(thread) ?? stored?.text ?? ""
+      const expected = loadedRev.get(thread) ?? 0
+      if (stored !== undefined && stored.rev !== expected && stored.text !== localText) {
+        const held = stored.rev === base ? stored.rev + 1 : stored.rev
+        return { type: "draftCollided", held, theirs: stored.author }
+      }
+      const nextRev = Math.max(expected, stored?.rev ?? 0) + 1
+      try ignore(store.set(draftKey(thread), keepStoredDraft({ rev: nextRev, author, text: localText })))
+      loadedRev.set(thread, nextRev)
+      return { type: "draftSaved" }
+    },
+    effect adoptSaved(thread: number): void!! {
+      const stored = try storedOf(thread)
+      editing.delete(thread)
+      loadedRev.set(thread, stored?.rev ?? 0)
+    },
+    effect rebase(thread: number): void!! {
+      const stored = try storedOf(thread)
+      loadedRev.set(thread, stored?.rev ?? 0)
+    },
     pictures: () => sync(() => pictures),
     setPictures: (next: ReadonlyArray<Picture>) => sync(() => { pictures = next }),
     subscriptions: () => sync(() => subscriptions),
@@ -318,10 +407,33 @@ function journaled(id: number, recipients: number): Stream.Stream<Event, never, 
 
 // spec/app/messages/sending.md, "The radio reports each part sent or failed, and the send ends when every recipient has an answer"
 effect function radioed(id: number): Event!!(Drafts | Telephony) {
-  const held = try (try Drafts).outgoing()
+  const store = try Drafts
+  const held = try store.outgoing()
   if (Option.isNone(held)) return { type: "lost" }
   const send = held.value
-  const status = send.status === "submitted" && send.sim !== null && send.operation !== undefined ? try receiptOf(send, send.sim, send.operation) : send.status
+  let status = send.status
+  if (status === "submitted" && send.sim !== null && send.operation !== undefined) {
+    const sim = send.sim
+    const operation = send.operation
+    status = try receiptOf(send, sim, operation)
+    if (status === "submitted" && !usingMms(send.to.length, send.pictured)) {
+      const noticed = Stream.runHead(Stream.filter(
+        Stream.callback<OperationId, never, Telephony>((queue) => Effect.asVoid(acquireRelease(
+          Effect.orElseSucceed(telephony("observeMessages", (c) => c.messages.observeMessages(() => {}, (op) => { Queue.offerUnsafe(queue, op) }, (op) => { Queue.offerUnsafe(queue, op) })), () => undefined),
+          (unsubscribe) => (unsubscribe === undefined ? Effect.void : ignore(tryPromise(() => unsubscribe()))),
+        ))),
+        (op) => op === operation,
+      ))
+      for (let attempt = 0; status === "submitted" && attempt < 3; attempt += 1) {
+        try race(noticed, sleep("100 millis"))
+        status = try receiptOf(send, sim, operation)
+      }
+    }
+    if (status !== undefined && status !== "submitted") {
+      const latest = try store.outgoing()
+      if (Option.isSome(latest) && latest.value.operation === operation) try store.setOutgoing({ ...latest.value, status })
+    }
+  }
   return status === undefined || status === "unknown" || status === "submitted" ? { type: "lost" } : { type: "partSent", id, ok: sentStatuses.has(status) }
 }
 
@@ -379,7 +491,10 @@ effect function suggestion(ticket: number, thread: number): Event!!(Agent | Inbo
 
 function carry(fx: Out): Job<Event, Telephony | Drafts | Attempts | Conversations | Inbox | Agent | SystemSettings | Messages | Composer.Machine | Phone, []> {
   return match (fx) {
-    when { tag: "SaveDraft" }: answer("save", succeed<Event>({ type: "draftSaved" }), { type: "draftSaved" });
+    when { tag: "SaveDraft", let thread, let author }: answer("save", effect {
+      const base = (try (try Composer.Machine).get()).slot.draft.base
+      return try (try Drafts).save(thread, author, base)
+    }, { type: "draftSaved" });
     when { tag: "DropDraft", let thread }: run(`drop ${thread}`, effect { try (try Drafts).drop(thread) });
     when { tag: "Suggest", let ticket, let thread }: answer("suggest", suggestion(ticket, thread), { type: "suggested", ticket, ok: false });
     when { tag: "Prompt", let need }: answer("prompt", effect {
@@ -389,8 +504,8 @@ function carry(fx: Out): Job<Event, Telephony | Drafts | Attempts | Conversation
     }, { type: "accessReported", need, grant: "Unasked" });
     when { tag: "OpenSettings" }: run("settings", effect { try (try SystemSettings).open("AppPermissions", "") });
     when { tag: "OpenMessagingApp" }: run("elsewhere", effect {
-      const thread = (try (try Composer.Machine).get()).thread
-      try elsewhere(thread, try (try Drafts).text(thread))
+      const state = try (try Composer.Machine).get()
+      try elsewhere(state.thread, state.slot.author === "Nobody" ? "" : try (try Drafts).text(state.thread))
     });
     when { tag: "Sending" }: sending(fx.effect);
   }
@@ -560,17 +675,36 @@ effect function attachPicture(thread: number, picture: Picture): boolean!!(Draft
 
 // spec/app/messages/composer.md, "The owner attaches up to five pictures, and removes them one by one"
 /** Attach the owner's chosen files in turn: each the phone's MMS takes, a JPEG, PNG or GIF within its size with those before, is attached while the composer takes one. */
-export effect function attachAll(files: ReadonlyArray<File>): void!!(Drafts | Composer.Machine) {
+export effect function attachAll(files: ReadonlyArray<File>): void!!(Drafts | Composer.Machine | Toasts | Said) {
   const machine = try Composer.Machine
+  const store = try Drafts
   const thread = (try machine.get()).thread
+  let skipped: string | undefined
   for (const file of files) {
     const contentType = MMS_ATTACHMENT_TYPES.find((type) => type === file.type)
-    if (contentType === undefined || file.size <= 0 || file.size > MMS_MAX_TOTAL_BYTES) continue
+    if (contentType === undefined || file.size <= 0) {
+      skipped ??= "Only JPEG, PNG, and GIF pictures can be attached"
+      continue
+    }
+    if (file.size > MMS_MAX_TOTAL_BYTES) {
+      skipped ??= "That picture is too large to send"
+      continue
+    }
     const bytes = tryPromise(() => file.arrayBuffer()) catch () => undefined
-    if (bytes === undefined) continue
+    if (bytes === undefined) {
+      skipped ??= "Could not read the selected picture"
+      continue
+    }
     if ((try machine.get()).thread !== thread) return
-    try attachPicture(thread, { name: file.name, contentType, bytes: new Uint8Array(bytes) })
+    const held = try store.pictures()
+    const taken = new Set(held.flatMap((one) => [one.name, one.wireName ?? one.name]))
+    const name = uniquePictureName(file.name || "image.jpg", taken)
+    const attached = try attachPicture(thread, { name, contentType, bytes: new Uint8Array(bytes) })
+    if (!attached) {
+      skipped ??= (try machine.get()).pictures >= 5 ? "You can attach up to 5 pictures" : "That picture does not fit in this message"
+    }
   }
+  if (skipped !== undefined) try say(skipped, true)
 }
 
 // spec/app/messages/composer.md, "An edited draft is saved for its conversation, one save at a time"

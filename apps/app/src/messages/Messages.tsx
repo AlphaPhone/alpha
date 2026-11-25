@@ -2,8 +2,8 @@
 import { MMS_ATTACHMENT_TYPES, MMS_MAX_BODY, MMS_MAX_RECIPIENTS } from "@elizaos/os-bridges";
 import type { MessageRow, ThreadRow } from "@elizaos/os-bridges";
 import { normalizePhoneNumber } from "@elizaos/os-bridges";
-import { Alert, Avatar, Banner, Button, Chip, ConfirmDialog, Input, Menu, MenuContent, MenuItem, MenuTrigger, SearchField, Spinner, Textarea } from "@repo/ui";
-import { Effect, type Layer, type ManagedRuntime } from "effect";
+import { Alert, Avatar, Banner, Button, Chip, ConfirmDialog, Input, Menu, MenuContent, MenuItem, MenuTrigger, SearchField, Spinner, Textarea, cn, focusRing } from "@repo/ui";
+import { Effect, Exit, type Layer, type ManagedRuntime } from "effect";
 import { ArrowUp, Camera, ChevronDown, ChevronLeft, ChevronUp, CircleAlert, Copy, Image as PictureIcon, ImagePlus, Mic, Pencil, Phone as Call, Plus, RefreshCw, Search, Send, Sparkles, Square, Trash2, X } from "lucide-react";
 import { memo, useCallback, useMemo, useRef, useState, useSyncExternalStore, type MouseEvent, type PointerEvent } from "react";
 import { clear } from "../../gen/app__phone.ts";
@@ -33,7 +33,7 @@ export interface MessagesProps {
 type MessagesUI = ReturnType<typeof useMessages>;
 
 const header = "flex min-h-12 shrink-0 items-center gap-1 px-2";
-const contactRow = "flex min-h-15 w-full items-center gap-3 px-5 py-1.5 text-left hover:bg-accent focus-visible:outline-2 focus-visible:outline-ring";
+const contactRow = cn(focusRing, "flex min-h-15 w-full items-center gap-3 px-5 py-1.5 text-left hover:bg-accent focus-visible:-outline-offset-focus");
 const messageURL = /\bhttps?:\/\/[^\s<>"']+/giu;
 const noMessages: ReadonlyArray<MessageRow> = [];
 
@@ -127,9 +127,9 @@ function Threads({ runtime, messages: { state, can, send }, onBack }: MessagesPr
         <>
           <div className="flex shrink-0 flex-wrap items-center gap-2 px-5 empty:hidden" role="group" aria-label="Filter conversations">
             {state.chip === "UnreadThreads"
-              ? <Chip onClear={can(all) ? () => void send(all) : undefined} clearLabel="Show all conversations">Unread</Chip>
-              : searching && can(unread) && <Button size="sm" variant="ghost" onClick={() => void send(unread)}>Unread</Button>}
-            {!searching && state.sought && <Chip onClear={() => search("")} clearLabel="Clear the search">{sought}</Chip>}
+              ? <Chip className="min-h-11" onClear={can(all) ? () => void send(all) : undefined} clearLabel="Show all conversations">Unread</Chip>
+              : searching && can(unread) && <Button size="sm" variant="ghost" className="min-h-11" onClick={() => void send(unread)}>Unread</Button>}
+            {!searching && state.sought && <Chip className="min-h-11" onClear={() => search("")} clearLabel="Clear the search">{sought}</Chip>}
           </div>
           <div data-alpha-messages-threads className="min-h-0 flex-1 touch-pan-y overflow-y-auto overscroll-contain py-1">
             {state.list.status === "Loading" && state.threads === 0 && <div className="px-5 py-3"><Spinner label="Reading conversations" /></div>}
@@ -143,7 +143,7 @@ function Threads({ runtime, messages: { state, can, send }, onBack }: MessagesPr
                   const title = complete ? titleOf(complete.addresses, names) || "Conversation" : "Conversation";
                   return (
                     <li key={row.id}>
-                      <button type="button" aria-label={title} aria-description={complete?.unread ? "Unread" : undefined} onClick={() => open(row)} className={`${contactRow} min-h-17 items-start py-2.5`}>
+                      <button type="button" disabled={!can({ type: "openThread", thread: 1 })} aria-label={title} aria-description={complete?.unread ? "Unread" : undefined} onClick={() => open(row)} className={`${contactRow} min-h-17 items-start py-2.5`}>
                         <Avatar name={avatarName(title)} aria-hidden className="size-12 text-base" />
                         <span className="min-w-0 flex-1">
                           <span className="flex items-center gap-1.5">
@@ -205,17 +205,20 @@ interface BubbleActions {
   remove?: (() => void) | undefined;
 }
 
-const Bubble = memo(function Bubble({ row, now, choose, actions, onOpenLink }: { row: MessageRow; now: number; choose: (id: string) => void; actions?: BubbleActions | undefined; onOpenLink?: MessagesProps["onOpenLink"] }) {
+const Bubble = memo(function Bubble({ row, now, selected, choose, actions, onOpenLink }: { row: MessageRow; now: number; selected: boolean; choose: (id: string) => void; actions?: BubbleActions | undefined; onOpenLink?: MessagesProps["onOpenLink"] }) {
   const triggerRef = useRef<HTMLDivElement>(null);
   const pointerRef = useRef<{ x: number; y: number; at: number } | null>(null);
+  const longPressedRef = useRef(false);
   const complete = "incomplete" in row ? undefined : row;
   const outgoing = complete?.direction === "outgoing";
   const failed = complete?.status === "failed";
   const status = failed ? "Not sent" : complete?.status === "pending" ? "Sending" : outgoing && (complete?.status === "delivered" || complete?.deliveryReport === "complete") ? "Delivered" : outgoing ? "Sent" : "";
+  const toggle = () => choose(selected ? "" : row.id);
   const select = (event: MouseEvent) => {
     if (event.target instanceof Element && event.target.closest("a")) return;
     if (document.getSelection()?.isCollapsed === false) return;
-    choose(row.id);
+    if (longPressedRef.current) { longPressedRef.current = false; return; }
+    toggle();
   };
   const moved = (event: PointerEvent) => {
     const started = pointerRef.current;
@@ -225,26 +228,30 @@ const Bubble = memo(function Bubble({ row, now, choose, actions, onOpenLink }: {
   return (
     <div className={`flex max-w-[min(17.5rem,100%)] flex-col ${outgoing ? "items-end self-end" : "items-start self-start"}`}>
       <div ref={triggerRef} data-alpha-message-id={row.id} data-alpha-sms-outgoing={outgoing} role="button" tabIndex={0} aria-label={`Message actions: ${label}`} aria-haspopup="menu" aria-expanded={Boolean(actions)}
-        className={`flex max-w-full flex-col gap-0.5 rounded-tile focus-visible:outline-2 focus-visible:outline-ring ${outgoing ? "items-end" : "items-start"}`}
+        className={cn(focusRing, "flex max-w-full flex-col gap-0.5 rounded-tile", outgoing ? "items-end" : "items-start")}
         onClick={select}
         onContextMenu={(event) => {
           if (event.target instanceof Element && event.target.closest("a")) return;
           event.preventDefault();
-          select(event);
+          longPressedRef.current = false;
+          choose(row.id);
         }}
-        onPointerDown={(event) => { if (event.pointerType === "touch") pointerRef.current = { x: event.clientX, y: event.clientY, at: event.timeStamp }; }}
+        onPointerDown={(event) => { if (event.pointerType === "touch") { longPressedRef.current = false; pointerRef.current = { x: event.clientX, y: event.clientY, at: event.timeStamp }; } }}
         onPointerMove={moved}
         onPointerCancel={() => { pointerRef.current = null; }}
         onPointerUp={(event) => {
           const started = pointerRef.current;
           pointerRef.current = null;
-          if (started && event.timeStamp - started.at >= 500) choose(row.id);
+          if (started && event.timeStamp - started.at >= 500) {
+            longPressedRef.current = true;
+            choose(row.id);
+          }
         }}
         onKeyDown={(event) => {
           if (event.target !== event.currentTarget) return;
           if (event.key === "ContextMenu" || (event.shiftKey && event.key === "F10") || event.key === "Enter" || event.key === " ") {
             event.preventDefault();
-            choose(row.id);
+            toggle();
           }
         }}>
         {!complete ? <p className="rounded-tile bg-muted px-4 py-2.5 text-base">{label}</p> : (
@@ -277,21 +284,39 @@ function Conversation({ runtime, messages: { state, can, send }, onOpenLink }: M
   const [selected, setSelected] = useState("");
   const scrollRef = useRef<HTMLDivElement>(null);
   const nearEndRef = useRef(true);
+  const earlierAnchorRef = useRef<{ height: number; top: number; oldestId: string | undefined } | null>(null);
   const held = runtime.runSync(Effect.flatMap(Inbox, (inbox) => inbox.get()));
   const now = runtime.runSync(Effect.flatMap(Time, (time) => time.latest()));
   const rows = state?.shown.rows && held.messagesThread === state.thread ? held.messages : noMessages;
   const chronological = rows.toReversed();
+  const oldest = chronological[0]?.id;
   const latest = rows[0]?.id;
   const anchor = useCallback((element: HTMLDivElement | null) => {
-    if (element && nearEndRef.current && scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+    const viewport = scrollRef.current;
+    if (!element || !viewport) return;
+    const saved = earlierAnchorRef.current;
+    if (saved && element.dataset.oldest !== (saved.oldestId ?? "")) {
+      earlierAnchorRef.current = null;
+      viewport.scrollTop = saved.top + (viewport.scrollHeight - saved.height);
+      return;
+    }
+    if (nearEndRef.current) viewport.scrollTop = viewport.scrollHeight;
   }, []);
   const viewport = useCallback((element: HTMLDivElement | null) => {
     scrollRef.current = element;
     if (!element || typeof ResizeObserver === "undefined") return;
     const resize = new ResizeObserver(() => {
+      const saved = earlierAnchorRef.current;
+      if (saved && element.scrollHeight !== saved.height) {
+        earlierAnchorRef.current = null;
+        element.scrollTop = saved.top + (element.scrollHeight - saved.height);
+        return;
+      }
       if (nearEndRef.current) element.scrollTop = element.scrollHeight;
     });
     resize.observe(element);
+    const log = element.querySelector('[role="log"]');
+    if (log) resize.observe(log);
     return () => { resize.disconnect(); scrollRef.current = null; };
   }, []);
   const choose = useCallback((id: string) => {
@@ -300,12 +325,13 @@ function Conversation({ runtime, messages: { state, can, send }, onOpenLink }: M
   }, [runtime]);
   if (!state || !phone) return null;
   const conversation = runtime.runSync(Effect.flatMap(Conversations, (numbering) => numbering.get(state.thread)));
+  const conversationId = conversation._tag === "Some" ? conversation.value.id : "";
   const addresses = conversation._tag === "Some" ? conversation.value.addresses : [];
   const title = titleOf(addresses, held.names) || "Conversation";
   const selectedRow = rows.find((row) => row.id === selected);
   const confirm = { type: "confirmDelete", clear: clear(phone) } as const;
   const actions = selectedRow && !("incomplete" in selectedRow) && !state.confirming && content(state) ? {
-    copy: selectedRow.body && can({ type: "copy" }) ? () => { void send({ type: "copy" }); } : undefined,
+    copy: selectedRow.body && can({ type: "copy" }) ? () => { void send({ type: "copy" }); choose(""); } : undefined,
     remove: state.smsApp && state.removal.outcome !== "Unknown" && can({ type: "askDelete" }) ? () => {
       const { id, kind, threadId, date } = selectedRow;
       runtime.runSync(Effect.flatMap(Inbox, (inbox) => inbox.set({ deleteTarget: { id, kind, threadId, date } })));
@@ -320,25 +346,37 @@ function Conversation({ runtime, messages: { state, can, send }, onOpenLink }: M
         <h1 data-alpha-messages-title className="min-w-0 flex-1 truncate pl-1.5 text-lg font-bold">{title}</h1>
         {addresses.length === 1 && can({ type: "call" }) && <Button variant="ghost" size="icon" aria-label={`Call ${title}`} onClick={() => void send({ type: "call" })}><Call /></Button>}
       </header>
-      <div ref={viewport} data-alpha-messages-thread className="min-h-0 flex-1 touch-pan-y overflow-y-auto overscroll-contain px-4 pb-3" onScroll={(event) => {
-        const viewport = event.currentTarget;
-        nearEndRef.current = viewport.scrollHeight - viewport.scrollTop - viewport.clientHeight < 64;
-      }}>
+      <div ref={viewport} data-alpha-messages-thread className="min-h-0 flex-1 touch-pan-y overflow-y-auto overscroll-contain px-4 pb-3"
+        onClick={(event) => {
+          if (selected !== "" && event.target instanceof Element && !event.target.closest("[data-alpha-message-id],[data-alpha-sms-actions]")) choose("");
+        }}
+        onScroll={(event) => {
+          const el = event.currentTarget;
+          nearEndRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < 64;
+        }}>
         <div className="flex min-h-full flex-col gap-1.5">
           {state.page.status === "Loading" && state.shown.rows === 0 && <Spinner label="Reading the conversation" />}
           {state.page.status === "Failed" && <Banner variant="destructive">The conversation could not be read</Banner>}
-          {can({ type: "earlierMessages" }) && <Button className="self-center" size="icon" variant="secondary" aria-label="Earlier messages" onClick={() => void send({ type: "earlierMessages" })}><ChevronUp /></Button>}
+          {can({ type: "earlierMessages" }) && <Button className="self-center" size="icon" variant="secondary" aria-label="Earlier messages" onClick={() => {
+            if (scrollRef.current) earlierAnchorRef.current = { height: scrollRef.current.scrollHeight, top: scrollRef.current.scrollTop, oldestId: oldest };
+            void send({ type: "earlierMessages" });
+          }}><ChevronUp /></Button>}
           <div role="log" aria-label="Messages" className="mt-auto flex flex-col gap-1.5">
-            {chronological.map((row) => <Bubble key={row.id} row={row} now={now} choose={choose} actions={row.id === selected && (actions?.copy || actions?.remove) ? actions : undefined} onOpenLink={onOpenLink} />)}
+            {chronological.map((row) => <Bubble key={row.id} row={row} now={now} selected={row.id === selected} choose={choose} actions={row.id === selected && (actions?.copy || actions?.remove) ? actions : undefined} onOpenLink={onOpenLink} />)}
           </div>
           {selectedRow && "incomplete" in selectedRow && can({ type: "openElsewhere" }) && <Button size="sm" variant="outline" className="self-start" onClick={() => void send({ type: "openElsewhere" })}>Open in messaging app</Button>}
-          <div key={latest} ref={latest ? anchor : undefined} aria-hidden />
+          <div key={`${latest ?? ""}:${oldest ?? ""}`} data-oldest={oldest ?? ""} ref={latest ? anchor : undefined} aria-hidden />
         </div>
       </div>
       {state.removal.outcome === "Unknown" && <Banner variant="warn">Alpha cannot tell whether the message was deleted</Banner>}
-      {state.removal.outcome === "Refused" && held.deleteTarget && <Banner variant="destructive">The message was not deleted</Banner>}
+      {state.removal.outcome === "Refused" && held.deleteTarget && held.deleteTarget.threadId === conversationId && <Banner variant="destructive">The message was not deleted</Banner>}
       <ConfirmDialog open={state.confirming} title="Delete message?" confirmLabel="Delete" destructive
-        onConfirm={() => void (selectedRow && !("incomplete" in selectedRow) && can(confirm) && send(confirm))} onCancel={() => void (can({ type: "keep" }) && send({ type: "keep" }))}>Delete this message from this phone?</ConfirmDialog>
+        onConfirm={() => {
+          if (selectedRow && !("incomplete" in selectedRow) && can(confirm)) {
+            void send(confirm);
+            choose("");
+          }
+        }} onCancel={() => void (can({ type: "keep" }) && send({ type: "keep" }))}>Delete this message from this phone?</ConfirmDialog>
       <Compose runtime={runtime} title={title} addresses={addresses} thread={state.thread} />
     </>
   );
@@ -369,8 +407,13 @@ function Compose({ runtime, title, addresses, thread }: MessagesProps & { title:
   const write = (next: string) => {
     const event = { type: "typeText", empty: next.length === 0 } as const;
     if (!can(event)) return;
+    const before = text;
     runtime.runSync(Effect.flatMap(Drafts, (drafts) => drafts.write(thread, next)));
-    void send(event);
+    void send(event).then((outcome) => {
+      if (Exit.isFailure(outcome)) {
+        runtime.runSync(Effect.flatMap(Drafts, (drafts) => (before === "" ? drafts.drop(thread) : drafts.write(thread, before))));
+      }
+    });
   };
   const outgoing = state.outgoing;
   const here = outgoing.thread === thread;
@@ -461,8 +504,14 @@ function Compose({ runtime, title, addresses, thread }: MessagesProps & { title:
       <div ref={simControls} data-alpha-messages-accessories className="flex max-h-[34%] shrink-0 flex-wrap gap-1.5 overflow-y-auto px-3 empty:hidden">
         {state.slot.draft.sync === "Conflicted" && (
           <Banner variant="warn" action={<>
-            {can({ type: "keepMine" }) && <Button size="sm" onClick={() => void send({ type: "keepMine" })}>Keep mine</Button>}
-            {can({ type: "takeSaved" }) && <Button size="sm" variant="outline" onClick={() => void send({ type: "takeSaved" })}>Use the saved draft</Button>}
+            {can({ type: "keepMine" }) && <Button size="sm" onClick={() => {
+              runtime.runSync(Effect.flatMap(Drafts, (drafts) => drafts.rebase(thread)));
+              void send({ type: "keepMine" });
+            }}>Keep mine</Button>}
+            {can({ type: "takeSaved" }) && <Button size="sm" variant="outline" onClick={() => {
+              runtime.runSync(Effect.flatMap(Drafts, (drafts) => drafts.adoptSaved(thread)));
+              void send({ type: "takeSaved" });
+            }}>Use the saved draft</Button>}
           </>}>Another draft was saved for this conversation</Banner>
         )}
         {checking && <Banner variant="warn">Alpha is still waiting for the send result</Banner>}
@@ -543,22 +592,23 @@ function Picker({ runtime, messages: { state, can, send } }: MessagesProps & { m
       </header>
       {offer?.ticket === state.offeredPicture && (
         <div aria-label="Picture for this message" className="flex px-5 py-2">
-          <Chip clearLabel={`Remove ${offer.picture.name}`} onClear={() => void send({ type: "clearPictureOffer", ticket: offer.ticket })}>
+          <Chip clearLabel={`Remove ${offer.picture.name}`} onClear={can({ type: "clearPictureOffer", ticket: offer.ticket }) ? () => void send({ type: "clearPictureOffer", ticket: offer.ticket }) : undefined}>
             <PictureIcon aria-hidden />{offer.picture.name}
           </Chip>
         </div>
       )}
       <div data-alpha-messages-picks className="min-h-0 flex-1 touch-pan-y overflow-y-auto overscroll-contain pb-2">
-        {numbers.length > 0 && <div className="px-5 py-1"><Button variant="outline" onClick={() => open(numbers, true)}>{numbers.length === 1 ? `Text ${numbers[0]}` : `Text ${numbers.length} recipients`}</Button></div>}
+        {numbers.length > 0 && <div className="px-5 py-1"><Button variant="outline" disabled={!can({ type: state.offeredPicture > 0 ? "choosePictureRecipient" : "choose", thread: 1, typed: true })} onClick={() => open(numbers, true)}>{numbers.length === 1 ? `Text ${numbers[0]}` : `Text ${numbers.length} recipients`}</Button></div>}
         {can(allow) && <div className="px-5 py-2"><Button variant="outline" onClick={() => void send(allow)}>Allow Contacts access</Button></div>}
         {can(settings) && <div className="px-5 py-2"><Button variant="outline" onClick={() => void send(settings)}>Open Settings for Contacts access</Button></div>}
         {state.picker.status === "Loading" && <div className="px-5"><Spinner label="Checking Contacts" /></div>}
         {state.picker.status === "Failed" && can({ type: "findChoices" }) && <div className="px-5"><Banner variant="destructive" action={<Button size="sm" variant="outline" onClick={() => void send({ type: "findChoices" })}>Retry</Button>}>Contacts could not be read</Banner></div>}
         {state.choices > 0 && (
           <ul aria-label="Contacts" data-alpha-messages-contact-picker={browsing || undefined}>
-            {held.choices.flatMap((contact) => contact.phones.map((phone) => (
-              <li key={`${contact.id}:${phone}`}>
-                <button type="button" className={contactRow} aria-label={contact.name} aria-description={phone} onClick={() => {
+            {held.choices.flatMap((contact) => contact.phones.map((phone, at) => (
+              // eslint-disable-next-line @eslint-react/no-array-index-key -- The phone can return a duplicated number at distinct positions.
+              <li key={`${contact.id}:${phone}:${at}`}>
+                <button type="button" className={contactRow} disabled={to.length === 1 && !can({ type: state.offeredPicture > 0 ? "choosePictureRecipient" : "choose", thread: 1, typed: false })} aria-label={contact.name} aria-description={phone} onClick={() => {
                   if (to.length === 1) { open([phone], false); return; }
                   find([...to.slice(0, -1), phone].join(", "));
                 }}>

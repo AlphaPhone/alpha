@@ -34,7 +34,7 @@ function read(ticket: number): Stream.Stream<Event, never, Calls> {
   return Stream.unwrap(effect {
     const calls = try Calls
     const raw = calls.ongoing() catch (failure) => (failure._tag === "CallsAbsent" ? { calls: [] } : undefined)
-    return Stream.succeed<Event>({ type: "refreshAnswered", ticket, ...reported(raw) })
+    return Stream.succeed<Event>({ type: "refreshAnswered", ticket, ...reported(raw), at: untimed })
   })
 }
 
@@ -46,7 +46,7 @@ effect function ended(callId: string): Event!!Calls {
 
 function carry(fx: Out): Job<Event, Calls, []> {
   return match (fx) {
-    when { tag: "ReadCalls", let ticket }: stream("read", read(ticket), { type: "refreshAnswered", ticket, calls: [], wellFormed: false });
+    when { tag: "ReadCalls", let ticket }: stream("read", read(ticket), { type: "refreshAnswered", ticket, calls: [], wellFormed: false, at: untimed });
     when { tag: "ShowCall", let callId }: run("show", effect { try ignore((try Calls).show(callId)) });
     when { tag: "EndCall", let callId }: answer("end", ended(callId), { type: "endAnswered", callId, ended: false });
   }
@@ -61,9 +61,13 @@ function timers(state: CallBar) {
   ]
 }
 
-const machine = reacting(Bar, { carry, timers, open: [{ type: "eligibilityChanged", eligible: true }] })
+const opening = effect {
+  return [{ type: "eligibilityChanged", eligible: try (try Device).showing() }] as const
+}
 
-const pushed = hearing(Stream.unwrap(effect { return (try Calls).reports }), Bar.Machine, (raw): Event => ({ type: "callsReported", ...reported(raw) }))
+const machine = reacting(Bar, { carry, timers, open: opening })
+
+const pushed = hearing(Stream.unwrap(effect { return (try Calls).reports }), Bar.Machine, (raw): Event => ({ type: "callsReported", ...reported(raw), at: untimed }))
 
 const seen = hearing(Stream.unwrap(effect { return (try Device).visible }), Bar.Machine, (visible): Event => ({ type: "eligibilityChanged", eligible: visible }))
 

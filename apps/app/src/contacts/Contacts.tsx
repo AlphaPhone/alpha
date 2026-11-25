@@ -1,9 +1,9 @@
 // spec/app/contacts/index.md, "Story: Browse my contacts"; spec/app/contacts/index.md, "Story: Give Alpha access to my contacts"; spec/app/contacts/index.md, "Story: Look at one contact"; spec/app/contacts/index.md, "Story: Add or change a contact"; spec/app/contacts/index.md, "Story: Delete a contact"; spec/app/contacts/index.md, "Story: Know what happened to my change"
 import { Alert, AppHeader, Avatar, Banner, Button, Chip, ConfirmDialog, Input, ListGroup, ListRow, SearchField, Spinner, Tabs, TabsContent, Textarea } from "@repo/ui";
-import { Effect, type ManagedRuntime } from "effect";
+import { Effect, Exit, type ManagedRuntime } from "effect";
 import { CONTACT_MAX_ADDRESS, CONTACT_MAX_NAME, CONTACT_MAX_NOTES, CONTACT_MAX_NUMBER } from "@elizaos/os-bridges";
 import { ArrowLeft, Check, ChevronDown, ChevronLeft, Mail, MessageSquare, Minus, NotebookText, Pencil, Phone as Call, Plus, Search, Trash2, X } from "lucide-react";
-import { useMemo, useRef } from "react";
+import { useMemo, useRef, useState } from "react";
 import type { Machine as ContactsMachine } from "../../gen/app__contacts.effect.vibe";
 import { accessNeeded, listFailed, listedEmpty, maxEach, noMatches, pending, refused, shown, uncertain } from "../../gen/app__contacts.ts";
 import { useMachine as useContacts } from "../../gen/app__contacts.react.ts";
@@ -50,8 +50,11 @@ export function Contacts({ runtime, alpha }: ContactsProps & { alpha: Alpha }) {
   const search = (typed: string) => {
     const event = { type: "search", typed: typed.trim() !== "" } as const;
     if (!can(event)) return;
+    const before = held.sought;
     set({ sought: typed });
-    void send(event);
+    void send(event).then((outcome) => {
+      if (Exit.isFailure(outcome)) set({ sought: before });
+    });
   };
   const safe = clear(phone);
   if (state.form !== "Shut") return <Editor runtime={runtime} />;
@@ -89,6 +92,11 @@ export function Contacts({ runtime, alpha }: ContactsProps & { alpha: Alpha }) {
   ) : (
     <AppHeader title="Contacts" leading={<AppBack alpha={alpha} />}>{actions}</AppHeader>
   );
+  const bar = (
+    <CommsBar runtime={runtime}
+      person={state.opened && held.card !== undefined ? { label: held.card.displayName, initials: callerInitials(held.card.displayName) } : undefined}
+      filter={!state.opened && !searching && can({ type: "search", typed: true }) ? { value: query, onChange: search, maxLength: 128 } : undefined} />
+  );
   const content = (
     <section aria-label="Contacts" className="flex flex-1 flex-col gap-2">
       {!state.opened && !phoneTabs && header}
@@ -101,10 +109,10 @@ export function Contacts({ runtime, alpha }: ContactsProps & { alpha: Alpha }) {
       )}
       {state.opened ? <Card runtime={runtime} safe={safe} /> : (
         <>
-          {state.sought && !searching && <Chip className="mx-4 self-start" onClear={() => void send({ type: "endSearch" })} clearLabel="Clear the search">{query} · {state.rows}</Chip>}
+          {state.sought && !searching && <Chip className="mx-4 self-start" onClear={can({ type: "endSearch" }) ? () => void send({ type: "endSearch" }) : undefined} clearLabel="Clear the search">{query} · {state.rows}</Chip>}
           {searching && <div className="flex gap-2 px-4" role="group" aria-label="Show">
-            <Button size="sm" variant={state.chip === "Everyone" ? "primary" : "outline"} aria-pressed={state.chip === "Everyone"} onClick={() => void (can({ type: "pick", chip: "Everyone" }) && send({ type: "pick", chip: "Everyone" }))}>All</Button>
-            <Button size="sm" variant={state.chip === "Favourites" ? "primary" : "outline"} aria-pressed={state.chip === "Favourites"} onClick={() => void (can({ type: "pick", chip: "Favourites" }) && send({ type: "pick", chip: "Favourites" }))}>Favourites</Button>
+            <Button size="sm" variant={state.chip === "Everyone" ? "primary" : "outline"} aria-pressed={state.chip === "Everyone"} disabled={state.chip !== "Everyone" && !can({ type: "pick", chip: "Everyone" })} onClick={() => void (can({ type: "pick", chip: "Everyone" }) && send({ type: "pick", chip: "Everyone" }))}>All</Button>
+            <Button size="sm" variant={state.chip === "Favourites" ? "primary" : "outline"} aria-pressed={state.chip === "Favourites"} disabled={state.chip !== "Favourites" && !can({ type: "pick", chip: "Favourites" })} onClick={() => void (can({ type: "pick", chip: "Favourites" }) && send({ type: "pick", chip: "Favourites" }))}>Favourites</Button>
           </div>}
           {state.list.status === "Loading" && state.rows === 0 && <Spinner label="Reading contacts" />}
           {listFailed(state) && <Banner variant="destructive" action={can({ type: "refresh" }) && <Button size="sm" variant="outline" onClick={() => void send({ type: "refresh" })}>Retry</Button>}>Contacts could not be read</Banner>}
@@ -133,9 +141,7 @@ export function Contacts({ runtime, alpha }: ContactsProps & { alpha: Alpha }) {
           {can({ type: "loadMore" }) && <Button variant="secondary" size="icon" aria-label="More contacts" className="self-center" onClick={() => void send({ type: "loadMore" })}><ChevronDown /></Button>}
         </>
       )}
-      <CommsBar runtime={runtime}
-        person={state.opened && held.card !== undefined ? { label: held.card.displayName, initials: callerInitials(held.card.displayName) } : undefined}
-        filter={!state.opened && !searching && can({ type: "search", typed: true }) ? { value: query, onChange: search, maxLength: 128 } : undefined} />
+      {!phoneTabs && bar}
     </section>
   );
   if (!phoneTabs) return content;
@@ -143,6 +149,7 @@ export function Contacts({ runtime, alpha }: ContactsProps & { alpha: Alpha }) {
     <Tabs value="Contacts" onValueChange={(value) => void select(value)} className="min-h-0 flex-1 gap-0">
       {header}
       <TabsContent value="Contacts" className="min-h-0 flex-1 overflow-y-auto">{content}</TabsContent>
+      {bar}
     </Tabs>
   );
 }
@@ -159,7 +166,7 @@ function Card({ runtime, safe }: ContactsProps & { safe: boolean }) {
   const field = "flex min-h-13.5 items-center gap-4 px-5 py-2";
   return (
     <div className="flex flex-1 flex-col">
-      <div data-host-chrome="" className="mt-11 flex min-h-14 items-center gap-1 px-2">
+      <div data-host-chrome="" className="mt-[var(--alpha-safe-top)] flex min-h-14 items-center gap-1 px-2">
         {can({ type: "closeContact" }) && <Button variant="ghost" size="icon" aria-label="Back" onClick={() => void send({ type: "closeContact" })}><ChevronLeft /></Button>}
         <span className="flex-1" />
         {card && can({ type: "amend" }) && <Button variant="ghost" size="icon" aria-label="Edit" onClick={() => {
@@ -230,7 +237,7 @@ interface ContactValuesProps {
   kind: "Phone" | "Email";
   values: readonly string[];
   locked: boolean;
-  change(values: readonly string[]): void;
+  change: (values: readonly string[]) => void;
 }
 
 /** A phone or email field, with room for the owner to add and remove entries. */
@@ -260,22 +267,30 @@ function ContactValues({ kind, values, locked, change }: ContactValuesProps) {
 function Editor({ runtime }: ContactsProps) {
   const { state, can, send } = useContacts(runtime);
   const phone = usePhone(runtime).state;
+  const [slotVersion, setSlotVersion] = useState(0);
   if (!state || !phone) return null;
   const { form, problem } = runtime.runSync(Effect.flatMap(Rows, (rows) => rows.get()));
   const safe = clear(phone);
   const locked = pending(state);
   const canSave = problem !== "stale" && problem !== "not-found" && can({ type: "save", clear: safe });
+  const addBlankSlot = (next: Form) => {
+    runtime.runSync(Effect.flatMap(Rows, (rows) => rows.set({ form: next })));
+    setSlotVersion((count) => count + 1);
+  };
   const update = (next: Form, part: "Names" | "Phones" | "Emails" | "Notes") => {
     const sheet = sheetOf(next);
     const count = part === "Names" ? sheet.names : part === "Phones" ? sheet.phones : part === "Emails" ? sheet.emails : sheet.notes;
     const event = { type: "fill", part, count } as const;
     if (!can(event)) return;
+    const before = { form, problem };
     runtime.runSync(Effect.flatMap(Rows, (rows) => rows.set({ form: next, problem: problem === "stale" || problem === "not-found" ? problem : undefined })));
-    void send(event);
+    void send(event).then((outcome) => {
+      if (Exit.isFailure(outcome)) runtime.runSync(Effect.flatMap(Rows, (rows) => rows.set(before)));
+    });
   };
   const title = state.form === "Adding" ? "New contact" : "Edit contact";
   return (
-    <form aria-label={title} noValidate className="flex flex-1 flex-col gap-2.5 px-4 pb-8" onSubmit={(event) => {
+    <form aria-label={title} data-slot-version={slotVersion} noValidate className="flex flex-1 flex-col gap-2.5 px-4 pb-8" onSubmit={(event) => {
       event.preventDefault();
       if (canSave) void send({ type: "save", clear: safe });
     }}>
@@ -291,8 +306,8 @@ function Editor({ runtime }: ContactsProps) {
       {state.sheet.notable ? <Textarea className="min-h-24 rounded-tile border-0 bg-secondary px-4.5 py-3.5 text-lg" aria-label="Notes" placeholder="Notes" maxLength={CONTACT_MAX_NOTES} disabled={locked} value={form.notes} onChange={(event) => update({ ...form, notes: event.target.value }, "Notes")} />
         : <p className="rounded-tile bg-secondary px-4.5 py-3.5 text-muted-foreground">Use Android Contacts to change notes for this contact.</p>}
       <div className="flex flex-wrap gap-2">
-        {form.phones.length < maxEach && <Button type="button" variant="ghost" disabled={locked} className="flex-1 text-muted-foreground" onClick={() => update({ ...form, phones: [...form.phones, ""] }, "Phones")}>Add another phone</Button>}
-        {form.emails.length < maxEach && <Button type="button" variant="ghost" disabled={locked} className="flex-1 text-muted-foreground" onClick={() => update({ ...form, emails: [...form.emails, ""] }, "Emails")}>Add another email</Button>}
+        {form.phones.length < maxEach && <Button type="button" variant="ghost" disabled={locked} className="flex-1 text-muted-foreground" onClick={() => addBlankSlot({ ...form, phones: [...form.phones, ""] })}>Add another phone</Button>}
+        {form.emails.length < maxEach && <Button type="button" variant="ghost" disabled={locked} className="flex-1 text-muted-foreground" onClick={() => addBlankSlot({ ...form, emails: [...form.emails, ""] })}>Add another email</Button>}
       </div>
     </form>
   );

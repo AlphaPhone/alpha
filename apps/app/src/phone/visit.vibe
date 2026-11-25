@@ -19,7 +19,7 @@ export function visiting<IB, Ev, Refused>(inFront: (state: Where) => boolean, ta
     const shell = try Shell
     const device = try Device
     const to = try target
-    const visible = Stream.concat(Stream.succeed(true), device.visible)
+    const visible = Stream.concat(Stream.fromEffect(device.showing()), device.visible)
     const shown = Stream.map(Stream.zipLatest(Stream.map(shell.changes, inFront), visible), ([front, seen]) => front && seen)
     try Stream.runForEach(Stream.changesWith(shown, (a, b) => a === b), effect (now) => {
       const event = told(now)
