@@ -724,4 +724,26 @@ describe("The Browser on a phone", () => {
     expect(showing(await alpha.runtime.runPromise(Effect.flatMap(Shell, (sh) => sh.get())), "Browser")).toBe(true);
     await drawn(() => vi.waitFor(async () => expect(await front()).toBe(url), { timeout: 10_000 }));
   });
+
+  it("Toggles desktop site per native tab from the Browser menu", async () => {
+    const world = { ...scene(), phone: true, image: true };
+    const { alpha, runtime } = await onBrowser(world);
+    await until(alpha, runtime, Tabs, (s) => s.hydrated);
+    await go("example.com");
+    await vi.waitFor(async () => expect(await committedAddress(runtime, world.browser.tabs)).toBe("https://example.com"));
+    const firstTab = (await runtime.runPromise(Effect.flatMap(Tabs, (model) => model.get()))).selected;
+    const firstId = `tab${firstTab}`;
+    expect(world.browser.tabs.get(firstId)?.desktop).toBe(false);
+
+    await press("Menu");
+    await pressOnTop("Request desktop site");
+    await vi.waitFor(() => expect(world.browser.tabs.get(firstId)?.desktop).toBe(true));
+    await vi.waitFor(async () => expect(await committedAddress(runtime, world.browser.tabs)).toBe("https://example.com"));
+
+    await press("Menu");
+    expect(button("Request mobile site")).toBeDefined();
+    await pressOnTop("Request mobile site");
+    await vi.waitFor(() => expect(world.browser.tabs.get(firstId)?.desktop).toBe(false));
+    expect(world.browser.calls.filter((call) => call === "setDesktopSite")).toHaveLength(2);
+  });
 });

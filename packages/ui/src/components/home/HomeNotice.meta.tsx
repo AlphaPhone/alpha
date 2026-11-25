@@ -8,6 +8,7 @@ export const meta: ComponentMeta<HomeNoticeProps> = {
     "Turned off": { notice: { tag: "TellNotOpened", ask: { tag: "OpenApp", label: "Clock" }, why: "TurnedOff" } },
     "Profile locked": { notice: { tag: "TellNotOpened", ask: { tag: "OpenApp", label: "Mail (Work)" }, why: "ProfileLocked" } },
     "Not in front": { notice: { tag: "TellNotOpened", ask: { tag: "OpenApp", label: "Clock" }, why: "NotInFront" } },
+    "Shade not in front": { notice: { tag: "TellNotOpened", ask: { tag: "Shade" }, why: "NotInFront" } },
     "Shade refused": { notice: { tag: "TellNotOpened", ask: { tag: "Shade" }, why: "Unable" } },
     "No answer": { notice: { tag: "TellNoAnswer" } },
     "Unlock first": { notice: { tag: "TellUnlockFirst" } },
@@ -18,6 +19,10 @@ export const meta: ComponentMeta<HomeNoticeProps> = {
   play: {
     Default: ({ canvasElement }: { canvasElement: HTMLElement }) =>
       expect(canvasElement).toHaveTextContent("Couldn't open Clock. It's no longer installed."),
+    "Shade refused": ({ canvasElement }: { canvasElement: HTMLElement }) =>
+      expect(canvasElement).toHaveTextContent("Android did not open its notifications from Alpha. Swipe down from the top edge of the screen instead."),
+    "Shade not in front": ({ canvasElement }: { canvasElement: HTMLElement }) =>
+      expect(canvasElement).toHaveTextContent("Alpha is not in front. Swipe down from the top edge of the screen for Android notifications."),
     "Not saved": ({ canvasElement }: { canvasElement: HTMLElement }) =>
       expect(within(canvasElement).getByRole("alert")).toHaveTextContent("Couldn't save your change to Home"),
   },

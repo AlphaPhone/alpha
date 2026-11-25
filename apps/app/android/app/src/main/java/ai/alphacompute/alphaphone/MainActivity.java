@@ -41,7 +41,7 @@ public class MainActivity extends BridgeActivity {
  private boolean telephonyAdmitted;
  private final AtomicLong composerVisit = new AtomicLong();
  private InsetsState insets;
- private TextAsk textAsk;
+ private volatile TextAsk textAsk;
  private int closedTextAsk;
 
  private record TextAsk(int ticket, boolean returnExternally) {}
@@ -68,21 +68,26 @@ public class MainActivity extends BridgeActivity {
   try {
    if (!offered.nonce().equals(intent.getStringExtra(TEXT_ASK_NONCE))) return true;
    offeringAsk = null;
-   if (AlphaAssistActivity.unlocked(this) && textAsk == null) textAsk = offered.visit();
+   if (AlphaAssistActivity.unlocked(this) && textAsk == null) {
+    composerVisit.incrementAndGet();
+    textAsk = offered.visit();
+   }
    if (textAsk != null && getBridge() != null) getBridge().triggerWindowJSEvent("alpha-text-ask");
   } catch (RuntimeException foreignExtras) { return true; }
   return true;
  }
 
  int textAskTicket() {
-  return textAsk != null && AlphaAssistActivity.unlocked(this) && hasWindowFocus() && !isFinishing() && !isDestroyed()
-    ? textAsk.ticket() : 0;
+  return AlphaAssistActivity.unlocked(this) && hasWindowFocus() && !isFinishing() && !isDestroyed()
+    ? assistantVisit() : 0;
  }
 
  boolean closeTextAsk(int ticket) {
   if (ticket <= 0) return false;
   if (textAsk == null) return ticket == closedTextAsk;
-  if (ticket != textAskTicket() || (textAsk.returnExternally() && !moveTaskToBack(true))) return false;
+  if (ticket != textAskTicket()) return false;
+  composerVisit.incrementAndGet();
+  if (textAsk.returnExternally() && !moveTaskToBack(true)) return false;
   closedTextAsk = ticket;
   textAsk = null;
   return true;
@@ -203,7 +208,7 @@ public class MainActivity extends BridgeActivity {
 
  @Override protected void load() {
   if (handingOff) return;
-  if (telephonyAdmitted && !isAssistantSurface()) {
+  if (telephonyAdmitted) {
    if (config == null) config = CapConfig.loadDefault(this);
    WebView page = findViewById(com.getcapacitor.android.R.id.webview);
    if (page != null && config.getServerUrl() == null) {
@@ -249,7 +254,12 @@ public class MainActivity extends BridgeActivity {
 
  private boolean volumeShutter;
 
- boolean isAssistantSurface() { return false; }
+ int assistantVisit() {
+  TextAsk current = textAsk;
+  return current == null ? 0 : current.ticket();
+ }
+
+ boolean isAssistantSurface() { return assistantVisit() != 0; }
  long composerVisit() { return composerVisit.get(); }
 
  void setVolumeShutter(boolean enabled) { volumeShutter = enabled; }
@@ -282,8 +292,8 @@ public class MainActivity extends BridgeActivity {
   }
   boolean home = isHome(intent);
   if (home) {
-   textAsk = null;
    composerVisit.incrementAndGet();
+   textAsk = null;
    SmsNoticeOpenRequest.clear();
   }
   super.onNewIntent(intent);

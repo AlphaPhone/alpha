@@ -388,7 +388,9 @@ pure def stepOnlyTheShownNoteCanBeShared(before: VoiceNote, via: str, after: Voi
 
 The player rests when playback ends and reports a playback failure. The
 screen offers playback controls when the note has retained audio the phone
-can play.
+or browser can play. Before making a browser clip audible, the browser
+matches its saved recording and note IDs against the current selection.
+Leaving the page stops playback and retires the clip URL.
 
 ```quint
 pure def canPlay(v: VoiceNote, from: int, by: Actor): bool =

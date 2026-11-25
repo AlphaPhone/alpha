@@ -5,6 +5,7 @@ import type { Grant } from "../../gen/kit__permission.ts"
 import { fresh } from "../runtime/attempts.vibe"
 import { registered } from "./device.vibe"
 import { type SavedNoteWindow, readSavedNote } from "./voice.vibe"
+import { browserNoteDevice, browserNotesSupported } from "./noteBrowser.vibe"
 
 module native {
   import { type PluginListenerHandle, registerPlugin } from "@capacitor/core"
@@ -73,15 +74,17 @@ export type Recorded = typeof RecordedReply.Type
 
 export error RecordingUnavailable
 
-/** Audio custody and microphone permission are owned by the Android Notes host. */
+/** Audio custody and microphone permission belong to the device hosting Notes. */
 export service NoteDevice {
   readonly available: boolean
+  readonly canPlay: boolean
   readonly canTranscribe: boolean
   readonly changed: Stream.Stream<Tape>
   readonly openAsked: Stream.Stream<void>
   permission(): Grant!!
   request(): Grant!!
-  status(): Tape!RecordingUnavailable
+  status(ownerDigest?: string): Tape!RecordingUnavailable
+  retire(): void!!
   start(ownerDigest: string, folderId?: string): Tape!RecordingUnavailable
   command(recordingId: string, command: Command): Tape!RecordingUnavailable
   retain(recordingId: string, noteId: string): Recorded!RecordingUnavailable
@@ -102,46 +105,68 @@ const absent = () => new RecordingUnavailable()
 const noTape = (): Tape => ({ state: "idle" })
 
 export const noteDevice = Layer.sync(NoteDevice, () => {
-  const available = registered("AlphaNotes")
-  const canTranscribe = available && registered("AlphaVoiceCloud")
+  const api = registered("AlphaNotes") ? client() : undefined
+  const canTranscribe = api !== undefined && registered("AlphaVoiceCloud")
   const purges = Semaphore.makeUnsafe(1)
-  const api = available ? client() : undefined
+  const browser = api === undefined && browserNotesSupported() ? browserNoteDevice() : undefined
+  const available = api !== undefined || browser?.available === true
+  const web = <A>(call: () => Promise<A>) => tryPromise({ try: call, catch: absent })
   const asked = <A>(call: (native: NotesPlugin) => Promise<A>) => api === undefined ? Effect.fail(absent()) : tryPromise({ try: () => call(api), catch: absent })
   const decoded = <A>(schema: Schema.Decoder<A>, raw: unknown) => mapError(Schema.decodeUnknownEffect(schema)(raw), absent)
   const read = <A>(schema: Schema.Decoder<A>, call: (native: NotesPlugin) => Promise<unknown>) => flatMap(asked(call), (raw) => decoded(schema, raw))
-  const granted = (call: (native: NotesPlugin) => Promise<unknown>) => Effect.map(
-    Effect.catch(read(Permission, call), () => succeed({ grant: "prompt" })),
+  const granted = (raw: Effect.Effect<{ readonly grant: string }, RecordingUnavailable>) => Effect.map(
+    Effect.orElseSucceed(raw, () => ({ grant: "prompt" })),
     ({ grant }): Grant => grant === "granted" ? "Granted" : grant === "denied" ? "Denied" : "Unasked",
   )
-  const changed = api === undefined ? Stream.empty : Stream.callback<Tape>((queue) => acquireRelease(
+  const nativeChanged = api === undefined ? Stream.empty : Stream.callback<Tape>((queue) => acquireRelease(
     promise(() => api.addListener("recordingChanged", (raw) => {
       const report = Schema.decodeUnknownOption(TapeReply)(raw)
       if (Option.isSome(report)) Queue.offerUnsafe(queue, report.value)
     })),
     (listener) => promise(() => listener.remove()),
   ))
+  const changed = browser === undefined ? nativeChanged : Stream.callback<Tape>((queue) => acquireRelease(
+    sync(() => browser.observe((report) => { Queue.offerUnsafe(queue, report) })),
+    (remove) => sync(remove),
+  ))
   const openAsked = api === undefined ? Stream.empty : Stream.callback<void>((queue) => acquireRelease(
     promise(() => api.addListener("openRequested", () => { Queue.offerUnsafe(queue, undefined) })),
     (listener) => promise(() => listener.remove()),
   ))
   return {
-    available, canTranscribe, changed, openAsked,
-    permission: () => granted((native) => native.permission()),
-    request: () => granted((native) => native.requestMicrophone()),
-    status: () => available ? read(TapeReply, (native) => native.status()) : succeed(noTape()),
-    start: (ownerDigest: string, folderId?: string) => read(TapeReply, (native) => native.start({ ownerDigest, ...(folderId === undefined ? {} : { folderId }) })),
-    command: (recordingId: string, command: Command) => read(TapeReply, (native) => native.command({ recordingId, command })),
-    retain: (recordingId: string, noteId: string) => read(RecordedReply, (native) => native.retain({ recordingId, noteId })),
-    discard: (recordingId: string) => asked((native) => native.discard({ recordingId })),
-    describe: (audioId: string) => read(RecordedReply, (native) => native.describe({ audioId })),
+    available, canPlay: api !== undefined || browser !== undefined, canTranscribe, changed, openAsked,
+    permission: () => granted(browser === undefined ? read(Permission, (native) => native.permission()) : web(() => browser.permission())),
+    request: () => granted(browser === undefined ? read(Permission, (native) => native.requestMicrophone()) : web(() => browser.request())),
+    status: (ownerDigest?: string) => browser !== undefined ? web(() => browser.status(ownerDigest))
+      : api !== undefined ? read(TapeReply, (native) => native.status()) : succeed(noTape()),
+    retire: () => sync(() => browser?.retire()),
+    start: (ownerDigest: string, folderId?: string) => browser === undefined
+      ? read(TapeReply, (native) => native.start({ ownerDigest, ...(folderId === undefined ? {} : { folderId }) }))
+      : web(() => browser.start(ownerDigest, folderId)),
+    command: (recordingId: string, command: Command) => browser === undefined
+      ? read(TapeReply, (native) => native.command({ recordingId, command }))
+      : web(() => browser.command(recordingId, command)),
+    retain: (recordingId: string, noteId: string) => browser === undefined
+      ? read(RecordedReply, (native) => native.retain({ recordingId, noteId }))
+      : web(() => browser.retain(recordingId, noteId)),
+    discard: (recordingId: string) => browser === undefined
+      ? asked((native) => native.discard({ recordingId }))
+      : web(() => browser.discard(recordingId)),
+    describe: (audioId: string) => browser === undefined
+      ? read(RecordedReply, (native) => native.describe({ audioId }))
+      : tryPromise({ try: () => browser.describe(audioId), catch: absent }),
     effect transcribe(window: SavedNoteWindow) {
       if (!canTranscribe) throw new RecordingUnavailable()
       const requestId = `notes-${fresh()}`
       const raw = try tryPromise({ try: (signal) => readSavedNote(window, requestId, signal), catch: absent })
       return (try decoded(Heard, raw)).text
     },
-    play: (audioId: string, noteId: string, offsetMs: number) => Effect.catch(Effect.map(read(Played, (native) => native.play({ audioId, noteId, offsetMs })), ({ ok }) => ok), () => succeed(false)),
-    halt: () => Effect.catch(Effect.map(read(Played, (native) => native.halt()), ({ ok }) => ok), () => succeed(false)),
+    play: (audioId: string, noteId: string, offsetMs: number) => browser === undefined
+      ? Effect.catch(Effect.map(read(Played, (native) => native.play({ audioId, noteId, offsetMs })), ({ ok }) => ok), () => succeed(false))
+      : Effect.orElseSucceed(tryPromise(() => browser.play(audioId, noteId, offsetMs)), () => false),
+    halt: () => browser === undefined
+      ? Effect.catch(Effect.map(read(Played, (native) => native.halt()), ({ ok }) => ok), () => succeed(false))
+      : sync(() => browser.halt()),
     purge: (receipt: NotesTrashRecordingCleanup) => Semaphore.withPermit(purges, effect {
       const result = asked((native) => native.purge(receipt)) catch () => undefined
       return typeof result === "object" && result !== null && "status" in result && result.status === "purged"
@@ -153,6 +178,6 @@ export const noteDevice = Layer.sync(NoteDevice, () => {
     share: (channel: "Email" | "Messages", title: string, text: string) => ignore(asked((native) => native.share({ channel, title, text }))),
     settings: () => ignore(asked((native) => native.settings())),
     previousExists: () => Effect.catch(Effect.map(read(EarlierPresence, (native) => native.previousExists()), ({ present }) => present), () => succeed(false)),
-    earlier: (area: Earlier) => available ? Effect.map(read(EarlierText, (native) => native.readPrevious({ area })), (read) => read.text) : succeed(null),
+    earlier: (area: Earlier) => api !== undefined ? Effect.map(read(EarlierText, (native) => native.readPrevious({ area })), (read) => read.text) : succeed(null),
   }
 })

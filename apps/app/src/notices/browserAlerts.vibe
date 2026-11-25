@@ -1,0 +1,39 @@
+// spec/app/notices/browserAlerts.md, "Story: Choose whether Alpha shows browser alerts"
+import * as Alerts from "../../gen/app__notices__browserAlerts.effect.vibe"
+import { browserAlertsEnabled, listenBrowserAlerts, saveBrowserAlerts } from "../platform/browserAlertStorage.ts"
+import { native } from "../platform/device.vibe"
+import { type Job, answer, hearing, reacting, together } from "../runtime/reactor.vibe"
+
+effect function observe(read: number): Alerts.Event!! {
+  const status = effect {
+    return (try tryPromise(browserAlertsEnabled)) ? "Enabled" as const : "Disabled" as const
+  } catch () => "Unavailable" as const
+  return { type: "readBack", read, status }
+}
+
+effect function save(write: number, enabled: boolean): Alerts.Event!! {
+  const ok = effect {
+    try tryPromise(() => saveBrowserAlerts(enabled))
+    return true
+  } catch () => false
+  return { type: "saved", write, ok }
+}
+
+function carry(out: Alerts.Effect): Job<Alerts.Event, never, [Alerts.Sender]> {
+  return match (out) {
+    when { tag: "Read", let read }: answer("browser alerts", observe(read), { type: "readBack", read, status: "Unavailable" }, "Browser" as Alerts.Sender);
+    when { tag: "Save", let write, let desired }: answer("browser alerts", save(write, desired), { type: "saved", write, ok: false }, "Browser" as Alerts.Sender);
+  }
+}
+
+const revisits = Stream.suspend(() => native() ? Stream.empty
+  : Stream.callback<void>((queue) => Effect.acquireRelease(
+    sync(() => listenBrowserAlerts(() => Queue.offerUnsafe(queue, undefined))),
+    (stop) => sync(stop),
+  )))
+
+/** One saved preference for the browser Settings and its alert presentation. */
+export const browserAlerts = together(
+  reacting(Alerts, { carry, open: effect { return [{ type: "start", web: !native() } as Alerts.Event, "Browser" as Alerts.Sender] as const } }),
+  hearing(revisits, Alerts.Machine, (): Alerts.Event => ({ type: "refresh" }), "Browser" as Alerts.Sender),
+)

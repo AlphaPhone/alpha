@@ -273,6 +273,7 @@ describe("Workflows", () => {
     if (first === undefined) throw new Error("The phone received no approval notice");
     expect(first.route).toMatchObject({ workflowId: "monthly-statement", runId: "monthly-statement-r1", versionId: "monthly-statement-v3" });
     expect(Object.keys(first).sort()).toEqual(["bindingHash", "expiresAt", "id", "route"]);
+    expect(first.route.scope).toMatch(/^[a-f0-9]{64}$/);
     await drawn(() => notices.tap(first));
     await until(alpha, area, Approvals, (state) => state.opened === "Ready" && state.sheet);
     expect(document.querySelector('[aria-label="Workflow approval"]')?.textContent).toContain("Review the statement preview");

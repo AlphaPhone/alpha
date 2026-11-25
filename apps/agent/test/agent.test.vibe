@@ -99,7 +99,7 @@ describe("Run Alpha's agent on the phone", () => {
   // spec/agent/index.md, "The launch names the pack's pinned workflow worker, and the agent refuses any other with its configuration code"
   // spec/agent/index.md, "The pack carries the plugins the old phone's agent loaded, under the pinned eliza's names, and the launch loads them with the agent's own modules the old agent had"
   // spec/agent/index.md, "A proposed device step goes through eliza's device-action module, and the phone says which steps it takes"
-  // spec/agent/index.md, "The launch names Home and every Alpha app but Notes as a view the agent may show, by the id the phone opens it by"
+  // spec/agent/index.md, "The launch names Home and every Alpha app but Notes and Browser as a view the agent may show, by the id the phone opens it by"
   it.live("Run Alpha's agent on the phone", () => scoped(effect {
     const run = try acquireRelease(promise(() => startRun()), (started) => promise(() => started.stop()))
     const phone = try Effect.try(() => run.place("phone"))
@@ -143,7 +143,7 @@ describe("Run Alpha's agent on the phone", () => {
       const task = saved.tasks.find((one) => one.promptInstructions === title)
       const queued = try promise(() => call(first, "POST", "/api/triggers", {
         kind: "prompt", displayName: title, instructions: "Review the receipt", timezone: "UTC",
-        triggerType: "event", eventKind: "alpha.test.route-admission", wakeMode: "inject_now", enabled: false,
+        triggerType: "event", eventKind: "MESSAGE_SENT", wakeMode: "inject_now", enabled: false,
       }))
       const { trigger } = try Schema.decodeUnknownEffect(Schema.fromJsonString(SavedTrigger))(queued.body)
       try Effect.try(() => expect({ routine: routine.status, task: task !== undefined, trigger: queued.status }).toEqual({ routine: 201, task: true, trigger: 201 }))
@@ -172,13 +172,13 @@ describe("Run Alpha's agent on the phone", () => {
       try Effect.try(() => expect({ created: created.status, notes: read.result.state?.notes.map(({ title, body }) => body === "" ? title : `${title}\n${body}`) })
         .toEqual({ created: 200, notes: ["Heron food on Thursday"] }))
       const shown: Record<string, number> = {}
-      for (const id of ["notes", ...launchViews.map((view) => view.id)]) {
+      for (const id of ["notes", "browser", ...launchViews.map((view) => view.id)]) {
         const prepared = try promise(() => call(first, "POST", `/api/views/${id}/navigate`, {
           clientId: `journey-${id}`, delivery: "completed-action", prepareOnly: true, viewType: "gui", completedActionHandoffId: `open-${id}`,
         }))
         shown[id] = prepared.status
       }
-      try Effect.try(() => expect(shown).toEqual(Object.fromEntries(["notes", ...launchViews.map((view) => view.id)].map((id) => [id, 200]))))
+      try Effect.try(() => expect(shown).toEqual(Object.fromEntries(["notes", "browser", ...launchViews.map((view) => view.id)].map((id) => [id, 200]))))
       // spec/agent/index.md, "Only the phone's native channel can verify that a reviewed recording was erased"
       const audioId = "retained-voice-at-home"
       const captured = try promise(() => call(first, "POST", "/api/notes/interact", {

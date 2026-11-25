@@ -71,7 +71,10 @@ pure def sometimesProvisionalTextShows(r: Reply): bool = r.status == Streaming a
 ### One brief acknowledgment at most, only from the agent's acknowledgment frame, before any tool runs
 
 The agent writes its acknowledgment with its first tool calls, in at most
-120 units, and the stream then starts again with the reply. A tool frame
+120 units, and the stream then starts again with the reply. Text it
+streamed before the acknowledgment is the acknowledgment's own words: the
+acknowledgment is still taken, replaces any of that text not yet spoken,
+and the reply is read from its start. A tool frame
 never acknowledges, a second frame or one after a tool has run is refused,
 and text written before the first tool is never an acknowledgment. "Sure."
 counts only after an instruction, and a request that only navigates gets
@@ -127,7 +130,12 @@ pure def sometimesAcknowledgedThenAnsweredInFull(r: Reply): bool = r.status == S
 ### A spoken acknowledgment starts at once; a reply ready before it is audible drops it, and an audible one finishes before the reply, within 2.5 s
 
 In a voice turn the acknowledgment is prepared as soon as it arrives, with
-no hold. Stop, barge-in and leaving the turn cancel it at once.
+no hold, and plays on its own so the reply never queues behind it. It is
+audible at the first playback the speaker reports, never at synthesis. The
+reply is ready when its first sentence is ready to speak: an acknowledgment
+not yet audible is then dropped and never said after, and an audible one
+plays out first, but once the ready reply has waited 2.5 s it is cut and
+the reply starts. Stop, barge-in and leaving the turn cancel it at once.
 
 ```quint
 type Cue = Preparing | Audible | Ended | Dropped

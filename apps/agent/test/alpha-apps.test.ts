@@ -232,7 +232,7 @@ describe("Alpha product plugin: Clock actions, provider, and routes", () => {
     const { runtime } = makeFakeRuntime();
     const { plugin } = createAlphaAppsPlugin({ store, timeZone: "UTC", runtime });
     expect(plugin.name).toBe(alphaAppsPluginName);
-    // spec/agent/index.md, "The launch names Home and every Alpha app but Notes as a view the agent may show, by the id the phone opens it by": the product plugin loads after eliza's views module, so Clock and Reminders are the launch's views, not the plugin's.
+    // spec/agent/index.md, "The launch names Home and every Alpha app but Notes and Browser as a view the agent may show, by the id the phone opens it by": the product plugin loads after eliza's views module, so Clock and Reminders are the launch's views, not the plugin's.
     expect(plugin.views).toBeUndefined();
 
     const alarmAction = plugin.actions!.find((a) => a.name === "CLOCK_ALARM")!;

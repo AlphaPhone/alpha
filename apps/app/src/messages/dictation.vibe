@@ -11,9 +11,16 @@ import { Device } from "../platform/device.vibe"
 import { VoiceBridge } from "../platform/voice.vibe"
 import { contained, started, together } from "../runtime/reactor.vibe"
 import { type VoiceWords, openDictation, voiceWithCalls, voicing } from "../voice/voice.vibe"
-import { Drafts } from "./composer.vibe"
+import { Drafts, editNewMessage, newDraftHeld } from "./composer.vibe"
+import { Conversations } from "./messages.vibe"
 
-const remainingInMessages = (where: Messages.Messages): boolean => where.front && where.pane === "Conversation" && Messages.readable(where)
+/** The open thread or exact New visit owns the recorder. Across a pane change it must retire. */
+function messageField(where: Messages.Messages): string {
+  if (!where.front) return ""
+  if (where.pane === "Conversation" && Messages.readable(where)) return `thread:${where.thread}:${where.page.ticket}`
+  if (where.pane === "New" && !where.newDraft.picking) return `new:${where.newDraft.visit}:${where.newDraft.revision}`
+  return ""
+}
 
 /** Leaving the open text or raising Ask Alpha puts away its recorder, even if native recognition is still running. */
 const messageDictation = started(effect {
@@ -22,13 +29,12 @@ const messageDictation = started(effect {
   const voice = try Voice.Machine
   const origin = Stream.zipLatest(shell.changes, messages.changes)
   const changes = Stream.changesWith(origin, ([view, page], [nextView, nextPage]) =>
-    view.assistant === nextView.assistant && view.trail.at(-1) === nextView.trail.at(-1) && page.thread === nextPage.thread
-      && page.page.ticket === nextPage.page.ticket && remainingInMessages(page) === remainingInMessages(nextPage))
-  let previous: { thread: number; ticket: number } | undefined
+    view.assistant === nextView.assistant && view.trail.at(-1) === nextView.trail.at(-1) && messageField(page) === messageField(nextPage))
+  let previous = ""
   try Stream.runForEach(changes, effect ([view, page]) => {
-    const keep = showing(view, "Messages") && view.assistant === "Bar" && remainingInMessages(page)
-    const same = keep && previous?.thread === page.thread && previous.ticket === page.page.ticket
-    previous = keep ? { thread: page.thread, ticket: page.page.ticket } : undefined
+    const field = showing(view, "Messages") && view.assistant === "Bar" ? messageField(page) : ""
+    const same = field !== "" && field === previous
+    previous = field
     if (same) return
     const current = try voice.get()
     if (current.recorder.field === "MessagesBar" && Voice.canCloseRecorder(current)) try contained(voice.send({ type: "closeRecorder" }), "discarding dictation for the previous conversation")
@@ -78,4 +84,42 @@ export effect function dictateMessage(thread: number): void!!(Composer.Machine |
     if (!(try contained(composer.send({ type: "typeText", empty: false }), "putting dictation in the message draft")) && (try drafts.text(thread)) === next) try drafts.write(thread, before)
   })
   if (opened) try contained(voice.send({ type: "startRecording" }), "starting message dictation")
+}
+
+/** Start dictating to the New draft even before choosing To. A late transcript cannot move to another visit or draft revision. */
+export effect function dictateNewMessage(visit: number, revision: number): void!!(Composer.Machine | Messages.Machine | Phone | Shell | Voice.Machine | VoiceWords | VoiceBridge | Device | Drafts | Toasts | Said | Conversations) {
+  const messages = try Messages.Machine
+  const composer = try Composer.Machine
+  const phone = try Phone
+  const shell = try Shell
+  const voice = try Voice.Machine
+  const device = try Device
+  const drafts = try Drafts
+  const editableHere = effect {
+    const view = try shell.get()
+    const place = try messages.get()
+    return showing(view, "Messages") && view.assistant === "Bar" && Messages.holdsNewDraft(place, visit)
+      && place.newDraft.revision === revision && !place.newDraft.picking && !newDraftHeld(try composer.get(), revision)
+      && (try phone.get()).telecom === "NoCall" && (try device.showing())
+  }
+  if (!(try editableHere)) return
+  if (!(try (try VoiceBridge).available())) {
+    try say("Dictation is unavailable. You can still type your message.", true)
+    return
+  }
+  const toasts = try Toasts
+  const said = try Said
+  const opened = try openDictation("MessagesBar", effect (words: string) => {
+    if (!(try editableHere)) return
+    const before = (try drafts.newDraft()).body
+    const body = before.trim() === "" ? words : `${before.trimEnd()} ${words}`
+    if (body.length > MMS_MAX_BODY) {
+      try (say("That transcription would make the message too long", true)
+        |> Effect.provideService(%, Toasts, toasts)
+        |> Effect.provideService(%, Said, said))
+      return
+    }
+    try editNewMessage(visit, { body }, false, revision)
+  })
+  if (opened) try contained(voice.send({ type: "startRecording" }), "starting New message dictation")
 }

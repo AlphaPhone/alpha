@@ -86,7 +86,9 @@ const subjects = started(effect {
       : top === "Messages"
         ? texts.pane === "Conversation"
           ? { type: "subjectShown", app: "MessagesApp", subject: "ThreadSubject", key: `messages:thread:${texts.thread}` }
-          : { type: "subjectShown", app: "MessagesApp", subject: "ListSubject", key: texts.pane === "Picker" ? "messages:new:" : "messages:list:" }
+          : { type: "subjectShown", app: "MessagesApp", subject: "ListSubject", key: texts.pane === "New"
+            ? `messages:new:${texts.newDraft.visit}`
+            : texts.pane === "Picker" ? "messages:new:" : "messages:list:" }
         : undefined
     if (event === undefined || event.type !== "subjectShown" || event.key === told) return
     told = event.key

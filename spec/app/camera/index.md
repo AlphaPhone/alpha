@@ -989,10 +989,12 @@ last capture.
 ```quint
 pure def canAgentShoot(s: Camera, sensitive: bool, by: Actor): bool = G::canShoot(s.agent, by)
 
+pure def agentShutterReady(s: Camera): bool = ready(s) and free(s) and s.countdown == 0 and chosenLens(s) == s.lens
+
 pure def agentShoot(s: Camera, sensitive: bool, by: Actor): Done =
   val n = s.shots + 1
   if (sensitive) answering(emit(List(), blocking(Protected, s)), s)
-  else if (not(ready(s) and free(s) and s.countdown == 0 and chosenLens(s) == s.lens)) answering(emit(List(), blocking(Busy, s)), s)
+  else if (not(agentShutterReady(s))) answering(emit(List(), blocking(Busy, s)), s)
   else emit(List(Capture({ ticket: n, request: s.agent.request })),
     { ...s, agent: G::shoot(s.agent, by), shots: n, shot: n, shotFor: s.agent.request })
 ```
@@ -1040,13 +1042,16 @@ pure def alwaysTheRequestWaitsOnTheCamera(s: Camera): bool =
 
 ### A request fails only for a cause Camera names: left, no access, a failed preview, a busy camera or a protected screen
 
+A running countdown reserves the shutter for the owner. The phone reports
+Busy when it cannot fire the shutter on the reviewed viewfinder.
+
 ```quint
 pure def stepTheAgentFailsOnlyForCause(before: Camera, via: str, after: Camera): bool =
   (G::open(before.agent) and after.agent.result == G::Blocked)
     implies ((after.cause == Left and not(after.showing))
       or (after.cause == Denied and not(P::allows(after.permission)))
       or (after.cause == PreviewFailed and after.phase == Failed)
-      or (after.cause == Busy and via == "agentShoot" and not(free(before)))
+      or (after.cause == Busy and via == "agentShoot" and not(agentShutterReady(before)))
       or (after.cause == Protected and via == "agentShoot"))
 ```
 
