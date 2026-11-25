@@ -249,7 +249,7 @@ function journaled(id: number, recipients: number): Stream.Stream<Event, never, 
       return outgoing.op.id === id && outgoing.op.outcome === "Recorded" && outgoing.thread === send.thread
         && outgoing.recipients === recipients && send.to.length === recipients && clear(try phone.get())
     }
-    if (!(try current()) || send.operation !== undefined) return denied
+    if (!(try current) || send.operation !== undefined) return denied
     const operation = (try (try Attempts).key(id)) as OperationId
     const sim = send.selectedSim?.id ?? (try simOf(undefined))
     if (sim === undefined) return denied
@@ -258,9 +258,9 @@ function journaled(id: number, recipients: number): Stream.Stream<Event, never, 
     if (review !== undefined && bound === undefined) return denied
     if (send.selectedSim !== undefined && (try simOf(send.selectedSim)) !== sim) return denied
     const still = try store.outgoing()
-    if (Option.isNone(still) || still.value !== send || !(try current())) return denied
+    if (Option.isNone(still) || still.value !== send || !(try current)) return denied
     const next: Outgoing = { ...send, sim, selectedSim: undefined, operation, mms: bound === undefined ? undefined : { hash: bound.hash, attachments: bound.binding.attachments } }
-    if (!(try store.bindOutgoing(next)) || !(try current())) return denied
+    if (!(try store.bindOutgoing(next)) || !(try current)) return denied
     const to = send.to as PhoneNumber[]
     const status: SmsSendStatus | undefined = review !== undefined
       ? Effect.map(telephony("sendMms", (c) => c.messages.sendMms(review, operation)), (result) => result.status) catch (failure) => refusedSend(failure)
