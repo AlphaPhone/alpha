@@ -79,7 +79,10 @@ const sendShell = (runtime: VoiceRuntime, event: Shell.Event) =>
   runtime.runPromise(Effect.flatMap(Shell.Machine, (m) => m.send(event)));
 
 async function startListening(world: Scene): Promise<VoiceRuntime> {
-  const runtime = bootVoice(world);
+  const { alpha } = await open(world, talkMounts);
+  const runtime = assistant.runtime(alpha);
+  await drawnUntil(alpha, runtime, Conversation, (s) => s.ready);
+  await drawnUntil(alpha, runtime, Composer, (s) => s.slot === "Open" && s.binding.owner > 0);
   await until(runtime, Voice.Machine, (s) => s.warmed);
   await sendVoice(runtime, { type: "permissionChanged", grant: "Granted" });
   await sendVoice(runtime, { type: "startTalking", now: untimed });
@@ -271,6 +274,7 @@ describe("Voice Bug 1 & Bug 3 journeys", () => {
       "Final sentence wraps up.",
     ];
     const runtime = await startListening(world);
+    expect(world.ask.opened).toBe(0);
 
     speakUtterance(world, "Give me an update");
     await until(runtime, Voice.Machine, (s) => s.phase === "Listening" && s.mic === "On" && s.sent === 1 && s.turn === 2);
@@ -281,6 +285,7 @@ describe("Voice Bug 1 & Bug 3 journeys", () => {
       { text: "Final sentence wraps up.", append: true },
     ]);
     expect(world.voice.engineHeld).toBe(true);
+    expect([...world.ask.kept.values()].map((chat) => chat.title)).toEqual(["Ask Alpha"]);
 
     world.ask.nextReplyChunks = [
       "Sun, Nov 22:\n",
@@ -674,6 +679,12 @@ describe("Talk from Ask Alpha's composer (spec/app/voice/index.md, \"Story: Hold
     speakUtterance(world, "And now?");
     await drawnUntil(alpha, area, Voice.Machine, (s) => s.sent === 1 && s.phase === "Listening");
     expect([world.ask.said.at(-1), world.ask.metadata.length, world.ask.metadata.at(-1)]).toEqual(["And now?", 3, typed]);
+    // spec/app/voice/index.md, "Talk keeps what it sends in the selected Ask Alpha conversation"
+    expect(world.ask.opened).toBe(1);
+    expect(world.ask.kept.get("c1")?.messages.slice(-2).map(({ role, text }) => ({ role, text }))).toEqual([
+      { role: "user", text: "And now?" },
+      { role: "assistant", text: "You said: And now?" },
+    ]);
 
     // spec/app/voice/index.md, "An active voice conversation may ask the shell to open Home or any admitted screen"
     const shellState = () => alpha.runtime.runSync(Shell.Machine.use((machine) => machine.get()));

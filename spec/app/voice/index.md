@@ -537,6 +537,17 @@ pure def alwaysAQuietConversationHoldsNothing(v: Voice): bool =
         and not(v.engineHeld) and not(v.reviewPending)))
 ```
 
+### Talk keeps what it sends in the selected Ask Alpha conversation
+
+Starting Talk leaves the selected conversation and typed draft alone. A
+first accepted utterance uses the owner's selected conversation. From a
+blank chat, the first utterance may ask Chats to make one conversation
+while the editor is empty and no other send is in hand. An unsent draft
+keeps its own slot. Typed and spoken turns take the same exclusive posting
+place while either may still reach the agent. The recorded user and reply
+rows appear under the identities the agent confirms, on the latest page
+of that conversation. Opening older history keeps its place.
+
 ### What was heard but not sent is never counted as sent
 
 The owner sees it as "Heard so far, not sent". A turn still being heard,
