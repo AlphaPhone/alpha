@@ -1,5 +1,7 @@
 // spec/app/assistant/attachments.md, "Each file is checked against its limits: an image is made to fit, audio and video never go, and the message's files fit together"; spec/app/assistant/composer.md, "Files chosen are added up to the upload limit of four"; spec/app/assistant/index.md, "Stored attachments are posted with their message, and a message whose attachments could not be stored never left"
 import * as Picker from "../../gen/app__assistant__attachments.effect.vibe"
+import type { SelectionId } from "@elizaos/os/bridges/definitions/media"
+import { Documents } from "../platform/documents.vibe"
 import { batchFits, fileBase64Cap, fits, imageBase64Cap, nameLimit, reencoded } from "../../gen/app__assistant__attachments.effect.vibe"
 import * as Composer from "../../gen/app__assistant__composer.effect.vibe"
 import { Machine as Conversation } from "../../gen/app__assistant.effect.vibe"
@@ -11,7 +13,8 @@ import { type Attached, Talk } from "./talk.vibe"
 
 const images = ["image/jpeg", "image/png", "image/gif", "image/webp"]
 const documents = ["application/pdf", "text/plain", "text/csv", "text/markdown", "application/json"]
-export const acceptedFiles = [...images, ...documents, "image/heic", "image/tiff", "image/svg+xml"].join(",")
+export const acceptedPhotos = [...images, "image/heic", "image/tiff", "image/svg+xml"].join(",")
+export const acceptedFiles = [acceptedPhotos, ...documents].join(",")
 const base64 = /^[A-Za-z0-9+/]+={0,2}$/
 
 /** The owner sends a file reviewed in another app to the existing Ask Alpha draft. */
@@ -112,16 +115,16 @@ export effect function previewFile(file: Attached): void!!(Talk | Picker.Machine
   try ignore(picker.send({ type: "preview", attachment: board.previewFile(file) }))
 }
 
-interface FileTarget { readonly binding: Composer.Binding; readonly slot: number; readonly revision: number }
+export interface FileTarget { readonly binding: Composer.Binding; readonly slot: number; readonly revision: number }
 
-effect function added(target: FileTarget, candidates: readonly { readonly name: string; readonly file: Attached | undefined }[]): boolean!!(Talk | Composer.Machine | Conversation) {
+effect function added(target: FileTarget, candidates: readonly { readonly name: string; readonly file: Attached | undefined }[], active: Effect.Effect<boolean> = succeed(true)): boolean!!(Talk | Composer.Machine | Conversation) {
   const { board, attachmentLock } = try Talk
   const composer = try Composer.Machine
   const conversation = try Conversation
   return try attachmentLock.withPermits(1)(effect {
     const current = try composer.get()
     const context = (try conversation.get()).context
-    if (context.sensitive || context.revision !== target.revision || !sameBinding(current.binding, target.binding) || current.read.ticket !== target.slot || current.slot !== "Open" || current.away !== "Free") return false
+    if (!(try active) || context.sensitive || context.revision !== target.revision || !sameBinding(current.binding, target.binding) || current.read.ticket !== target.slot || current.slot !== "Open" || current.away !== "Free") return false
     const prior = board.snapshot()
     const before = sameBinding(prior.filesBinding, target.binding) ? prior.files : []
     const chosen: Attached[] = [...before]
@@ -153,11 +156,34 @@ effect function added(target: FileTarget, candidates: readonly { readonly name: 
   })
 }
 
-export effect function insertFiles(binding: Composer.Binding, slot: number, files: readonly File[]): void!!(Talk | Composer.Machine | Conversation) {
+/** The chooser hands off only the selected document; the owner sees its name before its contents are read. */
+export effect function chooseDocument(): ({ id: SelectionId; name: string; bytes?: number } | undefined)!!Documents {
+  const documents = try Documents
+  const client = documents.client
+  if (Option.isNone(client)) return undefined
+  const chosen = try documents.pick()
+  if (Option.isNone(chosen)) return undefined
+  const description = tryPromise(() => client.value.describe(chosen.value)) catch () => undefined
+  return description?.name === undefined ? undefined : { id: chosen.value, name: description.name, bytes: description.size }
+}
+
+export effect function readChosenDocument(id: SelectionId): (File | undefined)!!Documents {
+  const value = try (try Documents).attachment(id)
+  if (Option.isNone(value)) return undefined
+  const item = value.value
+  if (item.dataBase64.length > Picker.base64Of(Picker.imageIntakeBytes) || !base64.test(item.dataBase64)) return undefined
+  return Effect.try(() => selected(item.dataBase64, item.name, item.mimeType)) catch () => undefined
+}
+
+// spec/app/assistant/attachments.md, "Cancel closes the picker, and files still being read are not attached"
+export effect function insertFiles(target: FileTarget, files: readonly File[], active: () => boolean): boolean!!(Talk | Composer.Machine | Conversation | Picker.Machine) {
+  const picker = try Picker.Machine
+  if (!active() || !(try picker.get()).open) return false
   const context = (try (try Conversation).get()).context
-  if (context.sensitive) return
+  if (context.sensitive || context.revision !== target.revision) return false
   const picked = try Effect.forEach(files.slice(0, Composer.maxFiles), (file) => encoded(file, fresh()))
-  try added({ binding, slot, revision: context.revision }, files.map((file, index) => ({ name: file.name, file: picked[index] })))
+  const admitted = Effect.map(picker.get(), (state) => state.open && active())
+  return try added(target, files.map((file, index) => ({ name: file.name, file: picked[index] })), admitted)
 }
 
 export effect function stageAttachment(file: Attached): boolean!!(Talk | Composer.Machine | Conversation | Shell) {

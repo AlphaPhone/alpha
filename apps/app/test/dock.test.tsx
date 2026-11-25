@@ -15,6 +15,49 @@ const underAct = async (work: () => Promise<void> | void) => {
 };
 
 describe("Ask Alpha dock and shell navigation", () => {
+  // spec/app/assistant/attachments.md, "Story: Choose files to attach"; "Cancel closes the picker, and files still being read are not attached"
+  it("reviews local Files and only attaches the confirmed selection to the draft", async () => {
+    await mountDock({ view: "Home", flush: underAct });
+    const file = new File(["notes for the appointment"], "appointment.txt", { type: "text/plain" });
+    const named = <T extends HTMLElement>(name: string) => document.querySelector<T>(`[aria-label="${name}"]`);
+    const show = async () => {
+      await underAct(() => {
+        named("Chat actions")?.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+      });
+      const attach = [...document.querySelectorAll<HTMLElement>("[role=menuitem]")].find((item) => item.textContent === "Attach media");
+      expect(attach).toBeDefined();
+      await underAct(() => { attach?.click(); });
+      expect(named("Attach files")).not.toBeNull();
+    };
+    const pick = async () => {
+      const source = [...document.querySelectorAll<HTMLButtonElement>('[aria-label="Attachment sources"] button')].find((item) => item.textContent === "Files");
+      expect(source).toBeDefined();
+      await underAct(() => { source?.click(); });
+      const input = named<HTMLInputElement>("Select files");
+      expect(input).not.toBeNull();
+      await underAct(() => {
+        if (!input) return;
+        Object.defineProperty(input, "files", { value: [file] });
+        input.dispatchEvent(new Event("change", { bubbles: true }));
+      });
+      expect(named("Remove appointment.txt from the selection")).not.toBeNull();
+      expect(named("Attached")).toBeNull();
+    };
+
+    await show();
+    await pick();
+    await underAct(() => { named("Close attachments")?.click(); });
+    expect(named("Attach files")).toBeNull();
+    expect(named("Attached")).toBeNull();
+
+    await show();
+    await pick();
+    await underAct(() => { named("Attach selected files")?.click(); });
+    await expect.poll(() => named("Attach files")).toBeNull();
+    expect(named("Attached")?.textContent).toContain("appointment.txt");
+    expect(document.querySelector<HTMLTextAreaElement>("textarea[data-alpha-composer]")?.value).toBe("");
+  });
+
   // spec/app/assistant/dock.md, "Focusing or tapping the composer on the bar opens Ask Alpha as a sheet"
   it("focusing the composer on the Browser bar opens half-open Sheet without reparenting and marks host chrome (spec/app/assistant/dock.md, \"Focusing or tapping the composer on the bar opens Ask Alpha as a sheet\")", async () => {
     const { runtime } = await mountDock({ view: "Browser", withToast: true, flush: underAct });
