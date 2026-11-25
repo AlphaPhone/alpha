@@ -20,10 +20,10 @@ export function Menu(props: MenuProps) {
 export const MenuTrigger = MenuPrimitive.Trigger;
 
 /** The floating list of `MenuItem`s. Escape, a press outside and choosing an item close it. */
-export function MenuContent({ align = "end", sideOffset = 8, collisionPadding = 8, className, ...props }: MenuContentProps) {
+export function MenuContent({ align = "end", sideOffset = 0, collisionPadding = 8, className, ...props }: MenuContentProps) {
   return (
     <MenuPrimitive.Portal>
-      <MenuPrimitive.Content align={align} sideOffset={sideOffset} collisionPadding={collisionPadding} className={cn(floatingPanel, "flex min-w-52 flex-col p-1.5", className)} {...props} />
+      <MenuPrimitive.Content align={align} sideOffset={sideOffset} collisionPadding={collisionPadding} className={cn(floatingPanel, "flex min-w-50 flex-col", className)} {...props} />
     </MenuPrimitive.Portal>
   );
 }

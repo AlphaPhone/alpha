@@ -21,7 +21,7 @@ const tabs = [
 /** Recents, keypad and the phone's admitted voicemail and address book, in the Phone header. */
 export function PhoneTabs({ title, contacts, voicemail, unheard, onBack, children }: PhoneTabsProps) {
   return (
-    <AppHeader title={title} data-alpha-phone-header="" className="shrink-0 flex-wrap"
+    <AppHeader title={title} data-alpha-phone-header="" className="mt-[max(0.125rem,env(safe-area-inset-top))] shrink-0 flex-wrap"
       leading={onBack && <Button variant="ghost" size="icon" aria-label="Back" onClick={onBack}><ChevronLeft /></Button>}>
       <TabsList aria-label="Phone" className="gap-0.5 p-[3px]">
         {tabs.map(({ name, Icon }) => {

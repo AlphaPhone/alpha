@@ -1,8 +1,8 @@
 import type { ReactNode } from "react";
-import { CircleCheck } from "lucide-react";
-import { Alert } from "../Alert.tsx";
+import { Check } from "lucide-react";
 import { Button } from "../Button.tsx";
-import { Sheet, SheetContent } from "../Sheet.tsx";
+import { Dialog, DialogContent, DialogTitle } from "../Dialog.tsx";
+import { startupMainAction, startupPanel } from "./StartupAccessPanel.tsx";
 import type { StartupTrouble } from "./vocabulary.ts";
 
 export type StartupAllSetProps = {
@@ -29,24 +29,32 @@ const troubles: Record<StartupTrouble, string> = {
 export function StartupAllSet({ trouble, notSaved = false, children, onDone }: StartupAllSetProps) {
   const attention = trouble !== undefined || notSaved;
   return (
-    <Sheet open>
-      <SheetContent
-        title="All set"
+    <Dialog open>
+      <DialogContent
+        className={startupPanel}
         aria-describedby={undefined}
         onInteractOutside={(event) => event.preventDefault()}
         onEscapeKeyDown={(event) => {
           event.preventDefault();
           onDone?.();
         }}
-        actions={<Button disabled={!onDone} onClick={onDone}>Done</Button>}
       >
-        <div className="flex flex-col items-center gap-4 py-2">
-          {attention ? null : <CircleCheck aria-hidden className="size-10 text-ok" />}
-          {trouble ? <Alert variant="warn" className="w-full">{troubles[trouble]}</Alert> : null}
-          {notSaved ? <Alert variant="warn" className="w-full">Not saved</Alert> : null}
-          {children}
+        <div className="m-auto flex w-full max-w-90 flex-col items-center text-center">
+          <span aria-hidden className="relative mb-7 grid size-20 place-items-center rounded-full bg-secondary">
+            <Check className="size-9" />
+            {attention ? <span className="absolute top-1.5 right-1.5 size-3.5 rounded-full border-2 border-background bg-warn" /> : null}
+          </span>
+          <DialogTitle className="mb-5 font-display text-4xl font-light">All set</DialogTitle>
+          <div className="flex flex-col items-center gap-2 text-sm">
+            {trouble ? <p role="alert">{troubles[trouble]}</p> : null}
+            {notSaved ? <p role="alert">Not saved</p> : null}
+            {children}
+          </div>
+          <div className="mt-9 min-h-27 w-full">
+            <Button className={startupMainAction} disabled={!onDone} onClick={onDone}>Done</Button>
+          </div>
         </div>
-      </SheetContent>
-    </Sheet>
+      </DialogContent>
+    </Dialog>
   );
 }

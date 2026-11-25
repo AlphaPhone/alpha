@@ -104,26 +104,44 @@ effect function askLog(): Event!!Telephony {
 /** Whether a failure means the phone may have acted: no answer came back. */
 const lost = (failure: unknown) => failure instanceof TelephonyRefused && failure.code === undefined && failure.tag === ""
 
+/** Final handoff reply known to have opened the system dialer or placed the call. */
+function dialAnswered(ticket: number, opened: boolean, placed = false): Event {
+  return { type: "dialAnswered", ticket, opened, placed }
+}
+
 /** The dial screen opened with `number`, as the phone answers it. */
 effect function dialScreen(ticket: number, number: string): Event!!Telephony {
-  const report = telephony("dial", (c) => c.phone.dial(number)) catch () => undefined
-  return { type: "dialAnswered", ticket, opened: report?.dialStatus === "DialHandedOff" }
+  const report = telephony("dial", (c) => c.phone.dial(number)) catch (failure) => (lost(failure) ? undefined : null)
+  return report === undefined ? { type: "dialLost", ticket } : dialAnswered(ticket, report?.dialStatus === "DialHandedOff")
+}
+
+effect function mayHandoff(ticket: number, typed: Typed): boolean!!Phone.Machine {
+  const state = try (try Phone.Machine).get()
+  return Phone.canDialLost(state, ticket) && (typed === "Emergency" || (state.carrier && Phone.clear(state)))
 }
 
 // spec/app/phone/index.md, "Call hands the typed number to the dialer, only if the phone says it is a number it can dial"; spec/app/phone/index.md, "Tapping a recent call hands its number to the dialer"; spec/app/phone/index.md, "With the dialer role a call is placed through Telecom, and counts as started only when Telecom accepted it"
-effect function handoff(ticket: number, typed: boolean, tapped: string): Event!!(Telephony | Dialer) {
-  const held = try (try Dialer).get()
+effect function handoff(ticket: number, typed: boolean, tapped: string): Event!!(Telephony | Dialer | Phone.Machine) {
+  const store = try Dialer
+  const held = try store.get()
   const number = typed ? held.digits : tapped
   const shape = judge(number)
-  if (shape !== "Dialable" && shape !== "Emergency") return { type: "dialAnswered", ticket, opened: false }
+  if (shape !== "Dialable" && shape !== "Emergency") return dialAnswered(ticket, false)
+  if (!(try mayHandoff(ticket, shape))) return dialAnswered(ticket, false)
+  if (shape === "Emergency") return try dialScreen(ticket, number)
   const status = telephony("status", (c) => c.phone.status()) catch () => undefined
-  if (status?.roles.dialer.held !== true || shape === "Emergency") return try dialScreen(ticket, number)
+  if (!(try mayHandoff(ticket, shape))) return dialAnswered(ticket, false)
+  if (status?.roles.dialer.held !== true) return try dialScreen(ticket, number)
   const placed = telephony("placeCall", (c) => c.phone.placeCall(number)) catch (failure) => (lost(failure) ? undefined : null)
-  if (placed === undefined) return { type: "dialLost" }
+  if (placed === undefined) return { type: "dialLost", ticket }
   switch (placed?.placeStatus) {
-    case "CallPlaced": case "CallEmergencyHandoff": return { type: "dialAnswered", ticket, opened: true }
-    case "CallRoleRequired": case "CallPermissionRequired": return try dialScreen(ticket, number)
-    default: return { type: "dialAnswered", ticket, opened: false }
+    case "CallPlaced":
+      if (Phone.canDialAnswered(try (try Phone.Machine).get(), ticket, true, true)) try store.set({ digits: "", matched: "", matchedNumber: "" })
+      return dialAnswered(ticket, true, true)
+    case "CallEmergencyHandoff": return dialAnswered(ticket, true)
+    case "CallRoleRequired": case "CallPermissionRequired":
+      return (try mayHandoff(ticket, shape)) ? try dialScreen(ticket, number) : dialAnswered(ticket, false)
+    default: return dialAnswered(ticket, false)
   }
 }
 
@@ -134,7 +152,7 @@ function carry(fx: Out): Job<Event, Telephony | Dialer | Phone.Machine | SystemS
     when { tag: "AskLog" }: answer("ask", askLog(), { type: "logReported", grant: "Unasked" });
     when { tag: "OpenSettings" }: run("settings", effect { try (try SystemSettings).open("AppPermissions", 0) });
     when { tag: "MarkSeen" }: run("seen", effect {});
-    when { tag: "Handoff", let ticket, let source, let number }: answer(`dial ${ticket}`, handoff(ticket, source === "TypedNumber", number), { type: "dialLost" });
+    when { tag: "Handoff", let ticket, let source, let number }: answer(`dial ${ticket}`, handoff(ticket, source === "TypedNumber", number), { type: "dialLost", ticket });
   }
 }
 
@@ -158,7 +176,7 @@ export function telecomOf(raw: unknown): { readonly telecom: Telecom; readonly c
   const row = Option.getOrUndefined(Schema.decodeUnknownOption(Reading)(raw))
   if (row === undefined || row.inCall === null) return { telecom: "CallUnknown", carrier: row?.carrier ?? false }
   const telecom: Telecom = !row.inCall ? "NoCall" : row.emergencyLive || row.emergency !== false ? "MaybeEmergencyCall" : "OrdinaryCall"
-  return { telecom, carrier: row.carrier ?? true }
+  return { telecom, carrier: row.carrier ?? false }
 }
 
 /** Telecom's reading when Alpha opens; afterwards each one the phone pushes. */

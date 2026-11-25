@@ -36,6 +36,8 @@ export function checkout(): Checkout {
 const stamp = (at: Checkout) => path.join(at.root, ".alpha/ready.json");
 
 const clientPackages = [
+  { name: "@elizaos/plugin-files", entry: "packages/plugin-files/dist/src/documents/local-ocr.js" },
+  { name: "@elizaos/plugin-inbox", entry: "packages/plugin-inbox/dist/src/client/index.js" },
   { name: "@elizaos/plugin-notes", entry: "packages/plugin-notes/dist/src/client.js" },
   { name: "@elizaos/plugin-workflow", entry: "packages/plugin-workflows/dist/src/client/index.js" },
 ];

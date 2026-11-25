@@ -1,10 +1,12 @@
 // spec/app/inbox/index.md, "Story: See my mail"; spec/app/inbox/index.md, "Story: See my last list when offline"; spec/app/inbox/message.md, "Story: Read a message"
-import { CloudError, type GoogleStatus, type MailCard, type MailMessage, type MailOperation } from "@elizaos/cloud/client"
+import { CloudError, type MailCard, type MailMessage, type MailOperation, type MailSearch } from "@elizaos/cloud/client"
+import { gmailReadable, type GmailAccount, type GmailDraftSummary } from "@elizaos/plugin-inbox/mailbox"
 import * as KeyValueStore from "effect/persistence/KeyValueStore"
 import type { Failure, Folder, Linked, Mailbox, Selection } from "../../gen/app__inbox.ts"
 import type { Fault } from "../../gen/app__inbox__message.ts"
 import { Cloud, type CloudClient } from "../platform/cloud.vibe"
 import { Attempts } from "../runtime/attempts.vibe"
+import { provider } from "./provider.vibe"
 
 module pure {
   import type { MailCard } from "@elizaos/cloud/client"
@@ -14,38 +16,48 @@ module pure {
   export interface Letter {
     readonly message: number
     readonly card: MailCard
+    readonly draftId?: string
   }
 
   /** A list kept for a selection, to show as saved while Gmail cannot be reached. */
   export interface Kept {
     readonly selection: Selection
     readonly letters: ReadonlyArray<Letter>
+    readonly credential?: number
   }
 
   /** What Alpha keeps of Gmail on the phone: its own numbers for accounts, credentials and messages, and the list last read. */
   export interface Ledger {
     readonly accounts: Record<string, number>
     readonly credentials: Record<string, number>
-    readonly grants: Record<string, string>
+    readonly labels?: Record<string, string>
     readonly messages: Record<string, number>
     readonly cards: Record<string, MailCard>
     readonly next: number
     readonly kept: Kept | undefined
   }
 
+  function record(value: unknown): value is Record<string, unknown> {
+    return value !== null && typeof value === "object" && !Array.isArray(value)
+  }
+
   /** The ledger kept under `text`, or a blank one where nothing readable is kept. @throws {never} */
   export function readLedger(text: string | undefined): Ledger | undefined {
     if (text === undefined) return undefined
     try {
-      const found = JSON.parse(text) as Partial<Ledger> | null
-      return found !== null && typeof found === "object" && typeof found.next === "number" ? found as Ledger : undefined
+      const found: unknown = JSON.parse(text)
+      if (!record(found) || typeof found["next"] !== "number" || !Number.isSafeInteger(found["next"]) || found["next"] < 1) return undefined
+      if (![found["accounts"], found["credentials"], found["messages"], found["cards"]].every(record)) return undefined
+      if (found["labels"] !== undefined && !record(found["labels"])) return undefined
+      if (found["kept"] !== undefined && (!record(found["kept"]) || !record(found["kept"]["selection"]) || !Array.isArray(found["kept"]["letters"]))) return undefined
+      return found as unknown as Ledger
     } catch { return undefined }
   }
 }
 import { type Kept, type Ledger, type Letter, readLedger } from pure
 export type { Letter }
 
-const blank: Ledger = { accounts: {}, credentials: {}, grants: {}, messages: {}, cards: {}, next: 1, kept: undefined }
+const blank = (): Ledger => ({ accounts: {}, credentials: {}, labels: {}, messages: {}, cards: {}, next: 1, kept: undefined })
 const key = "alpha/inbox/mail"
 
 /** The Gmail search each folder is, before the owner's own words. */
@@ -68,24 +80,22 @@ const pageSize = 25
  * for it; and the bodies read, by the ticket of their read. A screen reads it at the state its machine shows.
  */
 export service Mail {
-  account(email: string): number!!
-  credential(connection: string): number!!
+  connected(accounts: ReadonlyArray<GmailAccount>): ReadonlyArray<Linked>!!
+  generation(account?: number): number
   /** The address of `account`, as Google named it. */
   email(account: number): string
   /** The grant eliza's client names an account by, as the newest account check gave it. */
   grant(account: number): string | undefined
-  granted(account: number, grant: string): void!!
-  message(account: number, card: MailCard): number!!
+  canOperate(account: number, kind: Proposal["kind"]): boolean
   card(message: number): MailCard | undefined
-  gmailId(message: number): string | undefined
-  cursor(token: string): number
+  remember(account: number, card: MailCard): number!!
+  gmailId(message: number, account?: number): string | undefined
   token(cursor: number): string | undefined
-  /** Take a page read for `selection`: the first page replaces the list, a further one adds to it; either is kept. */
-  listed(selection: Selection, first: boolean, letters: ReadonlyArray<Letter>): void!!
+  /** Stage the provider page so only the matching accepted read can show or keep it. */
+  stage(ticket: number, selection: Selection, credential: number, first: boolean, found: SearchPage): ReadPage
+  accept(state: Mailbox): void!!
   /** A mark Gmail confirmed, on the message as the list shows it. */
   relabelled(message: number, unread: boolean): void!!
-  /** Whether the mailbox moved since the first page of the list, by its history. */
-  moved(first: boolean, history: string): boolean
   /** The list on screen for `state`: none, the one kept, or the one read. */
   shown(state: Mailbox): ReadonlyArray<Letter>
   read(ticket: number, body: MailMessage): void
@@ -94,85 +104,231 @@ export service Mail {
   forget(): void!!
 }
 
+type ReadPage = { readonly found: number; readonly unread: number; readonly following: number; readonly shifted: boolean }
+type SearchPage = Omit<MailSearch, "messages"> & { readonly messages: ReadonlyArray<MailCard & { readonly draftId?: string }> }
+type Page = Kept & { readonly ticket: number; readonly credential: number; readonly history: string; readonly names: ReadonlyMap<number, string> }
+
+const sameSelection = (a: Selection, b: Selection): boolean => a.account === b.account && a.folder === b.folder && a.query === b.query
+
 export const mail = Layer.effect(Mail, effect {
   const store = try KeyValueStore.KeyValueStore
-  let ledger = readLedger(store.get(key) catch () => undefined) ?? blank
-  let current: ReadonlyArray<Letter> = []
-  let history = ""
+  const restored = readLedger(store.get(key) catch () => undefined) ?? blank()
+  const storedLabels = restored.labels ?? Object.fromEntries(Object.entries(restored.accounts).map(([label, id]) => [id, label]))
+  let ledger: Ledger = { accounts: restored.accounts, credentials: restored.credentials, labels: storedLabels, messages: restored.messages, cards: restored.cards, next: restored.next, kept: restored.kept }
+  let sequence = 0
+  let ownerGeneration = 0
+  let nextId = ledger.next
+  const accountGenerations = new Map<number, number>()
+  let current: Page | undefined
+  const staged = new Map<number, Page>()
+  let grants = new Map<number, { readonly id: string; readonly consent: Linked["grant"] }>()
+  const messages = new Map<number, string>(Object.entries(ledger.messages).map(([name, id]) => [id, name]))
   const cursors = new Map<string, number>()
+  const tokens = new Map<number, string>()
   const bodies = new Map<number, MailMessage>()
-  effect function keep(changed: Ledger): void!! {
-    ledger = changed
-    try ignore(store.set(key, JSON.stringify(ledger)))
+  effect function keep(): void!! {
+    try ignore(store.set(key, JSON.stringify({ ...ledger, next: nextId })))
   }
-  effect function numbered(table: "accounts" | "credentials" | "messages", name: string): number!! {
-    const found = ledger[table][name]
+  function numbered(table: "accounts" | "credentials", name: string): number {
+    if (Object.hasOwn(ledger[table], name)) return ledger[table][name] ?? 0
+    const next = nextId++
+    ledger = { ...ledger, [table]: { ...ledger[table], [name]: next } }
+    return next
+  }
+  function cursor(token: string | null): number {
+    if (token === null) return 0
+    const found = cursors.get(token)
     if (found !== undefined) return found
-    try keep({ ...ledger, [table]: { ...ledger[table], [name]: ledger.next }, next: ledger.next + 1 })
-    return ledger.next - 1
+    const next = cursors.size + 1
+    cursors.set(token, next)
+    tokens.set(next, token)
+    return next
   }
-  const named = (table: Record<string, number>, number: number) => Object.keys(table).find((name) => table[name] === number)
+  function drop(account: number): void {
+    for (const [number, name] of messages) {
+      if (!name.startsWith(`${account}/`)) continue
+      messages.delete(number)
+      delete ledger.messages[name]
+      delete ledger.cards[String(number)]
+    }
+    if (current?.selection.account === account || ledger.kept?.selection.account === account) bodies.clear()
+    if (current?.selection.account === account) current = undefined
+    for (const [ticket, page] of staged) {
+      if (page.selection.account === account) staged.delete(ticket)
+    }
+    if (ledger.kept?.selection.account === account) ledger = { ...ledger, kept: undefined }
+  }
+  const credentialOf = (state: Mailbox) => state.connected.find(({ account }) => account === state.selected.account)?.credential
+  const currentPage = (state: Mailbox) => state.list.status === "Loaded" ? staged.get(state.list.ticket) ?? current : current
   return {
-    account: (email: string) => numbered("accounts", email.toLowerCase()),
-    effect credential(connection: string) {
-      return try numbered("credentials", connection)
+    effect connected(accounts: ReadonlyArray<GmailAccount>) {
+      const next = new Map<number, { readonly id: string; readonly consent: Linked["grant"] }>()
+      const links: Linked[] = []
+      const seen = new Set<string>()
+      const labels = { ...ledger.labels }
+      for (const row of accounts) {
+        const connection = row.connectionId
+        if (connection === null || connection === "" || seen.has(connection)) continue
+        seen.add(connection)
+        const name = `grant:${connection}`
+        const label = row.label.toLowerCase()
+        const legacy = ledger.accounts[label]
+        if (ledger.accounts[name] === undefined && Object.hasOwn(ledger.accounts, label) &&
+          legacy !== undefined && Object.hasOwn(ledger.credentials, connection)) {
+          ledger.accounts[name] = legacy
+          delete ledger.accounts[label]
+        }
+        const account = numbered("accounts", name)
+        const credential = numbered("credentials", connection)
+        const consent = consentOf(row)
+        if (consent.read) next.set(account, { id: connection, consent })
+        labels[String(account)] = row.label
+        links.push({ account, credential, grant: consent })
+      }
+      for (const [account, grant] of grants) {
+        if (next.get(account)?.id === grant.id) continue
+        accountGenerations.set(account, ++sequence)
+        drop(account)
+      }
+      for (const [account, grant] of next) {
+        if (grants.get(account)?.id !== grant.id) accountGenerations.set(account, ++sequence)
+      }
+      grants = next
+      ledger = { ...ledger, labels }
+      try keep()
+      return links
     },
-    email: (account: number) => named(ledger.accounts, account) ?? "",
-    grant: (account: number) => ledger.grants[String(account)],
-    effect granted(account: number, grant: string) {
-      if (ledger.grants[String(account)] !== grant) try keep({ ...ledger, grants: { ...ledger.grants, [String(account)]: grant } })
+    generation: (account?: number) => account === undefined ? ownerGeneration : accountGenerations.get(account) ?? ownerGeneration,
+    email: (account: number) => ledger.labels?.[String(account)] ?? "",
+    grant: (account: number) => grants.get(account)?.id,
+    canOperate(account: number, kind: Proposal["kind"]) {
+      const grant = grants.get(account)?.consent
+      return grant !== undefined && (kind === "send" ? grant.send : grant.modify)
     },
-    effect message(account: number, card: MailCard) {
-      const number = try numbered("messages", `${account}/${card.id}`)
-      try keep({ ...ledger, cards: { ...ledger.cards, [String(number)]: card } })
-      return number
+    card: (message: number) => ledger.cards[String(message)] ?? Array.from(staged.values()).find((page) => page.names.has(message))?.letters.find((letter) => letter.message === message)?.card,
+    effect remember(account: number, card: MailCard) {
+      const name = `${account}/${card.id}`
+      const message = ledger.messages[name] ?? nextId++
+      const canonical = ledger.cards[String(message)]
+      if (canonical === undefined || canonical.metadata.historyId !== card.metadata.historyId) {
+        ledger.cards[String(message)] = card
+        messages.set(message, name)
+        ledger.messages[name] = message
+        try keep()
+      }
+      return message
     },
-    card: (message: number) => ledger.cards[String(message)],
-    gmailId: (message: number) => named(ledger.messages, message)?.replace(/^\d+\//, ""),
-    cursor(token: string) {
-      const found = cursors.get(token)
-      if (found !== undefined) return found
-      cursors.set(token, cursors.size + 1)
-      return cursors.size
+    gmailId(message: number, account?: number) {
+      const named = messages.get(message) ?? Array.from(staged.values()).find((page) => page.names.has(message))?.names.get(message)
+      return named === undefined || (account !== undefined && !named.startsWith(`${account}/`)) ? undefined : named.replace(/^\d+\//u, "")
     },
-    token: (cursor: number) => [...cursors.keys()].find((token) => cursors.get(token) === cursor),
-    effect listed(selection: Selection, first: boolean, letters: ReadonlyArray<Letter>) {
-      current = first ? letters : [...current, ...letters]
-      try keep({ ...ledger, kept: { selection, letters: current } })
+    token: (number: number) => tokens.get(number),
+    stage(ticket: number, selection: Selection, credential: number, first: boolean, found: SearchPage) {
+      const previous = first ? undefined : current
+      const unique = new Map(previous?.letters.map((letter) => [letter.card.id, letter]))
+      const names = new Map<number, string>()
+      const seen = unique.size
+      for (const card of found.messages) {
+        const name = `${selection.account}/${card.id}`
+        const message = unique.get(card.id)?.message ?? ledger.messages[name] ?? nextId++
+        if (!messages.has(message)) names.set(message, name)
+        unique.set(card.id, { message, card, ...(card.draftId === undefined ? {} : { draftId: card.draftId }) })
+      }
+      const history = previous?.history ?? found.mailboxHistoryId
+      const letters = Array.from(unique.values())
+      staged.set(ticket, { ticket, selection, credential, history, letters, names })
+      return {
+        found: unique.size - seen, unread: first ? letters.filter(({ card }) => card.isUnread).length : 0,
+        following: cursor(found.nextPageToken), shifted: previous !== undefined && history !== found.mailboxHistoryId,
+      }
+    },
+    effect accept(state: Mailbox) {
+      const page = state.list.status === "Loaded" ? staged.get(state.list.ticket) : undefined
+      if (page !== undefined) {
+        staged.delete(page.ticket)
+        if (sameSelection(page.selection, state.selected) && page.credential === credentialOf(state)) {
+          current = page
+          for (const [message, name] of page.names) {
+            messages.set(message, name)
+            ledger.messages[name] = message
+          }
+          for (const { message, card } of page.letters) {
+            delete ledger.cards[String(message)]
+            ledger.cards[String(message)] = card
+          }
+          ledger = { ...ledger, kept: { selection: page.selection, letters: page.letters, credential: page.credential } }
+          try keep()
+          return
+        }
+      }
+      for (const ticket of staged.keys()) {
+        if (ticket < state.list.ticket || (ticket === state.list.ticket && state.list.status !== "Loading")) staged.delete(ticket)
+      }
+      if (state.failure === "Revoked" && grants.delete(state.selected.account)) {
+        accountGenerations.set(state.selected.account, ++sequence)
+        drop(state.selected.account)
+        try keep()
+        return
+      }
+      const saved = ledger.kept
+      if (saved !== undefined && (state.keptPages === 0 || !sameSelection(saved.selection, state.kept))) {
+        const account = state.connected.find((linked) => linked.account === saved.selection.account)
+        if (state.failure === "Revoked" || (state.accounts.status === "Loaded" &&
+          (account === undefined || !account.grant.read || (saved.credential !== undefined && saved.credential !== account.credential)))) drop(saved.selection.account)
+        else ledger = { ...ledger, kept: undefined }
+        try keep()
+      }
     },
     effect relabelled(message: number, unread: boolean) {
       const card = ledger.cards[String(message)]
       if (card === undefined) return
       const changed = { ...card, isUnread: unread }
-      current = current.map((letter) => (letter.message === message ? { ...letter, card: changed } : letter))
-      try keep({ ...ledger, cards: { ...ledger.cards, [String(message)]: changed } })
-    },
-    moved(first: boolean, read: string) {
-      const before = history
-      history = read
-      return !first && before !== "" && before !== read
+      const relabel = (letters: ReadonlyArray<Letter>) => letters.map((letter) => (letter.message === message ? { ...letter, card: changed } : letter))
+      if (current !== undefined) current = { ...current, letters: relabel(current.letters) }
+      const saved = ledger.kept
+      ledger.cards[String(message)] = changed
+      if (saved !== undefined) ledger = { ...ledger, kept: { ...saved, letters: relabel(saved.letters) } }
+      try keep()
     },
     shown(state: Mailbox) {
       if (state.pages === 0) return []
-      return state.saved ? ledger.kept?.letters ?? [] : current
+      if (state.saved) {
+        const kept = ledger.kept
+        return kept !== undefined && sameSelection(kept.selection, state.selected) &&
+          (kept.credential === undefined || kept.credential === state.keptCredential) ? kept.letters : []
+      }
+      const live = currentPage(state)
+      return live !== undefined && sameSelection(live.selection, state.selected) && live.credential === credentialOf(state) ? live.letters : []
     },
     read(ticket: number, body: MailMessage) {
       bodies.set(ticket, body)
+      if (bodies.size > 8) {
+        const oldest = bodies.keys().next().value
+        if (oldest !== undefined) bodies.delete(oldest)
+      }
     },
     body: (ticket: number) => bodies.get(ticket),
     effect forget() {
-      current = []
+      ownerGeneration = ++sequence
+      accountGenerations.clear()
+      current = undefined
+      staged.clear()
+      grants.clear()
+      messages.clear()
+      cursors.clear()
+      tokens.clear()
       bodies.clear()
-      try keep(blank)
+      ledger = blank()
+      try keep()
     },
   }
 })
 
 /** What Google consented to, as the grant the rules read: reading, sending, and changing the mailbox. */
-function consentOf(status: GoogleStatus) {
-  const has = (capability: GoogleStatus["grantedCapabilities"][number]) => status.grantedCapabilities.includes(capability)
-  const read = status.reason === "connected" && (has("google.gmail.triage") || has("google.gmail.mailbox"))
-  return { read, send: read && has("google.gmail.send"), modify: read && has("google.gmail.manage") }
+function consentOf(account: GmailAccount) {
+  const has = (capability: string) => account.grantedCapabilities.includes(capability)
+  const read = gmailReadable(account)
+  return { read, send: read && has("google.gmail.send"), modify: read && (has("google.gmail.manage") || has("google.gmail.mailbox")) }
 }
 
 /** The failure of a read, as the list tells it: offline, access withdrawn, or Gmail not reached for another reason. */
@@ -181,6 +337,7 @@ export function failureOf(failed: unknown): Failure {
   if (!(cause instanceof CloudError)) return "Unreachable"
   const failure = cause.failure
   if (failure.tag === "CloudNetwork") return "Offline"
+  if (failure.tag === "CloudCredentialInvalid") return "Revoked"
   if (failure.tag === "CloudRefused" && (failure.code === "GoogleReauthRequired" || failure.reason === "CredentialRevoked" || failure.reason === "GrantRequired" || failure.reason === "CapabilityMissing")) return "Revoked"
   return "Unreachable"
 }
@@ -195,50 +352,60 @@ export function faultOf(failed: unknown): Fault {
   return code === "NotFound" ? "Gone" : code === "StaleRevision" ? "Stale" : code === "ContentTooLarge" ? "TooLarge" : code === "PreconditionFailed" ? "Moved" : "Unreachable"
 }
 
-/** The connected Google accounts, as the cloud's status of the owner's Google connection names them. */
-export effect function connections(): ReadonlyArray<Linked>!unknown!(Cloud | Mail) {
-  const { client } = try Cloud
-  const ledger = try Mail
-  const status = try asked(() => client.googleStatus())
-  if (!status.connected && status.reason !== "needs_reauth") return []
-  if (status.identity === null) return []
-  const account = try ledger.account(status.identity.email)
-  const connection = status.connectionId ?? status.identity.email
-  try ledger.granted(account, connection)
-  return [{ account, credential: try ledger.credential(connection), grant: consentOf(status) }]
+/** The distinct Google connections returned by Eliza's owner-facing Gmail client. */
+export effect function connections() {
+  return try provider(try Cloud).gmailAccounts()
 }
 
 /** What eliza's client threw: a `CloudError` where the cloud refused or could not be reached. */
 export error Asked { cause: unknown }
 
 /** What eliza's client answers, failing with what it threw: a `CloudError` where the cloud refused or could not be reached. */
-export effect function asked<A>(call: () => Promise<A>): A!Asked {
+export effect function asked<A>(call: (signal: AbortSignal) => Promise<A>): A!Asked {
   return try tryPromise({ try: call, catch: (cause) => new Asked({ cause }) })
 }
 
-const grantChoice = (grant: string | undefined) => (grant === undefined ? {} : { grantId: grant })
+/** Refuse a read without an account-bound grant, even if the cloud has a default account. */
+const missingGrant = () => new CloudError({ failure: { tag: "CloudRefused", code: "GoogleReauthRequired", reason: "GrantRequired" }, cause: "no current Gmail grant" })
+
+function draftCard(draft: GmailDraftSummary, from: string): MailCard & { readonly draftId: string } {
+  return {
+    id: draft.messageId, draftId: draft.draftId, threadId: "", subject: draft.subject, from, to: draft.to, cc: [],
+    snippet: draft.snippet, receivedAt: draft.updatedAt ?? "", labels: ["DRAFT"], isUnread: false,
+    isImportant: false, likelyReplyNeeded: false, triageScore: 0, triageReason: "", metadata: { historyId: null },
+  }
+}
 
 /** One page of `folder` searched for `query`, from the page `cursor` names. */
-export effect function page(account: number, folder: Folder, query: string, cursor: number) {
-  const { client } = try Cloud
+export effect function page(account: number, folder: Folder, query: string, cursor: number, supportsSpamTrash: boolean) {
+  const cloud = try Cloud
+  const { client } = cloud
   const ledger = try Mail
+  const grantId = ledger.grant(account)
+  if (grantId === undefined) throw missingGrant()
   const token = cursor === 0 ? undefined : ledger.token(cursor)
-  const found = try asked(() => client.gmailSearch({
-    ...grantChoice(ledger.grant(account)), query: searchOf(folder, query), maxResults: pageSize, ...(token === undefined ? {} : { pageToken: token }),
-  }))
-  const letters: Letter[] = []
-  for (const card of found.messages) letters.push({ message: try ledger.message(account, card), card })
-  const following = found.nextPageToken === null ? 0 : ledger.cursor(found.nextPageToken)
-  return { letters, following, history: found.mailboxHistoryId, spamTrash: found.supportsSpamTrash }
+  if (cursor !== 0 && token === undefined) throw missingGrant()
+  if (folder === "DraftsFolder" && query.trim() === "") {
+    const result = try provider(cloud).gmailDrafts(grantId, token)
+    const from = ledger.email(account)
+    return { messages: result.drafts.map((draft) => draftCard(draft, from)), nextPageToken: result.nextPageToken, mailboxHistoryId: "", syncedAt: "", supportsSpamTrash }
+  }
+  return try asked((signal) => client.gmailSearch({
+    grantId, query: searchOf(folder, query), maxResults: pageSize, ...(token === undefined ? {} : { pageToken: token }),
+  }, { signal }))
 }
 
 /** The message `message` of `account`, read whole. */
 export effect function body(account: number, message: number): MailMessage!unknown!(Cloud | Mail) {
   const { client } = try Cloud
   const ledger = try Mail
-  const id = ledger.gmailId(message)
+  const grantId = ledger.grant(account)
+  if (grantId === undefined) throw missingGrant()
+  const id = ledger.gmailId(message, account)
   if (id === undefined) throw new CloudError({ failure: { tag: "CloudRefused", code: "NotFound", reason: "NoReason" }, cause: "no such message" })
-  return try asked(() => client.gmailRead({ ...grantChoice(ledger.grant(account)), messageId: id }))
+  const found = try asked((signal) => client.gmailRead({ grantId, messageId: id }, { signal }))
+  if (found.message.id !== id) throw new CloudError({ failure: { tag: "CloudRefused", code: "StaleRevision", reason: "NoReason" }, cause: "Gmail returned another message" })
+  return found
 }
 
 /** The revision a message is at, as a number the rules can compare: Gmail's history id. */
@@ -283,18 +450,29 @@ export effect function operate(id: number, account: number, proposal: Proposal, 
   const key = try (try Attempts).key(id)
   const requestId = at === 0 ? key : `${key.slice(0, -4)}${at.toString(16).padStart(4, "0")}`
   const grantId = ledger.grant(account)
-  if (grantId === undefined) return refusedBefore
-  const prepared = asked(() => client.gmailPrepare({ grantId, requestId, proposal })) catch (failed) => failed
-  if (prepared instanceof Asked) return { ...refusedBefore, expired: expiredBy(prepared) }
-  if (prepared.receipt.state !== "prepared") return endedAs(prepared)
-  const dispatched = asked(() => client.gmailDispatch({ grantId, requestId, reviewDigest: prepared.receipt.reviewDigest, proposal })) catch (failed) => failed
-  return dispatched instanceof Asked ? { done: false, known: false, expired: expiredBy(dispatched) } : endedAs(dispatched)
+  if (grantId === undefined || !ledger.canOperate(account, proposal.kind)) return refusedBefore
+  const generation = ledger.generation(account)
+  const prepared = effect {
+    return { operation: try asked((signal) => client.gmailPrepare({ grantId, requestId, proposal }, { signal })) }
+  } catch (failed) => ({ expired: expiredBy(failed) })
+  if ("expired" in prepared) return { ...refusedBefore, expired: prepared.expired }
+  const receipt = prepared.operation.receipt
+  if (ledger.generation(account) !== generation || !ledger.canOperate(account, proposal.kind) || receipt.requestId !== requestId || receipt.kind !== proposal.kind) return refusedBefore
+  if (receipt.state !== "prepared") return endedAs(prepared.operation)
+  const reviewDigest = receipt.reviewDigest
+  const dispatched = effect {
+    return { operation: try asked((signal) => client.gmailDispatch({ grantId, requestId, reviewDigest, proposal }, { signal })) }
+  } catch (failed) => ({ expired: expiredBy(failed) })
+  if ("expired" in dispatched) return { done: false, known: false, expired: dispatched.expired }
+  const ended = dispatched.operation.receipt
+  return ended.requestId === requestId && ended.kind === proposal.kind && ended.reviewDigest === reviewDigest
+    ? endedAs(dispatched.operation) : { done: false, known: false, expired: false }
 }
 
 /** Change one message's labels in Gmail, once, as `operate` does, at the history revision the list read it at. */
 export effect function relabel(id: number, account: number, message: number, kind: "mark-read" | "mark-unread" | "archive" | "unarchive" | "trash" | "untrash", at = 0): Changed!!(Cloud | Mail | Attempts) {
   const ledger = try Mail
-  const messageId = ledger.gmailId(message)
+  const messageId = ledger.gmailId(message, account)
   if (messageId === undefined) return refusedBefore
   return try operate(id, account, { kind, messageId, expectedHistoryId: ledger.card(message)?.metadata.historyId ?? "" }, at)
 }

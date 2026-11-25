@@ -1,7 +1,10 @@
 // spec/app/assistant/chats.md, "Story: Find my conversations"; spec/app/assistant/composer.md, "Story: Keep what I am writing"
 import { ConversationRecord } from "@elizaos/agent/client"
 import * as KeyValueStore from "effect/persistence/KeyValueStore"
+import type { MediaCard } from "./media-review.vibe"
+import type { Attachment } from "./attachments.vibe"
 import type { Failure, Fix } from "../../gen/app__assistant__reply.ts"
+import type { CommsPrompt } from "../phone/comms.vibe"
 
 /** One message of the conversation showing, as the agent keeps it. */
 export interface Line {
@@ -12,6 +15,7 @@ export interface Line {
   readonly quote?: string
   /** Why a reply the agent keeps did not finish, as its history says, in Alpha's words. */
   readonly failure?: Failure
+  readonly files?: ReadonlyArray<Pick<Attachment, "id" | "name" | "mimeType">>
 }
 
 /** A search hit: the conversation it is in, by its number, the message, by its number, and what it says. */
@@ -39,6 +43,9 @@ export interface Seen {
   readonly failure: { readonly kind: Failure; readonly fix: Fix; readonly waitMs: number } | undefined
   /** The text in the composer's box, which its slot keeps. */
   readonly typed: string
+  readonly files: ReadonlyArray<Attachment>
+  readonly media: ReadonlyArray<MediaCard>
+  readonly mediaNote: string
   /** The text of a message the slot marks as sending, under review; or the saved copy of a conflict. */
   readonly saved: string
   /** The hits of each search, by the ticket that asked from the first hit. */
@@ -59,9 +66,13 @@ export interface Board {
   /** The text a send in hand carries, the last text sent, and a send that waits for its conversation to be made. */
   outgoing: string
   lastSent: string
+  /** The exact wire text, used only to reconcile a turn without a message ID. */
+  lastSentWire: string
   /** The id the last message was posted under, as the agent keeps it, or "" where its post never said. */
   lastSentId: string
   sendWhenMade: boolean
+  waitingRequest: CommsPrompt | undefined
+  postingRequest: CommsPrompt | undefined
   change(patch: Partial<Seen>): void
   /** The number of the conversation the agent names `record`, given the first time it is seen; its title where one is given. */
   numberOf(record: ConversationRecord, title?: string): number
@@ -81,6 +92,7 @@ export interface Board {
 
 export service Talk {
   readonly board: Board
+  readonly attachmentLock: Semaphore.Semaphore
 }
 
 /** Where the agent's conversations are kept by number, so that the conversation showing is found again after a restart. */
@@ -109,7 +121,7 @@ export const talk = Layer.effect(Talk, effect {
   const messages: string[] = []
   const listeners = new Set<() => void>()
   let seen: Seen = {
-    pages: new Map(), reply: "", label: "", failure: undefined, typed: "", saved: "", hits: [],
+    pages: new Map(), reply: "", label: "", failure: undefined, typed: "", files: [], media: [], mediaNote: "", saved: "", hits: [],
     titles: new Map(records.map((one, at) => [at + 1, one.title])),
   }
   const keep = () => runFork(ignore(store.set(key, JSON.stringify({ conversations: records.map((one) => ({ id: one.record.id, roomId: one.record.roomId, title: one.title })) }))))
@@ -122,8 +134,11 @@ export const talk = Layer.effect(Talk, effect {
     type: (text) => board.change({ typed: text }),
     outgoing: "",
     lastSent: "",
+    lastSentWire: "",
     lastSentId: "",
     sendWhenMade: false,
+    waitingRequest: undefined,
+    postingRequest: undefined,
     change: (patch) => {
       seen = { ...seen, ...patch }
       for (const listener of listeners) listener()
@@ -167,5 +182,5 @@ export const talk = Layer.effect(Talk, effect {
       board.change({ pages: new Map([...seen.pages, [newest, board.page(newest).filter((one) => one !== line)]]) })
     },
   }
-  return { board }
+  return { board, attachmentLock: try Semaphore.make(1) }
 })
