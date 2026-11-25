@@ -247,6 +247,17 @@ export function Assistant({ runtime, messageActions, speech, canReadAloud = fals
       {onComms && full && <CommsTarget runtime={runtime} placement="strip" />}
       {(!onComms || open) && <AssistantConversation
         detent={assistantDetent === "Full" ? "full" : assistantDetent === "Sheet" ? "sheet" : "bar"}
+        barDrag={shell.state ? {
+          onStart: () => {
+            void dock.send({ type: "press", detent: assistantDetent, now: untimed });
+            void dock.send({ type: "drag" });
+          },
+          onRelease: ({ direction, flick, y }) => {
+            const height = Math.max(0, Math.round(window.innerHeight - y));
+            void dock.send({ type: "release", direction: direction === "up" ? "Up" : "Down", flick, height, floor: barHeight, full: window.innerHeight, now: untimed });
+          },
+          onCancel: () => { void dock.send({ type: "shift", now: untimed }); },
+        } : undefined}
         className={onComms ? "relative w-full motion-safe:transition-[height] motion-safe:duration-[420ms]" : open ? "fixed inset-x-0 bottom-0 mx-auto max-w-md" : "sticky bottom-0"}
         style={onComms
           ? { height: assistantDetent === "Full" ? "calc(100dvh - 52px)" : `clamp(38dvh, ${keptHeight === undefined ? "50dvh" : `${keptHeight}px`}, 60dvh)` }

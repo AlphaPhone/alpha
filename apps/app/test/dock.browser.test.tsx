@@ -78,4 +78,30 @@ describe("Ask Alpha dock", () => {
     await runtime.runPromise(Effect.flatMap(Shell, (m) => Stream.runHead(Stream.filter(m.changes, (s) => s.assistant === "Sheet"))));
     expect(document.activeElement).toBe(document.querySelector("textarea[data-alpha-composer]"));
   });
+  // spec/app/assistant/dock.md, "Story: Drag Ask Alpha where I want it"; spec/app/assistant/dock.md, "A released drag lands on the bar, a sheet at a height, or the full screen"
+  it("Drag Ask Alpha up from anywhere on its resting bar (spec/app/assistant/dock.md, \"Story: Drag Ask Alpha where I want it\")", async () => {
+    await page.viewport(390, 844);
+    const { runtime } = await mountDock({ view: "Browser" });
+    const field = document.querySelector<HTMLTextAreaElement>("textarea[data-alpha-composer]");
+    const section = document.querySelector<HTMLElement>("section[aria-label='Ask Alpha']");
+    expect(section?.getAttribute("data-alpha-detent")).toBe("bar");
+    const finger = (type: string, target: Element | null | undefined, clientY: number) =>
+      target?.dispatchEvent(new PointerEvent(type, { bubbles: true, clientY, pointerId: 3, pointerType: "touch", isPrimary: true }));
+
+    // A drag that starts on the bar's field, not on the handle, carries Ask Alpha up to the full screen.
+    finger("pointerdown", field, 800);
+    for (const y of [790, 600, 300, 60]) finger("pointermove", field, y);
+    finger("pointerup", field, 60);
+    await runtime.runPromise(Effect.flatMap(Shell, (m) => Stream.runHead(Stream.filter(m.changes, (s) => s.assistant === "Full"))));
+
+    // A press on the bar that does not move is still a tap: it takes nothing from the field.
+    for (let step = 0; step < 3 && (await runtime.runPromise(Effect.flatMap(Shell, (m) => m.get()))).assistant !== "Bar"; step++) {
+      await runtime.runPromise(Effect.flatMap(Shell, (m) => m.send({ type: "goBack" })));
+    }
+    await runtime.runPromise(Effect.flatMap(Shell, (m) => Stream.runHead(Stream.filter(m.changes, (s) => s.assistant === "Bar"))));
+    finger("pointerdown", field, 800);
+    finger("pointerup", field, 800);
+    const still = await runtime.runPromise(Effect.flatMap(Shell, (m) => m.get()));
+    expect(still.assistant).toBe("Bar");
+  });
 });

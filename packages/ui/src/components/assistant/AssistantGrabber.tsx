@@ -39,6 +39,64 @@ const capture = (element: HTMLElement, pointer: number) => {
 
 const fast = (t: Track) => t.moved && Math.abs(t.last.y - t.prev.y) >= (t.last.at - t.prev.at) * flickPixelsPerMillisecond;
 
+/** What a drag on Ask Alpha's resting bar reports: that it began, where the finger is, and how it ended or was taken away. */
+export type AssistantBarDrag = {
+  /** The finger moved past a few pixels on the bar: a drag begins, as a press and a drag of the handle would. */
+  onStart?: (press: Press) => void;
+  /** Where the finger is, on each move once the drag began. */
+  onDrag?: (drag: { y: number }) => void;
+  /** The drag ended: its direction, whether it was a flick, and where it ended. */
+  onRelease?: (release: AssistantRelease) => void;
+  /** The drag was taken away by the system, a resize or the window losing focus. */
+  onCancel?: (press: Press) => void;
+};
+
+/**
+ * Pointer handlers that let the whole resting bar be dragged like its handle, as v121's bar was. Nothing is taken until
+ * the finger moves past a few pixels, so a tap on the bar, its buttons or its field stays a tap; a press on the handle
+ * itself is left to the handle.
+ */
+export function useAssistantBarDrag({ onStart, onDrag, onRelease, onCancel }: AssistantBarDrag) {
+  const trackRef = useRef<(Track & { pointer: number }) | undefined>(undefined);
+  const lost = (event: PointerEvent<HTMLElement>) => {
+    const t = trackRef.current;
+    if (!t || t.pointer !== event.pointerId) return;
+    trackRef.current = undefined;
+    if (t.moved) onCancel?.({ now: event.timeStamp });
+  };
+  return {
+    onPointerDown: (event: PointerEvent<HTMLElement>) => {
+      if (!event.isPrimary || event.button !== 0) return;
+      if (event.target instanceof Element && event.target.closest("[data-alpha-grabber]")) return;
+      const sample = { y: event.clientY, at: event.timeStamp };
+      trackRef.current = { start: event.clientY, prev: sample, last: sample, moved: false, pointer: event.pointerId };
+    },
+    onPointerMove: (event: PointerEvent<HTMLElement>) => {
+      const t = trackRef.current;
+      if (!t || t.pointer !== event.pointerId) return;
+      const y = event.clientY;
+      t.prev = t.last;
+      t.last = { y, at: event.timeStamp };
+      if (!t.moved && Math.abs(y - t.start) > slop) {
+        t.moved = true;
+        capture(event.currentTarget, event.pointerId);
+        onStart?.({ now: event.timeStamp });
+      }
+      if (t.moved) onDrag?.({ y });
+    },
+    onPointerUp: (event: PointerEvent<HTMLElement>) => {
+      const t = trackRef.current;
+      if (!t || t.pointer !== event.pointerId) return;
+      trackRef.current = undefined;
+      if (!t.moved) return;
+      const y = event.clientY;
+      onRelease?.({ direction: y < t.start ? "up" : "down", flick: fast(t), y, now: event.timeStamp });
+    },
+    onPointerCancel: lost,
+    onLostPointerCapture: lost,
+  };
+}
+
 /**
  * The handle of Ask Alpha: it reports a finger pressing, dragging, lifting or released as plain facts with their time;
  * the dock's rules choose where Ask Alpha lands.
@@ -59,6 +117,7 @@ export function AssistantGrabber({ variant = "handle", onPress, onDrag, onReleas
     <button
       type="button"
       aria-label={variant === "mark" ? "Open conversation" : "Resize chat"}
+      data-alpha-grabber=""
       className={cn(focusRing, "flex size-11 shrink-0 touch-none justify-center", variant === "mark" ? "items-center overflow-hidden rounded-full bg-alpha text-alpha-foreground" : "cursor-grab items-start rounded-sm pt-1.5", className)}
       onPointerDown={(event) => {
         capture(event.currentTarget, event.pointerId);

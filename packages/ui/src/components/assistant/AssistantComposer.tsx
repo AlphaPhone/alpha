@@ -107,7 +107,7 @@ export function AssistantComposer({
       {editing ? <AssistantQuoteBar kind="editing" /> : null}
       {voiceNotice}
       {voice}
-      <div hidden={Boolean(voice)} className={cn("touch-pan-y items-center bg-secondary", voice ? "hidden" : "flex", bar ? "min-h-18.5 gap-1 rounded-dock py-1.5 pr-2 pl-2.25 shadow-dock dark:shadow-dock-dark" : "min-h-17 gap-1.5 rounded-sheet py-1.5 pr-1.5 pl-5")}>
+      <div hidden={Boolean(voice)} className={cn(bar ? "touch-none" : "touch-pan-y", "items-center bg-secondary", voice ? "hidden" : "flex", bar ? "min-h-18.5 gap-1 rounded-dock py-1.5 pr-2 pl-2.25 shadow-dock dark:shadow-dock-dark" : "min-h-17 gap-1.5 rounded-sheet py-1.5 pr-1.5 pl-5")}>
         {leading}
         {bar ? opener ?? (onOpen ? (
           <Button size="icon" aria-label="Open conversation" className="overflow-hidden bg-alpha text-alpha-foreground hover:bg-alpha/90" onClick={onOpen}><Mark aria-hidden className="size-[118%]" /></Button>
