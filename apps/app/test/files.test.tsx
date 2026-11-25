@@ -513,13 +513,17 @@ describe("Files on a phone", () => {
     expect([read.ok, read.items.map((item) => item.name), now().trail.length, now().items.length]).toEqual([true, ["notes.txt"], 2, 2]);
     expect((await runtime.runPromise(agentRead(2, { volume: "primary", path: "Documents" }, everything, true))).ok).toBe(false);
 
+    // spec/app/files/index.md, "An approved filter for a named folder goes to that folder before it searches"
+    const targeted = await runtime.runPromise(fileAction({ type: "files_filter", folder: "Documents", text: "notes" }, { attemptId: 1, proposalId: "targeted-filter", operationId: "targeted-filter" }));
+    expect([targeted?.kind, now().search.hits.map((item) => item.name)]).toEqual(["applied", ["notes.txt"]]);
+
     const dated = Date.parse("2026-03-04T12:00:00Z");
     world.files.stored.push(
       { volume: "primary", path: "Download/during.pdf", directory: false, mimeType: "application/pdf", size: 10, modified: dated },
       { volume: "primary", path: "Download/earlier.pdf", directory: false, mimeType: "application/pdf", size: 10, modified: dated - 86_400_000 },
       { volume: "primary", path: "Download/plain.pdf", directory: false, mimeType: "text/plain", size: 10, modified: dated },
     );
-    const filter = { type: "files_filter", kind: "pdf", from: "2026-03-04T00:00:00Z", to: "2026-03-04T23:59:59Z" } as const;
+    const filter = { type: "files_filter", folder: "Download", kind: "pdf", from: "2026-03-04T00:00:00Z", to: "2026-03-04T23:59:59Z" } as const;
     const filteredByDate = await runtime.runPromise(fileAction(filter, { attemptId: 1, proposalId: "dated-pdfs", operationId: "dated-pdfs" }));
     expect([filteredByDate?.kind, now().search.hits.map((item) => item.name)]).toEqual(["applied", ["during.pdf"]]);
 
