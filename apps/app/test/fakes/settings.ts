@@ -1,5 +1,6 @@
 // spec/app/settings/index.md, "Story: Find a setting and come back"
 import type { DataResetPlugin, AndroidRoleStatus, ElizaPasswordsPlugin, ListenerStatus, PasswordEditorInput, PasswordEntrySummary, PasswordsStatus, LaunchTarget, LauncherAppsChange, NativeCrashEntry, SystemFacts, SystemHostPlugin, SystemPlugin, SystemSettingsPage, ApprovedJoinResult, ConnectOptions, ConnectivityResult, WiFiNetwork, WiFiPlugin } from "@elizaos/os-bridges";
+import type { PasswordProvider, PasswordProviderAction } from "../../src/platform/systemSettings.vibe";
 import type { LauncherScene } from "./launcher.ts";
 import { type Faked, plugin, rejection } from "./phone.ts";
 
@@ -24,6 +25,7 @@ export interface SettingsScene {
   facts: SystemFacts;
   recovery?: RecoveryScene;
   listener?: ListenerScene;
+  textAsk?: { ticket: number; canReturn: boolean; returned: number[] };
   roles: AndroidRoleStatus[];
   launcher: boolean;
   version: string;
@@ -34,11 +36,14 @@ export interface SettingsScene {
   grantsHome: boolean;
   readonly opened: string[];
   readonly copied: string[];
+  refusesCopy: boolean;
   passwordsUnlocked: boolean;
   readonly passwords: PasswordEntrySummary[];
   readonly passwordEdits: Array<PasswordEditorInput | undefined>;
+  readonly passwordRowActions: Array<{ choice: "copy" | "reveal" | "remove"; id: string; revision: number }>;
   autofill: PasswordsStatus["autofill"];
   autofillDestination: Awaited<ReturnType<ElizaPasswordsPlugin["openAutofillSettings"]>>["destination"];
+  passwordProvider?: PasswordProvider;
   crashes: NativeCrashEntry[];
   reset: { status: string; message: string };
   readonly reviews: number[];
@@ -49,6 +54,8 @@ export interface SettingsScene {
   carrier: { slots: Array<{ slotIndex: number; imei: CarrierField; simState: CarrierField }>; iccid: CarrierField; eid: CarrierField };
   /** Each Google consent Alpha's host kept to launch the agent with, oldest first: one told again unchanged is kept once, as `AlphaAgentService.keep` does. */
   readonly consents: Array<{ gmailChanges: boolean; calendarEdits: boolean }>;
+  /** How many times Alpha told the host a consent at all, kept or not. */
+  told: number;
   /** Whether the host refuses each consent it is told, keeping what it had, as when Android cannot save it. */
   refusesConsent: boolean;
   /** What the host waits for before it answers a consent, as when a restart of the agent is slow. */
@@ -64,11 +71,11 @@ export function settingsScene(): SettingsScene {
     ],
     launcher: true, version: "1.4.0",
     hostFacts: { androidRelease: "16", permissions: { Microphone: false, Calendar: true } },
-    passwordsUnlocked: false, passwords: [], passwordEdits: [],
+    passwordsUnlocked: false, passwords: [], passwordEdits: [], passwordRowActions: [],
     autofill: { supported: true, selected: "none" }, autofillDestination: "autofill-picker",
-    gate: Promise.resolve(), grantsHome: true, opened: [], copied: [], crashes: [], reset: { status: "cancelled", message: "Nothing was reset." }, reviews: [],
+    gate: Promise.resolve(), grantsHome: true, opened: [], copied: [], refusesCopy: false, crashes: [], reset: { status: "cancelled", message: "Nothing was reset." }, reviews: [],
     networks: [{ ssid: "home", bssid: "00:11:22:33:44:55", rssi: -50, frequency: 2412, capabilities: "[WPA2-PSK-CCMP]", secured: true, security: "wpa2" }],
-    joinAnswer: "connected", joins: [], connectivity: { online: true, validated: true, captivePortal: false, ssid: "home" }, consents: [], refusesConsent: false, consentGate: Promise.resolve(),
+    joinAnswer: "connected", joins: [], connectivity: { online: true, validated: true, captivePortal: false, ssid: "home" }, consents: [], told: 0, refusesConsent: false, consentGate: Promise.resolve(),
     carrier: {
       slots: [{ slotIndex: 0, imei: { status: "available", value: "356938035643809" }, simState: { status: "available", value: "Ready" } }, { slotIndex: 1, imei: { status: "permission-denied" }, simState: { status: "available", value: "Absent" } }],
       iccid: { status: "permission-denied" }, eid: { status: "available", value: "89049032000000000000000000000001" },
@@ -181,6 +188,7 @@ export function elizaWiFi(scene: SettingsScene): Faked {
 export function alphaAgentConsent(scene: SettingsScene) {
   return {
     setAgentGoogleConsent: async (consent: { gmailChanges: boolean; calendarEdits: boolean }) => {
+      scene.told += 1;
       await scene.consentGate;
       if (scene.refusesConsent) throw new Error("Agent consent could not be saved");
       const kept = scene.consents.at(-1);
@@ -225,6 +233,13 @@ export function elizaSense(scene: SettingsScene, listener: ListenerScene): Faked
 
 /** Android's autofill status and provider picker through the native Passwords bridge. */
 export function elizaPasswords(scene: SettingsScene): Faked {
+  const check = (choice: "copy" | "reveal" | "remove", id: string, revision: number | undefined) => {
+    if (!scene.passwordsUnlocked) throw rejection("locked");
+    const index = scene.passwords.findIndex((entry) => entry.id === id && entry.revision === revision);
+    if (revision === undefined || index < 0) throw rejection("conflict");
+    scene.passwordRowActions.push({ choice, id, revision });
+    return index;
+  };
   return () => ({
     status: () => Promise.resolve<PasswordsStatus>({ available: true, locked: !scene.passwordsUnlocked, unlockRemainingMs: scene.passwordsUnlocked ? 60000 : 0, unlockSeconds: 60, biometric: false, autofill: { ...scene.autofill } }),
     unlock: async (): ReturnType<ElizaPasswordsPlugin["unlock"]> => {
@@ -238,6 +253,18 @@ export function elizaPasswords(scene: SettingsScene): Faked {
     list: async (): ReturnType<ElizaPasswordsPlugin["list"]> => {
       if (!scene.passwordsUnlocked) throw rejection("locked");
       return { entries: structuredClone(scene.passwords) };
+    },
+    reveal: async ({ id, expectedRevision }: Parameters<ElizaPasswordsPlugin["reveal"]>[0]): ReturnType<ElizaPasswordsPlugin["reveal"]> => {
+      check("reveal", id, expectedRevision);
+      return { shown: true, hidesAfterMs: 30_000 };
+    },
+    copy: async ({ id, expectedRevision }: Parameters<ElizaPasswordsPlugin["copy"]>[0]): ReturnType<ElizaPasswordsPlugin["copy"]> => {
+      check("copy", id, expectedRevision);
+      return { copied: true, clearsAfterMs: 30_000 };
+    },
+    remove: async ({ id, expectedRevision }: Parameters<ElizaPasswordsPlugin["remove"]>[0]): ReturnType<ElizaPasswordsPlugin["remove"]> => {
+      scene.passwords.splice(check("remove", id, expectedRevision), 1);
+      return { removed: true };
     },
     openEditor: async ({ entryId, expectedRevision }: Partial<PasswordEditorInput>): ReturnType<ElizaPasswordsPlugin["openEditor"]> => {
       if (!scene.passwordsUnlocked) throw rejection("locked");
@@ -266,7 +293,23 @@ export function elizaPasswords(scene: SettingsScene): Faked {
 export function settingsHost(scene: SettingsScene) {
   return {
     settingsFacts: () => Promise.resolve(scene.hostFacts),
+    passwordProviderStatus: () => Promise.resolve(scene.passwordProvider),
+    openPasswordProvider: async ({ action }: { action: PasswordProviderAction }) => {
+      await page(scene, `password-provider ${action}`);
+      return { status: "opened", destination: action === "settings" ? "provider-picker" : "external" };
+    },
+    textAsk: () => Promise.resolve({ ticket: scene.textAsk?.ticket ?? 0 }),
+    closeTextAsk: ({ ticket }: { ticket: number }) => {
+      const visit = scene.textAsk;
+      const closed = visit?.ticket === ticket && visit.canReturn;
+      if (closed) {
+        visit.returned.push(ticket);
+        visit.ticket = 0;
+      }
+      return Promise.resolve({ closed });
+    },
     copyText: ({ text }: { text: string }) => {
+      if (scene.refusesCopy) return Promise.reject(new Error("Clipboard unavailable"));
       scene.copied.push(text);
       return Promise.resolve();
     },

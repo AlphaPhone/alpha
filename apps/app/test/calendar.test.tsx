@@ -14,7 +14,7 @@ import { civilDay, dateOf, dayStart } from "../src/calendar/time.ts";
 import { createReminderItem, resetReminderStores } from "../src/reminders/reminders.vibe";
 import { DEFAULT_LIST_ID, remindersStore } from "../src/reminders/store.ts";
 import type { Alpha } from "../src/runtime/area.tsx";
-import { button, closeAll, drawn, fill, hardware, later, only, open, press, underAct, until } from "./alpha.tsx";
+import { button, closeAll, drawn, fill, hardware, later, only, open, press, seen, underAct, until } from "./alpha.tsx";
 import { agentEvent, agentRequest } from "./fakes/calendar.ts";
 import { type Scene, scene } from "./fakes/scene.ts";
 
@@ -211,6 +211,108 @@ describe("Calendar without a connected account", () => {
     await press(/^Leave through the garden,/);
     expect(document.querySelector('[data-alpha-subview="calendar-detail"]')?.textContent).toContain("Due 10:15 AM");
   });
+
+  it("Reviews discarding a retained Calendar reminder draft (spec/app/calendar/editor.md, \"Story: Keep my draft through a restart\")", async () => {
+    const world = { ...morning(false), signedIn: false };
+    const { alpha } = await open(world, only("view:Calendar"));
+    const runtime = calendar.runtime(alpha);
+    await openCalendar(alpha);
+    await until(alpha, runtime, View, (state) => state.front && state.anchor === world.today);
+    await press("New event");
+    await until(alpha, runtime, Editor, (state) => state.form === "NewEvent" && state.shown);
+    await press("Reminders");
+    await fill("Title", "Keep this until I confirm");
+    await press("Discard calendar draft");
+    await until(alpha, runtime, Editor, (state) => state.confirming === "ConfirmDiscard");
+    await hardware("back");
+    await until(alpha, runtime, Editor, (state) => state.confirming === "NoConfirm" && state.shown);
+    expect(document.querySelector<HTMLInputElement>('input[aria-label="Title"]')?.value).toBe("Keep this until I confirm");
+    await press("Discard calendar draft");
+    await until(alpha, runtime, Editor, (state) => state.confirming === "ConfirmDiscard");
+    await press("Discard");
+    await until(alpha, runtime, Editor, (state) => state.form === "NoForm");
+    expect(remindersStore.snapshot().snapshot.items).toHaveLength(0);
+    await press("New event");
+    await until(alpha, runtime, Editor, (state) => state.form === "NewEvent" && state.shown);
+    expect(document.querySelector<HTMLInputElement>('input[aria-label="Title"]')?.value).toBe("");
+  });
+
+  it("Edits a dated reminder in Calendar without changing another reminder with the same title (spec/app/calendar/editor.md, \"Story: Write an event\")", async () => {
+    const world = morning(false);
+    const { alpha } = await open(world, only("view:Calendar"));
+    const runtime = calendar.runtime(alpha);
+    await openCalendar(alpha);
+    await until(alpha, runtime, View, (state) => state.front && state.anchor === world.today);
+    await until(alpha, alpha.runtime, Reminders, (state) => state.sync.status === "Loaded");
+    const input = { listId: DEFAULT_LIST_ID, title: "Bring the blue notebook", dueMinute: 570, alertMinutes: null };
+    const selected = await alpha.runtime.runPromise(createReminderItem({ ...input, notes: "The first draft is inside.", dueDate: "2026-11-24" }));
+    await until(alpha, alpha.runtime, Reminders, (state) => state.write.outcome === "Confirmed");
+    const other = await alpha.runtime.runPromise(createReminderItem({ ...input, notes: "A different notebook.", dueDate: "2026-11-25" }));
+    await until(alpha, alpha.runtime, Reminders, (state) => state.write.outcome === "Confirmed");
+    if (!selected || !other) throw new Error("Expected two saved reminders");
+
+    await until(alpha, runtime, View, (state) => state.reminders === 1);
+    await press(/^Bring the blue notebook,/);
+    await until(alpha, runtime, View, (state) => state.reminder > 0);
+    await press("Event actions");
+    await press("Edit event");
+    await until(alpha, runtime, Editor, (state) => state.form === "EditReminder" && state.shown);
+    expect(document.querySelector<HTMLInputElement>('input[aria-label="Title"]')?.value).toBe(selected.title);
+    expect(document.querySelector<HTMLInputElement>('input[aria-label="Reminder time"]')?.value).toBe("09:30");
+    await fill("Notes", "Take the earlier draft.");
+    await fill("Reminder time", "10:15");
+    await press("Save event");
+    await until(alpha, runtime, Editor, (state) => !state.shown && state.write.outcome === "Confirmed");
+    expect(remindersStore.findItem(selected.id)).toMatchObject({ notes: "Take the earlier draft.", dueMinute: 615, revision: selected.revision + 1 });
+    expect(world.reminders.items.find((item) => item.id === selected.id)).toMatchObject({ notes: "Take the earlier draft.", dueMinute: 615 });
+    expect(remindersStore.findItem(other.id)).toMatchObject({ notes: "A different notebook.", dueMinute: 570, revision: other.revision });
+  });
+
+  it("Reviews reopening the exact completed reminder without an alert (spec/app/calendar/reminderReopen.md, \"Story: Review reopening the selected reminder without an alert\")", async () => {
+    const world = morning(false);
+    const { alpha } = await open(world, only("view:Calendar"));
+    const runtime = calendar.runtime(alpha);
+    await openCalendar(alpha);
+    await until(alpha, runtime, View, (state) => state.front && state.anchor === world.today);
+    await until(alpha, alpha.runtime, Reminders, (state) => state.sync.status === "Loaded");
+    const inputs = { listId: DEFAULT_LIST_ID, title: "Bring the blue notebook", dueMinute: 570, alertMinutes: 0 };
+    const selected = await alpha.runtime.runPromise(createReminderItem({ ...inputs, dueDate: "2026-11-24" }));
+    await until(alpha, alpha.runtime, Reminders, (state) => state.write.outcome === "Confirmed");
+    const other = await alpha.runtime.runPromise(createReminderItem({ ...inputs, dueDate: "2026-11-25" }));
+    await until(alpha, alpha.runtime, Reminders, (state) => state.write.outcome === "Confirmed");
+    if (!selected || !other) throw new Error("Expected two saved reminders");
+
+    await until(alpha, runtime, View, (state) => state.reminders === 1);
+    await press(/^Bring the blue notebook,/);
+    await until(alpha, runtime, View, (state) => state.reminder > 0);
+    await press("Complete reminder occurrence");
+    await until(alpha, alpha.runtime, Reminders, (state) => state.write.outcome === "Confirmed");
+    const detail = () => document.querySelector('[data-alpha-subview="calendar-detail"]')?.textContent;
+    expect(detail()).toContain(`Completed ${new Date(world.now).toLocaleString()} · due ${new Date(world.at(0, 9.5)).toLocaleString()}`);
+    await press("Reopen reminder");
+    await vi.waitFor(() => expect(document.querySelector('[role="dialog"]')?.textContent).toContain("No alert"));
+    await hardware("back");
+    await vi.waitFor(() => expect(document.querySelector('[role="dialog"]')).toBeNull());
+    expect(world.reminders.items.find((item) => item.id === selected.id)?.completed).toBe(true);
+    expect(button("Reopen reminder")).toBeDefined();
+
+    await press("Reopen reminder");
+    await vi.waitFor(() => expect(button("Reopen")).toBeDefined());
+    try {
+      await seen(false);
+      await vi.waitFor(() => expect(document.querySelector('[role="dialog"]')).toBeNull());
+    } finally {
+      await seen(true);
+    }
+    expect(world.reminders.items.find((item) => item.id === selected.id)?.completed).toBe(true);
+
+    await press("Reopen reminder");
+    await vi.waitFor(() => expect(button("Reopen")).toBeDefined());
+    await press("Reopen");
+    await vi.waitFor(() => expect(detail()).toContain("No alert · saved on this device"));
+    expect(world.reminders.items.find((item) => item.id === selected.id)).toMatchObject({ completed: false, alertMinutes: null, dueMinute: 570 });
+    expect(world.reminders.items.find((item) => item.id === other.id)).toMatchObject({ completed: false, alertMinutes: 0, revision: other.revision });
+  });
 });
 
 it("Shows the newly verified Google grant when Calendar Settings reopens (spec/app/settings/index.md, \"Each page links to what another area owns there\")", async () => {
@@ -333,6 +435,47 @@ describe("on a phone", () => {
     await until(alpha, runtime, Editor, (e) => e.form === "NoForm" && e.write.outcome === "Confirmed");
     await until(alpha, runtime, View, (s) => s.phoneRows === 2);
     expect([world.calendar.phoneEvents.map((event) => event.title), titles()]).toEqual([["Gym", "Coffee"], ["Coffee", "Standup", "Team lunch", "Gym"]]);
+
+    // spec/app/calendar/editor.md, "An event ends after it starts": an all-day event sends a positive, UTC-midnight-bounded span
+    await press("New event");
+    await until(alpha, runtime, Editor, (e) => e.shown && e.receipts.status === "Loaded");
+    await fill("Title", "Away for the day");
+    await press("All day");
+    await until(alpha, runtime, Editor, (e) => e.titled && e.allDay && e.kept);
+    await press("Save event");
+    await until(alpha, runtime, Editor, (e) => e.form === "NoForm" && e.write.outcome === "Confirmed");
+    expect(world.calendar.events.find(({ title }) => title === "Away for the day")).toMatchObject({
+      isAllDay: true, startAt: "2026-11-24T00:00:00.000Z", endAt: "2026-11-25T00:00:00.000Z",
+    });
+
+    // spec/app/calendar/writing.md, "Guests, alerts and video rooms go to Android Calendar; zones, all-day and repeats use the direct save for a new event": Android keeps those options on the local row
+    await press("New event");
+    await until(alpha, runtime, Editor, (e) => e.shown && e.receipts.status === "Loaded");
+    await fill("Title", "Office closure");
+    await press("This phone's calendar");
+    await press("All day");
+    await press("Weekdays");
+    await press("Save event");
+    await until(alpha, runtime, Editor, (e) => e.form === "NoForm" && e.write.outcome === "Confirmed");
+    await until(alpha, runtime, View, (state) => state.phoneRows === 3);
+    expect(world.calendar.phoneEvents.find(({ title }) => title === "Office closure")).toMatchObject({
+      allDay: true, recurring: true, begin: Date.UTC(2026, 10, 24), end: Date.UTC(2026, 10, 25),
+    });
+    expect(button("Office closure, All day")).toBeDefined();
+
+    // spec/app/calendar/editor.md, "Story: Hand Android Calendar what Alpha cannot write": the handoff carries the requested alert and writes nothing
+    await press("New event");
+    await fill("Title", "Briefing");
+    await press("This phone's calendar");
+    await press("Video link");
+    await until(alpha, runtime, Editor, (e) => e.extras);
+    await press("10 min");
+    await press("Video link");
+    await press("Open in Android Calendar");
+    await until(alpha, runtime, Editor, (e) => e.form === "NoForm");
+    await vi.waitFor(() => expect(world.calendar.handoffs).toMatchObject([{ title: "Briefing", alerts: [10] }]));
+    expect(world.calendar.phoneEvents.map((event) => event.title)).toEqual(["Gym", "Coffee", "Office closure"]);
+    expect(world.calendar.events.some((event) => event.title === "Briefing")).toBe(false);
 
     // spec/app/calendar/editor.md, "While a create is in doubt its form waits; checking the phone's receipts finds it or not": the phone made the event and could not say so.
     world.calendar.lost = true;

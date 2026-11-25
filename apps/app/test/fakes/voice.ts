@@ -54,6 +54,8 @@ export interface VoiceScene {
   readonly speakerGainRequests: boolean[];
   readonly speakerMutedAtPlayback: boolean[];
   readonly spoken: SpokenSentence[];
+  readonly spokenPages: { readonly readingToken: string; readonly ownerId: string; readonly sessionId: string; readonly requestId: string }[];
+  holdPagePlayback?: boolean;
   activeMicSession: string | undefined;
   emitLocal?: (event: string, data: unknown) => void;
   emitCloud?: (event: CloudStreamEvent) => void;
@@ -98,6 +100,7 @@ export function voiceScene(): VoiceScene {
     speakerGainRequests: [],
     speakerMutedAtPlayback: [],
     spoken: [],
+    spokenPages: [],
     activeMicSession: undefined,
   };
 }
@@ -106,6 +109,7 @@ export function alphaVoiceCloud(voice: VoiceScene): Faked {
   return (emit) => {
     voice.emitLocal = emit;
     let playbackSeq = 0;
+    let pagePlaybackId: string | undefined;
     let recordingSeq = 0;
     let activeRecording: string | undefined;
     let finishedRecording: string | undefined;
@@ -164,9 +168,15 @@ export function alphaVoiceCloud(voice: VoiceScene): Faked {
         await voice.synthesisGate?.();
         return { playbackId };
       },
+      synthesizeLocalBrowserReading: (reading: VoiceScene["spokenPages"][number]) => {
+        const { readingToken, ownerId, sessionId, requestId } = reading;
+        voice.spokenPages.push({ readingToken, ownerId, sessionId, requestId });
+        pagePlaybackId = `pb-${++playbackSeq}`;
+        return Promise.resolve({ execution: "device", playbackId: pagePlaybackId });
+      },
       play: ({ playbackId }: { playbackId: string }) => {
         voice.speakerMutedAtPlayback.push(voice.speakerMuted);
-        emit("playbackEnded", { playbackId });
+        if (!voice.holdPagePlayback || playbackId !== pagePlaybackId) emit("playbackEnded", { playbackId });
         return Promise.resolve({});
       },
       setSpeechOutputMuted: async ({ muted }: { muted: boolean }) => {

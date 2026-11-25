@@ -97,9 +97,9 @@ export function App({ alpha }: AppProps) {
   }
   const shellFailed = cause !== undefined;
   const showing = state.trail.at(-1);
-  const owner = `${showing ?? "home"}:${state.assistant}:${launcher}`;
+  const owner = `${showing ?? "home"}:${state.assistant}:${launcher}:${state.textAskThrough}`;
   const beginSwipe = (event: PointerEvent<HTMLElement>) => {
-    if (shellFailed || signingIn || !event.isPrimary || event.button !== 0 || event.defaultPrevented) return;
+    if (shellFailed || signingIn || state.textAsk.tag === "TextAskVisit" || !event.isPrimary || event.button !== 0 || event.defaultPrevented) return;
     startedRef.current = undefined;
     const target = event.target;
     if (target instanceof Element && target.closest("input, textarea, select, [contenteditable]:not([contenteditable=false]), [data-alpha-own-gesture]")) return;
@@ -168,12 +168,12 @@ export function App({ alpha }: AppProps) {
   };
   const inert = shellFailed || (layers !== undefined && pageInert(layers));
   const comms = isCommsView(showing);
-  const side = showing === undefined && canvas?.landscape === true && coarsePointer;
+  const side = state.textAsk.tag === "NoTextAsk" && showing === undefined && canvas?.landscape === true && coarsePointer;
   const fullScreen = state.assistant === "Full" && !side;
   const strip = comms && fullScreen;
   const back = !shellFailed && can({ type: "goBack" });
   const canGoBack = String(!shellFailed && (signingIn ? canLeaveSignInStep(signedIn, signInFlow)
-    : back || (layers !== undefined && takesBack(layers))));
+    : back || state.textAsk.tag === "TextAskVisit" || (layers !== undefined && takesBack(layers))));
   const frameStyle = preview
     ? { left: preview.left, top: preview.top, width: preview.width, height: preview.height, transform: `scale(${preview.scale})`, transformOrigin: "top left" }
     : canvas?.covered ? { height: canvas.visible } : undefined;

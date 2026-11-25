@@ -54,7 +54,7 @@ pure def offers(page: I::Page, target: Target): bool =
     target == AboutPhone or target == MobileNetworks or target == SimCards or target == AccessPointNames or target == DefaultApps
   else if (page == I::CalendarApp or page == I::CameraApp or page == I::MapsApp or page == I::NotesApp) target == AppPermissions
   else if (page == I::PhotosApp) target == PhotoPermissions
-  else if (page == I::PasswordsPage) target == PasswordAutofill
+  else if (I::passwordPage(page)) target == PasswordAutofill
   else if (page == I::Developer) target == DeveloperOptions
   else false
 ```

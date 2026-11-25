@@ -142,7 +142,7 @@ export function InboxListScreen({
       {notice ? <InboxNotice kind={notice} onAction={onNoticeAction} plain /> : null}
       {rows.length === 0 && loading ? <InboxListState kind="loading" />
         : state && rows.length === 0 ? <InboxListState kind={state === "empty" ? emptyIn[folder] : state} onAction={onStateAction} />
-        : <InboxList rows={rows} loading={loading} onLoadMore={onLoadMore} loadingMore={loadingMore} />}
+        : <InboxList rows={rows} searching={searching} loading={loading} onLoadMore={onLoadMore} loadingMore={loadingMore} />}
     </Screen>
   );
 }

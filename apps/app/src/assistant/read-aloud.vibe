@@ -4,9 +4,9 @@ import { Machine as Shell, type Shell as ShellState } from "../../gen/app__shell
 import * as Voice from "../../gen/app__voice.effect.vibe"
 import * as Speaker from "../../gen/app__voice__output.effect.vibe"
 import { Device } from "../platform/device.vibe"
-import { VoiceBridge } from "../platform/voice.vibe"
+import { type NativePageSpeech, VoiceBridge } from "../platform/voice.vibe"
 import { type Job, answer, contained, hearing, reacting, started, stream, together } from "../runtime/reactor.vibe"
-import { VoiceWords } from "../voice/voice.vibe"
+import { type PageSpeech, VoiceWords } from "../voice/voice.vibe"
 import { Talk } from "./talk.vibe"
 import { wordsOf } from "./words.ts"
 
@@ -61,6 +61,32 @@ export effect function stopTranscript(review: number): void!!(Speaker.Machine | 
   try contained(speaker.send({ type: "stop" }, (state) => state.ticket === reading.ticket), "stopping the reviewed transcript")
 }
 
+export effect function readPage(page: PageSpeech): boolean!!(Speaker.Machine | Voice.Machine | VoiceWords | VoiceBridge) {
+  const voice = try (try Voice.Machine).get()
+  if (!Voice.quiet(voice) || voice.recorder.stage !== "Closed" || !(try (try VoiceBridge).canRead()) || !(try page.current())) return false
+  const { memory } = try VoiceWords
+  const speaker = try Speaker.Machine
+  const reading = try speaker.get()
+  if (reading.stage !== "Silent" || reading.retiring || !Speaker.canRead(reading, "Page", page.item)) return false
+  memory.pageReading = page
+  const accepted = try contained(speaker.send({ type: "read", text: "Page", which: page.item }, (state) => state.ticket === reading.ticket), "reading the current Browser page")
+  if (!accepted && memory.pageReading === page) memory.pageReading = undefined
+  return accepted
+}
+
+export effect function stopPage(item: number): void!!(Speaker.Machine | VoiceWords) {
+  const { memory } = try VoiceWords
+  const page = memory.pageReading
+  if (page?.item !== item) return
+  memory.pageReading = undefined
+  const speaker = try Speaker.Machine
+  const reading = try speaker.get()
+  if (reading.text === "Page" && reading.item === item && Speaker.canStop(reading)) {
+    try contained(speaker.send({ type: "stop" }, (state) => state.ticket === reading.ticket), "stopping the current Browser page")
+  }
+  try page.retire()
+}
+
 type Inputs = Speaker.Machine | Chats.Machine | Talk | VoiceBridge | Voice.Machine | VoiceWords | Shell | Device
 
 function prepare(ticket: number, text: Speaker.Text, item: number): Stream.Stream<Speaker.Event, never, Inputs> {
@@ -69,8 +95,9 @@ function prepare(ticket: number, text: Speaker.Text, item: number): Stream.Strea
     const state = try speaker.get()
     if (state.ticket !== ticket || state.stage !== "Preparing") return Stream.empty
     const conversation = (try (try Chats.Machine).get()).chosen
-    let words: string | undefined
+    let words: string | NativePageSpeech | undefined
     let stillCurrent: (() => boolean!!) | undefined
+    let retire: (() => void!!) | undefined
     if (text === "Transcript") {
       const { memory } = try VoiceWords
       const held = memory.transcriptReading
@@ -89,6 +116,18 @@ function prepare(ticket: number, text: Speaker.Text, item: number): Stream.Strea
         }
         if (try stillCurrent()) words = held.words
       }
+    } else if (text === "Page") {
+      const { memory } = try VoiceWords
+      const page = memory.pageReading
+      if (page?.item === item) {
+        retire = effect () => {
+          if (memory.pageReading !== page) return
+          memory.pageReading = undefined
+          try page.retire()
+        }
+        stillCurrent = effect () => memory.pageReading === page && (try page.current())
+        if (try stillCurrent()) words = page.words
+      }
     } else if (text === "Message") {
       const { board } = try Talk
       const line = board.line(conversation, item)
@@ -99,6 +138,7 @@ function prepare(ticket: number, text: Speaker.Text, item: number): Stream.Strea
       : Stream.map(bridge.readAloud(ticket, words, stillCurrent), (event): Speaker.Event => ({ type: event.kind, ticket, ok: event.ok }))
     return Stream.concat(audio, Stream.fromEffect(effect {
       const confirmed = try bridge.silenceReading(ticket)
+      if (retire !== undefined) try retire()
       return { type: "cleaned", confirmed } as Speaker.Event
     }))
   })

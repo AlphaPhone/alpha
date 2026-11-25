@@ -81,3 +81,42 @@ it("Holds native Home until the phone confirms the signed-in account (spec/app/a
     react.IS_REACT_ACT_ENVIRONMENT = undefined;
   }
 });
+
+it("Returns from Android Wi-Fi settings to the sign-in chooser (spec/app/account/signIn.md, \"Story: Sign in when Alpha needs it\")", async () => {
+  const world = { ...scene(), phone: true, signedIn: false };
+  world.settings.connectivity = { online: false, validated: false, captivePortal: false, ssid: null };
+  underAct();
+  try {
+    await openOver(fakeWorld(world), only("home", "overlay"), true);
+    const notice = () => document.querySelector('[aria-label="Sign-in connection"]');
+    await vi.waitFor(() => expect(notice()?.textContent).toContain("You’re offline. Connect to Wi-Fi to sign in."));
+    expect(button("Send code")?.disabled).toBe(true);
+    expect(button("Settings")).toBeUndefined();
+    await press("Open Wi-Fi settings");
+    await vi.waitFor(() => expect(world.settings.opened).toEqual(["wifi"]));
+    expect(notice()?.querySelector('[role="alert"]')).toBeNull();
+
+    world.settings.connectivity = { online: true, validated: false, captivePortal: true, ssid: "captive" };
+    await drawn(() => window.dispatchEvent(new Event("focus")));
+    await vi.waitFor(() => expect(notice()?.textContent).toContain("Android couldn’t verify internet access."));
+    expect(button("Send code")?.disabled).toBe(false);
+
+    world.settings.facts.wifiActive = false;
+    await drawn(() => window.dispatchEvent(new Event("focus")));
+    await vi.waitFor(() => expect(notice()?.textContent).toContain("Sign-in isn’t using Wi-Fi. Android couldn’t verify internet access."));
+    world.settings.connectivity = { online: true, validated: true, captivePortal: false, ssid: null };
+    await drawn(() => window.dispatchEvent(new Event("focus")));
+    await vi.waitFor(() => expect(notice()?.textContent).toContain("You can use mobile data or connect to Wi-Fi."));
+    expect(button("Send code")?.disabled).toBe(false);
+
+    world.settings.facts.wifiActive = true;
+    world.settings.connectivity = { online: true, validated: true, captivePortal: false, ssid: "home" };
+    await drawn(() => window.dispatchEvent(new Event("focus")));
+    await vi.waitFor(() => expect(notice()).toBeNull());
+    expect(button("Send code")?.disabled).toBe(false);
+    expect(button("Settings")).toBeUndefined();
+  } finally {
+    await closeAll();
+    react.IS_REACT_ACT_ENVIRONMENT = undefined;
+  }
+});

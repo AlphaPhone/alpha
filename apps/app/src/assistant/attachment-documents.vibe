@@ -23,6 +23,7 @@ export type AttachmentDocumentListing =
 export type AttachmentDocumentsAccess = "Granted" | "Denied" | "Unsupported" | "Failed"
 
 module names {
+  import type { StorageEntry } from "@elizaos/os-bridges"
   const names = new Intl.Collator(undefined, { numeric: true, sensitivity: "base" })
 
   /** @throws {never} */

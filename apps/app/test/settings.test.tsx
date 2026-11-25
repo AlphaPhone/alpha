@@ -312,6 +312,29 @@ describe("Settings", () => {
     await vi.waitFor(() => expect(titled("New account")).toBeDefined());
     expect(world.settings.passwordEdits).toEqual([{ entryId: "entry-47", expectedRevision: 4 }, undefined]);
 
+    const choosePasswordAction = async (label: string, choice: string) => {
+      await act(async () => button(`Options for ${label}`)?.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true })));
+      const item = () => [...document.querySelectorAll<HTMLElement>('[role="menuitem"]')].find((row) => row.textContent === choice);
+      await vi.waitFor(() => expect(item()).toBeDefined());
+      await act(async () => item()?.click());
+    };
+    await choosePasswordAction("Updated account", "Reveal password");
+    await vi.waitFor(() => expect(world.settings.passwordRowActions[0]).toEqual({ choice: "reveal", id: "entry-47", revision: 5 }));
+    await vi.waitFor(() => expect(titled("Updated account")).toBeDefined());
+    await choosePasswordAction("Updated account", "Copy password");
+    await vi.waitFor(() => expect(document.body.textContent).toContain("Password copied"));
+    await choosePasswordAction("New account", "Delete password");
+    await press("Cancel");
+    expect(world.settings.passwords.some(({ id }) => id === "entry-new")).toBe(true);
+    await choosePasswordAction("New account", "Delete password");
+    await press("Delete");
+    await vi.waitFor(() => expect(document.body.textContent).toContain("Password deleted"));
+    expect(world.settings.passwordRowActions).toEqual([
+      { choice: "reveal", id: "entry-47", revision: 5 },
+      { choice: "copy", id: "entry-47", revision: 5 },
+      { choice: "remove", id: "entry-new", revision: 1 },
+    ]);
+
     await seen(false);
     await vi.waitFor(() => expect(world.settings.passwordsUnlocked).toBe(false));
     await seen(true);
@@ -324,6 +347,36 @@ describe("Settings", () => {
     expect(titled("Updated account")).toBeUndefined();
     await hardware("back");
     expect(await page(alpha)).toBe("Apps");
+  });
+
+  it("Shows and opens Proton Pass only from the owner's native Password manager (spec/app/settings/facts.md, \"Story: Manage my saved passwords\")", async () => {
+    const sceneWithProton = { ...scene(), phone: true };
+    sceneWithProton.settings.passwordProvider = { installation: "absent", selection: "none", support: "available" };
+    const { world } = await settingsOpen(sceneWithProton);
+    await press("Apps");
+    await press("Passwords");
+    await vi.waitFor(() => expect(button("Proton Pass")?.textContent).toContain("Not installed"));
+    expect(world.settings.opened).toEqual([]);
+    expect(button("Get Proton Pass")).toBeUndefined();
+    await press("Proton Pass");
+    expect(button("Proton Pass")?.getAttribute("aria-expanded")).toBe("true");
+    expect(button("Open Proton Pass")).toBeUndefined();
+    await press("Get Proton Pass");
+    await vi.waitFor(() => expect(world.settings.opened).toEqual(["password-provider install"]));
+
+    world.settings.passwordProvider = { installation: "installed", selection: "proton", support: "available" };
+    await vi.waitFor(() => expect(button("Refresh password provider status")?.disabled).toBe(false));
+    await press("Refresh password provider status");
+    await vi.waitFor(() => expect(button("Proton Pass")?.textContent).toContain("Verified"));
+    expect(button("Get Proton Pass")).toBeUndefined();
+    expect(document.body.textContent).toContain("Selected");
+    await press("Open Proton Pass");
+    await vi.waitFor(() => expect(world.settings.opened).toEqual(["password-provider install", "password-provider open"]));
+    await vi.waitFor(() => expect(button("Choose provider")?.disabled).toBe(false));
+    await press("Choose provider");
+    await vi.waitFor(() => expect(world.settings.opened).toEqual(["password-provider install", "password-provider open", "password-provider settings"]));
+    await hardware("back");
+    await vi.waitFor(() => expect(button("Proton Pass")).toBeUndefined());
   });
 
   it("See and control the listener (spec/app/voice/listener.md, \"Story: See and control the listener\")", async () => {
@@ -459,9 +512,11 @@ describe("Settings", () => {
     const refused = await alpha.runtime.runPromise(Prefs.Machine.use((prefs) => prefs.get()));
     expect([Prefs.allows(refused, "CalendarEdits"), refused.agentGoogle]).toEqual([true, { tag: "Consents", gmailChanges: false, calendarEdits: true }]);
     expect(JSON.parse(localStorage.getItem("alpha.preferences") ?? "{}")).toEqual({ askFirst: true, images: true, shares: ["AgentLocation", "CalendarEdits", "SlackContext"] });
+    const toldBefore = world.settings.told;
     await tap("Location for Alpha");
     await until(alpha, alpha.runtime, Prefs.Machine, (s) => s.saving.read.status === "Loaded" && !Prefs.allows(s, "AgentLocation"));
-    expect(world.settings.consents).toHaveLength(3);
+    await later(alpha, 0);
+    expect([world.settings.consents.length, world.settings.told - toldBefore]).toEqual([3, 0]);
     // spec/app/settings/preferences.md, "A change takes effect when the phone saved it; when the phone refuses it, Alpha says it was not saved and nothing changes; when the phone does not answer in time, Alpha says it was not saved and reads the device preferences again": a change the host takes too late is what Settings shows once the phone has finished with it.
     world.settings.refusesConsent = false;
     let answer = () => undefined as void;
@@ -494,6 +549,48 @@ describe("Settings", () => {
     world.settings.refusesConsent = false;
     await press("Settings");
     await vi.waitFor(() => expect(world.settings.consents).toEqual([{ gmailChanges: false, calendarEdits: true }]));
+  });
+
+  it("The host ends on the Google consent Settings shows when a read and a save cross (spec/app/settings/preferences.md, \"Story: Decide whether Alpha asks before it acts\")", async () => {
+    // spec/app/settings/preferences.md, "The agent is launched allowed to change Gmail and Calendar exactly as the phone last read or saved, allowed neither once it could not read them, and Alpha says nothing of it before the first answer"
+    const { alpha, world } = await settingsOpen();
+    await until(alpha, alpha.runtime, Prefs.Machine, (s) => s.document.read.status === "Loaded" && Prefs.allows(s, "GmailChanges"));
+    await vi.waitFor(() => expect(world.settings.consents).toEqual([{ gmailChanges: true, calendarEdits: true }]));
+    await press("Privacy");
+    // spec/app/settings/preferences.md, "The agent is launched allowed to change Gmail and Calendar exactly as the phone last read or saved, allowed neither once it could not read them, and Alpha says nothing of it before the first answer": a read answers while the host is slow, the owner's save waits for the host to take the read's consent, and once the save is kept the host is told the saved consent again from Settings.
+    let answer = () => undefined as void;
+    world.settings.consentGate = new Promise((resolve) => { answer = resolve; });
+    let told = world.settings.told;
+    await seen(false);
+    await seen(true);
+    await vi.waitFor(() => expect(world.settings.told).toBe(told + 1));
+    await until(alpha, alpha.runtime, Prefs.Machine, (s) => s.document.read.status === "Loaded");
+    await tap("Gmail changes");
+    await until(alpha, alpha.runtime, Prefs.Machine, (s) => s.saving.read.status === "Loading");
+    await later(alpha, 0);
+    expect(world.settings.told).toBe(told + 1);
+    answer();
+    await until(alpha, alpha.runtime, Prefs.Machine, (s) => s.saving.read.status === "Loaded" && !Prefs.allows(s, "GmailChanges"));
+    await later(alpha, 0);
+    await vi.waitFor(() => expect(world.settings.consents.at(-1)).toEqual({ gmailChanges: false, calendarEdits: true }));
+    await vi.waitFor(() => expect(world.settings.told).toBe(told + 3));
+    expect(JSON.parse(localStorage.getItem("alpha.preferences") ?? "{}")).toEqual({ askFirst: false, images: true, shares: ["AgentLocation", "BrowserPage", "CalendarEdits", "TelegramContext", "SlackContext"] });
+    // spec/app/settings/preferences.md, "The agent is launched allowed to change Gmail and Calendar exactly as the phone last read or saved, allowed neither once it could not read them, and Alpha says nothing of it before the first answer": a save holds the host past both ten-second limits while the consent of the read that gave up waits its turn, so the host is told neither, and the next read tells it what the save kept.
+    world.settings.consentGate = new Promise((resolve) => { answer = resolve; });
+    told = world.settings.told;
+    await tap("Gmail changes");
+    await later(alpha, 10_000);
+    await until(alpha, alpha.runtime, Prefs.Machine, (s) => s.saving.read.status === "Failed" && s.document.read.status === "Loading");
+    await later(alpha, 10_000);
+    await until(alpha, alpha.runtime, Prefs.Machine, (s) => s.document.read.status === "Failed" && s.agentGoogle.tag === "Consents" && !s.agentGoogle.gmailChanges && !s.agentGoogle.calendarEdits);
+    expect(world.settings.told).toBe(told + 1);
+    answer();
+    await vi.waitFor(() => expect(world.settings.consents.slice(-2)).toEqual([{ gmailChanges: true, calendarEdits: true }, { gmailChanges: false, calendarEdits: false }]));
+    expect(JSON.parse(localStorage.getItem("alpha.preferences") ?? "{}")).toEqual({ askFirst: false, images: true, shares: ["AgentLocation", "BrowserPage", "CalendarEdits", "GmailChanges", "TelegramContext", "SlackContext"] });
+    await seen(false);
+    await seen(true);
+    await until(alpha, alpha.runtime, Prefs.Machine, (s) => s.document.read.status === "Loaded" && Prefs.allows(s, "GmailChanges"));
+    await vi.waitFor(() => expect(world.settings.consents.at(-1)).toEqual({ gmailChanges: true, calendarEdits: true }));
   });
 
   it("A phone updated from the previous Alpha keeps its choices (spec/app/settings/preferences.md, \"The device preferences are read when Alpha starts, when Settings opens, when Alpha comes back while Settings shows, and after a change the phone did not answer in time, with ten seconds to answer, never while a change or a recovery is in flight\")", async () => {

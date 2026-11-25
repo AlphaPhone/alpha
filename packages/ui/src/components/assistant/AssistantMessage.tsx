@@ -110,8 +110,8 @@ function roam(event: KeyboardEvent<HTMLDivElement>, close: () => void) {
 export function AssistantMessage({ author, text, quote, attachments = [], children, onPreview, onQuote, onCopy, onUseInEmail, onEditAgain, onFork, onReadAloud, readAloudActive = false, hold, onOpenLink, streaming = false, className, ...props }: AssistantMessageProps) {
   const owner = author === "owner";
   const shown = useMemo(() => owner
-    ? <span className="break-words whitespace-pre-line">{text}</span>
-    : <span className="flex flex-col gap-3 break-words"><ReplyBlocks blocks={replyMarkdown(text, streaming)} onOpenLink={onOpenLink} /></span>,
+    ? <span className="wrap-anywhere whitespace-pre-line">{text}</span>
+    : <span className="flex flex-col gap-3 wrap-anywhere"><ReplyBlocks blocks={replyMarkdown(text, streaming)} onOpenLink={onOpenLink} /></span>,
   [onOpenLink, owner, streaming, text]);
   const bubble = cn("max-w-full text-left text-base", owner ? "rounded-tile rounded-br-box bg-alpha px-4 py-2.75 leading-normal text-alpha-foreground" : "text-body leading-chat");
   const actions = Boolean(onQuote || onCopy || onUseInEmail || onEditAgain || onFork || onReadAloud);

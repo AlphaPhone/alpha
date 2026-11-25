@@ -578,7 +578,6 @@ function SortFilterMenu({
 export function Reminders({ runtime }: Shown<Resident | RemindersMachines>) {
   const { state, can, send } = useTimed(runtime, useRemindersMachine);
   const storeView = useSyncExternalStore((listener) => remindersStore.subscribe(listener), remindersStore.snapshot);
-  const [drilledIn, setDrilledIn] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const [listDialog, setListDialog] = useState<{ readonly open: boolean; readonly editing: ReminderListRecord | null }>({ open: false, editing: null });
   const [deletingList, setDeletingList] = useState<ReminderListRecord | null>(null);
@@ -598,28 +597,24 @@ export function Reminders({ runtime }: Shown<Resident | RemindersMachines>) {
   const activeListId = activeList?.id ?? DEFAULT_LIST_ID;
   const activeTitle = searching
     ? "Search"
-    : !drilledIn
-      ? "Reminders"
-      : state.view.tag === "Smart"
-        ? smartTitle(state.view.view)
-        : (activeList?.name ?? "Reminders");
+    : activeView.tag === "Smart"
+      ? smartTitle(activeView.view)
+      : activeList?.name ?? "Reminders";
 
   function openSmart(view: SmartView) {
     if (can({ type: "selectSmartView", view })) void send({ type: "selectSmartView", view });
-    setDrilledIn(true);
   }
 
   function openCustomList(list: ReminderListRecord) {
     const specId = remindersStore.specIdForList(list.id);
     if (specId > 0 && can({ type: "selectCustomList", listId: specId })) void send({ type: "selectCustomList", listId: specId });
-    setDrilledIn(true);
   }
 
   function openNewEditor() {
-    const presetDue = drilledIn && state?.view.tag === "Smart" && (state.view.view === "TodayView" || state.view.view === "ScheduledView")
+    const presetDue = activeView.tag === "Smart" && (activeView.view === "TodayView" || activeView.view === "ScheduledView")
       ? todayStr
       : null;
-    const presetFlag = drilledIn && state?.view.tag === "Smart" && state.view.view === "FlaggedView";
+    const presetFlag = activeView.tag === "Smart" && activeView.view === "FlaggedView";
     void runtime.runPromise(beginNewReminder(activeListId, { dueDate: presetDue, flagged: presetFlag }));
   }
 
@@ -644,7 +639,7 @@ export function Reminders({ runtime }: Shown<Resident | RemindersMachines>) {
   }
 
   function handleQuickAdd(title: string, dueDate: string | null) {
-    const flagged = drilledIn && state?.view.tag === "Smart" && state.view.view === "FlaggedView";
+    const flagged = activeView.tag === "Smart" && activeView.view === "FlaggedView";
     void runtime.runPromise(createReminderItem({ listId: activeListId, title, dueDate, flagged }));
   }
 
@@ -658,7 +653,6 @@ export function Reminders({ runtime }: Shown<Resident | RemindersMachines>) {
 
   function handleDeleteList(listId: string, mode: DeleteMode) {
     void runtime.runPromise(deleteReminderList(listId, mode));
-    if (activeList?.id === listId) setDrilledIn(false);
   }
 
   const wireFilter = {
@@ -667,10 +661,10 @@ export function Reminders({ runtime }: Shown<Resident | RemindersMachines>) {
     priority: specToPriority(state.filter.priority),
   };
 
-  const detailItems = drilledIn
+  const detailItems = activeView.tag !== "Overview"
     ? selectViewItems(
         snapshot.items,
-        state.view.tag === "Smart" ? { kind: "smart", view: state.view.view } : { kind: "list", listId: activeListId },
+        activeView.tag === "Smart" ? { kind: "smart", view: activeView.view } : { kind: "list", listId: activeListId },
         wireFilter,
         state.sort,
         hiddenIds,
@@ -679,7 +673,7 @@ export function Reminders({ runtime }: Shown<Resident | RemindersMachines>) {
     : [];
 
   const searchMatches = searching ? sortReminders(searchReminders(snapshot.items, searchQuery, hiddenIds), state.sort) : [];
-  const defaultQuickDue = drilledIn && state.view.tag === "Smart" && (state.view.view === "TodayView" || state.view.view === "ScheduledView")
+  const defaultQuickDue = activeView.tag === "Smart" && (activeView.view === "TodayView" || activeView.view === "ScheduledView")
     ? todayStr
     : null;
 
@@ -687,9 +681,9 @@ export function Reminders({ runtime }: Shown<Resident | RemindersMachines>) {
     <>
       <div className="flex flex-1 flex-col gap-3.5 px-4 pt-2 pb-32">
         <div className="flex items-center justify-between gap-2">
-          {drilledIn && !searching ? (
+          {activeView.tag !== "Overview" && !searching ? (
             <div className="flex min-w-0 items-center gap-2">
-              <Button type="button" variant="ghost" size="icon" aria-label="All lists" onClick={() => setDrilledIn(false)}>
+              <Button type="button" variant="ghost" size="icon" aria-label="All lists" onClick={() => void send({ type: "showLists" })}>
                 <ChevronLeft />
               </Button>
               <h2 className="truncate text-lg font-semibold text-foreground">{activeTitle}</h2>
@@ -709,7 +703,7 @@ export function Reminders({ runtime }: Shown<Resident | RemindersMachines>) {
             </div>
           )}
           <div className="flex shrink-0 items-center gap-1">
-            {drilledIn && !searching ? (
+            {activeView.tag !== "Overview" && !searching ? (
               <SortFilterMenu
                 sort={state.sort}
                 showCompleted={state.filter.showCompleted}
@@ -764,7 +758,7 @@ export function Reminders({ runtime }: Shown<Resident | RemindersMachines>) {
               <p className="text-sm text-muted-foreground">No reminders matched “{searchQuery.trim()}”.</p>
             </EmptyState>
           )
-        ) : !drilledIn ? (
+        ) : activeView.tag === "Overview" ? (
           <RemindersOverview
             counts={counts}
             lists={snapshot.lists}

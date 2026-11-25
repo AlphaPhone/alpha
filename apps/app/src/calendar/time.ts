@@ -3,6 +3,9 @@ import { windowFirstMonth, windowLastMonth } from "../../gen/app__calendar__pres
 
 const dayMs = 86_400_000;
 
+/** UTC midnight of a civil date, for providers that store all-day events as UTC dates. @throws {never} */
+export const utcStart = (civil: number) => civil * dayMs;
+
 /** The phone's civil day of `ms`, counted in days from 1970-01-01, in the phone's own time zone. @throws {never} */
 export function civilDay(ms: number): number {
   const at = new Date(ms);
@@ -11,7 +14,7 @@ export function civilDay(ms: number): number {
 
 /** The local date of a civil day, as a Date at its midnight. @throws {never} */
 export function dateOf(civil: number): Date {
-  const utc = new Date(civil * dayMs);
+  const utc = new Date(utcStart(civil));
   return new Date(utc.getUTCFullYear(), utc.getUTCMonth(), utc.getUTCDate());
 }
 

@@ -2,6 +2,7 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { defineRoutes } from "@elizaos/agent";
 import { describe, expect, it } from "vitest";
 import { AlphaAppsStore, alphaAppsPluginName, createAlphaAppsPlugin } from "../src/plugins/index.ts";
 import { advanceDueDate } from "../src/plugins/store.ts";
@@ -23,11 +24,29 @@ function makeFakeRuntime(initialTasks: readonly {
 }[] = []) {
   const tasks = [...initialTasks];
   const notifications: unknown[] = [];
+  const refusing = new Set<string>();
+  const open = (status: string) => status === "Scheduled" || status === "Fired" || status === "Acknowledged";
+  const answers: Record<string, (task: (typeof tasks)[number], request: { kind: string; verb?: { tag: string }; edit?: { trigger?: { kind: string; atIso?: string } } }) => (typeof tasks)[number] | undefined> = {
+    Dismiss: (task) => task.status === "Dismissed" ? undefined : { ...task, status: "Dismissed" },
+    Complete: (task) => open(task.status) ? { ...task, status: "Completed" } : undefined,
+    Reopen: (task) => task.status === "Completed" ? { ...task, status: "Scheduled" } : undefined,
+    edit: (task, request) => task.status === "Dismissed" || request.edit?.trigger === undefined ? undefined : { ...task, trigger: request.edit.trigger },
+  };
   const runtime = {
     getService: (name: string) => {
       if (name === "scheduled-tasks") {
         return {
           list: () => Promise.resolve([...tasks]),
+          get: (taskId: string) => Promise.resolve(tasks.find((task) => task.taskId === taskId)),
+          applyVerb: (taskId: string, request: { kind: string; verb?: { tag: string }; edit?: { trigger?: { kind: string; atIso?: string } } }) => {
+            const at = tasks.findIndex((task) => task.taskId === taskId);
+            if (at < 0) return Promise.resolve({ kind: "notFound" });
+            const verb = request.kind === "edit" ? "edit" : request.verb?.tag ?? "";
+            const next = refusing.has(verb) ? undefined : answers[verb]?.(tasks[at]!, request);
+            if (next === undefined) return Promise.resolve({ kind: "refused", reason: { tag: "NotApplicable" } });
+            tasks[at] = next;
+            return Promise.resolve({ kind: "applied", task: next });
+          },
           create: (task: { kind: string; ownerVisible: boolean; promptInstructions: string; trigger: { kind: string; atIso?: string }; metadata: Record<string, unknown> }) => {
             const created = { taskId: `task-${tasks.length + 1}`, ...task, status: "Scheduled" };
             tasks.push(created);
@@ -46,7 +65,7 @@ function makeFakeRuntime(initialTasks: readonly {
       return null;
     },
   } as unknown as AgentRuntimeLike;
-  return { runtime, tasks, notifications };
+  return { runtime, tasks, notifications, refusing };
 }
 
 async function callRoute(
@@ -417,5 +436,86 @@ describe("Alpha product plugin: Reminders actions, provider, recurrence, and rou
     } finally {
       fs.rmSync(dir, { recursive: true, force: true });
     }
+  });
+
+  // spec/agent/index.md, "A reminder with a due time keeps one scheduled task, and the task follows what the owner does to the reminder"; spec/agent/index.md, "The page names the query values each gated route can receive"
+  it("keeps each reminder's scheduled task following it, so a delete, completion or new time made in the app or in chat holds, and says so only when it does", async () => {
+    const nowMs = Date.UTC(2026, 10, 24, 15, 0, 0);
+    const store = new AlphaAppsStore({ now: () => nowMs });
+    const { runtime, tasks, refusing } = makeFakeRuntime([
+      { taskId: "plumber-task", kind: "personal-assistant.reminder", ownerVisible: true, promptInstructions: "Call the plumber", status: "Scheduled", trigger: { kind: "once", atIso: "2026-11-24T18:00:00.000Z" }, metadata: { title: "Call the plumber" } },
+      { taskId: "dentist-task", kind: "personal-assistant.reminder", ownerVisible: true, promptInstructions: "Call the dentist", status: "Scheduled", trigger: { kind: "once", atIso: "2026-11-24T19:00:00.000Z" }, metadata: { title: "Call the dentist" } },
+    ]);
+    const { plugin } = createAlphaAppsPlugin({ store, timeZone: "UTC", runtime });
+    const action = plugin.actions!.find((a) => a.name === "REMINDERS_MANAGE")!;
+    const routes = plugin.routes!;
+    const read = async () => (await callRoute(routes, "GET", "/api/alpha/reminders")).body as unknown as RemindersSnapshot;
+    const named = async (title: string) => (await read()).items.find((item) => item.title === title);
+    const statusOf = (taskId: string) => tasks.find((task) => task.taskId === taskId)?.status;
+
+    const untitled = await action.handler(runtime, emptyMessage("remind me to water the plants"), emptyState, { parameters: { op: "create", dueDate: "2026-11-24" } });
+    expect({ success: untitled?.success, made: (await read()).items.length }).toEqual({ success: false, made: 2 });
+
+    const plumber = (await named("Call the plumber"))!;
+    refusing.add("Dismiss");
+    const refused = await action.handler(runtime, emptyMessage("delete my plumber reminder"), emptyState, { parameters: { op: "delete", title: "Call the plumber" } });
+    expect({ success: refused?.success, task: statusOf("plumber-task"), kept: (await named("Call the plumber"))?.id }).toEqual({ success: false, task: "Scheduled", kept: plumber.id });
+    refusing.delete("Dismiss");
+    const deleted = await action.handler(runtime, emptyMessage("delete my plumber reminder"), emptyState, { parameters: { op: "delete", title: "Call the plumber" } });
+    expect({ success: deleted?.success, task: statusOf("plumber-task"), kept: await named("Call the plumber") }).toEqual({ success: true, task: "Dismissed", kept: undefined });
+
+    const dentist = (await named("Call the dentist"))!;
+    expect((await callRoute(routes, "POST", "/api/alpha/reminders/items/{id}/complete", { params: { id: dentist.id } })).status).toBe(200);
+    expect({ completed: (await named("Call the dentist"))?.completed, task: statusOf("dentist-task") }).toEqual({ completed: true, task: "Completed" });
+    expect((await callRoute(routes, "DELETE", "/api/alpha/reminders/items/{id}", { params: { id: dentist.id } })).status).toBe(200);
+    expect({ kept: await named("Call the dentist"), task: statusOf("dentist-task") }).toEqual({ kept: undefined, task: "Dismissed" });
+
+    const made = await callRoute(routes, "POST", "/api/alpha/reminders/items", { body: { title: "Pick up keys", dueDate: "2026-11-24", dueMinute: 20 * 60 } });
+    const keys = made.body.item as ReminderItemRecord;
+    const moved = await callRoute(routes, "PATCH", "/api/alpha/reminders/items/{id}", { params: { id: keys.id }, body: { dueDate: "2026-11-25", dueMinute: 9 * 60 } });
+    expect(moved.status).toBe(200);
+    const live = tasks.filter((task) => task.metadata.alphaReminderId === keys.id && task.status !== "Dismissed");
+    expect(live.map((task) => task.trigger.atIso)).toEqual(["2026-11-25T09:00:00.000Z"]);
+    await action.handler(runtime, emptyMessage("rename it"), emptyState, { parameters: { op: "update", title: "keys", notes: "From the front desk" } });
+    expect((await named("Pick up keys"))?.notes).toBe("From the front desk");
+    const keysTask = tasks.findIndex((task) => task.metadata.alphaReminderId === keys.id && task.status !== "Dismissed");
+    tasks[keysTask] = { ...tasks[keysTask]!, status: "Dismissed" };
+    expect(await named("Pick up keys")).toBeUndefined();
+
+    const gate = defineRoutes(routes.map(({ method, path, query }) => (query === undefined ? { method, path } : { method, path, query })));
+    const admitted = (method: string, target: string) => gate.admit({ method, target, streamed: false, body: undefined }).tag;
+    expect([
+      admitted("DELETE", "/api/alpha/reminders/items/rem-1"),
+      admitted("DELETE", "/api/alpha/reminders/lists/list-1?mode=cascade"),
+      admitted("DELETE", "/api/alpha/reminders/items/rem-1?idempotencyKey=k"),
+    ]).toEqual(["Admitted", "Admitted", "RouteRefused"]);
+  });
+
+  it("reopens the reviewed Calendar reminder without firing its old task (spec/agent/index.md, \"A reminder with a due time keeps one scheduled task, and the task follows what the owner does to the reminder\")", async () => {
+    const store = new AlphaAppsStore({ now: () => Date.UTC(2026, 10, 24, 15) });
+    const { runtime, tasks, refusing } = makeFakeRuntime([]);
+    const routes = createAlphaAppsPlugin({ store, timeZone: "UTC", runtime }).plugin.routes!;
+    const creation = await callRoute(routes, "POST", "/api/alpha/reminders/items", { body: { title: "Pick up keys", dueDate: "2026-11-24", dueMinute: 18 * 60, alertMinutes: 0 } });
+    const id = (creation.body.item as ReminderItemRecord).id;
+    const completed = await callRoute(routes, "POST", "/api/alpha/reminders/items/{id}/complete", { params: { id } });
+    const record = completed.body.item as ReminderItemRecord;
+    const body = { dueDate: "2026-11-24", dueMinute: 18 * 60, expectedRevision: record.revision };
+    const noAlert = (expectedRevision: number) => callRoute(routes, "POST", "/api/alpha/reminders/items/{id}/reopen", { params: { id }, body: { ...body, expectedRevision } });
+
+    expect((await noAlert(record.revision + 1)).status).toBe(409);
+    const withoutTasks = createAlphaAppsPlugin({ store, timeZone: "UTC" }).plugin.routes!;
+    expect((await callRoute(withoutTasks, "POST", "/api/alpha/reminders/items/{id}/reopen", { params: { id }, body })).status).toBe(409);
+    refusing.add("Dismiss");
+    expect((await noAlert(record.revision)).status).toBe(409);
+    expect(store.getReminders().items.find((item) => item.id === id)?.completed).toBe(true);
+    expect(tasks.find((task) => task.taskId === record.agentTaskId)?.status).toBe("Completed");
+
+    refusing.delete("Dismiss");
+    const revision = store.getReminders().items.find((item) => item.id === id)!.revision;
+    const reopened = await noAlert(revision);
+    expect(reopened.status).toBe(200);
+    expect(reopened.body.item).toMatchObject({ id, completed: false, dueDate: body.dueDate, dueMinute: body.dueMinute, alertMinutes: null, agentTaskId: null });
+    expect(tasks.find((task) => task.taskId === record.agentTaskId)?.status).toBe("Dismissed");
+    expect(tasks.filter((task) => task.metadata.alphaReminderId === id && task.status === "Scheduled")).toHaveLength(0);
   });
 });

@@ -390,7 +390,8 @@ pure def sometimesHeldByAnother(s: Facts): bool = roleWord(s, s.home) == HeldByA
 ## Story: Manage my saved passwords
 
 > As the owner, I want to unlock my saved passwords, search for an entry,
-> and add or edit it in Android's own password editor. I want the list
+> add or edit it in Android's own password editor, and reveal, copy or
+> delete the exact entry I chose. I want the list
 > to go away when I lock the vault, leave this page or leave Alpha.
 
 ### This visit holds only entry metadata and a deadline from Android
@@ -403,23 +404,26 @@ Android. Android's own editor handles the form. Passwords is a sensitive
 ```quint
 type VaultRow = { id: str, revision: int, label: str, username: str, terms: List[str] }
 type VaultPhase = VaultAway | VaultChecking | VaultUnavailable | VaultNeedsLock | VaultLocked | VaultUnlocking | VaultReady | VaultEditing | VaultLocking
-type VaultWork = CheckVault | UnlockVault | LockVault | CreatePassword | EditPassword({ id: str, revision: int })
+type VaultSelection = NoVaultSelection | VaultSelected({ id: str, revision: int })
+type RowAction = RevealPassword | CopyPassword | RemovePassword
+type VaultWork = CheckVault | UnlockVault | LockVault | CreatePassword | EditPassword({ id: str, revision: int }) |
+  PasswordRowAction({ choice: RowAction, id: str, revision: int })
 type VaultResult = VaultNotAvailable | VaultUnsecured | VaultSecured | VaultList({ rows: List[VaultRow], until: int })
-type VaultNotice = VaultQuiet | VaultFailed | VaultChanged
+type VaultNotice = VaultQuiet | VaultFailed | VaultChanged | VaultCopied | VaultRemoved
 type VaultView = {
   here: bool, front: bool, request: int, phase: VaultPhase,
-  rows: List[VaultRow], until: int, query: str, notice: VaultNotice,
+  rows: List[VaultRow], until: int, query: str, notice: VaultNotice, remove: VaultSelection,
 }
 
 pure val initialVault: VaultView = {
   here: false, front: false, request: 0, phase: VaultAway,
-  rows: List(), until: 0, query: "", notice: VaultQuiet,
+  rows: List(), until: 0, query: "", notice: VaultQuiet, remove: NoVaultSelection,
 }
 
 pure def beginVault(phase: VaultPhase, work: VaultWork, s: Facts): Asked =
   val request = s.vault.request + 1
   { state: { ...s, vault: { ...s.vault, request: request, phase: phase, rows: List(), until: 0,
-      query: if (phase == VaultEditing) s.vault.query else "", notice: VaultQuiet } },
+      query: if (phase == VaultEditing) s.vault.query else "", notice: VaultQuiet, remove: NoVaultSelection } },
     out: List(WorkVault({ request: request, work: work })) }
 
 pure def vaultInUse(v: VaultView): bool =
@@ -520,4 +524,46 @@ pure def alwaysVaultRowsStayInFront(s: Facts): bool =
   (s.vault.rows.length() > 0 or s.vault.until > 0) implies (s.vault.front and s.vault.here and s.vault.phase == VaultReady)
 
 pure def sometimesVaultEntriesAreListed(s: Facts): bool = s.vault.phase == VaultReady and s.vault.rows.length() > 0
+```
+
+
+### Revealing or copying passes the displayed revision to Android, and deletion first asks for confirmation
+
+The native vault reveals inside Android and copies directly to Android's
+clipboard for its own bounded time. Alpha receives only the outcome. A
+delete sends the exact revision after a separate confirmation. Closing or
+locking the vault dismisses that confirmation.
+
+```quint
+pure val choiceValues = Set(RevealPassword, CopyPassword, RemovePassword)
+
+pure def canVaultRowAction(s: Facts, choice: RowAction, id: str, revision: int, now: int): bool =
+  choice != RemovePassword and s.vault.remove == NoVaultSelection and canVaultEdit(s, id, revision, now)
+
+pure def vaultRowAction(s: Facts, choice: RowAction, id: str, revision: int, now: int): Asked =
+  beginVault(VaultEditing, PasswordRowAction({ choice: choice, id: id, revision: revision }), s)
+
+pure def canReviewVaultRemoval(s: Facts, id: str, revision: int, now: int): bool =
+  s.vault.remove == NoVaultSelection and canVaultEdit(s, id, revision, now)
+
+pure def reviewVaultRemoval(s: Facts, id: str, revision: int, now: int): Facts =
+  { ...s, vault: { ...s.vault, remove: VaultSelected({ id: id, revision: revision }) } }
+
+pure def canCancelVaultRemoval(s: Facts): bool = s.vault.remove != NoVaultSelection
+
+pure def cancelVaultRemoval(s: Facts): Facts = { ...s, vault: { ...s.vault, remove: NoVaultSelection } }
+
+pure def canConfirmVaultRemoval(s: Facts, id: str, revision: int, now: int): bool =
+  s.vault.remove == VaultSelected({ id: id, revision: revision }) and canVaultEdit(s, id, revision, now)
+
+pure def confirmVaultRemoval(s: Facts, id: str, revision: int, now: int): Asked =
+  beginVault(VaultEditing, PasswordRowAction({ choice: RemovePassword, id: id, revision: revision }), s)
+
+pure def alwaysVaultRemovalBelongsToAnUnlockedVisit(s: Facts): bool =
+  val selected = s.vault.remove
+  match selected {
+    | NoVaultSelection => true
+    | VaultSelected(x) => s.vault.front and s.vault.phase == VaultReady and
+      s.vault.rows.some(row => row.id == x.id and row.revision == x.revision)
+  }
 ```

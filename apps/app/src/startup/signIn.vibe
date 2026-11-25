@@ -10,19 +10,21 @@ import * as SignIn from "../../gen/app__account__signIn.effect.vibe"
 import * as Page from "../../gen/app__update__page.effect.vibe"
 import { Device, registered } from "../platform/device.vibe"
 import { Launcher } from "../platform/launcher.vibe"
+import { SystemSettings } from "../platform/systemSettings.vibe"
 import { CLOUD_ENVIRONMENT, signInAccounts } from "../platform/voice.vibe"
 import { WiFi } from "../platform/wifi.vibe"
 import { Time } from "../runtime/time.vibe"
 import { Engagements } from "../update/activity.vibe"
 
 export type Stage = "Disabled" | "Checking" | "Required" | "Unavailable" | "Admitted"
+export type ConnectionWarning = "Offline" | "Unvalidated" | "WithoutWifi" | "UnvalidatedWithoutWifi"
 
 export interface FirstRun {
   readonly stage: Stage
   readonly email: boolean
   readonly google: boolean
   readonly phone: boolean
-  readonly online: boolean
+  readonly connection?: ConnectionWarning
 }
 
 export service StartupSignIn {
@@ -30,6 +32,7 @@ export service StartupSignIn {
   active(): boolean!!
   check(): void!!
   touch(): void!!
+  openNetwork(): boolean!!
   send(method: "email" | "phone", address: string): boolean!!
   chooseGoogle(): boolean!!
   verify(code: string): boolean!!
@@ -37,7 +40,7 @@ export service StartupSignIn {
   back(): boolean!!
 }
 
-const empty: FirstRun = { stage: "Disabled", email: false, google: false, phone: false, online: true }
+const empty: FirstRun = { stage: "Disabled", email: false, google: false, phone: false }
 
 module numbers {
   /** @throws {never} */
@@ -79,6 +82,7 @@ export function startupSignIn(enabled: boolean) {
         active: () => succeed(false),
         check: () => Effect.void,
         touch: () => Effect.void,
+        openNetwork: () => succeed(false),
         send: () => succeed(false),
         chooseGoogle: () => succeed(false),
         verify: () => succeed(false),
@@ -95,6 +99,7 @@ export function startupSignIn(enabled: boolean) {
       const device = try Device
       const launcher = try Launcher
       const wifi = try WiFi
+      const settings = try SystemSettings
       const time = try Time
       const engaged = try Engagements
       const reports = try SubscriptionRef.make<FirstRun>({ ...empty, stage: "Checking" })
@@ -120,15 +125,23 @@ export function startupSignIn(enabled: boolean) {
         try set({ ...empty, stage: "Admitted" })
         try engaged.report("startup/sign-in", { card: "NoCard", connecting: false })
       }
-      const online = effect {
+      const networkWarning = effect {
         const network = try wifi.connectivity()
-        return Option.isNone(network) || network.value.online
+        if (Option.isNone(network)) return undefined
+        if (!network.value.online) return "Offline" as const
+        const wifiActive = try wifi.usingWifi()
+        if (Option.isSome(wifiActive) && !wifiActive.value) {
+          return network.value.validated ? "WithoutWifi" as const : "UnvalidatedWithoutWifi" as const
+        }
+        if (!network.value.validated) return "Unvalidated" as const
+        return undefined
       }
       const move = (event: SignIn.Event) => Effect.option(signIn.send(event))
 
-      effect function reported(reply: SignInStatus | undefined, connected: boolean): void!! {
+      effect function reported(reply: SignInStatus | undefined): void!! {
+        const connection = (try current()).connection
         if (!known(reply)) {
-          try set({ ...empty, stage: "Unavailable", online: connected })
+          try set({ ...empty, stage: "Unavailable", connection })
           return
         }
         const { account, readiness } = reply
@@ -138,7 +151,7 @@ export function startupSignIn(enabled: boolean) {
         }
         if (signedInBy !== undefined) {
           // The phone has not confirmed custody of the sign-in it just reported. Recheck it before mounting.
-          try set({ ...empty, stage: "Unavailable", online: connected })
+          try set({ ...empty, stage: "Unavailable", connection })
           return
         }
         let model = try signIn.get()
@@ -154,7 +167,7 @@ export function startupSignIn(enabled: boolean) {
         })
         try set({
           stage: "Required",
-          online: connected,
+          connection,
           email: readiness.methodsKnown && readiness.email,
           phone: readiness.methodsKnown && readiness.sms,
           google: readiness.methodsKnown && readiness.google,
@@ -163,11 +176,13 @@ export function startupSignIn(enabled: boolean) {
       }
 
       const check = () => effect {
-        const before = try current()
+        let before = try current()
         if (before.stage === "Disabled" || before.stage === "Admitted" || !(try foreground)) return
+        const connection = try networkWarning
+        before = try current()
+        if (before.stage === "Admitted") return
+        if (before.connection !== connection) try set({ ...before, connection })
         const model = try signIn.get()
-        const connected = try online
-        if (before.stage === "Required" && before.online !== connected) try set({ ...before, online: connected })
         if (
           signedInBy === undefined && model.step !== "Closed" && (model.step !== "Choose" || model.work !== "Resting")
         ) return
@@ -178,7 +193,7 @@ export function startupSignIn(enabled: boolean) {
               try admitted
               return
             }
-            try reported(try status(before.stage !== "Checking"), connected)
+            try reported(try status(before.stage !== "Checking"))
           },
           Ref.set(checking, false),
         )
@@ -190,10 +205,18 @@ export function startupSignIn(enabled: boolean) {
         try engaged.report("startup/sign-in", { card: "Touched" })
       }
 
+      const openNetwork = () => effect {
+        const ready = try current()
+        if ((ready.stage !== "Required" && ready.stage !== "Unavailable") || ready.connection === undefined || !(try foreground)) return false
+        try ownerTouch()
+        return (try settings.open("WifiNetworks", "")) === "Exactly"
+      }
+
       const canAct = effect {
         const ready = try current()
-        return ready.stage === "Required" && ready.online && !(try Ref.get(checking)) && (try foreground)
-          && (try online)
+        if (ready.stage !== "Required" || ready.connection === "Offline" || (try Ref.get(checking)) || !(try foreground)) return false
+        const network = try wifi.connectivity()
+        return Option.isNone(network) || network.value.online
       }
 
       effect function applyReceipt(
@@ -211,7 +234,7 @@ export function startupSignIn(enabled: boolean) {
           signedInBy = answer.credentialId
           const read = try status()
           if (!known(read) || read.account.kind !== "signedIn" || read.account.credentialId !== signedInBy) {
-            try set({ ...empty, stage: "Unavailable", online: try online })
+            try set({ ...empty, stage: "Unavailable", connection: try networkWarning })
             return false
           }
           verdict = "Passed"
@@ -318,6 +341,7 @@ export function startupSignIn(enabled: boolean) {
         active,
         check,
         touch: ownerTouch,
+        openNetwork,
         send,
         chooseGoogle,
         verify,

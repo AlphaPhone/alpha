@@ -2,7 +2,7 @@
 import type { Source } from "../../gen/app__calendar.ts";
 import { rowShown } from "../../gen/app__calendar__presentation.ts";
 import type { Cancellation, OwnAnswer } from "../../gen/app__calendar__writing.ts";
-import { civilDay } from "./time.ts";
+import { civilDay, utcStart } from "./time.ts";
 import { externalStore } from "../runtime/store.ts";
 
 /** One of an event's people: the organizer, or a guest with the reply the calendar gave. */
@@ -119,6 +119,11 @@ export function onDay(row: Pick<Row, "begin" | "end">, day: number): boolean {
   const first = civilDay(row.begin);
   const last = civilDay(Math.max(row.begin, row.end - 1));
   return first <= day && day <= last;
+}
+
+/** Android stores an all-day event's civil dates at UTC midnight. @throws {never} */
+export function androidWindowOf({ begin, end, allDay }: Pick<Row, "begin" | "end" | "allDay">): { begin: number; end: number } {
+  return allDay ? { begin: utcStart(civilDay(begin)), end: utcStart(civilDay(end)) } : { begin, end };
 }
 
 function told(): void {

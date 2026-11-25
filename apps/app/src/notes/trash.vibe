@@ -56,10 +56,14 @@ effect function action(fx: Extract<Trash.Effect, { readonly tag: "Does" }>): Tra
           !saved.state.trash?.some((row) => row.note.id === note.id)) return lost
         return done
       }
-      case "Recover":
-        if (entry === undefined) return failed
-        try store.recover(entry.note.id, snapshot.revision)
+      case "Recover": {
+        if (entry === undefined || (ownerAt() catch () => "") !== identity) return failed
+        const saved = try store.recover(entry.note.id, snapshot.revision)
+        if ((ownerAt() catch () => "") !== identity || saved.target?.id !== entry.note.id ||
+          saved.state.revision !== revision || saved.state.trash?.some((row) => row.note.id === entry.note.id) ||
+          !saved.state.notes.some((row) => row.id === entry.note.id)) return lost
         return done
+      }
       case "Erase":
         if (entry === undefined) return failed
         try store.erase({ scope: "entry", id: entry.note.id, deletedAt: entry.deletedAt, expectedRevision: snapshot.revision })

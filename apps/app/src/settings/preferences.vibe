@@ -214,10 +214,16 @@ const large = applying(Prefs.Machine, Prefs.largeText, effect (on) => {
 })
 
 // spec/app/settings/preferences.md, "The agent is launched allowed to change Gmail and Calendar exactly as the phone last read or saved, allowed neither once it could not read them, and Alpha says nothing of it before the first answer"
-const consented = applying(Prefs.Machine, (state) => state.document.read, effect (read) => {
-  if (read.status !== "Loaded" && read.status !== "Failed") return
-  const said = (try (try Prefs.Machine).get()).agentGoogle
-  if (said.tag === "Consents") try turn.withPermits(1)(ignore((try Device).agentConsent({ gmailChanges: said.gmailChanges, calendarEdits: said.calendarEdits })))
+/**
+ * Told at each answered read and again at each consent a save took, reading the consent only once the turn is held: a save that takes the turn just as a
+ * read lands is then never left behind the older consent the read gave.
+ */
+const consented = applying(Prefs.Machine, (state) => ({ read: state.document.read, consent: state.agentGoogle }), effect (fact) => {
+  if (fact.read.status !== "Loaded" && fact.read.status !== "Failed") return
+  try turn.withPermits(1)(effect {
+    const said = (try (try Prefs.Machine).get()).agentGoogle
+    if (said.tag === "Consents") try ignore((try Device).agentConsent({ gmailChanges: said.gmailChanges, calendarEdits: said.calendarEdits }))
+  })
 })
 
 /** The owner's preferences, from launch: the look and the text the whole page follows, what other areas ask before they act, and what the agent is launched allowed to change. */

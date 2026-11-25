@@ -25,6 +25,23 @@ public final class AlphaDevicePlugin extends Plugin {
   call.resolve(new JSObject().put("session", session == null ? org.json.JSONObject.NULL : session));
  }
 
+ @PluginMethod public void textAsk(PluginCall call) {
+  if (!(getActivity() instanceof MainActivity activity)) {
+   call.resolve(new JSObject().put("ticket", 0));
+   return;
+  }
+  activity.runOnUiThread(() -> call.resolve(new JSObject().put("ticket", activity.textAskTicket())));
+ }
+
+ @PluginMethod public void closeTextAsk(PluginCall call) {
+  Integer ticket = call.getInt("ticket");
+  if (ticket == null || !(getActivity() instanceof MainActivity activity)) {
+   call.resolve(new JSObject().put("closed", false));
+   return;
+  }
+  activity.runOnUiThread(() -> call.resolve(new JSObject().put("closed", activity.closeTextAsk(ticket))));
+ }
+
  /** Explicit bounded text handoff; chooser opening never claims a sent message. */
  static String boundedShareText(String text){
   if(text==null||text.isBlank()||text.indexOf('\0')>=0||text.length()>65536)throw new IllegalArgumentException();
@@ -117,16 +134,29 @@ public final class AlphaDevicePlugin extends Plugin {
  }
  /** As HOME, an outside screen gets its own task, as stock launchers do, so HOME does not clear it. Never for a result start. */
  private static Intent handOff(Intent intent){return intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);}
+ @PluginMethod public void passwordProviderStatus(PluginCall call) {
+  call.resolve(PasswordProviderSupport.status(getContext()));
+ }
+
  @PluginMethod public void openPasswordProvider(PluginCall call) {
-  String action=call.getString("action","");
-  getActivity().runOnUiThread(()->{
+  String action = call.getString("action", "");
+  android.app.Activity activity = getActivity();
+  if (activity == null) {
+    call.reject("Open and unlock Alpha before choosing a password provider.");
+    return;
+  }
+  activity.runOnUiThread(() -> {
+    if (!shareForeground(activity)) {
+      call.reject("Open and unlock Alpha before choosing a password provider.");
+      return;
+    }
    try {
     Intent target=PasswordProviderSupport.intent(getContext(),action);
     String destination=Settings.ACTION_REQUEST_SET_AUTOFILL_SERVICE.equals(target.getAction())?"provider-picker":"external";
-    try { getActivity().startActivity(handOff(target)); }
+    try { activity.startActivity(handOff(target)); }
     catch(android.content.ActivityNotFoundException missing) {
      if(!"settings".equals(action)||!Settings.ACTION_REQUEST_SET_AUTOFILL_SERVICE.equals(target.getAction()))throw missing;
-     getActivity().startActivity(handOff(new Intent(Settings.ACTION_SETTINGS)));destination="system-settings";
+     activity.startActivity(handOff(new Intent(Settings.ACTION_SETTINGS)));destination="system-settings";
     }
     if(Settings.ACTION_SETTINGS.equals(target.getAction()))destination="system-settings";
     JSObject out=new JSObject();out.put("status","opened");out.put("destination",destination);call.resolve(out);

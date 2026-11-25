@@ -2,7 +2,7 @@ import type { ComponentProps } from "react";
 import { cn, focusRing } from "../../lib/cn.ts";
 import { Mark } from "../Mark.tsx";
 import { type AssistantPull, useAssistantPull } from "./assistant-pull.ts";
-export type { AssistantRelease } from "./assistant-pull.ts";
+export type { AssistantPull, AssistantRelease } from "./assistant-pull.ts";
 
 type Press = { now: number };
 
@@ -23,6 +23,7 @@ export function AssistantGrabber({ variant = "handle", onPress, onDrag, onReleas
   return (
     <button
       type="button"
+      data-alpha-grabber=""
       aria-label={variant === "mark" ? "Open conversation" : "Resize chat"}
       className={cn(focusRing, "flex size-11 shrink-0 touch-none justify-center", variant === "mark" ? "items-center overflow-hidden rounded-full bg-alpha text-alpha-foreground" : "cursor-grab items-start rounded-sm px-0.5 pt-1.5", className)}
       {...pull}

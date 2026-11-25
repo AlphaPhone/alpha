@@ -26,18 +26,18 @@ export effect function taking(place: string, took: () => Promise<boolean>): void
 
 module previous {
   /** Older shell state with the navigation fields initialized, still untrusted. @throws {never} */
-  export function withSpokenRoute(raw: string, needsDrawer: boolean, needsRoute: boolean): unknown {
+  export function withTextAsk(raw: string, needsDrawer: boolean, needsRoute: boolean, needsSpokenRoute: boolean): unknown {
     try {
       const parsed: unknown = JSON.parse(raw)
       return typeof parsed === "object" && parsed !== null && !Array.isArray(parsed)
-        ? { ...parsed, ...(needsDrawer ? { drawer: false } : {}), ...(needsRoute ? { route: 0 } : {}), spokenRoute: 0 }
+        ? { ...parsed, ...(needsDrawer ? { drawer: false } : {}), ...(needsRoute ? { route: 0 } : {}), ...(needsSpokenRoute ? { spokenRoute: 0 } : {}), textAsk: { tag: "NoTextAsk" }, textAskThrough: 0 }
         : undefined
     } catch {
       return undefined
     }
   }
 }
-import { withSpokenRoute } from previous
+import { withTextAsk } from previous
 
 // spec/app/shell/index.md, "When Alpha opens again the trail is kept, and Ask Alpha is closed"
 function stored(key: string, start?: Shell.Shell) {
@@ -45,15 +45,16 @@ function stored(key: string, start?: Shell.Shell) {
     const store = try KeyValueStore.KeyValueStore
     const current = store.get(key) catch () => undefined
     if (current !== undefined) return Shell.stored(key, start)
-    const withRoute = store.get("alpha/app/shell/index@3") catch () => undefined
+    const withSpokenRoute = store.get("alpha/app/shell/index@4") catch () => undefined
+    const withRoute = withSpokenRoute ?? (store.get("alpha/app/shell/index@3") catch () => undefined)
     const withDrawer = withRoute ?? (store.get("alpha/app/shell/index@2") catch () => undefined)
     const raw = withDrawer ?? (store.get("alpha/app/shell/index@1") catch () => undefined)
-    const recovered = raw === undefined ? undefined : (Shell.decodeState(withSpokenRoute(raw, withDrawer === undefined, withRoute === undefined)) catch () => undefined)
+    const recovered = raw === undefined ? undefined : (Shell.decodeState(withTextAsk(raw, withDrawer === undefined, withRoute === undefined, withSpokenRoute === undefined)) catch () => undefined)
     return Shell.stored(key, recovered ?? start)
   })
 }
 
-const kept = reacting({ ...Shell, stored }, { keep: 4, open: [{ type: "reopen" }] })
+const kept = reacting({ ...Shell, stored }, { keep: 5, open: [{ type: "reopen" }] })
 
 // spec/app/shell/layers.md, "Story: Keep a sheet or a dialog above the phone"
 const layered = reacting(Layers, {})
@@ -64,7 +65,7 @@ const layered = reacting(Layers, {})
  * nothing while the phone is held; then the screen showing may take a step of its own, Home's Add to Home and
  * editing included, under Ask Alpha at rest; then Ask Alpha by a step and the app on top.
  */
-export effect function back(): void!!(Shell.Machine | Layers.Machine | Backs) {
+export effect function back(): void!!(Shell.Machine | Layers.Machine | Backs | Device) {
   const shell = try Shell.Machine
   const layers = try Layers.Machine
   const screens = try Backs
@@ -78,6 +79,14 @@ export effect function back(): void!!(Shell.Machine | Layers.Machine | Backs) {
   const state = try shell.get()
   const view = state.trail.at(-1)
   if (try screens.take("assistant")) return
+  if (state.textAsk.tag === "TextAskVisit") {
+    const device = try Device
+    const ticket = state.textAsk.ticket
+    if (!(try device.showing()) || !Shell.canCloseTextAsk(state, ticket) || !(try contained(shell.send({ type: "closeTextAsk", ticket }), "close text Ask Alpha"))) return
+    const closed = try device.closeTextAsk(ticket)
+    try contained(shell.send({ type: "textAskClosed", ticket, closed }), "return from text Ask Alpha")
+    return
+  }
   if (state.assistant === "Bar" && (try screens.take(view === undefined ? "home" : `view:${view}`))) return
   try contained(shell.send({ type: "goBack" }), "back")
 }
@@ -108,6 +117,18 @@ const told = Layer.effectDiscard(effect {
     Effect.provideService(Effect.provideService(Effect.provideService(Effect.provideService(work, Shell.Machine, shell), Layers.Machine, layers), Backs, pressed), Device, device)
   try provided(admitted())
   try fork.scoped Stream.runForEach(Stream.filter(device.visible, (shown) => shown), () => provided(admitted()))
+  const uncovered = Stream.filter(Stream.changes(Stream.map(layers.changes, (state) => !Layers.assistantInert(state))), (open) => open)
+  const ready = Stream.filter(Stream.changes(Stream.map(shell.changes, (state) => state.image && state.textAsk.tag === "NoTextAsk")), (ready) => ready)
+  const fromAndroid = Stream.merge(device.textAskVisits, Stream.merge(uncovered, ready))
+  try fork.scoped Stream.runForEach(fromAndroid, () => provided(effect {
+    const before = try shell.get()
+    if (!before.image || before.textAsk.tag !== "NoTextAsk" || !(try device.showing()) || Layers.assistantInert(try layers.get())) return
+    const ticket = try device.textAsk()
+    const state = try shell.get()
+    if (Shell.canOpenTextAsk(state, ticket) && (try device.showing()) && !Layers.assistantInert(try layers.get())) {
+      try contained(shell.send({ type: "openTextAsk", ticket }), "open text Ask Alpha")
+    }
+  }))
   try fork.scoped Stream.runForEach(device.buttons, (button) => contained(provided(button === "back" ? back() : home()), `the ${button} button`))
 })
 

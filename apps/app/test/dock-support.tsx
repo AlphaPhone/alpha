@@ -41,7 +41,7 @@ export async function mountDock({ view = "Browser", withToast = false, flush }: 
   );
   const platform = Layer.mergeAll(
     pagePlatform(Layer.provide(agentAt("http://agent.test"), client), Layer.provide(cloudAt("http://cloud.test"), client)),
-    Layer.succeed(MediaHandoff, { attach: () => Effect.succeed(false), offerTranscript: () => Effect.succeed(false) }),
+    Layer.succeed(MediaHandoff, { attach: () => Effect.succeed(false), offerTranscript: () => Effect.succeed(false), reviewedDraft: () => Effect.succeed(undefined), offerPageSpeech: () => Effect.succeed(false), stopPageSpeech: () => Effect.void }),
     Layer.succeed(AgentPages, { open: () => Effect.succeed(false) }),
     Layer.succeed(MediaExecutors, { reviewFiles: () => Effect.succeed(undefined), filesContext: () => Effect.succeed(undefined), readyFiles: () => Effect.succeed(undefined), execute: () => Effect.succeed(undefined) }),
   );

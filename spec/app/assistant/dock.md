@@ -13,6 +13,12 @@ which a stray click is ignored, and the height a sheet was left at.
 > away, with one press doing one thing, and the composer never hidden by
 > the keyboard.
 
+As in Alpha before VibeStack, the sheet follows the finger while its
+handle or Alpha's mark is dragged, and lands where the release says. A tap
+or a drag on the page outside an open sheet lowers Ask Alpha when it ends;
+outside the bar being typed in, it only leaves the field, which rests the
+bar once.
+
 ### A released drag lands on the bar, a sheet at a height, or the full screen
 
 Near the top it fills the screen and near the floor it goes to the bar;
@@ -75,7 +81,8 @@ pure val phoneValues = Set(S::initial,
   { ...S::initial, trail: List(S::Notes), assistant: S::Sheet },
   { ...S::initial, trail: List(S::Calendar, S::Notes), assistant: S::Full, image: true },
   { ...S::initial, assistant: S::Typing, contacts: true },
-  { ...S::initial, drawer: true, assistant: S::Sheet })
+  { ...S::initial, drawer: true, assistant: S::Sheet },
+  { ...S::initial, trail: List(S::Calendar), assistant: S::Bar })
 
 pure def lawTheShellSettlesWhereTheGestureLands(phone: S::Shell, direction: Direction, flick: bool, height: int, floor: int, full: int): bool =
   applied(asked(phone.assistant, landing(phone.assistant, direction, flick, height, floor, full).detent), phone).assistant
@@ -237,6 +244,12 @@ pure def stepOneGestureAsksOnce(before: Dock, via: str, after: Dock, out: List[E
 
 ### A press does one thing: a tap is never also a drag, and a late click never taps
 
+As on v121, the resting bar drags from anywhere on it, not only its handle:
+from its background, the Alpha mark and an empty field. Nothing is taken
+until the finger moves a few points, so a tap stays a tap. Its other
+controls (Send, Talk, Stop, the chat actions) keep their own presses, and a
+field with a draft in it scrolls by finger instead of dragging.
+
 ```quint
 pure def stepAPressDoesOneThing(before: Dock, via: str, after: Dock, out: List[Effect]): bool =
   out.every(e => match e {
@@ -296,9 +309,40 @@ pure def lawFocusingTheBarOpensSheet(phone: S::Shell): bool =
 
 ### A keyboard closed while typing puts Ask Alpha back on the bar
 
+Leaving the field for anything outside Ask Alpha closes the keyboard too, as
+a tap beside the raised bar did in Alpha before VibeStack: a hardware
+keyboard or a browser never reports a keyboard going. Only one of the two
+lowers it, since the second finds Ask Alpha already on the bar.
+
 ```quint
 pure def keyboardClosed(detent: S::Detent): List[Effect] = if (detent == S::Typing) List(Lower({ steps: 1 })) else List()
 
 pure def lawAClosedKeyboardLeavesTypingForTheBar(phone: S::Shell): bool =
   applied(keyboardClosed(phone.assistant), phone).assistant == (if (phone.assistant == S::Typing) S::Bar else phone.assistant)
+```
+
+## Story: Keep the app's screen while Ask Alpha rests
+
+> As the owner, I want Ask Alpha at rest inside an app to take as little of
+> the screen as it did before VibeStack: a small pill centred above the
+> bottom edge with Alpha's mark, Type and Talk, while Home and the Browser
+> keep the whole bar to type in.
+
+### Inside an app other than the Browser, Ask Alpha at rest is the pill; Type raises it to typing, where the whole bar shows, and a swipe up from it opens the sheet
+
+The pill is how the bar is drawn in an app, not another height: Back,
+gestures and every guard treat it as the bar. Alpha's mark opens the sheet,
+Type focuses the composer, and Talk starts a spoken turn. A swipe up that
+starts on one of the pill's buttons opens the sheet, as the pill in Alpha
+before VibeStack did; a press there that does not move stays that button's
+tap.
+
+```quint
+pure def pill(phone: S::Shell): bool = phone.assistant == S::Bar and phone.trail.length() > 0 and not(S::showing(phone, S::Browser))
+
+pure def lawThePillIsOnlyTheBarInAnApp(phone: S::Shell): bool =
+  pill(phone) implies (phone.assistant == S::Bar and phone.trail.length() > 0)
+
+pure def lawTypeLeavesThePill(phone: S::Shell): bool =
+  pill(phone) implies not(pill(applied(focused(phone.assistant), phone)))
 ```

@@ -6,7 +6,7 @@ import { useMachine } from "../../gen/app__account__signIn.react.ts";
 import type { SignIn as State, Trouble } from "../../gen/app__account__signIn.ts";
 import { Time } from "../runtime/time.vibe";
 import type { Alpha } from "../runtime/area.tsx";
-import { StartupSignIn, type FirstRun } from "./signIn.vibe";
+import { StartupSignIn, type ConnectionWarning, type FirstRun } from "./signIn.vibe";
 
 const messages: Partial<Record<Trouble, string>> = {
   WrongCode: "Wrong code",
@@ -18,6 +18,12 @@ const messages: Partial<Record<Trouble, string>> = {
   TooLate: "That code expired.",
   TabExpired: "That sign-in expired. Try again.",
   Busy: "Sign-in is busy. Try again.",
+};
+const networkMessages: Record<ConnectionWarning, string> = {
+  Offline: "You’re offline. Connect to Wi-Fi to sign in.",
+  Unvalidated: "Android couldn’t verify internet access. Sign-in needs an internet connection.",
+  WithoutWifi: "Sign-in isn’t using Wi-Fi. You can use mobile data or connect to Wi-Fi.",
+  UnvalidatedWithoutWifi: "Sign-in isn’t using Wi-Fi. Android couldn’t verify internet access.",
 };
 
 export function useFirstRun(alpha: Alpha, ready: boolean) {
@@ -34,12 +40,11 @@ export function useFirstRun(alpha: Alpha, ready: boolean) {
     const recheck = () => { alpha.runtime.runFork(StartupSignIn.use((signIn) => signIn.check())); };
     const visible = () => { if (document.visibilityState === "visible") recheck(); };
     recheck();
-    window.addEventListener("online", recheck);
-    window.addEventListener("offline", recheck);
+    const events = ["online", "offline", "focus", "pageshow"];
+    for (const event of events) window.addEventListener(event, recheck);
     document.addEventListener("visibilitychange", visible);
     return () => {
-      window.removeEventListener("online", recheck);
-      window.removeEventListener("offline", recheck);
+      for (const event of events) window.removeEventListener(event, recheck);
       document.removeEventListener("visibilitychange", visible);
     };
   }, [alpha, ready]);
@@ -68,27 +73,32 @@ export function SignIn({ alpha, read, state }: { alpha: Alpha; read?: FirstRun; 
   };
   const touch = () => work((signIn) => signIn.touch());
   const retry = () => work((signIn) => signIn.check());
+  const online = read.connection !== "Offline";
+  const connection = read.connection === undefined ? undefined : {
+    message: networkMessages[read.connection],
+    onOpen: () => alpha.runtime.runPromise(StartupSignIn.use((signIn) => signIn.openNetwork())),
+  };
   if (read.stage === "Unavailable") return (
-    <SignInScreen stage="Choose" email={false} phone={false} online={read.online} message="Sign-in unavailable" onRetry={retry} />
+    <SignInScreen stage="Choose" email={false} phone={false} online={online} connection={connection} message="Sign-in unavailable" onRetry={retry} />
   );
   const busy = state.work !== "Resting";
   const issue = messages[state.trouble];
   const onBack = canLeaveSignInStep(read, state) ? () => work((signIn) => signIn.back()) : undefined;
-  const onVerify = read.online && !busy && !state.spent && Math.max(now, clock()) < state.expiresAt
+  const onVerify = online && !busy && !state.spent && Math.max(now, clock()) < state.expiresAt
     ? (code: string) => work((signIn) => signIn.verify(code)) : undefined;
   const method = state.method === "Phone" ? "phone" : "email";
-  if (state.step === "Browser") return <SignInScreen stage="Browser" />;
+  if (state.step === "Browser") return <SignInScreen stage="Browser" connection={connection} />;
   return (
     <div className="size-full" onPointerDownCapture={touch} onKeyDownCapture={touch}>
       {state.step === "Code" ? (
-        <SignInScreen stage="Code" attempt={state.attempt} method={method} address={state.address} busy={busy} problem={issue}
+        <SignInScreen stage="Code" attempt={state.attempt} method={method} address={state.address} busy={busy} problem={issue} connection={connection}
           onVerify={onVerify} onBack={onBack}
-          resendIn={Math.max(0, state.resendAt - Math.max(now, clock()))} onResend={read.online ? () => work((signIn) => signIn.resend()) : undefined} />
+          resendIn={Math.max(0, state.resendAt - Math.max(now, clock()))} onResend={online ? () => work((signIn) => signIn.resend()) : undefined} />
       ) : state.step === "Second" ? (
         <SignInScreen stage="Second" attempt={state.attempt} factor={state.factor === "Sms" ? "sms" : "totp"}
-          busy={busy} problem={issue} onVerify={onVerify} onBack={onBack} />
+          busy={busy} problem={issue} connection={connection} onVerify={onVerify} onBack={onBack} />
       ) : (
-        <SignInScreen stage="Choose" email={read.email} phone={read.phone} online={read.online} busy={busy} message={issue}
+        <SignInScreen stage="Choose" email={read.email} phone={read.phone} online={online} busy={busy} message={issue} connection={connection}
           previous={state.prefill ? { method, address: state.address } : undefined}
           onSend={(method, address) => work((signIn) => signIn.send(method, address))}
           onGoogle={read.google ? () => work((signIn) => signIn.chooseGoogle()) : undefined}

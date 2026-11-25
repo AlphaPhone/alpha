@@ -17,7 +17,7 @@ import { Talk, type Attached, type DraftSeat } from "../assistant/talk.vibe"
 import type { MessageSmsRequest } from "../messages/agent-sim.vibe"
 import { sendShowing } from "../contacts/requests.vibe"
 import { SystemSettings } from "../platform/systemSettings.vibe"
-import { interruptedByCall, type VoiceEvent, type VoicePreview, VoiceBridge } from "../platform/voice.vibe"
+import { interruptedByCall, type NativePageSpeech, type VoiceEvent, type VoicePreview, VoiceBridge } from "../platform/voice.vibe"
 import { Machine as Toasts } from "../../gen/app__notices__toasts.effect.vibe"
 import { type Said, say } from "../notices/toasts.vibe"
 import { fresh } from "../runtime/attempts.vibe"
@@ -83,6 +83,13 @@ interface InterimCapture extends VoicePreview {
 
 type InterimContext = Device | Layers.Machine | Shell.Machine | Voice.Machine | VoiceWords | Talk | Chats | Conversation
 
+export type PageSpeech = {
+  readonly item: number
+  readonly words: string | NativePageSpeech
+  readonly current: () => boolean!!
+  readonly retire: () => void!!
+}
+
 export interface VoiceMemory {
   prepareInterim: ((session: number) => (InterimCapture | undefined)!!) | undefined
   interimCapture: InterimCapture | undefined
@@ -100,6 +107,7 @@ export interface VoiceMemory {
   dictatedText: string
   dictatedDurationMs: number | undefined
   transcriptReading: { readonly review: number; readonly scene: string; readonly words: string } | undefined
+  pageReading: PageSpeech | undefined
   fillTarget: { readonly field: Field; readonly filling: number; readonly apply: (words: string) => void!! } | undefined
   spokenNavigation: SpokenNavigation | undefined
   /** The observation and the open Files document a turn sent now from `shown` takes with it, read as Ask Alpha reads them. */
@@ -149,6 +157,7 @@ export const voiceWords = Layer.effect(VoiceWords, effect {
     dictatedText: "",
     dictatedDurationMs: undefined,
     transcriptReading: undefined,
+    pageReading: undefined,
     fillTarget: undefined,
     spokenNavigation: undefined,
     screen: undefined,

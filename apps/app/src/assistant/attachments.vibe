@@ -12,6 +12,7 @@ import { Machine as Shell, canRaise } from "../../gen/app__shell.effect.vibe"
 import { type NoteTranscript, type NotesSelection, transcriptCurrent } from "../notes/selection.vibe"
 import { fresh } from "../runtime/attempts.vibe"
 import { contained } from "../runtime/reactor.vibe"
+import type { PageSpeech } from "../voice/voice.vibe"
 import { reencodeImage } from "./image-encode.ts"
 import { type Attached, type TranscriptAttachment, Talk } from "./talk.vibe"
 
@@ -21,10 +22,15 @@ export const acceptedPhotos = [...images, "image/heic", "image/tiff", "image/svg
 export const acceptedFiles = [acceptedPhotos, ...documents].join(",")
 const base64 = /^[A-Za-z0-9+/]+={0,2}$/
 
+export type ReviewedDraft = (text: string, current: Effect.Effect<boolean>) => Effect.Effect<boolean>
+
 /** The owner sends a file reviewed in another app to the existing Ask Alpha draft. */
 export service MediaHandoff {
   attach(file: Attached, current?: Effect.Effect<boolean>, suggestion?: string): boolean!!
   offerTranscript(transcript: NoteTranscript): boolean!!
+  reviewedDraft(): (ReviewedDraft | undefined)!!
+  offerPageSpeech(speech: PageSpeech): boolean!!
+  stopPageSpeech(item: number): void!!
 }
 
 export effect function attachToAlpha(file: Attached, current?: Effect.Effect<boolean>, suggestion?: string): boolean!!MediaHandoff {
@@ -235,6 +241,32 @@ export effect function stageAttachment(file: Attached, active: Effect.Effect<boo
   const shell = try Shell
   if ((try shell.get()).assistant === "Bar") try contained(shell.send({ type: "raise", detent: "Sheet" }), "opening Ask Alpha")
   return true
+}
+
+// spec/app/browser/reading.md, "Confirming hands over the reviewed words as shown"
+export effect function captureReviewedDraft(): (ReviewedDraft | undefined)!!(Talk | Composer.Machine | Conversation | Shell) {
+  const { board, attachmentLock } = try Talk
+  const composer = try Composer.Machine
+  const conversation = try Conversation
+  const shell = try Shell
+  const starting = try composer.get()
+  const previous = board.snapshot().typed
+  if (starting.slot !== "Open" || starting.away !== "Free" || starting.unsettled || starting.editor.editing > 0 || (try conversation.get()).context.sensitive) return undefined
+  return (text, active) => attachmentLock.withPermits(1)(effect {
+    if (!(try active)) return false
+    const here = try composer.get()
+    const event: Composer.Event = { type: "edit", blank: text.trim() === "", long: text.length > Composer.textLimit }
+    if (!sameBinding(starting.binding, here.binding) || starting.read.ticket !== here.read.ticket || starting.draft.edits !== here.draft.edits ||
+      board.snapshot().typed !== previous || here.away !== "Free" || here.unsettled || here.editor.editing > 0 ||
+      (try conversation.get()).context.sensitive || event.blank || event.long || !Composer.enabled(here, event)) return false
+    board.type(text)
+    if (!(try contained(composer.send(event), "putting the reviewed question in Ask Alpha"))) {
+      if (board.snapshot().typed === text) board.type(previous)
+      return false
+    }
+    if (canRaise(try shell.get(), "Sheet")) try contained(shell.send({ type: "raise", detent: "Sheet" }), "opening Ask Alpha")
+    return true
+  })
 }
 
 // spec/app/assistant/composer.md, "Story: Attach, quote and edit again"

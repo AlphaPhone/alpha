@@ -43,8 +43,16 @@ async function chooseNotesOption(menu: string, title: string) {
   await drawn(() => option()?.click());
 }
 
+async function chooseNoteMenu(trigger: string, name: string) {
+  await control(trigger);
+  await drawn(() => button(trigger)?.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true })));
+  const choice = () => [...document.querySelectorAll<HTMLElement>("[role=menuitem]")].find((item) => item.textContent?.trim() === name);
+  await rendered(() => expect(choice()?.getAttribute("aria-disabled")).toBeNull());
+  await drawn(() => choice()?.click());
+}
+
 async function openNotesFromHome(world: Scene) {
-  const { alpha } = await open(world, only("home", "view:Notes"));
+  const { alpha } = await open(world, only("home", "view:Notes", "notice"));
   const runtime = home.runtime(alpha);
   await rendered(async () => {
     expect((await runtime.runPromise(Home.use((machine) => machine.get()))).tiles.load.status).toBe("Loaded");
@@ -263,6 +271,75 @@ describe("Notes", () => {
       await rendered(() => expect(document.body.textContent).toContain("Sharing is unavailable."));
       expect(copy).toHaveBeenCalledTimes(1);
     } finally { copy.mockRestore(); }
+  });
+
+  it("Selects notes and only moves the reviewed notes after confirmation (spec/app/notes/index.md, \"Story: Select and delete notes\")", async () => {
+    const world = scene();
+    world.now = Date.now();
+    world.notes.deleteRequests = [];
+    const { alpha, runtime } = await openNotesFromHome(world);
+    await until(alpha, runtime, List, (state) => state.read.status === "Loaded");
+    await chooseNoteMenu("Notes options", "Select");
+    expect(button("Delete selected notes")?.disabled).toBe(true);
+    await press("Select Enclave launch");
+    await press("Select Groceries");
+    expect(button("Select Enclave launch")?.getAttribute("aria-pressed")).toBe("true");
+    await press("Delete selected notes");
+    await control("Cancel");
+    expect(world.notes.trash).toEqual([]);
+    await press("Cancel");
+    await control("Delete selected notes");
+    expect(button("Select Groceries")?.getAttribute("aria-pressed")).toBe("true");
+
+    await press("Delete selected notes");
+    await control("Delete");
+    world.notes.revision++;
+    await press("Delete");
+    await until(alpha, runtime, List, (state) => state.selectionResult === "RefusedSelection" && state.read.status === "Loaded" && state.version === world.notes.revision + 1);
+    expect(world.notes.trash).toEqual([]);
+
+    await press("Delete selected notes");
+    await control("Delete");
+    const confirmedRevision = world.notes.revision;
+    await press("Delete");
+    await until(alpha, runtime, List, (state) => state.selection === "NoSelection" && state.read.status === "Loaded" && state.rows.length === 4);
+    expect(world.notes.trash.map(({ note }) => note.id)).toEqual(["enclave", "groceries"]);
+    expect(world.notes.deleteRequests).toEqual([
+      { id: "enclave", expectedRevision: confirmedRevision },
+      { id: "groceries", expectedRevision: confirmedRevision + 1 },
+    ]);
+    await control("Open Design sync");
+    expect(button("Open Groceries")).toBeUndefined();
+    await control("Undo");
+    await press("Undo");
+    await until(alpha, runtime, List, (state) => state.read.status === "Loaded" && state.rows.length === 6);
+    expect(world.notes.trash).toEqual([]);
+    await control("Open Groceries");
+  });
+
+  it("Stops the reviewed selection on refusal and keeps the remaining notes selected (spec/app/notes/index.md, \"Confirmation moves only the reviewed notes to Recently deleted and stops if a deletion is refused or unknown\")", async () => {
+    const world = scene();
+    world.notes.deleteRequests = [];
+    const { alpha, runtime } = await openNotesFromHome(world);
+    await until(alpha, runtime, List, (state) => state.read.status === "Loaded");
+    await chooseNoteMenu("Notes options", "Select");
+    await press("Select Enclave launch");
+    await press("Select Groceries");
+    await press("Select Design sync");
+    world.notes.refuseDiscardId = "groceries";
+    await press("Delete selected notes");
+    await control("Delete");
+    await press("Delete");
+    await until(alpha, runtime, List, (state) => state.selectionResult === "RefusedSelection" && state.read.status === "Loaded");
+    expect(world.notes.trash.map(({ note }) => note.id)).toEqual(["enclave"]);
+    expect(world.notes.deleteRequests.map(({ id }) => id)).toEqual(["enclave", "groceries"]);
+    await rendered(() => {
+      expect(button("Select Groceries")?.getAttribute("aria-pressed")).toBe("true");
+      expect(button("Select Design sync")?.getAttribute("aria-pressed")).toBe("true");
+      expect(button("Select Enclave launch")).toBeUndefined();
+    });
+    await press("Done");
+    await control("Open Groceries");
   });
 
   it("Read and use the transcript (spec/app/notes/voice.md, \"Story: Read and use the transcript\")", async () => {
@@ -530,6 +607,11 @@ describe("Notes", () => {
     await drawn(() => vi.waitFor(() => expect(results()).toHaveLength(5)));
     expect(world.notes.views.at(-2)).toMatchObject({ path: "claim", body: { viewId: "home" } });
     expect([results()[4], (await shell()).trail, (await shell()).assistant]).toEqual([{ switched: true }, [], panel]);
+    // spec/app/assistant/index.md, "A complete reply may open one view, once, while the screen it was asked from still shows": "Open the browser." from Home, which VIEWS answers with the browser view, brings Browser forward.
+    await ask("Open the browser.", true, "browser");
+    await drawn(() => vi.waitFor(() => expect(results()).toHaveLength(6)));
+    expect(world.notes.views.at(-2)).toMatchObject({ path: "claim", body: { viewId: "browser" } });
+    expect([results()[5], showing(await shell(), "Browser")]).toEqual([{ switched: true }, true]);
   });
 
   it("The agent opens the note I named aloud (spec/app/assistant/context.md, \"A spoken turn carries what a typed turn sent at that moment would, the view claim included\"; spec/app/notes/index.md, \"The agent opens the one note the owner named, as the list last read it, once for the owner's current request, and is told whether it opened\")", async () => {

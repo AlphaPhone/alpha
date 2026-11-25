@@ -62,7 +62,8 @@ export function useMessageRows({ runtime, board, lines, chats, writing, replying
     if (!chats || !writing || prepared.length === 0) return empty;
     const chat = (event: Chats.Event) => void runtime.runPromiseExit(Effect.flatMap(Chats.Machine, (machine) => machine.send(event)));
     const compose = (event: Composer.Event) => void runtime.runPromiseExit(Effect.flatMap(Composer.Machine, (machine) => machine.send(event)));
-    return prepared.map(({ line, cards, reply: { words: text, choices } }): HistoryRow => {
+    return prepared.flatMap(({ line, cards, reply: { words: text, choices } }): HistoryRow[] => {
+      if (!line.mine && text.trim() === "" && cards.length === 0 && choices.length === 0 && line.failure === undefined && !line.attachments?.length) return [];
       const message = board.numbered(line.id);
       const live = !line.mine && message > 0 && message === chats.messages && !replying;
       const open = live && onOpenMaps !== undefined && opened?.has(message) !== true ? onOpenMaps : undefined;
@@ -77,7 +78,7 @@ export function useMessageRows({ runtime, board, lines, chats, writing, replying
       const readAloud = { type: "readAloud", message, mine: line.mine } as const;
       const reading = actions?.reading;
       const stopReading = reading !== undefined && reading.message === message && Chats.enabled(chats, readAloud) ? reading.stop : undefined;
-      return {
+      return [{
         id: line.id,
         author: line.mine ? "owner" : "alpha",
         text,
@@ -104,7 +105,7 @@ export function useMessageRows({ runtime, board, lines, chats, writing, replying
           const file = line.attachments?.find((one) => one.id === id);
           if (file) onPreview(file);
         } : undefined,
-      };
+      }];
     });
   }, [actions, board, canReadAloud, chats, holding, onChoose, onOpenMaps, onPreview, onSettings, opened, prepared, replying, runtime, settled, writing]);
 }

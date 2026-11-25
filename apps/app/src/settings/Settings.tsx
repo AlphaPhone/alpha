@@ -58,7 +58,7 @@ import type { Machine as PrefsMachine } from "../../gen/app__settings__preferenc
 import type * as ResetGen from "../../gen/app__settings__reset.ts";
 import { useMachine as useReset } from "../../gen/app__settings__reset.react.ts";
 import type { Machine as ResetMachine } from "../../gen/app__settings__reset.effect.vibe";
-import type { Neighbour, Page } from "../../gen/app__settings.ts";
+import { type Neighbour, type Page, passwordPage } from "../../gen/app__settings.ts";
 import { useMachine as usePages } from "../../gen/app__settings.react.ts";
 import type { Machine as PagesMachine } from "../../gen/app__settings.effect.vibe";
 import { useMachine as useDeveloper } from "../../gen/app__settings__developer.react.ts";
@@ -69,6 +69,8 @@ import { useMachine as useLayers } from "../../gen/app__shell__layers.react.ts";
 import type { Machine as LayersMachine } from "../../gen/app__shell__layers.effect.vibe";
 import { pageInert } from "../../gen/app__shell__layers.ts";
 import type { Alpha } from "../runtime/area.tsx";
+import type { Device } from "../platform/device.vibe";
+import type { SystemSettings } from "../platform/systemSettings.vibe";
 import { useTimed } from "../runtime/react.ts";
 import { untimed } from "../runtime/reactor.vibe";
 import type { Time } from "../runtime/time.vibe";
@@ -81,9 +83,10 @@ import { AppBack } from "../shell/AppBack.tsx";
 import { AccountStatus } from "../account/index.tsx";
 import { CalendarAccount, type CalendarConnection } from "./calendar.vibe";
 import { PasswordEntries } from "./PasswordEntries.tsx";
+import { ProtonPass } from "./ProtonPass.tsx";
 
 /** What every Settings page reads: where the owner is, the phone's facts, the hand-overs to Android, the preferences, the reset and the developer tools. */
-export type SettingsRuntime = ManagedRuntime.ManagedRuntime<PagesMachine | CalendarAccount | FactsMachine | AccessReviewMachine | ActivityMachine | RecordsMachine | AndroidMachine | PrefsMachine | ResetMachine | DeveloperMachine | ListenerMachine | ShellMachine | LayersMachine | Time, unknown>;
+export type SettingsRuntime = ManagedRuntime.ManagedRuntime<PagesMachine | CalendarAccount | FactsMachine | AccessReviewMachine | ActivityMachine | RecordsMachine | AndroidMachine | PrefsMachine | ResetMachine | DeveloperMachine | ListenerMachine | ShellMachine | LayersMachine | Time | Device | SystemSettings, unknown>;
 
 /** What the frame gives each page: the runtime, Alpha's places, and the props every page shares. */
 export interface PageProps {
@@ -105,7 +108,7 @@ export interface Common {
   readonly onPlace: (row: number) => void;
 }
 
-const pageNames: Record<Page, SettingsPageName> = {
+const pageNames: Record<Exclude<Page, "BrowserPasswordsPage">, SettingsPageName> = {
   Top: "top", General: "general", Display: "display", Sound: "sound", Notifications: "notifications", Battery: "battery",
   NetworkPage: "network", CarrierPage: "carrier", PhonePage: "phone", Privacy: "privacy", Permissions: "permissions", Apps: "apps",
   InboxApp: "inbox", WorkflowsApp: "workflows", CalendarApp: "calendar", CameraApp: "camera", PhotosApp: "photos", MapsApp: "maps", NotesApp: "notes", PasswordsPage: "passwords",
@@ -341,16 +344,26 @@ function Phone({ alpha, common }: PageProps) {
 }
 
 // spec/app/settings/android.md, "Each Android page is offered on the Settings page it belongs to"
-function Passwords({ runtime, common }: PageProps) {
+function Passwords({ runtime, common, alpha }: PageProps) {
   const service = reading(useFacts(runtime).state, "AutofillService");
+  const settings = usePages(runtime).state;
   const canChoose = service.word === "reported" && (service.value === "None" || service.value === "Other");
   return (
-    <SettingsPage title="Password manager" onBack={common.onBack} backLabel="Back to Apps" told={common.told} actions={common.actions}>
-      <PasswordEntries runtime={runtime} />
-      <ListGroup heading="Autofill">
-        <SettingsFactRow title="Autofill service" reading={service} />
-        {canChoose ? <SettingsAndroidRow title="Use for autofill" target="password-autofill" starting={common.starting} onAndroid={common.onAndroid} /> : null}
-      </ListGroup>
+    <SettingsPage title="Password manager" onBack={common.onBack} backLabel={settings?.page === "BrowserPasswordsPage" ? "Back to Settings" : "Back to Apps"} told={common.told} actions={common.actions}>
+      {settings?.phone ? (
+        <>
+          <PasswordEntries runtime={runtime} />
+          {service.word === "reported" ? <ListGroup heading="Autofill">
+            <SettingsFactRow title="Autofill service" reading={service} />
+            {canChoose ? <SettingsAndroidRow title="Use for autofill" target="password-autofill" starting={common.starting} onAndroid={common.onAndroid} /> : null}
+          </ListGroup> : null}
+          <ProtonPass runtime={runtime} alpha={alpha} />
+        </>
+      ) : (
+        <ListGroup heading="Other">
+          <SettingsFactRow title="Proton Pass" reading={{ word: "reported", value: "Browser" }} />
+        </ListGroup>
+      )}
     </SettingsPage>
   );
 }
@@ -363,7 +376,6 @@ function Apps({ runtime, common }: PageProps) {
     <SettingsAppsPage
       {...common}
       image={pages?.image ?? false}
-      onPhone={pages?.phone ?? false}
       onOpenApp={(app) => {
         const open = { type: "openView", view: appViews[app] } as const;
         if (shell.can(open)) void shell.send(open);
@@ -512,6 +524,7 @@ const drawn: Partial<Record<Page, Drawn>> = {
   Permissions,
   Apps,
   PasswordsPage: Passwords,
+  BrowserPasswordsPage: Passwords,
   InboxApp: (props) => <App {...props} app="inbox" />,
   WorkflowsApp: (props) => <App {...props} app="workflows" />,
   CalendarApp: (props) => <App {...props} app="calendar" />,
@@ -543,7 +556,7 @@ export function Settings({ runtime, alpha, further }: { runtime: SettingsRuntime
   const start = android.state && loading(android.state.start) ? { target: targetNames[android.state.target], channel: android.state.channel || undefined } : undefined;
   const refresh = { type: "refresh", at: untimed } as const;
   const common: Common = {
-    actions: state.development && state.phone && (page === "Top" || page === "General" || page === "PasswordsPage") && facts.can(refresh)
+    actions: state.development && state.phone && (page === "Top" || page === "General" || passwordPage(page)) && facts.can(refresh)
       ? <Button variant="ghost" size="sm" onClick={() => void facts.send(refresh)}>Refresh</Button>
       : undefined,
     onBack: can(goBack) ? () => void send(goBack) : undefined,
@@ -558,7 +571,7 @@ export function Settings({ runtime, alpha, further }: { runtime: SettingsRuntime
     starting: start,
     onAndroid: ({ target, channel }) => {
       const handOff = { type: "handOff", page, target: targetsNamed[target], channel: channel ?? "", at: untimed } as const;
-      if (android.can(handOff)) void android.send(handOff);
+      if ((!passwordPage(page) || state.phone) && android.can(handOff)) void android.send(handOff);
     },
     told: android.state && toldWords[android.state.told],
     place: entered.opened && (state.places[state.places.length - 1] ?? 0) === 0 ? -1 : state.places[state.places.length - 1] ?? 0,

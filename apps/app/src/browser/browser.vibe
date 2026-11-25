@@ -5,7 +5,11 @@ import * as Tabs from "../../gen/app__browser.effect.vibe"
 import type { Browser, Effect as TabsOut, Event as TabsEvent } from "../../gen/app__browser.effect.vibe"
 import * as Address from "../../gen/app__browser__address.effect.vibe"
 import type { Effect as PageOut, Event as PageEvent, Page } from "../../gen/app__browser__address.effect.vibe"
+import * as Share from "../../gen/app__browser__share.effect.vibe"
+import type { Event as ShareEvent } from "../../gen/app__browser__share.effect.vibe"
+import { Machine as Settings } from "../../gen/app__settings.effect.vibe"
 import { Machine as Shell, showing } from "../../gen/app__shell.effect.vibe"
+import type { BrowserPageGuard } from "@elizaos/os-bridges"
 import { BrowserDownloadsHandoff, TabHost, hosted } from "../platform/browser.vibe"
 import { readWebBrowsing, saveWebBrowsing } from "../platform/browserWeb.vibe"
 import type { Install } from "../runtime/attempts.vibe"
@@ -71,6 +75,12 @@ const failedRestore = (ticket: number): TabsEvent => ({ type: "restored", ticket
 /** A tab's page: its own machine, made when the tab is first asked for and ended with the tab. */
 export type PageRuntime = ManagedRuntime.ManagedRuntime<Address.Machine | Time, unknown>
 
+/** What Alpha's tab host says of a failed tab beyond eliza's state: the HTTPS address another browser may still reach. */
+schema Stranded { readonly id: string; readonly elsewhereUrl?: string }
+
+/** The address each native tab's failed page may open at in another browser, as the host last said it; none once a load starts. */
+const elsewhere = new Map<string, string>()
+
 export type HistoryRow = { readonly url: string; readonly stamp: number; readonly title?: string; readonly at?: number }
 type HistoryEdit = { readonly ticket: number; readonly stamps: ReadonlySet<number> }
 export type HistoryChange =
@@ -101,6 +111,8 @@ export service Pages {
   stageHistory(edit: HistoryEdit): boolean!!
   finishHistory(edit: HistoryEdit, ok: boolean): void!!
   wipeHistory(): void!!
+  /** Tell the Browser's Share machine, which speaks for the tab in front, of `tab`'s page: nothing for a tab behind. Whether it took it. */
+  share(tab: number, event: ShareEvent): boolean!!
 }
 
 /** Read the current address machine for the exact tab. */
@@ -112,6 +124,10 @@ export effect function pageOf(tab: number): Page!!Pages {
 export effect function tellPage(tab: number, event: PageEvent): boolean!!Pages {
   const runtime = try (try Pages).of(tab)
   return try promise(() => runtime.runPromiseExit(Address.Machine.use((machine) => machine.send(event))).then((ended) => Exit.isSuccess(ended)))
+}
+
+effect function tellShare(tab: number, event: ShareEvent): boolean!!Pages {
+  return try (try Pages).share(tab, event)
 }
 
 export effect function tellTabs(event: TabsEvent): boolean!!Tabs.Machine {
@@ -244,6 +260,8 @@ effect function went(tab: number, load: number, way: Address.Way): PageEvent!!(T
     const s = try (try Tabs.Machine).get()
     const p = try pageOf(tab)
     if (!s.open.includes(tab) || p.phase !== "Loading" || p.load !== load) return failed
+    elsewhere.delete(idOf(tab))
+    try tellShare(tab, { type: "pageChanged" })
     if (!s.native.includes(tab)) try tellTabs({ type: "load", tab })
     try made(tab, Tabs.kindOf(s, tab))
     const id = idOf(tab)
@@ -262,6 +280,31 @@ effect function went(tab: number, load: number, way: Address.Way): PageEvent!!(T
     }
     return { type: "started" }
   } catch () => failed
+}
+
+/** The shown page's guard, as the host last said it: the page a call is for, which the host refuses once it moved on. */
+effect function guardOf(tab: number): Option.Option<BrowserPageGuard>!!TabHost {
+  const host = try TabHost
+  const id = idOf(tab)
+  const info = host.session.info(id)
+  return info?.url === undefined || info.navigation === undefined ? Option.none() : Option.some({ session: host.session.session, id, url: info.url, navigation: info.navigation })
+}
+
+// spec/app/browser/share.md, "The other browser opens, or the owner is told that none could and the page is still here"; spec/app/browser/share.md, "Only an unreachable HTTPS address makes a failed page leave, and only from a normal tab"
+/**
+ * Open the failed page in front in another browser, at the HTTPS address the host named.
+ * A committed page leaves only through the menu's reviewed hand-off (`launchOtherBrowser` in share.vibe), never from here.
+ */
+export effect function leaving(): ShareEvent!!(TabHost | Tabs.Machine | Share.Machine) {
+  const tab = (try (try Tabs.Machine).get()).selected
+  const guard = try guardOf(tab)
+  const share = try (try Share.Machine).get()
+  const failedAt = elsewhere.get(idOf(tab))
+  if (Option.isNone(guard) || !share.stranded || failedAt === undefined) return { type: "launched", ok: false, found: true }
+  const sent = hosted("openFailedPage", (plugin) => plugin.openFailedPage({ ...guard.value, url: failedAt }))
+  const launched = effect { try sent; return { type: "launched", ok: true, found: true } as ShareEvent }
+    catch (failed) => ({ type: "launched", ok: false, found: !String((failed.cause as { message?: unknown } | undefined)?.message ?? failed.cause).includes("No other installed browser") }) as ShareEvent
+  return launched
 }
 
 function carryPage(tab: number) {
@@ -340,6 +383,13 @@ const pages = Layer.effect(Pages, effect {
       history = []
       Queue.offerUnsafe(changed, { kind: "wiped" })
     }),
+    effect share(tab: number, event: ShareEvent): boolean!! {
+      const context = try area.context
+      const tabs = Context.getOption(context as Context.Context<Tabs.Machine>, Tabs.Machine)
+      const machine = Context.getOption(context as Context.Context<Share.Machine>, Share.Machine)
+      if (Option.isNone(tabs) || Option.isNone(machine) || (try tabs.value.get()).selected !== tab) return false
+      return try (machine.value.send(event) |> Effect.as(%, true) |> Effect.orElseSucceed(%, () => false))
+    },
     effect end(tab: number): void!! {
       const runtime = made.get(tab)
       made.delete(tab)
@@ -398,11 +448,25 @@ const told = started(effect {
     const tab = tabOf(change.id)
     const p = try pageOf(tab)
     const { info } = change
-    if (p.phase === "Shown" && info.loading === true && change.documentChanged) try tellPage(tab, { type: "followed" })
+    if (p.phase === "Shown" && info.loading === true && change.documentChanged && (try tellPage(tab, { type: "followed" }))) try tellShare(tab, { type: "pageChanged" })
     const now = try pageOf(tab)
     if (now.phase !== "Loading") return
-    if ((info.error ?? "") !== "") try tellPage(tab, { type: "failed", load: now.load })
-    else if (info.loading !== true && change.committedPage) try tellPage(tab, { type: "committed", load: now.load, secure: secure(info.url ?? "") })
+    if ((info.error ?? "") !== "") {
+      const stranded = Schema.decodeUnknownOption(Stranded)(said.raw)
+      const failedAt = Option.isSome(stranded) ? (stranded.value.elsewhereUrl ?? "") : ""
+      if (failedAt === "") elsewhere.delete(change.id)
+      else elsewhere.set(change.id, failedAt)
+      if (try tellPage(tab, { type: "failed", load: now.load })) try tellShare(tab, { type: "pageFailed", failure: failedAt === "" ? "Refused" : "Unreachable", https: secure(failedAt === "" ? (info.url ?? "") : failedAt) })
+    }
+    else if (info.loading !== true && (try sync(() => host.session.pageBinding(change.id))) !== undefined) {
+      // spec/app/browser/address.md, "A page that replaces its own address at its own origin, without loading another document, is still the same load": a single-page site's Back or Forward settles in place, and the native commit says so.
+      const before = URL.parse(change.previous?.url ?? "")
+      const after = URL.parse(info.url ?? "")
+      if (before !== null && after !== null && before.href !== after.href && info.committed === true && change.previous?.loading !== true) {
+        try tellPage(tab, { type: "readdressed", load: now.load, sameOrigin: before.origin === after.origin, sameDocument: true })
+      }
+      try tellPage(tab, { type: "committed", load: now.load, secure: secure(info.url ?? "") })
+    }
   })
 }, "the tab host")
 
@@ -433,6 +497,27 @@ effect function present(tab: number, host: TabHost.Shape): void!! {
   try ignore(tryPromise(() => tab === 0 || place === undefined
     ? plugin.value.present({ session: host.session.session, id: null })
     : plugin.value.present({ session: host.session.session, id: idOf(tab), ...place })))
+}
+
+// spec/app/settings/index.md, "The owner can open Password manager from the Browser menu"
+/** Open Password manager with the Settings root as its parent. */
+export const openPasswords: void!!(Tabs.Machine | Shell | Settings) = effect {
+  const shell = try Shell
+  const tabs = try Tabs.Machine
+  if (!showing(try shell.get(), "Browser") || (try tabs.get()).layer !== "Menu") return
+  if (!(try contained(tabs.send({ type: "uncover" }, (before) => before.layer === "Menu"), "closing the Browser menu"))) return
+  if (try contained(shell.send({ type: "openView", view: "Settings" }, (before) => showing(before, "Browser")), "opening Settings")) {
+    if (showing(try shell.get(), "Settings")) try contained((try Settings).send({ type: "openBrowserPasswords" }), "opening Password manager")
+  }
+}
+
+// spec/app/browser/share.md, "Story: Open the page in another browser"
+/** Place the current native tab before its plugin opens an Android action for it. */
+export effect function presentForAction(id: string): boolean!!(TabHost | Tabs.Machine | Shell) {
+  const tabs = try (try Tabs.Machine).get()
+  const position = placeOfPage()
+  if (position === undefined || idOf(tabs.selected) !== id || !Tabs.pageShown(tabs) || !showing(try (try Shell).get(), "Browser")) return false
+  return try contained(hosted("present", (plugin, session) => plugin.present({ session, id, ...position })), "showing the Browser page")
 }
 
 // spec/app/browser/downloads.md, "Story: Download a file"

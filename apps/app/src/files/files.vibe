@@ -797,6 +797,22 @@ effect function downloadsAt(fromBrowser: boolean): void!!(Files | Handles | Brow
   try ignore(shell.send({ type: "openView", view: "Files" }))
 }
 
+// spec/app/files/index.md, "The owner selects items of the place showing, all of them, or none, and a changed selection closes the sheets, telling the owner a share sheet sent nothing, and voids the delete confirmation"
+/** Wait for a Files row hold. The pointer handler cancels this wait after movement or release. */
+export effect function fileRowHeld(held: () => void): void!! {
+  try sleep("500 millis")
+  try sync(held)
+}
+
+/** Holding a listed row selects it once, including when selection changed while the pointer was down. */
+export effect function selectListedFile(target: number): void!!Browser.Machine {
+  const files = try Browser.Machine
+  const state = try files.get()
+  if (!state.picked.includes(target) && Browser.canToggle(state, target, "Owner")) {
+    try ignore(files.send({ type: "toggle", target }, "Owner"))
+  }
+}
+
 // spec/app/shell/index.md, "Back closes one layer: Ask Alpha by a step, then the app on top"; spec/app/files/index.md, "Back closes one layer inside Files: the Move to sheet, the share sheet, the name clash, the delete confirmation, the details, the Trash, the selection and the filter, then goes up the path a step; at the top, or back where another area's walk began, it leaves Files"
 /** Back inside Files: the layer the rules name, closed by its own event. Whether it took one. */
 export const back: boolean!!(Browser.Machine | Shown.Machine | Recent.Machine | ScanMachine | CorrectionMachine | Bin.Machine) = effect {

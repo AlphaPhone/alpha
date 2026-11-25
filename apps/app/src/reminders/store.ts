@@ -392,6 +392,14 @@ export const remindersStore = {
     }
     return undefined;
   },
+  /** Keep under the reminder `id` the number the Reminders machine gave it. @throws {never} */
+  numberItem(id: string, specId: number): void {
+    publish({ ...current(), itemSpecIds: new Map([...current().itemSpecIds, [id, specId]]) });
+  },
+  /** Keep under the list `id` the number the Reminders machine gave it. @throws {never} */
+  numberList(id: string, specId: number): void {
+    publish({ ...current(), listSpecIds: new Map([...current().listSpecIds, [id, specId]]) });
+  },
   /** @throws {never} */
   specIdForItem(id: string): number {
     return current().itemSpecIds.get(id) ?? 0;

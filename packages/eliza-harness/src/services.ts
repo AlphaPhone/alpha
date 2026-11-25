@@ -71,7 +71,8 @@ const scriptedModel = "alpha-chat";
  * and repeating only the person's own words, since the agent appends its notes, each starting "Note from the agent
  * host", and delivers no reply that repeats one.
  */
-const repeated = (said: string) => `[answer] You said: ${said.split(/(?:^|\n+)Note from the agent host\b/u, 1)[0].trimEnd()}`;
+const ownerWords = (text: string) => text.split(/(?:^|\n+)Note from the agent host\b/u, 1)[0].trimEnd();
+const repeated = (said: string) => `[answer] You said: ${ownerWords(said)}`;
 /** Alpha as the cloud's staging registry knows it: the client a device signs in as. */
 const client = { clientId: "ai.alphacompute.alphaphone", displayName: "Alpha", androidPackage: "ai.alphacompute.alphaphone", certFingerprints: [Array.from({ length: 32 }, () => "AA").join(":")] };
 
@@ -149,13 +150,91 @@ interface Tool { readonly type: string; readonly function: { readonly name: stri
 const uniformTools = (tools: readonly Tool[]): Tool[] =>
   tools.every((tool) => tool.function.strict === true) ? [...tools] : tools.map(({ function: { strict: _strict, ...declared }, ...tool }) => ({ ...tool, function: declared }));
 
+/** One model call as `ALPHA_MODEL_TIMING_LOG` keeps it: when it started, how long until its headers, its first output and its end, and what it asked and called. */
+interface CallTiming {
+  readonly kind: "model";
+  readonly startedAt: number;
+  readonly headersMs: number;
+  readonly firstMs: number | undefined;
+  readonly ms: number;
+  readonly status: number | undefined;
+  readonly messages: number;
+  readonly tools: number;
+  readonly called: string[];
+  readonly answered: string[];
+  readonly usage: unknown;
+}
+
+type Delta = { content?: unknown; reasoning?: unknown; reasoning_content?: unknown; tool_calls?: { function?: { name?: unknown } }[] };
+type Choice = { delta?: Delta; message?: Delta };
+
+/** What the tools answered since the model last spoke, as this call tells it: why a turn took the steps it did. */
+function answeredBefore(messages: unknown): string[] {
+  if (!Array.isArray(messages)) return [];
+  const told: string[] = [];
+  for (const message of (messages as { role?: unknown; content?: unknown }[]).toReversed()) {
+    if (message.role !== "tool") break;
+    told.unshift(typeof message.content === "string" ? message.content.slice(0, 600) : JSON.stringify(message.content).slice(0, 600));
+  }
+  return told;
+}
+
+/** Whether a streamed or whole answer's choice carries output: text, reasoning or a tool call. */
+const carries = (part: Delta | undefined) =>
+  part !== undefined && ([part.content, part.reasoning, part.reasoning_content].some((one) => typeof one === "string" && one !== "") || (part.tool_calls?.length ?? 0) > 0);
+
+/**
+ * A listener for the real model's answer to one call that appends the call's timing to the file `log` names once the
+ * answer ends, read from the answer's own JSON, streamed as server-sent events or whole: a developer's measure of
+ * where a turn's time goes, kept only on the dev server.
+ */
+function noted(log: string, input: Record<string, unknown>, startedAt: number, answer: IncomingMessage) {
+  const headersMs = Date.now() - startedAt;
+  const called = new Set<string>();
+  let firstMs: number | undefined;
+  let usage: unknown;
+  let pending = "";
+  const read = (json: string) => {
+    let body: { choices?: Choice[]; usage?: unknown };
+    try { body = JSON.parse(json) as typeof body; } catch { return; }
+    for (const choice of body.choices ?? []) {
+      const part = choice.delta ?? choice.message;
+      if (firstMs === undefined && carries(part)) firstMs = Date.now() - startedAt;
+      for (const call of part?.tool_calls ?? []) if (typeof call.function?.name === "string") called.add(call.function.name);
+    }
+    if (body.usage !== undefined && body.usage !== null) usage = body.usage;
+  };
+  const lines = (text: string) => {
+    pending += text;
+    const done = pending.split("\n");
+    pending = done.pop() ?? "";
+    for (const line of done) if (line.startsWith("data:") && line.slice(5).trim() !== "[DONE]") read(line.slice(5).trim());
+  };
+  const streamed = String(answer.headers["content-type"] ?? "").includes("text/event-stream");
+  answer.on("end", () => {
+    if (streamed) lines("\n");
+    else read(pending);
+    const messages = Array.isArray(input.messages) ? input.messages.length : 0;
+    const tools = Array.isArray(input.tools) ? input.tools.length : 0;
+    const row: CallTiming = { kind: "model", startedAt, headersMs, firstMs, ms: Date.now() - startedAt, status: answer.statusCode, messages, tools, called: [...called], answered: answeredBefore(input.messages), usage };
+    fs.appendFileSync(log, `${JSON.stringify(row)}\n`);
+  });
+  return (part: Buffer) => {
+    if (streamed) lines(part.toString("utf8"));
+    else pending += part.toString("utf8");
+  };
+}
+
 /** Send the cloud's call on to `real`, which the cloud already asks for by its own id, under its key, and its answer back as it comes, a stream included. */
 function forwarded(real: RealModel, input: Record<string, unknown>, outgoing: ServerResponse) {
+  const startedAt = Date.now();
   const tools = input.tools as readonly Tool[] | undefined;
   const url = new URL(`${real.baseUrl}/chat/completions`);
   const upstream = (url.protocol === "https:" ? https : http).request(url, { method: "POST", headers: { "content-type": "application/json", authorization: `Bearer ${real.key}` } }, (answer) => {
     const wait = answer.headers["retry-after"];
     outgoing.writeHead(answer.statusCode ?? 502, { "content-type": answer.headers["content-type"] ?? "application/json", "cache-control": "no-store", ...(wait === undefined ? {} : { "retry-after": wait }) }).flushHeaders();
+    const timing = process.env.ALPHA_MODEL_TIMING_LOG;
+    if (timing) answer.on("data", noted(timing, input, startedAt, answer));
     pipeline(answer, outgoing, () => undefined);
   });
   upstream.on("error", (cause) => {
@@ -193,7 +272,7 @@ function catalogued(route: string, authorization: string | undefined): [number, 
  * sends, so journeys share one cloud.
  */
 async function startProvider(key: string, real: RealModel | undefined) {
-  const replies = new Map<string, Reply[]>();
+  const replies = new Map<string, { readonly prompt?: string; readonly reply: Reply }[]>();
   const asked = new Map<string, Message[][]>();
   const listed = <A>(lists: Map<string, A[]>, system: string) => lists.get(system) ?? lists.set(system, []).get(system)!;
   const scripted = (system: string) => [...replies.keys()].filter((character) => system.startsWith(character)).sort((a, b) => b.length - a.length)[0] ?? system;
@@ -213,7 +292,11 @@ async function startProvider(key: string, real: RealModel | undefined) {
     listed(asked, system).push(messages);
     if (real !== undefined) return forwarded(real, input, outgoing);
     const last = messages.findLast((message) => message.role === "user")?.content;
-    const reply = listed(replies, scripted(system)).shift() ?? { kind: "text", parts: [typeof last === "string" ? repeated(last) : `You said: ${JSON.stringify(last)}`] };
+    const pending = listed(replies, scripted(system));
+    const prompt = typeof last === "string" ? ownerWords(last) : undefined;
+    const choice = pending.findIndex((entry) => entry.prompt === undefined || entry.prompt === prompt);
+    const queued = choice < 0 ? undefined : pending.splice(choice, 1)[0]?.reply;
+    const reply = queued ?? { kind: "text", parts: [typeof last === "string" ? repeated(last) : `You said: ${JSON.stringify(last)}`] };
     const text = reply.kind === "text" ? reply.parts.join("") : reply.first;
     const named = { id: "chatcmpl-local", created: 1_790_000_000, model: input.model };
     if (input.stream !== true) {
@@ -232,7 +315,8 @@ async function startProvider(key: string, real: RealModel | undefined) {
     const url = new URL(incoming.url ?? "/", "http://provider");
     if (url.pathname === "/operator/model") {
       const body = await read(incoming);
-      return json(outgoing, 200, { scripted: listed(replies, String(body.system)).push(body.reply as Reply) });
+      const prompt = typeof body.prompt === "string" ? body.prompt : undefined;
+      return json(outgoing, 200, { scripted: listed(replies, String(body.system)).push({ prompt, reply: body.reply as Reply }) });
     }
     if (url.pathname === "/operator/asked") return json(outgoing, 200, heard(url.searchParams.get("system") ?? ""));
     if (url.pathname.startsWith("/stripe/")) return json(outgoing, ...catalogued(url.pathname.slice("/stripe".length), incoming.headers.authorization));

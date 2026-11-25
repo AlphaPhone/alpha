@@ -327,6 +327,12 @@ describe.each([["a browser", false], ["a phone", true]])("in %s", (_where, phone
       expect(locationIn(world.ask.metadata?.at(-1))).toBe(undefined);
     }
 
+    // spec/app/assistant/reply.md, "A recognized tool block outside a fence becomes its card; inside a fence every line stays code": a tool call written out as text is hidden from Alpha's words, never from the owner's.
+    const written = "Open Maps <tool_call>\n<function=phone_use() {}</function>\n</tool_call>";
+    write(written);
+    await press("Send");
+    await until(alpha, runtime, Conversation, (s) => s.turn.send.id === (phone ? 8 : 5) && s.turn.reply === "Complete");
+    expect(lines().slice(-2)).toEqual([written, "You said: Open Maps"]);
     // spec/app/assistant/reply.md, "Prose is drawn with its Markdown: bold, italics, code, headings, lists and quotes; a link is a link only to an https address, and HTML reads as text"
     const marked = "**Limes** tonight?\n> Ask [Ana](https://ana.example/) <b>now</b>\n- [one](javascript:alert(1))";
     write(marked);

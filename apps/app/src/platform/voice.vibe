@@ -62,10 +62,11 @@ type RecordingStop = typeof recordingStop.Type
 
 module capacitor {
   import { registerPlugin } from "@capacitor/core"
-  import type { ElizaCloudSpeechPlugin } from "@elizaos/os-bridges"
+  import type { BrowserReadingBinding, ElizaCloudSpeechPlugin } from "@elizaos/os-bridges"
   import { type SignInClient, signInClient } from "@elizaos/os-bridges"
 
   export interface ListenerHandle { remove(): Promise<void> }
+  export type NativePageSpeech = Extract<BrowserReadingBinding, { execution: "device" }> & { readonly readingToken: string }
 
   /** One time window of a retained Notes recording. */
   export type SavedNoteWindow = { readonly recordingId: string; readonly noteId: string; readonly offsetMs: number; readonly durationMs: number }
@@ -81,6 +82,7 @@ module capacitor {
     startLiveCapture(options: { captureId: string; nativeAsr: boolean; echoCancel: boolean; bargeIn: boolean; reopen: boolean }): Promise<{ captureId: string; nativeAsr: boolean; echoCancelled: boolean }>
     stopLiveCapture(options: { captureId: string; discard: boolean }): Promise<{ captureId: string; serverClosed: boolean }>
     synthesizeLocal(options: { requestId: string; text: string; append?: boolean; replace?: boolean }): Promise<{ playbackId?: string }>
+    synthesizeLocalBrowserReading(options: NativePageSpeech & { readonly requestId: string; readonly replace: false }): Promise<{ playbackId?: string; execution?: string }>
     play(options: { playbackId: string; replace?: boolean }): Promise<unknown>
     setSpeechOutputMuted(options: { muted: boolean }): Promise<void>
     stopPlayback(options: { requestId?: string }): Promise<unknown>
@@ -161,8 +163,8 @@ module capacitor {
     }
   }
 }
-import { type SavedNoteWindow, localPlugin, makeAbort, makeSessionGuard, readSavedNote, readVoicemail, relayPlugin, signInAccounts } from capacitor
-export { type SavedNoteWindow, readSavedNote, signInAccounts }
+import { type NativePageSpeech, type SavedNoteWindow, localPlugin, makeAbort, makeSessionGuard, readSavedNote, readVoicemail, relayPlugin, signInAccounts } from capacitor
+export { type NativePageSpeech, type SavedNoteWindow, readSavedNote, signInAccounts }
 
 export error VoiceBridgeFailed { method: string; cause: unknown }
 /** Recognition ran on the confirmed clip, stayed in custody, or could not start. */
@@ -198,7 +200,7 @@ export service VoiceBridge {
   setSpeakerMuted(session: number, muted: boolean): boolean!!
   hush(turn: number): void!!
   canRead(): boolean!!
-  readAloud(ticket: number, text: string, stillCurrent?: () => boolean!!): Stream.Stream<ReadingEvent>
+  readAloud(ticket: number, text: string | NativePageSpeech, stillCurrent?: () => boolean!!): Stream.Stream<ReadingEvent>
   silenceReading(ticket: number): boolean!!
   shut(session: number): boolean!!
   readonly events: Stream.Stream<VoiceEvent>
@@ -736,7 +738,7 @@ export const phoneVoiceBridge = Layer.effect(VoiceBridge, effect {
   }
 
   // spec/app/voice/output.md, "Only the current reading's audio plays, and it ends once, as its own answer says"
-  function readAloud(ticket: number, text: string, stillCurrent?: () => boolean!!): Stream.Stream<ReadingEvent> {
+  function readAloud(ticket: number, text: string | NativePageSpeech, stillCurrent?: () => boolean!!): Stream.Stream<ReadingEvent> {
     return Stream.callback<ReadingEvent>((queue) => effect {
       if (!registered(LOCAL_PLUGIN) || !(try restoreLocalOutput(() => true)) || ticket <= stoppedThrough ||
         (stillCurrent !== undefined && !(try stillCurrent()))) {
@@ -750,9 +752,13 @@ export const phoneVoiceBridge = Layer.effect(VoiceBridge, effect {
       readings.set(ticket, { id, stopped })
       try addFinalizer(() => ignore(silenceReading(ticket)))
       let playbackId: string | undefined
+      let stoppedInBrowser = false
       for (const [event, ok] of [["playbackEnded", true], ["playbackFailed", false], ["playbackStopped", false]] as const) {
         const listener = tryPromise(() => plugin.addListener(event, (data) => {
-          if (playbackId === undefined || typeof data !== "object" || data === null || !("playbackId" in data) || data.playbackId !== playbackId) return
+          if (typeof data !== "object" || data === null) return
+          if (typeof text !== "string" && event === "playbackStopped" && "requestId" in data && data.requestId === id) {
+            stoppedInBrowser = true
+          } else if (playbackId === undefined || !("playbackId" in data) || data.playbackId !== playbackId) return
           runFork(Deferred.succeed(stopped, ok))
         })) catch () => undefined
         if (listener === undefined) {
@@ -763,9 +769,11 @@ export const phoneVoiceBridge = Layer.effect(VoiceBridge, effect {
         try addFinalizer(() => ignore(tryPromise(() => listener.remove())))
       }
       const playing = effect {
-        const prepared = try tryPromise(() => plugin.synthesizeLocal({ requestId: id, text, replace: false }))
+        const prepared = try tryPromise(() => typeof text === "string"
+          ? plugin.synthesizeLocal({ requestId: id, text, replace: false })
+          : plugin.synthesizeLocalBrowserReading({ ...text, requestId: id, replace: false }).then((receipt) => receipt.execution === "device" ? receipt : {}))
         const playback = prepared.playbackId
-        if (!playback || readings.get(ticket)?.id !== id || (stillCurrent !== undefined && !(try stillCurrent()))) return false
+        if (!playback || stoppedInBrowser || readings.get(ticket)?.id !== id || (stillCurrent !== undefined && !(try stillCurrent()))) return false
         playbackId = playback
         try tryPromise(() => plugin.play({ playbackId: playback, replace: false }))
         return true

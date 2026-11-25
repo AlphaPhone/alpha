@@ -18,6 +18,8 @@ export interface WalletScene {
   holdings: Holding[];
   /** The families whose network cannot be read. */
   unread: Family[];
+  /** Only the whole holdings read fails while standing and the other lists still answer. */
+  holdingsUnreachable: boolean;
   requests: Asked[];
   operations: Operation[];
   /** Every route answers 502, as a wallet whose network is down does. */
@@ -52,7 +54,7 @@ export function walletScene(): WalletScene {
       { family: "evm", chainId: "1", asset: "native", symbol: "ETH", decimals: 18, atomicUnits: "2500000000000000000" },
       { family: "solana", chainId: "mainnet", asset: "native", symbol: "SOL", decimals: 9, atomicUnits: "4000000000" },
     ],
-    unread: [], requests: [], operations: [], unreachable: false, refusal: "", unresolved: false, stalled: false, reviewFor: 60_000,
+    unread: [], holdingsUnreachable: false, requests: [], operations: [], unreachable: false, refusal: "", unresolved: false, stalled: false, reviewFor: 60_000,
     reviews: new Map(), made: [], askings: [], decisions: [], issued: 0, opened: 0,
   };
 }
@@ -169,7 +171,9 @@ export function walletRoutes(scene: WalletScene, now: () => number): Route[] {
         });
       }
       if (scene.custody !== "ready") return refused("The wallet is off.");
-      if (path === "/holdings" && method === "GET") return Response.json({ holdings: scene.holdings.filter((holding) => !scene.unread.includes(holding.family)), unread: scene.unread });
+      if (path === "/holdings" && method === "GET") return scene.holdingsUnreachable
+        ? Response.json({ error: "Holdings could not be read.", code: "unreachable" }, { status: 502 })
+        : Response.json({ holdings: scene.holdings.filter((holding) => !scene.unread.includes(holding.family)), unread: scene.unread });
       if (path === "/activity" && method === "GET") return Response.json({ operations: scene.operations });
       if (path === "/requests" && method === "GET") return Response.json({ requests: scene.requests });
       if (path === "/requests" && method === "POST") return ask(scene, request);

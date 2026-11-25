@@ -88,7 +88,9 @@ function Desk({ ledger, sending }: { ledger: Ledger; sending: Transferring }) {
 /** What one account holds: its amounts, or that its network could not be read, never an empty account in its place. */
 function Holdings({ ledger, account }: { ledger: Ledger; account: Account }) {
   const reading = readingOf(account.family, ledger.state);
-  if (reading === "NotRead") return <ListRow title={account.network} trailing={<StatusDot status="warn" label={`${account.network} could not be read`} />} />;
+  if (reading === "NotRead" || (reading === "Nothing" && ledger.state.holdings.status === "Failed")) {
+    return <ListRow title={account.network} trailing={<StatusDot status="warn" label="Could not be read" showLabel />} />;
+  }
   if (!account.connected) return <ListRow title={account.network === "" ? account.symbol : account.network} trailing={<StatusDot status="off" label="No network" />} />;
   if (reading === "Nothing") return <ListRow title={<WalletAmount amount="0" symbol={account.symbol} />} detail={account.network} />;
   return (

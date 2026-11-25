@@ -272,6 +272,9 @@ export function remindersRoutes(scene: RemindersScene, now: () => number): Route
       }
       if (request.method === "PATCH" && sub === undefined) {
         return readJsonBody(request).then((body) => {
+          if (body.expectedRevision !== undefined && body.expectedRevision !== existing.revision) {
+            return Response.json({ error: "reminder_revision_changed" }, { status: 409 });
+          }
           const ts = now();
           return commitItem(index, { ...existing, ...(body as Partial<FakeReminderItem>), id: existing.id, revision: existing.revision + 1, updatedAtMs: ts }, ts);
         });
@@ -304,8 +307,18 @@ export function remindersRoutes(scene: RemindersScene, now: () => number): Route
         return Response.json({ item: completed, nextItem: null, snapshot: snapshotOf(scene) });
       }
       if (request.method === "POST" && sub === "reopen") {
-        const ts = now();
-        return commitItem(index, { ...existing, completed: false, completedAtMs: null, revision: existing.revision + 1, updatedAtMs: ts }, ts);
+        return readJsonBody(request).then((body) => {
+          const ts = now();
+          if (body.expectedRevision !== undefined) {
+            if (body.expectedRevision !== existing.revision || !existing.completed || existing.recurrence !== "none"
+              || typeof body.dueDate !== "string" || typeof body.dueMinute !== "number") {
+              return Response.json({ error: "reminder_revision_changed" }, { status: 409 });
+            }
+            return commitItem(index, { ...existing, completed: false, completedAtMs: null, dueDate: body.dueDate, dueMinute: body.dueMinute,
+              alertMinutes: null, snoozedUntilMs: null, notifiedAtMs: null, revision: existing.revision + 1, updatedAtMs: ts }, ts);
+          }
+          return commitItem(index, { ...existing, completed: false, completedAtMs: null, revision: existing.revision + 1, updatedAtMs: ts }, ts);
+        });
       }
       if (request.method === "POST" && sub === "snooze") {
         return readJsonBody(request).then((body) => {

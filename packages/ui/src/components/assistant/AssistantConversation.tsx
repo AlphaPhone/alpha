@@ -4,6 +4,7 @@ import { Alert } from "../Alert.tsx";
 import { AssistantChatHeader, type AssistantChatHeaderProps } from "./AssistantChatHeader.tsx";
 import { AssistantComposer, type AssistantComposerProps } from "./AssistantComposer.tsx";
 import { AssistantTranscript, type AssistantTranscriptProps } from "./AssistantTranscript.tsx";
+import { type AssistantBarDrag, useAssistantBarDrag } from "./assistant-pull.ts";
 
 export type AssistantConversationProps = Omit<ComponentProps<"section">, "children"> & {
   /** The top of the sheet: handle, name, context and the ways to find or start a conversation. */
@@ -14,10 +15,12 @@ export type AssistantConversationProps = Omit<ComponentProps<"section">, "childr
   transcript: AssistantTranscriptProps;
   /** The dictation recorder within the open conversation. */
   voicePanel?: ReactNode;
-  /** The composer at the foot. */
+  /** The composer at the foot; its variant follows the detent unless given, as a sheet pulled up from the bar keeps the bar under it. */
   composer: AssistantComposerProps;
   /** How far Ask Alpha is raised: resting on its bar, open as a half-screen sheet, or filling the screen. */
   detent?: "bar" | "sheet" | "full";
+  /** A drag anywhere on the resting bar moves Ask Alpha as a drag of its handle does; left out where it may not be dragged. */
+  barDrag?: AssistantBarDrag;
 };
 
 /**
@@ -25,8 +28,9 @@ export type AssistantConversationProps = Omit<ComponentProps<"section">, "childr
  * Keeping the composer mounted in one slot across detents preserves focus and the native keyboard session on tap.
  * @model spec/app/assistant/index.md
  */
-export function AssistantConversation({ header, attachmentNotice, transcript, voicePanel, composer, detent = "sheet", className, ...props }: AssistantConversationProps) {
+export function AssistantConversation({ header, attachmentNotice, transcript, voicePanel, composer, detent = "sheet", barDrag, className, ...props }: AssistantConversationProps) {
   const resting = detent === "bar";
+  const dragging = useAssistantBarDrag(barDrag ?? {});
   const full = detent === "full";
   const panel = resting ? undefined : voicePanel;
   return (
@@ -42,6 +46,7 @@ export function AssistantConversation({ header, attachmentNotice, transcript, vo
           : resting ? null : cn("rounded-t-chat pt-1", props.style?.height ? "max-h-dvh" : "min-h-[38dvh] max-h-[60dvh]"),
         className,
       )}
+      {...(resting && barDrag ? dragging : {})}
       {...props}
     >
       <div hidden={resting} className={cn("min-h-0 flex-1 basis-auto flex-col", resting ? "hidden" : "flex", panel && "overflow-y-auto")}>
@@ -50,7 +55,7 @@ export function AssistantConversation({ header, attachmentNotice, transcript, vo
         {panel}
         <AssistantTranscript {...transcript} className={cn("flex-1", transcript.className)} />
       </div>
-      <AssistantComposer {...composer} voice={panel ? undefined : composer.voice} hidden={Boolean(panel) || composer.hidden} variant={resting ? "bar" : "sheet"} />
+      <AssistantComposer {...composer} voice={panel ? undefined : composer.voice} hidden={Boolean(panel) || composer.hidden} variant={composer.variant ?? (resting ? "bar" : "sheet")} />
     </section>
   );
 }

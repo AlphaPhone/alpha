@@ -50,8 +50,8 @@ export const pages = together(
 
 // spec/app/settings/facts.md, "Only the newest asking's answer is taken, and it replaces everything shown"
 effect function readPhone(ticket: number): Facts.Event!!(SystemSettings | Pages.Machine) {
-  const { page } = try (try Pages.Machine).get()
-  const report = try (try SystemSettings).report({ autofill: page === "PasswordsPage" })
+  const { page, phone } = try (try Pages.Machine).get()
+  const report = try (try SystemSettings).report({ autofill: phone && Pages.passwordPage(page) })
   return { type: "answered", ticket, reported: [...report.readings], grants: [...report.grants], alerts: [...report.alerts], home: report.home, assistant: report.assistant, launcher: report.launcher }
 }
 
@@ -123,7 +123,7 @@ const androidMachine = reacting(Android, { carry: startAndroid, timers: androidT
 
 const autofillShown = following(
   Pages.Machine,
-  (state) => state.page === "PasswordsPage",
+  (state) => state.phone && Pages.passwordPage(state.page),
   Facts.Machine,
   (showing): Facts.Event | undefined => showing ? { type: "refresh", at: untimed } : undefined,
 )

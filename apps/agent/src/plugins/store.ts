@@ -797,8 +797,14 @@ export class AlphaAppsStore {
     const items = [...this.reminders.items];
     for (const task of tasks) {
       if (task.kind !== "personal-assistant.reminder") continue;
-      if (task.status === "Dismissed") continue;
       const existingIdx = items.findIndex((item) => item.agentTaskId === task.taskId);
+      if (task.status === "Dismissed") {
+        if (existingIdx >= 0) {
+          items.splice(existingIdx, 1);
+          changed = true;
+        }
+        continue;
+      }
       const completed = task.status === "Completed";
       if (existingIdx >= 0) {
         const current = items[existingIdx];

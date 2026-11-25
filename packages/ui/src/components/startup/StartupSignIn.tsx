@@ -34,10 +34,28 @@ type Challenge = {
   | { stage: "Second"; factor: "totp" | "sms" }
 );
 
-export type StartupSignInProps = Choice | Challenge | { stage: "Browser"; message?: string };
+type Connection = { message: string; onOpen: () => Promise<boolean> };
+export type StartupSignInProps = (Choice | Challenge | { stage: "Browser"; message?: string }) & { connection?: Connection };
 
 const mainAction = "min-h-13 w-full rounded-[14px] text-base leading-tight font-medium";
 const textAction = "h-11 w-full text-[15px] font-medium";
+
+function NetworkNotice({ message, onOpen }: Connection) {
+  const [result, setResult] = useState<"idle" | "opening" | "failed">("idle");
+  const open = async () => {
+    setResult("opening");
+    const opened = await onOpen().catch(() => false);
+    setResult(opened ? "idle" : "failed");
+  };
+  return (
+    <aside aria-label="Sign-in connection" className="mb-3 rounded-sm border border-border px-4 py-3">
+      <p role="status" className="text-sm leading-[1.45] text-muted-foreground/97 dark:text-muted-foreground">{message}</p>
+      <Button variant="ghost" className="h-11 rounded-md border border-transparent px-0 text-[15px] leading-tight font-medium text-primary hover:bg-transparent active:bg-transparent"
+        loading={result === "opening"} onClick={() => void open()}>Open Wi-Fi settings</Button>
+      {result === "failed" ? <p role="alert">Couldn’t open Wi-Fi settings.</p> : null}
+    </aside>
+  );
+}
 
 function Google({ onClick, disabled }: { onClick: () => void; disabled: boolean }) {
   const button = useRef<HTMLButtonElement>(null);
@@ -72,7 +90,6 @@ function Chooser(props: Choice) {
   };
   return (
     <>
-      {!online ? <p role="status" className="mb-3 rounded-xl border border-border px-4 py-3">Connect to the internet to sign in.</p> : null}
       <div className="flex flex-col gap-3">
         {onGoogle ? <Google disabled={!online || !!busy} onClick={onGoogle} /> : null}
         {onGoogle && enabled ? <div aria-hidden="true" className="my-2 flex items-center gap-3.5 text-[13px] text-muted-foreground before:h-px before:flex-1 before:bg-border after:h-px after:flex-1 after:bg-border">or</div> : null}
@@ -191,6 +208,7 @@ export function StartupSignIn(props: StartupSignInProps) {
         <div className="mx-auto w-full max-w-lg">
           <AuthMark className="mb-6" />
           <h1 id={heading} className="mb-7 font-display text-[clamp(36px,9vw,48px)] leading-[1.08] font-normal tracking-[-.025em] text-balance">{title}</h1>
+          {props.connection ? <NetworkNotice {...props.connection} /> : null}
           {props.stage === "Choose" ? <Chooser {...props} /> : props.stage === "Browser" ? (
             <div className="flex flex-col items-center gap-4">
               <Spinner className="size-7 text-alpha" label="Waiting for Google sign-in" />
