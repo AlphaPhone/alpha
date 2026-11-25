@@ -386,6 +386,24 @@ pure def toggleComplete(s: Reminders, itemId: int, nextDueDay: int, at: int): Mo
       out: List(WriteItem({ attemptId: attemptId, itemId: itemId })) }
 ```
 
+### The reviewed reopen from Calendar restores the same reminder without an alert
+
+Calendar already wrote the selected resident revision. This updates the
+list's projection where it knows that item, without sending a second write.
+
+```quint
+pure val dueMinuteValues = Set(0, 540, 1439)
+
+pure def canAdoptReopened(s: Reminders, itemId: int, dueDay: int, dueMinute: int): bool =
+  itemId != s.hiddenId and hasItem(s.items, itemId) and itemOf(s.items, itemId).completed
+    and itemOf(s.items, itemId).repeat == NoRepeat and dueMinute >= 0 and dueMinute < 1440
+
+pure def adoptReopened(s: Reminders, itemId: int, dueDay: int, dueMinute: int): Reminders =
+  { ...s, items: s.items.listMap(row => if (row.id == itemId)
+    { ...row, completed: false, hasDue: true, hasDueTime: true, dueDay: dueDay, dueMinute: dueMinute,
+      snoozedUntil: 0, revision: row.revision + 1 } else row) }
+```
+
 ### Deleting a reminder hides it immediately and holds it for five seconds before committing the deletion
 
 ```quint

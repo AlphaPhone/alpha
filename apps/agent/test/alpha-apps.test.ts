@@ -490,4 +490,32 @@ describe("Alpha product plugin: Reminders actions, provider, recurrence, and rou
       admitted("DELETE", "/api/alpha/reminders/items/rem-1?idempotencyKey=k"),
     ]).toEqual(["Admitted", "Admitted", "RouteRefused"]);
   });
+
+  it("reopens the reviewed Calendar reminder without firing its old task (spec/agent/index.md, \"A reminder with a due time keeps one scheduled task, and the task follows what the owner does to the reminder\")", async () => {
+    const store = new AlphaAppsStore({ now: () => Date.UTC(2026, 10, 24, 15) });
+    const { runtime, tasks, refusing } = makeFakeRuntime([]);
+    const routes = createAlphaAppsPlugin({ store, timeZone: "UTC", runtime }).plugin.routes!;
+    const creation = await callRoute(routes, "POST", "/api/alpha/reminders/items", { body: { title: "Pick up keys", dueDate: "2026-11-24", dueMinute: 18 * 60, alertMinutes: 0 } });
+    const id = (creation.body.item as ReminderItemRecord).id;
+    const completed = await callRoute(routes, "POST", "/api/alpha/reminders/items/{id}/complete", { params: { id } });
+    const record = completed.body.item as ReminderItemRecord;
+    const body = { dueDate: "2026-11-24", dueMinute: 18 * 60, expectedRevision: record.revision };
+    const noAlert = (expectedRevision: number) => callRoute(routes, "POST", "/api/alpha/reminders/items/{id}/reopen", { params: { id }, body: { ...body, expectedRevision } });
+
+    expect((await noAlert(record.revision + 1)).status).toBe(409);
+    const withoutTasks = createAlphaAppsPlugin({ store, timeZone: "UTC" }).plugin.routes!;
+    expect((await callRoute(withoutTasks, "POST", "/api/alpha/reminders/items/{id}/reopen", { params: { id }, body })).status).toBe(409);
+    refusing.add("Dismiss");
+    expect((await noAlert(record.revision)).status).toBe(409);
+    expect(store.getReminders().items.find((item) => item.id === id)?.completed).toBe(true);
+    expect(tasks.find((task) => task.taskId === record.agentTaskId)?.status).toBe("Completed");
+
+    refusing.delete("Dismiss");
+    const revision = store.getReminders().items.find((item) => item.id === id)!.revision;
+    const reopened = await noAlert(revision);
+    expect(reopened.status).toBe(200);
+    expect(reopened.body.item).toMatchObject({ id, completed: false, dueDate: body.dueDate, dueMinute: body.dueMinute, alertMinutes: null, agentTaskId: null });
+    expect(tasks.find((task) => task.taskId === record.agentTaskId)?.status).toBe("Dismissed");
+    expect(tasks.filter((task) => task.metadata.alphaReminderId === id && task.status === "Scheduled")).toHaveLength(0);
+  });
 });

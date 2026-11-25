@@ -23,8 +23,10 @@ import {
 import {
   type ReminderRecurrence,
   advanceDueDate,
+  civilDateAt,
   civilDayFromString,
   civilDayNumber,
+  formatCivilDate,
 } from "./recurrence.ts"
 import { persistReminderSnapshot, pushToHomeAgenda, snapshotKey } from "./snapshot.vibe"
 import {
@@ -492,6 +494,60 @@ effect function prepareItemEdit(id: string, expectedRevision?: number): ({ reado
   if (existing === undefined || (expectedRevision !== undefined && existing.revision !== expectedRevision)) return undefined
   const now = try (try Time).now()
   return { current, existing, now }
+}
+
+/** Apply the reviewed one-off reopen through Reminders with exactly the shown revision and due time. */
+export effect function reopenDatedReminder(id: string, revision: number, dueAt: number, attempt: number) {
+  const key = try (try Attempts).key(attempt)
+  const reviewed = try prepareItemEdit(id, revision)
+  const item = reviewed?.existing
+  if (item === undefined || !item.completed || item.dueDate === null || item.recurrence !== "none") {
+    try say("Changed", true)
+    return
+  }
+  const clock = try Time
+  if (dueAt <= (try clock.now())) {
+    try say("Time passed", true)
+    return
+  }
+  const date = new Date(dueAt)
+  const dueDate = formatCivilDate(civilDateAt(dueAt))
+  const dueMinute = date.getHours() * 60 + date.getMinutes()
+  const agent = try Agent
+  const outcome = effect {
+    const body = try agent.call(HttpClientRequest.bodyJsonUnsafe(
+      HttpClientRequest.post(`/api/alpha/reminders/items/${encodeURIComponent(id)}/reopen`),
+      { expectedRevision: revision, dueDate, dueMinute, idempotencyKey: key },
+    ))
+    const decoded = Schema.decodeUnknownOption(ItemReplySchema)(body)
+    return { kept: true, item: Option.isSome(decoded) ? decoded.value.item : undefined }
+  } catch (failure) => {
+    const result = outcomeOf(failure)
+    return { kept: result.confirmed || !result.known || failure._tag === "Unsent", item: undefined }
+  }
+  const view = remindersStore.snapshot()
+  const latest = view.snapshot.items.find((row) => row.id === id)
+  if (!outcome.kept || latest?.revision !== revision || view.hiddenIds.has(id)) {
+    try say("Changed", true)
+    return
+  }
+  const now = try clock.now()
+  const saved = outcome.item
+  const accepted = saved?.id === id && saved.revision > revision && !saved.completed && saved.dueDate === dueDate
+    && saved.dueMinute === dueMinute && saved.alertMinutes === null && saved.agentTaskId === null ? saved : undefined
+  if (accepted === undefined && latest.agentTaskId !== null) {
+    try say("Couldn't confirm reopen", true)
+    return
+  }
+  const updated = accepted ?? { ...latest, completed: false, completedAtMs: null, dueDate, dueMinute, alertMinutes: null, snoozedUntilMs: null, notifiedAtMs: null, revision: revision + 1, updatedAtMs: now }
+  try persistAndBroadcast(replaceItemInSnapshot(view.snapshot, updated, now), now)
+  const machine = try Reminders.Machine
+  const itemId = remindersStore.specIdForItem(id)
+  const dueDay = civilDayNumber(dueAt)
+  if (Reminders.canAdoptReopened(try machine.get(), itemId, dueDay, dueMinute)) {
+    try contained(machine.send({ type: "adoptReopened", itemId, dueDay, dueMinute }), "reopening the same reminder in its list")
+  }
+  try say("Reopened · No alert")
 }
 
 effect function commitItemWrite(

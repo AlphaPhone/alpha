@@ -179,7 +179,9 @@ chat, its task follows: deleting it, or taking its due time away, dismisses
 the task, so it never comes back; completing it completes the task, and
 completing a repeating one moves the task to its next due time; reopening
 it reopens the task; and a new due time moves the task, so it
-fires only at the new time. A dated, open reminder with no task gets one, and a reminder whose task the
+fires only at the new time. A reviewed Calendar reopen with No alert keeps the
+due time and dismisses its prior task without starting another. Other dated,
+open reminders with no task get one, and a reminder whose task the
 owner dismisses in chat is deleted.
 A task that cannot follow, such as one completed too long ago to reopen,
 is dismissed and the reminder gets a new one. A change whose task stays

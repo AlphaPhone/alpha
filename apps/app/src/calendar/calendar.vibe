@@ -11,9 +11,13 @@ import { pageOffered } from "../../gen/app__calendar__presentation.ts"
 import { type Provider, answersOffered, cancellation, mutability, ownAnswer } from "../../gen/app__calendar__writing.ts"
 import type * as Changes from "../../gen/app__calendar__agent.effect.vibe"
 import type * as Linking from "../../gen/app__calendar__link.effect.vibe"
+import type * as Reopen from "../../gen/app__calendar__reminderReopen.effect.vibe"
+import type { Machine as Toasts } from "../../gen/app__notices__toasts.effect.vibe"
 import type { AndroidCalendarEvent } from "@elizaos/os-bridges"
 import { Agent } from "../platform/agent.vibe"
+import type { Said } from "../notices/toasts.vibe"
 import type { Cloud } from "../platform/cloud.vibe"
+import type { Device } from "../platform/device.vibe"
 import { Machine as Settings } from "../../gen/app__settings.effect.vibe"
 import { PhoneCalendar } from "../platform/calendar.vibe"
 import { type Failure, ask } from "../platform/remote.vibe"
@@ -278,4 +282,4 @@ const reminders = started(effect {
 export const calendar = together(kept, told, fronted, returned, widened, writing, reminders)
 
 /** Every machine of the Calendar area, which its screen reads, and Alpha's time. */
-export type Calendared = View.Machine | Writes.Machine | Changes.Machine | Linking.Machine | Held.Machine | Canvas.Machine | Cloud | Time | KeyValueStore.KeyValueStore
+export type Calendared = View.Machine | Writes.Machine | Changes.Machine | Linking.Machine | Held.Machine | Canvas.Machine | Reopen.Machine | Cloud | Device | Time | KeyValueStore.KeyValueStore | Toasts | Said

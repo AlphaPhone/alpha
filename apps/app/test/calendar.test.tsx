@@ -14,7 +14,7 @@ import { civilDay, dateOf, dayStart } from "../src/calendar/time.ts";
 import { createReminderItem, resetReminderStores } from "../src/reminders/reminders.vibe";
 import { DEFAULT_LIST_ID, remindersStore } from "../src/reminders/store.ts";
 import type { Alpha } from "../src/runtime/area.tsx";
-import { button, closeAll, drawn, fill, hardware, later, only, open, press, underAct, until } from "./alpha.tsx";
+import { button, closeAll, drawn, fill, hardware, later, only, open, press, seen, underAct, until } from "./alpha.tsx";
 import { agentEvent, agentRequest } from "./fakes/calendar.ts";
 import { type Scene, scene } from "./fakes/scene.ts";
 
@@ -266,6 +266,52 @@ describe("Calendar without a connected account", () => {
     expect(remindersStore.findItem(selected.id)).toMatchObject({ notes: "Take the earlier draft.", dueMinute: 615, revision: selected.revision + 1 });
     expect(world.reminders.items.find((item) => item.id === selected.id)).toMatchObject({ notes: "Take the earlier draft.", dueMinute: 615 });
     expect(remindersStore.findItem(other.id)).toMatchObject({ notes: "A different notebook.", dueMinute: 570, revision: other.revision });
+  });
+
+  it("Reviews reopening the exact completed reminder without an alert (spec/app/calendar/reminderReopen.md, \"Story: Review reopening the selected reminder without an alert\")", async () => {
+    const world = morning(false);
+    const { alpha } = await open(world, only("view:Calendar"));
+    const runtime = calendar.runtime(alpha);
+    await openCalendar(alpha);
+    await until(alpha, runtime, View, (state) => state.front && state.anchor === world.today);
+    await until(alpha, alpha.runtime, Reminders, (state) => state.sync.status === "Loaded");
+    const inputs = { listId: DEFAULT_LIST_ID, title: "Bring the blue notebook", dueMinute: 570, alertMinutes: 0 };
+    const selected = await alpha.runtime.runPromise(createReminderItem({ ...inputs, dueDate: "2026-11-24" }));
+    await until(alpha, alpha.runtime, Reminders, (state) => state.write.outcome === "Confirmed");
+    const other = await alpha.runtime.runPromise(createReminderItem({ ...inputs, dueDate: "2026-11-25" }));
+    await until(alpha, alpha.runtime, Reminders, (state) => state.write.outcome === "Confirmed");
+    if (!selected || !other) throw new Error("Expected two saved reminders");
+
+    await until(alpha, runtime, View, (state) => state.reminders === 1);
+    await press(/^Bring the blue notebook,/);
+    await until(alpha, runtime, View, (state) => state.reminder > 0);
+    await press("Complete reminder occurrence");
+    await until(alpha, alpha.runtime, Reminders, (state) => state.write.outcome === "Confirmed");
+    const detail = () => document.querySelector('[data-alpha-subview="calendar-detail"]')?.textContent;
+    expect(detail()).toContain(`Completed ${new Date(world.now).toLocaleString()} · due ${new Date(world.at(0, 9.5)).toLocaleString()}`);
+    await press("Reopen reminder");
+    await vi.waitFor(() => expect(document.querySelector('[role="dialog"]')?.textContent).toContain("No alert"));
+    await hardware("back");
+    await vi.waitFor(() => expect(document.querySelector('[role="dialog"]')).toBeNull());
+    expect(world.reminders.items.find((item) => item.id === selected.id)?.completed).toBe(true);
+    expect(button("Reopen reminder")).toBeDefined();
+
+    await press("Reopen reminder");
+    await vi.waitFor(() => expect(button("Reopen")).toBeDefined());
+    try {
+      await seen(false);
+      await vi.waitFor(() => expect(document.querySelector('[role="dialog"]')).toBeNull());
+    } finally {
+      await seen(true);
+    }
+    expect(world.reminders.items.find((item) => item.id === selected.id)?.completed).toBe(true);
+
+    await press("Reopen reminder");
+    await vi.waitFor(() => expect(button("Reopen")).toBeDefined());
+    await press("Reopen");
+    await vi.waitFor(() => expect(detail()).toContain("No alert · saved on this device"));
+    expect(world.reminders.items.find((item) => item.id === selected.id)).toMatchObject({ completed: false, alertMinutes: null, dueMinute: 570 });
+    expect(world.reminders.items.find((item) => item.id === other.id)).toMatchObject({ completed: false, alertMinutes: 0, revision: other.revision });
   });
 });
 
