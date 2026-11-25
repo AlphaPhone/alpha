@@ -23,7 +23,7 @@ export effect function browserInFront(): boolean!!Shell {
 }
 
 module page {
-  import { addressFacts, isSecureWebAddress } from "@elizaos/os-bridges"
+  import { addressFacts, isSecureWebAddress, isWebAddress } from "@elizaos/os-bridges"
   import type { Input } from "../../gen/app__browser__address.ts"
 
   /** Whether `href` came over HTTPS with a host. @throws {never} */
@@ -53,7 +53,9 @@ module page {
       web,
       spaced,
       colon: /^[A-Za-z][\w-]*:(?!\d)/.test(text) && !web,
-      host: /^(localhost|\[[\da-f:.]+\]|[^\s/:@.]+(\.[^\s/:@.]+)+)(:\d+)?([/?#]\S*)?$/i.test(rest) && !/^[\d.:]+$/.test(rest),
+      host: web
+        ? isWebAddress(text)
+        : /^(localhost|\[[\da-f:.]+\]|[^\s/:@.]+(\.[^\s/:@.]+)+)(:\d+)?([/?#]\S*)?$/i.test(rest) && !/^[\d.:]+$/.test(rest) && isWebAddress(`https://${rest}`),
       numeric: /^[\d.:]+$/.test(text),
       mail,
     }
@@ -105,7 +107,12 @@ export service Pages {
   aimed(tab: number): Option.Option<string>!!
   /** What the owner is finding in `tab`'s page. */
   seek(tab: number, text: string): void!!
-  sought(tab: number): string!!
+  sought(tab: number): { readonly text: string; readonly index: number }!!
+  stood(tab: number, index: number): void!!
+  readonly find: {
+    readonly subscribe: (listener: () => void) => () => void
+    readonly snapshot: (tab: number) => { readonly text: string; readonly index: number }
+  }
   /** Whether the native tab currently requests the desktop version of pages. */
   desktop(tab: number): boolean!!
   setDesktop(tab: number, enabled: boolean): void!!
@@ -230,17 +237,21 @@ function carryTabs(fx: TabsOut): Job<TabsEvent, TabHost | Pages | Tabs.Machine, 
   }
 }
 
-effect function erased(): TabsEvent!!(TabHost | Pages) {
+effect function erased(): TabsEvent!!(TabHost | Pages | Tabs.Machine) {
   return effect {
     const host = try TabHost
     const pages = try Pages
     const edit = try pages.historyEdit()
     if (edit !== undefined) try pages.finishHistory(edit, false)
+    const tabs = try (try Tabs.Machine).get()
+    const cleared = tabs.open.filter((tab) => !tabs.privates.includes(tab))
     if (host.web === undefined) try hosted("clearBrowsingData", (plugin, session) => plugin.clearBrowsingData({ session }))
     else {
       try saveWebBrowsing({})
       try sync(() => host.web?.clear())
     }
+    host.session.forget(cleared.map(idOf))
+    for (const tab of cleared) try pages.end(tab)
     try pages.wipeHistory()
     return { type: "erased", ok: true }
   } catch () => ({ type: "erased", ok: false })
@@ -270,7 +281,7 @@ effect function went(tab: number, load: number, way: Address.Way): PageEvent!!(T
     if (!s.open.includes(tab) || p.phase !== "Loading" || p.load !== load) return failed
     elsewhere.delete(idOf(tab))
     try tellShare(tab, { type: "pageChanged" })
-    if (!s.native.includes(tab)) try tellTabs({ type: "load", tab })
+    if (!s.native.includes(tab) && !(try tellTabs({ type: "load", tab }))) return failed
     try made(tab, Tabs.kindOf(s, tab))
     const id = idOf(tab)
     if (way === "Address" || way === "Query") {
@@ -333,12 +344,16 @@ function carryPage(tab: number) {
   }
 }
 
+const emptyFind = { text: "", index: 0 } as const
+
 /** Each tab's page machine, made over the Browser's own runtime once it is whole, so its loads go through the tab host. */
 const pages = Layer.effect(Pages, effect {
   const area = try Whole
   const made = new Map<number, PageRuntime>()
   const aims = new Map<number, string>()
-  const finds = new Map<number, string>()
+  const finds = new Map<number, { readonly text: string; readonly index: number }>()
+  const findListeners = new Set<() => void>()
+  const notifyFind = () => { for (const listener of [...findListeners]) listener() }
   const desktops = new Set<number>()
   let history: readonly HistoryRow[] = []
   let stamp = 0
@@ -361,8 +376,24 @@ const pages = Layer.effect(Pages, effect {
     },
     aim: (tab: number, address: string) => sync(() => { aims.set(tab, address) }),
     aimed: (tab: number) => sync(() => Option.fromNullishOr(aims.get(tab))),
-    seek: (tab: number, text: string) => sync(() => { finds.set(tab, text) }),
-    sought: (tab: number) => sync(() => finds.get(tab) ?? ""),
+    seek: (tab: number, text: string) => sync(() => {
+      finds.set(tab, { text, index: 0 })
+      notifyFind()
+    }),
+    sought: (tab: number) => sync(() => finds.get(tab) ?? emptyFind),
+    stood: (tab: number, index: number) => sync(() => {
+      const current = finds.get(tab) ?? emptyFind
+      if (current.index === index) return
+      finds.set(tab, { text: current.text, index })
+      notifyFind()
+    }),
+    find: {
+      snapshot: (tab: number) => finds.get(tab) ?? emptyFind,
+      subscribe: (listener: () => void) => {
+        findListeners.add(listener)
+        return () => { findListeners.delete(listener) }
+      },
+    },
     desktop: (tab: number) => sync(() => desktops.has(tab)),
     setDesktop: (tab: number, enabled: boolean) => sync(() => {
       if (enabled) desktops.add(tab)
@@ -407,7 +438,7 @@ const pages = Layer.effect(Pages, effect {
       const runtime = made.get(tab)
       made.delete(tab)
       aims.delete(tab)
-      finds.delete(tab)
+      if (finds.delete(tab)) notifyFind()
       desktops.delete(tab)
       if (runtime !== undefined) try promise(() => runtime.dispose())
     },
