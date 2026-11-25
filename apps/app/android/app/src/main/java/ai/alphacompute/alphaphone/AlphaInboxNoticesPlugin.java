@@ -66,10 +66,11 @@ public final class AlphaInboxNoticesPlugin extends Plugin {
    try {
     foreground.check();
     if (!inbox.allowed()) throw new SecurityException("Gmail notifications are disabled");
-    return inbox.delivery.configure(attempt, call.getString("credentialId"), grant, call.getString("userId"), call.getString("organizationId"), foreground);
+    var status = inbox.delivery.configure(attempt, call.getString("credentialId"), grant, call.getString("userId"), call.getString("organizationId"), foreground);
+    inbox.changed();
+    return status;
    } finally {
     inbox.delivery.releaseUnadmittedAttempt(attempt);
-    inbox.changed();
    }
   });
  }
