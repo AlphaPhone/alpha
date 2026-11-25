@@ -325,7 +325,7 @@ describe("Voice Bug 1 & Bug 3 journeys", () => {
 
     world.voice.credentialId = "cred-owner-8";
     await sendVoice(runtime, { type: "startTalking", now: untimed });
-    await until(runtime, Voice.Machine, (s) => s.phase === "Failed" || s.phase === "Idle");
+    await until(runtime, Voice.Machine, (s) => s.session === 2 && s.phase === "Idle" && s.failure === "NoFailure" && s.mic === "Off");
     await sendVoice(runtime, { type: "startTalking", now: untimed });
     await until(runtime, Voice.Machine, (s) => s.phase === "Listening" && s.mic === "On" && s.network);
     expect(world.voice.cloudStarts.map((one) => one.credentialId)).toEqual(["cred-owner-7", "cred-owner-7", "cred-owner-8"]);
@@ -336,7 +336,7 @@ describe("Voice Bug 1 & Bug 3 journeys", () => {
     await sendVoice(runtime, { type: "returned" });
     await untilCondition(runtime, () => world.voice.relayWarmups.length === 3, () => world.voice.relayWarmups);
     await sendVoice(runtime, { type: "startTalking", now: untimed });
-    await until(runtime, Voice.Machine, (s) => s.phase === "Failed" || s.phase === "Idle");
+    await until(runtime, Voice.Machine, (s) => s.session === 4 && s.phase === "Idle");
     expect([(await getVoice(runtime)).mic, world.voice.cloudStarts.length]).toEqual(["Off", 3]);
   });
 });
@@ -401,5 +401,27 @@ describe("Talk from Ask Alpha's composer (spec/app/voice/index.md, \"Story: Hold
     expect([after.mic, after.network, world.voice.cloudStarts, world.voice.relayWarmups, document.querySelector("[role=alertdialog], [role=alert], [role=note], [role=status]"), button("Talk") !== undefined]).toEqual([
       "Off", false, [], [], null, true,
     ]);
+  });
+
+  // spec/app/voice/index.md, "Story: Dictate into a field"; spec/app/voice/index.md, "Recording asks for the microphone the first time, like a conversation"; spec/app/voice/dictation.md, "A failed dictation ends quietly: the failure waits in its stage only until voice closes the recorder, and nothing is shown"
+  it("a dictation the microphone refuses ends quietly: the recorder closes, nothing is shown, and Dictate is offered again", async () => {
+    const world = { ...scene(), phone: true, signedIn: false };
+    world.voice.permission = "prompt";
+    world.voice.grantOnRequest = false;
+    const { alpha } = await open(world, talkMounts);
+    const area = assistant.runtime(alpha);
+    const settled = async (check: () => boolean) => {
+      for (let turn = 0; turn < 400 && !check(); turn += 1) await drawn(() => alpha.runtime.runPromise(Effect.yieldNow));
+      expect(check()).toBe(true);
+    };
+    await drawnUntil(alpha, area, Voice.Machine, (s) => s.warmed);
+    await settled(() => button("Dictate") !== undefined);
+
+    await press("Dictate");
+    await drawnUntil(alpha, area, Voice.Machine, (s) => s.recorder.stage === "Ready" && s.recorder.field === "ComposerField");
+    await press("Start recording");
+    await drawnUntil(alpha, area, Voice.Machine, (s) => s.recorder.stage === "Closed" && s.permission.asked);
+    await settled(() => button("Dictate") !== undefined);
+    expect([document.querySelector("[role=alertdialog], [role=alert], [role=note], [role=status], section[aria-label='Voice transcription']"), world.voice.permission]).toEqual([null, "denied"]);
   });
 });

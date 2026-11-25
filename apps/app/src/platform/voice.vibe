@@ -207,11 +207,11 @@ effect function signedInKey(accounts: ReturnType<typeof signInAccounts>): Creden
   return status.account.credentialId
 }
 
-/** Who the phone's sign-in says holds its Cloud key now, or unknown where there is no sign-in to ask or it did not answer. */
+/** Who the phone's sign-in says holds its Cloud key now, or unknown where there is no sign-in to ask or it did not answer in time. */
 function signedInAccount(): CloudSignIn!! {
   return registered(SIGN_IN_PLUGIN)
     ? Effect.orElseSucceed(
-      Effect.map(tryPromise(() => signInAccounts().status({ environment: CLOUD_ENVIRONMENT })), (status): CloudSignIn =>
+      Effect.map(timeout(tryPromise(() => signInAccounts().status({ environment: CLOUD_ENVIRONMENT })), RELAY_WARMUP_BOUND), (status): CloudSignIn =>
         status.account.kind === "signedIn" ? { kind: "signedIn", credential: status.account.credentialId } : { kind: "signedOut" }),
       (): CloudSignIn => ({ kind: "unknown" }))
     : succeed<CloudSignIn>({ kind: "unknown" })
