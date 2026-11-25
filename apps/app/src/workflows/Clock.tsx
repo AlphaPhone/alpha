@@ -8,7 +8,7 @@ import type { Machine } from "../../gen/app__workflows__clock.effect.vibe";
 import type { Resident, Shown } from "../runtime/area.tsx";
 import { AlarmLabel, reviewAlarm, setAlarmLabel } from "./clock.vibe";
 
-interface ClockProps extends Pick<Shown<Resident | Machine | AlarmLabel>, "runtime"> {}
+type ClockProps = Pick<Shown<Resident | Machine | AlarmLabel>, "runtime">;
 
 const actions = [
   ["SetAlarm", "Set alarm"], ["ShowAlarms", "Show alarms"], ["Snooze", "Snooze"], ["Dismiss", "Dismiss"],

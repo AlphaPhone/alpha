@@ -908,6 +908,9 @@ pure def edit(v: Voice, words: bool): Voice = { ...v, recorder: D::edit(v.record
 
 A messaging bar's dictation fills that bar, never Ask Alpha. The fill names
 its own number, so a late delivery cannot fill the field of a newer recording.
+In a Messages conversation, stopping a recording puts a successful transcript
+straight into that conversation's editable draft. Leaving the conversation
+before it arrives discards it.
 
 ```quint
 pure def canFill(v: Voice): bool = D::canFill(v.recorder)

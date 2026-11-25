@@ -42,7 +42,6 @@
     { "module": "passwords" },
     { "module": "filesystem" },
     { "module": "camera" },
-    { "module": "media" },
     { "module": "location" },
     { "module": "wifi" },
     { "module": "voice-io" },

@@ -9,7 +9,7 @@ import { type Asking, propose, withdrawn } from "../src/contacts/requests.vibe";
 import { type Reading, answerReading } from "../src/contacts/reads.vibe";
 import { Machine as Messages } from "../gen/app__messages.effect.vibe";
 import { Machine as Composer } from "../gen/app__messages__composer.effect.vibe";
-import { closeAll, drawn, open, press, underAct, until } from "./alpha.tsx";
+import { closeAll, drawn, later, open, press, underAct, until } from "./alpha.tsx";
 import { scene } from "./fakes/scene.ts";
 
 underAct();
@@ -34,13 +34,22 @@ const write = (name: string, text: string) => act(async () => {
 });
 
 describe("Contacts on an Alpha image", () => {
-  it("Browse my contacts, look at one, change it and delete it (spec/app/contacts/index.md, \"Story: Browse my contacts\"; spec/app/contacts/index.md, \"Story: Know what happened to my change\"; spec/app/contacts/index.md, \"Story: Look at one contact\"; spec/app/contacts/index.md, \"Story: Add or change a contact\"; spec/app/contacts/index.md, \"Story: Delete a contact\")", async () => {
+  it("Browse my contacts, look at one, change it and delete it (spec/app/contacts/index.md, \"Story: Browse my contacts\"; spec/app/contacts/index.md, \"Story: Give Alpha access to my contacts\"; spec/app/contacts/index.md, \"Story: Know what happened to my change\"; spec/app/contacts/index.md, \"Story: Look at one contact\"; spec/app/contacts/index.md, \"Story: Add or change a contact\"; spec/app/contacts/index.md, \"Story: Delete a contact\")", async () => {
     const world = image();
+    world.telephony.contacts = false;
     const { alpha } = await open(world);
     await until(alpha, alpha.runtime, Shell, (s) => s.contacts);
 
     // spec/app/contacts/index.md, "Contacts reads the list each time it comes to the front"
     await press("Contacts");
+    await until(alpha, alpha.runtime, Contacts, (s) => s.front && s.list.status === "Failed" && s.rows === 0);
+    await press("Allow");
+    await until(alpha, alpha.runtime, Contacts, (s) => s.list.status === "Loaded" && s.rows === 2);
+
+    await write("Search or ask", "Maya");
+    await until(alpha, alpha.runtime, Contacts, (s) => s.list.status === "Loaded" && s.rows === 1);
+    expect(document.querySelector('[aria-label="Ben Ortiz"]')).toBeNull();
+    await write("Search or ask", "");
     await until(alpha, alpha.runtime, Contacts, (s) => s.list.status === "Loaded" && s.rows === 2);
 
     // spec/app/contacts/index.md, "Opening a contact reads it from the phone afresh"
@@ -59,9 +68,15 @@ describe("Contacts on an Alpha image", () => {
     expect(card).toMatchObject({ status: "read", contact: { displayName: "Maya Chen-Ortiz" } });
 
     // spec/app/contacts/index.md, "Confirming deletes the contact that was shown"
+    const deletion = Promise.withResolvers<void>();
+    world.telephony.holdContactDeletion = deletion.promise;
     await press("Delete");
     await until(alpha, alpha.runtime, Contacts, (s) => s.confirming);
     await confirm("Delete");
+    await until(alpha, alpha.runtime, Contacts, (s) => s.write.outcome === "Sent" && s.change === "Remove");
+    expect(world.telephony.people.map((one) => one.id)).toEqual(["7", "8"]);
+    deletion.resolve();
+    await later(alpha, 500);
     await until(alpha, alpha.runtime, Contacts, (s) => s.write.outcome === "Confirmed" && s.change === "Remove" && !s.opened);
     expect(world.telephony.people.map((one) => one.id)).toEqual(["8"]);
 
@@ -178,6 +193,13 @@ describe("Contacts on an Alpha image", () => {
     await press("Approve");
     await until(alpha, alpha.runtime, Agent, (s) => s.stage === "Ended" && s.ending === "NotDone");
     expect(world.telephony.people).toContain(ben);
+
+    // spec/app/contacts/agent.md, "Only the phone answers the action, and the request ends as that answer says"
+    await ask({ type: "contact_delete", query: "Ben" });
+    await until(alpha, alpha.runtime, Agent, (s) => s.stage === "Shown" && s.contact === "8");
+    await press("Approve");
+    await until(alpha, alpha.runtime, Agent, (s) => s.stage === "Ended" && s.ending === "Done");
+    expect(world.telephony.people).not.toContain(ben);
   });
 
   it("Let the agent read what I have open, and draft a reply that never sends (spec/app/contacts/agent.md, \"Story: Let the agent read what I have open\"; spec/app/messages/composer.md, \"Story: Let Alpha suggest a draft\")", async () => {

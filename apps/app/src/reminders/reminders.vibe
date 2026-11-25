@@ -175,7 +175,7 @@ function buildWriteRequest(req: PendingRequest, key: string): HttpClientRequest.
     case "restoreItem":
       return HttpClientRequest.bodyJsonUnsafe(HttpClientRequest.post(`/api/alpha/reminders/items/${encodeURIComponent(req.id)}/restore`), { item: req.item, idempotencyKey: key })
     case "snoozeItem":
-      return HttpClientRequest.bodyJsonUnsafe(HttpClientRequest.post(`/api/alpha/reminders/items/${encodeURIComponent(req.id)}/snooze`), { snoozedUntilMs: req.snoozedUntilMs, idempotencyKey: key })
+      return HttpClientRequest.bodyJsonUnsafe(HttpClientRequest.post(`/api/alpha/reminders/items/${encodeURIComponent(req.id)}/snooze`), { untilMs: req.snoozedUntilMs, idempotencyKey: key })
     case "deleteItem":
       return HttpClientRequest.delete(`/api/alpha/reminders/items/${encodeURIComponent(req.id)}`, { urlParams: { idempotencyKey: key } })
     case "createList":
@@ -500,7 +500,7 @@ export effect function toggleReminderComplete(id: string): void!!(Reminders.Mach
   const recurring = completing && existing.recurrence !== "none" && existing.dueDate !== null
   const nextDueDate = recurring && existing.dueDate !== null ? advanceDueDate(existing.dueDate, existing.recurrence) : existing.dueDate
   const updated: ReminderItemRecord = recurring
-    ? { ...existing, dueDate: nextDueDate, snoozedUntilMs: null, notifiedAtMs: null, revision: existing.revision + 1, updatedAtMs: now }
+    ? { ...existing, dueDate: nextDueDate, subtasks: existing.subtasks.map((sub) => ({ ...sub, done: false })), snoozedUntilMs: null, notifiedAtMs: null, revision: existing.revision + 1, updatedAtMs: now }
     : { ...existing, completed: completing, completedAtMs: completing ? now : null, snoozedUntilMs: null, revision: existing.revision + 1, updatedAtMs: now }
   const { machine, itemSpecId } = try commitItemWrite(current, updated, now, completing ? { kind: "completeItem", id, item: updated } : { kind: "reopenItem", id })
   const nextDueDay = civilDayFromString(nextDueDate) ?? (civilDayFromString(existing.dueDate) ?? civilDayNumber(now)) + 1

@@ -19,11 +19,12 @@ import * as Comms from "../../gen/app__phone__comms.effect.vibe"
 import * as Voice from "../../gen/app__voice.effect.vibe"
 import { Machine as Speaker } from "../../gen/app__voice__output.effect.vibe"
 import { Machine as Shell, canReturnCommsView } from "../../gen/app__shell.effect.vibe"
+import { Machine as Canvas } from "../../gen/app__shell__keyboard.effect.vibe"
 import { Machine as Layers } from "../../gen/app__shell__layers.effect.vibe"
 import { syncClockNow } from "../clock/sync.vibe"
 import { type NotesSelection, type RendererNote, noteSubjects, notesSelection } from "../notes/selection.vibe"
 import { syncRemindersNow } from "../reminders/reminders.vibe"
-import { Agent } from "../platform/agent.vibe"
+import { Agent, isCloudFundsRefusal } from "../platform/agent.vibe"
 import { Device } from "../platform/device.vibe"
 import { Location } from "../platform/location.vibe"
 import type { VoiceBridge } from "../platform/voice.vibe"
@@ -31,7 +32,7 @@ import { Refused, ask, outcomeOf } from "../platform/remote.vibe"
 import { Attempts, fresh } from "../runtime/attempts.vibe"
 import { CommsPrompts, type CommsPrompt, commsViewOf } from "../phone/comms.vibe"
 import { MailQuestions, withMail } from "../inbox/mail-context.vibe"
-import { type Job, answer, contained, following, reacting, run, started, stream, tell, together, untimed } from "../runtime/reactor.vibe"
+import { type Job, answer, applying, contained, following, reacting, run, started, stream, tell, together, untimed } from "../runtime/reactor.vibe"
 import { Time } from "../runtime/time.vibe"
 import { MediaReview, mediaReview } from "./media-review.vibe"
 import { type Board, type Line, Talk, talk } from "./talk.vibe"
@@ -91,11 +92,6 @@ const failures: Readonly<Record<string, Reply.Failure>> = {
   credential_invalid: "CredentialInvalid", insufficient_credits: "InsufficientCredits", limit_reached: "LimitReached",
   rate_limited: "LimitReached", provider_issue: "ProviderIssue", timeout: "TimedOut", missing_capability: "MissingCapability",
   no_provider: "NoProvider", billing_refused: "PlanLimit", subscription_required: "PlanLimit", allowance_exhausted: "PlanLimit",
-}
-
-/** Whether the resident's failed turn carries Cloud's own code for spent allowance and credits. */
-export function isCloudFundsRefusal(result: TurnResult | undefined): boolean {
-  return result?.kind === "AgentFailed" && result.reply?.cloudCode !== undefined
 }
 
 // spec/app/assistant/reply.md, "The settled reply is the whole final answer, shown and spoken, never the acknowledgment"; spec/app/assistant/reply.md, "A failure refused before any output replaces the streamed text; any other failure is added after it"
@@ -268,7 +264,7 @@ function posted(ticket: number, told: boolean, context: Conversation.Context): S
         if (board.snapshot().reply === "") board.change({ label: label ?? `Using ${name}` })
       },
     }
-    board.change({ media: [], mediaNote: "" })
+    board.change({ media: [], mediaNote: undefined })
     const metadata = { ...observed(told, context, location, selection), ...(quoted === undefined ? {} : { replyToMessageId: quoted.id }) }
     const images = files.map(({ data, mimeType, name }) => ({ data, mimeType, name }))
     const result = tryPromise(() => controller.send({ text: outgoing, ...(images.length === 0 ? {} : { images }), ...(Object.keys(metadata).length === 0 ? {} : { metadata }) }, { stream: hooks, ...(enrolled === undefined ? {} : { headers: enrolled.headers }) })) catch () => undefined
@@ -277,7 +273,6 @@ function posted(ticket: number, told: boolean, context: Conversation.Context): S
       const archive = { owner: composer.binding.owner, conversation: known.record.id, room: known.record.roomId }
       if (!(try rememberFiles(archive, result.clientMessageId, files))) board.change({ attachmentNotice: "Could not keep the sent attachments on this phone." })
     }
-    board.change({ reply: "", label: "" })
     board.lastSentId = result !== undefined && "clientMessageId" in result ? result.clientMessageId : ""
     const ending = replied(ticket, result)
     const keepStreamed = ending.type === "stop" || (ending.type === "failed" && !Reply.refusedBeforeOutput(ending.kind))
@@ -461,7 +456,7 @@ const forgetting = started(effect {
   })
 }, "forgetting the position")
 
-// spec/app/assistant/chats.md, "The newest list says which conversations there are, and a conversation no longer listed stops showing"; spec/app/assistant/chats.md, "The list read after a conversation was gone opens the first it lists, the most recently used, while the new chat is blank and none other is showing or being made"
+// spec/app/assistant/chats.md, "The newest list says which conversations there are, and a conversation no longer listed stops showing"; spec/app/assistant/chats.md, "A conversation the list no longer has is forgotten, and the first it lists, the most recently used, shows in its place, or a new chat when there is none"
 /** The agent's conversations in its own order, the most recently used first. */
 effect function listed(ticket: number): Chats.Event!!(Agent | Talk) {
   return effect {
@@ -471,16 +466,15 @@ effect function listed(ticket: number): Chats.Event!!(Agent | Talk) {
   } catch () => ({ type: "listed", ticket, ok: false, ids: [] })
 }
 
-/** The list read after a conversation was gone, with whether the new chat is still blank when it is answered. */
-effect function newest(ticket: number): Chats.Event!!(Agent | Talk | Composer.Machine) {
-  const read = try listed(ticket)
-  const writing = try (try Composer.Machine).get()
-  const blank = !Composer.content(writing.editor) && !Composer.attached(writing.editor) && writing.draft.sync === "Kept"
-  return read.type === "listed" ? { ...read, type: "latest", blank } : read
+/** The list read after the page `page` of `conversation` answered 404, with whether the turn and the composer are free when it is answered. */
+effect function newest(page: number, conversation: number): Chats.Event!!(Agent | Talk | Chats.Machine | Conversation.Machine | Composer.Machine) {
+  const read = try listed(page)
+  const free = freedom(try (try Conversation.Machine).get(), try (try Composer.Machine).get(), (try (try Chats.Machine).get()).chosen)
+  return read.type === "listed" ? { type: "latest", page, ok: read.ok, ids: read.ids, conversation, ...free } : read
 }
 
-// spec/app/assistant/chats.md, "A page of the conversation showing is taken only from the newest asking"; spec/app/assistant/chats.md, "Older or newer messages are read around a message of the conversation showing"; spec/app/assistant/chats.md, "A conversation the agent says it does not have is forgotten, and the agent's newest conversation shows in its place, or a new chat when it has none"
-/** A page of the conversation showing, each message numbered as Alpha first saw it: the page counts up to its highest number, which a scroll names. The agent's 404 to a read of the latest messages says it has no such conversation. */
+// spec/app/assistant/chats.md, "A page of the conversation showing is taken only from the newest asking"; spec/app/assistant/chats.md, "Older or newer messages are read around a message of the conversation showing"; spec/app/assistant/chats.md, "A read of the latest messages answered 404 asks the agent's list whether the conversation is still there"
+/** A page of the conversation showing, each message numbered as Alpha first saw it: the page counts up to its highest number, which a scroll names. A 404 to a read of the latest messages is told as such, for the agent's list to decide. */
 effect function paged(conversation: number, around: number, ticket: number): Chats.Event!!(Agent | Talk | Chats.Machine | Composer.Machine) {
   return effect {
     const { board } = try Talk
@@ -506,7 +500,7 @@ effect function paged(conversation: number, around: number, ticket: number): Cha
     board.putPage(ticket, conversation, [...recorded, ...board.page(ticket).filter((one) => !ids.has(one.id))])
     const numbers = messages.map((one) => board.messageNumber(one.id))
     return { type: "paged", ticket, ok: true, messages: Math.max(0, ...numbers) }
-  } catch (failure) => (around === 0 && failure instanceof Refused && failure.status === 404 ? { type: "gone", ticket } : { type: "paged", ticket, ok: false, messages: 0 })
+  } catch (failure) => (around === 0 && failure instanceof Refused && failure.status === 404 ? { type: "notFound", ticket } : { type: "paged", ticket, ok: false, messages: 0 })
 }
 
 /** A conversation the agent made, under the number Alpha gives it, or how its making ended where it was not. */
@@ -532,10 +526,10 @@ effect function forked(conversation: number, message: number, ticket: number): C
   return try making(ticket, HttpClientRequest.bodyJsonUnsafe(HttpClientRequest.post(`/api/conversations/${encodeURIComponent(known.record.id)}/fork`), { messageId: line.id, requestId: key, expectedText: line.text }))
 }
 
-function carryChats(fx: Chats.Effect): Job<Chats.Event, Agent | Talk | Chats.Machine | Composer.Machine | Voice.Machine | VoiceBridge | Speaker, []> {
+function carryChats(fx: Chats.Effect): Job<Chats.Event, Agent | Talk | Chats.Machine | Conversation.Machine | Composer.Machine | Voice.Machine | VoiceBridge | Speaker, []> {
   return match (fx) {
     when { tag: "ReadList", let ticket }: answer("list", listed(ticket), { type: "listed", ticket, ok: false, ids: [] });
-    when { tag: "ReadLatest", let ticket }: answer("list", newest(ticket), { type: "latest", ticket, ok: false, ids: [], blank: false });
+    when { tag: "ReadLatest", let page, let conversation }: answer("latest", newest(page, conversation), { type: "latest", page, ok: false, ids: [], conversation, replying: false, holding: false });
     when { tag: "ReadPage", let conversation, let around, let ticket }: answer("page", paged(conversation, around, ticket), { type: "paged", ticket, ok: false, messages: 0 });
     when { tag: "Create", let ticket }: answer("make", making(ticket, HttpClientRequest.bodyJsonUnsafe(HttpClientRequest.post("/api/conversations"), { title: "Ask Alpha" })), { type: "made", ticket, confirmed: false, known: false, conversation: 1 });
     when { tag: "Fork", let conversation, let message, let ticket }: answer("make", forked(conversation, message, ticket), { type: "made", ticket, confirmed: false, known: false, conversation: conversation + 1 });
@@ -782,6 +776,14 @@ function carryDock(fx: Dock.Effect): Job<Dock.Event, Shell, []> {
 // spec/app/assistant/dock.md, "Ask Alpha put away forgets the height its sheet was left at"
 const rested = following(Shell, (shown) => shown.assistant === "Bar", Dock.Machine, (bar): Dock.Event | undefined => (bar ? { type: "putAway", now: untimed } : undefined))
 
+// spec/app/assistant/dock.md, "A keyboard closed while typing puts Ask Alpha back on the bar"
+const keyboardRest = applying(Canvas, (canvas) => canvas.released, effect (releases) => {
+  if (releases === 0) return
+  const shell = try Shell
+  const current = try shell.get()
+  if (Dock.keyboardClosed(current.assistant).length > 0) try contained(shell.send({ type: "goBack" }), "resting Ask Alpha after typing")
+})
+
 // spec/app/assistant/index.md, "Back closes a review, then search, then a quote or an edit, one at a time; with none of them open Back is the shell's"; spec/app/shell/layers.md, "A screen says when it has a step of its own to take Back, and when it has none left; its page stays usable"
 const steppingBack = started(effect {
   const search = try Search.Machine
@@ -839,7 +841,7 @@ export const assisting = Layer.provideMerge(
     reacting(Dock, { carry: carryDock }),
     Attachments.machine(),
     reacting(Locator, { carry: carryLocator }),
-    reached, looked, left, opening, saving, bound, requested, submitted, allowing, forgetting, rested, steppingBack,
+    reached, looked, left, opening, saving, bound, requested, submitted, allowing, forgetting, rested, keyboardRest, steppingBack,
   ),
   Layer.merge(Layer.fresh(turns), talk),
 )

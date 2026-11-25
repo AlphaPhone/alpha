@@ -1,7 +1,7 @@
 // @vitest-environment happy-dom
 import { Effect } from "effect";
 import { act } from "react";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { Machine as Conversation } from "../gen/app__assistant.effect.vibe";
 import { Machine as Chats } from "../gen/app__assistant__chats.effect.vibe";
 import { Machine as Composer } from "../gen/app__assistant__composer.effect.vibe";
@@ -14,7 +14,7 @@ import { Machine as Shell } from "../gen/app__shell.effect.vibe";
 import type { Mount } from "../src/areas.ts";
 import assistant from "../src/assistant/index.tsx";
 import { untimed } from "../src/runtime/reactor.vibe";
-import { button, closeAll, fill, hardware, later, open, press, underAct, until } from "./alpha.tsx";
+import { button, closeAll, fill, hardware, later, open, press, pressOnTop, underAct, until } from "./alpha.tsx";
 import { scene } from "./fakes/scene.ts";
 
 underAct();
@@ -272,20 +272,35 @@ describe.each([["a browser", false], ["a phone", true]])("in %s", (_where, phone
     expect(lines()).toEqual(["Hello before restart", "You said: Hello before restart"]);
     await second.close();
 
-    // spec/app/assistant/chats.md, "A conversation the agent says it does not have is forgotten, and the agent's newest conversation shows in its place, or a new chat when it has none"; spec/app/assistant/chats.md, "The list read after a conversation was gone opens the first it lists, the most recently used, while the new chat is blank and none other is showing or being made"
+    // spec/app/assistant/chats.md, "A read of the latest messages answered 404 asks the agent's list whether the conversation is still there": a conversation the agent still lists is a read that failed, read once and never again by itself.
+    world.ask.pagesMissing = true;
+    world.ask.pageReads = 0;
+    world.ask.listReads = 0;
+    const listedYetMissing = await open(world, mounts);
+    runtime = assistant.runtime(listedYetMissing.alpha);
+    await until(listedYetMissing.alpha, runtime, Chats, (s) => s.chosen === 1 && s.page.status === "Failed");
+    await until(listedYetMissing.alpha, runtime, Conversation, (s) => s.ready);
+    expect([document.body.textContent?.includes("Messages did not load"), world.ask.pageReads, world.ask.listReads]).toEqual([true, 1, 1]);
+    world.ask.pagesMissing = false;
+    await press("Try again");
+    await until(listedYetMissing.alpha, runtime, Chats, (s) => s.chosen === 1 && s.page.status === "Loaded");
+    expect([lines(), world.ask.pageReads]).toEqual([["Hello before restart", "You said: Hello before restart"], 2]);
+    await listedYetMissing.close();
+
+    // spec/app/assistant/chats.md, "A conversation the list no longer has is forgotten, and the first it lists, the most recently used, shows in its place, or a new chat when there is none"
     world.ask.kept.clear();
     world.ask.kept.set("c8", { roomId: "r8", title: "Dinner", messages: [{ id: "m8", role: "user", text: "Dinner at eight?" }] });
     world.ask.kept.set("c7", { roomId: "r7", title: "Lunch", messages: [{ id: "m7", role: "user", text: "Lunch on Friday?" }] });
     const third = await open(world, mounts);
     runtime = assistant.runtime(third.alpha);
-    await until(third.alpha, runtime, Chats, (s) => s.chosen > 1 && s.ids.length === 2 && s.list.status === "Loaded" && s.page.status === "Loaded");
+    await until(third.alpha, runtime, Chats, (s) => s.chosen > 1 && s.ids.length === 2 && s.page.status === "Loaded");
     expect([document.body.textContent?.includes("Messages did not load"), button("Try again"), lines()]).toEqual([false, undefined, ["Dinner at eight?"]]);
     await third.close();
 
     world.ask.kept.clear();
     const fourth = await open(world, mounts);
     runtime = assistant.runtime(fourth.alpha);
-    await until(fourth.alpha, runtime, Chats, (s) => s.chosen === 0 && s.ids.length === 0 && s.list.status === "Loaded" && s.page.status === "Idle");
+    await until(fourth.alpha, runtime, Chats, (s) => s.chosen === 0 && s.ids.length === 0 && s.page.status === "Idle");
     await until(fourth.alpha, runtime, Composer, (s) => s.binding.conversation === 0 && s.slot === "Open");
     await until(fourth.alpha, runtime, Conversation, (s) => s.ready);
     expect([document.body.textContent?.includes("Messages did not load"), button("Try again"), lines()]).toEqual([false, undefined, []]);
@@ -294,6 +309,34 @@ describe.each([["a browser", false], ["a phone", true]])("in %s", (_where, phone
     await until(fourth.alpha, runtime, Chats, (s) => s.chosen > 0 && s.page.status === "Loaded");
     await until(fourth.alpha, runtime, Conversation, (s) => s.turn.reply === "Complete");
     expect([lines(), world.ask.said.at(-1), world.ask.opened]).toEqual([["Hello after restart", "You said: Hello after restart"], "Hello after restart", 2]);
+    await fourth.close();
+
+    // spec/app/assistant/chats.md, "The newest list says which conversations there are, and a conversation no longer listed stops showing"; spec/app/assistant/chats.md, "A new chat holds no conversation's page": a list without the conversation that lands while its 404 is being checked leaves its page behind, and the new chat settles.
+    world.ask.kept.clear();
+    world.ask.kept.set("c7", { roomId: "r7", title: "Lunch", messages: [{ id: "m7", role: "user", text: "Lunch on Friday?" }] });
+    world.ask.holdLists = true;
+    const fifth = await open(world, mounts);
+    runtime = assistant.runtime(fifth.alpha);
+    await vi.waitFor(() => expect(world.ask.heldLists.length).toBe(1));
+    world.ask.holdLists = false;
+    chatsList();
+    await until(fifth.alpha, runtime, Chats, (s) => s.chosen === 0 && s.list.status === "Loaded" && s.page.status === "Idle");
+    expect([document.querySelector("[role=log] [aria-busy]"), document.body.textContent?.includes("Messages did not load")]).toEqual([null, false]);
+    for (const release of world.ask.heldLists.splice(0)) release();
+
+    // spec/app/assistant/chats.md, "A list asked before a conversation was made is left behind, so its answer never takes that conversation away": the list read asked before New chat answers after the conversation was made.
+    world.ask.holdLists = true;
+    chatsList();
+    await vi.waitFor(() => expect(world.ask.heldLists.length).toBe(1));
+    await pressOnTop("New chat");
+    await until(fifth.alpha, runtime, Chats, (s) => s.chosen > 0 && s.make.outcome === "Confirmed" && s.page.status === "Loaded");
+    const chats = () => runtime.runPromise(Effect.flatMap(Chats, (machine) => machine.get()));
+    const made = (await chats()).chosen;
+    world.ask.holdLists = false;
+    for (const release of world.ask.heldLists.splice(0)) release();
+    await until(fifth.alpha, runtime, Chats, (s) => s.list.status === "Loaded");
+    const after = await chats();
+    expect([after.chosen, after.ids.includes(made)]).toEqual([made, true]);
   });
 
   // spec/app/assistant/index.md, "Story: Stop a reply"

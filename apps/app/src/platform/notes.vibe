@@ -8,8 +8,7 @@ module transport {
   import type { NotesTransport } from "@elizaos/plugin-notes/client"
   import type { Runtime } from "./agent.vibe"
 
-  /** The agent's own authenticated client carries Notes' protocol. Its client decodes each unknown reply.
-   * @throws {never} */
+  /** The agent's own authenticated client carries Notes' protocol. Its client decodes each unknown reply. @throws {never} */
   export function via(runtime: Runtime): NotesTransport {
     return {
       async fetch<T>(path: string, { body, signal }: Parameters<NotesTransport["fetch"]>[1]): Promise<T> {

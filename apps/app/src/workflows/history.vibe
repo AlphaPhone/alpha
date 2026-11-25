@@ -4,10 +4,10 @@ import * as Listing from "../../gen/app__workflows__list.effect.vibe"
 import * as Sheet from "../../gen/app__workflows__sheet.effect.vibe"
 import type { Effect as Out, Event, Output } from "../../gen/app__workflows__sheet.effect.vibe"
 import type { Status } from "../../gen/app__workflows__runs.effect.vibe"
-import { MediaHandoff, attachToAlpha } from "../assistant/attachments.vibe"
+import { type MediaHandoff, attachToAlpha } from "../assistant/attachments.vibe"
 import type { Machine as Toasts } from "../../gen/app__notices__toasts.effect.vibe"
 import { type Said, say } from "../notices/toasts.vibe"
-import { Agent } from "../platform/agent.vibe"
+import type { Agent } from "../platform/agent.vibe"
 import { ownerAt } from "../platform/owner.vibe"
 import { type Job, answer, applying, reacting, run, together } from "../runtime/reactor.vibe"
 import { WorkflowsApi, type PromptRun, readPromptRuns } from "./api.vibe"
@@ -111,13 +111,13 @@ import { said } from speech
 export { canSpeak } from speech
 
 module handoff {
+  import { Base64 } from "effect/encoding"
   import type { WorkflowRun } from "@elizaos/plugin-workflow/client"
 
   /** The identity of the reviewed run, ready to attach without putting its private output in chat. @throws {never} */
   export function runReference(run: WorkflowRun): string {
     const reference = { workflowId: run.workflowId, runId: run.id, versionId: run.versionId, status: run.status, startedAt: run.startedAt }
-    const bytes = new TextEncoder().encode(JSON.stringify(reference))
-    return btoa(Array.from(bytes, (byte) => String.fromCharCode(byte)).join(""))
+    return Base64.encode(JSON.stringify(reference))
   }
 }
 import { runReference } from handoff

@@ -131,10 +131,12 @@ export function elizaFiles(scene: FilesScene): Faked {
         const entries = scene.stored.filter((one) => one.volume === "primary" && !one.directory && of(one)).map(entry);
         return Promise.resolve({ status: "ready", entries, count: entries.length, bytes: entries.reduce((sum, one) => sum + one.size, 0), truncated: false });
       },
-      storageQuery({ text, mimePrefix, documents, folder }) {
+      storageQuery({ text, mimePrefix, documents, folders, folder, from, to }) {
         called("storageQuery");
         if (denied()) return Promise.resolve(refused());
-        const entries = scene.stored.filter((one) => one.volume === "primary" && !one.directory
+        const entries = scene.stored.filter((one) => one.volume === "primary" && one.directory === (folders === true)
+          && (from === undefined || one.modified >= from)
+          && (to === undefined || one.modified <= to)
           && (folder === undefined || parent(one.path) === folder)
           && (text === undefined || leaf(one.path).toLowerCase().includes(text.toLowerCase()))
           && (mimePrefix === undefined || one.mimeType.startsWith(mimePrefix))
@@ -268,7 +270,11 @@ export function selectedDocuments(scene: FilesScene): Faked {
         scene.opened.push(selectionId);
         return Promise.resolve({ status: "opened", message: "" });
       },
-      shareSelected: () => Promise.resolve({ status: "opened", message: "" }),
+      shareSelected({ selectionId }) {
+        if (!held(selectionId)) return Promise.resolve({ status: "unavailable", message: "" });
+        scene.shared.push([selectionId]);
+        return Promise.resolve({ status: "opened", message: "" });
+      },
       forgetSelected({ selectionId }) {
         scene.forgotten.push(selectionId);
         return Promise.resolve();

@@ -327,6 +327,8 @@ type Kept<Ev, R, By extends ReadonlyArray<unknown>> =
 
 /** What `reacting` takes beside the spec. */
 export type Options<S, Ev, R, By extends ReadonlyArray<unknown>> = Kept<Ev, R, By> & {
+  /** Name separate in-memory instances of the same model in their effect attempt identities. */
+  readonly attemptScope?: string
   /** The deadlines `state` waits on. Each is told to the machine once its time has come, also after a restart. */
   readonly timers?: (state: S) => ReadonlyArray<Due<Ev, By>>
 }
@@ -352,7 +354,7 @@ export function reacting<I, S, Ev, M, Refused, Undecoded, By extends ReadonlyArr
   const carry = options.carry as ((fx: unknown) => Job<Ev, R | RO, By>) | undefined
   const key = options.keep === undefined ? undefined : storeKey(spec.Machine.key, options.keep)
   const parts: Parts<S, Ev, M, unknown, R | RO, By> = {
-    scope: key ?? spec.Machine.key,
+    scope: key ?? (options.attemptScope === undefined ? spec.Machine.key : `${spec.Machine.key}/${options.attemptScope}`),
     durable: key !== undefined,
     stateOf: (moved) => (carry === undefined ? moved as unknown as S : (moved as unknown as Moved<S, unknown>).state),
     outOf: (moved) => (carry === undefined ? [] : (moved as unknown as Moved<S, unknown>).out),

@@ -1,10 +1,12 @@
 // spec/app/photos/viewer.md, "Story: Look at a photo or video"; spec/app/photos/viewer.md, "Story: Edit a photo or trim a video"; spec/app/photos/viewer.md, "Story: Keep a copy through a restart"; spec/app/photos/viewer.md, "Story: Share what I am looking at"
-import type { EditPreview, MediaItem, VideoEditSession } from "@elizaos/os/bridges/definitions/media"
+import type { CropRect, EditPreview, MediaItem, VideoEditSession } from "@elizaos/os/bridges/definitions/media"
 import * as KeyValueStore from "effect/persistence/KeyValueStore"
 import * as Library from "../../gen/app__photos.effect.vibe"
 import type { Actor } from "../../gen/app__photos__actor.effect.vibe"
 import * as Viewer from "../../gen/app__photos__viewer.effect.vibe"
-import { PhotosPort } from "../platform/photos.vibe"
+import { PhotosPort, canReplaceBrowserEdit, isBrowserEdit, type BrowserCapture } from "../platform/photos.vibe"
+import { photoRefusal, renderBrowserPhoto, type BrowserEditFrame, type PhotoLook } from "../platform/photoCanvas.vibe"
+import { clipRefusal, renderBrowserClip } from "../platform/videoCanvas.vibe"
 import { Catalog } from "./catalog.vibe"
 import { answer, applying, reacting, run, together, type Job } from "../runtime/reactor.vibe"
 import { say, type Said } from "../notices/toasts.vibe"
@@ -25,6 +27,8 @@ module sources {
   export const localUri = (file: Blob): string => URL.createObjectURL(file)
   /** @throws {never} */
   export const releaseUri = (uri: string): void => URL.revokeObjectURL(uri)
+  /** @throws {never} */
+  export const browserOperation = (): string => `browser-edit:${crypto.randomUUID()}`
 
   export async function attachmentBytes(uri: string, name: string) {
     if (!uri.startsWith("data:image/") && !uri.startsWith("blob:")) return undefined
@@ -40,21 +44,26 @@ module sources {
     })
   }
 }
-import { attachmentBytes, editOperation, localUri, releaseUri } from sources
+import { attachmentBytes, browserOperation, editOperation, localUri, releaseUri } from sources
 
-type Session = { readonly kind: "still"; readonly value: EditPreview } | { readonly kind: "clip"; readonly value: VideoEditSession }
+type BrowserSession = { readonly kind: "browser"; readonly value: { readonly operationId: string } }
+type Session = { readonly kind: "still"; readonly value: EditPreview } | { readonly kind: "clip"; readonly value: VideoEditSession } | BrowserSession
 
 export interface MediaView {
   readonly photo: number
   readonly uri: string
   readonly local: boolean
   readonly item?: MediaItem
+  readonly browser?: { readonly item: BrowserCapture; readonly file: Blob }
 }
 
 export interface EditView {
   readonly revision: number
   readonly image: string
+  readonly width: number
+  readonly height: number
   readonly canReplace: boolean
+  readonly frame?: BrowserEditFrame
 }
 
 export service OpenedPhoto {
@@ -72,6 +81,7 @@ const opened = Layer.effect(OpenedPhoto, effect {
   let media: MediaView = { photo: 0, uri: "", local: false }
   let session: Session | undefined
   let preview: EditView | undefined
+  try addFinalizer(() => sync(() => { if (media.local) releaseUri(media.uri); if (preview?.frame !== undefined) releaseUri(preview.image) }))
   return {
     rendering,
     current: () => sync(() => media),
@@ -79,7 +89,7 @@ const opened = Layer.effect(OpenedPhoto, effect {
     session: () => sync(() => session),
     holdSession: (next: Session | undefined) => sync(() => { session = next }),
     preview: () => sync(() => preview),
-    holdPreview: (next: EditView | undefined) => sync(() => { preview = next }),
+    holdPreview: (next: EditView | undefined) => sync(() => { if (preview?.frame !== undefined) releaseUri(preview.image); preview = next }),
   }
 })
 
@@ -99,7 +109,7 @@ effect function loaded(ticket: number, photo: number): Viewer.Event!!(Viewer.Mac
     const duration = kind === "Clip" ? Math.max(1, Math.round((item.duration ?? 0) * 10)) : 0
     const file = original(item.id) catch () => undefined
     if (file === undefined || !Viewer.canLoaded(try viewing.get(), ticket, kind, duration, "Phone")) return failed(ticket)
-    try (try OpenedPhoto).hold({ photo, uri: localUri(file), local: true })
+    try (try OpenedPhoto).hold({ photo, uri: localUri(file), local: true, browser: { item, file } })
     return { type: "loaded", ticket, ok: true, kind, duration, revision: try cache.revision(), favourite: false }
   }
   if (Option.isNone(phone)) return failed(ticket)
@@ -114,16 +124,24 @@ effect function loaded(ticket: number, photo: number): Viewer.Event!!(Viewer.Mac
   return { type: "loaded", ticket, ok: true, kind, duration, revision: try cache.revision(), favourite: item.favorite === true }
 }
 
-const looks: Record<Viewer.Look, string> = { Original: "none", Vivid: "vivid", Warm: "warm", Cool: "cool", Mono: "mono", Fade: "fade", Noir: "noir" }
+const looks: Record<Viewer.Look, PhotoLook> = { Original: "none", Vivid: "vivid", Warm: "warm", Cool: "cool", Mono: "mono", Fade: "fade", Noir: "noir" }
+export const photoLook = (look: Viewer.Look): PhotoLook => looks[look]
+
+function cropRect(bounds: Viewer.CropBounds): CropRect | undefined {
+  const unit = Viewer.cropUnits
+  if (bounds.width === unit && bounds.height === unit) return undefined
+  return { x: bounds.x / unit, y: bounds.y / unit, width: bounds.width / unit, height: bounds.height / unit }
+}
+
 const operationKey = (attempt: number): string => `alpha/photos/edit/${attempt}`
 
 /** An edit preview is tied to both the open item and the latest preview revision. */
-effect function rendered(revision: number, edit: Viewer.Edit): Viewer.Event!!(Viewer.Machine | OpenedPhoto | PhotosPort) {
+effect function rendered(revision: number, edit: Viewer.Edit, cropSource: boolean): Viewer.Event!!(Viewer.Machine | OpenedPhoto | PhotosPort) {
   const open = try OpenedPhoto
-  return try open.rendering.withPermits(1)(Effect.uninterruptible(rendering(revision, edit)))
+  return try open.rendering.withPermits(1)(Effect.uninterruptible(rendering(revision, edit, cropSource)))
 }
 
-effect function rendering(revision: number, edit: Viewer.Edit): Viewer.Event!!(Viewer.Machine | OpenedPhoto | PhotosPort) {
+effect function rendering(revision: number, edit: Viewer.Edit, cropSource: boolean): Viewer.Event!!(Viewer.Machine | OpenedPhoto | PhotosPort) {
   const open = try OpenedPhoto
   const { phone } = try PhotosPort
   const current = try open.current()
@@ -131,8 +149,9 @@ effect function rendering(revision: number, edit: Viewer.Edit): Viewer.Event!!(V
   const model = try Viewer.Machine
   const pending = try model.get()
   if (!Viewer.canPreviewed(pending, revision, "Phone") || pending.open !== current.photo) return { type: "previewed", revision, ok: false }
+  if (current.browser !== undefined) return try browserPreview(current, revision, edit, cropSource)
   let session = try open.session()
-  if (Option.isNone(phone) || target === undefined) return { type: "editRefused", why: "NoEditor" }
+  if (session?.kind === "browser" || Option.isNone(phone) || target === undefined) return { type: "editRefused", why: "NoEditor" }
   if (target.kind === "video" && (target.duration ?? 0) > 300) return { type: "editRefused", why: "TooLong" }
   if (target.size > (target.kind === "video" ? 104857600 : 33554432)) return { type: "editRefused", why: "TooLarge" }
   const item = { id: target.id, revision: target.mutationRevision ?? target.revision }
@@ -155,16 +174,43 @@ effect function rendering(revision: number, edit: Viewer.Edit): Viewer.Event!!(V
     try open.holdSession(session)
   }
   const still = session.kind === "still" ? session.value : undefined
-  const preview = still === undefined ? undefined : (tryPromise(() => phone.value.previewEdit({ sessionId: still.sessionId, rotation: edit.turns * 90, filter: looks[edit.look], crop: edit.cropped })) catch () => undefined)
+  const preview = still === undefined ? undefined : (tryPromise(() => phone.value.previewEdit({ sessionId: still.sessionId, rotation: edit.turns * 90, filter: looks[edit.look], cropRect: cropSource ? undefined : cropRect(edit.bounds) })) catch () => undefined)
   const ready = session.kind === "clip" || preview !== undefined
-  if (ready && Viewer.canPreviewed(try model.get(), revision, "Phone")) try open.holdPreview({ revision, image: preview?.image ?? current.uri, canReplace: preview?.canReplace === true })
+  if (ready && Viewer.canPreviewed(try model.get(), revision, "Phone")) try open.holdPreview({ revision, image: preview?.image ?? current.uri, width: preview?.width ?? session.value.width, height: preview?.height ?? session.value.height, canReplace: preview?.canReplace === true })
   return { type: "previewed", revision, ok: ready }
+}
+
+effect function browserPreview(current: MediaView, revision: number, edit: Viewer.Edit, cropSource: boolean): Viewer.Event!!(Viewer.Machine | OpenedPhoto) {
+  const open = try OpenedPhoto
+  const model = try Viewer.Machine
+  const source = current.browser
+  if (source === undefined) return { type: "editRefused", why: "NoEditor" }
+  const session = try open.session()
+  if (source.item.mimeType.startsWith("video/")) {
+    const why = clipRefusal({ file: source.file, width: source.item.width, height: source.item.height, duration: source.item.duration ?? 0 })
+    if (why !== undefined) return { type: "editRefused", why }
+    if (session === undefined) try open.holdSession({ kind: "browser", value: { operationId: browserOperation() } })
+    try open.holdPreview({ revision, image: current.uri, width: source.item.width, height: source.item.height, canReplace: false })
+    return { type: "previewed", revision, ok: true }
+  }
+  if (session === undefined) {
+    const refusal = tryPromise(() => photoRefusal(source.file, source.item.width, source.item.height)) catch () => "NoEditor" as const
+    if (refusal !== undefined) return { type: "editRefused", why: refusal }
+  }
+  const frame = tryPromise(() => renderBrowserPhoto(source.file, { turns: edit.turns, look: looks[edit.look], crop: cropSource ? undefined : cropRect(edit.bounds) })) catch () => undefined
+  const pending = try model.get()
+  const valid = frame !== undefined && pending.open === current.photo && Viewer.canPreviewed(pending, revision, "Phone")
+  if (valid) {
+    if (session === undefined) try open.holdSession({ kind: "browser", value: { operationId: browserOperation() } })
+    try open.holdPreview({ ...frame, revision, image: localUri(frame.file), canReplace: canReplaceBrowserEdit(source.item.id), frame })
+  }
+  return { type: "previewed", revision, ok: valid }
 }
 
 type Save = Extract<Viewer.Effect, { tag: "WriteCopy" }>
 
 effect function written(request: Save): Viewer.Event!!(Library.Machine | Viewer.Machine | OpenedPhoto | PhotosPort | KeyValueStore.KeyValueStore) {
-  const { phone } = try PhotosPort
+  const { phone, saveEdit } = try PhotosPort
   const open = try OpenedPhoto
   const current = try open.current()
   const model = try (try Viewer.Machine).get()
@@ -172,14 +218,36 @@ effect function written(request: Save): Viewer.Event!!(Library.Machine | Viewer.
   const store = try KeyValueStore.KeyValueStore
   const { attempt, photo, revision, edit, replace } = request
   const answer = { type: "saved", attempt, known: true, confirmed: false } as const
-  if (Option.isNone(phone) || photo !== current.photo || revision !== model.revision || session === undefined) return answer
+  if (photo !== current.photo || revision !== model.revision || session === undefined) return answer
   const { value } = session
   const kept = store.set(operationKey(attempt), value.operationId) catch () => false
   if (kept === false) return answer
-  const { sessionId } = value
+  if (session.kind === "browser") {
+    const source = current.browser
+    const preview = try open.preview()
+    if (source === undefined || preview?.revision !== model.preview.revision) return answer
+    const video = source.item.mimeType.startsWith("video/")
+    const frame = video ? (tryPromise({
+      try: (signal) => renderBrowserClip({ file: source.file, width: source.item.width, height: source.item.height, duration: source.item.duration ?? 0 },
+        { start: edit.start / 10, end: edit.end / 10, turns: edit.turns, crop: edit.cropped }, signal),
+      catch: (cause) => cause,
+    }) catch () => undefined) : preview.frame
+    if (frame === undefined) return answer
+    const receipt = saveEdit({ operation: session.value.operationId, source: source.item, frame, replace: replace && !video }) catch () => undefined
+    if (receipt?.status !== "saved") return { ...answer, known: receipt !== undefined }
+    const visible = try (try Viewer.Machine).get()
+    if (receipt.replaced && visible.open === current.photo && visible.revision === revision) {
+      const item = { ...source.item, id: receipt.id, revision: session.value.operationId, mimeType: frame.file.type, size: frame.file.size,
+        width: frame.width, height: frame.height, duration: frame.duration, thumbnail: frame.thumbnail }
+      try open.hold({ photo, uri: localUri(frame.file), local: true, browser: { item, file: frame.file } })
+    }
+    return { ...answer, confirmed: true }
+  }
+  if (Option.isNone(phone)) return answer
+  const { sessionId } = session.value
   const reply = tryPromise(() => session.kind === "clip"
     ? phone.value.saveVideoEdit({ sessionId, rotation: edit.turns * 90, crop: edit.cropped, start: edit.start / 10, end: edit.end / 10 })
-    : phone.value.saveEdit({ sessionId, rotation: edit.turns * 90, filter: looks[edit.look], crop: edit.cropped, replace })) catch () => undefined
+    : phone.value.saveEdit({ sessionId, rotation: edit.turns * 90, filter: looks[edit.look], cropRect: cropRect(edit.bounds), replace })) catch () => undefined
   if (reply?.status === "saved") {
     try ignore((try Library.Machine).send({ type: "libraryChanged" }, "Phone"))
     return { ...answer, confirmed: true }
@@ -188,9 +256,14 @@ effect function written(request: Save): Viewer.Event!!(Library.Machine | Viewer.
 }
 
 effect function located(ticket: number, attempt: number): Viewer.Event!!(PhotosPort | KeyValueStore.KeyValueStore) {
-  const { phone } = try PhotosPort
+  const { phone, editResult } = try PhotosPort
   const store = try KeyValueStore.KeyValueStore
-  const id = editOperation(store.get(operationKey(attempt)) catch () => undefined)
+  const raw = store.get(operationKey(attempt)) catch () => undefined
+  if (raw !== undefined && isBrowserEdit(raw)) {
+    const receipt = editResult(raw) catch () => undefined
+    return { type: "copyFound", ticket, ok: receipt !== undefined, found: receipt?.status === "saved" }
+  }
+  const id = editOperation(raw)
   const reply = Option.isNone(phone) || id === undefined ? undefined : (tryPromise(() => phone.value.editResult(id)) catch () => undefined)
   return { type: "copyFound", ticket, ok: reply !== undefined && reply.status !== "unknown" && reply.status !== "incomplete", found: reply?.status === "saved" }
 }
@@ -202,7 +275,7 @@ effect function closeEditor() {
   try open.holdSession(undefined)
   try open.holdPreview(undefined)
   const { phone } = try PhotosPort
-  if (Option.isSome(phone)) {
+  if (session.kind !== "browser" && Option.isSome(phone)) {
     const { sessionId } = session.value
     try ignore(tryPromise(() => session.kind === "still" ? phone.value.cancelEdit(sessionId) : phone.value.cancelVideoEdit(sessionId)))
   }
@@ -233,7 +306,7 @@ type Needs = PhotosPort | Catalog | OpenedPhoto | Viewer.Machine | Library.Machi
 function carry(fx: Viewer.Effect): Job<Viewer.Event, Needs, [Actor]> {
   return match (fx) {
     when { tag: "Load", let ticket, let photo }: answer("view", loaded(ticket, photo), failed(ticket), "Phone");
-    when { tag: "Render", let revision, let edit }: answer("preview", rendered(revision, edit), { type: "previewed", revision, ok: false }, "Phone");
+    when { tag: "Render", let revision, let edit, let cropSource }: answer("preview", rendered(revision, edit, cropSource), { type: "previewed", revision, ok: false }, "Phone");
     when { tag: "WriteCopy", let attempt }: answer(`write ${attempt}`, written(fx), { type: "saved", attempt, known: false, confirmed: false }, "Phone");
     when { tag: "FindCopy", let ticket, let attempt }: answer("check", located(ticket, attempt), { type: "copyFound", ticket, ok: false, found: false }, "Phone");
     when { tag: "Request", let change, let photo, let revision }: run("change", ignore(effect {

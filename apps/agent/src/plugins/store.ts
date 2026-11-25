@@ -711,31 +711,30 @@ export class AlphaAppsStore {
     const stashed = this.stashReminder(id);
     if (stashed === undefined) return undefined;
     const { existing, nowMs } = stashed;
-    const completed: ReminderItemRecord = {
-      ...existing, completed: true, completedAtMs: nowMs, snoozedUntilMs: null,
-      revision: existing.revision + 1, updatedAtMs: nowMs,
-    };
     const nextDate = existing.dueDate !== null ? advanceDueDate(existing.dueDate, existing.recurrence) : null;
-    const nextItem: ReminderItemRecord | null = nextDate === null
-      ? null
-      : {
+    if (nextDate !== null) {
+      const advanced: ReminderItemRecord = {
         ...existing,
-        id: `rem-${randomUUID().slice(0, 8)}`,
         dueDate: nextDate,
         subtasks: existing.subtasks.map((sub) => ({ ...sub, done: false })),
         completed: false,
         completedAtMs: null,
         snoozedUntilMs: null,
         notifiedAtMs: null,
-        agentTaskId: null,
-        revision: 1,
-        createdAtMs: nowMs,
+        revision: existing.revision + 1,
         updatedAtMs: nowMs,
       };
+      const items = this.reminders.items.map((entry) => (entry.id === id ? advanced : entry));
+      this.saveReminders({ ...this.reminders, version: this.reminders.version + 1, updatedAtMs: nowMs, items });
+      return { item: advanced, nextItem: advanced };
+    }
+    const completed: ReminderItemRecord = {
+      ...existing, completed: true, completedAtMs: nowMs, snoozedUntilMs: null,
+      revision: existing.revision + 1, updatedAtMs: nowMs,
+    };
     const items = this.reminders.items.map((entry) => (entry.id === id ? completed : entry));
-    if (nextItem !== null) items.push(nextItem);
     this.saveReminders({ ...this.reminders, version: this.reminders.version + 1, updatedAtMs: nowMs, items });
-    return { item: completed, nextItem };
+    return { item: completed, nextItem: null };
   }
 
   reopenItem(id: string): ReminderItemRecord | undefined {
