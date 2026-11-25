@@ -1,0 +1,15 @@
+// spec/app/workflows/automations.md, "Story: Create or edit an automation on a schedule"; spec/app/reminders/editor.md, "Story: Create or edit a reminder with safe validation and draft recovery"
+import * as KeyValueStore from "effect/persistence/KeyValueStore"
+import { Machine as Editor } from "../../gen/app__reminders__editor.effect.vibe"
+import { Machine as Shell, canOpenView } from "../../gen/app__shell.effect.vibe"
+import { beginNewReminder } from "../reminders/editor.vibe"
+
+/** Open the phone's reminder editor. An editor already open keeps its draft. */
+export effect function newPhoneReminder(): void!!(Shell | Editor | KeyValueStore.KeyValueStore) {
+  const shell = try Shell
+  const seen = try shell.get()
+  if (!canOpenView(seen, "Reminders")) return
+  const moved = (map(shell.send({ type: "openView", view: "Reminders" }), () => true) catch () => false)
+  if (!moved || (try (try Editor).get()).open) return
+  try beginNewReminder()
+}

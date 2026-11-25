@@ -1,11 +1,12 @@
 // spec/app/approvals/index.md, "Story: One action at a time"; spec/app/approvals/proposal.md, "Story: Decide"; spec/app/photos/agent.md, "Story: Let Alpha read my library"; spec/app/phone/comms.md, "Story: Approve what Alpha proposes, one thing at a time"; spec/app/messages/composer.md, "The agent's draft goes into the open conversation's draft only while it is empty, and never sends"
 import { DeviceExecution, NOT_DISPATCHED, type DeviceAgent, type ExecutorCall, type JournalIdentity, type RuntimeRequestHeaders } from "@elizaos/agent/client"
-import { operationOf, readOperation, type DeviceOperation } from "@elizaos/agent/operations"
+import { readOperation, type DeviceOperation } from "@elizaos/agent/operations"
 import { Machine as Conversation } from "../../gen/app__assistant.effect.vibe"
 import { Machine as Chats } from "../../gen/app__assistant__chats.effect.vibe"
 import { Machine as Messages } from "../../gen/app__messages.effect.vibe"
 import { Machine as Shell, showing } from "../../gen/app__shell.effect.vibe"
 import type { MessageDraftTarget } from "../messages/agent.vibe"
+import { notesOperation, notesOperationWords } from "../notes/device-actions.vibe"
 import { Agent, type Runtime } from "../platform/agent.vibe"
 import { Device, registered } from "../platform/device.vibe"
 import { ownerAt } from "../platform/owner.vibe"
@@ -71,8 +72,30 @@ const prefix = "/api/client-devices"
 const protocol = Schema.Struct({ agentId: Schema.NonEmptyString, identityId: Schema.NonEmptyString, deviceActions: Schema.Struct({ protocol: Schema.Literal(1), capabilities: Schema.Array(Schema.String) }) })
 const registration = Schema.Struct({ installationId: Schema.NonEmptyString, enrollmentId: Schema.NonEmptyString })
 const context = Schema.Struct({ agentId: Schema.NonEmptyString, installationId: Schema.NonEmptyString, enrollmentId: Schema.NonEmptyString, subjectUserId: Schema.NonEmptyString })
-const listed = Schema.Struct({ proposals: Schema.Array(Schema.Struct({ id: Schema.NonEmptyString, digest: Schema.NonEmptyString, state: Schema.String, expiresAt: Schema.String, payload: Schema.Struct({ operation: Schema.Unknown, requestMessageId: Schema.optionalKey(Schema.String), workflow: Schema.optionalKey(Schema.Unknown) }) })) })
+const listed = Schema.Struct({ proposals: Schema.Array(Schema.Struct({ id: Schema.NonEmptyString, digest: Schema.NonEmptyString, state: Schema.String, expiresAt: Schema.String, execution: Schema.optionalKey(Schema.Struct({ attemptId: Schema.NonEmptyString })), payload: Schema.Struct({ operation: Schema.Unknown, requestMessageId: Schema.optionalKey(Schema.String), workflow: Schema.optionalKey(Schema.Unknown) }) })) })
 const claim = Schema.Struct({ digest: Schema.NonEmptyString, proposal: Schema.Struct({ state: Schema.Literal("executing"), execution: Schema.Struct({ attemptId: Schema.NonEmptyString }) }) })
+
+const journalBinding = Schema.Struct({
+  proposalId: Schema.NonEmptyString, digest: Schema.NonEmptyString, ownerId: Schema.NonEmptyString,
+  agentId: Schema.NonEmptyString, origin: Schema.NonEmptyString, installationId: Schema.NonEmptyString,
+  enrollmentId: Schema.NonEmptyString, agentAttemptId: Schema.optionalKey(Schema.NonEmptyString),
+})
+type Proposal = typeof listed.Type.proposals[number]
+
+/** The device's proposal as it can be shown in the owner's Settings journal. */
+export interface ActivityProposal {
+  readonly proposal: string
+  readonly title: string
+  readonly detail: string
+  readonly outcome: string
+  readonly declinable: boolean
+  readonly unsettled: boolean
+}
+
+const outcomes: Readonly<Partial<Record<string, string>>> = {
+  pending: "Waiting for approval", approved: "Approved", executing: "Outcome still pending", reconciliation_required: "Needs confirmation",
+  done: "Finished", rejected: "Declined", expired: "Expired", retryable: "Needs another try", failed: "Failed",
+}
 
 const cameraCapabilities = ["camera.capture-photo.v1", "camera.capture-lens.v1", "camera.capture-library-id.v1"]
 const photosCapabilities = ["photos.library.v1", "photos.view.v1"]
@@ -104,7 +127,7 @@ interface Session {
 function operation(raw: unknown) {
   const checked = readOperation(raw)
   if (checked === undefined) return undefined
-  const value = operationOf(checked)
+  const value = checked.operation
   switch (value.type) {
     case "phone_keypad":
     case "sms_reply_selected":
@@ -136,12 +159,15 @@ function operation(raw: unknown) {
     case "files_trash":
       return "reviewed" in value && "paths" in value && value.reviewed?.length === 1 && value.paths.length === 1 ? value : undefined
     default:
-      return undefined
+      return notesOperation(value)
   }
 }
 
 function words(value: NonNullable<ReturnType<typeof operation>>): { title: string; detail: string } {
   switch (value.type) {
+    case "notes_move":
+    case "notes_folder_create":
+    case "notes_restore": return notesOperationWords(value)
     case "phone_keypad": return { title: "Open the keypad", detail: value.number ?? "Phone" }
     case "phone_dial": return { title: "Open the phone dialer", detail: value.target.kind === "number" ? value.target.number : "Phone" }
     case "phone_call": return { title: "Call", detail: value.target.kind === "number" ? value.target.number : "Phone" }
@@ -160,7 +186,7 @@ function words(value: NonNullable<ReturnType<typeof operation>>): { title: strin
     case "files_open": return { title: "Open a file", detail: "path" in value ? value.path : `Item ${value.shown} in the current list` }
     case "files_folder_create": return { title: "Create a folder", detail: value.name }
     case "files_share": return { title: "Share a file", detail: "paths" in value ? value.paths.join(", ") : "Open Android sharing" }
-    case "files_move": return { title: "Move a file", detail: "paths" in value ? `${value.paths.join(", ")} → ${value.dest}` : value.dest }
+    case "files_move": return { title: "Move a file", detail: `${value.paths.join(", ")} → ${value.dest}` }
     case "files_trash": return { title: "Move a file to Trash", detail: "paths" in value ? value.paths.join(", ") : "Review the file in the current list" }
   }
 }
@@ -171,6 +197,10 @@ export service MediaReview {
   messageTarget(): (MessageDraftTarget | undefined)!!
   pending(session: Session, message: string, conversation: number, revision: number, target: MessageDraftTarget | undefined): readonly MediaCard[]!!
   decide(card: MediaCard, approve: boolean): void!!(Talk | Conversation | Chats)
+  /** Same enrollment and custody as the cards, without exposing its tokens or action payloads. */
+  history(): (readonly ActivityProposal[] | undefined)!!
+  /** Acts only against the exact current proposal and the local receipt the SDK can verify. */
+  settle(proposal: string, action: "decline" | "happened" | "did-not-happen"): boolean!!
 }
 
 function routes(runtime: Runtime, headers: RuntimeRequestHeaders): DeviceAgent {
@@ -191,20 +221,19 @@ function routes(runtime: Runtime, headers: RuntimeRequestHeaders): DeviceAgent {
   }
 }
 
-effect function enrolled(epoch: number, runtime: Runtime, executeAction: (op: DeviceOperation, call: ExecutorCall) => Promise<unknown>): Session!unknown!(Agent | Device) {
+effect function enrolled(epoch: number, runtime: Runtime, owner: string, image: boolean, executeAction: (op: DeviceOperation, call: ExecutorCall) => Promise<unknown>): Session!unknown {
   const offer = try Schema.decodeUnknownEffect(protocol)(try tryPromise(() => runtime.request(`${prefix}/capabilities`)))
-  const owner = try ownerAt()
   if (offer.identityId !== owner) throw new Error("Device owner changed")
   const origin = "https://device.alpha.invalid"
   const slot = try tryPromise(() => slotFor([origin, owner, offer.agentId]))
   const { key } = try tryPromise(() => enrollment().enrollmentKey({ slot }))
   if (!/^[a-f0-9]{64}$/.test(key)) throw new Error("Invalid enrollment key")
-  const device = try (try Device).capabilities()
   const capabilities = [
     ...(registered("ElizaCamera") ? cameraCapabilities : []),
     ...(registered("AlphaPhotoLibrary") ? photosCapabilities : []),
     ...(registered("ElizaFiles") ? filesCapabilities : []),
-    ...(device.image && registered("ElizaTelephony") ? phoneCapabilities : []),
+    ...(registered("AlphaNotes") ? ["notes.organize.v1"] : []),
+    ...(image && registered("ElizaTelephony") ? phoneCapabilities : []),
   ].filter((name) => offer.deviceActions.capabilities.includes(name))
   if (capabilities.length === 0) throw new Error("Media operations are unavailable")
   const headers = { "x-eliza-device-id": offer.agentId, "x-eliza-device-key": key, "x-eliza-device-capabilities": capabilities.join(",") }
@@ -231,7 +260,8 @@ const sameTarget = (one: MessageDraftTarget | undefined, other: MessageDraftTarg
   one !== undefined && other !== undefined && one.thread === other.thread && one.ticket === other.ticket
 
 export const mediaReview = Layer.effect(MediaReview, effect {
-  const { runtime, life } = try Agent
+  const agent = try Agent
+  const { runtime, life } = agent
   const executors = try MediaExecutors
   const device = try Device
   const messages = try Messages
@@ -254,19 +284,76 @@ export const mediaReview = Layer.effect(MediaReview, effect {
     const status = life.status() catch () => undefined
     if (status?.state !== "running") { latest = undefined; return undefined }
     if (latest?.epoch === status.epoch) return latest
-    latest = enrolled(status.epoch, runtime, guarded) catch () => undefined
+    const owner = Effect.provideService(ownerAt(), Agent, agent) catch () => undefined
+    const { image } = try device.capabilities()
+    latest = owner === undefined ? undefined : (enrolled(status.epoch, runtime, owner, image, guarded) catch () => undefined)
     const fresh = latest
     if (fresh !== undefined) try ignore(tryPromise(() => fresh.execute.sync()))
     return latest
   }
+  effect function proposals(opened: Session): (readonly Proposal[] | undefined)!! {
+    const answer = (tryPromise(() => runtime.request(`${prefix}/proposals`, undefined, opened.headers)) |> flatMap(%, Schema.decodeUnknownEffect(listed))) catch () => undefined
+    if (answer === undefined || opened !== latest) return undefined
+    return answer.proposals
+  }
+  effect function enrollmentIsCurrent(opened: Session): boolean!! {
+    const status = life.status() catch () => undefined
+    const owner = Effect.provideService(ownerAt(), Agent, agent) catch () => ""
+    const front = (tryPromise(() => enrollment().authority()) |> map(%, (one) => one.active === true)) catch () => false
+    return status?.state === "running" && status.epoch === opened.epoch && owner === opened.identity.ownerId && front && (try device.showing())
+  }
+  effect function hasReceipt(opened: Session, proposal: Proposal): boolean!! {
+    if (proposal.execution === undefined) return false
+    const decoded = (tryPromise(() => journal().get(proposal.id)) |> flatMap(%, Schema.decodeUnknownEffect(journalBinding))) catch () => undefined
+    if (decoded === undefined) return false
+    const { identity } = opened
+    return decoded.proposalId === proposal.id && decoded.digest === proposal.digest && decoded.ownerId === identity.ownerId
+      && decoded.agentId === identity.agentId && decoded.origin === identity.origin && decoded.installationId === identity.installationId
+      && decoded.enrollmentId === identity.enrollmentId && decoded.agentAttemptId === proposal.execution.attemptId
+  }
+  const readyToDecline = (proposal: Proposal, at: number) => proposal.state === "pending" && Date.parse(proposal.expiresAt) > at
+  const toSettle = (proposal: Proposal) => proposal.state === "executing" || proposal.state === "reconciliation_required"
   return {
     session,
+    effect history() {
+      const opened = try session()
+      if (opened === undefined || !(try enrollmentIsCurrent(opened))) return undefined
+      const answer = try proposals(opened)
+      if (answer === undefined) return undefined
+      const at = try Clock.currentTimeMillis
+      const rows = try Effect.forEach(answer, effect (proposal) => {
+        if (proposal.payload.workflow !== undefined) return undefined
+        const outcome = outcomes[proposal.state]
+        if (outcome === undefined) return undefined
+        const visible = operation(proposal.payload.operation)
+        const labelled = visible === undefined ? { title: "Phone action", detail: "" } : words(visible)
+        return { proposal: proposal.id, ...labelled, outcome, declinable: readyToDecline(proposal, at), unsettled: toSettle(proposal) && (try hasReceipt(opened, proposal)) }
+      }, { concurrency: 4 })
+      if (!(try enrollmentIsCurrent(opened))) return undefined
+      return rows.filter((row) => row !== undefined)
+    },
+    effect settle(id, action) {
+      return try lock.withPermits(1)(effect {
+        const opened = try session()
+        if (opened === undefined || !(try enrollmentIsCurrent(opened))) return false
+        const found = (try proposals(opened))?.find((proposal) => proposal.id === id && proposal.payload.workflow === undefined)
+        if (found === undefined || !(try enrollmentIsCurrent(opened))) return false
+        if (action === "decline") {
+          if (!readyToDecline(found, try Clock.currentTimeMillis)) return false
+          const result = tryPromise(() => opened.decide(found.id, { digest: found.digest, approved: false })) catch () => undefined
+          return result !== undefined
+        }
+        if (!toSettle(found) || !(try hasReceipt(opened, found))) return false
+        const result = tryPromise(() => opened.execute.confirmReview(found.id, action === "happened" ? "ReviewedApplied" : "ReviewedNotApplied")) catch () => "refused"
+        return result === "sent"
+      })
+    },
     messageTarget,
     effect pending(opened: Session, message: string, conversation: number, revision: number, target: MessageDraftTarget | undefined) {
-      const answer = (tryPromise(() => runtime.request(`${prefix}/proposals`, undefined, opened.headers)) |> flatMap(%, Schema.decodeUnknownEffect(listed))) catch () => undefined
-      if (answer === undefined || opened !== latest) return []
+      const answer = try proposals(opened)
+      if (answer === undefined) return []
       const bound = sameTarget(target, try messageTarget()) ? target : undefined
-      return answer.proposals.flatMap((proposal) => {
+      return answer.flatMap((proposal) => {
         if (proposal.state !== "pending" || proposal.payload.requestMessageId !== message || proposal.payload.workflow !== undefined) return []
         const op = operation(proposal.payload.operation)
         const expiresAt = Date.parse(proposal.expiresAt)
@@ -280,14 +367,13 @@ export const mediaReview = Layer.effect(MediaReview, effect {
       const conversation = try Conversation
       const chats = try Chats
       effect function current(session: Session): boolean!! {
-        const status = life.status() catch () => undefined
         const showing = (try conversation.get()).context
         const chosen = (try chats.get()).chosen
         const time = try Clock.currentTimeMillis
-        if (session !== latest || status?.state !== "running" || status.epoch !== session.epoch
-          || (card.target !== undefined && !sameTarget(card.target, try messageTarget())) || card.enrollmentId !== session.identity.enrollmentId || card.conversation !== chosen
-          || card.revision !== showing.revision || showing.sensitive || time >= card.expiresAt || !(try device.showing())) return false
-        return (tryPromise(() => enrollment().authority()) |> map(%, (answer) => answer.active === true)) catch () => false
+        if (session !== latest || (card.target !== undefined && !sameTarget(card.target, try messageTarget()))
+          || card.enrollmentId !== session.identity.enrollmentId || card.conversation !== chosen
+          || card.revision !== showing.revision || showing.sensitive || time >= card.expiresAt) return false
+        return try enrollmentIsCurrent(session)
       }
       try lock.withPermits(1)(effect {
         if (!board.snapshot().media.includes(card)) return

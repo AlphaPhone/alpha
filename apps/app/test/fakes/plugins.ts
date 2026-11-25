@@ -8,7 +8,8 @@ import { alphaConnection } from "./platform.ts";
 import { elizaReminders } from "./reminders.ts";
 import type { Answering } from "./routes.ts";
 import type { Scene } from "./scene.ts";
-import { alphaCarrierSetup, elizaReset, elizaSystem, elizaWiFi } from "./settings.ts";
+import { alphaCarrierSetup, elizaNotices, elizaReset, elizaSystem, elizaWiFi, settingsHost } from "./settings.ts";
+import { alphaAgentConsent, alphaCarrierSetup, elizaReset, elizaSystem, elizaWiFi } from "./settings.ts";
 import { telephonyPlugins } from "./telephony.ts";
 import { alphaDevice } from "./update.ts";
 import { alphaBrowser } from "./browser.ts";
@@ -36,7 +37,11 @@ export function plugins(world: Scene, services: { readonly agent: Answering; rea
     ElizaWiFi: elizaWiFi(world.settings),
     AlphaCarrierSetup: alphaCarrierSetup(world.settings),
     AlphaMapsTransport: alphaMapsTransport(world.maps),
+    ...(world.image ? telephonyPlugins(world.telephony) : {}),
+    AlphaDevice: (emit) => ({ ...alphaDevice(world.update, () => world.now)(emit), ...settingsHost(world.settings) }),
+    ElizaNotifications: elizaNotices(world.settings),
     AlphaDevice: alphaDevice(world.update, () => world.now),
+    AlphaDevice: (emit) => ({ ...alphaDevice(world.update, () => world.now)(emit), ...alphaAgentConsent(world.settings) }),
     ...(world.image ? { ElizaTelephony: present, ElizaContacts: present, ...telephonyPlugins(world.telephony) } : {}),
     AlphaConnection: alphaConnection(world.platform),
     ...(world.voice.onDevice ? { AlphaVoiceCloud: alphaVoiceCloud(world.voice) } : {}),

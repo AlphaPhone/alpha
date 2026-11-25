@@ -17,6 +17,10 @@ export type SettingsAboutPageProps = SettingsAndroidProps &
     androidVersion: Reading;
     /** The storage used, as the phone last said. */
     storage?: Reading;
+    /** Alpha runs on the phone, where it has an agent and an Android Settings page. */
+    onPhone?: boolean;
+    /** What the resident agent last reported. */
+    agent?: "running" | "starting" | "needs-you" | "stopped";
     /** What Alpha tells about the last start of an Android page. */
     told?: AndroidTold;
     /** Goes back to the first page. */
@@ -31,10 +35,10 @@ export type SettingsAboutPageProps = SettingsAndroidProps &
  * About: Alpha and its version, Android's version, Agent activity, the licences, and the way into Android's About phone.
  * @model spec/app/settings/index.md
  */
-export function SettingsAboutPage({ alphaVersion, androidVersion, storage, told, onBack, onOpen, starting, onAndroid, place, onPlace, children }: SettingsAboutPageProps) {
+export function SettingsAboutPage({ alphaVersion, androidVersion, storage, onPhone = true, agent, told, onBack, onOpen, starting, onAndroid, place, onPlace, children }: SettingsAboutPageProps) {
   const at = (row: number) => placed({ place, onPlace }, row);
   return (
-    <SettingsPage title="About" told={told} onBack={onBack}>
+    <SettingsPage title="About" told={told} onBack={onBack} backLabel="Back to Settings">
       <div className="flex flex-col items-center gap-2.5 px-6 pt-5.5 pb-4.5 text-center">
         <span className="flex size-16 items-center justify-center overflow-hidden rounded-full bg-alpha text-alpha-foreground">
           <Mark aria-hidden className="size-[118%] shrink-0" />
@@ -49,9 +53,9 @@ export function SettingsAboutPage({ alphaVersion, androidVersion, storage, told,
         {storage ? <SettingsFactRow title="Storage" reading={storage} /> : null}
       </ListGroup>
       <ListGroup>
-        <SettingsNavRow title="Agent activity" icon={<Clock />} onOpen={onOpen && (() => onOpen("activity"))} {...at(0)} />
+        {onPhone ? <SettingsNavRow title="Agent activity" value={agent === "running" ? "Running" : agent === "starting" ? "Starting" : agent === "needs-you" ? "Needs attention" : agent === "stopped" ? "Stopped" : undefined} icon={<Clock />} aria-label="Agent activity" onOpen={onOpen && (() => onOpen("activity"))} {...at(0)} /> : null}
         <SettingsNavRow title="Licenses" icon={<SlidersHorizontal />} onOpen={onOpen && (() => onOpen("licences"))} {...at(1)} />
-        <SettingsAndroidRow target="about-phone" title="About phone" icon={<Smartphone />} starting={starting} onAndroid={onAndroid} {...at(2)} />
+        {onPhone ? <SettingsAndroidRow target="about-phone" title="About phone" icon={<Smartphone />} starting={starting} onAndroid={onAndroid} {...at(2)} /> : null}
       </ListGroup>
       {children}
     </SettingsPage>
