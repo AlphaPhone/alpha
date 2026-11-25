@@ -112,12 +112,21 @@ function formatDuration(ms: number): string {
   return `${seconds}s`;
 }
 
-function parseDaysMask(input: unknown): number {
-  if (typeof input === "number" && Number.isFinite(input)) return Math.max(0, Math.min(127, Math.trunc(input)));
-  if (!Array.isArray(input)) return 0;
-  const bits: Readonly<Record<string, number>> = { sunday: 1, monday: 2, tuesday: 4, wednesday: 8, thursday: 16, friday: 32, saturday: 64 };
-  return input.reduce<number>((mask, day) => mask | (bits[String(day)] ?? 0), 0);
+const dayBits: Readonly<Record<string, number>> = {
+  sunday: 1, monday: 2, tuesday: 4, wednesday: 8, thursday: 16, friday: 32, saturday: 64,
+  sun: 1, mon: 2, tue: 4, wed: 8, thu: 16, fri: 32, sat: 64,
+};
+
+/** The repeat days the model named, as a mask; any day it named that is not a weekday is returned for it to correct. */
+function parseDaysMask(input: unknown): { readonly mask: number } | { readonly unknown: readonly string[] } {
+  if (typeof input === "number" && Number.isFinite(input)) return { mask: Math.max(0, Math.min(127, Math.trunc(input))) };
+  const days = Array.isArray(input) ? input.map(String) : input === undefined ? [] : [String(input)];
+  const unknown = days.filter((day) => dayBits[day.trim().toLowerCase()] === undefined);
+  return unknown.length > 0 ? { unknown } : { mask: days.reduce((mask, day) => mask | (dayBits[day.trim().toLowerCase()] ?? 0), 0) };
 }
+
+const unknownDays = (unknown: readonly string[]) =>
+  ({ success: false, text: `Not a day of the week: ${unknown.join(", ")}. Name each repeat day, sunday to saturday, or leave days out for an alarm that rings once.` });
 
 function parseAlarmTime(params: Record<string, unknown>): { readonly hour: number; readonly minute: number } | undefined {
   const hourParam = readNumber(params, "hour");
@@ -134,35 +143,41 @@ function parseTimerDurationMs(params: Record<string, unknown>): number | undefin
   return total > 0 ? total * 1000 : undefined;
 }
 
-function findAlarmTarget(alarms: readonly ClockAlarmRecord[], params: Record<string, unknown>): ClockAlarmRecord | undefined {
+/**
+ * The one alarm the model named: by id, by label, or (except for an update, whose time is the new one) by its time.
+ * When it named none, only an alarm that is the sole candidate: the only alarm, or for snooze and dismiss the only one
+ * ringing. Nothing is guessed: a ringing alarm never wins over the one named.
+ */
+function findAlarmTarget(alarms: readonly ClockAlarmRecord[], params: Record<string, unknown>, op: string): ClockAlarmRecord | undefined {
   const id = readString(params, "id");
   if (id !== undefined) return alarms.find((entry) => entry.id === id);
-  const ringing = alarms.find((entry) => entry.phase === "ringing");
-  if (ringing !== undefined) return ringing;
   const label = readString(params, "label")?.toLowerCase();
   if (label !== undefined) {
-    const byLabel = alarms.find((entry) => entry.label.toLowerCase().includes(label));
-    if (byLabel !== undefined) return byLabel;
+    const byLabel = alarms.filter((entry) => entry.label.toLowerCase() === label);
+    return byLabel.length === 1 ? byLabel[0] : undefined;
   }
-  const time = parseAlarmTime(params);
+  const time = op === "update" ? undefined : parseAlarmTime(params);
   if (time !== undefined) {
-    const byTime = alarms.find((entry) => entry.hour === time.hour && entry.minute === time.minute);
-    if (byTime !== undefined) return byTime;
+    const byTime = alarms.filter((entry) => entry.hour === time.hour && entry.minute === time.minute);
+    return byTime.length === 1 ? byTime[0] : undefined;
   }
+  const ringing = alarms.filter((entry) => entry.phase === "ringing");
+  if ((op === "snooze" || op === "dismiss") && ringing.length === 1) return ringing[0];
   return alarms.length === 1 ? alarms[0] : undefined;
 }
 
-function findTimerTarget(timers: readonly ClockTimerRecord[], params: Record<string, unknown>): ClockTimerRecord | undefined {
+/** The one timer the model named, by id or label; when it named none, only the sole timer, or for dismiss the only one ringing. */
+function findTimerTarget(timers: readonly ClockTimerRecord[], params: Record<string, unknown>, op: string): ClockTimerRecord | undefined {
   const id = readString(params, "id");
   if (id !== undefined) return timers.find((entry) => entry.id === id);
-  const ringing = timers.find((entry) => entry.status === "ringing");
-  if (ringing !== undefined) return ringing;
   const label = readString(params, "label")?.toLowerCase();
   if (label !== undefined) {
-    const byLabel = timers.find((entry) => entry.label.toLowerCase().includes(label));
-    if (byLabel !== undefined) return byLabel;
+    const byLabel = timers.filter((entry) => entry.label.toLowerCase() === label);
+    return byLabel.length === 1 ? byLabel[0] : undefined;
   }
-  return timers.find((entry) => entry.status === "running") ?? timers.find((entry) => entry.status === "paused") ?? timers[0];
+  const ringing = timers.filter((entry) => entry.status === "ringing");
+  if (op === "dismiss" && ringing.length === 1) return ringing[0];
+  return timers.length === 1 ? timers[0] : undefined;
 }
 
 function inferAlarmOp(params: Record<string, unknown>): string {
@@ -188,10 +203,12 @@ function handleClockAlarm(store: AlphaAppsStore, timeZone: string, params: Recor
   if (op === "set" || op === "create") {
     const parsed = parseAlarmTime(params);
     if (parsed === undefined) return { success: false, text: "Please specify an alarm time (for example, 7:30 AM)." };
+    const days = parseDaysMask(params.daysMask ?? params.days);
+    if ("unknown" in days) return unknownDays(days.unknown);
     const created = store.createAlarm({
       hour: parsed.hour,
       minute: parsed.minute,
-      daysMask: parseDaysMask(params.daysMask ?? params.days),
+      daysMask: days.mask,
       label: readString(params, "label") ?? "",
       sound: normalizeSound(params.sound),
       vibrate: readBoolean(params, "vibrate") ?? true,
@@ -201,8 +218,8 @@ function handleClockAlarm(store: AlphaAppsStore, timeZone: string, params: Recor
     });
     return { success: true, text: `Alarm set for ${formatHourMinute(created.hour, created.minute)}${created.label ? ` (${created.label})` : ""}.`, data: { op: "set", alarm: created } };
   }
-  const target = findAlarmTarget(snapshot.alarms, params);
-  if (target === undefined) return { success: false, text: "No matching alarm found." };
+  const target = findAlarmTarget(snapshot.alarms, params, op);
+  if (target === undefined) return { success: false, text: "No single alarm matches: name it by its id from the Clock context." };
   if (op === "snooze") {
     const updated = store.snoozeAlarm(target.id, readNumber(params, "snoozeMinutes") ?? readNumber(params, "minutes"));
     return { success: true, text: `Snoozed ${formatHourMinute(target.hour, target.minute)} alarm.`, data: { op, alarm: updated } };
@@ -221,10 +238,12 @@ function handleClockAlarm(store: AlphaAppsStore, timeZone: string, params: Recor
     return { success: true, text: `Alarm ${formatHourMinute(target.hour, target.minute)} ${enabled ? "enabled" : "disabled"}.`, data: { op, alarm: updated } };
   }
   const parsedTime = parseAlarmTime(params);
+  const days = params.daysMask !== undefined || params.days !== undefined ? parseDaysMask(params.daysMask ?? params.days) : undefined;
+  if (days !== undefined && "unknown" in days) return unknownDays(days.unknown);
   const updated = store.updateAlarm(target.id, {
     hour: parsedTime?.hour,
     minute: parsedTime?.minute,
-    daysMask: params.daysMask !== undefined || params.days !== undefined ? parseDaysMask(params.daysMask ?? params.days) : undefined,
+    daysMask: days?.mask,
     label: readRawString(params, "label"),
     sound: params.sound === undefined ? undefined : normalizeSound(params.sound, target.sound),
     vibrate: readBoolean(params, "vibrate"),
@@ -244,19 +263,12 @@ function handleClockTimer(store: AlphaAppsStore, params: Record<string, unknown>
   }
   if (op === "start" || op === "create") {
     const durationMs = parseTimerDurationMs(params);
-    if (durationMs === undefined) {
-      const existing = findTimerTarget(snapshot.timers, params);
-      if (existing !== undefined) {
-        const started = store.updateTimer(existing.id, { action: "start" });
-        return { success: true, text: `Started timer (${formatDuration(started?.remainingMs ?? existing.remainingMs)}).`, data: { op: "start", timer: started } };
-      }
-      return { success: false, text: "Please specify a timer duration (for example, 5 minutes)." };
-    }
+    if (durationMs === undefined) return { success: false, text: "A new timer needs its durationSeconds; to run a paused timer again, resume it." };
     const created = store.createTimer({ durationMs, label: readString(params, "label") ?? "", startImmediately: true });
     return { success: true, text: `Started ${formatDuration(created.durationMs)} timer${created.label ? ` for ${created.label}` : ""}.`, data: { op: "start", timer: created } };
   }
-  const target = findTimerTarget(snapshot.timers, params);
-  if (target === undefined) return { success: false, text: "No matching timer found." };
+  const target = findTimerTarget(snapshot.timers, params, op);
+  if (target === undefined) return { success: false, text: "No single timer matches: name it by its id from the Clock context." };
   if (op === "cancel" || op === "delete") {
     const removed = store.deleteTimer(target.id);
     return { success: true, text: `Cancelled timer${target.label ? ` (${target.label})` : ""}.`, data: { op: "cancel", timer: removed } };
