@@ -99,7 +99,7 @@ export function services(world: Scene) {
       ...clockRoutes(world.clock, () => world.now),
       ...remindersRoutes(world.reminders, () => world.now),
       ...(review === undefined ? [] : [textReviewRoute(review, world.notes.ownerIdentity)]),
-      ...notesRoutes(world.notes),
+      ...notesRoutes(world.notes, () => world.now),
       ...workflowRoutes(world.workflows),
       ...platformRoutes(world.platform),
       ...telephonyRoutes(world.telephony),
