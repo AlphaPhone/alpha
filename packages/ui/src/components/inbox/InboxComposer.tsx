@@ -90,7 +90,7 @@ export function InboxComposer({
   return (
     <div className="flex h-full min-h-0 flex-col bg-background pt-[env(safe-area-inset-top)] text-base text-foreground motion-safe:animate-rise">
       <InboxHeader leading={<button type="button" aria-label="Back from draft" disabled={!onSetAside} onClick={onSetAside} className={inboxHeaderButton}><ChevronLeft className="size-5.5!" /></button>}>
-        <h1 className="min-w-0 flex-1 truncate text-body leading-tight font-semibold">{titles[kind]}</h1>
+        <h1 className="min-w-0 flex-1 truncate text-md font-semibold">{titles[kind]}</h1>
         {menu ? (
           <Menu>
             <MenuTrigger aria-label="Draft actions" className={cn(inboxHeaderButton, "[&_svg]:size-5.5")}><Ellipsis /></MenuTrigger>
