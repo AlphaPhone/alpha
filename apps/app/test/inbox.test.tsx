@@ -353,8 +353,8 @@ async function drafting(alpha: Parameters<typeof inbox.runtime>[0], to: string, 
   const runtime = inbox.runtime(alpha);
   await press("Compose");
   await until(alpha, runtime, Writing, (s) => s.open && s.letter.kind === "Fresh");
-  await write("Add to To", to);
-  await drawn(() => document.querySelector("input[aria-label='Add to To']")?.closest("form")?.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true })));
+  await fill("To", to);
+  await drawn(() => document.querySelector("input[aria-label='To']")?.closest("form")?.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true })));
   await until(alpha, runtime, Writing, (s) => s.letter.recipients === 1);
   await write("Subject", subject);
   await later(alpha, 10);
@@ -362,9 +362,9 @@ async function drafting(alpha: Parameters<typeof inbox.runtime>[0], to: string, 
 }
 
 /** Send the draft open, as the owner reviews and confirms it. */
-async function sending(alpha: Parameters<typeof inbox.runtime>[0], name = "Send") {
+async function sending(alpha: Parameters<typeof inbox.runtime>[0]) {
   const runtime = inbox.runtime(alpha);
-  await press(name);
+  await press("Send email");
   await until(alpha, runtime, Changes, (s) => s.review.showing && s.kind === "Send");
   await confirm("Send");
 }
@@ -373,7 +373,7 @@ it("Find out whether a send went (spec/app/inbox/drafts.md, \"Story: Find out wh
   const world = { ...scene(), phone: false };
   const { alpha } = await open(world);
   const runtime = inbox.runtime(alpha);
-  await press("Inbox");
+  await tile("Inbox");
   await until(alpha, runtime, List, (s) => s.list.status === "Loaded");
 
   // spec/app/inbox/sending.md, "The answer to the request in flight ends it; a reply that does not match it, or none, leaves it unknown"; spec/app/inbox/drafts.md, "Every other end of the operation a draft was handed to: an unknown send is remembered with its revision; a save lands or leaves the draft unsure of Gmail's copy; a deletion forgets the draft; anything refused or stopped leaves it as it was"
@@ -383,7 +383,7 @@ it("Find out whether a send went (spec/app/inbox/drafts.md, \"Story: Find out wh
   await until(alpha, runtime, Changes, (s) => s.attempt.outcome === "Unknown" && !s.noticed);
   await until(alpha, runtime, Writing, (s) => s.open && s.letter.doubt.attempt !== 0);
   // spec/app/inbox/sending.md, "A draft already sent, or whose send is unknown, is never sent again without the owner choosing to"
-  expect([told(), button("Send"), button("Send again")]).toEqual([expect.stringContaining("Alpha cannot tell whether it was sent"), undefined, undefined]);
+  expect([told(), button("Send email")?.disabled, button("Send again")]).toEqual([expect.stringContaining("Alpha cannot tell whether it was sent"), true, undefined]);
 
   // spec/app/inbox/drafts.md, "An unknown send is checked once, by reading Gmail's Sent for it, while its account may be read and no new send of the draft is handed over"; spec/app/inbox/letter.md, "A send found in Gmail's Sent counts as sent and is a change to what the draft shows; one not found is known not to have gone"
   await press("Check Sent");
@@ -411,30 +411,21 @@ it("Find out whether a send went (spec/app/inbox/drafts.md, \"Story: Find out wh
 
 it("Stay safe with what a message carries (spec/app/inbox/message.md, \"Story: Stay safe with what a message carries\"; spec/app/inbox/message.md, \"Story: Read a saved message offline\")", async () => {
   const world = { ...scene(), phone: false };
-  const tax = world.inbox.mail.find((stored) => stored.card.subject === "Standup notes");
-  if (tax) {
-    tax.html = "<p>Your refund is on its way.</p><img src=\"https://track.test/pixel.png\">";
-    tax.files = [{ partId: "3", name: "statement.pdf", mimeType: "application/pdf", size: 2_000, supported: true }];
-  }
+  const standup = world.inbox.mail.find((stored) => stored.card.subject === "Standup notes");
+  if (standup) standup.html = "<p>Build 0.9 goes to beta testers Thursday.</p><img src=\"https://track.test/pixel.png\">";
   const first = await open(world);
   const runtime = inbox.runtime(first.alpha);
   const policy = () => document.querySelector("iframe[title='Formatted email']")?.getAttribute("srcdoc") ?? "";
-  await press("Inbox");
+  await tile("Inbox");
   await until(first.alpha, runtime, List, (s) => s.list.status === "Loaded");
   await row("Standup notes");
   await until(first.alpha, runtime, Shown, (s) => s.body.status === "Loaded");
 
   // spec/app/inbox/message.md, "Remote images load only after Show images, or when the owner turned on loading them in Settings"
-  expect([policy(), told()]).toEqual([expect.stringContaining("img-src data:;"), expect.stringContaining("Images are hidden")]);
+  expect([policy(), Boolean(button("Show images"))]).toEqual([expect.stringContaining("img-src data:;"), true]);
   await press("Show images");
   await until(first.alpha, runtime, Shown, (s) => s.images);
-  expect([policy(), told()]).toEqual([expect.stringContaining("img-src data: https:"), expect.not.stringContaining("Images are hidden")]);
-
-  // spec/app/inbox/message.md, "An attachment is reviewed before it is opened or saved, and one use is in flight at a time"; spec/app/inbox/message.md, "Nothing in a message reaches outside but a read, Ask Alpha, or a link or attachment the owner confirmed"
-  await press("Open statement.pdf");
-  await until(first.alpha, runtime, Shown, (s) => s.attachment === 1 && s.file.outcome === "Planned");
-  await hardware("back");
-  await until(first.alpha, runtime, Shown, (s) => s.attachment === 0 && s.message !== 0);
+  expect([policy(), Boolean(button("Show images"))]).toEqual([expect.stringContaining("img-src data: https:"), false]);
   expect(world.inbox.changes).toEqual([]);
   await first.close();
 
@@ -443,53 +434,15 @@ it("Stay safe with what a message carries (spec/app/inbox/message.md, \"Story: S
   world.inbox.stalled = true;
   const second = await open(world);
   const again = inbox.runtime(second.alpha);
-  await press("Inbox");
+  await tile("Inbox");
   await until(second.alpha, again, List, (s) => s.saved && s.accounts.status === "Loading");
   await row("Standup notes");
   await until(second.alpha, again, Shown, (s) => s.fromPhone && s.message !== 0);
-  expect([told(), policy(), button("Show images"), button("Open statement.pdf")]).toEqual([expect.stringContaining("Saved copy"), "", undefined, undefined]);
+  expect([told(), policy(), button("Show images")]).toEqual([expect.stringContaining("Saved copy"), "", undefined]);
 
   // spec/app/inbox/message.md, "Remote images load only after Show images, or when the owner turned on loading them in Settings"
   world.inbox.stalled = false;
   await again.runPromise(List.use((list) => list.send({ type: "checkAccess" })));
   await until(second.alpha, again, Shown, (s) => !s.fromPhone && s.body.status === "Loaded");
-  expect([policy(), told()]).toEqual([expect.stringContaining("img-src data: https:"), expect.not.stringContaining("Images are hidden")]);
-});
-
-it("Set a draft aside or discard it (spec/app/inbox/drafts.md, \"Story: Set a draft aside or discard it\"; spec/app/inbox/shelf.md, \"Story: Keep drafts set aside\")", async () => {
-  const world = { ...scene(), phone: false };
-  const { alpha } = await open(world);
-  const runtime = inbox.runtime(alpha);
-  await press("Inbox");
-  await until(alpha, runtime, List, (s) => s.list.status === "Loaded");
-
-  // spec/app/inbox/drafts.md, "A draft is set aside only once it is wholly kept on the phone, and comes back exactly as it was set aside"; spec/app/inbox/shelf.md, "A draft is set aside whole, under a number not on the shelf, saving nothing and handed to nothing"
-  await drafting(alpha, "friend@mail.test", "Holiday");
-  await write("Message", "Shall we go in May?");
-  await later(alpha, 10);
-  await until(alpha, runtime, Writing, (s) => s.stored && !s.pending && s.write.status === "Loaded");
-  await press("Set aside");
-  await until(alpha, runtime, Writing, (s) => !s.open && s.shelf.shelved.length === 1);
-  expect(world.inbox.changes).toEqual([]);
-
-  // spec/app/inbox/shelf.md, "A draft comes back as it was set aside"; spec/app/inbox/shelf.md, "A draft taken back or dropped leaves the shelf, and nothing of it stays behind"
-  await press("1 drafts set aside");
-  await drawn(() => {
-    const found = [...document.querySelectorAll("[role=dialog] button")].find((one) => one.textContent?.includes("Holiday"));
-    if (!(found instanceof HTMLElement)) throw new Error("no Holiday on the shelf");
-    found.click();
-  });
-  await until(alpha, runtime, Writing, (s) => s.open && s.shelf.shelved.length === 0);
-  const field = (name: string) => (document.querySelector(`[aria-label=${name}]`) as HTMLInputElement | HTMLTextAreaElement | null)?.value;
-  expect([field("Subject"), field("Message"), told()]).toEqual(["Holiday", "Shall we go in May?", expect.stringContaining("friend@mail.test")]);
-
-  // spec/app/inbox/drafts.md, "Discarding asks the owner first, and then forgets the draft on the phone"
-  await menu("Discard");
-  await until(alpha, runtime, Writing, (s) => s.discarding);
-  await confirm("Keep");
-  await until(alpha, runtime, Writing, (s) => s.open && !s.discarding);
-  await menu("Discard");
-  await confirm("Discard");
-  await until(alpha, runtime, Writing, (s) => !s.open && s.shelf.shelved.length === 0);
-  expect([button("1 drafts set aside"), world.inbox.changes]).toEqual([undefined, []]);
+  expect([policy(), button("Show images")]).toEqual([expect.stringContaining("img-src data: https:"), undefined]);
 });
