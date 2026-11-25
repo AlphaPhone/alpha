@@ -3,8 +3,12 @@ import { always } from "@antithesishq/bombadil";
 import { extract } from "@antithesishq/bombadil/browser";
 
 const offered = extract(({ document }) => {
-  const labels = [...document.querySelectorAll("section[aria-label='Ask Alpha'] button")].map((button) => button.textContent ?? "");
-  return { send: labels.includes("Send"), stop: labels.includes("Stop") };
+  const buttons = [...document.querySelectorAll<HTMLButtonElement>("section[aria-label='Ask Alpha'] button")];
+  const labelOf = (button: HTMLButtonElement) => (button.getAttribute("aria-label") ?? button.textContent ?? "").trim();
+  return {
+    send: buttons.some((button) => !button.disabled && labelOf(button) === "Send"),
+    stop: buttons.some((button) => !button.disabled && (labelOf(button) === "Stop reply" || labelOf(button) === "Stop")),
+  };
 });
 
 /** While a reply can be stopped, nothing more can be sent. */

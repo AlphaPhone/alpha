@@ -1,69 +1,52 @@
-import { AppHeader, Toast } from "@repo/ui";
-import { Effect, Layer, ManagedRuntime, Stream } from "effect";
-import { HttpClient, HttpClientResponse } from "effect/http";
+import { Effect, Stream } from "effect";
 import { createRoot } from "react-dom/client";
+import { vi } from "vitest";
 import { Machine as Composer } from "../gen/app__assistant__composer.effect.vibe";
 import { Machine as Shell } from "../gen/app__shell.effect.vibe";
-import { Assistant } from "../src/assistant/Assistant.tsx";
-import { assisting } from "../src/assistant/assistant.vibe";
-import { MediaHandoff } from "../src/assistant/attachments.vibe";
-import { MediaExecutors } from "../src/assistant/media-review.vibe";
-import { aloud } from "../src/assistant/read-aloud.vibe";
-import { agentAt } from "../src/platform/agent.vibe";
-import { cloudAt } from "../src/platform/cloud.vibe";
-import { voiceArea } from "../src/messages/dictation.vibe";
-import { pagePlatform } from "../src/platform/platform.vibe";
-import { resident } from "../src/resident.vibe";
-import { together, whole } from "../src/runtime/reactor.vibe";
+import { App } from "../src/App.tsx";
+import assistant from "../src/assistant/index.tsx";
+import { boot } from "../src/boot.tsx";
+import { say } from "../src/notices/toasts.vibe";
+import { only, resetDocument } from "./alpha.tsx";
+import { scene } from "./fakes/scene.ts";
+import { fakeWorld } from "./fakes/world.vibe";
 
 const closers: (() => Promise<void>)[] = [];
 
 export async function closeAllDocks() {
   for (const close of closers.splice(0)) await close();
   localStorage.clear();
+  resetDocument();
 }
 
 export async function mountDock({ view = "Browser", withToast = false, flush }: { view?: "Browser" | "Calendar" | "Home" | "Settings"; withToast?: boolean; flush?: (work: () => Promise<void> | void) => Promise<void> } = {}) {
   const run = flush ?? (async (work: () => Promise<void> | void) => { await work(); });
-  const client = Layer.succeed(
-    HttpClient.HttpClient,
-    HttpClient.make((request, url) => {
-      const body = url.pathname === "/api/health"
-        ? { ready: true }
-        : url.pathname === "/api/status"
-          ? { version: "1", optionalFields: true }
-          : url.pathname === "/api/conversations"
-            ? { conversations: [] }
-            : {};
-      return Effect.succeed(HttpClientResponse.fromWeb(request, new Response(JSON.stringify(body), { headers: { "content-type": "application/json" } })));
-    }),
-  );
-  const platform = Layer.mergeAll(
-    pagePlatform(Layer.provide(agentAt("http://agent.test"), client), Layer.provide(cloudAt("http://cloud.test"), client)),
-    Layer.succeed(MediaHandoff, { attach: () => Effect.succeed(false), offerTranscript: () => Effect.succeed(false) }),
-    Layer.succeed(MediaExecutors, { reviewFiles: () => Effect.succeed(undefined), filesContext: () => Effect.succeed(undefined), readyFiles: () => Effect.succeed(undefined), execute: () => Effect.succeed(undefined) }),
-  );
-  const runtime = ManagedRuntime.make(Layer.provideMerge(whole(together(assisting, voiceArea, aloud)), Layer.provideMerge(resident, platform)));
+  const mounts = only("home", "assistant", "notice", "view:Browser", "view:Calendar", "view:Settings");
+  const world = scene();
+  const alpha = boot(fakeWorld(world), mounts);
   const host = document.body.appendChild(document.createElement("div"));
   const reactRoot = createRoot(host);
   await run(async () => {
-    reactRoot.render(
-      <div className="relative flex min-h-dvh w-full flex-col bg-background text-foreground">
-        <AppHeader title={view} />
-        {withToast ? <Toast>Saved</Toast> : <div className="flex-1 p-4 text-sm text-muted-foreground">Web page content</div>}
-        <Assistant runtime={runtime} />
-      </div>,
-    );
-    await runtime.runPromise(Effect.void);
+    await Promise.allSettled(mounts.map((mount) => mount.load()));
+    reactRoot.render(<App alpha={alpha} />);
+    await alpha.runtime.runPromise(Effect.void);
   });
   closers.push(async () => {
     await run(() => { reactRoot.unmount(); });
     host.remove();
-    await runtime.dispose();
+    await alpha.dispose();
   });
+  const runtime = assistant.runtime(alpha);
   await run(async () => {
-    if (view !== "Home") await runtime.runPromise(Effect.flatMap(Shell, (m) => m.send({ type: "openView", view })));
+    if (view !== "Home") await alpha.runtime.runPromise(Effect.flatMap(Shell, (m) => m.send({ type: "openView", view })));
+    if (withToast) await alpha.runtime.runPromise(say("Saved"));
     await runtime.runPromise(Effect.flatMap(Composer, (m) => Stream.runHead(Stream.filter(m.changes, (s) => s.slot === "Open"))));
   });
+  await vi.waitFor(() => {
+    const hasAssistant = document.querySelector("section[aria-label='Ask Alpha']") !== null;
+    const hasHeader = view === "Home" || document.querySelector("header[data-host-chrome]") !== null;
+    const hasToast = !withToast || document.querySelectorAll("[data-host-chrome]").length >= 3;
+    if (!hasAssistant || !hasHeader || !hasToast) throw new Error("dock not painted");
+  }, { timeout: 10_000 });
   return { runtime, host };
 }

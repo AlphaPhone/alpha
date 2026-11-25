@@ -60,9 +60,9 @@ export function textReviewRoute(review: TextReviewScene, subjectUserId: string):
     const step = resource.split("/").at(-1);
     return readJsonBody(request).then((body) => {
       if (body.digest !== proposal.digest) return reject(409);
-      if (step === "decision" && proposal.state === "pending" && body.decision === "approve") {
+      if (step === "decision" && proposal.state === "pending" && (body.decision === "approve" || body.decision === "reject")) {
         review.decisions.push(proposal.id);
-        proposal.state = "approved";
+        proposal.state = body.decision === "approve" ? "approved" : "rejected";
         return Response.json({ digest: proposal.digest, proposal });
       }
       if (step === "claim" && proposal.state === "approved") {

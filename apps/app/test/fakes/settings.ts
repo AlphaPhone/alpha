@@ -27,6 +27,11 @@ export interface SettingsScene {
   grantsHome: boolean;
   readonly opened: string[];
   readonly copied: string[];
+  readonly shared: Array<{ title: string; text: string }>;
+  readonly haptics: string[];
+  readonly systemBars: boolean[];
+  timeoutScalePercent: number;
+  mirror: { enabled: boolean; paused: boolean; accessGranted: boolean; connected: boolean };
   autofill: PasswordsStatus["autofill"];
   autofillDestination: Awaited<ReturnType<ElizaPasswordsPlugin["openAutofillSettings"]>>["destination"];
   crashes: NativeCrashEntry[];
@@ -55,7 +60,9 @@ export function settingsScene(): SettingsScene {
     launcher: true, version: "1.4.0",
     hostFacts: { androidRelease: "16", permissions: { Microphone: false, Calendar: true } },
     autofill: { supported: true, selected: "none" }, autofillDestination: "autofill-picker",
-    gate: Promise.resolve(), grantsHome: true, opened: [], copied: [], crashes: [], reset: { status: "cancelled", message: "Nothing was reset." }, reviews: [],
+    gate: Promise.resolve(), grantsHome: true, opened: [], copied: [], shared: [], haptics: [], systemBars: [], timeoutScalePercent: 100,
+    mirror: { enabled: false, paused: false, accessGranted: false, connected: false },
+    crashes: [], reset: { status: "cancelled", message: "Nothing was reset." }, reviews: [],
     networks: [{ ssid: "home", bssid: "00:11:22:33:44:55", rssi: -50, frequency: 2412, capabilities: "[WPA2-PSK-CCMP]", secured: true, security: "wpa2" }],
     joinAnswer: "connected", joins: [], connectivity: { online: true, validated: true, captivePortal: false, ssid: "home" }, consents: [], refusesConsent: false, consentGate: Promise.resolve(),
     carrier: {
@@ -153,8 +160,11 @@ export function elizaWiFi(scene: SettingsScene): Faked {
     requestPermissions: () => Promise.resolve({ location: "granted" }),
     getCapabilities: () => Promise.resolve({ sdk: 35, approvedJoin: true, internetPanel: true }),
     openInternetPanel: () => page(scene, "internet"),
-    getWifiState: () => Promise.resolve({ enabled: true, connected: true, rssi: -50 }),
-    getConnectedNetwork: () => Promise.resolve({ network: null }),
+    getWifiState: () => Promise.resolve({ enabled: true, connected: scene.connectivity.ssid !== undefined, rssi: -50 }),
+    getConnectedNetwork: () => {
+      const current = scene.connectivity.ssid === undefined ? undefined : scene.networks.find((n) => n.ssid === scene.connectivity.ssid);
+      return Promise.resolve({ network: current ? { ...current } : null });
+    },
     listAvailableNetworks: () => Promise.resolve({ networks: scene.networks.map((network) => ({ ...network })) }),
     connectToNetwork: () => Promise.resolve({ success: false }),
     disconnectFromNetwork: () => Promise.resolve({ success: true }),
@@ -173,7 +183,7 @@ export function alphaAgentConsent(scene: SettingsScene) {
       await scene.consentGate;
       if (scene.refusesConsent) throw new Error("Agent consent could not be saved");
       const kept = scene.consents.at(-1);
-      if (kept?.gmailChanges !== consent.gmailChanges || kept.calendarEdits !== consent.calendarEdits) scene.consents.push({ gmailChanges: consent.gmailChanges, calendarEdits: consent.calendarEdits });
+      if (kept?.gmailChanges !== consent.gmailChanges || kept?.calendarEdits !== consent.calendarEdits) scene.consents.push({ gmailChanges: consent.gmailChanges, calendarEdits: consent.calendarEdits });
     },
   };
 }
@@ -207,13 +217,27 @@ export function elizaPasswords(scene: SettingsScene): Faked {
   });
 }
 
-/** The Android-only Settings methods exposed by AlphaDevice. */
+/** The Android-only Settings and device methods exposed by AlphaDevice. */
 export function settingsHost(scene: SettingsScene) {
   return {
     settingsFacts: () => Promise.resolve(scene.hostFacts),
+    diagnosticsFacts: () => Promise.resolve({ androidRelease: scene.hostFacts.androidRelease, version: scene.version, launcher: scene.launcher }),
+    haptic: ({ kind }: { kind: string }) => {
+      scene.haptics.push(kind);
+      return Promise.resolve();
+    },
+    recommendedTimeout: ({ baseMs }: { baseMs: number }) => Promise.resolve({ timeoutMs: Math.round((baseMs * scene.timeoutScalePercent) / 100) }),
+    setSystemBarAppearance: ({ dark }: { dark: boolean }) => {
+      scene.systemBars.push(dark);
+      return Promise.resolve();
+    },
     copyText: ({ text }: { text: string }) => {
       scene.copied.push(text);
       return Promise.resolve();
+    },
+    shareText: ({ title, text }: { title: string; text: string }) => {
+      scene.shared.push({ title, text });
+      return Promise.resolve({ status: "opened" });
     },
     openSettings: async ({ page: target }: { page: string }) => {
       await page(scene, target);
@@ -229,6 +253,7 @@ export function elizaNotices(scene: SettingsScene): Faked {
       appEnabled: true, permissionGranted: true, interruption: "all", scope: "alpha-phone",
       channels: [{ id: "opaque-reminders", name: "Reminders", importance: 0, blocked: true, groupBlocked: false }],
     }),
+    mirrorStatus: () => Promise.resolve({ ...scene.mirror }),
     openChannelSettings: async ({ id }: { id: string }) => {
       if (id !== "opaque-reminders") throw rejection("This notification channel is no longer available");
       await page(scene, `channel ${id}`);

@@ -22,6 +22,7 @@ import { textReviewRoute } from "./text-review.ts";
 import { type UpdateScene, updateScene } from "./update.ts";
 import { type VoiceScene, voiceScene } from "./voice.ts";
 import { type BrowserScene, browserScene } from "./browser.ts";
+import { type SlackScene, type TelegramScene, slackRoutes, slackScene, telegramRoutes, telegramScene } from "./messaging.ts";
 
 export interface Scene {
   phone: boolean;
@@ -51,6 +52,8 @@ export interface Scene {
   readonly update: UpdateScene;
   readonly voice: VoiceScene;
   readonly browser: BrowserScene;
+  readonly slack: SlackScene;
+  readonly telegram: TelegramScene;
 }
 
 export function scene(): Scene {
@@ -76,6 +79,8 @@ export function scene(): Scene {
     update: updateScene(),
     voice: voiceScene(),
     browser: browserScene(),
+    slack: slackScene(),
+    telegram: telegramScene(),
   };
 }
 
@@ -83,7 +88,10 @@ const health: Route = (request, url) => (request.method === "GET" && url.pathnam
 
 /** @throws {never} */
 export function services(world: Scene) {
-  const review = world.telephony.textReview;
+  const dynamicTextReview: Route = (request, url) => {
+    const review = world.telephony.textReview;
+    return review === undefined ? undefined : textReviewRoute(review, world.notes.ownerIdentity)(request, url);
+  };
   return {
     agent: answering([
       health,
@@ -92,7 +100,7 @@ export function services(world: Scene) {
       ...calendarRoutes(world.calendar),
       ...clockRoutes(world.clock, () => world.now),
       ...remindersRoutes(world.reminders, () => world.now),
-      ...(review === undefined ? [] : [textReviewRoute(review, world.notes.ownerIdentity)]),
+      dynamicTextReview,
       ...notesRoutes(world.notes),
       ...workflowRoutes(world.workflows),
       ...platformRoutes(world.platform),
@@ -103,5 +111,7 @@ export function services(world: Scene) {
       ...inboxRoutes(world.inbox),
       ...mapsRoutes(world.maps, () => world.now),
     ]),
+    slack: answering(slackRoutes(world.slack, () => world.now)),
+    telegram: answering(telegramRoutes(world.telegram, () => world.now)),
   };
 }

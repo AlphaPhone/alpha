@@ -228,7 +228,8 @@ export function inboxRoutes(scene: InboxScene): Route[] {
       return request.json().then(({ proposal }: { proposal: { to: string[]; subject: string; bodyText: string; attachments?: { name: string }[] } }) => {
         scene.changes.push(`send ${proposal.to.join(",")} ${proposal.subject}`);
         scene.attached.push(...(proposal.attachments ?? []).map((file) => file.name));
-        scene.mail.push({ ...letter(scene.mail.length + 100, proposal.subject, ["SENT"], proposal.bodyText), card: { ...letter(scene.mail.length + 100, proposal.subject, ["SENT"]).card, to: proposal.to } });
+        const sent = letter(scene.mail.length + 100, proposal.subject, ["SENT"], proposal.bodyText);
+        scene.mail.push({ ...sent, card: { ...sent.card, to: proposal.to } });
         return Response.json(operation(requestId, "send", "succeeded"));
       });
     },

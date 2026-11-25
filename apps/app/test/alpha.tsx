@@ -31,11 +31,26 @@ const closing: (() => Promise<void>)[] = [];
 /** What each open Alpha was opened with: the world a journey moves, and the screens its `until` loads. */
 const opened = new WeakMap<Alpha, { world?: Scene; mounts: readonly Mount[] }>();
 
+/** Reset document-level styles, alpha data attributes, fake browser overlays, and visibility state between tests. */
+export function resetDocument() {
+  if (typeof document === "undefined") return;
+  document.documentElement.style.fontSize = "";
+  document.documentElement.style.removeProperty("--alpha-own-text-scale");
+  document.documentElement.style.removeProperty("--alpha-native-inset-top");
+  document.documentElement.style.removeProperty("--alpha-native-inset-bottom");
+  document.documentElement.style.removeProperty("--alpha-viewport-height");
+  for (const attr of [...document.documentElement.attributes]) {
+    if (attr.name.startsWith("data-alpha-")) document.documentElement.removeAttribute(attr.name);
+  }
+  for (const surface of [...document.querySelectorAll("[data-fake-browser-page]")]) surface.remove();
+  Object.defineProperty(document, "visibilityState", { configurable: true, get: () => "visible" });
+}
+
 /** Close every Alpha the test opened, and forget what it stored: for `afterEach`. */
 export async function closeAll() {
   for (const close of closing.splice(0)) await close();
   localStorage.clear();
-  Object.defineProperty(document, "visibilityState", { configurable: true, get: () => "visible" });
+  resetDocument();
 }
 
 /**
@@ -44,16 +59,15 @@ export async function closeAll() {
  * process dying.
  */
 export async function open(world: Scene, mounts: readonly Mount[] = every) {
-  const running = await openOver(fakeWorld(world), mounts);
-  opened.set(running.alpha, { world, mounts });
-  return running;
+  return openOver(fakeWorld(world), mounts, world);
 }
 
 /** Alpha over `platform`, which a journey with real services builds itself (test/eliza/world.vibe). */
-export async function openOver(platform: Layer.Layer<Platform>, mounts: readonly Mount[] = every) {
+export async function openOver(platform: Layer.Layer<Platform>, mounts: readonly Mount[] = every, world?: Scene) {
   const alpha = boot(platform, mounts);
-  opened.set(alpha, { mounts });
-  const root = createRoot(document.body.appendChild(document.createElement("div")));
+  opened.set(alpha, { world, mounts });
+  const host = document.body.appendChild(document.createElement("div"));
+  const root = createRoot(host);
   await drawn(async () => {
     root.render(<App alpha={alpha} />);
     await alpha.runtime.runPromise(Effect.void);
@@ -63,6 +77,7 @@ export async function openOver(platform: Layer.Layer<Platform>, mounts: readonly
     if (!open) return;
     open = false;
     await drawn(() => root.unmount());
+    host.remove();
     await alpha.dispose();
   };
   closing.push(close);

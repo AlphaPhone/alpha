@@ -41,7 +41,7 @@ export function plugins(world: Scene, services: { readonly agent: Answering; rea
     AlphaCarrierSetup: alphaCarrierSetup(world.settings),
     AlphaMapsTransport: alphaMapsTransport(world.maps),
     ...(world.image ? telephonyPlugins(world.telephony, () => world.now) : {}),
-    AlphaDevice: (emit) => ({ ...alphaDevice(world.update, () => world.now)(emit), ...settingsHost(world.settings), ...alphaAgentConsent(world.settings), ...cameraKeys(world.camera) }),
+    AlphaDevice: (emit, onUnplug) => ({ ...alphaDevice(world.update, () => world.now)(emit, onUnplug), ...settingsHost(world.settings), ...alphaAgentConsent(world.settings), ...cameraKeys(world.camera) }),
     ElizaNotifications: elizaNotices(world.settings),
     ElizaPasswords: elizaPasswords(world.settings),
     AlphaConnection: alphaConnection(world.platform),

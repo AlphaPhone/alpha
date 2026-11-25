@@ -191,19 +191,25 @@ export function askRoutes(scene: AskScene): Route[] {
       });
     },
     (request, url) => {
-      const found = /^\/api\/conversations\/c(\d+)\/messages(\/stream)?$/.exec(url.pathname);
+      const found = /^\/api\/conversations\/([^/]+)\/messages(\/stream)?$/.exec(url.pathname);
       if (request.method !== "POST" || !found) return;
-      const messages = scene.kept.get(`c${found[1]}`)?.messages ?? [];
-      const keep = (role: "user" | "assistant", text: string) => void messages.push({ id: `m${scene.said.length}${role === "user" ? "u" : "a"}`, role, text });
-      return request.json().then((body: { text: string; metadata?: unknown; channelType?: unknown; images?: readonly unknown[] }) => {
+      const conversationId = decodeURIComponent(found[1] ?? "");
+      const kept = scene.kept.get(conversationId);
+      if (kept === undefined) return Response.json({ error: "unknown_conversation" }, { status: 404 });
+      const keep = (role: "user" | "assistant", text: string) => void kept.messages.push({ id: `m${scene.said.length}${role === "user" ? "u" : "a"}`, role, text });
+      return request.json().then((body: { text: string; metadata?: unknown; channelType?: unknown; images?: readonly unknown[]; clientMessageId?: string }) => {
         scene.metadata?.push(body.metadata);
         scene.spokenFiles?.push({ channel: body.channelType, images: body.images });
         if (body.text !== body.text.trim()) return Response.json({ error: "invalid_message" }, { status: 400 });
-        if (found[2] === undefined) return Response.json({ text: `You said: ${body.text}`, ...named(scene.said.length) });
         scene.said.push(body.text);
         keep("user", body.text);
-        Object.assign(messages.at(-1) ?? {}, { clientMessageId: (body as { clientMessageId?: string }).clientMessageId });
-        return reply(scene, `r${found[1]}`, body.text, (said) => keep("assistant", said), body.metadata);
+        Object.assign(kept.messages.at(-1) ?? {}, { clientMessageId: body.clientMessageId });
+        if (found[2] === undefined) {
+          const text = `You said: ${body.text}`;
+          keep("assistant", text);
+          return Response.json({ text, ...named(scene.said.length) });
+        }
+        return reply(scene, kept.roomId, body.text, (said) => keep("assistant", said), body.metadata);
       });
     },
     (request, url) => {
