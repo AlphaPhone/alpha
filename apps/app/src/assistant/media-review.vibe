@@ -3,6 +3,8 @@ import { DeviceExecution, type DeviceAgent, type ExecutorCall, type JournalIdent
 import { operationOf, readOperation, type DeviceOperation } from "@elizaos/agent/operations"
 import { Machine as Conversation } from "../../gen/app__assistant.effect.vibe"
 import { Machine as Chats } from "../../gen/app__assistant__chats.effect.vibe"
+import { Machine as Messages } from "../../gen/app__messages.effect.vibe"
+import { Machine as Shell, showing } from "../../gen/app__shell.effect.vibe"
 import { Agent, type Runtime } from "../platform/agent.vibe"
 import { Device, registered } from "../platform/device.vibe"
 import { ownerAt } from "../platform/owner.vibe"
@@ -10,7 +12,17 @@ import { Talk } from "./talk.vibe"
 
 /** Area-owned equipment and approved executors. The resident protocol never receives a media bridge handle. */
 export service MediaExecutors {
-  execute(operation: DeviceOperation, call: ExecutorCall): unknown!!
+  execute(operation: DeviceOperation, call: ExecutorCall, authority: ReviewAuthority): unknown!!
+}
+
+export interface MessageTarget {
+  readonly thread: number
+  readonly ticket: number
+}
+
+export interface ReviewAuthority {
+  readonly current: () => Promise<boolean>
+  readonly target?: MessageTarget
 }
 
 module native {
@@ -63,6 +75,8 @@ const claim = Schema.Struct({ digest: Schema.NonEmptyString, proposal: Schema.St
 const cameraCapabilities = ["camera.capture-photo.v1", "camera.capture-lens.v1", "camera.capture-library-id.v1"]
 const photosCapabilities = ["photos.library.v1", "photos.view.v1"]
 const filesCapabilities = ["files.browser.v1"]
+const phoneCapabilities = ["phone.keypad.v1", "phone.dial.v1", "phone.call.v1", "views.telephony.v1"]
+const draftCapabilities = ["sms.compose.v1", "sms.compose.v2"]
 
 export interface MediaCard {
   readonly id: string
@@ -75,6 +89,7 @@ export interface MediaCard {
   readonly enrollmentId: string
   readonly title: string
   readonly detail: string
+  readonly target?: MessageTarget
 }
 
 interface Session {
@@ -83,6 +98,7 @@ interface Session {
   readonly headers: RuntimeRequestHeaders
   readonly execute: DeviceExecution<DeviceOperation>
   readonly decide: DeviceAgent["decide"]
+  readonly approvals: Map<string, ReviewAuthority>
 }
 
 function operation(raw: unknown) {
@@ -90,6 +106,15 @@ function operation(raw: unknown) {
   if (checked === undefined) return undefined
   const value = operationOf(checked)
   switch (value.type) {
+    case "phone_keypad":
+      return value
+    case "phone_dial":
+    case "phone_call":
+      return value.target.kind === "number" ? value : undefined
+    case "sms_reply_selected":
+      return value
+    case "sms_compose":
+      return "draft" in value && value.draft === true && value.target.kind === "number" && !("replyThreadId" in value) ? value : undefined
     case "camera_capture_photo":
     case "photos_filter":
     case "photos_open":
@@ -116,6 +141,11 @@ function operation(raw: unknown) {
 
 function words(value: NonNullable<ReturnType<typeof operation>>): { title: string; detail: string } {
   switch (value.type) {
+    case "phone_keypad": return { title: "Open the keypad", detail: value.number ?? "Phone" }
+    case "phone_dial": return { title: "Open the phone dialer", detail: value.target.kind === "number" ? value.target.number : "Phone" }
+    case "phone_call": return { title: "Call", detail: value.target.kind === "number" ? value.target.number : "Phone" }
+    case "sms_reply_selected": return { title: "Draft a reply in Messages", detail: value.body }
+    case "sms_compose": return { title: `Draft a text to ${"target" in value && value.target.kind === "number" ? value.target.number : "the recipient"}`, detail: value.body }
     case "camera_capture_photo": return { title: "Take a photo", detail: value.lens === undefined ? "Open the viewfinder to review the shot" : `Open the ${value.lens === "front" ? "front" : "rear"} camera to review the shot` }
     case "photos_filter": return { title: "Filter Photos", detail: value.text ?? "Show the requested photos in your library" }
     case "photos_open": return { title: "Open a photo", detail: "Show the requested item in Photos" }
@@ -137,7 +167,8 @@ function words(value: NonNullable<ReturnType<typeof operation>>): { title: strin
 /** Enrollment and the proposal protocol share the same live resident identity. */
 export service MediaReview {
   session(): (Session | undefined)!!
-  pending(session: Session, message: string, conversation: number, revision: number): readonly MediaCard[]!!
+  messageTarget(): (MessageTarget | undefined)!!
+  pending(session: Session, message: string, conversation: number, revision: number, target: MessageTarget | undefined): readonly MediaCard[]!!
   decide(card: MediaCard, approve: boolean): void!!
 }
 
@@ -159,7 +190,7 @@ function routes(runtime: Runtime, headers: RuntimeRequestHeaders): DeviceAgent {
   }
 }
 
-effect function enrolled(epoch: number, runtime: Runtime, executors: MediaExecutors.Shape): Session!unknown!Agent {
+effect function enrolled(epoch: number, runtime: Runtime, executors: MediaExecutors.Shape): Session!unknown!(Agent | Device) {
   const offer = try Schema.decodeUnknownEffect(protocol)(try tryPromise(() => runtime.request(`${prefix}/capabilities`)))
   const owner = try ownerAt()
   if (offer.identityId !== owner) throw new Error("Device owner changed")
@@ -167,10 +198,12 @@ effect function enrolled(epoch: number, runtime: Runtime, executors: MediaExecut
   const slot = try tryPromise(() => slotFor([origin, owner, offer.agentId]))
   const { key } = try tryPromise(() => enrollment().enrollmentKey({ slot }))
   if (!/^[a-f0-9]{64}$/.test(key)) throw new Error("Invalid enrollment key")
+  const device = try (try Device).capabilities()
   const capabilities = [
     ...(registered("ElizaCamera") ? cameraCapabilities : []),
     ...(registered("AlphaPhotoLibrary") ? photosCapabilities : []),
     ...(registered("ElizaFiles") ? filesCapabilities : []),
+    ...(device.image && registered("ElizaTelephony") ? [...phoneCapabilities, ...draftCapabilities] : []),
   ].filter((name) => offer.deviceActions.capabilities.includes(name))
   if (capabilities.length === 0) throw new Error("Media operations are unavailable")
   const headers = { "x-eliza-device-id": offer.agentId, "x-eliza-device-key": key, "x-eliza-device-capabilities": capabilities.join(",") }
@@ -184,13 +217,20 @@ effect function enrolled(epoch: number, runtime: Runtime, executors: MediaExecut
   if (confirmed.subjectUserId !== owner || confirmed.agentId !== offer.agentId || confirmed.installationId !== offer.agentId) throw new Error("Device scope changed")
   const identity = { origin, ownerId: owner, ...confirmed }
   const agent = routes(runtime, headers)
+  const approvals = new Map<string, ReviewAuthority>()
   const execute = new DeviceExecution<DeviceOperation>({
     identity, agent, journal: journal(), validate: operation,
-    execute: (op, call) => runPromise(executors.execute(op, call)),
+    execute: (op, call) => {
+      const approval = approvals.get(call.proposalId)
+      return approval === undefined ? Promise.resolve(undefined) : runPromise(executors.execute(op, call, approval))
+    },
     readBack: () => Promise.resolve(undefined),
   })
-  return { epoch, identity, headers, execute, decide: agent.decide }
+  return { epoch, identity, headers, execute, decide: agent.decide, approvals }
 }
+
+const sameTarget = (one: MessageTarget | undefined, other: MessageTarget | undefined): boolean =>
+  one !== undefined && other !== undefined && one.thread === other.thread && one.ticket === other.ticket
 
 const notStarted = "Alpha couldn’t start that action."
 
@@ -201,8 +241,16 @@ export const mediaReview = Layer.effect(MediaReview, effect {
   const { board } = try Talk
   const conversation = try Conversation
   const chats = try Chats
+  const messages = try Messages
+  const shell = try Shell
   const lock = try Semaphore.make(1)
   let latest: Session | undefined
+  effect function messageTarget(): (MessageTarget | undefined)!! {
+    if (!showing(try shell.get(), "Messages")) return undefined
+    const state = try messages.get()
+    return state.front && state.pane === "Conversation" && state.page.status === "Loaded"
+      ? { thread: state.thread, ticket: state.page.ticket } : undefined
+  }
   effect function session(): (Session | undefined)!! {
     if (!registered("AlphaMediaEnrollment") || !registered("ElizaActionJournal")) return undefined
     const status = life.status() catch () => undefined
@@ -213,27 +261,36 @@ export const mediaReview = Layer.effect(MediaReview, effect {
   }
   return {
     session,
-    effect pending(opened: Session, message: string, conversation: number, revision: number) {
+    messageTarget,
+    effect pending(opened: Session, message: string, conversation: number, revision: number, target: MessageTarget | undefined) {
       const answer = (tryPromise(() => runtime.request(`${prefix}/proposals`, undefined, opened.headers)) |> flatMap(%, Schema.decodeUnknownEffect(listed))) catch () => undefined
       if (answer === undefined || opened !== latest) return []
+      const bound = sameTarget(target, try messageTarget()) ? target : undefined
       return answer.proposals.flatMap((proposal) => {
         if (proposal.state !== "pending" || proposal.payload.requestMessageId !== message || proposal.payload.workflow !== undefined) return []
         const op = operation(proposal.payload.operation)
         const expiresAt = Date.parse(proposal.expiresAt)
         if (op === undefined || !Number.isFinite(expiresAt)) return []
-        return [{ id: proposal.id, digest: proposal.digest, operation: op, expiresAt, message, conversation, revision, enrollmentId: opened.identity.enrollmentId, ...words(op) }]
+        if (op.type === "sms_reply_selected" && bound === undefined) return []
+        return [{ id: proposal.id, digest: proposal.digest, operation: op, expiresAt, message, conversation, revision, enrollmentId: opened.identity.enrollmentId, ...words(op), ...(op.type === "sms_reply_selected" && bound !== undefined ? { target: bound } : {}) }]
       })
     },
     effect decide(card: MediaCard, approve: boolean) {
       try lock.withPermits(1)(effect {
         if (!board.snapshot().media.includes(card)) return
-        const showing = (try conversation.get()).context
-        const chosen = (try chats.get()).chosen
         const held = try session()
-        const time = try Clock.currentTimeMillis
-        const front = (tryPromise(() => enrollment().authority()) |> map(%, (one) => one.active === true)) catch () => false
-        const live = held !== undefined && card.enrollmentId === held.identity.enrollmentId && card.conversation === chosen
-          && card.revision === showing.revision && !showing.sensitive && time < card.expiresAt && front && (try device.showing())
+        const active = effect {
+          const status = life.status() catch () => undefined
+          const context = (try conversation.get()).context
+          const chosen = (try chats.get()).chosen
+          const time = try Clock.currentTimeMillis
+          const front = (tryPromise(() => enrollment().authority()) |> map(%, (one) => one.active === true)) catch () => false
+          return held !== undefined && held === latest && status?.state === "running" && status.epoch === held.epoch
+            && card.enrollmentId === held.identity.enrollmentId && card.conversation === chosen && card.revision === context.revision
+            && !context.sensitive && time < card.expiresAt && front && (try device.showing())
+            && (card.target === undefined || sameTarget(card.target, try messageTarget()))
+        }
+        const live = try active
         board.change({ media: board.snapshot().media.filter((one) => one !== card) })
         if (!live || held === undefined) { board.change({ mediaNote: "That review expired. Ask again from the current screen." }); return }
         if (!approve) {
@@ -241,7 +298,9 @@ export const mediaReview = Layer.effect(MediaReview, effect {
           board.change({ mediaNote: declined === undefined ? "Alpha couldn’t confirm the decline." : "Declined" })
           return
         }
-        const result = tryPromise(() => held.execute.approve(card, { live: true, nonsensitive: true, exact: true, forceReview: true, requestEligible: true, reviewed: true })) catch () => undefined
+        held.approvals.set(card.id, { current: () => runPromise(active), ...(card.target === undefined ? {} : { target: card.target }) })
+        const approval = tryPromise(() => held.execute.approve(card, { live: true, nonsensitive: true, exact: true, forceReview: true, requestEligible: true, reviewed: true }))
+        const result = (approval |> Effect.ensuring(%, sync(() => { held.approvals.delete(card.id) }))) catch () => undefined
         const note = result?.kind !== "settled" ? notStarted : result.result.tag === "Applied" ? (result.synced ? "Done" : "Done. Agent receipt pending.")
           : result.result.tag === "Unknown" ? "The result could not be confirmed. Check before trying again." : "Nothing changed."
         board.change({ mediaNote: note })
