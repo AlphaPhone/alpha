@@ -1,0 +1,45 @@
+// spec/app/phone/comms.md, "The bar addresses Alpha exactly while the conversation is open, and the left slot holds the other target"; spec/app/voice/index.md, "Story: Hold a spoken conversation"
+import { Machine as Phone } from "../../gen/app__phone.effect.vibe"
+import { Machine as Comms } from "../../gen/app__phone__comms.effect.vibe"
+import * as Shell from "../../gen/app__shell.effect.vibe"
+import * as Voice from "../../gen/app__voice.effect.vibe"
+import { Machine as Speaker } from "../../gen/app__voice__output.effect.vibe"
+import { say } from "../notices/toasts.vibe"
+import { CommsPrompts } from "../phone/comms.vibe"
+import { Device } from "../platform/device.vibe"
+import { VoiceBridge } from "../platform/voice.vibe"
+import { contained, started, untimed } from "../runtime/reactor.vibe"
+import { keyboardVoice } from "../shell/canvas.vibe"
+
+/** Start only if the microphone and speaker are free at the time of the owner's request. */
+export effect function beginTalk() {
+  const voice = try Voice.Machine
+  const call = (try (try Phone).get()).telecom
+  const speaker = try (try Speaker).get()
+  if (call === "OrdinaryCall" || call === "MaybeEmergencyCall" || speaker.stage !== "Silent" || speaker.retiring
+    || !(try (try Device).showing()) || !(try (try VoiceBridge).available()) || !Voice.canStartTalking(try voice.get(), untimed)) return
+  try keyboardVoice(true)
+  if (!(try contained(voice.send({ type: "startTalking", now: untimed }), "starting Talk"))) try keyboardVoice(false)
+}
+
+/** A hold belongs to the subject under the owner's finger. A late request cannot open Talk elsewhere. */
+export const talkFromComms = started(effect {
+  const shell = try Shell.Machine
+  const comms = try Comms
+  const phone = try Phone
+  const device = try Device
+  const bridge = try VoiceBridge
+  const requests = (try CommsPrompts).talkRequests
+  try Stream.runForEach(requests, effect ({ about, view }) => {
+    const before = try shell.get()
+    if (!Shell.showing(before, view) || !Shell.canRaise(before, "Sheet") || (try comms.get()).key !== about || !(try device.showing())) return
+    if ((try phone.get()).telecom !== "NoCall" || !(try bridge.available())) {
+      try say("Talk is unavailable right now", true)
+      return
+    }
+    if (!(try contained(shell.send({ type: "raise", detent: "Sheet" }), "opening Talk from the communications bar"))) return
+    const current = try shell.get()
+    if (Shell.showing(current, view) && current.assistant === "Sheet" && (try comms.get()).key === about
+      && (try phone.get()).telecom === "NoCall") try beginTalk()
+  })
+}, "starting Talk from the communications bar")

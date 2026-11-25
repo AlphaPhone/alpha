@@ -105,8 +105,8 @@ export service Device {
   bars(dark: boolean): void!!
   /** What Alpha's Android host says about its build for a support report, untrusted; none off the phone or where it could not say. */
   buildFacts(): Option.Option<unknown>!!
-  /** The Google consent the phone's host launches the agent with from now on, restarting a running agent when it changed; nothing where no agent is hosted. */
-  agentConsent(consent: GoogleConsent): void!!
+  /** Whether the phone's host took the Google consent it launches the agent with from now on, restarting a running agent when it changed; it keeps what it had when it refuses. True where no agent is hosted. */
+  agentConsent(consent: GoogleConsent): boolean!!
   /** Whether the owner's text was put on the system clipboard. */
   copyText(text: string): boolean!!
 }
@@ -168,7 +168,7 @@ export const phoneDevice = Layer.effect(Device, effect {
     feels: () => sync(() => registered(alphaDevice)),
     bars: (dark: boolean) => registered(alphaDevice) ? ignore(tryPromise(() => alpha().setSystemBarAppearance({ dark }))) : Effect.void,
     buildFacts: () => registered(alphaDevice) ? Effect.option(tryPromise(() => alpha().diagnosticsFacts())) : succeed(Option.none<unknown>()),
-    agentConsent: (consent: GoogleConsent) => registered(alphaDevice) ? ignore(tryPromise(() => alpha().setAgentGoogleConsent(consent))) : Effect.void,
+    agentConsent: (consent: GoogleConsent) => registered(alphaDevice) ? Effect.map(Effect.option(tryPromise(() => alpha().setAgentGoogleConsent(consent))), Option.isSome) : succeed(true),
     copyText: (text: string) => registered(alphaDevice) ? Effect.map(Effect.option(tryPromise(() => alpha().copyText({ text }))), Option.isSome) : succeed(false),
     effect capabilities() {
       const variant = variantOf(native(), registered(telephony))
@@ -187,7 +187,7 @@ export const browserDevice = Layer.effect(Device, effect {
     feels: () => succeed(false),
     bars: () => Effect.void,
     buildFacts: () => succeed(Option.none<unknown>()),
-    agentConsent: () => Effect.void,
+    agentConsent: () => succeed(true),
     copyText: (text: string) => Effect.map(Effect.option(tryPromise(() => copyToBrowser(text))), Option.isSome),
   }
 })

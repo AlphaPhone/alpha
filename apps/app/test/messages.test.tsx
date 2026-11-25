@@ -13,6 +13,7 @@ import { Machine as Home } from "../gen/app__home.effect.vibe";
 import { Pages } from "../src/browser/browser.vibe";
 import browser from "../src/browser/index.tsx";
 import home from "../src/home/index.tsx";
+import messages from "../src/messages/index.tsx";
 import { closeAll, drawn, hardware, only, open, press, underAct } from "./alpha.tsx";
 import { scene } from "./fakes/scene.ts";
 
@@ -119,10 +120,11 @@ describe("Messages on an Alpha image", () => {
 
     // spec/app/voice/index.md, "Using the transcript fills the field dictation started in, and dictation never sends"
     const openedChats = world.ask.opened;
+    const messageView = messages.runtime(alpha);
     await press("Dictate a text to Maya");
-    await ready(alpha.runtime, Voice, "Messages recording", (state) => state.recorder.field === "MessagesBar" && state.recorder.stage === "Recording");
+    await ready(messageView, Voice, "Messages recording", (state) => state.recorder.field === "MessagesBar" && state.recorder.stage === "Recording");
     await press("Stop recording");
-    await ready(alpha.runtime, Voice, "Messages transcript returned", (state) => state.recorder.stage === "Closed");
+    await ready(messageView, Voice, "Messages transcript returned", (state) => state.recorder.stage === "Closed");
     const dictated = "On my way Dictated note";
     expect([document.querySelector<HTMLTextAreaElement>('textarea[aria-label="Message"]')?.value, world.telephony.sent, world.ask.opened, world.ask.said, world.voice.startLiveCaptureCalls])
       .toEqual([dictated, [], openedChats, [], 0]);
