@@ -1,4 +1,5 @@
 // spec/app/assistant/reply.md, "A recognized tool block outside a fence becomes its card; inside a fence every line stays code"
+// spec/app/assistant/reply.md, "The agent's turn tag is never drawn, copied, quoted, emailed or spoken, and a reply still being written holds back what may become one"
 import { withoutMapsCards } from "@elizaos/plugin-maps-client";
 import { replyWords } from "@repo/ui";
 
@@ -16,7 +17,9 @@ const formClose = /\[\/FORM\]\s*$/;
 const cardOpen = /^\s*\[[ \t]*MAPSCARD[ \t]*\][ \t]*$/;
 const cardClose = /^\s*\[[ \t]*\/[ \t]*MAPSCARD[ \t]*\][ \t]*$/;
 const option = /^([^=\n]{1,500})=([^=\n]{1,80})$/;
-const partialOpener = /^\s*\[(?:M(?:A(?:P(?:S(?:C(?:A(?:R(?:D)?)?)?)?)?)?)?|C(?:H(?:O(?:I(?:C(?:E(?::[^\]\n]*)?)?)?)?)?)?|F(?:O(?:R(?:M)?)?)?)?$/;
+const turnTag = /[ \t]*(?:\[\/?(?:answer|promise)\]|<\/?(?:answer|promise)>)[ \t]*(?=\r?\n|$)|(?:\[\/?(?:answer|promise)\]|<\/?(?:answer|promise)>)[ \t]*/gi;
+const turnTagSoFar = /[[<]\/?(?:a(?:n(?:s(?:w(?:e(?:r)?)?)?)?)?|p(?:r(?:o(?:m(?:i(?:s(?:e)?)?)?)?)?)?)?$/i;
+const partialOpener =/^\s*\[(?:M(?:A(?:P(?:S(?:C(?:A(?:R(?:D)?)?)?)?)?)?)?|C(?:H(?:O(?:I(?:C(?:E(?::[^\]\n]*)?)?)?)?)?)?|F(?:O(?:R(?:M)?)?)?)?$/;
 
 interface Blocks {
   readonly words: string;
@@ -24,13 +27,23 @@ interface Blocks {
 }
 
 /**
- * A reply read for the owner: its Maps cards (eliza's recognizer), its Maps share questions and its forms taken out of the
+ * The model's text without eliza's turn tag, `[answer]` or `[promise]` in either bracket, wherever it stands; while the
+ * reply is still `streaming`, an ending that may still become one is held back. Never for the owner's own words.
+ * @throws {never}
+ */
+export function withoutTurnTags(text: string, streaming = false): string {
+  const untagged = text.replace(turnTag, "");
+  return streaming ? untagged.replace(turnTagSoFar, "") : untagged;
+}
+
+/**
+ * A reply read for the owner, without the agent's turn tag: its Maps cards (eliza's recognizer), its Maps share questions and its forms taken out of the
  * words, outside a code fence only, with each share question's answers kept. Any other block reads as text. While the reply
  * is still `streaming`, a block that has not closed, and a last line that may still become one, are held back; in a finished
  * reply an unclosed block stays as text. @throws {never}
  */
 export function replyBlocks(text: string, streaming = false): Blocks {
-  const lines = withoutMapsCards(text).split(/\r?\n/);
+  const lines = withoutMapsCards(withoutTurnTags(text, streaming)).split(/\r?\n/);
   const kept: string[] = [];
   const choices: ShareChoice[] = [];
   let fenced = false;
