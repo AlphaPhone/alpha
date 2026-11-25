@@ -446,11 +446,15 @@ pure def sentencePlayed(v: Voice, session: int, turn: int): Change =
 
 ### A reply that needs the owner's review in chat keeps voice listening with the microphone open
 
-The owner reviews and approves in the chat. Voice never approves a proposal
-that requires the owner’s review. Any pre-review reply speech is hushed and a non-blocking review
-notice is shown, while the conversation returns straight to listening with
-the microphone open (when unmuted) for the next turn. Settling the review
-clears the notice and never stops voice.
+Talk takes a proposal from the agent's completed action result and the
+phone's matching current enrollment, request and review target. An
+admitted review shows in Ask Alpha. If Talk is on the bar, it brings up
+the sheet for the review. The reply's prose creates no review. The owner
+reviews and decides in chat. Any pre-review reply speech is hushed, and
+Talk returns to listening with the microphone open when unmuted. Its
+notice follows the last matching review still shown, including while the
+decision is being confirmed. When that review settles or leaves this
+chat, the notice clears without stopping Talk.
 
 ```quint
 pure def canReplyEnds(v: Voice, session: int, turn: int, asks: bool): bool =

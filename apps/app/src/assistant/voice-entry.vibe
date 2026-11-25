@@ -1,4 +1,6 @@
 // spec/app/phone/comms.md, "The bar addresses Alpha exactly while the conversation is open, and the left slot holds the other target"; spec/app/voice/index.md, "Story: Hold a spoken conversation"
+import { Machine as Conversation } from "../../gen/app__assistant.effect.vibe"
+import { Machine as Chats } from "../../gen/app__assistant__chats.effect.vibe"
 import { Machine as Phone } from "../../gen/app__phone.effect.vibe"
 import { Machine as Comms } from "../../gen/app__phone__comms.effect.vibe"
 import * as Shell from "../../gen/app__shell.effect.vibe"
@@ -10,6 +12,7 @@ import { Device } from "../platform/device.vibe"
 import { VoiceBridge } from "../platform/voice.vibe"
 import { contained, started, untimed } from "../runtime/reactor.vibe"
 import { keyboardVoice } from "../shell/canvas.vibe"
+import { Talk } from "./talk.vibe"
 
 /** Start only if the microphone and speaker are free at the time of the owner's request. */
 export effect function beginTalk() {
@@ -58,3 +61,35 @@ export const commsVoicePanel = started(effect {
     if ((try comms.get()).voice !== on) try contained(comms.send({ type: "voiceChanged", on }, "Device"), "placing End in the communications stage")
   })
 }, "observing the communications Talk panel")
+
+// spec/app/voice/index.md, "A reply that needs the owner's review in chat keeps voice listening with the microphone open"
+export const spokenReviewNotice = started(effect {
+  const voice = try Voice.Machine
+  const conversation = try Conversation
+  const chats = try Chats
+  const { board } = try Talk
+  const reviews = Stream.callback<void>((queue) => acquireRelease(sync(() => {
+    let previous = board.snapshot().media
+    return board.subscribe(() => {
+      const current = board.snapshot().media
+      if (current === previous) return
+      previous = current
+      Queue.offerUnsafe(queue, undefined)
+    })
+  }), (off) => sync(off)))
+  const pages = Stream.changes(Stream.map(chats.changes, (state) => state.chosen))
+  const shown = Stream.changes(Stream.map(conversation.changes, (state) => state.context.revision))
+  const pending = Stream.changes(Stream.map(voice.changes, (state) => state.reviewPending ? state.session : 0))
+  const changes = Stream.merge(reviews, Stream.as(Stream.mergeAll([pages, shown, pending], { concurrency: "unbounded" }), undefined))
+  try Stream.runForEach(changes, effect () => {
+    const state = try voice.get()
+    if (!Voice.canReviewSettled(state)) return
+    const page = (try chats.get()).chosen
+    const context = (try conversation.get()).context
+    const cards = board.snapshot().media
+    const remains = !context.sensitive && cards.some((card) => card.conversation === page && card.revision === context.revision
+      && (card.spoken?.session ?? card.spokenSms?.session) === state.session)
+    if (!remains) try contained(voice.send({ type: "reviewSettled" }, (live) => live.session === state.session
+      && Voice.canReviewSettled(live) && board.snapshot().media === cards), "clearing the settled Talk review")
+  })
+}, "following the exact Talk reviews shown in chat")
