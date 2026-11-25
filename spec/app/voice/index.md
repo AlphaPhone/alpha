@@ -795,9 +795,11 @@ pure def agentNavigates(v: Voice, session: int, place: int): Change =
 
 ### An exact spoken Files request may follow its own leased navigation once
 
-After its reply finishes, an explicit path or filter can open Files from
-another screen when the same voice turn, source and direct-action permission
-still hold. A result position only refers to an existing Files listing.
+After its reply finishes, the agent's one direct filter, or open by path,
+can open Files from another screen when the same voice turn, source and
+direct-action permission still hold; the turn keeps its words for the
+phone's result only once the agent proposes a Files action. A result
+position only refers to an existing Files listing.
 Talk follows this move only when its guarded route write is accepted. Stop
 and the owner's navigation can retire the request before the file action.
 

@@ -460,11 +460,11 @@ export const placed: void!!(Tabs.Machine | Shell | TabHost) = effect {
 export const browser = Layer.provideMerge(together(tabs, told, shown), pages)
 
 // spec/app/messages/index.md, "Only the newest read of the open conversation is shown, and it marks the shown messages read only where Alpha is the phone's SMS app"; spec/app/browser/index.md, "Story: Open, pick and close tabs"
-/** A link the owner tapped in Messages opens in one selected normal Browser tab through the address machine. */
-export effect function openMessageLink(href: string): boolean!!(Tabs.Machine | Pages | Shell | TabHost) {
+/** A link the owner tapped in Messages, or in an Ask Alpha reply over any screen, opens in one selected normal Browser tab through the address machine. */
+export effect function openMessageLink(href: string, from: "Messages" | "Ask Alpha" = "Messages"): boolean!!(Tabs.Machine | Pages | Shell | TabHost) {
   const address = messageHref(href)
   const shell = try Shell
-  if (address === undefined || Option.isNone((try TabHost).plugin) || !showing(try shell.get(), "Messages")) return false
+  if (address === undefined || Option.isNone((try TabHost).plugin) || (from === "Messages" && !showing(try shell.get(), "Messages"))) return false
   const input = inputOf(address)
   if (Address.verdict(input) !== "Open") return false
   if (!(try contained(shell.send({ type: "openView", view: "Browser" }), "opening a Message link"))) return false

@@ -721,7 +721,7 @@ describe("Files on a phone", () => {
   it('Opens or filters only what the owner asked for directly (spec/app/files/index.md, "An explicit request to open or filter Files may act directly on the same idle Files view")', async () => {
     const world = { ...scene(), phone: true, image: true };
     const filter = { type: "files_filter", kind: "pdf", folder: "Download" } as const;
-    const review = textReview(world.notes.owner, "unasked-filter", filter);
+    const review = textReview(world.notes.owner, "asked-filter", filter);
     world.telephony.textReview = review;
     const { alpha, runtime } = await onFiles(world, "assistant");
     const chat = assistant.runtime(alpha);
@@ -731,36 +731,62 @@ describe("Files on a phone", () => {
     await press("Open conversation");
     await until(alpha, alpha.runtime, Shell, (s) => s.assistant === "Sheet");
 
-    const send = async (id: string, text: string, direct: boolean) => {
+    const send = async (id: string, text: string, proposed: "Nothing" | "Review" | "Direct") => {
       review.proposal.id = id;
       review.proposal.state = "pending";
       const reads = review.pendingReads;
-      world.ask.nextReplyChunks = ["I found a Files action."];
+      world.ask.nextReplyChunks = [proposed === "Nothing" ? "Your Downloads hold a lease and a photo." : "I found a Files action."];
       world.ask.nextActions = (metadata) => {
-        const mode = readTurnContext({ content: { metadata } }).voiceUi?.agentActionMode;
-        expect(mode).toBe(direct ? "direct-request-v1" : undefined);
-        review.proposal.payload.requestMessageId = mode === "direct-request-v1" ? `m${world.ask.said.length}u` : undefined;
-        return [{ action: "PROPOSE_DEVICE_ACTION", data: { proposalId: id, state: "pending", executed: false, approvalRequired: mode === undefined,
-          ...(mode === "direct-request-v1" ? { awaitingDeviceExecution: true, directRequest: true } : { awaitingUserInput: true }) } }];
+        expect(readTurnContext({ content: { metadata } }).voiceUi?.agentActionMode).toBe("direct-files-v1");
+        review.proposal.payload.requestMessageId = proposed === "Nothing" ? undefined : `m${world.ask.said.length}u`;
+        return proposed === "Nothing" ? [] : [{ action: "PROPOSE_DEVICE_ACTION", data: { proposalId: id, state: "pending", executed: false, approvalRequired: proposed === "Review",
+          ...(proposed === "Direct" ? { awaitingDeviceExecution: true, directRequest: true } : { awaitingUserInput: true }) } }];
       };
       await fill("Message Alpha", text);
       await vi.waitFor(() => expect(button("Send")?.disabled).toBe(false));
       await press("Send");
       await until(alpha, chat, Conversation, (s) => review.pendingReads > reads && s.turn.reply === "Complete");
     };
+    const before = runtime.runSync(Browser.use((m) => m.get()));
 
-    await send("unasked-filter", "What is in my Downloads?", false);
-    await vi.waitFor(() => expect(button("Approve")).toBeDefined());
-    expect(review.decisions).toEqual([]);
+    await send("no-files-request", "What is in my Downloads?", "Nothing");
+    const after = runtime.runSync(Browser.use((m) => m.get()));
+    expect([button("Approve"), review.decisions, review.claims, after.trail, after.search.filter]).toEqual([undefined, [], [], before.trail, before.search.filter]);
 
-    await send("asked-filter", "Show PDFs in Download", true);
+    const changes = [
+      ["move-lease", "put the lease in my documents", { type: "files_move", paths: ["Download/lease.pdf"], dest: "Documents" }],
+      ["share-lease", "send the lease to someone", { type: "files_share", paths: ["Download/lease.pdf"] }],
+      ["trash-lease", "get rid of the lease", { type: "files_trash", paths: ["Download/lease.pdf"] }],
+      ["taxes-folder", "make a taxes folder in downloads", { type: "files_folder_create", parent: "Download", name: "Taxes" }],
+    ] as const;
+    for (const [id, text, change] of changes) {
+      review.proposal.payload.operation = change;
+      await send(id, text, "Review");
+      await vi.waitFor(() => expect(button("Approve")).toBeDefined());
+      expect([review.decisions, review.claims, world.files.shared, world.files.trash]).toEqual([[], [], [], []]);
+    }
+
+    review.proposal.payload.operation = filter;
+    await send("asked-filter", "only the pdfs from my downloads please", "Direct");
     await vi.waitFor(() => expect(review.receipts).toEqual([expect.objectContaining({ outcome: "applied", operationId: "asked-filter" })]));
     expect(document.body.textContent).toContain("Showing 1 item in Files.");
     expect(button("Approve")).toBeUndefined();
 
+    // spec/app/assistant/context.md, "A turn an agent refuses whole for a direct-request mode it does not know is sent once more without it"
+    world.ask.knowsNoActionMode = true;
+    world.ask.metadata = [];
+    world.ask.nextReplyChunks = ["Your Downloads hold a lease and a photo."];
+    await fill("Message Alpha", "what is in my downloads?");
+    await vi.waitFor(() => expect(button("Send")?.disabled).toBe(false));
+    await press("Send");
+    await until(alpha, chat, Conversation, (s) => s.turn.reply === "Complete");
+    expect(world.ask.metadata.map((one) => readTurnContext({ content: { metadata: one } }).voiceUi?.agentActionMode)).toEqual(["direct-files-v1", undefined]);
+    expect(document.body.textContent).toContain("Your Downloads hold a lease and a photo.");
+    world.ask.knowsNoActionMode = false;
+
     review.proposal.payload.operation = { type: "files_open", path: "Documents/notes.txt" };
     world.files.refusing.push("readSelected");
-    await send("refused-open", "Open Documents/notes.txt", true);
+    await send("refused-open", "open my notes file", "Direct");
     await vi.waitFor(() => expect(review.receipts.at(-1)).toMatchObject({ outcome: "failed", operationId: "refused-open" }));
     expect(document.body.textContent).not.toContain("Opened the requested item in Files.");
   });
@@ -770,6 +796,7 @@ describe("Files on a phone", () => {
     const filter = { type: "files_filter", kind: "pdf", folder: "Download" } as const;
     const openNotes = { type: "files_open", path: "Documents/notes.txt" } as const;
     const allPdfs = { type: "files_filter", kind: "pdf" } as const;
+    const firstShown = { type: "files_open", shown: 1 } as const;
     const review = textReview(world.notes.owner, "home-filter", filter);
     world.telephony.textReview = review;
     const { alpha } = await open(world, only("home", "view:Files", "assistant", "notice"));
@@ -792,17 +819,15 @@ describe("Files on a phone", () => {
       await press("Open conversation");
       await panel();
     };
-    const send = async (id: string, text: string, direct: boolean, operation: typeof filter | typeof allPdfs | typeof openNotes) => {
+    const send = async (id: string, text: string, operation: typeof filter | typeof allPdfs | typeof openNotes | typeof firstShown) => {
       review.proposal.id = id;
       review.proposal.state = "pending";
       review.proposal.payload.operation = operation;
       world.ask.nextReplyChunks = ["I found a Files action."];
       world.ask.nextActions = (metadata) => {
-        const mode = readTurnContext({ content: { metadata } }).voiceUi?.agentActionMode;
-        expect(mode).toBe(direct ? "direct-request-v1" : undefined);
-        review.proposal.payload.requestMessageId = mode === "direct-request-v1" ? `m${world.ask.said.length}u` : undefined;
-        return [{ action: "PROPOSE_DEVICE_ACTION", data: { proposalId: id, state: "pending", executed: false, approvalRequired: !direct,
-          ...(direct ? { awaitingDeviceExecution: true, directRequest: true } : { awaitingUserInput: true }) } }];
+        expect(readTurnContext({ content: { metadata } }).voiceUi?.agentActionMode).toBe("direct-files-v1");
+        review.proposal.payload.requestMessageId = `m${world.ask.said.length}u`;
+        return [{ action: "PROPOSE_DEVICE_ACTION", data: { proposalId: id, state: "pending", executed: false, approvalRequired: false, awaitingDeviceExecution: true, directRequest: true } }];
       };
       await fill("Message Alpha", text);
       await vi.waitFor(() => expect(button("Send")?.disabled).toBe(false));
@@ -811,7 +836,7 @@ describe("Files on a phone", () => {
 
     await fromHome();
     world.ask.holdAfterTools = true;
-    await send("cancel-at-source", "Show PDFs in Download", true, filter);
+    await send("cancel-at-source", "Show PDFs in Download", filter);
     await vi.waitFor(() => expect(world.ask.turns.size).toBe(1));
     expect([review.claims, review.journal.size, world.files.calls.includes("storageQuery")]).toEqual([[], 0, false]);
     await hardware("back");
@@ -822,7 +847,7 @@ describe("Files on a phone", () => {
 
     const filterGate = Promise.withResolvers<void>();
     world.files.gate = filterGate.promise;
-    await send("home-filter", "Show PDFs", true, allPdfs);
+    await send("home-filter", "just my pdfs", allPdfs);
     await until(alpha, alpha.runtime, Shell, (s) => s.trail.join("/") === "Files" && s.assistant === "Sheet");
     await until(alpha, storage, Browser, (s) => s.open && s.storage.status === "Loading");
     expect([review.claims, review.journal.has("home-filter"), review.receipts, world.files.calls.includes("storageQuery")])
@@ -836,7 +861,7 @@ describe("Files on a phone", () => {
     await fromHome();
     const fileGate = Promise.withResolvers<void>();
     world.files.gate = fileGate.promise;
-    await send("cancel-in-files", "Open Documents/notes.txt", true, openNotes);
+    await send("cancel-in-files", "Open Documents/notes.txt", openNotes);
     await until(alpha, alpha.runtime, Shell, (s) => s.trail.join("/") === "Files" && s.assistant === "Sheet");
     await until(alpha, storage, Browser, (s) => s.open && s.storage.status === "Loading");
     expect(review.journal.has("cancel-in-files")).toBe(true);
@@ -853,11 +878,11 @@ describe("Files on a phone", () => {
     await hardware("home");
     await fromHome();
     const reads = review.pendingReads;
-    await send("ordinal-without-results", "Open item 1", false, openNotes);
+    await send("ordinal-without-results", "Open item 1", firstShown);
     await until(alpha, chat, Conversation, (s) => s.turn.reply === "Complete" && review.pendingReads > reads);
     expect(review.claims).toEqual(["home-filter", "cancel-in-files"]);
 
-    await send("home-open", "Open Documents/notes.txt", true, openNotes);
+    await send("home-open", "open the notes file in my documents", openNotes);
     await until(alpha, storage, Shown, (s) => s.kind === "Text" && s.content.status === "Loaded");
     await vi.waitFor(() => expect(review.receipts.at(-1)).toMatchObject({ outcome: "applied", operationId: "home-open" }));
     expect(world.files.calls.filter((call) => call === "storageSelect")).toHaveLength(1);

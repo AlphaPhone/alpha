@@ -144,7 +144,6 @@ const needsMessage = (operation: DeviceOperation): boolean => operation.type ===
 export type DirectFilesOperation = Extract<DeviceOperation, { type: "files_filter" | "files_open" }>
 
 interface DirectFiles {
-  readonly operation: DirectFilesOperation
   readonly files: FilesReadContext
   readonly current: Effect.Effect<boolean>
   readonly report: (note: string) => void
@@ -160,10 +159,7 @@ export interface FilesOrigin {
   readonly spoken: boolean
 }
 
-export type OutsideFilesOperation = Exclude<DirectFilesOperation, { readonly shown: number }>
-
 export interface FilesContinuation {
-  readonly operation: OutsideFilesOperation
   readonly origin: FilesOrigin
   readonly current: Effect.Effect<boolean>
   readonly report: (note: string) => void
@@ -198,47 +194,17 @@ interface DeviceActionReply {
   readonly actionResults: readonly { readonly action: string; readonly data: unknown }[]
 }
 
-function literal(value: string): string {
-  return value.trim().replace(/^(?:"([^"]*)"|“([^”]*)”)$/, (_match, straight: string | undefined, curved: string | undefined) => straight ?? curved ?? "")
+type FilesPlace = "InFiles" | "Outside"
+
+/** The filter or open the agent proposed as the owner asked, that the place the owner asked from may run directly: from outside Files, never a shown position. */
+function askedFiles(operation: DeviceOperation, place: FilesPlace): DirectFilesOperation | undefined {
+  if (operation.type === "files_filter") return operation
+  return operation.type === "files_open" && (place === "InFiles" || "path" in operation) ? operation : undefined
 }
 
-const fileFilterWords = { image: ["images", "photos"], video: ["videos"], audio: ["audio", "audio files"], document: ["documents"], pdf: ["pdfs"], folder: ["folders"] }
-
-/** The owner’s exact Files command, parsed before the turn may ask the agent to act directly. */
-export function requestedFilesOperation(authored: string): DirectFilesOperation | undefined {
-  const command = authored.trim().replace(/^(?:(?:hey )?alpha[,\s]+)?(?:(?:could|can|would) you\s+)?(?:please\s+)?/i, "")
-  const open = /^open (?:the )?(.+?)(?: in Files)?[!?]?$/i.exec(command)
-  if (open?.[1] !== undefined) {
-    const name = open[1].replace(/^file (?=["“])/i, "").replace(/\.$/, "")
-    const position = /^(?:item|result|file) (\d+)$/i.exec(name)
-    const path = literal(name)
-    const namedFile = path !== name || path.includes("/") || /\.[A-Za-z0-9]{1,12}$/.test(path) || / in Files[.!?]?$/i.test(command)
-    if (position === null && !namedFile) return undefined
-    const decoded = readOperation(position === null
-      ? { type: "files_open", path } : { type: "files_open", shown: Number(position[1]) })?.operation
-    return decoded?.type === "files_open" ? decoded : undefined
-  }
-  const filter = /^(?:show|find|filter)(?: me)? (.+?)\s*[!?]?$/i.exec(command)
-  if (filter?.[1] === undefined) return undefined
-  const terms = /^(.*?)(?: (?:matching|named|containing) ("[^"]+"|“[^”]+”|.+?))?(?: in ("[^"]+"|“[^”]+”|.+?))?(?: from (\S+))?(?: to (\S+))?$/i.exec(filter[1].replace(/\.$/, ""))
-  if (terms === null) return undefined
-  const [, kind, search, folder, from, to] = terms
-  const item = kind?.toLowerCase()
-  const category = Object.entries(fileFilterWords).find(([, names]) => names.some((name) => name === item))?.[0]
-  if (category === undefined && item !== "files") return undefined
-  const place = folder === undefined ? undefined : literal(folder)
-  const decoded = readOperation({ type: "files_filter", ...(category === undefined ? {} : { kind: category }),
-    ...(search === undefined ? {} : { text: literal(search) }), ...(place === undefined ? {} : { folder: place === "Internal storage" ? "" : place }),
-    ...(from === undefined ? {} : { from }), ...(to === undefined ? {} : { to }) })?.operation
-  return decoded?.type === "files_filter" ? decoded : undefined
-}
-
-function sameFileOperation(expected: DirectFilesOperation, actual: DeviceOperation): boolean {
-  if (expected.type === "files_open" && actual.type === "files_open") {
-    return "path" in expected ? "path" in actual && expected.path === actual.path : "shown" in actual && expected.shown === actual.shown
-  }
-  return expected.type === "files_filter" && actual.type === "files_filter" && expected.kind === actual.kind
-    && expected.text === actual.text && expected.folder === actual.folder && expected.from === actual.from && expected.to === actual.to
+/** The session's headers declaring only its Files capabilities, for a turn whose reply handles nothing but Files. */
+export function filesOnlyHeaders(opened: Session): RuntimeRequestHeaders {
+  return { ...opened.headers, "x-eliza-device-capabilities": filesCapabilities.filter((name) => opened.capabilities.has(name)).join(",") }
 }
 
 function sameTrail(expected: readonly View[], current: readonly View[]): boolean {
@@ -278,12 +244,12 @@ function fromThisEnrollment(proposal: Proposal, opened: Session): boolean {
   return proposal.payload.installationId === opened.identity.installationId && proposal.payload.enrollmentId === opened.identity.enrollmentId
 }
 
-function directFromReply(proposal: Proposal, opened: Session, message: string, actions: ReadonlyMap<string, ReplyAction>, expected: DirectFilesOperation, at: number): boolean {
+function directFromReply(proposal: Proposal, opened: Session, message: string, actions: ReadonlyMap<string, ReplyAction>, place: FilesPlace, at: number): boolean {
   const expires = Date.parse(proposal.expiresAt)
   if (proposal.state !== "pending" || proposal.payload.workflow !== undefined || !Number.isFinite(expires) || expires <= at
     || proposal.payload.requestMessageId !== message || actions.get(proposal.id) !== "Direct" || !fromThisEnrollment(proposal, opened)) return false
   const checked = readOperation(proposal.payload.operation)
-  return checked !== undefined && sameFileOperation(expected, checked.operation) && mayRunDirectly(checked, "NoBinding", true)
+  return checked !== undefined && askedFiles(checked.operation, place) !== undefined && mayRunDirectly(checked, "NoBinding", true)
 }
 
 function reviewFromReply(proposal: Proposal, opened: Session, actions: ReadonlyMap<string, ReplyAction>): boolean {
@@ -626,8 +592,11 @@ function filesActions(context: FilesReviewContext) {
   // spec/app/files/index.md, "An exact Files request from another screen may open Files once after the typed reply finishes"
   effect function continueInFiles(opened: Session, proposal: Proposal, request: FilesContinuation, steps: FilesRouteSteps): boolean!! {
     return try lock.withPermits(1)(effect {
-      const { origin, operation } = request
+      const { origin } = request
       const { view, revision, moved, open, changes } = steps
+      const checked = readOperation(proposal.payload.operation)
+      const operation = checked === undefined ? undefined : askedFiles(checked.operation, "Outside")
+      if (operation === undefined) return false
       const expiresAt = Date.parse(proposal.expiresAt)
       const live = effect {
         return isLatest(opened) && (try request.current) && !(try view.get()).context.sensitive
@@ -687,8 +656,8 @@ function filesActions(context: FilesReviewContext) {
     const offer = matching[0]
     if (offer === undefined) return false
     const exact = readOperation(offer.payload.operation)
-    if (exact === undefined || !sameFileOperation(request.operation, exact.operation) || !mayRunDirectly(exact, "NoBinding", true)) return false
-    const op = exact.operation
+    const op = exact === undefined ? undefined : askedFiles(exact.operation, "InFiles")
+    if (exact === undefined || op === undefined || !mayRunDirectly(exact, "NoBinding", true)) return false
     const files = op.type === "files_open" ? try executors.reviewFiles(op) : undefined
     if (op.type === "files_open" && files === undefined) return false
     return try actOnFiles(opened, { id: offer.id, digest: offer.digest, expiresAt: Date.parse(offer.expiresAt), operation: op,
@@ -700,7 +669,7 @@ function filesActions(context: FilesReviewContext) {
     if (![...actions.values()].some((action) => action === "Direct")) return false
     const answer = try proposals(opened)
     const at = try Clock.currentTimeMillis
-    const candidates = answer?.filter((proposal) => directFromReply(proposal, opened, message, actions, request.operation, at))
+    const candidates = answer?.filter((proposal) => directFromReply(proposal, opened, message, actions, "Outside", at))
     const candidate = candidates?.[0]
     if (candidate === undefined || candidates?.length !== 1) return false
     return try continueInFiles(opened, candidate, request, route)
@@ -742,9 +711,10 @@ function pendingProposals(context: PendingReviewContext): MediaReview.Shape["pen
       && (try enrollmentIsCurrent(opened)) && isLatest(opened) && (try reviewContext(revision, view))
     const at = try Clock.currentTimeMillis
     const outside = reply.outsideFiles
-    const directOutside = outside === undefined ? [] : answer.filter((proposal) => directFromReply(proposal, opened, message, actions, outside.operation, at))
+    const directOutside = outside === undefined ? [] : answer.filter((proposal) => directFromReply(proposal, opened, message, actions, "Outside", at))
     const [candidate] = directOutside
-    if (outside !== undefined && candidate !== undefined && directOutside.length === 1 && (try outside.current)) {
+    const continued = outside !== undefined && candidate !== undefined && directOutside.length === 1 && (try outside.current) ? candidate : undefined
+    if (outside !== undefined && continued !== undefined) {
       const current = effect {
         const state = try view.get()
         return (try outside.current) && state.turn.send.id === outside.ticket && state.turn.reply === "Complete" && !state.turn.stopping
@@ -755,7 +725,7 @@ function pendingProposals(context: PendingReviewContext): MediaReview.Shape["pen
       }
       const { source, panel, route } = outside.origin
       const open = () => navigateFilesForReply(view, outside.ticket, source, panel, route)
-      outside.hold(Effect.asVoid(continueInFiles(opened, candidate, { ...outside, current }, { view, revision, moved, open, changes: view.changes })))
+      outside.hold(Effect.asVoid(continueInFiles(opened, continued, { ...outside, current }, { view, revision, moved, open, changes: view.changes })))
     }
     for (const [id, pin] of pinnedFiles) if (pin.expiresAt <= at) pinnedFiles.delete(id)
     const cards = try Effect.forEach(answer, effect (proposal) => {
@@ -765,7 +735,7 @@ function pendingProposals(context: PendingReviewContext): MediaReview.Shape["pen
       if (op === undefined || !Number.isFinite(expiresAt) || expiresAt <= at) return undefined
       const filesOperation = op.type.startsWith("files_")
       const request = proposal.payload.requestMessageId
-      if (filesOperation && outside !== undefined && actions.get(proposal.id) === "Direct") return undefined
+      if (proposal.id === continued?.id) return undefined
       const readsContent = reviewedRead(op)
       const origin = readsContent ? exactReadOrigin(proposal, message, reply) : undefined
       if (readsContent && !acceptsRead(opened, op)) return undefined
@@ -817,9 +787,10 @@ function pendingProposals(context: PendingReviewContext): MediaReview.Shape["pen
     const visible = visibleCards(cards, currentReview && isLatest(opened) && (try reviewContext(revision, view)))
     const owner = reply.directFiles
     if (owner === undefined || !(try owner.current)) return visible
-    const direct = visible.find((card) => answer.some((proposal) =>
-      proposal.id === card.id && directFromReply(proposal, opened, message, actions, owner.operation, at)))
-    if (direct === undefined) return visible
+    const directs = visible.filter((card) => answer.some((proposal) =>
+      proposal.id === card.id && directFromReply(proposal, opened, message, actions, "InFiles", at)))
+    const [direct] = directs
+    if (direct === undefined || directs.length !== 1) return visible
     const current = effect { return (try owner.current) && (try reviewContext(revision, view)) }
     return (try actOnFiles(opened, direct, { ...owner, current })) ? visible.filter((card) => card !== direct) : visible
   }
