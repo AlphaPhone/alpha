@@ -1,6 +1,6 @@
 // spec/app/digests/index.md, "Story: See my digests"; spec/app/digests/schedules.md, "Story: Keep my digest schedules"
 import { Effect } from "effect";
-import { digestSourceState, digestStatusLabel, digestSummaryText, digestTemplateName } from "@elizaos/plugin-workflow/digests";
+import { digestSourceState, digestStatusLabel, digestSummaryText, digestTemplateName } from "@elizaos/plugin-workflow-client";
 import { Alert, Button, ConfirmDialog, EmptyState, Input, ListRow, Spinner } from "@repo/ui";
 import { CalendarDays, ChevronRight, Plus, RefreshCw, Sun } from "lucide-react";
 import { useMachine } from "../../gen/app__digests__schedules.react.ts";

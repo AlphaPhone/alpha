@@ -17,7 +17,7 @@ export interface Checkout {
   readonly root: string;
   /** `agent.mjs` and its PGlite files, as the device carries them. */
   readonly bundle: string;
-  /** `packages/cloud`, with the cloud's own command built to `dist/src/main.js`. */
+  /** `packages/cloud-worker`, with the cloud's own command built to `dist/src/main.js`. */
   readonly cloud: string;
 }
 
@@ -31,16 +31,16 @@ const lock = JSON.parse(fs.readFileSync(path.join(repository, "eliza.lock.json")
 /** @throws {never} */
 export function checkout(): Checkout {
   const root = process.env.ALPHA_ELIZA_DIR ?? path.join(os.homedir(), ".cache/alpha/eliza-vibestack", lock.commit.slice(0, 12));
-  return { commit: lock.commit, root, bundle: path.join(root, ".alpha/agent"), cloud: path.join(root, "packages/cloud") };
+  return { commit: lock.commit, root, bundle: path.join(root, ".alpha/agent"), cloud: path.join(root, "packages/cloud-worker") };
 }
 
 const stamp = (at: Checkout) => path.join(at.root, ".alpha/ready.json");
 
 const clientPackages = [
-  { name: "@elizaos/plugin-files", entry: "packages/plugin-files/dist/src/documents/local-ocr.js" },
-  { name: "@elizaos/plugin-inbox", entry: "packages/plugin-inbox/dist/src/client/index.js" },
-  { name: "@elizaos/plugin-notes", entry: "packages/plugin-notes/dist/src/client.js" },
-  { name: "@elizaos/plugin-workflow", entry: "packages/plugin-workflows/dist/src/client/index.js" },
+  { name: "@elizaos/plugin-files-client", entry: "packages/plugin-files-client/dist/src/index.js" },
+  { name: "@elizaos/plugin-inbox-client", entry: "packages/plugin-inbox-client/dist/src/index.js" },
+  { name: "@elizaos/plugin-notes-client", entry: "packages/plugin-notes-client/dist/src/index.js" },
+  { name: "@elizaos/plugin-workflow-client", entry: "packages/plugin-workflow-client/dist/src/index.js" },
 ];
 
 interface ReadyStamp {
@@ -133,10 +133,10 @@ async function buildBase(at: Checkout) {
   }
   run(at.root, "git", "checkout", "-q", "--detach", at.commit);
   run(at.root, "pnpm", "install", "--frozen-lockfile", "--prefer-offline");
-  for (const name of ["core", "cloud", "agent", "os"]) run(at.root, "pnpm", "--filter", `@elizaos/${name}`, "build");
+  for (const name of ["core", "core-node", "cloud", "agent", "os-bridges", "os", "agent-host", "cloud-worker"]) run(at.root, "pnpm", "--filter", `@elizaos/${name}`, "build");
   fs.rmSync(at.bundle, { recursive: true, force: true });
   const started = Date.now();
-  const { buildAgentBundle } = await import(pathToFileURL(path.join(at.root, "packages/agent/dist/src/bundle/build.js")).href) as {
+  const { buildAgentBundle } = await import(pathToFileURL(path.join(at.root, "packages/agent-host/dist/src/bundle/build.js")).href) as {
     buildAgentBundle: (options: { plugins: string[]; outDir: string; sourceCommit: string; sourceRoot: string }) => Promise<unknown>;
   };
   await buildAgentBundle({ plugins: [], outDir: at.bundle, sourceCommit: at.commit, sourceRoot: at.root });

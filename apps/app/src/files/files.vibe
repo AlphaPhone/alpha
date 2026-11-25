@@ -1,5 +1,5 @@
 // spec/app/files/index.md, "Story: Browse my storage"
-import type { ElizaFilesPlugin, FileOutcomeRow, FilesCategory, StorageEntry, TrashEntry } from "@elizaos/os/bridges/definitions/files"
+import type { ElizaFilesPlugin, FileOutcomeRow, FilesCategory, StorageEntry, TrashEntry } from "@elizaos/os-bridges"
 import * as KeyValueStore from "effect/persistence/KeyValueStore"
 import * as Browser from "../../gen/app__files.effect.vibe"
 import type { Actor, Count, Effect as Out, Event, Tally, Volume } from "../../gen/app__files.effect.vibe"

@@ -1,5 +1,5 @@
 // spec/app/calendar/link.md, "Story: Link a Google calendar I can write to, and be told it is synced only when it is"; spec/app/calendar/link.md, "Story: See whether my agent's Calendar reaches Google"; spec/app/calendar/link.md, "Story: Disconnect Google from Calendar without leaving sync running"
-import type { GoogleStatus } from "@elizaos/cloud/client"
+import type { GoogleStatus } from "@elizaos/cloud"
 import * as Link from "../../gen/app__calendar__link.effect.vibe"
 import type { Effect as Out, Event, Grant, LinksRead, Planned } from "../../gen/app__calendar__link.effect.vibe"
 import * as View from "../../gen/app__calendar.effect.vibe"
@@ -14,7 +14,7 @@ const base = "/api/lifeops/calendar"
 /** One of the owner's Google calendars, as eliza's linked sync names a destination. */
 schema Destination { readonly connectorAccountId: string; readonly providerCalendarId: string }
 
-/** The agent's linked sync control (eliza's `LinkedCalendarControlView` of `@elizaos/plugin-calendar/client`). */
+/** The agent's linked sync control (eliza's `LinkedCalendarControlView` of `@elizaos/plugin-calendar-client`). */
 schema Control {
   readonly revision: number
   readonly paused: boolean

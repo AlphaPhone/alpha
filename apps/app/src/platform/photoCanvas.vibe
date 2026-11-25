@@ -1,6 +1,6 @@
 // spec/app/photos/viewer.md, "Story: Edit a photo or trim a video"
 module editor {
-  import type { CropRect } from "@elizaos/os/bridges/definitions/media"
+  import type { CropRect } from "@elizaos/os-bridges"
 
   export const photoLooks = {
     none: "none", vivid: "saturate(1.55) contrast(1.08)", warm: "sepia(.3) saturate(1.35) hue-rotate(-8deg)",

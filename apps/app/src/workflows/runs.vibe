@@ -1,6 +1,6 @@
 // spec/app/workflows/runs.md, "Story: See how a workflow ran"; spec/app/workflows/runs.md, "Story: Run a workflow now"; spec/app/workflows/runs.md, "Story: Stop a run"
 import * as KeyValueStore from "effect/persistence/KeyValueStore"
-import { type WorkflowRun, WorkflowAdmissionRejected, WorkflowHttpError, WorkflowResponseInvalid } from "@elizaos/plugin-workflow/client"
+import { type WorkflowRun, WorkflowAdmissionRejected, WorkflowHttpError, WorkflowResponseInvalid } from "@elizaos/plugin-workflow-client"
 import * as Model from "../../gen/app__workflows__runs.effect.vibe"
 import type { Effect as Out, Event } from "../../gen/app__workflows__runs.effect.vibe"
 import * as Listing from "../../gen/app__workflows__list.effect.vibe"

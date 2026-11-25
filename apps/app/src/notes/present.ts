@@ -1,6 +1,6 @@
 // spec/app/notes/index.md, "Pinned notes come first, then the rest, narrowed to the chosen folder"
-import { projectAuthoredNoteContent } from "@elizaos/plugin-notes/format";
-import type { StickyNote } from "@elizaos/plugin-notes/types";
+import { projectAuthoredNoteContent } from "@elizaos/plugin-notes-client";
+import type { StickyNote } from "@elizaos/plugin-notes-client";
 import { moment } from "./content.vibe";
 
 /** The title shown when listing or opening a note. */

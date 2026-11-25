@@ -1,6 +1,6 @@
 // spec/app/files/index.md, "Images and Videos show the phone's folder groups with their counts and open the folder chosen"
-import type { CategoryFolder, StorageEntry } from "@elizaos/os/bridges/definitions/files"
-import { groupByFolder, validPath } from "@elizaos/plugin-files/client"
+import type { CategoryFolder, StorageEntry } from "@elizaos/os-bridges"
+import { groupByFolder, validPath } from "@elizaos/plugin-files-client"
 import { Handles } from "./handles.vibe"
 
 export interface CategoryGroup {

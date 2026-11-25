@@ -1,5 +1,5 @@
 // @vitest-environment happy-dom
-import { NOT_DISPATCHED } from "@elizaos/agent/client";
+import { NOT_DISPATCHED } from "@elizaos/agent";
 import { type Context, Effect, type ManagedRuntime, Stream } from "effect";
 import { act } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";

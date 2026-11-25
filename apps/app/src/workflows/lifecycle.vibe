@@ -1,6 +1,6 @@
 // spec/app/workflows/index.md, "Story: Open a workflow"; spec/app/workflows/index.md, "Story: Change a workflow"
 import * as KeyValueStore from "effect/persistence/KeyValueStore"
-import { type RemoteWorkflow, WorkflowActivationRejected, WorkflowHttpError, WorkflowLifecycleRejected, WorkflowMetadataRejected, WorkflowPauseRejected, WorkflowResponseInvalid } from "@elizaos/plugin-workflow/client"
+import { type RemoteWorkflow, WorkflowActivationRejected, WorkflowHttpError, WorkflowLifecycleRejected, WorkflowMetadataRejected, WorkflowPauseRejected, WorkflowResponseInvalid } from "@elizaos/plugin-workflow-client"
 import * as Listing from "../../gen/app__workflows__list.effect.vibe"
 import * as Model from "../../gen/app__workflows.effect.vibe"
 import type { Change, Effect as Out, Event } from "../../gen/app__workflows.effect.vibe"

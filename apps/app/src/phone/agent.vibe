@@ -1,6 +1,5 @@
 // spec/app/contacts/agent.md, "Only the owner approves, only what is shown as it is now, and only when the phone has ruled out an emergency call"; spec/app/phone/index.md, "A number handed to Phone opens the keypad with it filled in, and never dials"
-import { NOT_DISPATCHED } from "@elizaos/agent/client"
-import { readResult, type DeviceOperation } from "@elizaos/agent/operations"
+import { NOT_DISPATCHED, readResult, type DeviceOperation } from "@elizaos/agent"
 import { Machine as Phone, clear } from "../../gen/app__phone.effect.vibe"
 import { Machine as Shell, available, showing } from "../../gen/app__shell.effect.vibe"
 import { Device } from "../platform/device.vibe"

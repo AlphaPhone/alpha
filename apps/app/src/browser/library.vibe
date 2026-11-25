@@ -1,5 +1,5 @@
 // spec/app/browser/library.md, "The library is read when it opens and again on request, never under a write"; "The latest read gives the bookmarks and history, says it could not read them, or finds the bookmark list damaged and offers once to replace it"
-import { bookmarkBrowserUrl } from "@elizaos/os/bridges/browsing-session"
+import { bookmarkBrowserUrl } from "@elizaos/os-bridges"
 import * as Library from "../../gen/app__browser__library.effect.vibe"
 import { TabHost, hosted } from "../platform/browser.vibe"
 import { answer, reacting } from "../runtime/reactor.vibe"
