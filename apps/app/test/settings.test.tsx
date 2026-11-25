@@ -49,7 +49,7 @@ async function settingsOpen(world = { ...scene(), phone: true }) {
 }
 
 describe("Settings", () => {
-  it("Find a setting and come back (spec/app/settings/index.md, \"Story: Find a setting and come back\")", async () => {
+  it("Find a setting and come back (spec/app/settings/index.md, \"Story: Find a setting and come back\"; spec/app/account/plan.md, \"Story: Know my plan\"; spec/app/account/billing.md, \"Story: Pay in the browser\")", async () => {
     const { alpha, machines, world } = await settingsOpen();
     // spec/app/settings/index.md, "The build says once whether it is a development build, and the phone whether Alpha runs on a phone and on an Alpha image"
     await until(alpha, alpha.runtime, Pages.Machine, (s) => s.told && s.phone && !s.image && s.development);
@@ -74,7 +74,18 @@ describe("Settings", () => {
     await vi.waitFor(() => expect(button("Account")?.textContent).toContain(account.email));
     await press("Account");
     await until(alpha, alpha.runtime, Layers.Machine, (state) => Layers.listed(state, "account"));
+    const shownBalance = new Intl.NumberFormat(undefined, { style: "currency", currency: "USD" }).format(12.5);
     await vi.waitFor(() => expect(document.querySelector('[role="dialog"]')?.textContent).toContain(account.email));
+    await vi.waitFor(() => expect(document.querySelector('[aria-label="Cloud plan"]')?.textContent).toContain(shownBalance));
+    await act(async () => document.querySelector<HTMLElement>('[role="dialog"] summary')?.click());
+    const offerPrice = new Intl.NumberFormat(undefined, { style: "currency", currency: "USD" }).format(19.5);
+    const roundUsd = new Intl.NumberFormat(undefined, { style: "currency", currency: "USD", maximumFractionDigits: 0 });
+    await vi.waitFor(() => {
+      const [plus, pro] = [...document.querySelectorAll('[aria-label="Plans"] li')].map((row) => row.textContent);
+      expect(plus).toContain(offerPrice);
+      expect(plus).toContain(roundUsd.format(16));
+      expect(pro).toContain(roundUsd.format(49));
+    });
     await hardware("back");
     await until(alpha, alpha.runtime, Layers.Machine, (state) => !Layers.listed(state, "account"));
     expect(await page(alpha)).toBe("Top");
@@ -84,6 +95,7 @@ describe("Settings", () => {
     await until(alpha, alpha.runtime, Layers.Machine, (state) => Layers.listed(state, "account"));
     await vi.waitFor(() => expect(document.querySelector('[role="dialog"]')?.textContent).toContain("Sign-in required"));
     expect(document.querySelector('[role="dialog"]')?.textContent).not.toContain(account.email);
+    expect(document.querySelector('[aria-label="Cloud plan"]')).toBeNull();
     await press("Close Account");
     await until(alpha, alpha.runtime, Layers.Machine, (state) => !Layers.listed(state, "account"));
     await vi.waitFor(() => expect(button("Account")?.textContent).toContain("Signed out"));
@@ -385,7 +397,7 @@ describe("Settings", () => {
     const sharedFiles: File[] = [];
     Object.defineProperty(navigator, "canShare", { configurable: true, value: () => true });
     Object.defineProperty(navigator, "share", { configurable: true, value: (data: ShareData) => { sharedFiles.push(...(data.files ?? [])); return Promise.resolve(); } });
-    await press("Export diagnostics");
+    await press("Export");
     await until(alpha, machines, Developer.Machine, (s) => s.exporting.read.status === "Loaded");
     const text = await sharedFiles[0]?.text();
     const report = JSON.parse(text ?? "{}");
@@ -394,13 +406,13 @@ describe("Settings", () => {
       { format: "alpha-cloud-stream-timing-v1", sessions: [{ sttConnectedMs: 812, firstFrameSentMs: 815, consentRetry: true }, { sttConnectedMs: 390, firstFrameSentMs: null, consentRetry: false }] },
     ]);
     // spec/app/settings/developer.md, "Clear is offered only for a log with problems, one at a time; once the startup area answers, the log is read again": Clear asks first, and backing out clears nothing.
-    await press("Clear");
+    await press("Clear problem log");
     await press("Cancel");
     expect(world.settings.crashes.length).toBe(2);
-    await press("Clear");
+    await press("Clear problem log");
     await press("Clear log");
     await until(alpha, machines, Developer.Machine, (s) => s.log.read.status === "Loaded" && s.problems === 0);
-    expect([world.settings.crashes, Boolean(button("Clear"))]).toEqual([[], false]);
+    expect([world.settings.crashes, Boolean(button("Clear problem log"))]).toEqual([[], false]);
   });
 
   it("Erase all data (spec/app/settings/reset.md, \"Story: Erase all data\")", async () => {

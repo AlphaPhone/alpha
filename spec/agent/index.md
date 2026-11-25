@@ -182,7 +182,8 @@ goes through eliza's `ElizaAgent` plugin, which checks each request against
 the host file's route list. Ask Alpha opens its conversation with
 `POST /api/conversations` (`apps/app/src/ask/ask.vibe`), and eliza's
 `TurnController`, which carries its turns, posts each message buffered or
-streamed and asks the agent to stop a turn by its room. The assistant
+streamed and asks the agent to stop a turn by its room; the assistant
+also asks the agent to warm its model before the owner's first turn. The assistant
 (`apps/app/src/assistant/assistant.vibe`) lists conversations, reads a
 conversation's messages, forks one, searches messages, asks the agent's
 health and which device steps it takes; Home and Calendar
@@ -203,7 +204,9 @@ retained page after storing it, using the final result's cursor and run ID.
 Notes reads the same owner identity and calls the Notes module to
 read and edit notes, erase Trash and finish recording cleanup. The scanner
 hands the owner’s reviewed scan text to Notes through that module. The approvals area lists the agent's proposals and resolves one
-through the approvals module. A route an area
+through the approvals module. Ask Alpha completes a reviewed Messages read only
+for the exact owner turn after the agent acknowledges its device receipt.
+A route an area
 fakes for want of an agent plugin is not listed: none does today. Each line
 of `apps/agent/host/routes.jsonl` is one route; the pack is refused unless
 that list is this one, and eliza's route gate admits each of its routes.
@@ -222,6 +225,7 @@ pure val pageRoutes: List[Route] = List(
   { method: Post, path: "/api/conversations/{id}/messages/stream", stream: true },
   { method: Post, path: "/api/conversations/{id}/fork", stream: false },
   { method: Post, path: "/api/turns/{roomId}/abort", stream: false },
+  { method: Post, path: "/api/turns/warm", stream: false },
   { method: Get, path: "/api/client-devices/capabilities", stream: false },
   { method: Post, path: "/api/client-devices/register", stream: false },
   { method: Get, path: "/api/client-devices/context", stream: false },
@@ -229,6 +233,7 @@ pure val pageRoutes: List[Route] = List(
   { method: Post, path: "/api/client-devices/proposals/{id}/decision", stream: false },
   { method: Post, path: "/api/client-devices/proposals/{id}/claim", stream: false },
   { method: Post, path: "/api/client-devices/proposals/{id}/receipt", stream: false },
+  { method: Post, path: "/api/client-devices/proposals/{id}/read-completion", stream: false },
   { method: Post, path: "/api/client-devices/proposals/{id}/reconciliation", stream: false },
   { method: Get, path: "/api/approvals", stream: false },
   { method: Post, path: "/api/approvals/{id}/resolve", stream: false },
@@ -321,7 +326,7 @@ pure def routeListAdmitted(listed: List[Route]): bool =
 ### Only Android's native speech transport can call the resident recognizer
 
 The page's route table has neither the speech scope nor the live capture
-route. The phone admits exactly these two calls to its root-only native
+route. The phone admits these two speech calls to its root-only native
 channel. The scope answers the running resident's launch epoch and owner
 only when the pinned native engine can transcribe. Alpha checks the native
 sign-in account against that scope before capture and never sends frames
@@ -332,12 +337,35 @@ pure val nativeSpeechRoutes: List[Route] = List(
   { method: Get, path: "/api/alpha-speech/scope", stream: false },
   { method: Post, path: "/api/asr/local-inference/live", stream: false },
 )
-pure def nativeSpeechRoutesAdmitted(listed: List[Route]): bool =
-  listed.length() == nativeSpeechRoutes.length() and listed.every(route => nativeSpeechRoutes.includes(route))
-    and nativeSpeechRoutes.every(route => listed.includes(route))
 pure val routeValues: Set[Route] = nativeSpeechRoutes.foldl(Set(), (routes, route) => routes.union(Set(route)))
 pure def lawSpeechRoutesAreAbsentFromThePage(route: Route): bool =
   nativeSpeechRoutes.includes(route) implies not(pageRoutes.includes(route))
+```
+
+### Android's digest inbox verifies the launch before admitting results
+
+Android's native inbox uses the resident's private scope, which reports
+the launch epoch, agent and account even if speech is unavailable. An
+Android worker compares the proof to the serving epoch and active
+custody before accessing results. The worker and the panel share one
+Android writer. After the switch, the Android page never fetches or
+acknowledges the same results itself. The browser uses its own inbox.
+Only the native table admits the launch scope endpoint.
+
+```quint
+pure val nativeDigestScope = "/api/alpha-runtime/scope"
+pure val nativeDigestAck = "/api/workflow/hosted/results/ack"
+pure val nativeDigestAckLimit = 1024
+pure val nativeDigestRoutes: List[Route] = List(
+  { method: Get, path: nativeDigestScope, stream: false },
+  { method: Get, path: "/api/workflow/status", stream: false },
+  { method: Get, path: "/api/workflow/hosted/results", stream: false },
+  { method: Post, path: nativeDigestAck, stream: false },
+)
+pure val nativeRoutes = nativeSpeechRoutes.concat(nativeDigestRoutes)
+pure def nativeRoutesAdmitted(listed: List[Route]): bool =
+  listed.length() == nativeRoutes.length() and listed.every(route => nativeRoutes.includes(route))
+    and nativeRoutes.every(route => listed.includes(route))
 ```
 
 ### The page names the query values each gated route can receive
@@ -370,6 +398,7 @@ pure val pageQueries: List[RequestQuery] = List(
   { method: Delete, path: "/api/triggers/{id}", key: "expectedRevision", kind: PatternQuery, value: "[1-9][0-9]{0,15}", example: "1" },
   { method: Delete, path: "/api/alpha/reminders/lists/{id}", key: "mode", kind: PatternQuery, value: "reassign|cascade", example: "reassign" },
 )
+pure val nativeDigestQueries = pageQueries.select(q => q.method == Get and q.path == "/api/workflow/hosted/results")
 ```
 
 ### The agent keeps its memory across restarts, without embeddings

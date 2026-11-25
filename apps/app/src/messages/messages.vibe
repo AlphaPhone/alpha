@@ -7,12 +7,12 @@ import type { Effect as Out, Event, Need, Page } from "../../gen/app__messages.e
 import { CarrierSetup } from "../platform/carrier.vibe"
 import { registered } from "../platform/device.vibe"
 import { SystemSettings } from "../platform/systemSettings.vibe"
-import { Telephony, TelephonyRefused, namesOf, readAddressBook, telephony } from "../platform/telephony.vibe"
+import { Telephony, deletionRefused, namesOf, readAddressBook, telephony } from "../platform/telephony.vibe"
 import type { Machine as Toasts } from "../../gen/app__notices__toasts.effect.vibe"
 import { type Said, offer, withdraw } from "../notices/toasts.vibe"
 import { type Job, Whole, answer, contained, hearing, reacting, run, started, together } from "../runtime/reactor.vibe"
 import { Time } from "../runtime/time.vibe"
-import { Dialer, grantOf, prefilled } from "../phone/phone.vibe"
+import { Dialer, dialing, grantOf } from "../phone/phone.vibe"
 import { Machine as PhoneMachine } from "../../gen/app__phone.effect.vibe"
 import { Callers } from "../phone/voicemail.vibe"
 import { on, visiting } from "../phone/visit.vibe"
@@ -250,24 +250,25 @@ effect function removed(id: number): Event!!(Telephony | Inbox | Messages.Machin
   const one = (try inbox.get()).deleteTarget
   if (one === undefined) return { type: "removed", id, done: false, known: true }
   const machine = try Messages.Machine
-  return effect {
-    const answered = try telephony("deleteMessage", (c) => c.messages.deleteMessage(one))
-    if (answered.status !== "queued") return { type: "removed", id, done: answered.status === "not-found", known: true } satisfies Event
-    const staged = answered.deletion
-    const client = try (try Telephony).clients()
-    try offer("Message deletion queued", "messages", id, effect {
-      const outcome = tryPromise(() => client.deletions.undo(staged)) catch () => undefined
-      if (outcome?.kind === "Kept") {
-        try inbox.set({ deleteTarget: undefined })
-        try ignore(machine.send({ type: "removed", id, done: false, known: true }))
-        try ignore(machine.send({ type: "arrived" }))
-      }
-    })
-    try ignore(machine.send({ type: "arrived" }))
-    const outcome = try settledDeletion(id, staged)
-    try withdraw("messages", id)
-    return outcome
-  } catch (failure) => ({ type: "removed", id, done: false, known: !(failure instanceof TelephonyRefused && failure.code === undefined && failure.tag === "") } satisfies Event)
+  const answer = try Effect.result(telephony("deleteMessage", (c) => c.messages.deleteMessage(one)))
+  if (Result.isFailure(answer)) return { type: "removed", id, done: false, known: deletionRefused(answer.failure) }
+  const report = answer.success
+  if (report.status !== "queued") return { type: "removed", id, done: report.status === "not-found", known: true }
+  const staged = report.deletion
+  const phone = try Telephony
+  const undo = Effect.provideService(effect {
+    const outcome = telephony("undo message deletion", (c) => c.deletions.undo(staged)) catch () => undefined
+    if (outcome?.kind === "Kept") {
+      try inbox.set({ deleteTarget: undefined })
+      try ignore(machine.send({ type: "removed", id, done: false, known: true }))
+      try ignore(machine.send({ type: "arrived" }))
+    }
+  }, Telephony, phone)
+  try offer("Message deletion queued", "messages", id, undo)
+  try ignore(machine.send({ type: "arrived" }))
+  const outcome = try settledDeletion(id, staged)
+  try withdraw("messages", id)
+  return outcome
 }
 
 /** The open conversation's numbers. */
@@ -278,12 +279,7 @@ effect function numbers(thread: number): ReadonlyArray<string>!!Conversations {
 
 // spec/app/messages/index.md, "Copy puts a message's text on the clipboard, Call opens Phone with the number, and a message Alpha cannot show opens in the messaging app; none changes anything here"
 effect function called(thread: number): void!!(Conversations | Dialer | PhoneMachine | Shell) {
-  const number = (try numbers(thread))[0] ?? ""
-  const handed = prefilled(number)
-  if (handed === undefined) return
-  try (try Dialer).set({ digits: handed.digits })
-  try ignore((try PhoneMachine).send(handed.event))
-  try ignore((try Shell).send({ type: "openView", view: "Phone" }))
+  try ignore(dialing((try numbers(thread))[0] ?? ""))
 }
 
 /** The messaging app, opened on the conversation's numbers, for what Alpha cannot show or send. */

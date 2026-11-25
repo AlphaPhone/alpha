@@ -57,7 +57,7 @@ const config: CapacitorConfig = {
   loggingBehavior: "none",
   plugins: {
     ElizaSecureStore: {
-      nativeOnly: ["device", "device-execution", "action-journal"],
+      nativeOnly: ["device", "device-execution", "action-journal", "assistant-draft"],
       slots: [
         { pattern: "notes-draft:[1-9][0-9]*", access: "writable", limit: 256 * 1024 },
         { pattern: "notes-folders:[1-9][0-9]*", access: "writable", limit: 64 * 1024 },

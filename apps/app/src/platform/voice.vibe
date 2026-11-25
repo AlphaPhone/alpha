@@ -43,6 +43,7 @@ interface LiveCapture {
 interface DictationClip extends RecordedClip {
   readonly started: number
   state: "recording" | "recorded" | "failed"
+  durationMs?: number
 }
 
 const recordedClip = Schema.Struct({
@@ -162,8 +163,9 @@ export { type SavedNoteWindow, readSavedNote, signInAccounts }
 export error VoiceBridgeFailed { method: string; cause: unknown }
 /** Recognition ran on the confirmed clip, stayed in custody, or could not start. */
 export type DictationAnswer =
-  | { readonly kind: "recognized"; readonly text: string }
-  | { readonly kind: "lost" | "obscured" | "failed" }
+  | { readonly kind: "recognized"; readonly text: string; readonly durationMs: number | undefined }
+  | { readonly kind: "obscured" | "failed"; readonly durationMs: number | undefined }
+  | { readonly kind: "lost" }
 
 export service VoiceBridge {
   available(): boolean!!
@@ -347,6 +349,7 @@ export const phoneVoiceBridge = Layer.effect(VoiceBridge, effect {
     }
     if (clip.started <= retiredRecording || clip.state !== "recording") return
     clip.state = stopped.status
+    if (stopped.status === "recorded") clip.durationMs = stopped.durationMs
     publish({ kind: "recordingStopped", ticket: clip.started, recorded: stopped.status === "recorded" })
   }
 
@@ -723,7 +726,10 @@ export const phoneVoiceBridge = Layer.effect(VoiceBridge, effect {
         if (current.state === "recording") {
           const raw = tryPromise(() => localPlugin().stopRecording({})) catch () => undefined
           const stopped = Schema.decodeUnknownOption(recordedClip)(raw)
-          if (current.state === "recording" && Option.isSome(stopped) && stopped.value.recordingId === current.recordingId) current.state = "recorded"
+          if (current.state === "recording" && Option.isSome(stopped) && stopped.value.recordingId === current.recordingId) {
+            current.state = "recorded"
+            current.durationMs = stopped.value.durationMs
+          }
         }
         if (current.state !== "recorded") {
           recording = undefined
@@ -737,7 +743,7 @@ export const phoneVoiceBridge = Layer.effect(VoiceBridge, effect {
         try: () => localPlugin().transcribeLocalRecording({ requestId: fresh(), recordingId: clip.recordingId, automatic }),
         catch: (cause): "obscured" | "failed" => asRecord(cause)?.code === "dictation-obscured" ? "obscured" : "failed",
       }) catch (kind) => kind
-      return typeof result === "string" ? { kind: result } : { kind: "recognized", text: result.text ?? "" }
+      return typeof result === "string" ? { kind: result, durationMs: clip.durationMs } : { kind: "recognized", text: result.text ?? "", durationMs: clip.durationMs }
     },
     effect abandon(ticket: number): void!! {
       retiredRecording = Math.max(retiredRecording, ticket)

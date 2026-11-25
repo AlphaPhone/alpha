@@ -37,19 +37,22 @@ export type CalendarMonthPanelProps = Omit<ComponentProps<"div">, "children"> & 
   days: ReadonlyArray<CalendarMonthDay>;
   /** Under the grid: the layouts and what else the calendar offers. */
   children?: ReactNode;
+  /** Caps the dialog at 560px, centred, on a wide surface. */
+  wide?: boolean;
 };
 
 /** The month dialog under Calendar's title: choose a month and a year, step through months, and pick a day. */
-export function CalendarMonthPanel({ month, year, months, years, onMonth, onYear, onPrevious, onNext, onClose, days, className, children, ...props }: CalendarMonthPanelProps) {
+export function CalendarMonthPanel({ month, year, months, years, onMonth, onYear, onPrevious, onNext, onClose, days, wide, className, children, ...props }: CalendarMonthPanelProps) {
   const select = cn(focusRing, "min-h-11 min-w-0 border-0 bg-background text-lead leading-plain text-foreground");
   const icon = cn(focusRing, "inline-flex size-11 shrink-0 items-center justify-center rounded-full active:bg-accent [&_svg]:size-5.5");
   return (
-    <div className={cn("absolute inset-0 z-20", className)} {...props}>
+    <div data-alpha-calendar-month="" data-alpha-covers-assistant="" className={cn("absolute inset-0 z-20", className)}
+      onKeyDown={(event) => { if (event.key === "Escape") { event.preventDefault(); onClose(); } }} {...props}>
       <button type="button" aria-hidden tabIndex={-1} onClick={onClose} className="absolute inset-0 size-full bg-foreground/18 dark:bg-background/55" />
       <div role="dialog" aria-modal="true" aria-label="Choose calendar date"
-        className="absolute inset-x-0 top-11 box-border max-h-[calc(100%-64px)] overflow-auto rounded-sheet bg-background px-4 pt-3 pb-5">
+        className={cn("absolute inset-x-0 top-11 box-border", wide && "mx-auto max-w-140", "max-h-[calc(100%-64px)] overflow-auto rounded-sheet bg-background px-4 pt-3 pb-5")}>
         <div className="mb-3 flex items-center gap-1">
-          <select aria-label="Calendar month" value={month} onChange={(event) => onMonth(Number(event.target.value))} className={cn(select, "flex-1")}>
+          <select aria-label="Calendar month" autoFocus value={month} onChange={(event) => onMonth(Number(event.target.value))} className={cn(select, "flex-1")}>
             {months.map((choice) => <option key={choice.value} value={choice.value}>{choice.label}</option>)}
           </select>
           <select aria-label="Calendar year" value={year} onChange={(event) => onYear(Number(event.target.value))} className={cn(select, "w-18.5")}>

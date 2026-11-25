@@ -21,7 +21,9 @@ type Kind = Reminder | Prompt | Routine | Schedule
 type KindFilter = AllKinds | Reminders | Prompts | Routines | Schedules
 type StatusFilter = AnyStatus | Active | Inactive | Removed
 type Badge = On | Off | WaitingForYou | HistoryKept
-type Place = ListingRows | ListingDetail({ row: int }) | ListingAdd | ListingDigests({ adding: bool, result: int })
+type DigestNotice = { runId: str, workflowId: str, workflowVersionId: str }
+type Place = ListingRows | ListingDetail({ row: int }) | ListingAdd
+  | ListingDigests({ adding: bool, result: int, notice: DigestNotice })
 type Effect = ReadList({ ticket: int, owner: int })
 type Listing = {
   owner: int, list: R::Read, count: int, kind: KindFilter, status: StatusFilter,
@@ -41,6 +43,7 @@ pure val countValues = Set(-1, 0, 3)
 pure val ownerValues = Set(0, 1, 2)
 pure val rowValues = Set(0, 1, 2)
 pure val resultValues = Set(0, 1, 2)
+pure val noDigestNotice: DigestNotice = { runId: "", workflowId: "", workflowVersionId: "" }
 ```
 
 ### The list is read from the agent for the owner signed in, one reading at a time
@@ -60,19 +63,24 @@ pure def listRead(l: Listing, ticket: int, ok: bool, count: int, complete: bool)
 
 ### From the list the owner can open a row, Add to Workflows, or the digests; Back returns to the same filters
 
+Anyone can open the Add page to see the available choices. Reading the
+agent's rows, creating a routine on the agent and opening hosted digests
+still depend on the signed-in owner.
+
 ```quint
 pure def canOpenRow(l: Listing, row: int): bool = l.place == ListingRows and not(l.sheet) and l.owner >= 1 and l.count >= 1 and row >= 1
 
 pure def openRow(l: Listing, row: int): Listing = { ...l, place: ListingDetail({ row: row }) }
 
-pure def canOpenAdd(l: Listing): bool = l.place == ListingRows and not(l.sheet) and l.owner >= 1
+pure def canOpenAdd(l: Listing): bool = l.place == ListingRows and not(l.sheet)
 
 pure def openAdd(l: Listing): Listing = { ...l, place: ListingAdd }
 
 pure def canOpenDigests(l: Listing): bool =
   (l.place == ListingRows or l.place == ListingAdd) and not(l.sheet) and l.owner >= 1
 
-pure def openDigests(l: Listing): Listing = { ...l, place: ListingDigests({ adding: l.place == ListingAdd, result: 0 }) }
+pure def openDigests(l: Listing): Listing =
+  { ...l, place: ListingDigests({ adding: l.place == ListingAdd, result: 0, notice: noDigestNotice }) }
 
 pure def canOpenDigestResult(l: Listing, result: int): bool =
   val place = l.place
@@ -84,7 +92,7 @@ pure def canOpenDigestResult(l: Listing, result: int): bool =
 pure def openDigestResult(l: Listing, result: int): Listing =
   val place = l.place
   match place {
-    | ListingDigests(d) => { ...l, place: ListingDigests({ ...d, result: result }) }
+    | ListingDigests(d) => { ...l, place: ListingDigests({ ...d, result: result, notice: noDigestNotice }) }
     | _ => l
   }
 
@@ -93,11 +101,53 @@ pure def canClosePlace(l: Listing): bool = l.place != ListingRows
 pure def closePlace(l: Listing): Listing =
   val place = l.place
   match place {
-    | ListingDigests(d) => { ...l, place: if (d.result >= 1) ListingDigests({ ...d, result: 0 }) else if (d.adding) ListingAdd else ListingRows }
+    | ListingDigests(d) => { ...l, place: if (d.result >= 1) ListingDigests({ ...d, result: 0, notice: noDigestNotice }) else if (d.adding) ListingAdd else ListingRows }
     | _ => { ...l, place: ListingRows }
   }
 
 pure def alwaysOnlyTheListShowsFilters(l: Listing): bool = l.sheet implies l.place == ListingRows
+```
+
+### A digest notice opens the exact saved result and Back keeps the digest history in view
+
+The Android bridge confirms that the saved result and notice still
+belong to the same owner before opening Workflows. The result keeps its
+notice identity when the saved history changes. A filter sheet or
+another Workflows editor keeps its place until the owner leaves it.
+
+```quint
+pure val noticeValues = Set(noDigestNotice, { runId: "run", workflowId: "workflow", workflowVersionId: "version" })
+
+pure def digestNoticeReady(l: Listing): bool =
+  val place = l.place
+  val clear = match place {
+    | ListingRows => true
+    | ListingDigests(_) => true
+    | _ => false
+  }
+  not(l.sheet) and l.owner >= 1 and clear
+
+pure def canOpenDigestNotice(l: Listing, owner: int, result: int, notice: DigestNotice): bool =
+  digestNoticeReady(l) and l.owner == owner and result >= 1 and
+    notice.runId != "" and notice.workflowId != "" and notice.workflowVersionId != ""
+
+pure def openDigestNotice(l: Listing, owner: int, result: int, notice: DigestNotice): Listing =
+  val place = l.place
+  val adding = match place {
+    | ListingDigests(d) => d.adding
+    | _ => false
+  }
+  { ...l, place: ListingDigests({ adding: adding, result: result, notice: notice }) }
+
+pure def lawDigestNoticesOpenOnlyForTheirOwner(l: Listing, owner: int, result: int, notice: DigestNotice): bool =
+  canOpenDigestNotice(l, owner, result, notice) implies owner == l.owner
+
+pure def alwaysAnOpenedNoticeNamesAResult(l: Listing): bool =
+  val place = l.place
+  match place {
+    | ListingDigests(d) => d.notice != noDigestNotice implies d.result >= 1
+    | _ => true
+  }
 ```
 
 ### A row says it waits for the owner whenever one of its runs waits for an approval, whether or not notifications are on; a removed row says its history is kept

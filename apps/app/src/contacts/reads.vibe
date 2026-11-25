@@ -1,12 +1,13 @@
 // spec/app/contacts/agent.md, "Story: Let the agent read what I have open"; spec/app/messages/composer.md, "The agent's draft goes into the open conversation's draft only while it is empty, and never sends"
-import { type DeviceOperation, readResult } from "@elizaos/agent"
-import { Machine as Shell } from "../../gen/app__shell.effect.vibe"
+import { NOT_DISPATCHED, type DeviceOperation, type OperationResultOf, readResult } from "@elizaos/agent"
+import { normalizePhoneNumber, type VoicemailId } from "@elizaos/os-bridges"
+import { Machine as Shell, showing } from "../../gen/app__shell.effect.vibe"
 import { Machine as ContactsMachine } from "../../gen/app__contacts.effect.vibe"
 import { type Opened, readOf, senderSaid } from "../../gen/app__contacts__agent.effect.vibe"
 import { Machine as MessagesMachine } from "../../gen/app__messages.effect.vibe"
 import { Machine as ComposerMachine } from "../../gen/app__messages__composer.effect.vibe"
 import { Machine as PhoneMachine } from "../../gen/app__phone.effect.vibe"
-import { Machine as VoicemailMachine } from "../../gen/app__phone__voicemail.effect.vibe"
+import { Machine as VoicemailMachine, removing as removingVoicemail } from "../../gen/app__phone__voicemail.effect.vibe"
 import { Telephony, readAddressBook, telephony } from "../platform/telephony.vibe"
 import { Device } from "../platform/device.vibe"
 import { contained } from "../runtime/reactor.vibe"
@@ -52,17 +53,59 @@ effect function thread(): unknown!!(MessagesMachine | Inbox | Conversations) {
 }
 
 // spec/app/contacts/agent.md, "The agent reads only the conversation, voicemail or contact open on screen, as the phone last read it"
-effect function voicemail(): unknown!!(VoicemailMachine | Voicemails) {
+type VoicemailDetail = Extract<OperationResultOf<"voicemail_read_selected">, { readonly status: "read" }>
+const voicemailRead = { type: "voicemail_read_selected" } as const
+
+export type VoicemailReadContext = Device | Shell | PhoneMachine | VoicemailMachine | Voicemails
+
+/** The exact expanded item and the cached content which was visible when the owner asked. */
+export interface VoicemailTarget {
+  readonly id: VoicemailId
+  readonly list: number
+  readonly opening: number
+  readonly transcript: number
+  readonly result: VoicemailDetail
+}
+
+function boundedWords(text: string, limit: number): string {
+  return text.slice(0, limit).replace(/[\uD800-\uDBFF]$/u, "")
+}
+
+export effect function selectedVoicemail(): (VoicemailTarget | undefined)!!VoicemailReadContext {
+  const device = try Device
+  if (!(try device.capabilities()).image || !(try device.showing()) || !showing(try (try Shell).get(), "Phone")) return undefined
+  const phone = try (try PhoneMachine).get()
   const state = try (try VoicemailMachine).get()
+  if (!phone.front || phone.tab !== "Voicemail" || !state.front || !state.open || state.list.status !== "Loaded"
+    || state.confirming || removingVoicemail(state)) return undefined
   const held = try (try Voicemails).get()
   const row = held.rows.find((one) => one.id === held.open)
-  if (readOf(openedAs(state.open, row !== undefined)) === "NoneSelected" || row === undefined) return { kind: "voicemail-read", status: "none-selected" }
-  const said = { kind: "voicemail-read", status: "read", caller: (row.cachedName ?? row.number).slice(0, 128) || null, date: row.date, durationSeconds: row.durationSeconds }
-  const carrier = row.carrierTranscript ?? ""
-  if (carrier !== "") return { ...said, transcriptState: "ready", engine: "carrier", transcript: carrier.slice(0, 8000) }
-  if (state.transcript.status === "Loaded" && held.transcript !== "") return { ...said, transcriptState: "ready", engine: "device", transcript: held.transcript.slice(0, 8000) }
-  const transcriptState = state.transcript.status === "Loading" ? "pending" : state.transcript.status === "Failed" ? "failed" : "unavailable"
-  return { ...said, transcriptState, engine: null, transcript: null }
+  if (row === undefined) return undefined
+  const known = row.cachedName?.trim() ?? ""
+  const caller = known === "" || normalizePhoneNumber(known) !== null ? null : boundedWords(known, 128)
+  const recorded = { kind: "voicemail-read", status: "read", caller, date: row.date, durationSeconds: row.durationSeconds } as const
+  const carrier = state.carrierText ? row.carrierTranscript ?? "" : ""
+  const local = state.transcript.status === "Loaded" ? held.transcript : ""
+  const text = boundedWords(carrier || local, 8000)
+  const transcriptState = state.transcript.status === "Loading" || state.audio.status === "Loading" ? "pending"
+    : state.transcript.status === "Failed" ? "failed" : "unavailable"
+  const result = readResult<"voicemail_read_selected">(voicemailRead, text !== ""
+    ? { ...recorded, transcriptState: "ready", engine: carrier !== "" ? "carrier" : "device", transcript: text }
+    : { ...recorded, transcriptState, engine: null, transcript: null })
+  return result?.status === "read" ? { id: row.id, list: state.list.ticket, opening: state.audio.ticket, transcript: state.transcript.ticket, result } : undefined
+}
+
+export function sameVoicemail(one: VoicemailTarget | undefined, other: VoicemailTarget | undefined): boolean {
+  return one !== undefined && other !== undefined && one.id === other.id && one.list === other.list && one.opening === other.opening
+    && one.transcript === other.transcript && JSON.stringify(one.result) === JSON.stringify(other.result)
+}
+
+/** Share only the same visible cached voicemail, under the current explicit review. */
+export effect function shareSelectedVoicemail(target: VoicemailTarget | undefined, current: () => Promise<boolean>): unknown!!VoicemailReadContext {
+  if (target === undefined || !(tryPromise(current) catch () => false) || !sameVoicemail(target, try selectedVoicemail())) {
+    return { kind: "refused", code: NOT_DISPATCHED }
+  }
+  return { kind: "applied", result: target.result }
 }
 
 // spec/app/contacts/agent.md, "The agent reads only the conversation, voicemail or contact open on screen, as the phone last read it"
@@ -90,6 +133,26 @@ effect function sender(whole: boolean): unknown!!Telephony {
     case "WholeNumber":
     case "LastFour": return { kind: "sms-latest-sender", ...found }
   }
+}
+
+export type LatestSenderRead = Extract<DeviceOperation, { type: "sms_latest_sender" }>
+
+/** Only the disclosure the reviewed sender operation permits. */
+export function latestSenderResult(operation: LatestSenderRead, raw: unknown) {
+  const result = readResult<"sms_latest_sender">(operation, raw)
+  if (result === undefined || result.status === "unavailable") return undefined
+  return result.status !== "found" || ("address" in result) === ("includeAddress" in operation) ? result : undefined
+}
+
+// spec/app/contacts/agent.md, "The latest text's sender is named by its number alone, and the whole number only where the agent asked for it"
+/** Android finds the latest sender when the owner approves this read. */
+export effect function shareLatestSender(operation: LatestSenderRead, current: () => Promise<boolean>): unknown!!(Device | Telephony) {
+  const refused = { kind: "refused", code: NOT_DISPATCHED } as const
+  const device = try Device
+  if (!(try device.capabilities()).image || !(try device.showing()) || !(tryPromise(current) catch () => false)) return refused
+  const result = latestSenderResult(operation, try sender("includeAddress" in operation))
+  if (result === undefined || !(tryPromise(current) catch () => false) || !(try device.showing())) return refused
+  return { kind: "applied", result }
 }
 
 /** The keypad, opened filled in with `number` where there is one: nothing is dialed. */
@@ -122,7 +185,7 @@ effect function shown(query: string): unknown!!(Telephony | Rows | ContactsMachi
   if (Option.isNone(current) || Option.isNone(current.value) || current.value.value.form !== "Shut") return unavailable
   if (current.value.value.opened) try ignore(machine.send({ type: "closeContact" }))
   if (current.value.value.chip !== "Everyone") try ignore(machine.send({ type: "pick", chip: "Everyone" }))
-  try (try Rows).set({ sought: query })
+  try (try Rows).set({ sought: query, filteredBy: "Alpha" })
   const search = machine.send({ type: "search", typed: true }) catch () => undefined
   if (search === undefined) return unavailable
   const ticket = search.state.list.ticket
@@ -157,7 +220,7 @@ effect function drafted(body: string, number: string | undefined): ("drafted" | 
 export effect function answerReading(operation: Reading): unknown!!(Telephony | MessagesMachine | Inbox | Conversations | VoicemailMachine | Voicemails | ContactsMachine | Rows | Dialer | PhoneMachine | Shell | ComposerMachine | Drafts | Callers | Device) {
   switch (operation.type) {
     case "messages_read_selected": return checked(operation, try thread(), { kind: "messages-read", status: "unavailable" })
-    case "voicemail_read_selected": return checked(operation, try voicemail(), { kind: "voicemail-read", status: "unavailable" })
+    case "voicemail_read_selected": return (try selectedVoicemail())?.result ?? { kind: "voicemail-read", status: "none-selected" }
     case "contact_read_selected": return checked(operation, try contact(), { kind: "contact-read", status: "unavailable" })
     case "sms_latest_sender": return checked(operation, try sender("includeAddress" in operation), { kind: "sms-latest-sender", status: "unavailable" })
     case "phone_keypad": return checked(operation, try keypad(operation.number), { kind: "phone-keypad", status: "unavailable" })

@@ -10,7 +10,7 @@ import { BrowserDownloadsHandoff, TabHost, hosted } from "../platform/browser.vi
 import { readWebBrowsing, saveWebBrowsing } from "../platform/browserWeb.vibe"
 import type { Install } from "../runtime/attempts.vibe"
 import { type Job, Whole, answer, contained, due, reacting, run, started, stream, together, untimed, whole } from "../runtime/reactor.vibe"
-import type { Time } from "../runtime/time.vibe"
+import { Time } from "../runtime/time.vibe"
 
 module page {
   import { addressFacts, isSecureWebAddress } from "@elizaos/os-bridges"
@@ -71,6 +71,13 @@ const failedRestore = (ticket: number): TabsEvent => ({ type: "restored", ticket
 /** A tab's page: its own machine, made when the tab is first asked for and ended with the tab. */
 export type PageRuntime = ManagedRuntime.ManagedRuntime<Address.Machine | Time, unknown>
 
+export type HistoryRow = { readonly url: string; readonly stamp: number; readonly title?: string; readonly at?: number }
+type HistoryEdit = { readonly ticket: number; readonly stamps: ReadonlySet<number> }
+export type HistoryChange =
+  | { readonly kind: "visited"; readonly count: number }
+  | { readonly kind: "edited"; readonly ticket: number; readonly ok: boolean; readonly count: number; readonly remaining: number }
+  | { readonly kind: "wiped" }
+
 /**
  * Each open tab's page: its machine, the address its next load opens, and what the tab host last said of it, which
  * `TabHost`'s session holds by the tab's id.
@@ -86,12 +93,18 @@ export service Pages {
   stood(tab: number, index: number): void!!
   end(tab: number): void!!
   /** The saved and newly committed normal-tab addresses in recent-first order. */
-  visits(): readonly string[]!!
-  keepVisits(history: readonly string[]): void!!
-  visit(url: string): void!!
+  history(): readonly HistoryRow[]!!
+  keepVisits(addresses: readonly string[], times: Readonly<Record<string, number>> | undefined, titles: ReadonlyMap<string, string>): void!!
+  visit(url: string, at: number, title: string | undefined): void!!
+  readonly historyChanges: Stream.Stream<HistoryChange>
+  historyEdit(): (HistoryEdit | undefined)!!
+  stageHistory(edit: HistoryEdit): boolean!!
+  finishHistory(edit: HistoryEdit, ok: boolean): void!!
+  wipeHistory(): void!!
 }
 
-effect function pageOf(tab: number): Page!!Pages {
+/** Read the current address machine for the exact tab. */
+export effect function pageOf(tab: number): Page!!Pages {
   const runtime = try (try Pages).of(tab)
   return try promise(() => runtime.runPromise(Address.Machine.use((machine) => machine.get())))
 }
@@ -126,7 +139,7 @@ effect function restoredFrom(ticket: number): TabsEvent!!(TabHost | Pages | Tabs
     const s = try (try Tabs.Machine).get()
     const pages = try Pages
     const adopting = host.web !== undefined && s.kept.length === 0
-    const back = restoreBrowsing(saved, { visits: try pages.visits() }, s.untouched || host.web !== undefined)
+    const back = restoreBrowsing(saved, { visits: (try pages.history()).map((row) => row.url) }, s.untouched || host.web !== undefined)
     const rows = back.restored.map((row, index) => ({ ...row, tab: adopting ? s.issued + index + 1 : tabOf(row.id) }))
     const incoming = adopting ? rows.map((row) => row.tab) : []
     const cur = rows.find((row) => row.id === back.cur)?.tab ?? 0
@@ -134,7 +147,7 @@ effect function restoredFrom(ticket: number): TabsEvent!!(TabHost | Pages | Tabs
     if (!Tabs.canRestored(s, ticket, true, shown, incoming)) return failedRestore(ticket)
     const restored: TabsEvent = { type: "restored", ticket, ok: true, shown, incoming }
     if (!Tabs.restored(s, ticket, true, shown, incoming).hydrated) return restored
-    try pages.keepVisits(back.visits)
+    try pages.keepVisits(back.visits, back.visitTimes, new Map(rows.map(({ title, url }) => [url, title])))
     for (const { tab, url, title } of rows) {
       if (adopting || s.kept.includes(tab)) {
         try pages.aim(tab, url)
@@ -147,18 +160,33 @@ effect function restoredFrom(ticket: number): TabsEvent!!(TabHost | Pages | Tabs
 
 // spec/app/browser/index.md, "A stale session is written once it has been read, one write at a time, and never while browsing data is being cleared"
 effect function written(write: number): TabsEvent!!(TabHost | Tabs.Machine | Pages) {
-  return effect {
+  const pages = try Pages
+  const edit = try pages.historyEdit()
+  const result = try contained(effect {
     const host = try TabHost
     const s = try (try Tabs.Machine).get()
-    const visits = try (try Pages).visits()
+    const history = (try pages.history()).filter((row) => !edit?.stamps.has(row.stamp))
+    const visits = history.map((row) => row.url)
+    const visitTimes = Object.fromEntries(history.flatMap(({ url, at }) => at === undefined ? [] : [[url, at]]))
     const snapshot = browsingSnapshot(
-      { tabs: s.open.map((tab) => ({ id: idOf(tab), priv: s.privates.includes(tab) })), visits, cur: idOf(s.selected) },
+      { tabs: s.open.map((tab) => ({ id: idOf(tab), priv: s.privates.includes(tab) })), visits, visitTimes, cur: idOf(s.selected) },
       (id) => host.web === undefined ? host.session.info(id) : host.web.info(id),
     )
     if (host.web === undefined) try hosted("saveBrowsingState", (plugin, session) => plugin.saveBrowsingState({ session, ...snapshot }))
     else try saveWebBrowsing(snapshot)
-    return { type: "saved", ticket: write, ok: true, now: untimed }
-  } catch () => ({ type: "saved", ticket: write, ok: false, now: untimed })
+  }, "saving the Browser session")
+  if (edit !== undefined) try pages.finishHistory(edit, result)
+  return { type: "saved", ticket: write, ok: result, now: untimed }
+}
+
+// spec/app/browser/index.md, "A history edit is carried by the same session writer"
+export effect function persistHistory(ticket: number, stamps: ReadonlySet<number>): boolean!!(Pages | Tabs.Machine) {
+  if (!Tabs.canHistoryChanged(try (try Tabs.Machine).get())) return false
+  const pages = try Pages
+  const edit = { ticket, stamps }
+  if (!(try pages.stageHistory(edit))) return false
+  if (!(try tellTabs({ type: "historyChanged" }))) try pages.finishHistory(edit, false)
+  return true
 }
 
 function carryTabs(fx: TabsOut): Job<TabsEvent, TabHost | Pages | Tabs.Machine, []> {
@@ -181,25 +209,29 @@ function carryTabs(fx: TabsOut): Job<TabsEvent, TabHost | Pages | Tabs.Machine, 
 effect function erased(): TabsEvent!!(TabHost | Pages) {
   return effect {
     const host = try TabHost
+    const pages = try Pages
+    const edit = try pages.historyEdit()
+    if (edit !== undefined) try pages.finishHistory(edit, false)
     if (host.web === undefined) try hosted("clearBrowsingData", (plugin, session) => plugin.clearBrowsingData({ session }))
     else {
       try saveWebBrowsing({})
       try sync(() => host.web?.clear())
     }
-    try (try Pages).keepVisits([])
+    try pages.wipeHistory()
     return { type: "erased", ok: true }
   } catch () => ({ type: "erased", ok: false })
 }
 
 // spec/app/browser/library.md, "A page that commits in a normal tab is counted in history, which keeps the newest hundred"
-effect function visited(tab: number, load: number): void!!(Pages | TabHost | Tabs.Machine) {
+effect function visited(tab: number, load: number): void!!(Pages | TabHost | Tabs.Machine | Time) {
   const tabs = try (try Tabs.Machine).get()
   if (!Tabs.canTouch(tabs, tab) || tabs.erasing === "Running") return
   const page = try pageOf(tab)
   const host = try TabHost
-  const url = (try sync(() => host.web?.address(idOf(tab)))) ?? host.session.info(idOf(tab))?.url
+  const info = host.web === undefined ? host.session.info(idOf(tab)) : try sync(() => host.web?.info(idOf(tab)))
+  const url = info?.url
   if (page.load !== load || page.phase !== "Shown" || !savedBrowserUrl(url)) return
-  try (try Pages).visit(url)
+  try (try Pages).visit(url, try (try Time).now(), info?.title)
   try tellTabs({ type: "touch", tab })
 }
 
@@ -233,7 +265,7 @@ effect function went(tab: number, load: number, way: Address.Way): PageEvent!!(T
 }
 
 function carryPage(tab: number) {
-  return (fx: PageOut): Job<PageEvent, TabHost | Pages | Tabs.Machine, []> => match (fx) {
+  return (fx: PageOut): Job<PageEvent, TabHost | Pages | Tabs.Machine | Time, []> => match (fx) {
     when { tag: "Go", let load, let way }: stream(`go ${tab}`, Stream.fromEffect(went(tab, load, way)) |> Stream.filter(%, (event) => event.type === "failed"), { type: "failed", load });
     when { tag: "Halt", let load }: run(`halt ${tab}`, effect {
       const host = try TabHost
@@ -256,7 +288,13 @@ const pages = Layer.effect(Pages, effect {
   const made = new Map<number, PageRuntime>()
   const aims = new Map<number, string>()
   const finds = new Map<number, { text: string; index: number }>()
-  let history: readonly string[] = []
+  let history: readonly HistoryRow[] = []
+  let stamp = 0
+  let editing: HistoryEdit | undefined
+  const changed = try Queue.unbounded<HistoryChange>()
+  const note = (url: string, title?: string, at?: number): HistoryRow => ({
+    url, stamp: ++stamp, ...(title === undefined || title === "" || title === url ? {} : { title }), ...(at === undefined ? {} : { at }),
+  })
   return {
     effect of(tab: number): PageRuntime!! {
       const known = made.get(tab)
@@ -274,10 +312,33 @@ const pages = Layer.effect(Pages, effect {
     seek: (tab: number, text: string) => sync(() => { finds.set(tab, { text, index: 0 }) }),
     sought: (tab: number) => sync(() => finds.get(tab) ?? { text: "", index: 0 }),
     stood: (tab: number, index: number) => sync(() => { finds.set(tab, { text: finds.get(tab)?.text ?? "", index }) }),
-    visits: () => sync(() => history),
-    keepVisits: (visits: readonly string[]) => sync(() => { history = visits }),
-    visit: (url: string) => sync(() => {
-      history = [url, ...history.filter((visit) => visit !== url)].slice(0, DEFAULT_BROWSING_LIMITS.history)
+    history: () => sync(() => history),
+    keepVisits: (urls: readonly string[], times: Readonly<Record<string, number>> | undefined, titles: ReadonlyMap<string, string>) => sync(() => {
+      const live = new Map(history.map((row) => [row.url, row]))
+      history = urls.map((url) => live.get(url) ?? note(url, titles.get(url), times?.[url]))
+    }),
+    visit: (url: string, at: number, title: string | undefined) => sync(() => {
+      history = [note(url, title, at), ...history.filter((visit) => visit.url !== url)].slice(0, DEFAULT_BROWSING_LIMITS.history)
+      Queue.offerUnsafe(changed, { kind: "visited", count: history.length })
+    }),
+    historyChanges: Stream.fromQueue(changed),
+    historyEdit: () => sync(() => editing),
+    stageHistory: (edit: HistoryEdit) => sync(() => {
+      if (editing !== undefined) return false
+      editing = edit
+      return true
+    }),
+    finishHistory: (edit: HistoryEdit, ok: boolean) => sync(() => {
+      if (editing !== edit) return
+      editing = undefined
+      const count = history.length
+      const kept = history.filter((one) => !edit.stamps.has(one.stamp))
+      if (ok) history = kept
+      Queue.offerUnsafe(changed, { kind: "edited", ticket: edit.ticket, ok, count, remaining: count - kept.length })
+    }),
+    wipeHistory: () => sync(() => {
+      history = []
+      Queue.offerUnsafe(changed, { kind: "wiped" })
     }),
     effect end(tab: number): void!! {
       const runtime = made.get(tab)
@@ -375,11 +436,17 @@ effect function present(tab: number, host: TabHost.Shape): void!! {
 }
 
 // spec/app/browser/downloads.md, "Story: Download a file"
-/** Open the current native Browser's Downloads list after its menu closes. */
+/** Open the phone's Browser downloads, or enter Files from the enclosing browser. */
 export const openDownloads: void!!(Tabs.Machine | Shell | TabHost) = effect {
-  if (!showing(try (try Shell).get(), "Browser") || (try (try Tabs.Machine).get()).layer !== "Menu") return
+  const shell = try Shell
+  if (!showing(try shell.get(), "Browser") || (try (try Tabs.Machine).get()).layer !== "Menu") return
   if (!(try tellTabs({ type: "uncover" }))) return
-  try contained(hosted("downloads", (plugin, session) => plugin.downloads({ session })), "opening Browser downloads")
+  if ((try TabHost).web !== undefined) {
+    if (!(try contained(shell.send({ type: "goHome" }), "opening Files as an app"))) return
+    if ((try shell.get()).trail.length === 0) try contained(shell.send({ type: "openView", view: "Files" }), "opening Files from Browser")
+  } else {
+    try contained(hosted("downloads", (plugin, session) => plugin.downloads({ session })), "opening Browser downloads")
+  }
 }
 
 /** Draw the page shown where the Browser marks its place, once that place is drawn. */

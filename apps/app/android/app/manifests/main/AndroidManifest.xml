@@ -51,6 +51,8 @@
    <intent-filter><action android:name="android.service.notification.NotificationListenerService" /></intent-filter>
   </service>
   <activity android:name=".AlphaResetRecoveryActivity" android:exported="false" android:process=":reset_recovery" android:taskAffinity="${applicationId}.reset" android:excludeFromRecents="true" android:launchMode="singleTask" android:theme="@android:style/Theme.DeviceDefault.DayNight" android:label="@string/alpha_reset_recovery_label" />
+  <activity android:name=".HostedDigestQuestionActivity" android:exported="false" android:noHistory="true"
+   android:excludeFromRecents="true" android:theme="@android:style/Theme.Translucent.NoTitleBar" />
   <activity android:name=".MainActivity" android:exported="true" android:launchMode="singleTask" android:screenOrientation="${appOrientation}" android:windowSoftInputMode="adjustResize" android:configChanges="orientation|keyboardHidden|keyboard|screenSize|locale|smallestScreenSize|screenLayout|uiMode|density|navigation" android:theme="@style/AppTheme.Launch">
    <intent-filter><action android:name="android.intent.action.MAIN" /><category android:name="android.intent.category.LAUNCHER" /></intent-filter>
    <intent-filter android:autoVerify="true"><action android:name="android.intent.action.VIEW" /><category android:name="android.intent.category.DEFAULT" /><category android:name="android.intent.category.BROWSABLE" /><data android:scheme="https" android:host="${appLinkHost}" android:path="${signInCallbackPath}" /></intent-filter>

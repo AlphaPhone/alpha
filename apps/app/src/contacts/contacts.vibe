@@ -9,7 +9,7 @@ import { SystemSettings } from "../platform/systemSettings.vibe"
 import { Telephony, TelephonyRefused, readAddressBook, telephony } from "../platform/telephony.vibe"
 import { type Job, answer, applying, following, reacting, run, together } from "../runtime/reactor.vibe"
 import { Time } from "../runtime/time.vibe"
-import { Dialer, grantOf, prefilled } from "../phone/phone.vibe"
+import { Dialer, dialing, grantOf } from "../phone/phone.vibe"
 import { Callers } from "../phone/voicemail.vibe"
 import { on, visiting } from "../phone/visit.vibe"
 
@@ -32,11 +32,13 @@ export interface Book {
   readonly form: Form
   readonly reach: string
   readonly problem: ContactDraftProblem | "stale" | "not-found" | undefined
+  /** Who narrowed the list to `sought`: a filter Alpha applied shows as a chip the owner can clear. */
+  readonly filteredBy: "Owner" | "Alpha"
 }
 
 export const blankForm: Form = { givenName: "", familyName: "", phones: [""], emails: [""], notes: "" }
 
-const empty: Book = { rows: [], next: undefined, sought: "", card: undefined, editBase: undefined, form: blankForm, reach: "", problem: undefined }
+const empty: Book = { rows: [], next: undefined, sought: "", card: undefined, editBase: undefined, form: blankForm, reach: "", problem: undefined, filteredBy: "Owner" }
 
 /** The contacts behind Contacts' counts. */
 export service Rows {
@@ -209,11 +211,7 @@ effect function reached(how: Contacts.Reach): void!!(Rows | Dialer | PhoneMachin
     try (try Callers).message(number)
     return
   }
-  const handed = prefilled(number)
-  if (handed === undefined) return
-  try (try Dialer).set({ digits: handed.digits })
-  try ignore((try PhoneMachine).send(handed.event))
-  try ignore((try Shell).send({ type: "openView", view: "Phone" }))
+  try ignore(dialing(number))
 }
 
 // spec/app/contacts/index.md, "Where the phone does not let Alpha write contacts, New and Edit open the phone's own contact editor instead"

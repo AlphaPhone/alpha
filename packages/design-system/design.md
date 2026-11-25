@@ -16,7 +16,9 @@ do next.
 - **Meaning.** `primary` is the accent as text, a link and a mark: Alpha blue on white, a lighter
   blue on black where Alpha blue cannot be read. What the accent fills, the main action, a switch that is on
   and a chosen box or radio, is `alpha` with `alpha-foreground`, Alpha blue in both themes. `destructive`, `ok`, `warn` and `info` are states,
-  `call` a live or answerable call, `dial` the button that places one, `record` a running recording. A state color always sits beside a
+  `call` a live or answerable call (the same green in both themes, behind white text), `call-ended` the moment after one ends,
+  `dial` the button that places one, `hangup` the red behind or inside a control that ends a call or removes a recording,
+  never text, `record` a running recording and `record-shutter` the Video shutter. `map` marks pins, the phone and the route on a map, and `alpha-deep` the tab under Maps guidance's banner, both the same in both themes. Camera's access notice is `camera-panel`, its focus target `camera-focus`, and `camera-focused` once the camera confirms it. A state color always sits beside a
   word or an accessible name, never alone.
 - **Type.** `font-sans` is Public Sans, for everything read or pressed. `font-display` is Denton, with
   Fraunces behind it, at weight `light`: a screen's display title on the launcher, the date on Home, a large figure. The sizes
@@ -26,32 +28,38 @@ do next.
   a 4.4em word fit its own row above 150% text), `home-display` that title on a screen inside an app on the launcher, on
   one line and cut with an ellipsis until above 150% text, where every header title takes its own row and wraps, and
   `4xl` the Home date. Text up to `lg` is set at Public Sans's own line height (1.175), as develop sets it; copy that
-  is read at length takes `leading-normal`. `tracking-caps` with `text-xs` is a small uppercase label; `text-label` names an app tile on
+  is read at length takes `leading-normal`. `tracking-caps` with `text-xs` is a small uppercase label; `tracking-loose` with `text-xs` is the uppercase "Needs approval" over a request the owner approves; `text-label` names an app tile on
   Home and in the drawer. A list row reads `text-base`,
   `text-subject` and `text-snippet` line by line; `text-meta` is a status line under a header, and `text-body`
   the text of a message or of a field being typed; `text-2xs` is the time under a text message or a
   keypad key's letters; `text-keypad-number` the number being dialled, `text-keypad-digit` a key's
   digit and `text-keypad-letters` the letters under it; `text-contact-name` and `text-contact-initials`, in
   `font-display`, are a contact's name and initials at the top of their card. `text-lead` is the street of the next turn,
-  `text-title` a document's name over its preview and Notes' Recently deleted header on the launcher, and `text-figure` and `text-figure-sm` a route's time.
-  `leading-row` sets `text-body` as a note's or a routine's title in a list.
+  `text-title` a document's name over its preview and Notes' Recently deleted header on the launcher, and `text-figure` and `text-figure-sm` a route's time, `text-figure-lg` the distance to Maps guidance's next turn.
+  `leading-row` sets `text-body` as a note's or a routine's title in a list, and `leading-transcript` a transcript read back, such as a voicemail's.
   `text-badge` is a video's length over a thumbnail and `text-tile-name` an album's name under its cover.
   `text-headline` is an open voice or link note's title and `text-quote` a clip kept from a page.
+  On Camera, `text-camera-badge` is the timer and flash badge, `text-camera-countdown` the self-timer digit and
+  `leading-detail` the line under its access notice.
   `text-tab-count` in a `rounded-tab-count` outline is the Browser's count of open tabs.
   In Calendar, `text-fine` is an invitation's time, `text-prose` an event's notes and `text-date` a day
   chip's date; an event's page is titled `text-display` and its form `text-display-sm`. `leading-plain` is
-  the browser's own line height for Public Sans, for a line whose box the design measures.
+  the browser's own line height for Public Sans, for a line whose box the design measures. `leading-details`
+  spaces the From, To and Date lines of a message's details in Inbox, and `leading-message` the text of an email
+  being written; `leading-status` sets the Maps status card.
 - **Shape.** `radius` is a card; `rounded-group` a group of rows; `rounded-panel` a notice or a search bar; `rounded-home-card` is a Home overview card;
   `rounded-drawer-icon` rounds an installed app icon; `rounded-option` is a row of a floating menu and
   `rounded-box` the box of a list row's selection check; `rounded-chip` is a choice chip and an invitation
   row, `rounded-action` a labelled action button; `rounded-segment` is a segmented control and
-  `rounded-segment-option` the option chosen in it. `rounded-tile` is an app tile, a menu and a dialog;
+  `rounded-segment-option` the option chosen in it; `rounded-camera-stop` is Camera's stop square and focus target. `rounded-tile` is an app tile, a menu and a dialog;
   `rounded-sheet` the top of a bottom sheet, `rounded-chat` the top of the Ask Alpha sheet; `rounded-full` a
-  button and a chip, `rounded-dock` the Ask Alpha bar and `rounded-dock-compact` its compact controls.
+  button and a chip, `rounded-dock` the Ask Alpha bar and `rounded-dock-compact` its compact controls; `rounded-bar` is the foot bar of Maps guidance.
   Everything pressed is at least 44px in both directions.
 - **Elevation.** `shadow-sm` lifts a control, `shadow-menu` a menu, `shadow-md` a dialog or a notice, `shadow-lg` a raised card,
-  `shadow-dock` the floating Ask Alpha bar, `shadow-dock-compact` its compact controls, and `shadow-sheet` a bottom sheet.
-  Both dock shadows have a `-dark` variant for black surfaces.
+  `shadow-dock` the floating Ask Alpha bar, `shadow-dock-compact` its compact controls, `shadow-bar` the ongoing-call bar over a view,
+  and `shadow-sheet` a bottom sheet. The dock and bar shadows have a `-dark` variant for black surfaces. Over the map, `shadow-float` lifts the search bar,
+  a round control and the directions card, `shadow-chip` a saved-place chip and `shadow-credit` the credit links,
+  each with a `-dark` variant, as is `shadow-sheet`; `shadow-banner` is Maps guidance's turn banner.
 - **Layers.** `z-dock` is the Ask Alpha bar, `z-sheet` the conversation and bottom sheets, `z-dialog` a
   dialog, `z-toast` a notice, `z-voice` the voice overlay. `z-10`, `z-20` and `z-50` order things inside one view.
 - **Motion.** `fast` for press, `base` for most changes, `slow` for entering and leaving, on
@@ -104,16 +112,27 @@ this prose into tokens. To change the design, describe it, and have the change w
 | `ring` | oklch(0.45201372 0.31321437 264.05202064) | oklch(0.704 0.157 278) |
 | `ok` | oklch(0.509 0.134 149.4) | oklch(0.727 0.208 148.3) |
 | `warn` | oklch(0.514 0.111 70.3) | oklch(0.761 0.159 77.7) |
+| `status-ok` | oklch(0.5685 0.1522 147.98) | oklch(0.5685 0.1522 147.98) |
+| `status-warn` | oklch(0.7605 0.1587 77.67) | oklch(0.7605 0.1587 77.67) |
+| `status-error` | oklch(0.5785 0.2063 29.01) | oklch(0.5785 0.2063 29.01) |
 | `info` | oklch(0.354 0.245 264.1) | oklch(0.704 0.157 278) |
 | `alpha` | oklch(0.45201372 0.31321437 264.05202064) | — |
 | `alpha-foreground` | oklch(1 0 0) | — |
 | `voice-paused` | oklch(0.42871365 0.17763819 275.87797693) | oklch(0.49371435 0.17497524 277.85975720) |
 | `voice-processing` | oklch(0.35317586 0.24472654 264.05202064) | oklch(0.53252567 0.26097330 273.09464102) |
 | `voice-speaking` | oklch(0.46315925 0.30554663 264.59166337) | — |
-| `call` | oklch(0.509 0.134 149.4) | oklch(0.614 0.162 149.3) |
+| `call` | oklch(0.509 0.134 149.4) | — |
+| `call-ended` | oklch(0.4495 0 0) | — |
 | `record` | oklch(0.578 0.206 29) | oklch(0.663 0.224 28.3) |
+| `hangup` | oklch(0.6082 0.209 25.26) | — |
 | `dial` | oklch(0.614 0.162 149.3) | — |
 | `dial-foreground` | oklch(1 0 0) | — |
+| `camera-panel` | oklch(0.2264 0 0) | — |
+| `record-shutter` | oklch(0.6083 0.209 27.03) | — |
+| `camera-focus` | oklch(0.8819 0.1534 90.23) | — |
+| `camera-focused` | oklch(0.8086 0.1479 154.1) | — |
+| `map` | oklch(0.414 0.266 266.5) | — |
+| `alpha-deep` | oklch(0.354 0.245 264.1) | — |
 
 | Token | Value |
 | --- | --- |
@@ -134,6 +153,8 @@ this prose into tokens. To change the design, describe it, and have the change w
 | `rounded.chip` | 1.5rem |
 | `rounded.segment` | 0.9375rem |
 | `rounded.segment-option` | 0.6875rem |
+| `rounded.camera-stop` | 0.5rem |
+| `rounded.bar` | 2rem |
 | `font.sans` | "Public Sans", system-ui, -apple-system, "Segoe UI", sans-serif |
 | `font.display` | Denton, Fraunces, Georgia, serif |
 | `font.mono` | ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas, monospace |
@@ -185,6 +206,8 @@ this prose into tokens. To change the design, describe it, and have the change w
 | `text.4xl.tracking` | -0.01em |
 | `text.figure.size` | 2.75rem |
 | `text.figure.leading` | 1 |
+| `text.recorder-clock.size` | 3rem |
+| `text.recorder-clock.leading` | 1 |
 | `text.headline.size` | 2.125rem |
 | `text.headline.leading` | 1.08 |
 | `text.headline.tracking` | -0.01em |
@@ -197,14 +220,15 @@ this prose into tokens. To change the design, describe it, and have the change w
 | `text.title.tracking` | -0.01em |
 | `text.figure-sm.size` | 1.875rem |
 | `text.figure-sm.leading` | 1.05 |
-| `text.keypad-letters.size` | 0.59375rem |
-| `text.keypad-letters.leading` | 1.15 |
-| `text.keypad-letters.tracking` | 0.14em |
-| `text.keypad-digit.size` | 1.875rem |
+| `text.figure-lg.size` | 2.5rem |
+| `text.figure-lg.leading` | 1 |
+| `text.keypad-letters.size` | 0.6875rem |
+| `text.keypad-letters.leading` | 1.1 |
+| `text.keypad-letters.tracking` | 0.12em |
+| `text.keypad-digit.size` | 1.8525rem |
 | `text.keypad-digit.leading` | 1 |
-| `text.keypad-number.size` | 2.375rem |
-| `text.keypad-number.leading` | 1.2 |
-| `text.keypad-number.tracking` | 0.02em |
+| `text.keypad-number.size` | 2.25rem |
+| `text.keypad-number.leading` | 1.175 |
 | `text.contact-name.size` | 2.125rem |
 | `text.contact-name.leading` | 1.1 |
 | `text.contact-name.tracking` | -0.01em |
@@ -218,6 +242,10 @@ this prose into tokens. To change the design, describe it, and have the change w
 | `text.display.size` | 2.375rem |
 | `text.display.leading` | 1.05 |
 | `text.display.tracking` | -0.01em |
+| `text.camera-badge.size` | 0.625rem |
+| `text.camera-badge.leading` | 1 |
+| `text.camera-countdown.size` | 6rem |
+| `text.camera-countdown.leading` | 1.175 |
 | `weight.light` | 300 |
 | `weight.normal` | 400 |
 | `weight.medium` | 500 |
@@ -228,12 +256,19 @@ this prose into tokens. To change the design, describe it, and have the change w
 | `leading.snug` | 1.25 |
 | `leading.row` | 1.3 |
 | `leading.normal` | 1.4 |
+| `leading.transcript` | 1.45 |
+| `leading.voice-status` | 1rem |
 | `leading.relaxed` | 1.6 |
 | `leading.field` | 1.375 |
 | `leading.chat` | 1.5 |
 | `leading.plain` | 1.18 |
+| `leading.status` | 1.45 |
+| `leading.details` | 1.45 |
+| `leading.message` | 1.55 |
+| `leading.detail` | 1.35 |
 | `tracking.tight` | -0.01em |
 | `tracking.caps` | 0.14em |
+| `tracking.loose` | 0.04em |
 | `z.10` | 10 |
 | `z.20` | 20 |
 | `z.50` | 50 |
@@ -253,16 +288,29 @@ this prose into tokens. To change the design, describe it, and have the change w
 | `shadow.dock-dark` | 0 14px 40px oklch(0 0 0 / 0.45) |
 | `shadow.dock-compact` | 0 12px 34px oklch(0 0 0 / 0.12) |
 | `shadow.dock-compact-dark` | 0 12px 34px oklch(0 0 0 / 0.45) |
+| `shadow.float` | 0 6px 22px oklch(0 0 0 / 0.12) |
+| `shadow.float-dark` | 0 6px 22px oklch(0 0 0 / 0.45) |
+| `shadow.chip` | 0 4px 14px oklch(0 0 0 / 0.12) |
+| `shadow.chip-dark` | 0 4px 14px oklch(0 0 0 / 0.45) |
+| `shadow.credit` | 0 2px 12px oklch(0 0 0 / 0.12) |
+| `shadow.credit-dark` | 0 2px 12px oklch(0 0 0 / 0.45) |
+| `shadow.sheet-dark` | 0 -10px 40px oklch(0 0 0 / 0.45) |
+| `shadow.banner` | 0 10px 30px oklch(0 0 0 / 0.5) |
+| `shadow.bar` | 0 2px 8px oklch(0 0 0 / 0.12) |
+| `shadow.bar-dark` | 0 2px 8px oklch(0 0 0 / 0.45) |
+| `shadow.focus-target` | 0 0 2px oklch(0 0 0) |
 | `keyframes.rise` | from{opacity:0;transform:translateY(1.75rem)}to{opacity:1;transform:none} |
 | `keyframes.drop` | from{opacity:0;transform:translateY(-2.25rem)}to{opacity:1;transform:none} |
 | `keyframes.fade` | from{opacity:0}to{opacity:1} |
 | `keyframes.shimmer` | from{background-position:200% 0}to{background-position:-200% 0} |
+| `keyframes.page-loading` | from{transform:translateX(-100%)}to{transform:translateX(300%)} |
 | `keyframes.wiggle` | from{transform:rotate(-1.5deg)}to{transform:rotate(1.5deg)} |
 | `keyframes.blink` | 0%,100%{opacity:0.2}50%{opacity:1} |
 | `animate.rise` | rise 460ms cubic-bezier(0.19, 1, 0.22, 1) both |
 | `animate.drop` | drop 500ms cubic-bezier(0.19, 1, 0.22, 1) both |
 | `animate.fade` | fade 700ms ease both |
 | `animate.shimmer` | shimmer 2s linear infinite |
+| `animate.page-loading` | page-loading 1.2s linear infinite |
 | `animate.wiggle` | wiggle 300ms ease-in-out infinite alternate |
 | `animate.blink` | blink 1.2s ease-in-out infinite |
 | `breakpoint.sm` | 40rem |

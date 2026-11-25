@@ -30,14 +30,18 @@ import scanText as T from "./scanText"
 type Actor = Owner | Phone
 type Origin = Document | SelectedImage | SelectedDocument
 type Problem = NoProblem | TooLarge | TooMuchText | NotDrawn
+
+type SearchStage = SearchClosed | SearchReading | SearchReview | SearchFailed | SearchSaving
+type Search = { ticket: int, stage: SearchStage, pages: List[K::Page], remaining: List[int], tried: bool }
+pure def closeSearch(ticket: int): Search = { ticket: ticket, stage: SearchClosed, pages: List(), remaining: List(), tried: false }
 type Scan = {
   open: bool, origin: Origin, pages: List[K::Page], images: int, keeping: K::Keeping, text: T::Text,
-  pdf: A::Attempt, problem: Problem, written: List[List[int]], keep: A::Attempt, keptNow: int, kept: List[int],
+  pdf: A::Attempt, problem: Problem, written: List[List[int]], keep: A::Attempt, keptNow: int, kept: List[int], search: Search,
 }
 
 pure val initial: Scan = {
   open: false, origin: Document, pages: List(), images: 0, keeping: K::initial, text: T::initial,
-  pdf: A::plan(1), problem: NoProblem, written: List(), keep: A::plan(0), keptNow: 0, kept: List(),
+  pdf: A::plan(1), problem: NoProblem, written: List(), keep: A::plan(0), keptNow: 0, kept: List(), search: closeSearch(0),
 }
 ```
 
@@ -55,11 +59,13 @@ type Effect =
   | Save({ ticket: int, base: int, pages: List[K::Page] })
   | Discard({ ticket: int, base: int })
   | Recognize({ ticket: int, image: int })
+  | SearchRead({ ticket: int, image: int })
+  | SearchSaved({ ticket: int })
   | CopyText({ image: int, edits: int })
   | OpenLink({ ticket: int, image: int, edits: int, link: int })
   | Suggest({ ticket: int, image: int, edits: int })
   | Note({ ticket: int, pages: List[K::Page] })
-  | Prepare({ ticket: int, pages: List[K::Page] })
+  | Prepare({ ticket: int, pages: List[K::Page], review: int })
   | Export({ ticket: int })
   | ToRecent({ ticket: int })
   | Keep({ ticket: int, image: int })
@@ -69,7 +75,8 @@ pure def has(s: Scan, image: int): bool = s.pages.some(p => p.image == image)
 pure def pageOf(s: Scan, image: int): K::Page = s.pages.select(p => p.image == image).nthOr(0, K::noPage)
 pure def imagesOf(pages: List[K::Page]): List[int] = pages.listMap(p => p.image)
 pure def exporting(s: Scan): bool = s.pdf.outcome == A::Recorded or s.pdf.outcome == A::Sent
-pure def editable(s: Scan): bool = s.open and not(exporting(s)) and not(K::deleting(s.keeping))
+pure def pagesEditable(s: Scan): bool = s.open and not(exporting(s)) and not(K::deleting(s.keeping))
+pure def editable(s: Scan): bool = pagesEditable(s) and s.search.stage != SearchSaving
 ```
 
 ### What the simulator tries
@@ -78,6 +85,9 @@ pure def editable(s: Scan): bool = s.open and not(exporting(s)) and not(K::delet
 pure val imageValues = Set(1, 2, 3)
 pure val frameValues = Set(1)
 pure val replacingValues = Set(0, 1)
+pure val atValues = Set(-1, 0, 1, 2)
+pure val earlierValues = Set(1, 2, 3)
+pure val laterValues = Set(1, 2, 3)
 pure val ticketValues = Set(1, 2, 3)
 pure val heldValues = Set(1, 5)
 pure val baseValues = Set(0, 1)
@@ -93,6 +103,10 @@ pure val weight_recognized = 10
 pure val weight_makeNote = 8
 pure val weight_noted = 8
 pure val weight_exportPdf = 6
+pure val weight_startSearch = 8
+pure val weight_searchRead = 10
+pure val weight_keepSearch = 8
+pure val weight_saveSearch = 8
 pure val weight_prepared = 8
 pure val weight_exported = 8
 pure val weight_keepPhoto = 6
@@ -105,6 +119,7 @@ pure val weight_discarded = 4
 pure val weight_editText = 3
 pure val weight_reviewLinks = 3
 pure val weight_close = 2
+pure val reviewedValues = Set(List({ image: 1, camera: false, text: 1, blank: true, edits: 0, links: 0 }))
 pure val pagesValues =
   Set(List())
     .union(Set(List({ image: 1, camera: true, text: 1, blank: false, edits: 0, links: 2 })))
@@ -115,7 +130,8 @@ pure val pagesValues =
 
 ```quint
 pure def edited(pages: List[K::Page], s: Scan): Scan =
-  { ...s, pages: pages, keeping: if (s.origin == Document) K::edit(s.keeping) else s.keeping, text: T::edited(s.text) }
+  { ...s, pages: pages, keeping: if (s.origin == Document) K::edit(s.keeping) else s.keeping, text: T::edited(s.text),
+    search: if (pages == s.pages) s.search else closeSearch(s.search.ticket) }
 ```
 
 ### Opening a scan reads the saved draft, and keeps the pages still to save from before
@@ -210,17 +226,44 @@ pure def corrected(s: Scan, image: int, by: Actor): Scan =
     images: s.images + 1 }
 ```
 
-### The owner removes a page, or moves one to the end
+### The owner removes a page or moves it one place earlier or later
+
+Moving asks to swap the two named images at the places the owner saw. A
+pair that moved, was reversed or no longer shows there is refused. Both
+pages keep their image and reviewed text. The draft takes the new order.
 
 ```quint
 pure def canRemove(s: Scan, image: int, by: Actor): bool = by == Owner and editable(s) and has(s, image)
 
 pure def remove(s: Scan, image: int, by: Actor): Scan = edited(s.pages.select(p => p.image != image), s)
 
-pure def canMoveToEnd(s: Scan, image: int, by: Actor): bool = by == Owner and editable(s) and has(s, image) and s.pages.length() > 1
+pure def adjacentPages(pages: List[K::Page], at: int, earlier: int, later: int): bool =
+  at >= 0 and at < pages.length() - 1 and earlier > 0 and later > 0 and earlier != later
+    and pages.nthOr(at, K::noPage).image == earlier and pages.nthOr(at + 1, K::noPage).image == later
+    and pages.select(p => p.image == earlier or p.image == later).length() == 2
 
-pure def moveToEnd(s: Scan, image: int, by: Actor): Scan =
-  edited(s.pages.select(p => p.image != image).concat(s.pages.select(p => p.image == image)), s)
+pure def swappedPages(pages: List[K::Page], at: int): List[K::Page] =
+  val valid = at >= 0 and at < pages.length() - 1
+  val first = pages.nthOr(at, K::noPage)
+  val second = pages.nthOr(if (valid) at + 1 else -1, K::noPage)
+  if (valid) pages.listMap(p => if (p.image == first.image) second else if (p.image == second.image) first else p)
+  else pages
+
+pure def canSwapPages(s: Scan, at: int, earlier: int, later: int, by: Actor): bool =
+  by == Owner and editable(s) and adjacentPages(s.pages, at, earlier, later)
+
+pure def swapPages(s: Scan, at: int, earlier: int, later: int, by: Actor): Scan =
+  edited(swappedPages(s.pages, at), s)
+
+pure def lawAdjacentPagesSwapWhole(pages: List[K::Page], at: int, earlier: int, later: int): bool =
+  val swapped = swappedPages(pages, at)
+  adjacentPages(pages, at, earlier, later) implies
+    (swapped.length() == pages.length() and swapped.every(p => pages.includes(p))
+      and swapped.nthOr(at, K::noPage) == pages.nthOr(at + 1, K::noPage)
+      and swapped.nthOr(at + 1, K::noPage) == pages.nthOr(at, K::noPage))
+
+pure val eval_witness_canSwapPages = (("start", Owner), ("add", 1, 0, false, Phone),
+  ("add", 1, 0, true, Phone), ("swapPages", 0, 1, 2, Owner))
 ```
 
 ### Every page shows an image already made
@@ -253,7 +296,7 @@ reading finds text and the links in it, finds none, or fails.
 pure def clamp(links: int): int = if (links > K::linkLimit) K::linkLimit else if (links < 0) 0 else links
 
 pure def canRecognize(s: Scan, image: int, by: Actor): bool =
-  by == Owner and editable(s) and s.pages.some(p => p.image == image and p.text == 0)
+  by == Owner and editable(s) and s.search.stage == SearchClosed and s.pages.some(p => p.image == image and p.text == 0)
 
 pure def recognize(s: Scan, image: int, by: Actor): Moved =
   val text = T::recognize(s.text, image)
@@ -451,7 +494,89 @@ pure def sometimesTheDraftIsDeletedFromTheScan(s: Scan): bool = s.keeping.discar
 > when nothing was written, told why a PDF could not be made, and the
 > photos the camera took kept in Photos.
 
-### Export draws the pages as they are, with their text, into a PDF in the isolated worker, then asks the phone to save it, under one number
+### Searchable PDF reads only unread pages in order, then asks for a separate save
+
+The open review names the exact pages and their text revisions. It keeps
+previously read text, including a page that was blank. Reading or editing
+in this review writes nothing. Back retires only the review it was sent
+for. A change to the source retires that review.
+Keep text is an explicit draft edit. Save PDF starts the ordinary numbered
+save with the reviewed layer. Only a confirmed or unconfirmed write can
+then keep that layer in the draft. A refusal leaves the review available.
+
+```quint
+pure def pdfAvailable(s: Scan): bool =
+  editable(s) and s.pages.length() > 0 and not(s.written.includes(imagesOf(s.pages))) and s.text.reading.status != R::Loading
+
+pure def searchNext(search: Search, s: Scan): Moved =
+  val image = search.remaining.nthOr(0, 0)
+  if (search.remaining.length() == 0) { state: { ...s, search: { ...search, stage: SearchReview } }, out: List() }
+  else if (s.pages.some(p => p.image == image and p.text == 0))
+    { state: { ...s, search: search }, out: List(SearchRead({ ticket: search.ticket, image: image })) }
+  else { state: { ...s, search: { ...search, stage: SearchFailed } }, out: List() }
+
+pure def canStartSearch(s: Scan, by: Actor): bool = by == Owner and pdfAvailable(s) and s.search.stage == SearchClosed
+
+pure def startSearch(s: Scan, by: Actor): Moved =
+  searchNext({ ticket: s.search.ticket + 1, stage: SearchReading, pages: s.pages,
+    remaining: imagesOf(s.pages.select(p => p.text == 0)), tried: false }, s)
+
+pure def currentSearch(s: Scan, ticket: int): bool = s.open and s.search.ticket == ticket and s.search.pages == s.pages
+
+pure def canSearchRead(s: Scan, ticket: int, image: int, by: Actor): bool =
+  by == Phone and s.search.stage == SearchReading and currentSearch(s, ticket) and image > 0
+    and s.search.remaining.nthOr(0, 0) == image and s.pages.some(p => p.image == image and p.text == 0)
+
+pure def searchRead(s: Scan, ticket: int, image: int, ok: bool, by: Actor): Moved =
+  if (ok) searchNext({ ...s.search, remaining: s.search.remaining.tail() }, s)
+  else { state: { ...s, search: { ...s.search, stage: SearchFailed } }, out: List() }
+
+pure def canCancelSearch(s: Scan, ticket: int, by: Actor): bool =
+  ticket == s.search.ticket and s.search.stage != SearchClosed
+    and (by == Phone or s.search.stage != SearchSaving or s.pdf.outcome == A::Recorded)
+
+pure def cancelSearch(s: Scan, ticket: int, by: Actor): Scan =
+  { ...s, search: closeSearch(ticket),
+    pdf: if (s.search.stage == SearchSaving and s.pdf.outcome == A::Recorded) A::plan(s.pdf.id + 1) else s.pdf }
+
+pure def reviewedPage(old: K::Page, p: K::Page): bool =
+  p.text == p.image and p.camera == old.camera and
+    (if (old.text == 0) p.edits == 0 else p == old or p.edits == old.edits + 1)
+
+pure def reviewedPages(s: Scan, reviewed: List[K::Page]): bool =
+  imagesOf(reviewed) == imagesOf(s.pages) and K::matched(reviewed) and reviewed.every(p => reviewedPage(pageOf(s, p.image), p))
+
+pure def canKeepSearch(s: Scan, ticket: int, reviewed: List[K::Page], by: Actor): bool =
+  by == Owner and s.search.stage == SearchReview and currentSearch(s, ticket) and pagesEditable(s) and reviewedPages(s, reviewed)
+
+pure def keepSearch(s: Scan, ticket: int, reviewed: List[K::Page], by: Actor): Scan =
+  if (reviewed == s.pages) cancelSearch(s, ticket, by) else cancelSearch(edited(reviewed, s), ticket, by)
+
+pure def canSaveSearch(s: Scan, ticket: int, by: Actor): bool =
+  by == Owner and s.search.stage == SearchReview and currentSearch(s, ticket) and pdfAvailable(s)
+
+pure def saveSearch(s: Scan, ticket: int, by: Actor): Moved =
+  beginPdf(ticket, { ...s, search: { ...s.search, stage: SearchSaving, tried: true } })
+
+pure def canFinishSearch(s: Scan, ticket: int, reviewed: List[K::Page], by: Actor): bool =
+  by == Phone and s.search.stage == SearchSaving and currentSearch(s, ticket) and pagesEditable(s)
+    and (s.pdf.outcome == A::Confirmed or s.pdf.outcome == A::Unknown) and reviewedPages(s, reviewed)
+
+pure def finishSearch(s: Scan, ticket: int, reviewed: List[K::Page], by: Actor): Scan = keepSearch(s, ticket, reviewed, by)
+
+pure val eval_witness_canSaveSearch = (("start", Owner), ("add", 1, 0, false, Phone), ("startSearch", Owner),
+  ("searchRead", 1, 1, true, Phone), ("saveSearch", 1, Owner))
+
+pure def lawSearchNextReadsOneUnreadPage(s: Scan): bool =
+  val out = searchNext(s.search, s).out
+  out.length() <= 1 and out.every(e => match e {
+    | SearchRead(r) => r.ticket == s.search.ticket and s.search.remaining.nthOr(0, 0) == r.image
+        and s.pages.some(p => p.image == r.image and p.text == 0)
+    | _ => false
+  })
+```
+
+### Export draws the pages into a PDF using the chosen text layer, then asks the phone to save it, under one number
 
 It waits for text being read to come in. Pages already written, or perhaps
 written, are not exported again: text read or corrected later does not
@@ -459,20 +584,22 @@ make them another PDF. A PDF that could not be drawn, too large or with
 too much text, can be tried again.
 
 ```quint
-pure def canExportPdf(s: Scan, by: Actor): bool =
-  by == Owner and editable(s) and s.pages.length() > 0 and not(s.written.includes(imagesOf(s.pages)))
-    and s.text.reading.status != R::Loading
+pure def canExportPdf(s: Scan, by: Actor): bool = by == Owner and s.search.stage == SearchClosed and pdfAvailable(s)
 
-pure def exportPdf(s: Scan, by: Actor): Moved =
+pure def beginPdf(review: int, s: Scan): Moved =
   val pdf = A::record(if (A::canRecord(s.pdf)) s.pdf else A::plan(s.pdf.id + 1))
-  { state: { ...s, pdf: pdf, problem: NoProblem }, out: List(Prepare({ ticket: pdf.id, pages: s.pages })) }
+  { state: { ...s, pdf: pdf, problem: NoProblem }, out: List(Prepare({ ticket: pdf.id, pages: s.pages, review: review })) }
+
+pure def exportPdf(s: Scan, by: Actor): Moved = beginPdf(0, s)
+
+pure def retrySearch(s: Scan): Search = if (s.search.stage == SearchSaving) { ...s.search, stage: SearchReview } else s.search
 
 pure def canPrepared(s: Scan, ticket: int, by: Actor): bool =
   by == Phone and s.pdf.outcome == A::Recorded and ticket == s.pdf.id
 
 pure def prepared(s: Scan, ticket: int, ok: bool, problem: Problem, by: Actor): Moved =
   if (ok) { state: { ...s, pdf: A::dispatch(s.pdf) }, out: List(Export({ ticket: ticket })) }
-  else { state: { ...s, pdf: F::withdraw(s.pdf), problem: if (problem == NoProblem) NotDrawn else problem }, out: List() }
+  else { state: { ...s, pdf: F::withdraw(s.pdf), search: retrySearch(s), problem: if (problem == NoProblem) NotDrawn else problem }, out: List() }
 ```
 
 ### The saved PDF ends as the phone says; a confirmed one is listed in Recent, and pages confirmed or unsure are written
@@ -486,9 +613,11 @@ pure def canExported(s: Scan, ticket: int, by: Actor): bool = by == Phone and A:
 
 pure def exported(s: Scan, ticket: int, confirmed: bool, known: bool, by: Actor): Moved =
   val pdf = A::conclude(s.pdf, confirmed, known)
+  val receipt = if (pdf.outcome == A::Confirmed) List(ToRecent({ ticket: ticket })) else List()
+  val reviewed = if (pdf.outcome != A::Refused and s.search.stage == SearchSaving) List(SearchSaved({ ticket: s.search.ticket })) else List()
   { state: { ...s, pdf: pdf, pages: if (s.origin == Document or s.open) s.pages else List(),
-      written: if (pdf.outcome == A::Refused) s.written else writing(s) },
-    out: if (pdf.outcome == A::Confirmed) List(ToRecent({ ticket: ticket })) else List() }
+      search: if (pdf.outcome == A::Refused) retrySearch(s) else s.search,
+      written: if (pdf.outcome == A::Refused) s.written else writing(s) }, out: receipt.concat(reviewed) }
 ```
 
 ### While the PDF is being made, the pages do not change and no text is read
@@ -580,7 +709,7 @@ exported again; once the phone was asked, its answer still counts.
 ```quint
 pure def closed(by: Actor, s: Scan): Scan =
   { ...s, open: false, pages: if (s.origin == Document or exporting(s)) s.pages else List(),
-    text: T::close(s.text), keeping: K::close(s.keeping), pdf: F::withdraw(s.pdf) }
+    text: T::close(s.text), keeping: K::close(s.keeping), pdf: F::withdraw(s.pdf), search: closeSearch(s.search.ticket) }
 
 pure def canClose(s: Scan, by: Actor): bool = by == Owner and s.open
 

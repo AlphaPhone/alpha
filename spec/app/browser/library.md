@@ -1,8 +1,10 @@
 # Library
 
-Bookmarks and history, shown together from the Browser's menu. The phone
-keeps both; the library reads them, changes them one write at a time, and
-offers to replace a saved bookmark list it cannot read. A page enters
+Bookmarks and history, shown together from the Browser's menu. Alpha
+keeps both on the phone or in the web app's local storage. The library reads
+them, changes them one write at a time, and offers to replace a saved bookmark
+list it cannot read. The web app keeps the saved addresses readable by earlier
+versions. It uses saved titles when their ordered addresses match the list. A page enters
 history when it commits in a normal tab ([Address](./address.md)), and
 clearing all browsing data ([Browser](./index.md)) empties history too.
 
@@ -19,7 +21,7 @@ A damaged saved list cannot be read; Alpha offers once to replace it.
 import read as R from "../../kit/read"
 
 type Job = Idle | Adding | Removing | Repairing | Clearing
-type Notice = Quiet | NotSecure | Full | Unread | Failed
+type Notice = Quiet | NotSecure | Full | Unread | Failed | HistoryFailed
 type Effect = Load({ ticket: int }) | Write({ write: int, job: Job })
 type Library = {
   read: R::Read, damaged: bool, offered: bool, marks: int, history: int,
@@ -115,7 +117,7 @@ pure def repair(s: Library): Step = writing(Repairing, s)
 pure def canWritten(s: Library, ticket: int): bool = s.job != Idle and ticket == s.write
 
 pure def written(s: Library, ticket: int, ok: bool): Library =
-  val done = { ...s, job: Idle, kept: 0, notice: if (ok) Quiet else Failed }
+  val done = { ...s, job: Idle, kept: 0, notice: if (ok) Quiet else if (s.job == Clearing) HistoryFailed else Failed }
   if (not(ok)) done
   else if (s.job == Adding) { ...done, marks: s.marks + 1 }
   else if (s.job == Removing) { ...done, marks: s.marks - 1 }
@@ -183,15 +185,32 @@ pure def sometimesUnread(s: Library): bool = s.notice == Unread and s.marks > 0
 
 ### A page that commits in a normal tab is counted in history, which keeps the newest hundred
 
-A visit before the library is read is counted by the read. When history is
+A visit before the library is read is counted by the read. Visiting the
+same address again replaces its older entry. A history observation counts
+the current list and how many selected visits remain. Visits can leave that
+selection when they are replaced or displaced at the limit. When history is
 full the oldest page leaves it, and leaves a clear under way with it.
 
 ```quint
-pure def canVisited(s: Library): bool = hydrated(s)
+pure def canVisited(s: Library, count: int, remaining: int): bool =
+  hydrated(s) and count >= s.history and count <= maxHistory
+    and remaining >= 0 and remaining <= s.kept
 
-pure def visited(s: Library): Library =
-  if (s.history < maxHistory) { ...s, history: s.history + 1 }
-  else { ...s, kept: if (s.kept > 0) s.kept - 1 else 0 }
+pure def visited(s: Library, count: int, remaining: int): Library =
+  { ...s, history: count, kept: remaining }
+```
+
+### Removing a history row forgets only the visit the owner selected
+
+A later visit to the same address is a new visit. It stays in the list even
+if the earlier visit's removal is still being written. The writer receives
+the selected visit's identity, and the count tracks whether that visit is
+still present.
+
+```quint
+pure def canRemoveVisit(s: Library): bool = hydrated(s) and s.history > 0 and s.job == Idle and not(s.confirming)
+
+pure def removeVisit(s: Library): Step = writing(Clearing, { ...s, kept: 1 })
 ```
 
 ### Clearing history asks first, and can be cancelled
