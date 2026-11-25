@@ -2,7 +2,6 @@ import type { DeviceOperation, JournalEntry } from "@elizaos/agent";
 import { type Faked, plugin } from "./phone.ts";
 import { readJsonBody, type Route } from "./routes.ts";
 
-const subjectUserId = "signed-in-account";
 const enrollmentId = "this-phones-enrollment";
 const key = "a".repeat(64);
 const attemptId = "device-attempt-1";
@@ -34,7 +33,7 @@ export const textReviewEnrollment: Faked = plugin<{
 }>(() => ({ enrollmentKey: () => Promise.resolve({ key }), authority: () => Promise.resolve({ active: true }) }));
 
 /** The resident lists and settles only this enrolled phone's exact proposal. */
-export function textReviewRoute(review: TextReviewScene): Route {
+export function textReviewRoute(review: TextReviewScene, subjectUserId: string): Route {
   const { agentId, proposal } = review;
   const capabilities = proposal.payload.operation.type === "sms_send" ? ["sms.send.v1"] : ["sms.compose.v1", "sms.compose.v2"];
   const prefix = "/api/client-devices/";

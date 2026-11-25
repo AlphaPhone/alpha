@@ -22,6 +22,7 @@ export interface AskScene {
   readonly heldLists: (() => void)[];
   acknowledgment?: string;
   metadata?: unknown[];
+  spokenFiles?: { readonly channel: unknown; readonly images: readonly unknown[] | undefined }[];
   /** The failure fields of the resident's terminal reply. */
   refusal?: Pick<TurnReply, "cloudCode" | "planAction"> & { readonly failureKind: NonNullable<TurnReply["failureKind"]> };
   nextReplyChunks?: readonly string[];
@@ -139,8 +140,9 @@ export function askRoutes(scene: AskScene): Route[] {
       if (request.method !== "POST" || !found) return;
       const messages = scene.kept.get(`c${found[1]}`)?.messages ?? [];
       const keep = (role: "user" | "assistant", text: string) => void messages.push({ id: `m${scene.said.length}${role === "user" ? "u" : "a"}`, role, text });
-      return request.json().then((body: { text: string; metadata?: unknown }) => {
+      return request.json().then((body: { text: string; metadata?: unknown; channelType?: unknown; images?: readonly unknown[] }) => {
         scene.metadata?.push(body.metadata);
+        scene.spokenFiles?.push({ channel: body.channelType, images: body.images });
         if (body.text !== body.text.trim()) return Response.json({ error: "invalid_message" }, { status: 400 });
         if (found[2] === undefined) return Response.json({ text: `You said: ${body.text}`, ...named(scene.said.length) });
         scene.said.push(body.text);

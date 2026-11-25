@@ -126,7 +126,11 @@ it('Offer the original photo for Inbox to review (spec/app/photos/viewer.md, "St
   source.mutationRevision = source.revision;
   world.photos.selectedPicture = () => Promise.resolve({ name: source.name, mimeType: "image/png", size: source.size, dataBase64 });
   const { alpha } = await open(world, only("home", "view:Photos", "view:Inbox", "notice"));
-  await press("Inbox");
+  await drawn(() => {
+    const inboxTile = document.querySelector<HTMLButtonElement>("[data-home-tile='view:Inbox']");
+    if (!inboxTile) throw new Error("No Inbox home tile");
+    inboxTile.click();
+  });
   const letters = inbox.runtime(alpha);
   await until(alpha, letters, Inbox, (state) => state.list.status === "Loaded" && state.selected.account !== 0);
   await hardware("back");

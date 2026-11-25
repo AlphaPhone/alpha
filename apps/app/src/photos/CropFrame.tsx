@@ -1,7 +1,26 @@
 // spec/app/photos/viewer.md, "Cropping a photo shows its full rotated frame, and only the area applied changes the edit"
+import { X } from "lucide-react";
 import { useCallback, useRef, useState, type KeyboardEvent, type PointerEvent } from "react";
 import { Button, cn } from "@repo/ui";
 import { cropUnits, wholePhoto, type CropBounds } from "../../gen/app__photos__viewer.ts";
+
+export const editHeader = "flex h-13 shrink-0 items-center gap-2 pr-4 pl-3";
+export const editTool = "bg-accent hover:bg-accent/90 active:bg-accent/80";
+export const editFrame = "mx-8 mt-4.5 aspect-3/4 shrink self-stretch landscape:mx-4 landscape:mt-0 landscape:aspect-auto landscape:flex-1";
+
+interface CropHeaderProps {
+  readonly onCancel: () => void;
+  readonly onApply?: () => void;
+}
+
+/** The crop actions stay available above its media and ratio controls. */
+export function CropHeader({ onCancel, onApply }: CropHeaderProps) {
+  return <header data-host-chrome="" className={editHeader}>
+    <Button variant="ghost" size="icon" aria-label="Cancel crop" onClick={onCancel}><X /></Button>
+    <h1 className="sr-only">Crop photo</h1>
+    <Button className="ml-auto px-4.5" size="sm" aria-label="Apply crop" disabled={onApply === undefined} onClick={onApply}>Done</Button>
+  </header>;
+}
 
 const aspects = [
   { key: "Free", ratio: 0 }, { key: "Square", ratio: 1 },
@@ -69,11 +88,12 @@ function change(bounds: CropBounds, { x, y }: Delta, ratio: number, corner?: Cor
 interface Props {
   readonly source: Source;
   readonly bounds: CropBounds;
+  readonly onCancel: () => void;
   readonly onApply: (bounds: CropBounds) => void;
 }
 
 /** Move or resize a crop over the whole rotated image. The preview changes only after applying it. */
-export function CropFrame({ source, bounds, onApply }: Props) {
+export function CropFrame({ source, bounds, onCancel, onApply }: Props) {
   const [draft, setDraft] = useState<Draft>({ bounds, aspect: free });
   const imageRef = useRef<HTMLDivElement>(null);
   const gestureRef = useRef<Gesture | undefined>(undefined);
@@ -118,7 +138,8 @@ export function CropFrame({ source, bounds, onApply }: Props) {
     setDraft({ aspect, bounds: wanted === 0 ? rect : fit(wanted) });
   }
   return <>
-    <div className="relative flex min-h-0 flex-1 items-center justify-center px-4 [container-type:size]">
+    <CropHeader onCancel={onCancel} onApply={() => onApply(rect)} />
+    <div className={cn("relative flex min-h-0 items-center justify-center [container-type:size]", editFrame)}>
       <div ref={imageRef} className="relative touch-none overflow-hidden" style={{ width: `min(100cqw, calc(100cqh * ${imageRatio}))`, aspectRatio: imageRatio }}>
         <img src={source.image} alt="" draggable={false} className="pointer-events-none absolute inset-0 size-full" />
         <div aria-hidden className="pointer-events-none absolute inset-0 bg-background/65" style={{ clipPath: outside }} />
@@ -130,21 +151,18 @@ export function CropFrame({ source, bounds, onApply }: Props) {
           <span aria-hidden className="pointer-events-none absolute inset-y-0 left-1/3 w-1/3 border-x border-foreground/40" />
           {corners.map((corner) => <button key={corner.key} type="button" aria-label={corner.label} tabIndex={-1}
             className={cn("absolute grid size-10 place-items-center", corner.style)} onPointerDown={(event) => begin(event, corner)}>
-            <span className="pointer-events-none size-3 rounded-full border-2 border-background bg-foreground" />
+            <span className="pointer-events-none size-3 rounded-full bg-foreground" />
           </button>)}
         </div>
       </div>
     </div>
     <p className="sr-only" id="alpha-photos-crop-keys">Use the arrow keys to move the crop. Hold Shift to resize it.</p>
-    <div className="flex shrink-0 flex-col gap-3 px-4 py-4">
-      <div role="group" aria-label="Crop aspect" className="flex flex-wrap justify-center gap-2">
-        {aspects.map((aspect) => <Button key={aspect.key} size="sm" variant={draft.aspect === aspect ? "primary" : "secondary"}
-          aria-label={`${aspect.key} crop`} aria-pressed={draft.aspect === aspect} onClick={() => choose(aspect)}>{aspect.key}</Button>)}
-      </div>
-      <div className="flex justify-center gap-3">
-        <Button variant="secondary" onClick={() => { gestureRef.current = undefined; setDraft({ bounds: wholePhoto, aspect: free }); }}>Reset crop</Button>
-        <Button onClick={() => onApply(rect)}>Apply crop</Button>
-      </div>
+    <div role="group" aria-label="Crop aspect" className="mt-6.5 flex shrink-0 flex-wrap justify-center gap-2 px-3 landscape:mt-2">
+      {aspects.map((aspect) => <Button key={aspect.key} size="sm" variant="secondary"
+        className={cn("px-3.5", draft.aspect === aspect ? "bg-foreground text-background hover:bg-foreground/90 active:bg-foreground/80" : editTool)}
+        aria-label={`${aspect.key} crop`} aria-pressed={draft.aspect === aspect} onClick={() => choose(aspect)}>{aspect.key}</Button>)}
+      <Button variant="secondary" size="sm" className={cn("px-3.5", editTool)} aria-label="Reset crop"
+        onClick={() => { gestureRef.current = undefined; setDraft({ bounds: wholePhoto, aspect: free }); }}>Reset</Button>
     </div>
   </>;
 }
