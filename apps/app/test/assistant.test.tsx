@@ -431,8 +431,15 @@ describe.each([["a browser", false], ["a phone", true]])("in %s", (_where, phone
     ] });
     const { alpha, runtime } = await openAssistant(world, false);
 
-    // spec/app/assistant/search.md, "Words are searched from the first hit, and empty words are not searched"
-    await chatAction("Search chat");
+    await press("Open conversation");
+    await until(alpha, runtime, Shell, (s) => s.assistant === "Sheet");
+
+    // spec/app/assistant/search.md, "Story: Search my conversations": a hit returns to the full conversation.
+    const openSearch = async () => {
+      chatAction("Search chat");
+      await drawn(() => vi.waitFor(() => expect(document.querySelector("input[aria-label='Search chats']")).not.toBeNull()));
+    };
+    await openSearch();
     await fill("Search chats", "friday");
     await until(alpha, runtime, Search, (s) => s.hits.status === "Loaded" && s.words === "friday");
     expect(rows("Results")).toBe(4);
@@ -442,7 +449,8 @@ describe.each([["a browser", false], ["a phone", true]])("in %s", (_where, phone
     // spec/app/assistant/search.md, "Opening a hit closes search and opens its conversation around its message, and another conversation only while the turn and the composer are free"
     row("Results", "Friday at noon");
     await until(alpha, runtime, Chats, (s) => s.chosen > 0 && s.around > 0 && s.page.status === "Loaded");
-    expect([lines().slice(0, 2), document.querySelector("section[aria-label='Results']")]).toEqual([["Lunch on Friday?", "Friday at noon works."], null]);
+    const askDetent = () => document.querySelector("section[aria-label='Ask Alpha']")?.getAttribute("data-alpha-detent");
+    expect([lines().slice(0, 2), document.querySelector("section[aria-label='Results']"), askDetent()]).toEqual([["Lunch on Friday?", "Friday at noon works."], null, "full"]);
     // spec/app/assistant/reply.md, "A failed reply offers the fix the agent named, and a limit reached shows its live wait, never sending the message again": a reply read again from history says why it did not finish, and to wait a moment.
     expect(document.querySelector("[role=log]")?.textContent).toContain("Too many requests. Wait a moment, then try again");
     // spec/app/assistant/reply.md, "Out of funds is refused before any output, is never spoken, and offers only Manage plan"; spec/app/assistant/reply.md, "A failure refused before any output replaces the streamed text; any other failure is added after it": spent credits stored without Cloud's code keep their own words, and only the reply stored with it reads as the one out-of-funds line.
@@ -451,13 +459,14 @@ describe.each([["a browser", false], ["a phone", true]])("in %s", (_where, phone
 
     // spec/app/assistant/search.md, "Only the newest asking's hits are shown, a page at a time, after those already shown": a search that fails says so.
     world.ask.searchDown = true;
-    await chatAction("Search chat");
+    await openSearch();
     await fill("Search chats", "noon");
     await until(alpha, runtime, Search, (s) => s.hits.status === "Failed");
     expect(document.body.textContent).toContain("Search did not finish");
     // spec/app/assistant/index.md, "Back closes a review, then search, then a quote or an edit, one at a time; with none of them open Back is the shell's"
     await hardware("back");
     await until(alpha, runtime, Search, (s) => !s.open);
+    expect(askDetent()).toBe("full");
   });
 
   // spec/app/assistant/chats.md, "Story: Find my conversations"
@@ -519,6 +528,24 @@ describe.each([["a browser", false], ["a phone", true]])("in %s", (_where, phone
     expect([(await shellState()).assistant, composerText(), lines()]).toEqual([detent, "Ideas for dinner", ["Dinner at eight?"]]);
     write("");
     await third.close();
+
+    // spec/app/assistant/chats.md, "Older or newer messages are read around a message of the conversation showing"
+    world.ask.kept.set("c8", { roomId: "r8", title: "Dinner", messages: Array.from({ length: 205 }, (_, at) => ({
+      id: `history-${at + 1}`, role: "user", text: `History ${at + 1}`,
+    })) });
+    const long = await open(world, mounts);
+    runtime = assistant.runtime(long.alpha);
+    await until(long.alpha, runtime, Chats, (s) => s.page.status === "Loaded");
+    await press("Open conversation");
+    await until(long.alpha, runtime, Shell, (s) => s.assistant === "Sheet");
+    expect([lines().length, lines()[0], lines().at(-1), button("Later")]).toEqual([200, "History 6", "History 205", undefined]);
+    await press("Earlier");
+    await until(long.alpha, runtime, Chats, (s) => s.around > 0 && s.page.status === "Loaded");
+    expect([lines()[0], lines().at(-1), button("Earlier")]).toEqual(["History 1", "History 106", undefined]);
+    await press("Later");
+    await until(long.alpha, runtime, Chats, (s) => s.page.status === "Loaded" && s.around > 1);
+    expect([lines()[0], lines().at(-1), Boolean(button("Earlier")), button("Later")]).toEqual(["History 6", "History 205", true, undefined]);
+    await long.close();
 
     world.ask.kept.clear();
     const fourth = await open(world, mounts);

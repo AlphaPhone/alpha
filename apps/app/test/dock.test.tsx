@@ -2,60 +2,144 @@
 import { Effect, Stream } from "effect";
 import { act } from "react";
 import { afterEach, describe, expect, it } from "vitest";
+import { Machine as Composer } from "../gen/app__assistant__composer.effect.vibe";
 import { Machine as Dock } from "../gen/app__assistant__dock.effect.vibe";
 import { Machine as Shell } from "../gen/app__shell.effect.vibe";
 import { Machine as Canvas } from "../gen/app__shell__keyboard.effect.vibe";
+import assistant from "../src/assistant/index.tsx";
+import { button, closeAll, drawn, fill, only, open, pressOnTop, until, seen } from "./alpha.tsx";
 import { closeAllDocks, mountDock } from "./dock-support.tsx";
+import { scene } from "./fakes/scene.ts";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 afterEach(closeAllDocks);
+afterEach(closeAll);
 
 const underAct = async (work: () => Promise<void> | void) => {
   await act(async () => { await work(); });
 };
+
+const named = <T extends HTMLElement>(name: string) => document.querySelector<T>(`[aria-label="${name}"]`);
+
+async function showAttachments() {
+  await underAct(() => {
+    named("Chat actions")?.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+  });
+  const attach = [...document.querySelectorAll<HTMLElement>("[role=menuitem]")].find((item) => item.textContent === "Attach media");
+  expect(attach).toBeDefined();
+  await underAct(() => { attach?.click(); });
+  await expect.poll(() => named("Attach files")).not.toBeNull();
+}
 
 describe("Ask Alpha dock and shell navigation", () => {
   // spec/app/assistant/attachments.md, "Story: Choose files to attach"; "Cancel closes the picker, and files still being read are not attached"
   it("reviews local Files and only attaches the confirmed selection to the draft", async () => {
     await mountDock({ view: "Home", flush: underAct });
     const file = new File(["notes for the appointment"], "appointment.txt", { type: "text/plain" });
-    const named = <T extends HTMLElement>(name: string) => document.querySelector<T>(`[aria-label="${name}"]`);
-    const show = async () => {
-      await underAct(() => {
-        named("Chat actions")?.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
-      });
-      const attach = [...document.querySelectorAll<HTMLElement>("[role=menuitem]")].find((item) => item.textContent === "Attach media");
-      expect(attach).toBeDefined();
-      await underAct(() => { attach?.click(); });
-      expect(named("Attach files")).not.toBeNull();
-    };
     const pick = async () => {
       const source = [...document.querySelectorAll<HTMLButtonElement>('[aria-label="Attachment sources"] button')].find((item) => item.textContent === "Files");
       expect(source).toBeDefined();
       await underAct(() => { source?.click(); });
+      await expect.poll(() => named("Select files")).not.toBeNull();
       const input = named<HTMLInputElement>("Select files");
-      expect(input).not.toBeNull();
       await underAct(() => {
         if (!input) return;
         Object.defineProperty(input, "files", { value: [file] });
         input.dispatchEvent(new Event("change", { bubbles: true }));
       });
-      expect(named("Remove appointment.txt from the selection")).not.toBeNull();
+      await expect.poll(() => named("Remove appointment.txt from the selection")).not.toBeNull();
       expect(named("Attached")).toBeNull();
     };
 
-    await show();
+    await showAttachments();
     await pick();
     await underAct(() => { named("Close attachments")?.click(); });
     expect(named("Attach files")).toBeNull();
     expect(named("Attached")).toBeNull();
 
-    await show();
+    await showAttachments();
     await pick();
     await underAct(() => { named("Attach selected files")?.click(); });
     await expect.poll(() => named("Attach files")).toBeNull();
     expect(named("Attached")?.textContent).toContain("appointment.txt");
     expect(document.querySelector<HTMLTextAreaElement>("textarea[data-alpha-composer]")?.value).toBe("");
+  });
+
+  it('Stages only unchanged on-device media in the open Ask draft (spec/app/assistant/attachments.md, "Story: Choose files to attach"; spec/app/assistant/attachments.md, "Only the newest listing is shown; a denied folder asks for access, and one that fails offers Retry"; spec/app/assistant/attachments.md, "Attach reads the chosen files once, and adds only those within the type, name and size limits")', async () => {
+    const world = { ...scene(), phone: true };
+    world.photos.access = { scope: "full", images: "full", videos: "denied" };
+    const [changedPhoto, keptPhoto, laterPhoto] = world.photos.rows;
+    const path = "Documents/notes.txt";
+    const original = world.files.stored.find((file) => file.path === path);
+    if (!changedPhoto || !keptPhoto || !laterPhoto || !original) throw new Error("Missing picker fixtures");
+    changedPhoto.name = "Park.png";
+    world.files.texts[path] = "draft note";
+
+    const { alpha } = await open(world, only("home", "assistant", "notice"));
+    await until(alpha, assistant.runtime(alpha), Composer, (state) => state.slot === "Open");
+    await showAttachments();
+    await expect.poll(() => [button(changedPhoto.name) !== undefined, button(keptPhoto.name) !== undefined, button("More photos") !== undefined])
+      .toEqual([true, true, true]);
+    expect(button(laterPhoto.name)).toBeUndefined();
+
+    // spec/app/assistant/attachments.md, "What Android reports is believed: files are listed as soon as access allows, and dropped as soon as it is taken away": returning from another screen reports revoked photo access.
+    world.photos.access = { scope: "denied", images: "denied", videos: "denied" };
+    await seen(false);
+    await seen(true);
+    await expect.poll(() => [button(changedPhoto.name), button(keptPhoto.name), Boolean(button("Allow photos access"))]).toEqual([undefined, undefined, true]);
+    await pressOnTop("Allow photos access");
+    await expect.poll(() => [Boolean(button(changedPhoto.name)), world.photos.promptCount]).toEqual([true, 1]);
+
+    await pressOnTop(changedPhoto.name);
+    await expect.poll(() => button(`Remove ${changedPhoto.name} from the selection`)).toBeDefined();
+    changedPhoto.revision = "replacement-photo-revision";
+    await pressOnTop("Attach selected files");
+    await expect.poll(() => named("Attach files")?.querySelector("[role=alert]")?.textContent).toContain(changedPhoto.name);
+    expect(named("Attached")).toBeNull();
+
+    await pressOnTop(keptPhoto.name);
+    await expect.poll(() => button(`Remove ${keptPhoto.name} from the selection`)).toBeDefined();
+    await pressOnTop("Attach selected files");
+    await expect.poll(() => [named("Attach files") === null, named("Attached")?.textContent?.includes(keptPhoto.name)])
+      .toEqual([true, true]);
+
+    await showAttachments();
+    await expect.poll(() => button(keptPhoto.name)).toBeDefined();
+    const started = Promise.withResolvers<void>();
+    const late = Promise.withResolvers<void>();
+    world.photos.listPermittedGate = (query) => {
+      if (query !== "Original") return undefined;
+      started.resolve();
+      return late.promise;
+    };
+    try {
+      await fill("Search photos", "Original");
+      await started.promise;
+      await pressOnTop("Files");
+      await expect.poll(() => button("Documents")).toBeDefined();
+      await pressOnTop("Documents");
+      await expect.poll(() => button("notes.txt")).toBeDefined();
+      await drawn(async () => { late.resolve(); await late.promise; });
+      expect(button(laterPhoto.name)).toBeUndefined();
+      expect(button("notes.txt")).toBeDefined();
+    } finally {
+      late.resolve();
+    }
+
+    await pressOnTop("notes.txt");
+    await expect.poll(() => button("Remove notes.txt from the selection")).toBeDefined();
+    world.files.stored.splice(world.files.stored.indexOf(original), 1, { ...original });
+    await pressOnTop("Attach selected files");
+    await expect.poll(() => named("Attach files")?.querySelector("[role=alert]")?.textContent).toContain("notes.txt");
+    expect(named("Attached")?.textContent).not.toContain("notes.txt");
+
+    await pressOnTop("notes.txt");
+    await expect.poll(() => button("Remove notes.txt from the selection")).toBeDefined();
+    await pressOnTop("Attach selected files");
+    await expect.poll(() => [named("Attach files") === null, named("Attached")?.textContent?.includes("notes.txt")])
+      .toEqual([true, true]);
+    expect(named("Attached")?.textContent).toContain(keptPhoto.name);
+    expect([named<HTMLTextAreaElement>("Message Alpha")?.value, world.ask.kept.size, world.ask.said]).toEqual(["", 0, []]);
   });
 
   // spec/app/assistant/dock.md, "Focusing or tapping the composer on the bar opens Ask Alpha as a sheet"

@@ -556,8 +556,14 @@ export function remindersRoutes(store: AlphaAppsStore, runtime: AgentRuntimeLike
         const body = asRecord(input.body);
         const title = readString(body, "title");
         if (title === undefined) return { status: 400, body: { error: "invalid_reminder_title" } };
+        const id = readString(body, "id");
+        if (body.createOnly === true && id !== undefined) {
+          const snapshot = store.getReminders();
+          const existing = snapshot.items.find((item) => item.id === id);
+          if (existing !== undefined) return { status: 200, body: { item: existing, snapshot } };
+        }
         const created = store.createItem({
-          id: readString(body, "id"),
+          id,
           listId: readString(body, "listId"),
           title,
           notes: readRawString(body, "notes") ?? "",
@@ -636,7 +642,19 @@ export function remindersRoutes(store: AlphaAppsStore, runtime: AgentRuntimeLike
       path: "/api/alpha/reminders/items/{id}/snooze",
       handler: async (input) => {
         const body = asRecord(input.body);
-        const item = store.snoozeItem(input.parameters.get("id") ?? "", {
+        const id = input.parameters.get("id") ?? "";
+        const expectedRevision = readNumber(body, "expectedRevision");
+        if (body.expectedRevision !== undefined && (expectedRevision === undefined || !Number.isSafeInteger(expectedRevision) || expectedRevision < 1)) {
+          return { status: 400, body: { error: "invalid_reminder_revision" } };
+        }
+        if (expectedRevision !== undefined) {
+          const reviewed = store.getReminders().items.find((item) => item.id === id);
+          if (!reviewed) return { status: 404, body: { error: "reminder_not_found" } };
+          if (reviewed.revision !== expectedRevision || reviewed.completed || reviewed.dueDate === null || reviewed.alertMinutes === null) {
+            return { status: 409, body: { error: "reminder_revision_changed" } };
+          }
+        }
+        const item = store.snoozeItem(id, {
           minutes: readNumber(body, "minutes"),
           untilMs: readNumber(body, "untilMs") ?? readNumber(body, "snoozedUntilMs"),
         });

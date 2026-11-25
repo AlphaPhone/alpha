@@ -19,7 +19,7 @@ export type AssistantTranscriptProps = Omit<ComponentProps<"div">, "children"> &
   liveMessages?: readonly TranscriptMessage[];
   interim?: ReactNode;
   /** The page being read, with the message that a history or search request opened it around. */
-  position?: { page: string; around?: string };
+  position?: { page: string; around?: string; earlier?: string; later?: string };
   /** Whether the transcript is laid out in the open conversation. */
   visible?: boolean;
   /** Whether the page of messages is being read, was read, or could not be. */
@@ -102,11 +102,11 @@ export function AssistantTranscript({ messages, holdMessage, liveMessages, inter
     if (status === "failed") return <EmptyState title="Messages did not load">{onRetry ? <Button variant="secondary" onClick={onRetry}>Try again</Button> : null}</EmptyState>;
     return (
       <>
-        {onEarlier ? <Button variant="ghost" size="sm" className="self-center" onClick={(event) => pageFrom(event.currentTarget, messages[0]?.id, onEarlier)}><ChevronUp aria-hidden />Earlier</Button> : null}
+        {onEarlier ? <Button variant="ghost" size="sm" className="self-center" onClick={(event) => pageFrom(event.currentTarget, position?.earlier ?? messages[0]?.id, onEarlier)}><ChevronUp aria-hidden />Earlier</Button> : null}
         <MessageRows messages={messages} hold={holdMessage} />
         {liveMessages?.length ? <MessageRows messages={liveMessages} /> : null}
         {interim}
-        {onLater ? <Button variant="ghost" size="sm" className="self-center" onClick={(event) => pageFrom(event.currentTarget, messages.at(-1)?.id, onLater)}><ChevronDown aria-hidden />Later</Button> : null}
+        {onLater ? <Button variant="ghost" size="sm" className="self-center" onClick={(event) => pageFrom(event.currentTarget, position?.later ?? messages.at(-1)?.id, onLater)}><ChevronDown aria-hidden />Later</Button> : null}
         {turn ? <AssistantTurnNote {...turn} /> : null}
       </>
     );
