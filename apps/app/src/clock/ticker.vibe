@@ -4,6 +4,7 @@ import * as Alarms from "../../gen/app__clock__alarms.effect.vibe"
 import * as Stopwatch from "../../gen/app__clock__stopwatch.effect.vibe"
 import * as Timers from "../../gen/app__clock__timers.effect.vibe"
 import { started, together } from "../runtime/reactor.vibe"
+import { externalStore } from "../runtime/store.ts"
 import { Time } from "../runtime/time.vibe"
 
 interface TickStore {
@@ -13,18 +14,12 @@ interface TickStore {
 }
 
 function makeTickStore(): TickStore {
-  let value = 0
-  const listeners = new Set<() => void>()
+  const held = externalStore(0)
   return {
-    snapshot: () => value,
-    subscribe(listener: () => void): () => void {
-      listeners.add(listener)
-      return () => { listeners.delete(listener) }
-    },
+    snapshot: held.snapshot,
+    subscribe: held.subscribe,
     set(now: number): void {
-      if (now === value) return
-      value = now
-      for (const listener of [...listeners]) listener()
+      if (now !== held.snapshot()) held.set(now)
     },
   }
 }
