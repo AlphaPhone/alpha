@@ -563,6 +563,9 @@ pure def stepDeletingNeedsTheConfirmation(before: Contacts, via: str, after: Con
 A change that was made closes the form, and a deletion closes the contact;
 the list is read again. An edited contact that is still open is read again
 too. A refused change keeps the form for another try.
+If Android queues a deletion, the change stays pending until the receipt
+for that deletion settles. A deleted receipt confirms it. A kept contact
+or a conflict refuses it.
 When no answer can be trusted the form, the question and the contact close,
 and Contacts says the outcome is unknown.
 

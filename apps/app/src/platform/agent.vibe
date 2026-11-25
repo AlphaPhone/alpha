@@ -1,11 +1,16 @@
 // spec/kit/read.md, "Story: Read from outside"; spec/app/account/index.md, "Story: Have the agent running"; spec/app/platform/index.md, "Story: Talk to the resident agent"; spec/app/platform/index.md, "A request or stream Alpha stops waiting for is withdrawn from the phone, and may still have reached the agent"; spec/app/platform/feed.md, "Story: Follow what my agent does on my screen"
-import { type RuntimeJsonBridge, type RuntimeRequestHeaders, type RuntimeStatus, type RuntimeStreamFrame, RuntimeRequestError, createRuntimeJsonClient } from "@elizaos/agent/client"
+import { type RuntimeJsonBridge, type RuntimeRequestHeaders, type RuntimeStatus, type RuntimeStreamFrame, type TurnResult, RuntimeRequestError, createRuntimeJsonClient } from "@elizaos/agent/client"
 import { BridgeUnavailable } from "@elizaos/os/bridges/bridge"
 import type { AgentEvent, AgentMethod, AgentRecoveryArchive, AgentRecoveryReview, AgentRoute, AgentStatus, AgentStreamData, AgentStreamEnd, AgentTopic, ElizaAgentPlugin } from "@elizaos/os/bridges/definitions/agent"
 import { chunkTaken, deliveryOf, replied } from "../../gen/app__platform.effect.vibe"
 import { Machine as Feed, type FrameKind, machine as feedMachine } from "../../gen/app__platform__feed.effect.vibe"
 import { fresh } from "../runtime/attempts.vibe"
 import { type Failure, type Listening, type Opened, type Remote, type Wired, Unreachable, Unsent, parsed, patience, refusal, remoteAt, sse } from "./remote.vibe"
+
+/** Whether the resident's failed turn carries Cloud's own code for spent allowance and credits. */
+export function isCloudFundsRefusal(result: TurnResult | undefined): boolean {
+  return result?.kind === "AgentFailed" && result.reply?.cloudCode !== undefined
+}
 
 module held {
   import { agentClient } from "@elizaos/os/bridges/agent"

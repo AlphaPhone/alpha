@@ -46,6 +46,8 @@ export interface TelephonyScene {
   contacts: boolean;
   /** Whether the phone lets Alpha write contacts, beside reading them. */
   editable: boolean;
+  /** While this waits, Android has queued the contact deletion and still holds the contact. */
+  holdContactDeletion: Promise<void> | undefined;
   /** The phone's own contact editor, each time it was opened: on a new contact, or on the contact named. */
   editors: string[];
   people: Person[];
@@ -63,6 +65,10 @@ export interface TelephonyScene {
   deliver: (operationId: string) => void;
   /** While set, the radio has not answered a send yet. */
   hold: Promise<void> | undefined;
+  /** Android accepted this MMS and has not reported its carrier outcome. */
+  holdMmsSubmission: boolean;
+  readonly mmsAttempts: string[];
+  readonly mmsQueries: string[];
   /** What the agent's reply drafter answers: one draft, or none; and every thread it was asked about. */
   replyDraft: string | null;
   readonly asked: unknown[];
@@ -91,6 +97,7 @@ export function telephonyScene(): TelephonyScene {
     sms: "granted",
     texts: [{ id: 1, thread: 1, address: "+14155550100", box: "inbox", date: 1_700_000_050_000, body: "See you at five", read: false }],
     holdMessageDeletion: false,
+    holdContactDeletion: undefined,
     smsNotice: undefined,
     sent: [],
     journal: new Map(),
@@ -110,6 +117,9 @@ export function telephonyScene(): TelephonyScene {
     changed: () => {},
     deliver: () => {},
     hold: undefined,
+    holdMmsSubmission: false,
+    mmsAttempts: [],
+    mmsQueries: [],
     replyDraft: "Five works, see you there",
     asked: [],
   };
@@ -264,6 +274,7 @@ function telephony(world: TelephonyScene): Faked {
         return record;
       },
       async sendMms({ operationId, recipients, body, attachments, subscriptionId }) {
+        world.mmsAttempts.push(operationId);
         const kept = world.journal.get(operationId);
         if (kept !== undefined) return kept;
         if (world.hold !== undefined) await world.hold;
@@ -272,20 +283,23 @@ function telephony(world: TelephonyScene): Faked {
           attachments: attachments.map((one) => ({ name: one.name, contentType: one.contentType, bytes: Uint8Array.from(atob(one.data), (byte) => byte.charCodeAt(0)) })),
         });
         world.sent.push({ operationId, recipients, body });
-        const record = { kind: "mms-send", operationId, subscriptionId, bindingHash, status: "sent", createdAt: 1_700_000_400_000 };
+        const record = { kind: "mms-send", operationId, subscriptionId, bindingHash, status: world.holdMmsSubmission ? "submitted" : "sent", createdAt: 1_700_000_400_000 };
         world.journal.set(operationId, record);
         return record;
       },
       cancelSmsReview: () => Promise.resolve(undefined),
       smsSendHistory: () => Promise.resolve({ receipts: [...world.journal.values()] }),
       smsSendResult: ({ operationId }) => Promise.resolve(world.journal.get(operationId) ?? Promise.reject(rejection("No send with this operation", "not-found"))),
-      mmsSendResult: ({ operationId }) => Promise.resolve(world.journal.get(operationId) ?? Promise.reject(rejection("No send with this operation", "not-found"))),
+      mmsSendResult: ({ operationId }) => {
+        world.mmsQueries.push(operationId);
+        return Promise.resolve(world.journal.get(operationId) ?? Promise.reject(rejection("No send with this operation", "not-found")));
+      },
     };
   });
 }
 
 /** `ElizaContacts`: the address book, over `world`. */
-function contacts(world: TelephonyScene): Faked {
+function contacts(world: TelephonyScene, now: () => number): Faked {
   return plugin<AddressBookNativePlugin>(() => {
     const status = () => ({ available: true, readable: world.contacts, writable: world.contacts && world.editable });
     const find = (id: string) => world.people.find((one) => one.id === id);
@@ -350,9 +364,19 @@ function contacts(world: TelephonyScene): Faked {
         if (one === undefined) return { status: "not-found" };
         const revision = one.revision;
         if (await versionOf(id, revision) !== version || find(id) !== one || one.revision !== revision) return { status: "stale" };
-        world.people = world.people.filter((person) => person !== one);
-        const staged = { id: `staged-${world.staged.length + 1}`, kind: "contact", target: { id, version }, phase: "queued", deadline: { expiresAt: 1_800_000_000_000 } };
+        const staged = { id: `staged-${world.staged.length + 1}`, kind: "contact", target: { id, version }, phase: "queued", deadline: { expiresAt: now() + 200 } };
         world.staged.push(staged);
+        const settle = () => {
+          if (staged.phase !== "queued") return;
+          if (find(id) !== one || one.revision !== revision) {
+            staged.phase = "conflict";
+            return;
+          }
+          world.people = world.people.filter((person) => person !== one);
+          staged.phase = "deleted";
+        };
+        if (world.holdContactDeletion === undefined) settle();
+        else void world.holdContactDeletion.then(settle);
         return { status: "queued", deletion: staged };
       },
       resolveNames: ({ numbers }) => Promise.resolve({ names: numbers.map((number) => ({ number, name: world.people.find((one) => one.phoneNumbers.some((phone) => phone.number === number))?.displayName ?? null, photo: null })) }),
@@ -422,10 +446,10 @@ function callState(world: TelephonyScene): Faked {
 }
 
 /** The telephony plugins an Alpha image's host registers. */
-export function telephonyPlugins(world: TelephonyScene): Record<string, Faked> {
+export function telephonyPlugins(world: TelephonyScene, now: () => number): Record<string, Faked> {
   return {
     ElizaTelephony: telephony(world),
-    ElizaContacts: contacts(world),
+    ElizaContacts: contacts(world, now),
     ElizaActionJournal: journal(world),
     AlphaOngoingCall: ongoing(world),
     AlphaCallState: callState(world),
