@@ -314,7 +314,7 @@ type Action = (op: DeviceOperation, call: ExecutorCall) => Promise<unknown>
 
 effect function enrolled(epoch: number, owner: string, image: boolean, runtime: Runtime, executeAction: Action, readBack: Action): Session!unknown {
   const offer = try Schema.decodeUnknownEffect(protocol)(try tryPromise(() => runtime.request(`${prefix}/capabilities`)))
-  if (offer.identityId !== owner) throw new EnrollmentRefused({ reason: "Device owner changed" })
+  if (offer.agentId !== owner) throw new EnrollmentRefused({ reason: "Device agent changed" })
   const origin = "https://device.alpha.invalid"
   const slot = try tryPromise(() => slotFor([origin, owner, offer.agentId]))
   const { key } = try tryPromise(() => enrollment().enrollmentKey({ slot }))
@@ -335,7 +335,7 @@ effect function enrolled(epoch: number, owner: string, image: boolean, runtime: 
     raw = try tryPromise(() => runtime.request(`${prefix}/context`, undefined, headers))
   }
   const confirmed = try Schema.decodeUnknownEffect(context)(raw)
-  if (confirmed.subjectUserId !== owner || confirmed.agentId !== offer.agentId || confirmed.installationId !== offer.agentId) throw new EnrollmentRefused({ reason: "Device scope changed" })
+  if (confirmed.subjectUserId !== offer.identityId || confirmed.agentId !== offer.agentId || confirmed.installationId !== offer.agentId) throw new EnrollmentRefused({ reason: "Device scope changed" })
   const identity = { origin, ownerId: owner, ...confirmed }
   const agent = routes(runtime, headers)
   const execute = new DeviceExecution<DeviceOperation>({
