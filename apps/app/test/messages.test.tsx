@@ -311,15 +311,25 @@ describe("Messages on an Alpha image", () => {
     expect(message()?.getAttribute("aria-label")).toBe("Text Ben");
     await press("Choose contacts");
     await ready(alpha.runtime, Messages, "Recipient picker open", (s) => s.newDraft.picking);
+    await press("Dictate a text to Ben");
+    await ready(messages.runtime(alpha), Voice, "New message recording", (s) => s.recorder.field === "MessagesBar" && s.recorder.stage === "Recording");
+    await press("Stop recording");
+    await ready(messages.runtime(alpha), Voice, "New message transcript returned", (s) => s.recorder.stage === "Closed");
+    const dictated = `${body} Dictated note`;
+    await vi.waitFor(async () => {
+      await drawn(() => undefined);
+      expect(message()?.value).toBe(dictated);
+    }, { timeout: 12_000 });
+    expect(world.telephony.sent).toEqual([]);
     await press("Back");
     await ready(alpha.runtime, Messages, "Only the recipient picker closed", (s) => s.pane === "New" && !s.newDraft.picking);
-    expect(message()?.value).toBe(body);
+    expect(message()?.value).toBe(dictated);
 
     await press("Back");
     await ready(alpha.runtime, Messages, "Messages state", (s) => s.pane === "Threads" && s.list.status === "Loaded");
     await press("New message");
     await ready(alpha.runtime, Messages, "New draft restored", (s) => s.pane === "New" && s.picker.status === "Loaded" && s.newDraft.recipient > 0);
-    expect(message()?.value).toBe(body);
+    expect(message()?.value).toBe(dictated);
     await fill("To", "+14155550100, +14155550122");
     await vi.waitFor(() => expect(button("Send")?.disabled).toBe(false));
     expect(world.telephony.sent).toEqual([]);
@@ -327,7 +337,7 @@ describe("Messages on an Alpha image", () => {
     await ready(alpha.runtime, Composer, "Composer state", (s) => s.outgoing.op.outcome === "Confirmed");
     await ready(alpha.runtime, Messages, "New draft sent", (s) => s.pane === "Threads" && s.list.status === "Loaded");
     expect(world.telephony.sent.map(({ operationId, recipients, body }) => ({ kind: world.telephony.journal.get(operationId)?.kind, recipients, body }))).toEqual([
-      { kind: "mms-send", recipients: ["+14155550100", "+14155550122"], body },
+      { kind: "mms-send", recipients: ["+14155550100", "+14155550122"], body: dictated },
     ]);
     await press("New message");
     await ready(alpha.runtime, Messages, "A fresh New draft", (s) => s.pane === "New" && s.newDraft.recipient === 0);

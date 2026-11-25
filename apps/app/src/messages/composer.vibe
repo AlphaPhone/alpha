@@ -608,7 +608,7 @@ export function newDraftHeld(state: Composer.Composer, revision: number): boolea
 type NewDraftEdit = Partial<Pick<NewMessageDraft, "recipients" | "body" | "pictures">>
 
 /** Put a real edit in the visible New visit, preserving its other fields and retiring any replaced recipient. */
-export effect function editNewMessage(visit: number, edit: NewDraftEdit, closePicker: boolean, expected?: number): boolean!!(Messages | Shell | Drafts | Conversations | Composer.Machine) {
+export effect function editNewMessage(visit: number, edit: NewDraftEdit, closePicker: boolean, expected?: number, picking?: boolean): boolean!!(Messages | Shell | Drafts | Conversations | Composer.Machine) {
   const store = try Drafts
   const messages = try Messages
   const shell = try Shell
@@ -618,6 +618,7 @@ export effect function editNewMessage(visit: number, edit: NewDraftEdit, closePi
     const before = try store.newDraft()
     if (!showing(try shell.get(), "Messages") || !holdsNewDraft(place, visit) || before.revision !== place.newDraft.revision
       || (expected !== undefined && expected !== before.revision)
+      || (picking !== undefined && picking !== place.newDraft.picking)
       || newDraftHeld(try composer.get(), before.revision)) return false
     const draft = { ...before, ...edit, revision: before.revision + 1 }
     if (draft.body.length > MMS_MAX_BODY || draft.recipients.length > 230) return false

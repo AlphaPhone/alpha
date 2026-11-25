@@ -4,7 +4,7 @@ import type { TelephonySubscription } from "@elizaos/os-bridges";
 import { Button, Input, Menu, MenuContent, MenuItem, MenuTrigger, Textarea } from "@repo/ui";
 import { Effect } from "effect";
 import { ArrowUp, Camera, ImagePlus, Mic, Plus, RefreshCw, Square, X } from "lucide-react";
-import { useRef, useState } from "react";
+import { useRef, useState, type RefObject } from "react";
 import type { NewDraft } from "../../gen/app__messages.ts";
 import { useMachine as useComposer } from "../../gen/app__messages__composer.react.ts";
 import { uncertain } from "../../gen/app__messages__sending.ts";
@@ -21,7 +21,16 @@ import type { MessagesProps } from "./Messages.tsx";
 
 const textAction = "min-h-11 underline focus-visible:outline-2 focus-visible:outline-ring";
 
-export function NewMessageDock({ runtime, scope, draft }: { runtime: MessagesProps["runtime"]; scope: NewDraft; draft: NewMessageDraft }) {
+interface NewMessageDockProps {
+  runtime: MessagesProps["runtime"];
+  scope: NewDraft;
+  draft: NewMessageDraft;
+  textarea: RefObject<HTMLTextAreaElement | null>;
+  minHeight: number | undefined;
+  onTyped: () => void;
+}
+
+export function NewMessageDock({ runtime, scope, draft, textarea, minHeight, onTyped }: NewMessageDockProps) {
   const composer = useComposer(runtime);
   const phone = usePhone(runtime);
   const voice = useVoice(runtime);
@@ -55,7 +64,10 @@ export function NewMessageDock({ runtime, scope, draft }: { runtime: MessagesPro
   const stop = { type: "stopRecording", now: untimed } as const;
   const dismiss = { type: "closeRecorder" } as const;
   const retry = { type: "transcribeAgain", now: untimed } as const;
-  const changeBody = (body: string) => void runtime.runPromise(editNewMessage(visit, { body }, false));
+  const changeBody = (body: string) => {
+    onTyped();
+    void runtime.runPromise(editNewMessage(visit, { body }, false));
+  };
   const chooseFile = (input: HTMLInputElement | null) => {
     chooserRevision.current = revision;
     input?.click();
@@ -101,8 +113,8 @@ export function NewMessageDock({ runtime, scope, draft }: { runtime: MessagesPro
             <MenuItem onSelect={() => chooseFile(pictures.current)}><ImagePlus />Add media</MenuItem>
           </MenuContent>
         </Menu>}
-        <Textarea rows={1} aria-label={label} placeholder={label} value={draft.body} maxLength={MMS_MAX_BODY} readOnly={!editable}
-          onChange={(event) => changeBody(event.currentTarget.value)}
+        <Textarea ref={textarea} rows={1} aria-label={label} placeholder={label} value={draft.body} maxLength={MMS_MAX_BODY} readOnly={!editable}
+          onChange={(event) => changeBody(event.currentTarget.value)} style={minHeight === undefined ? undefined : { minHeight }}
           className="max-h-[min(10.5rem,28dvh)] min-h-11 min-w-0 flex-1 overflow-y-auto rounded-none border-0 bg-transparent py-2.75 pr-0.5 pl-2 text-body leading-field shadow-none focus-visible:outline-none" />
         {([["Attach a picture", pictures, false], ["Take a picture", camera, true]] as const).map(([name, input, capture]) => <Input
           key={name} ref={input} type="file" hidden className="hidden" aria-label={name} multiple={!capture} capture={capture ? "environment" : undefined}
@@ -113,10 +125,10 @@ export function NewMessageDock({ runtime, scope, draft }: { runtime: MessagesPro
             chooserRevision.current = undefined;
             if (picked !== undefined && files.length > 0) void runtime.runPromise(attachNewPictures(visit, picked, files));
           }} />)}
-        {hasContent && <Button size="icon" aria-label={checking ? "Check send status" : "Send"} data-alpha-bar-send disabled={!canSend}
+        {hasContent && <Button size="icon" className="disabled:opacity-100" aria-label={checking ? "Check send status" : "Send"} data-alpha-bar-send disabled={!canSend}
           onClick={(event) => void runtime.runPromise(sendNewMessage(visit, revision, selected, event.nativeEvent.isTrusted))}>{checking ? <RefreshCw /> : <ArrowUp />}</Button>}
         {editable && phone.state.telecom === "NoCall" && voice.can({ type: "openRecorder", target: "MessagesBar" }) && <Button variant="ghost" size="icon"
-          aria-label={`Dictate a text to ${first || "them"}`} disabled={picking} onClick={() => void runtime.runPromise(dictateNewMessage(visit, revision))}><Mic /></Button>}
+          aria-label={`Dictate a text to ${first || "them"}`} onClick={() => void runtime.runPromise(dictateNewMessage(visit, revision))}><Mic /></Button>}
       </div>
     )} />
   </>;

@@ -596,6 +596,8 @@ function Picker({ runtime, messages: { state, can, send } }: MessagesProps & { m
   const [typed, setTyped] = useState("");
   const [browsing, setBrowsing] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
+  const messageRef = useRef<HTMLTextAreaElement>(null);
+  const [composingHeight, setComposingHeight] = useState<number>();
   if (!state) return null;
   const fresh = state.pane === "New" ? state.newDraft : undefined;
   const editable = !fresh || !composer.state || !newDraftHeld(composer.state, fresh.revision);
@@ -638,6 +640,7 @@ function Picker({ runtime, messages: { state, can, send } }: MessagesProps & { m
     } else {
       const event = { type: "openNewContacts", visit: fresh.visit } as const;
       if (!can(event)) return;
+      setComposingHeight(messageRef.current?.offsetHeight);
       setTyped("");
       runtime.runSync(Effect.flatMap(Inbox, (inbox) => inbox.set({ typed: "" })));
       void send(event);
@@ -658,7 +661,7 @@ function Picker({ runtime, messages: { state, can, send } }: MessagesProps & { m
           <Input ref={inputRef} type="text" aria-label="To" placeholder={selecting ? `Recipient ${fresh ? before.length + 1 : to.slice(0, -1).filter(Boolean).length + 1}` : "To"} autoComplete="off" autoCapitalize="none" autoCorrect="off" spellCheck={false} maxLength={230}
             data-alpha-messages-recipients value={typedTo} readOnly={!editable} onChange={(event) => find(event.target.value)} className="h-11 rounded-tile border-0 px-4 text-body leading-[normal] focus-visible:outline-none" />
         </form>
-        <Button variant="ghost" size="icon" aria-label={selecting ? "Close contact picker" : "Choose contacts"} aria-expanded={selecting} disabled={!editable && !selecting} onClick={togglePicker}>{selecting && fresh ? <X /> : <Plus />}</Button>
+        <Button variant="ghost" size="icon" aria-label={selecting ? "Close contact picker" : "Choose contacts"} aria-expanded={selecting} disabled={!editable && !selecting} onClick={togglePicker}><Plus /></Button>
       </header>
       {offer?.ticket === state.offeredPicture && (
         <div aria-label="Picture for this message" className="flex px-5 py-2">
@@ -691,7 +694,8 @@ function Picker({ runtime, messages: { state, can, send } }: MessagesProps & { m
         )}
         {showChoices && can({ type: "loadMoreChoices" }) && <button type="button" className={`${textLink} mx-4`} onClick={() => void send({ type: "loadMoreChoices" })}>More contacts</button>}
       </div>
-      {fresh && kept ? <NewMessageDock runtime={runtime} scope={fresh} draft={kept} /> : <CommsBar runtime={runtime} />}
+      {fresh && kept ? <NewMessageDock runtime={runtime} scope={fresh} draft={kept} textarea={messageRef}
+        minHeight={selecting ? composingHeight : undefined} onTyped={() => setComposingHeight(undefined)} /> : <CommsBar runtime={runtime} />}
     </>
   );
 }

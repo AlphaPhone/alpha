@@ -18,7 +18,7 @@ import { Conversations } from "./messages.vibe"
 function messageField(where: Messages.Messages): string {
   if (!where.front) return ""
   if (where.pane === "Conversation" && Messages.readable(where)) return `thread:${where.thread}:${where.page.ticket}`
-  if (where.pane === "New" && !where.newDraft.picking) return `new:${where.newDraft.visit}:${where.newDraft.revision}`
+  if (where.pane === "New") return `new:${where.newDraft.visit}:${where.newDraft.revision}:${where.newDraft.picking}`
   return ""
 }
 
@@ -95,11 +95,12 @@ export effect function dictateNewMessage(visit: number, revision: number): void!
   const voice = try Voice.Machine
   const device = try Device
   const drafts = try Drafts
+  const picking = (try messages.get()).newDraft.picking
   const editableHere = effect {
     const view = try shell.get()
     const place = try messages.get()
     return showing(view, "Messages") && view.assistant === "Bar" && Messages.holdsNewDraft(place, visit)
-      && place.newDraft.revision === revision && !place.newDraft.picking && !newDraftHeld(try composer.get(), revision)
+      && place.newDraft.revision === revision && place.newDraft.picking === picking && !newDraftHeld(try composer.get(), revision)
       && (try phone.get()).telecom === "NoCall" && (try device.showing())
   }
   if (!(try editableHere)) return
@@ -119,7 +120,7 @@ export effect function dictateNewMessage(visit: number, revision: number): void!
         |> Effect.provideService(%, Said, said))
       return
     }
-    try editNewMessage(visit, { body }, false, revision)
+    try editNewMessage(visit, { body }, false, revision, picking)
   })
   if (opened) try contained(voice.send({ type: "startRecording" }), "starting New message dictation")
 }
