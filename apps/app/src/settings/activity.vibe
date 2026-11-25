@@ -1,0 +1,82 @@
+// spec/app/settings/activity.md, "Story: Help the agent recover"
+import type { AgentStatus } from "@elizaos/os-bridges"
+import { MediaReview } from "../assistant/media-review.vibe"
+import * as Pages from "../../gen/app__settings.effect.vibe"
+import * as Activity from "../../gen/app__settings__activity.effect.vibe"
+import { Agent } from "../platform/agent.vibe"
+import { Device, native } from "../platform/device.vibe"
+import { type Job, answer, contained, due, hearing, reacting, started, together, untimed } from "../runtime/reactor.vibe"
+
+function connection(status: AgentStatus | undefined): Activity.Connection {
+  if (status === undefined) return "Offline"
+  if (!status.available || status.state === "unavailable") return "Unpackaged"
+  if (status.state === "running") return "Ready"
+  if (status.state === "starting") return "Starting"
+  if (status.state === "failed" && status.error === "ipc-recovery-retention-limit") return "NeedsRestart"
+  return native() ? "NeedsRetry" : "Offline"
+}
+
+const observed = (seen: Activity.Connection): Activity.Event => ({ type: "connectionReported", connection: seen })
+
+function recover(how: Activity.Recovery): Job<Activity.Event, Agent | Activity.Machine, []> {
+  const failed: Activity.Event = { type: "recoveryReported", connection: "Offline" }
+  return answer("recover", effect {
+    const host = (try Agent).life
+    const current = host.status() catch () => undefined
+    if (how !== "Retry" || connection(current) !== "NeedsRetry") return { type: "recoveryReported", connection: connection(current) } as const
+    const starting = (try Activity.Machine).send(observed("Starting")) catch () => undefined
+    if (starting === undefined) return { type: "recoveryReported", connection: "Starting" } as const
+    const answered = host.start() catch () => undefined
+    return { type: "recoveryReported", connection: connection(answered) } as const
+  }, failed)
+}
+
+const unconfirmed: Activity.Event = { type: "giveUpOnActions", now: untimed }
+
+effect function readActions(reading: number, word: { proposal: string; value: "decline" | "happened" | "did-not-happen" } | undefined): Activity.Event!!MediaReview {
+  const media = try MediaReview
+  const result: Activity.WordResult = word === undefined ? "NoWord" : (try media.settle(word.proposal, word.value)) ? "WordTaken" : "WordUnconfirmed"
+  const rows = try media.history()
+  return { type: "actionsRead", reading, ok: rows !== undefined, rows: rows === undefined ? [] : [...rows], result }
+}
+
+function carry(fx: Activity.Effect): Job<Activity.Event, Agent | Activity.Machine | MediaReview, []> {
+  return match (fx) {
+    when { tag: "Recover", let how }: recover(how);
+    when { tag: "ReadJournal", let reading }: answer("actions", readActions(reading, undefined), unconfirmed);
+    when { tag: "Reject", let proposal, let reading }: answer("actions", readActions(reading, { proposal, value: "decline" }), unconfirmed);
+    when { tag: "Reconcile", let proposal, let happened, let reading }: answer("actions", readActions(reading, { proposal, value: happened ? "happened" : "did-not-happen" }), unconfirmed);
+  }
+}
+
+const hearingHost = hearing(
+  Stream.unwrap(effect {
+    const host = (try Agent).life
+    const read = Stream.fromEffect(Effect.option(host.status()))
+    const change = Stream.catch(host.changes, () => Stream.empty)
+    return Stream.changes(Stream.concat(Stream.map(read, Option.getOrUndefined), change))
+  }),
+  Activity.Machine,
+  (status) => observed(connection(status)),
+)
+
+const readingJournal = started(effect {
+  const machine = try Activity.Machine
+  const pages = Stream.map((try Pages.Machine).changes, (state) => state.page === "Activity")
+  const device = try Device
+  const visible = Stream.concat(Stream.fromEffect(device.showing()), device.visible)
+  const showing = Stream.map(Stream.zipLatest(pages, visible), ([activity, visible]) => activity && visible)
+  try Stream.runForEach(Stream.zipLatest(Stream.changes(showing), machine.changes), effect ([front, state]) => {
+    if (!front) {
+      if (Activity.canLeaveHistory(state)) try contained(machine.send({ type: "leaveHistory" }), "forget the activity journal")
+    } else if (state.connection === "Ready" && state.journal.read.status === "Idle") {
+      try contained(machine.send({ type: "refreshActions", connection: "Ready", at: untimed }), "read the activity journal")
+    }
+  })
+}, "activity journal visit")
+
+/** Real resident status and the owner-fenced phone-action history in Settings. */
+export const activity = together(reacting(Activity, {
+  carry,
+  timers: (state) => state.journal.read.status === "Loading" ? [due<Activity.Event, []>("actions", state.journal.due, unconfirmed)] : [],
+}), hearingHost, readingJournal)

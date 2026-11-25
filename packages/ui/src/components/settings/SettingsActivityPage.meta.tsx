@@ -10,9 +10,9 @@ const onRefresh = fn();
 const onHandOver = fn();
 
 const actions: SettingsActionItem[] = [
-  { proposal: 1, title: "Open the Lisbon flights page in Browser", detail: "Waiting for your word", declinable: true, unsettled: false },
-  { proposal: 2, title: "Send a photo of the receipt to Ana", detail: "Yesterday, 18:20", declinable: false, unsettled: true },
-  { proposal: 3, title: "Add lunch with Bruno to Calendar", detail: "Monday, 12:30", declinable: false, unsettled: false },
+  { proposal: "1", title: "Open the Lisbon flights page in Browser", detail: "Waiting for your word", declinable: true, unsettled: false },
+  { proposal: "2", title: "Send a photo of the receipt to Ana", detail: "Yesterday, 18:20", declinable: false, unsettled: true },
+  { proposal: "3", title: "Add lunch with Bruno to Calendar", detail: "Monday, 12:30", declinable: false, unsettled: false },
 ];
 
 export const meta: ComponentMeta<SettingsActivityPageProps> = {
@@ -39,7 +39,7 @@ export const meta: ComponentMeta<SettingsActivityPageProps> = {
       await userEvent.click(canvas.getByRole("button", { name: "Decline" }));
       await userEvent.click(canvas.getByRole("button", { name: "Didn’t" }));
       await userEvent.click(canvas.getByRole("button", { name: "Conversations" }));
-      await expect([onDecline.mock.calls, onReconcile.mock.calls, onHandOver.mock.calls]).toEqual([[[1]], [[2, false]], [["conversations"]]]);
+      await expect([onDecline.mock.calls, onReconcile.mock.calls, onHandOver.mock.calls]).toEqual([[["1"]], [["2", false]], [["conversations"]]]);
     },
     "Needs restart": async ({ canvasElement }: { canvasElement: HTMLElement }) => {
       onRecover.mockClear();

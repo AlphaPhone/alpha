@@ -25,6 +25,8 @@ export type NoteEditorProps = Omit<ComponentProps<"section">, "title"> & {
   next?: string;
   /** Says what became of the last save, when the owner should know. */
   status?: string;
+  /** Receipts and choices for a draft that is waiting on the owner. */
+  feedback?: ReactNode;
   /** Takes nothing typed while the note is on its way to Recently deleted. */
   locked?: boolean;
   /** The note's actions: a `NoteMenu`. */
@@ -48,7 +50,7 @@ const iconButton = cn(focusRing, "flex size-11 shrink-0 items-center justify-cen
 const box = (done: boolean) => cn("flex size-5.5 items-center justify-center rounded-box", done ? "bg-foreground text-background" : "text-transparent inset-ring-[1.5px] inset-ring-muted-foreground");
 
 /** Writing a text note or a checklist: its title, then its words or its items, under Back, the format, its actions and Done. */
-export function NoteEditor({ title, kind, body = "", items = [], next = "", status, locked = false, menu, onTitle, onBody, onItem, onRemoveItem, onNext, onAddItem, onFormat, onBack, onDone, className, ...props }: NoteEditorProps) {
+export function NoteEditor({ title, kind, body = "", items = [], next = "", status, feedback, locked = false, menu, onTitle, onBody, onItem, onRemoveItem, onNext, onAddItem, onFormat, onBack, onDone, className, ...props }: NoteEditorProps) {
   return (
     <section aria-label={title || "New note"} className={cn("absolute inset-0 z-10 flex flex-col bg-background", className)} {...props}>
       <div className="flex h-14 shrink-0 items-center gap-0.5 px-2">
@@ -63,6 +65,7 @@ export function NoteEditor({ title, kind, body = "", items = [], next = "", stat
         <button type="button" onClick={onDone} className={cn(focusRing, "min-h-11 rounded-full px-3 font-semibold text-foreground active:bg-accent")}>Done</button>
       </div>
       {status && <div role="status" aria-live="polite" className="px-6 pb-1 text-xs text-muted-foreground">{status}</div>}
+      {feedback && <div className="mx-auto w-full max-w-3xl shrink-0 px-6">{feedback}</div>}
       <div className="mx-auto w-full max-w-3xl shrink-0 px-6 pt-1">
         <input
           aria-label="Title"

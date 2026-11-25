@@ -1,19 +1,26 @@
 // spec/app/settings/facts.md, "Story: See what the phone says"; spec/app/settings/android.md, "Story: Change what only Android can change"
-import type { AndroidRoleStatus, NativeCrashEntry, SettingsHandoff, SystemFacts, SystemSettingsPage, LocationPermissionStatus, FilesAccess, StorageVolume } from "@elizaos/os-bridges"
+import type { AndroidRoleStatus, DeviceSettingsStatus, FilesAccess, LibraryScopeKind, LocationPermissionStatus, MirrorStatus, NativeCrashEntry, SettingsHandoff, StorageVolume, SystemFacts, SystemSettingsPage } from "@elizaos/os-bridges"
 import type { Opened, Target } from "../../gen/app__settings__android.ts"
-import type { Access, AccessGrant, Holder, Reading } from "../../gen/app__settings__facts.ts"
+import type { Access, AccessGrant, Alert, Holder, Reading } from "../../gen/app__settings__facts.ts"
 import type { Grant } from "../../gen/kit__permission.ts"
+import { openCarrierSettings } from "./carrier.vibe"
 
 module held {
-  import type { SystemClient } from "@elizaos/os-bridges"
-  import { locationClient } from "@elizaos/os-bridges"
-  import { wifiClient } from "@elizaos/os-bridges"
-  import { filesClient } from "@elizaos/os-bridges"
+  import { registerPlugin } from "@capacitor/core"
+  import { type SystemClient, filesClient, locationClient, noticesClient, permittedPhotosClient, wifiClient } from "@elizaos/os-bridges"
+
+  interface SettingsHost {
+    settingsFacts(): Promise<unknown>
+    openSettings(input: { page: "screen-lock" | "all-files" }): Promise<{ status: "opened"; specific: boolean }>
+  }
 
   let system: Promise<SystemClient> | undefined
   let location: ReturnType<typeof locationClient> | undefined
   let wifi: ReturnType<typeof wifiClient> | undefined
   let files: ReturnType<typeof filesClient> | undefined
+  let photos: ReturnType<typeof permittedPhotosClient> | undefined
+  let notices: ReturnType<typeof noticesClient> | undefined
+  let host: SettingsHost | undefined
   /**
    * eliza's client of `ElizaSystem`, which its bridge makes as it loads: loaded at first use, once the phone's host is
    * up, since Capacitor binds a plugin to the platform it finds when the plugin is first registered.
@@ -33,8 +40,20 @@ module held {
   export function filesOf(): ReturnType<typeof filesClient> {
     return (files ??= filesClient())
   }
+  /** @throws {never} */
+  export function photosOf(): ReturnType<typeof permittedPhotosClient> {
+    return (photos ??= permittedPhotosClient())
+  }
+  /** @throws {never} */
+  export function noticesOf(): ReturnType<typeof noticesClient> {
+    return (notices ??= noticesClient())
+  }
+  /** @throws {never} */
+  export function hostOf(): SettingsHost {
+    return (host ??= registerPlugin<SettingsHost>("AlphaDevice"))
+  }
 }
-import { filesOf, locationOf, systemOf, wifiOf } from held
+import { filesOf, hostOf, locationOf, noticesOf, photosOf, systemOf, wifiOf } from held
 
 module web {
   /** The browser's own answer for `name`, or none where it has no such permission. */
@@ -53,6 +72,7 @@ import { asked } from web
 export interface PhoneReport {
   readonly readings: ReadonlyArray<Reading>
   readonly grants: ReadonlyArray<AccessGrant>
+  readonly alerts: ReadonlyArray<Alert>
   readonly home: Holder
   readonly assistant: Holder
   readonly launcher: boolean
@@ -62,10 +82,12 @@ export interface PhoneReport {
 export service SystemSettings {
   /** What the phone reports now; what it could not read is left out, never guessed. */
   report(): PhoneReport!!
+  /** Whether Android could check one permission under review. */
+  access(access: Access): Option.Option<{ readonly grant: Grant; readonly on: boolean }>!!
   /** Android's dialog for the Home role; returns when it closes. Whether Alpha holds the role is read again, never taken from the dialog. */
   requestHome(): void!!
   /** Android's own page for `target`, for Alpha itself where the page is about Alpha. */
-  open(target: Target, channel: number): Opened!!
+  open(target: Target, channel: string): Opened!!
   /** The problems the phone's log holds, each by its classes and reasons alone, or none where it could not be read. */
   problems(): Option.Option<ReadonlyArray<Problem>>!!
   /** Whether the phone cleared its problem log. */
@@ -77,7 +99,7 @@ export type Problem = Pick<NativeCrashEntry, "at" | "source" | "kind" | "errorCl
 
 const problemOf = ({ at, source, kind, errorClass, rootClass, reason, thread }: NativeCrashEntry): Problem => ({ at, source, kind, errorClass, rootClass, reason, thread })
 
-const empty: PhoneReport = { readings: [], grants: [], home: "NotAlpha", assistant: "NotAlpha", launcher: false }
+const empty: PhoneReport = { readings: [], grants: [], alerts: [], home: "NotAlpha", assistant: "NotAlpha", launcher: false }
 
 function switched(facts: SystemFacts): ReadonlyArray<Reading> {
   const on = (value: boolean | undefined) => (value === undefined ? undefined : value ? "on" : "off")
@@ -117,26 +139,87 @@ function filesGrantOf(access: FilesAccess | undefined): Grant | undefined {
   return access === "granted" ? "Granted" : access === "denied" ? "Denied" : undefined
 }
 
-/** What the phone reports, through eliza's clients of `ElizaSystem` and `ElizaLocation`. */
+const HostFacts = Schema.Struct({
+  androidRelease: Schema.optionalKey(Schema.NonEmptyString),
+  permissions: Schema.optionalKey(Schema.Struct({
+    Camera: Schema.optionalKey(Schema.Boolean),
+    Microphone: Schema.optionalKey(Schema.Boolean),
+    Calendar: Schema.optionalKey(Schema.Boolean),
+  })),
+})
+
+const hostFacts = () => Effect.option(Effect.flatMap(tryPromise(() => hostOf().settingsFacts()), Schema.decodeUnknownEffect(HostFacts)))
+
+function boolGrant(access: Access, allowed: boolean | undefined): AccessGrant[] {
+  return allowed === undefined ? [] : [{ access, grant: allowed ? "Granted" : "Denied" }]
+}
+
+function photoGrant(scope: LibraryScopeKind): Grant {
+  return scope === "full" ? "Granted" : scope === "denied" || scope === "owned" ? "Denied" : "Limited"
+}
+
+const streams: ReadonlyArray<[DeviceSettingsStatus["volumes"][number]["stream"], Reading["fact"]]> = [
+  ["music", "MediaVolume"], ["ring", "RingVolume"], ["alarm", "AlarmVolume"],
+]
+
+function volumesOf(settings: DeviceSettingsStatus): ReadonlyArray<Reading> {
+  return streams.flatMap(([stream, fact]) => {
+    const volume = settings.volumes.find((one) => one.stream === stream)
+    return volume === undefined || volume.max <= 0 || volume.current < 0 || volume.current > volume.max
+      ? [] : [{ fact, value: `${Math.round(100 * volume.current / volume.max)}%` }]
+  })
+}
+
+function mirrorWord(mirror: MirrorStatus): string {
+  if (!mirror.enabled) return "off"
+  if (mirror.paused) return "paused"
+  if (!mirror.accessGranted) return "no access"
+  return mirror.connected ? "on" : "waiting"
+}
+
+/** What the phone reports through its SDK plugins and Alpha's own build facts. */
 effect function phoneReport(): PhoneReport!! {
-  const facts = try settled(async () => (await systemOf()).getSystemFacts())
-  const status = try settled(async () => (await systemOf()).getStatus())
-  const build = try settled(async () => (await systemOf()).getBuildInfo())
-  const located = try settled(() => locationOf().checkPermissions())
-  const stored = try settled(() => filesOf().storageState())
+  const [facts, status, build, located, stored, host, photo, delivery, deviceSettings, collection] = try.all [
+    settled(async () => (await systemOf()).getSystemFacts()),
+    settled(async () => (await systemOf()).getStatus()),
+    settled(async () => (await systemOf()).getBuildInfo()),
+    settled(() => locationOf().checkPermissions()),
+    settled(() => filesOf().storageState()),
+    hostFacts(),
+    settled(() => photosOf().libraryAccess()),
+    settled(() => noticesOf().delivery()),
+    settled(async () => (await systemOf()).getDeviceSettings()),
+    settled(() => noticesOf().mirrorStatus()),
+  ]
+  const settings = Option.getOrUndefined(host)
+  const notices = Option.getOrUndefined(delivery)
+  const alerts = notices?.channels.filter(({ id, name }) => id !== "" && name !== "").map(({ id, name, blocked, groupBlocked }) => ({ id, name, blocked: blocked || groupBlocked })) ?? []
+  const allowedAlerts = notices !== undefined && notices.appEnabled && notices.permissionGranted
   const storage = Option.isSome(stored) ? storageOf(stored.value.volumes) : undefined
   const filesGrant = Option.isSome(stored) ? filesGrantOf(stored.value.access) : undefined
   const readings = [
     ...(Option.isSome(facts) ? switched(facts.value) : []),
     ...(Option.isSome(status) ? [{ fact: "Roles" as const, value: "" }] : []),
-    ...(Option.isSome(build) ? [{ fact: "Versions" as const, value: build.value.version }] : []),
+    ...(Option.isSome(build) && build.value.version !== "" ? [{ fact: "Versions" as const, value: build.value.version }] : []),
+    ...(settings?.androidRelease === undefined ? [] : [{ fact: "AndroidVersion" as const, value: settings.androidRelease }]),
+    ...(notices === undefined ? [] : [{ fact: "Alerts" as const, value: !allowedAlerts ? "off" : alerts.some(({ blocked }) => blocked) ? "some off" : "on" }]),
     ...(storage === undefined ? [] : [storage]),
   ]
   const location = Option.isSome(located) ? grantOf(located.value.location, located.value.accuracy === "approximate") : undefined
   const roles = Option.isSome(status) ? status.value.roles : []
   return {
-    readings,
+    readings: [
+      ...readings,
+      ...(Option.isSome(deviceSettings) ? volumesOf(deviceSettings.value) : []),
+      ...(Option.isSome(collection) ? [{ fact: "CollectionStatus" as const, value: mirrorWord(collection.value) }] : []),
+    ],
+    alerts,
     grants: [
+      ...boolGrant("CameraAccess", settings?.permissions?.Camera),
+      ...boolGrant("MicrophoneAccess", settings?.permissions?.Microphone),
+      ...boolGrant("CalendarAccess", settings?.permissions?.Calendar),
+      ...boolGrant("NotificationsAccess", notices === undefined ? undefined : allowedAlerts),
+      ...(Option.isSome(photo) ? [{ access: "PhotosAccess" as const, grant: photoGrant(photo.value.scope) }] : []),
       ...(location === undefined ? [] : [{ access: "LocationAccess" as const, grant: location }]),
       ...(filesGrant === undefined ? [] : [{ access: "FilesAccess" as const, grant: filesGrant }]),
     ],
@@ -146,13 +229,38 @@ effect function phoneReport(): PhoneReport!! {
   }
 }
 
+const browserPermissions: Readonly<Partial<Record<Access, string>>> = { CameraAccess: "camera", MicrophoneAccess: "microphone", LocationAccess: "geolocation", NotificationsAccess: "notifications" }
+
+const permission = (grant: Grant | undefined, on = true) => Option.map(Option.fromNullishOr(grant), (value) => ({ grant: value, on }))
+
+effect function phoneAccess(access: Access) {
+  switch (access) {
+    case "LocationAccess": {
+      const [located, facts] = try.all [settled(() => locationOf().checkPermissions()), settled(async () => (await systemOf()).getSystemFacts())]
+      return Option.flatMap(located, (status) => permission(grantOf(status.location, status.accuracy === "approximate"), Option.getOrUndefined(facts)?.locationEnabled !== false))
+    }
+    case "PhotosAccess": return Option.map(try settled(() => photosOf().libraryAccess()), (status) => ({ grant: photoGrant(status.scope), on: true }))
+    case "FilesAccess": return Option.flatMap(try settled(() => filesOf().storageState()), (status) => permission(filesGrantOf(status.access)))
+    case "NotificationsAccess": return Option.map(try settled(() => noticesOf().delivery()), (status) => ({ grant: status.permissionGranted ? "Granted" as const : "Denied" as const, on: status.appEnabled }))
+    default: {
+      const permissions = Option.getOrUndefined(try hostFacts())?.permissions
+      const seen = access === "CameraAccess" ? permissions?.Camera : access === "MicrophoneAccess" ? permissions?.Microphone : permissions?.Calendar
+      return permission(seen === undefined ? undefined : seen ? "Granted" : "Denied")
+    }
+  }
+}
+
+effect function browserAccess(access: Access) {
+  const name = browserPermissions[access]
+  return name === undefined ? Option.none<{ readonly grant: Grant; readonly on: boolean }>() : permission(grantOf(try promise(() => asked(name))))
+}
+
 /** What a browser reports: no facts of a phone, and the browser's own answer for each access it knows. */
 effect function browserReport(): PhoneReport!! {
-  const names: ReadonlyArray<[Access, string]> = [["CameraAccess", "camera"], ["MicrophoneAccess", "microphone"], ["LocationAccess", "geolocation"], ["NotificationsAccess", "notifications"]]
   const grants: AccessGrant[] = []
-  for (const [access, name] of names) {
-    const grant = grantOf(try promise(() => asked(name)))
-    if (grant !== undefined) grants.push({ access, grant })
+  for (const access of ["CameraAccess", "MicrophoneAccess", "LocationAccess", "NotificationsAccess"] as const) {
+    const seen = try browserAccess(access)
+    if (Option.isSome(seen)) grants.push({ access, grant: seen.value.grant })
   }
   return { ...empty, grants }
 }
@@ -161,40 +269,49 @@ effect function browserReport(): PhoneReport!! {
 const pages: Readonly<Partial<Record<Target, SystemSettingsPage>>> = {
   AccountsSync: "accounts", WifiNetworks: "wifi", BluetoothDevices: "bluetooth", MobileNetworks: "mobile", AirplaneMode: "airplane",
   DefaultApps: "default-apps", DisplaySettings: "display", Brightness: "display", SoundSettings: "sound", DoNotDisturb: "dnd",
-  BatterySaver: "battery", NotificationAccess: "notifications", LocationSettings: "location", AboutPhone: "about", DeveloperOptions: "developer",
+  BatterySaver: "battery", AlphaAlerts: "notifications", AppPermissions: "privacy", LocationSettings: "location", AboutPhone: "about", DeveloperOptions: "developer",
 }
 
-/** Alpha's own App info, which holds its alerts, permissions and access to photos and files. */
-const alphasOwn: ReadonlyArray<Target> = ["AlphaAlerts", "WorkflowAlerts", "AppPermissions", "PhotoPermissions", "AllFilesAccess"]
-const nearby: ReadonlyArray<Target> = ["MobileNetworks", "AirplaneMode", "DoNotDisturb"]
-
-function openedOf(target: Target, handoff: Pick<SettingsHandoff, "outcome" | "specific">): Opened {
-  if (handoff.outcome !== "Opened") return "NotAtAll"
-  return handoff.specific || !nearby.includes(target) ? "Exactly" : "Nearby"
+function openedOf(handoff: Pick<SettingsHandoff, "outcome" | "specific">): Opened {
+  return handoff.outcome !== "Opened" ? "NotAtAll" : handoff.specific ? "Exactly" : "Nearby"
 }
 
-effect function opening(target: Target): Opened!! {
-  const handed = effect {
-    const system = try tryPromise(() => systemOf())
-    if (target === "AndroidHome") return try tryPromise(() => system.openSettings())
-    if (target === "InternetPanel") return { outcome: try tryPromise(() => wifiOf().openInternetPanel()), specific: true }
-    if (alphasOwn.includes(target)) {
-      const { packageName } = try tryPromise(() => system.getStatus())
-      const { outcome } = try tryPromise(() => system.openAppInfo({ packageName }))
-      return { outcome, specific: true }
+effect function opening(target: Target, channel: string): Opened!! {
+  return effect {
+    if (target === "SimCards" || target === "AccessPointNames") {
+      const opened = try openCarrierSettings(target === "SimCards" ? "sim" : "apn")
+      return opened === "exact" ? "Exactly" : opened === "nearby" ? "Nearby" : "NotAtAll"
     }
-    const page = pages[target]
-    if (page === undefined) return { outcome: "Refused" as const, specific: false }
-    return try tryPromise(() => system.openSettingsPage({ page }))
-  } catch () => ({ outcome: "Refused" as const, specific: false })
-  return openedOf(target, handed)
+    if (target === "ScreenLock" || target === "AllFilesAccess") {
+      const reply = try tryPromise(() => hostOf().openSettings({ page: target === "ScreenLock" ? "screen-lock" : "all-files" }))
+      return reply.status === "opened" ? reply.specific ? "Exactly" : "Nearby" : "NotAtAll"
+    }
+    if (target === "AlertChannel") {
+      try tryPromise(() => noticesOf().openChannelSettings(channel))
+      return "Exactly"
+    }
+    if (target === "NotificationAccess") {
+      try tryPromise(() => noticesOf().openNotificationAccess())
+      return "Exactly"
+    }
+    if (target === "PhotoPermissions") {
+      try tryPromise(() => photosOf().openLibrarySettings())
+      return "Exactly"
+    }
+    if (target === "InternetPanel") return (try tryPromise(() => wifiOf().openInternetPanel())) === "Opened" ? "Exactly" : "NotAtAll"
+    const system = try tryPromise(() => systemOf())
+    if (target === "AndroidHome") return openedOf(try tryPromise(() => system.openSettings()))
+    const page = target === "WorkflowAlerts" ? "notifications" : pages[target]
+    return page === undefined ? "NotAtAll" : openedOf(try tryPromise(() => system.openSettingsPage({ page })))
+  } catch () => "NotAtAll"
 }
 
 /** The phone, through eliza's clients of its plugins. */
 export const phoneSystemSettings = Layer.succeed(SystemSettings, {
   report: phoneReport,
+  access: phoneAccess,
   requestHome: () => ignore(tryPromise(async () => (await systemOf()).requestRole({ role: "home" }))),
-  open: (target: Target, _channel: number) => opening(target),
+  open: opening,
   problems: () => Effect.map(settled(async () => (await systemOf()).crashLog()), Option.map((log) => log.entries.map(problemOf))),
   clearProblems: () => Effect.map(settled(async () => (await systemOf()).clearCrashLog()), Option.isSome),
 })
@@ -202,6 +319,7 @@ export const phoneSystemSettings = Layer.succeed(SystemSettings, {
 /** A browser: none of the phone's facts, roles, pages or log. */
 export const browserSystemSettings = Layer.succeed(SystemSettings, {
   report: browserReport,
+  access: browserAccess,
   requestHome: () => Effect.void,
   open: () => succeed<Opened>("NotAtAll"),
   problems: () => succeed(Option.none<ReadonlyArray<Problem>>()),

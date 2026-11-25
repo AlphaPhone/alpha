@@ -1,0 +1,124 @@
+// spec/app/workflows/approvals.md, "Story: Answer a run's approval on the phone"; spec/app/workflows/approvals.md, "A decision whose answer was lost is settled by reading the approval again"
+import { type WorkflowApproval, type WorkflowRun, WorkflowHttpError } from "@elizaos/plugin-workflow-client"
+import * as Model from "../../gen/app__workflows__approvals.effect.vibe"
+import type { Answer, Effect as Out, Event } from "../../gen/app__workflows__approvals.effect.vibe"
+import * as Listing from "../../gen/app__workflows__list.effect.vibe"
+import * as Sheet from "../../gen/app__workflows__sheet.effect.vibe"
+import { Agent } from "../platform/agent.vibe"
+import { ownerAt } from "../platform/owner.vibe"
+import { type Job, answer, applying, due, reacting, run, together, untimed } from "../runtime/reactor.vibe"
+import { Time } from "../runtime/time.vibe"
+import { WorkflowsApi } from "./api.vibe"
+import { HistoryWordsPort } from "./history.vibe"
+import { Rows } from "./list.vibe"
+
+interface Pending {
+  readonly number: number
+  readonly owner: number
+  readonly runId: number
+  readonly run: WorkflowRun
+  readonly approval: WorkflowApproval
+}
+
+export service ApprovalWords {
+  get(): (Pending | undefined)!!
+  set(owner: number, runId: number, run: WorkflowRun, approval: WorkflowApproval): Pending!!
+  clear(): void!!
+}
+
+const kept = Layer.sync(ApprovalWords, () => {
+  let next = 0
+  let pending: Pending | undefined
+  return {
+    get: () => succeed(pending),
+    set: (owner: number, runId: number, run: WorkflowRun, approval: WorkflowApproval) => sync(() => {
+      if (pending?.owner === owner && pending.run.id === run.id && pending.approval.requestDigest === approval.requestDigest
+        && pending.approval.nodeId === approval.nodeId && pending.approval.iteration === approval.iteration) return pending
+      const found = { owner, runId, run, approval, number: ++next }
+      pending = found
+      return found
+    }),
+    clear: () => sync(() => { pending = undefined }),
+  }
+})
+
+type Needs = Agent | WorkflowsApi | ApprovalWords | Rows | Time | Sheet.Machine
+
+effect function decided(id: number, runId: number, digest: number, approve: boolean): Event!!Needs {
+  const attempted = try (try ApprovalWords).get()
+  const failure: Event = { type: "decisionAnswered", id, applied: false }
+  if (attempted?.number !== digest || attempted.runId !== runId || (approve && !attempted.approval.supported)) return failure
+  const scope = ownerAt() catch () => ""
+  if (!(try (try Rows).sameOwner(scope, attempted.owner))) return failure
+  const { workflow } = try WorkflowsApi
+  const result = effect {
+    try workflow.decideApproval(attempted.run, attempted.approval, approve)
+    return "answered"
+  } catch (error) => error instanceof WorkflowHttpError && [400, 401, 403, 404, 409, 422].includes(error.status) ? "refused" : "unknown"
+  if ((ownerAt() catch () => "") !== scope || result === "unknown") return { type: "restart" }
+  return { type: "decisionAnswered", id, applied: result === "answered" }
+}
+
+effect function checked(ticket: number, runId: number, digest: number, owner: number): Event!!Needs {
+  const failed: Event = { type: "approvalRead", ticket, ok: false, owner, waiting: false, answered: "Unanswered", expires: 0, now: untimed }
+  const expected = try (try ApprovalWords).get()
+  if (expected?.number !== digest || expected.runId !== runId || owner !== expected.owner) return failed
+  const scope = ownerAt() catch () => ""
+  if (!(try (try Rows).sameOwner(scope, owner))) return failed
+  const { workflow } = try WorkflowsApi
+  const receipt = (workflow.approvals(expected.run) catch () => undefined)
+  if (receipt === undefined || (ownerAt() catch () => "") !== scope) return failed
+  const found = receipt?.approvals.find((approval) => approval.requestDigest === expected.approval.requestDigest
+    && approval.nodeId === expected.approval.nodeId && approval.iteration === expected.approval.iteration)
+  const answered: Answer = found?.status === "approved" ? "WasApproved" : found?.status === "denied" ? "WasDenied" : "Unanswered"
+  return { type: "approvalRead", ticket, ok: true, owner, waiting: found?.status === "pending" && receipt?.finished === false,
+    answered, expires: found?.expiresAt ?? 0, now: untimed }
+}
+
+function carry(fx: Out): Job<Event, Needs, []> {
+  return match (fx) {
+    when { tag: "Decide", let id, let runId, let digest, let approve }: answer("approval decision", decided(id, runId, digest, approve), { type: "restart" });
+    when { tag: "ReadApproval", let ticket, let runId, let digest, let owner }: answer("approval receipt",
+      checked(ticket, runId, digest, owner), { type: "approvalRead", ticket, ok: false, owner, waiting: false, answered: "Unanswered", expires: 0, now: untimed });
+    when { tag: "WantNotice" }: run("approval notification", succeed(undefined));
+    when { tag: "DropNotice" }: run("approval notification", succeed(undefined));
+  }
+}
+
+const watching = applying(Sheet.Machine, (state) => ({ owner: state.owner, runId: state.runId, loaded: state.output.status === "Loaded", ticket: state.output.ticket }),
+  effect ({ owner, runId, loaded }: { owner: number; runId: number; loaded: boolean }) => {
+    const approvals = try Model.Machine
+    const words = try ApprovalWords
+    const state = try approvals.get()
+    if (state.owner !== owner) {
+      try words.clear()
+      try ignore(approvals.send({ type: "ownerChanged", owner }))
+    }
+    if (runId === 0) {
+      try ignore(approvals.send({ type: "closeApproval" }))
+      return
+    }
+    if (!loaded) return
+    const list = try (try Listing.Machine).get()
+    if (list.owner !== owner || list.place.tag !== "ListingDetail") return
+    const history = try (try HistoryWordsPort).view(owner, list.place.row)
+    const open = history.opened
+    if (open?.number !== runId) return
+    const approval = open.approvals.find((one) => one.status === "pending" && one.expiresAt !== undefined)
+    if (approval === undefined || approval.expiresAt === undefined) {
+      if (open.raw.finished && state.runId === runId) try ignore(approvals.send({ type: "runEnded", runId }))
+      return
+    }
+    const pending = try words.set(owner, runId, open.raw, approval)
+    const live = try approvals.get()
+    if (live.digest !== pending.number) try ignore(approvals.send({
+      type: "approvalAsked", owner, runId, digest: pending.number, expires: approval.expiresAt, running: !open.raw.finished, now: untimed,
+    }))
+    try ignore(approvals.send({ type: "openApproval", now: untimed }))
+  })
+
+export const approvals = together(
+  reacting(Model, { carry, timers: (state) => state.approval === "Waiting" ? [due<Event, []>("approval expires", state.expires, { type: "expire", now: untimed })] : [] }),
+  kept,
+  watching,
+)

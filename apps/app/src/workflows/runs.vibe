@@ -1,0 +1,195 @@
+// spec/app/workflows/runs.md, "Story: See how a workflow ran"; spec/app/workflows/runs.md, "Story: Run a workflow now"; spec/app/workflows/runs.md, "Story: Stop a run"
+import * as KeyValueStore from "effect/persistence/KeyValueStore"
+import { type WorkflowRun, WorkflowAdmissionRejected, WorkflowHttpError, WorkflowResponseInvalid } from "@elizaos/plugin-workflow-client"
+import * as Model from "../../gen/app__workflows__runs.effect.vibe"
+import type { Effect as Out, Event } from "../../gen/app__workflows__runs.effect.vibe"
+import * as Listing from "../../gen/app__workflows__list.effect.vibe"
+import * as Sheet from "../../gen/app__workflows__sheet.effect.vibe"
+import { Agent } from "../platform/agent.vibe"
+import { ownerAt } from "../platform/owner.vibe"
+import { type Job, answer, applying, following, reacting, started, together } from "../runtime/reactor.vibe"
+import { WorkflowsApi } from "./api.vibe"
+import { DefinitionWords } from "./lifecycle.vibe"
+import { Rows } from "./list.vibe"
+import { statusOf } from "./history.vibe"
+
+interface Anchored {
+  readonly owner: string
+  readonly run: WorkflowRun
+}
+
+export service RunRefs {
+  number(owner: string, run: WorkflowRun): number!!
+  read(id: number): (Anchored | undefined)!!
+}
+
+const references = Layer.sync(RunRefs, () => {
+  const ids = new Map<string, number>()
+  const records = new Map<number, Anchored>()
+  return {
+    number: (owner: string, run: WorkflowRun) => sync(() => {
+      const key = `${owner}/${run.id}`
+      const number = ids.get(key) ?? ids.size + 1
+      ids.set(key, number)
+      records.set(number, { owner, run })
+      return number
+    }),
+    read: (id: number) => succeed(records.get(id)),
+  }
+})
+
+const Retained = Schema.fromJsonString(Schema.Struct({
+  id: Schema.Int, submission: Schema.NonEmptyString, workflow: Schema.NonEmptyString, version: Schema.NonEmptyString,
+}))
+
+const retainedKey = (owner: string, workflow: string) => `alpha/workflows/run/${encodeURIComponent(owner)}/${encodeURIComponent(workflow)}`
+
+type Needs = Agent | WorkflowsApi | Model.Machine | Sheet.Machine | Rows | DefinitionWords | RunRefs | KeyValueStore.KeyValueStore
+
+effect function latest(ticket: number, owner: number): Event!!Needs {
+  const failed: Event = { type: "latestRead", ticket, ok: false, runId: 0, status: "NoRun", version: 0 }
+  const machine = try Model.Machine
+  const state = try machine.get()
+  const rows = try Rows
+  const selected = try rows.row(owner, state.workflow)
+  const { workflow } = try WorkflowsApi
+  const scope = ownerAt() catch () => ""
+  if (state.owner !== owner || selected?.kind !== "Routine" || !(try rows.sameOwner(scope, owner))) return failed
+  const all = (workflow.executions(selected.id) catch () => undefined)
+  const reaffirmed = ownerAt() catch () => ""
+  const live = try machine.get()
+  if (all === undefined || scope !== reaffirmed || live.workflow !== state.workflow || !Model.canLatestRead(live, ticket, 0, "NoRun", 0)) return failed
+  const refs = try RunRefs
+  const known = Model.running(live) ? (try refs.read(live.latest.id))?.run.id : undefined
+  const older = known === undefined ? undefined : all.find((one) => one.id === known)
+  const run = older ?? all.find((one) => statusOf(one) === "Running") ?? all[0]
+  if (run === undefined) return { ...failed, ok: true }
+  const definition = try (try DefinitionWords).read(state.workflow)
+  const version = definition?.workflow.versionId === run.versionId ? definition.version : Math.max(1, (definition?.version ?? 1) - 1)
+  return { type: "latestRead", ticket, ok: true, runId: try refs.number(scope, run), status: statusOf(run), version }
+}
+
+effect function refreshHistory(removed: boolean): void!!Sheet.Machine {
+  try ignore((try Sheet.Machine).send({ type: "readHistory", removed }))
+}
+
+effect function start(id: number, version: number, owner: number): Event!!Needs {
+  const failed: Event = { type: "runAnswered", id, accepted: false, runId: 0, version }
+  const lost: Event = { type: "runUnanswered" }
+  const state = try (try Model.Machine).get()
+  const exact = try (try DefinitionWords).read(state.workflow)
+  const rows = try Rows
+  const scope = ownerAt() catch () => ""
+  const { workflow } = try WorkflowsApi
+  const store = try KeyValueStore.KeyValueStore
+  if (state.owner !== owner || exact?.version !== version || exact.workflow.removed || !(try rows.sameOwner(scope, owner))) return failed
+  const target = exact.workflow
+  const key = retainedKey(scope, target.id)
+  const previous = (store.get(key) catch () => "")
+  const kept = previous === undefined || previous === "" ? undefined : (Schema.decodeUnknownEffect(Retained)(previous) catch () => undefined)
+  if (state.request.again && (kept === undefined || kept.id !== id || kept.version !== target.versionId || kept.workflow !== target.id)) return lost
+  if (!state.request.again && previous !== undefined) return lost
+  let dispatched = state.request.again
+  const hold = effect (submission: string) => {
+    store.set(key, JSON.stringify({ id, submission, workflow: target.id, version: target.versionId }))
+      catch effect () => { throw new WorkflowResponseInvalid({ message: "Could not retain Run now" }) }
+    dispatched = true
+  }
+  const answer = effect {
+    const run = kept !== undefined ? try workflow.resubmit(target.id, target.versionId, kept.submission) : try workflow.run(target.id, target.versionId, hold)
+    return { kind: "accepted", run } as const
+  } catch (failure) => ({
+    kind: !dispatched || failure instanceof WorkflowAdmissionRejected || (failure instanceof WorkflowHttpError && [400, 401, 403, 404, 409, 422].includes(failure.status))
+      ? "refused" as const : "unknown" as const,
+  })
+  if ((ownerAt() catch () => "") !== scope || answer.kind === "unknown") return lost
+  if (answer.kind === "refused") {
+    if (!state.request.again) try ignore(store.remove(key))
+    return failed
+  }
+  try ignore(store.remove(key))
+  try refreshHistory(target.removed)
+  return { type: "runAnswered", id, accepted: true, runId: try (try RunRefs).number(scope, answer.run), version }
+}
+
+effect function check(ticket: number, id: number): Event!!Needs {
+  const failed: Event = { type: "runChecked", ticket, ok: false, found: false, runId: 0, version: 1 }
+  const state = try (try Model.Machine).get()
+  const current = try (try DefinitionWords).read(state.workflow)
+  const rows = try Rows
+  const scope = ownerAt() catch () => ""
+  if (current === undefined || !(try rows.sameOwner(scope, state.owner))) return failed
+  const key = retainedKey(scope, current.workflow.id)
+  const store = try KeyValueStore.KeyValueStore
+  const raw = (store.get(key) catch () => undefined)
+  const held = raw === undefined ? undefined : (Schema.decodeUnknownEffect(Retained)(raw) catch () => undefined)
+  if (held === undefined || held.id !== id || held.workflow !== current.workflow.id) return failed
+  const { workflow } = try WorkflowsApi
+  const answer = (workflow.reconcile(held.workflow, held.version, held.submission) catch () => undefined)
+  const refreshed = (workflow.detail(held.workflow) catch () => undefined)
+  if (answer === undefined || refreshed === undefined || (ownerAt() catch () => "") !== scope) return failed
+  const version = refreshed.versionId === held.version ? state.named : state.named + 1
+  if (answer === null) return { ...failed, ok: true, version }
+  try ignore(store.remove(key))
+  try refreshHistory(refreshed.removed)
+  return { type: "runChecked", ticket, ok: true, found: true, runId: try (try RunRefs).number(scope, answer), version }
+}
+
+effect function stop(id: number, runId: number): Event!!Needs {
+  const found = try (try RunRefs).read(runId)
+  if (found === undefined || (ownerAt() catch () => "") !== found.owner) return { type: "stopAnswered", id, taken: false }
+  const { workflow } = try WorkflowsApi
+  const receipt = (workflow.cancel(found.run.id, found.run.workflowId) catch () => undefined)
+  if (receipt !== undefined) try refreshHistory(false)
+  return { type: "stopAnswered", id, taken: receipt !== undefined }
+}
+
+function carry(fx: Out): Job<Event, Needs, []> {
+  return match (fx) {
+    when { tag: "ReadLatest", let ticket, let owner }: answer("latest workflow run", latest(ticket, owner), { type: "latestRead", ticket, ok: false, runId: 0, status: "NoRun", version: 0 });
+    when { tag: "StartRun", let id, let version, let owner }: answer("start workflow", start(id, version, owner), { type: "runUnanswered" });
+    when { tag: "ReadRunRecord", let ticket, let id }: answer("workflow submission receipt", check(ticket, id), { type: "runChecked", ticket, ok: false, found: false, runId: 0, version: 1 });
+    when { tag: "StopRun", let id, let runId }: answer("stop workflow", stop(id, runId), { type: "stopAnswered", id, taken: false });
+  }
+}
+
+const opened = applying(Listing.Machine, (state) => ({ owner: state.owner, row: state.place.tag === "ListingDetail" ? state.place.row : 0 }),
+  effect ({ owner, row }: { owner: number; row: number }) => {
+    const machine = try Model.Machine
+    const current = try machine.get()
+    if (current.owner !== owner) try ignore(machine.send({ type: "ownerChanged", owner }))
+    const selected = try (try Rows).row(owner, row)
+    if (selected?.kind !== "Routine") {
+      try ignore(machine.send({ type: "cancelRun" }))
+      return
+    }
+    if (current.workflow !== row) try ignore(machine.send({ type: "selectRuns", workflow: row }))
+    if ((try machine.get()).workflow === row) try ignore(machine.send({ type: "readLatest" }))
+  })
+
+const sending = following(Model.Machine, (state) => Model.canSendRun(state), Model.Machine,
+  (ready): Event | undefined => ready ? { type: "sendRun" } : undefined)
+
+const polling = started(effect {
+  const machine = try Model.Machine
+  const listing = try Listing.Machine
+  const active = Stream.changes(Stream.map(Stream.zipLatest(machine.changes, listing.changes), ([state, page]) =>
+    Model.running(state) && page.owner === state.owner && page.place.tag === "ListingDetail" && page.place.row === state.workflow))
+  try Stream.runDrain(Stream.switchMap(active, (running) => running ? Stream.fromEffectRepeat(effect {
+    try sleep("4 seconds")
+    try ignore(machine.send({ type: "readLatest" }))
+  }) : Stream.empty))
+}, "following the running workflow")
+
+export effect function backRuns(): boolean!!Model.Machine {
+  const machine = try Model.Machine
+  if (!Model.canCancelRun(try machine.get())) return false
+  try ignore(machine.send({ type: "cancelRun" }))
+  return true
+}
+
+const ended = applying(Model.Machine, (state) => Model.ended(state.latest.status) ? state.latest.id : 0, effect (id: number) => {
+  if (id > 0) try refreshHistory(false)
+})
+
+export const runs = together(reacting(Model, { carry }), references, opened, sending, polling, ended)

@@ -1,0 +1,97 @@
+// spec/app/notes/transfer.md, "Story: Import and export a text file"; spec/app/notes/transfer.md, "Story: Leave Notes while the picker is open"
+import { noteShareText } from "@elizaos/plugin-notes-client"
+import * as Transfer from "../../gen/app__notes__transfer.effect.vibe"
+import type { Actor } from "../../gen/app__notes__note.effect.vibe"
+import { Machine as Notes } from "../../gen/app__notes.effect.vibe"
+import { Machine as Editor } from "../../gen/app__notes__editor.effect.vibe"
+import { Machine as Shell, showing } from "../../gen/app__shell.effect.vibe"
+import { NoteDocuments, type DocumentResult, noteDocuments } from "../platform/noteDocuments.vibe"
+import type { Agent } from "../platform/agent.vibe"
+import { NoteStore } from "../platform/notes.vibe"
+import { ownerAt } from "../platform/owner.vibe"
+import { Attempts } from "../runtime/attempts.vibe"
+import { type Job, answer, following, reacting, run, together } from "../runtime/reactor.vibe"
+import { NoteContent, numberOf, wordsOf } from "./content.vibe"
+
+const phone: Actor = "Phone"
+
+type InHand = { readonly owner: number; readonly visit: number; readonly choice: DocumentResult }
+
+service Selected {
+  put(value: InHand): void!!
+  take(): (InHand | undefined)!!
+}
+
+const selected = Layer.sync(Selected, () => {
+  let saved: InHand | undefined
+  return {
+    put: (value: InHand) => sync(() => { saved = value }),
+    take: () => sync(() => { const value = saved; saved = undefined; return value }),
+  }
+})
+
+type Scope = Agent | NoteDocuments | NoteContent | NoteStore | Selected | Transfer.Machine | Notes | Editor
+
+effect function picked(fx: Extract<Transfer.Effect, { readonly tag: "Picks" }>): Transfer.Event!!Scope {
+  const unavailable: Transfer.Event = { type: "picked", ticket: fx.ticket, result: "Refused" }
+  const identity = ownerAt() catch () => ""
+  if (identity === "" || numberOf("owner", identity) !== fx.owner) return unavailable
+  const store = try NoteContent
+  const doc = try NoteDocuments
+  const machine = try Transfer.Machine
+  const before = try machine.get()
+  const title = (try store.collection()).noteByNumber.get(before.note)?.title ?? "Note"
+  const chosen = try doc.pick(fx.job === "Importing", title)
+  const after = try machine.get()
+  if (after.owner !== fx.owner || (ownerAt() catch () => "") !== identity || !Transfer.canPicked(after, fx.ticket, phone)) return unavailable
+  if (chosen.status === "picked") {
+    if (fx.job === "Importing" && (chosen.text === undefined || chosen.text.trim().length === 0 || chosen.text.length > 20_241)) {
+      return { type: "picked", ticket: fx.ticket, result: "Unreadable" }
+    }
+    try (try Selected).put({ owner: fx.owner, visit: after.visit, choice: chosen })
+    return { type: "picked", ticket: fx.ticket, result: "Picked" }
+  }
+  return { type: "picked", ticket: fx.ticket, result: chosen.status === "unreadable" ? "Unreadable" : chosen.status === "cancelled" ? "Cancelled" : "Refused" }
+}
+
+effect function written(fx: Extract<Transfer.Effect, { readonly tag: "Imports" | "Exports" }>): Transfer.Event!!(Scope | Attempts) {
+  const failed: Transfer.Event = { type: "written", ticket: fx.ticket, ok: false, known: true }
+  const identity = ownerAt() catch () => ""
+  const transfer = try (try Transfer.Machine).get()
+  const held = try (try Selected).take()
+  if (identity === "" || numberOf("owner", identity) !== fx.owner || held?.owner !== fx.owner || held.visit !== transfer.from) return failed
+  if (fx.tag === "Imports") {
+    const text = held.choice.text
+    if (text === undefined) return failed
+    const store = try NoteStore
+    const result = store.create({ content: text, format: { kind: "text", data: { origin: "imported" } }, creationId: try (try Attempts).key(fx.ticket) }) catch (error) => error
+    if ("known" in result) return { ...failed, known: result.known }
+    try ignore((try Notes).send({ type: "storeChanged" }, phone))
+    return { ...failed, ok: true }
+  }
+  const handle = held.choice.handle
+  if (handle === undefined) return failed
+  const content = try NoteContent
+  const collection = try content.collection()
+  const note = collection.noteByNumber.get(fx.note)
+  const draft = try content.draft()
+  const saved = note === undefined ? undefined : noteShareText(note)
+  const body = fx.draft ? (draft?.owner === identity ? wordsOf(draft) : try content.rawDraft(identity))
+    : collection.version === fx.revision && saved !== undefined ? `${saved.title}\n${saved.text}` : undefined
+  if (body === undefined) return failed
+  const outcome = try (try NoteDocuments).write(handle, body)
+  return { ...failed, ok: outcome.status === "exported", known: outcome.status !== "unverified" }
+}
+
+function carry(fx: Transfer.Effect): Job<Transfer.Event, Scope, [Actor]> {
+  return match (fx) {
+    when { tag: "Picks" }: answer("picker", picked(fx), { type: "picked", ticket: fx.ticket, result: "Threw" }, phone);
+    when { tag: "Imports" }: answer("import", written(fx), { type: "written", ticket: fx.ticket, ok: false, known: false }, phone);
+    when { tag: "Exports" }: answer("export", written(fx), { type: "written", ticket: fx.ticket, ok: false, known: false }, phone);
+    when { tag: "SavedOut" }: run("draft exported", effect { try ignore((try Editor).send({ type: "draftSavedOut" }, phone)) }, phone);
+  }
+}
+
+const leaves = following(Shell, (shell) => showing(shell, "Notes"), Transfer.Machine, (front): Transfer.Event | undefined => front ? undefined : { type: "left" }, phone)
+
+export const transfers = Layer.provideMerge(together(reacting(Transfer, { carry }), leaves), Layer.merge(noteDocuments, selected))

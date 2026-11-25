@@ -6,17 +6,26 @@ import { ask } from "../platform/remote.vibe"
 
 export service WorkflowsApi {
   readonly workflow: WorkflowClient
+  readonly request: WorkflowRequest
 }
 
 export const workflowsApi = Layer.effect(WorkflowsApi, effect {
   const { runtime } = try Agent
+  const inFlight = new Map<string, Promise<unknown>>()
+  const read = (path: string) => {
+    const pending = inFlight.get(path)
+    if (pending !== undefined) return pending
+    const fresh = runtime.request(path).finally(() => { inFlight.delete(path) })
+    inFlight.set(path, fresh)
+    return fresh
+  }
   const request: WorkflowRequest = effect (path: string, body: unknown) => tryPromise({
-    try: () => runtime.request(path, body),
+    try: () => body === undefined ? read(path) : runtime.request(path, body),
     catch: (error) => error instanceof RuntimeRequestError
       ? workflowHttpError(error.status, { code: error.code, error: error.message })
       : workflowHttpError(0, {}),
   })
-  return { workflow: workflowClient(request) }
+  return { workflow: workflowClient(request), request }
 })
 
 const Identifier = Schema.NonEmptyString

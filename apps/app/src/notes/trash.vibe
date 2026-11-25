@@ -1,0 +1,119 @@
+// spec/app/notes/trash.md, "Story: Delete a note and get it back"; spec/app/notes/trash.md, "Story: Erase for good"; spec/app/notes/trash.md, "Story: Stay honest when an action is cut off"
+import * as KeyValueStore from "effect/persistence/KeyValueStore"
+import * as Trash from "../../gen/app__notes__trash.effect.vibe"
+import type { Actor } from "../../gen/app__notes__note.effect.vibe"
+import { Machine as Notes } from "../../gen/app__notes.effect.vibe"
+import { Machine as Editor } from "../../gen/app__notes__editor.effect.vibe"
+import { type Agent } from "../platform/agent.vibe"
+import { NoteDevice } from "../platform/noteDevice.vibe"
+import { NoteStore } from "../platform/notes.vibe"
+import { ownerAt } from "../platform/owner.vibe"
+import { Attempts } from "../runtime/attempts.vibe"
+import { type Job, answer, reacting, run } from "../runtime/reactor.vibe"
+import { NoteContent, audioIdOf, numberOf } from "./content.vibe"
+
+const phone: Actor = "Phone"
+
+effect function listed(owner: number, ticket: number): Trash.Event!!(Agent | NoteStore | NoteContent | Trash.Machine) {
+  const failed: Trash.Event = { type: "listed", ticket, ok: false, entries: [] }
+  const identity = ownerAt() catch () => ""
+  if (identity === "" || numberOf("owner", identity) !== owner) return failed
+  const snapshot = (try NoteStore).read() catch () => undefined
+  if (snapshot?.trash === undefined || (ownerAt() catch () => "") !== identity) return failed
+  const bin = try (try Trash.Machine).get()
+  if (bin.owner !== owner || !Trash.canListed(bin, ticket, phone)) return failed
+  try ignore((try NoteContent).publish(identity, snapshot))
+  const entries = snapshot.trash.map(({ note, deletedAt }) => ({
+    id: numberOf("note", note.id),
+    revision: snapshot.revision + 1,
+    at: Date.parse(deletedAt),
+    recording: audioIdOf(note) === "" ? 0 : numberOf("recording", audioIdOf(note)),
+  })).filter((entry) => Number.isSafeInteger(entry.at) && entry.at > 0)
+  return { type: "listed", ticket, ok: true, entries }
+}
+
+effect function action(fx: Extract<Trash.Effect, { readonly tag: "Does" }>): Trash.Event!!(Agent | NoteStore) {
+  const { owner, ticket, act, subject, revision, asOf } = fx
+  const failed: Trash.Event = { type: "finished", ticket, verdict: "Denied", revision }
+  const lost: Trash.Event = { ...failed, verdict: "Lost" }
+  const done: Trash.Event = { ...failed, verdict: "Done" }
+  const identity = ownerAt() catch () => ""
+  if (identity === "" || numberOf("owner", identity) !== owner) return failed
+  const store = try NoteStore
+  const snapshot = store.read() catch () => undefined
+  if (snapshot?.trash === undefined) return failed
+  const note = snapshot.notes.find((row) => numberOf("note", row.id) === subject)
+  const entry = snapshot.trash.find((row) => numberOf("note", row.note.id) === subject)
+  if (act !== "Sweep" && snapshot.revision + 1 !== revision) return failed
+  return effect {
+    switch (act) {
+      case "Discard":
+        if (note === undefined) return failed
+        try store.discard(note.id)
+        return done
+      case "Recover":
+        if (entry === undefined) return failed
+        try store.recover(entry.note.id, snapshot.revision)
+        return done
+      case "Erase":
+        if (entry === undefined) return failed
+        try store.erase({ scope: "entry", id: entry.note.id, deletedAt: entry.deletedAt, expectedRevision: snapshot.revision })
+        return done
+      case "EmptyAll":
+        try store.erase({ scope: "all", expectedRevision: snapshot.revision })
+        return done
+      case "Sweep": {
+        let latest = snapshot.revision
+        for (const row of snapshot.trash.filter((item) => Date.parse(item.deletedAt) + Trash.retention <= asOf)) {
+          const erased = try store.erase({ scope: "entry", id: row.note.id, deletedAt: row.deletedAt, expectedRevision: latest })
+          latest = erased.state.revision
+        }
+        return done
+      }
+      case "Destroy":
+        return failed
+    }
+  } catch (error) => error.known && act !== "Sweep" ? failed : lost
+}
+
+effect function cleanRecorded(ids: ReadonlyArray<number>): boolean!!(Agent | NoteStore | NoteDevice) {
+  const identity = ownerAt() catch () => ""
+  if (identity === "") return false
+  const store = try NoteStore
+  const snapshot = store.read() catch () => undefined
+  const receipts = store.cleanup() catch () => undefined
+  if (snapshot === undefined || receipts === undefined || (ownerAt() catch () => "") !== identity) return false
+  const device = try NoteDevice
+  const retained = new Set([...snapshot.notes, ...(snapshot.trash ?? []).map((entry) => entry.note)].map(audioIdOf))
+  let ok = true
+  for (const receipt of receipts) {
+    if (!ids.includes(numberOf("recording", receipt.audioId))) continue
+    if (retained.has(receipt.audioId) || !(try device.purge(receipt))) { ok = false; continue }
+    const acknowledged = store.cleaned(receipt) catch () => false
+    ok = ok && acknowledged
+  }
+  return ok
+}
+
+function carry(fx: Trash.Effect): Job<Trash.Event, Agent | NoteStore | NoteDevice | NoteContent | Trash.Machine | KeyValueStore.KeyValueStore | Notes | Editor, [Actor]> {
+  return match (fx) {
+    when { tag: "Lists" }: answer("trash", listed(fx.owner, fx.ticket), { type: "listed", ticket: fx.ticket, ok: false, entries: [] }, phone);
+    when { tag: "Keeps" }: answer(`keep ${fx.ticket}`, effect {
+      const number = try (try Attempts).key(fx.ticket)
+      const shelf = try KeyValueStore.KeyValueStore
+      const key = `alpha/trash/${number}`
+      const entry = JSON.stringify({ owner: fx.owner, act: fx.act, subject: fx.subject, recordings: fx.recordings })
+      const kept = effect { try shelf.set(key, entry); return (try shelf.get(key)) === entry } catch () => false
+      return { type: "kept", ticket: fx.ticket, ok: kept } satisfies Trash.Event
+    }, { type: "kept", ticket: fx.ticket, ok: false }, phone);
+    when { tag: "Does" }: answer(`action ${fx.ticket}`, action(fx), { type: "finished", ticket: fx.ticket, verdict: "Lost", revision: fx.revision }, phone);
+    when { tag: "ErasesAudio" }: answer(`audio ${fx.ticket}`, effect { return { type: "audioErased", ticket: fx.ticket, ok: try cleanRecorded(fx.recordings) } satisfies Trash.Event }, { type: "audioErased", ticket: fx.ticket, ok: false }, phone);
+    when { tag: "Changed" }: run("notes changed", effect { try ignore((try Notes).send({ type: "storeChanged" }, phone)) }, phone);
+    when { tag: "Answers" }: run(`deletion ${fx.ticket}`, effect {
+      try ignore((try Editor).send({ type: "deleted", ticket: fx.ticket, binned: fx.binned, told: fx.told }, phone))
+    }, phone);
+  }
+}
+
+/** Notes Trash with the phone's durable attempt numbers and the agent's canonical store. */
+export const trashing = reacting(Trash, { keep: 1, open: [{ type: "restart" }, phone], carry })
