@@ -17,6 +17,8 @@ export type HomeScreenProps = {
   editing?: boolean;
   /** Another launcher surface is over Home. */
   covered?: boolean;
+  /** The launcher reserves the status bar above the Home cards. */
+  launcher?: boolean;
   /** Opens a tile's app; left out where nothing may be opened. */
   onOpenTile?: (id: string) => void;
   /** Starts editing from a long press on a tile; left out off the phone, before the tiles are read and under a layer. */
@@ -52,13 +54,13 @@ export type HomeScreenProps = {
  * @model spec/app/home/index.md
  */
 export function HomeScreen({
-  cards = [], tiles, editing = false, covered = false, onOpenTile, onBeginEditing, hold, onRemoveTile, onMoveTile, scrollRef,
+  cards = [], tiles, editing = false, covered = false, launcher = false, onOpenTile, onBeginEditing, hold, onRemoveTile, onMoveTile, scrollRef,
   onShowHidden, onDone, notice, adding = false, hidden = [], onAddToHome, onCloseAdding = () => undefined, className,
 }: HomeScreenProps) {
   return (
     <div inert={covered || undefined} className={cn("flex h-full min-h-0 flex-1 flex-col bg-background text-base text-foreground", className)}>
       <div ref={scrollRef} className={cn(dockClearance, "flex min-h-0 flex-1 flex-col overflow-x-hidden overflow-y-auto overscroll-y-contain")}>
-        <div className="min-h-[calc(max(var(--alpha-native-inset-top,0px),env(safe-area-inset-top))+--spacing(3))] shrink-0">
+        <div className={cn("shrink-0", launcher ? "min-h-[max(--spacing(16),calc(max(var(--alpha-native-inset-top,0px),env(safe-area-inset-top))+--spacing(3)))]" : "min-h-[calc(max(var(--alpha-native-inset-top,0px),env(safe-area-inset-top))+--spacing(3))]")}>
           <h1 className="sr-only">Home</h1>
         </div>
         {editing ? <HomeEditBar onShowHidden={onShowHidden} onDone={onDone} notice={notice} className="pb-3" /> : null}
