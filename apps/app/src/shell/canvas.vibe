@@ -15,12 +15,20 @@ module page {
     const visible = Math.round(Math.min(height, window.visualViewport?.height ?? height))
     return { width, height, visible: Math.max(1, visible) }
   }
+  const textInputs = new Set(["email", "number", "password", "search", "tel", "text", "url"])
+
+  function editable(element: Element | null): element is HTMLElement {
+    if (!(element instanceof HTMLElement)) return false
+    if (element instanceof HTMLInputElement) return textInputs.has(element.type) && !element.readOnly && !element.matches(":disabled")
+    if (element instanceof HTMLTextAreaElement) return !element.readOnly && !element.matches(":disabled")
+    return element.isContentEditable
+  }
+
   /** What has focus: Ask Alpha's composer, another field, or nothing that takes text. @throws {never} */
   export function focused(): "Composer" | "OtherField" | "NoField" {
     const active = document.activeElement
-    if (!(active instanceof HTMLElement)) return "NoField"
-    if (active.closest("[data-alpha-composer]")) return "Composer"
-    return active.matches("input, textarea, [contenteditable=true]") ? "OtherField" : "NoField"
+    if (!editable(active)) return "NoField"
+    return active.closest("[data-alpha-composer]") ? "Composer" : "OtherField"
   }
 
   /** Android's most recent IME report, if this page has received one. @throws {never} */
@@ -84,9 +92,8 @@ module page {
 
   /** Put away the composer if it still owns the field. @throws {never} */
   export function releaseComposer(): void {
-    if (typeof document !== "undefined" && document.activeElement instanceof HTMLElement && document.activeElement.matches("[data-alpha-composer]")) {
-      document.activeElement.blur()
-    }
+    const active = typeof document === "undefined" ? null : document.activeElement
+    if (editable(active) && active.closest("[data-alpha-composer]")) active.blur()
   }
 }
 import { type Heard, focused, measured, nativeKeyboard, paged, releaseComposer, sized, watched } from page

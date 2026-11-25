@@ -134,6 +134,9 @@ pure def refresh(s: Contacts): Moved =
 
 ### Searching or changing the filter chip starts a new list
 
+The header search and the closed Ask Alpha bar both filter on the phone
+while the owner types. Submitting the bar passes those words to Ask Alpha.
+
 ```quint
 pure def narrowed(s: Contacts): bool = s.sought or s.chip != Everyone
 
