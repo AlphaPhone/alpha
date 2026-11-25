@@ -83,23 +83,27 @@ pure val weight_edit = 3
 pure val weight_deleted = 3
 ```
 
-### The owner opens a note, or starts a new one, only when no unsaved draft of theirs waits and nothing else of Notes is open
+### The owner opens a note, or starts a new one, and the agent opens the one note the owner just named, only when no unsaved draft waits and nothing else of Notes is open
 
 A draft left unsaved, by closing, a failed save or a restart, is offered
 first, and nothing else opens until it is saved or discarded. A note opens
 as the list shows it, at its revision and with its source (Notes, "The
 owner opens a note the list shows, when nothing else of Notes is open, and
-it opens as listed"). A new note needs the owner's notes available (Notes,
+it opens as listed"). The agent opens only the one note the owner just named, as
+Notes lets it (Notes, "The agent opens the one note the owner named, as the
+list shows it now, once for the owner's current turn, and is told whether
+it opened"); an owner's tap carries no request. A new note needs the
+owner's notes available (Notes,
 "Nothing new can be made while the notes are unavailable or storage has
 failed"), and is made in the folder the list is narrowed to (none is 0).
 
 ```quint
 pure def free(e: Editor): bool = not(e.showing) and not(waiting(e)) and isOwner(e.owner)
 
-pure def canOpenNote(e: Editor, id: int, revision: int, kind: Kind, link: Source, covered: bool, by: Actor): bool =
-  mayOpen(covered, by) and free(e) and id > 0 and revision > 0 and writable(kind) and sound(link) and link.tie != AudioLink
+pure def canOpenNote(e: Editor, id: int, revision: int, kind: Kind, link: Source, covered: bool, req: Request, by: Actor): bool =
+  mayOpenNote(covered, by, req) and free(e) and id > 0 and revision > 0 and writable(kind) and sound(link) and link.tie != AudioLink
 
-pure def openNote(e: Editor, id: int, revision: int, kind: Kind, link: Source, covered: bool, by: Actor): Editor =
+pure def openNote(e: Editor, id: int, revision: int, kind: Kind, link: Source, covered: bool, req: Request, by: Actor): Editor =
   { ...letGo(e.owner, e), note: id, kind: kind, draft: { ...D::blank, base: revision }, showing: true, link: link }
 
 pure def canNewNote(e: Editor, kind: Kind, available: bool, folder: int, covered: bool, by: Actor): bool =

@@ -28,7 +28,8 @@ A note row says its revision, what kind of note it is, where it came from,
 the source it points back to, its folder (none is 0) and whether it is
 pinned. The folders have a revision of their own. The list remembers the
 owner its last reading was asked for, whether the store changed while it
-was busy, and every folder number it saw removed.
+was busy, every folder number it saw removed, and the last turn of the
+owner's for which the agent opened a note (none is 0).
 
 ```quint
 import read as R from "../../kit/read"
@@ -45,7 +46,7 @@ type Notes = {
   owner: int, asked: int, read: R::Read, version: int, rows: List[Row], folders: List[Folder], shelf: int,
   filter: int, retired: List[int], again: bool, storage: bool,
   writing: A::Attempt, change: Change, wrote: int, fromProposal: bool,
-  proposal: Change, proposed: bool, declined: bool, review: V::Review,
+  proposal: Change, proposed: bool, declined: bool, review: V::Review, agentTurn: int,
 }
 
 pure val nothing: Change =
@@ -55,7 +56,7 @@ pure val initial: Notes = {
   owner: 0, asked: 0, read: R::unread, version: 0, rows: List(), folders: List(), shelf: 0,
   filter: 0, retired: List(), again: false, storage: true,
   writing: A::plan(0), change: nothing, wrote: 0, fromProposal: false,
-  proposal: nothing, proposed: false, declined: false, review: V::unreviewed,
+  proposal: nothing, proposed: false, declined: false, review: V::unreviewed, agentTurn: 0,
 }
 
 pure def hasNote(rows: List[Row], id: int): bool = rows.some(r => r.id == id)
@@ -67,15 +68,17 @@ pure def writing(s: Notes): bool = inFlight(s.writing)
 ### What the list asks of the world
 
 To read the owner's notes, to write one change to the owner's store, to
-open a note the list shows, and to send the owner to the account area to
-connect the agent's notes.
+open a note the list shows, to send the owner to the account area to
+connect the agent's notes, and to tell the agent whether the note it named
+for a turn opened.
 
 ```quint
 type Effect =
   | Lists({ ticket: int, owner: int })
   | Writes({ ticket: int, owner: int, change: Change })
-  | Shows({ row: Row })
+  | Shows({ row: Row, by: Actor, req: Request })
   | OpensAccount
+  | Opened({ turn: int, ok: bool })
 type Moved = { state: Notes, out: List[Effect] }
 ```
 
@@ -123,6 +126,7 @@ pure val weight_changeWritten = 3
 pure val weight_propose = 3
 pure val weight_showProposal = 3
 pure val weight_approve = 3
+pure val weight_agentOpen = 3
 ```
 
 ### Opening Notes, or trying again, reads the owner's notes
@@ -345,7 +349,7 @@ pure def sometimesAFolderRemoved(s: Notes): bool = s.retired != List() and s.rea
 ### The owner opens a note the list shows, when nothing else of Notes is open, and it opens as listed
 
 The list hands the row it shows, at the revision and with the source it
-read, to the view that opens it.
+read, to the view that opens it, in the name of whoever opened it.
 
 ```quint
 pure def canOpenRow(s: Notes, id: int, covered: bool, by: Actor): bool =
@@ -353,10 +357,55 @@ pure def canOpenRow(s: Notes, id: int, covered: bool, by: Actor): bool =
 
 pure def shownRow(s: Notes, id: int): Row = shown(s).select(r => r.id == id).nthOr(0, blankRow)
 
-pure def openRow(s: Notes, id: int, covered: bool, by: Actor): Moved = { state: s, out: List(Shows({ row: shownRow(s, id) })) }
+pure def openRow(s: Notes, id: int, covered: bool, by: Actor): Moved =
+  { state: s, out: List(Shows({ row: shownRow(s, id), by: by, req: noRequest })) }
 
 pure def stepANoteOpensAsListed(before: Notes, via: str, after: Notes, out: List[Effect]): bool =
   out.every(e => match e { | Shows(x) => shown(before).includes(x.row) and x.row.id > 0 | _ => true })
+```
+
+### The agent opens the one note the owner named, as the list shows it now, once for the owner's current turn, and is told whether it opened
+
+The model names the note in answer to the owner's request now, and the
+phone says which turn of the owner's that is, whether the screen it was
+asked from is sensitive, and whether a draft of another note waits unsaved
+(A note, "Only the owner opens a dialog or a question in Notes; a note is
+opened by the owner, or by the agent for the one the owner just named; and
+nothing opens while anything else of Notes is open"). The note opens as the
+list shows it, as the owner's tap would open it. A link note opens only in
+its dialog, which is the owner's alone, so the agent cannot open one. The
+agent is told once whether it opened; nothing else is said.
+
+```quint
+pure def canAgentOpen(s: Notes, id: int, covered: bool, req: Request, by: Actor): bool =
+  by == Agent and isOwner(s.owner) and req.turn > 0 and req.opened == s.agentTurn
+
+pure def agentOpens(s: Notes, id: int, covered: bool, req: Request, by: Actor): bool =
+  mayOpenNote(covered, by, req) and s.read.status == R::Loaded and id > 0 and shown(s).some(x => x.id == id)
+    and viewFor(shownRow(s, id).kind) != Visiting
+
+pure def agentOpen(s: Notes, id: int, covered: bool, req: Request, by: Actor): Moved =
+  if (agentOpens(s, id, covered, req, by))
+    { state: { ...s, agentTurn: req.turn }, out: List(Shows({ row: shownRow(s, id), by: by, req: req }), Opened({ turn: req.turn, ok: true })) }
+  else { state: s, out: List(Opened({ turn: req.turn, ok: false })) }
+```
+
+### The agent opens at most one note for each turn of the owner's, only for the turn that is current, and never over anything of Notes
+
+```quint
+pure def stepTheAgentOpensOnceForTheCurrentTurn(before: Notes, via: str, after: Notes, out: List[Effect]): bool =
+  out.every(e => match e {
+    | Opened(o) => via == "agentOpen" and (o.ok implies (o.turn > before.agentTurn and after.agentTurn == o.turn))
+    | Shows(x) => (via == "openRow" and x.by == Owner) or (via == "agentOpen" and x.by == Agent and after.agentTurn > before.agentTurn)
+    | _ => true
+  })
+    and (after.agentTurn >= before.agentTurn or via == "ownerChanged" or via == "restart")
+```
+
+### The agent can open the note the owner named
+
+```quint
+pure def sometimesTheAgentOpenedTheNoteNamed(s: Notes): bool = s.agentTurn > 1 and s.read.status == R::Loaded
 ```
 
 ### A voice note opens only as a voice note, a link note only in its dialog, and text and checklists only in the editor
@@ -644,7 +693,7 @@ pure def canOwnerChanged(s: Notes, owner: int, by: Actor): bool = by == Phone an
 pure def ownerChanged(s: Notes, owner: int, by: Actor): Notes =
   { ...s, owner: owner, read: dropped(s.read), version: 0, rows: List(), folders: List(), shelf: 0, filter: 0,
     retired: List(), again: false, writing: cutOff(s.writing), change: nothing, fromProposal: false,
-    proposal: nothing, proposed: false, declined: false, review: V::dismiss(s.review) }
+    proposal: nothing, proposed: false, declined: false, review: V::dismiss(s.review), agentTurn: 0 }
 ```
 
 ### Everything shown, read or written belongs to the owner the phone has now
@@ -690,7 +739,8 @@ pure def canRestart(s: Notes, by: Actor): bool = by == Phone
 
 pure def restart(s: Notes, by: Actor): Notes =
   { ...s, rows: List(), folders: List(), filter: 0, read: dropped(s.read), again: false,
-    proposal: nothing, proposed: false, declined: false, review: V::dismiss(s.review), writing: cutOff(s.writing) }
+    proposal: nothing, proposed: false, declined: false, review: V::dismiss(s.review), writing: cutOff(s.writing),
+    agentTurn: 0 }
 
 pure def stepNoLateAnswerAfterRestart(before: Notes, via: str, after: Notes): bool =
   via == "restart" implies and {
