@@ -158,6 +158,23 @@ describe("Alpha product plugin: Clock acts only on what the model named", () => 
     await run("CLOCK_TIMER", { action: "cancel", label: "pasta" });
     expect([store.getClock().alarms, store.getClock().timers]).toEqual([[], []]);
   });
+
+  it("finds the one live timer past a finished one, and the alarm's time past a label that names none", async () => {
+    const { store, run } = clockOf();
+    await run("CLOCK_TIMER", { action: "start", durationSeconds: 60, label: "eggs" });
+    await run("CLOCK_TIMER", { action: "reset", label: "eggs" });
+    await run("CLOCK_TIMER", { action: "start", durationSeconds: 300, label: "pasta" });
+    const paused = await run("CLOCK_TIMER", { action: "pause" });
+    await run("CLOCK_ALARM", { action: "set", hour: 6, minute: 0, label: "Gym" });
+    await run("CLOCK_ALARM", { action: "set", hour: 7, minute: 0 });
+    const toggled = await run("CLOCK_ALARM", { action: "toggle", label: "gym day", hour: 7, minute: 0, enabled: false });
+    const unmatched = await run("CLOCK_ALARM", { action: "delete", label: "work" });
+    expect([paused?.success, store.getClock().timers.map(({ label, status }) => ({ label, status }))]).toEqual([true, [{ label: "eggs", status: "ready" }, { label: "pasta", status: "paused" }]]);
+    expect([toggled?.success, unmatched?.success, store.getClock().alarms.map(({ hour, enabled }) => ({ hour, enabled }))]).toEqual([true, false, [{ hour: 6, enabled: true }, { hour: 7, enabled: false }]]);
+    for (const timer of store.getClock().timers) await run("CLOCK_TIMER", { action: "cancel", id: timer.id });
+    for (const alarm of store.getClock().alarms) await run("CLOCK_ALARM", { action: "delete", id: alarm.id });
+    expect([store.getClock().alarms, store.getClock().timers]).toEqual([[], []]);
+  });
 });
 
 describe("Alpha product plugin: Clock actions, provider, and routes", () => {

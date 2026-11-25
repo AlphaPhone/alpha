@@ -467,8 +467,14 @@ An ordinary Android result tap carries an opaque token and the exact
 run, workflow, version and saved cursor. Workflows opens that result
 only after the current owner still retains it. The renderer settles
 the token after the route commits and the same verified lease still
-admits the result. A notice is opened as a read, without sending to
-Ask Alpha.
+admits the result. An ordinary tap opens the result for reading.
+
+A completed brief can also offer a separate Ask Alpha action on Android
+where the system can require authentication. The authenticated action
+records its own opaque receipt. It opens the same exact result and uses
+the result panel's editable draft handoff. The owner still sends. An Ask
+receipt is settled only after attachment staging succeeds for the same
+current lease. An unavailable or blocked handoff leaves it pending.
 
 ```quint
 pure def canNativeChecksRead(d: Digests, owner: int, scheduled: bool, backgroundOn: bool): bool =
