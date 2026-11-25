@@ -33,6 +33,7 @@ do next.
   `text-title` a document's name over its preview, and `text-figure` and `text-figure-sm` a route's time.
   `leading-row` sets `text-body` as a note's or a routine's title in a list.
   `text-headline` is an open voice or link note's title and `text-quote` a clip kept from a page.
+  `text-tab-count` in a `rounded-tab-count` outline is the Browser's count of open tabs.
 - **Shape.** `radius` is a card; `rounded-group` a group of rows; `rounded-panel` a notice or a search bar; `rounded-home-card` is a Home overview card;
   `rounded-drawer-icon` rounds an installed app icon; `rounded-option` is a row of a floating menu and
   `rounded-box` the box of a list row's selection check. `rounded-tile` is an app tile, a menu and a dialog;
@@ -114,6 +115,7 @@ this prose into tokens. To change the design, describe it, and have the change w
 | `rounded.panel` | 1.5rem |
 | `rounded.dock` | 1.9375rem |
 | `rounded.chat` | 1.875rem |
+| `rounded.tab-count` | 0.4375rem |
 | `font.sans` | "Public Sans", system-ui, -apple-system, "Segoe UI", sans-serif |
 | `font.display` | Denton, Fraunces, Georgia, serif |
 | `font.mono` | ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas, monospace |
@@ -180,6 +182,8 @@ this prose into tokens. To change the design, describe it, and have the change w
 | `text.contact-name.tracking` | -0.01em |
 | `text.contact-initials.size` | 2.625rem |
 | `text.contact-initials.leading` | 1 |
+| `text.tab-count.size` | 0.71875rem |
+| `text.tab-count.leading` | 1.175 |
 | `weight.light` | 300 |
 | `weight.normal` | 400 |
 | `weight.medium` | 500 |
