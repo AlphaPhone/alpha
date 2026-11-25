@@ -49,8 +49,12 @@ export const meta: ComponentMeta<InboxMessageScreenProps> = {
     },
     "Full date in the details": async ({ canvasElement }: { canvasElement: HTMLElement }) => {
       const canvas = within(canvasElement);
-      await expect(canvas.getByText("To me · 09:41")).toBeInTheDocument();
-      await expect(canvas.getByText("Friday, 14 November 2025 at 09:41:07 GMT")).toBeInTheDocument();
+      const summary = canvas.getByText("To me · 09:41");
+      const date = canvas.getByText("Friday, 14 November 2025 at 09:41:07 GMT");
+      await expect(summary).toBeVisible();
+      await expect(date).not.toBeVisible();
+      await userEvent.click(summary);
+      await expect(date).toBeVisible();
     },
     "Saved copy": async ({ canvasElement }: { canvasElement: HTMLElement }) => {
       await expect(within(canvasElement).queryByRole("button", { name: "Show images" })).toBeNull();
