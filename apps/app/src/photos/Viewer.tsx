@@ -7,6 +7,7 @@ import type { Event, Look } from "../../gen/app__photos__viewer.ts";
 import type { Machine } from "../../gen/app__photos__viewer.effect.vibe";
 import type { Row } from "./catalog.vibe";
 import { OpenedPhoto } from "./viewer.vibe";
+import { CropFrame } from "./CropFrame.tsx";
 import { Time } from "../runtime/time.vibe";
 
 const filters: readonly Look[] = ["Original", "Vivid", "Warm", "Cool", "Mono", "Fade", "Noir"];
@@ -48,6 +49,13 @@ export function MediaViewer({ runtime, before, after, row, inTrash, onAddToAlbum
   }, []);
   const pointRef = useRef<{ readonly x: number; readonly y: number } | undefined>(undefined);
   const pointersRef = useRef(new Map<number, { readonly x: number; readonly y: number }>());
+  const returnCropFocusRef = useRef(0);
+  const cropButton = useCallback((button: HTMLButtonElement | null) => {
+    if (button && state?.preview.showing && returnCropFocusRef.current === state.open) {
+      returnCropFocusRef.current = 0;
+      button.focus({ preventScroll: true });
+    }
+  }, [state?.open, state?.preview.showing]);
   const pinchRef = useRef<{ readonly level: number; readonly distance: number } | undefined>(undefined);
   if (!state || state.open === 0) return null;
   const current = runtime.runSync(Effect.flatMap(OpenedPhoto, (opened) => opened.current()));
@@ -121,7 +129,12 @@ export function MediaViewer({ runtime, before, after, row, inTrash, onAddToAlbum
     const neighbour = x < 0 ? after : before;
     if (neighbour !== undefined) action({ type: "swipe", neighbour });
   }
-  const close = () => editAction(state.editing ? { type: "cancelEdit" } : { type: "close" });
+  const close = () => editAction(state.cropping ? { type: "cancelCrop" } : state.editing ? { type: "cancelEdit" } : { type: "close" });
+  const beginCrop = { type: "beginCrop" } satisfies Event;
+  function openCrop() {
+    returnCropFocusRef.current = state?.open ?? 0;
+    action(beginCrop);
+  }
   const photosMenu = [
     !inTrash && state.kind === "Still" && allows({ type: "askAlpha" }) && { label: "Ask Alpha", icon: <Sparkles />, select: () => action({ type: "askAlpha" }) },
     onAddToAlbum && { label: "Add to album", icon: <Album />, select: onAddToAlbum },
@@ -136,6 +149,20 @@ export function MediaViewer({ runtime, before, after, row, inTrash, onAddToAlbum
   );
   const swatchSource = current.item?.image || current.uri;
   const edited = preview !== undefined && preview.revision === state.preview.revision && state.editing && !state.unavailable ? preview : undefined;
+  if (state.cropping) return (
+    <div aria-label="Crop photo" data-alpha-subview="photos-crop"
+      // eslint-disable-next-line better-tailwindcss/no-unknown-classes -- design.md, "Dark": the crop tools follow the photo editor's fixed dark theme
+      className="dark absolute inset-0 z-50 flex min-h-0 flex-col bg-background text-foreground">
+      <header data-host-chrome="" className="flex min-h-14 shrink-0 items-center gap-2 px-2">
+        <Button variant="ghost" size="icon" aria-label="Cancel crop" onClick={close}><X /></Button>
+        <h1 className="text-base font-semibold">Crop photo</h1>
+      </header>
+      {edited && edited.width > 0 && edited.height > 0 ? <CropFrame key={state.revision} source={edited} bounds={state.edit.bounds}
+        onApply={(bounds) => action({ type: "applyCrop", bounds })} /> : <div className="m-auto text-center" role="status">
+        {state.unavailable ? <><p>Couldn’t prepare the photo.</p><Button variant="secondary" onClick={() => action({ type: "retryPreview" })}>Try again</Button></> : "Preparing photo…"}
+      </div>}
+    </div>
+  );
   return (
     <div aria-label={name} data-alpha-subview={state.editing ? "photos-editor" : "photos-viewer"}
       // eslint-disable-next-line better-tailwindcss/no-unknown-classes -- design.md, "Dark": the photo viewer and its controls keep their dark tokens in either app theme
@@ -181,7 +208,8 @@ export function MediaViewer({ runtime, before, after, row, inTrash, onAddToAlbum
       {state.editing && <div aria-label="Photo edit tools" className="flex flex-col gap-4 px-4 py-4">
         <div className="flex items-center justify-center gap-3">
           {control("Rotate", { type: "rotate" }, <RotateCcw />)}
-          {control("Crop", { type: "crop" }, <Crop />)}
+          {state.kind === "Still" ? <Button ref={cropButton} variant="ghost" size="icon" aria-label="Crop" disabled={!allows(beginCrop)} onClick={openCrop}><Crop /></Button>
+            : control("Crop", { type: "crop" }, <Crop />)}
           {allows({ type: "retryPreview" }) && <Button variant="secondary" onClick={() => action({ type: "retryPreview" })}>Retry preview</Button>}
         </div>
         {state.kind === "Still" ? <div role="group" aria-label="Photo filters" className="flex gap-3 overflow-x-auto p-0.5">

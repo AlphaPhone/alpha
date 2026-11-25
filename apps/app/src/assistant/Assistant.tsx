@@ -194,7 +194,8 @@ export function Assistant({ runtime, messageActions, speech, canReadAloud = fals
       </div>
     ),
   }));
-  const mediaNote = seen.mediaNote === "" ? [] : [{ id: "media result", author: "alpha" as const, text: seen.mediaNote }];
+  const mediaNote = talking.context.sensitive || seen.mediaNote?.conversation !== shown.chosen
+    ? [] : [{ id: "media result", author: "alpha" as const, text: seen.mediaNote.text }];
   const failed = seen.failure === undefined ? [] : [{ id: "failure", author: "alpha", text: "", children: <ReplyFailure {...seen.failure} fix={seen.failure.kind === "OutOfFunds" ? "FundingFix" : seen.failure.fix} live onRetry={() => type(board.lastSent)} onSettings={settingsAction ? onSettings : undefined} /> } as const];
   const quoted = board.line(shown.chosen, writing.editor.quote)?.text;
   const view = talking.context.showing.tag === "App" ? talking.context.showing.view : "Home";

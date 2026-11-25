@@ -8,7 +8,7 @@ import { ahead, browse, chosen, detailed, empty, filled } from "../../gen/app__f
 import { useMachine } from "../../gen/app__files.react.ts";
 import type { Dest, Work } from "../../gen/app__files__change.ts";
 import { finding } from "../../gen/app__files__search.ts";
-import type { Filter } from "../../gen/app__files__search.ts";
+import { type Filter, everything } from "../../gen/app__files__search.ts";
 import type { Item, Kind } from "../../gen/app__files__shared.ts";
 import type { Machine as TrashMachine } from "../../gen/app__files__trash.effect.vibe";
 import type { Alpha, Resident } from "../runtime/area.tsx";
@@ -32,11 +32,11 @@ export interface FilesProps {
 }
 
 const categories: readonly [Kind, string][] = [["Download", "Downloads"], ["Image", "Images"], ["Video", "Videos"], ["Audio", "Audio"], ["Document", "Documents"]];
-const icons: Record<Kind, LucideIcon> = { Folder, Download, Image, Video, Audio: AudioLines, Document: FileText, Other: File };
+const icons: Record<Kind, LucideIcon> = { Folder, Download, Image, Video, Audio: AudioLines, Document: FileText, Pdf: FileText, Other: File };
 const orders: readonly [Order, string][] = [["ByName", "Name"], ["ByDate", "Date"], ["BySize", "Size"]];
 const shares: readonly [Dest, string][] = [["Chooser", "Share to an app"], ["Email", "Email"], ["Copy", "Copy"]];
-const kinds: readonly [Kind | undefined, string][] = [[undefined, "Any kind"], ["Image", "Images"], ["Video", "Videos"], ["Audio", "Audio"], ["Document", "Documents"]];
-const kindNames: Record<Kind, string> = { Folder: "Folder", Image: "Image", Video: "Video", Audio: "Audio", Document: "Document", Download: "Download", Other: "File" };
+const kinds: readonly [Kind | undefined, string][] = [[undefined, "Any kind"], ["Image", "Images"], ["Video", "Videos"], ["Audio", "Audio"], ["Document", "Documents"], ["Pdf", "PDFs"]];
+const kindNames: Record<Kind, string> = { Folder: "Folder", Image: "Image", Video: "Video", Audio: "Audio", Document: "Document", Pdf: "PDF", Download: "Download", Other: "File" };
 /** A name no folder holds, since it is a path's separator: what asks whether a new name would be taken at all. */
 const unnamed = "/";
 /** A size in the units the owner reads, to one decimal above a kilobyte. */
@@ -62,6 +62,11 @@ function kindOf(item: Item): { name: string; icon: LucideIcon } {
 const filesEmpty = "gap-3 px-4 pt-24 pb-4 [&_svg]:size-11";
 /** When a file last changed, as a listed file says it: Today, or the day. */
 const changedOn = (revision: number, now: number) => (new Date(revision).toDateString() === new Date(now).toDateString() ? "Today" : new Date(revision).toLocaleDateString(undefined, { month: "short", day: "numeric" }));
+function dateRange(filter: Filter): string {
+  const date = (value: number) => new Date(value).toLocaleDateString();
+  if (filter.from === everything.from) return filter.to === everything.to ? "" : `Through ${date(filter.to)}`;
+  return filter.to === everything.to ? `Since ${date(filter.from)}` : `${date(filter.from)} – ${date(filter.to)}`;
+}
 type Naming = { work: Work; name: string };
 const changeWords: Record<Work, string> = { NewFolder: "make the folder", Rename: "rename it", MoveTo: "move them", CopyTo: "copy them" };
 
@@ -124,7 +129,7 @@ export function Files({ runtime, alpha }: FilesProps) {
   const primary = state.volumes[0];
   const place = state.inCategory ? category : state.trail.length === 1 && state.trail[0] === primary?.id ? "All files" : label(state.trail.at(-1) ?? 0);
   const title = selecting ? String(marks.size) : atTop ? "Files" : (place ?? "Files");
-  const wanted: Filter = { text: text.trim(), kind: kind ?? "Other", anyKind: kind === undefined };
+  const wanted: Filter = { ...everything, text: text.trim(), kind: kind ?? "Other", anyKind: kind === undefined };
   const today = runtime.runSync(Effect.flatMap(Time, (time) => time.latest()));
   const described = (item: Item) => `${kindOf(item).name} · ${sized(item.bytes)} · ${changedOn(item.revision, today)}`;
   const row = (item: Item) => {
@@ -225,7 +230,7 @@ export function Files({ runtime, alpha }: FilesProps) {
           {looked !== "NoFilter" && (
             <div className="flex flex-col gap-2">
               <div className="px-2"><Chip onClear={owner({ type: "clearFilter" }) ? () => tell({ type: "clearFilter" }) : undefined} clearLabel="Clear the filter">
-                {[state.search.filter.anyKind ? "" : kinds.find(([one]) => one === state.search.filter.kind)?.[1] ?? "", state.search.filter.text === "" ? "" : `“${state.search.filter.text}”`].filter(Boolean).join(" · ") || "Everything"}
+                {[state.search.filter.anyKind ? "" : kinds.find(([one]) => one === state.search.filter.kind)?.[1] ?? "", state.search.filter.text === "" ? "" : `“${state.search.filter.text}”`, dateRange(state.search.filter)].filter(Boolean).join(" · ") || "Everything"}
               </Chip></div>
               {looked === "Looking" && <Spinner label="Looking" />}
               {looked === "Nothing" && <EmptyState icon={<Search />} title="Nothing matches" className={filesEmpty} />}

@@ -43,6 +43,12 @@ describe("Contacts on an Alpha image", () => {
     await press("Contacts");
     await until(alpha, alpha.runtime, Contacts, (s) => s.list.status === "Loaded" && s.rows === 2);
 
+    await write("Search or ask", "Maya");
+    await until(alpha, alpha.runtime, Contacts, (s) => s.list.status === "Loaded" && s.rows === 1);
+    expect(document.querySelector('[aria-label="Ben Ortiz"]')).toBeNull();
+    await write("Search or ask", "");
+    await until(alpha, alpha.runtime, Contacts, (s) => s.list.status === "Loaded" && s.rows === 2);
+
     // spec/app/contacts/index.md, "Opening a contact reads it from the phone afresh"
     await press("Maya Chen");
     await until(alpha, alpha.runtime, Contacts, (s) => s.opened && s.card.status === "Loaded" && s.held.phones === 1);

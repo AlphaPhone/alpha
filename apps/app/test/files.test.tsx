@@ -5,16 +5,18 @@ import { Machine as Tabs } from "../gen/app__browser.effect.vibe";
 import { Machine as Browser } from "../gen/app__files.effect.vibe";
 import { Machine as Shown } from "../gen/app__files__preview.effect.vibe";
 import { Machine as Recent } from "../gen/app__files__recent.effect.vibe";
+import { everything } from "../gen/app__files__search.effect.vibe";
 import { Machine as Bin } from "../gen/app__files__trash.effect.vibe";
 import { Machine as Shell } from "../gen/app__shell.effect.vibe";
 import { Machine as Inbox } from "../gen/app__inbox.effect.vibe";
 import { Machine as Drafts } from "../gen/app__inbox__drafts.effect.vibe";
 import { Letters } from "../src/inbox/composer.vibe";
 import { agentFilter, agentOpen, agentRead, approved, fileAction, offer, shownAt } from "../src/files/agent.vibe";
+import type { Place } from "../src/areas.ts";
 import browser from "../src/browser/index.tsx";
 import files from "../src/files/index.tsx";
 import { called } from "../src/platform/files.vibe";
-import { button, closeAll, drawn, fill, hardware, later, open, press, pressOnTop, seen, underAct, until } from "./alpha.tsx";
+import { button, closeAll, drawn, fill, hardware, later, only, open, press, pressOnTop, seen, underAct, until } from "./alpha.tsx";
 import { scene } from "./fakes/scene.ts";
 
 underAct();
@@ -54,8 +56,8 @@ const openFromHome = (view: string) => drawn(() => {
 });
 
 /** Alpha on a phone with Files on screen, its storage read. */
-async function onFiles(world = { ...scene(), phone: true }) {
-  const running = await open(world);
+async function onFiles(world = { ...scene(), phone: true }, ...otherPlaces: Place[]) {
+  const running = await open(world, only("home", "view:Files", "notice", ...otherPlaces));
   const { alpha } = running;
   const runtime = files.runtime(alpha);
   if (homeTile("Files")) await openFromHome("Files");
@@ -122,7 +124,7 @@ describe("Files on a phone", () => {
   });
 
   it("Browse my storage from the Browser's Show in Files, and go back (spec/app/files/index.md, \"Story: Browse my storage\"; spec/app/browser/downloads.md, \"Story: Download a file\")", async () => {
-    const { alpha, runtime, world } = await onFiles({ ...scene(), phone: true, image: true });
+    const { alpha, runtime, world } = await onFiles({ ...scene(), phone: true, image: true }, "view:Browser");
     await until(alpha, runtime, Browser, (s) => s.storage.status === "Loaded");
     await press("Internal storage");
     await press("Download");
@@ -339,7 +341,7 @@ describe("Files on a phone", () => {
   });
 
   it("Look at a file, and find what I opened lately (spec/app/files/preview.md, \"Story: Look at a file\"; spec/app/files/recent.md, \"Story: Find what I opened lately\"; spec/app/files/recent.md, \"Story: Pick a file with the system picker\"; spec/app/files/preview.md, \"Story: Act on the file I am looking at\")", async () => {
-    const { alpha, runtime, world } = await onFiles();
+    const { alpha, runtime, world } = await onFiles(undefined, "assistant");
     await until(alpha, runtime, Browser, (s) => s.storage.status === "Loaded");
     await press("Internal storage");
     await openRow("Documents");
@@ -419,7 +421,7 @@ describe("Files on a phone", () => {
   });
 
   it("Offer the file I am looking at to Inbox (spec/app/files/preview.md, \"Story: Act on the file I am looking at\"; spec/app/inbox/adding.md, \"Story: Add files and people to my draft\")", async () => {
-    const { alpha, runtime, world } = await onFiles();
+    const { alpha, runtime, world } = await onFiles(undefined, "view:Inbox");
     const content = "A reviewed attachment";
     world.files.stored.push({ volume: "primary", path: "Download/attach.txt", directory: false, mimeType: "text/plain", size: content.length, modified: 12 });
     world.files.texts["Download/attach.txt"] = content;
@@ -455,18 +457,27 @@ describe("Files on a phone", () => {
     await press("Download");
     await until(alpha, runtime, Browser, (s) => s.listing.status === "Loaded" && s.items.length === 2);
     const now = () => runtime.runSync(Browser.use((m) => m.get()));
-    const everything = { text: "", kind: "Other", anyKind: true } as const;
     // spec/app/files/index.md, "The phone offers Files to an agent that takes Files' operations, and naming files by their place among the results shown only beside them; a request the phone cannot take is never shown for approval"
     expect(await runtime.runPromise(offer)).toEqual({ operations: true, positions: true });
 
     // spec/app/files/index.md, "The agent reads a folder for itself, and only its newest reading is told to it; it is told it failed without access or on a protected screen"
     // spec/app/files/index.md, "The agent's reading and opening change nothing the owner is working on"
-    const read = await runtime.runPromise(agentRead(1, { volume: "primary", path: "Documents" }, { text: "NOTES", kind: "Other", anyKind: true }, false));
+    const read = await runtime.runPromise(agentRead(1, { volume: "primary", path: "Documents" }, { ...everything, text: "NOTES" }, false));
     expect([read.ok, read.items.map((item) => item.name), now().trail.length, now().items.length]).toEqual([true, ["notes.txt"], 2, 2]);
     expect((await runtime.runPromise(agentRead(2, { volume: "primary", path: "Documents" }, everything, true))).ok).toBe(false);
 
+    const dated = Date.parse("2026-03-04T12:00:00Z");
+    world.files.stored.push(
+      { volume: "primary", path: "Download/during.pdf", directory: false, mimeType: "application/pdf", size: 10, modified: dated },
+      { volume: "primary", path: "Download/earlier.pdf", directory: false, mimeType: "application/pdf", size: 10, modified: dated - 86_400_000 },
+      { volume: "primary", path: "Download/plain.pdf", directory: false, mimeType: "text/plain", size: 10, modified: dated },
+    );
+    const filter = { type: "files_filter", kind: "pdf", from: "2026-03-04T00:00:00Z", to: "2026-03-04T23:59:59Z" } as const;
+    const filteredByDate = await runtime.runPromise(fileAction(filter, { attemptId: 1, proposalId: "dated-pdfs", operationId: "dated-pdfs" }));
+    expect([filteredByDate?.kind, now().search.hits.map((item) => item.name)]).toEqual(["applied", ["during.pdf"]]);
+
     // spec/app/files/index.md, "The agent sets the owner's filter on Files on screen, and is told how many it found; otherwise it is told it failed"
-    const filtered = await runtime.runPromise(agentFilter(3, { text: "", kind: "Image", anyKind: false }, false));
+    const filtered = await runtime.runPromise(agentFilter(3, { ...everything, kind: "Image", anyKind: false }, false));
     expect([filtered.ok, filtered.items.map((item) => item.name), now().search.filter.kind]).toEqual([true, ["beach.jpg"], "Image"]);
     // spec/app/files/index.md, "A position names a result on screen, counting from one; a request naming a position that is not shown names nothing and leaves no card, and a card keeps the files it showed"
     const [first] = await runtime.runPromise(shownAt([1]));
@@ -663,7 +674,7 @@ describe("Files on a phone", () => {
 describe("Files in a browser", () => {
   it("Browse my storage (spec/app/files/index.md, \"Story: Browse my storage\")", async () => {
     const world = scene();
-    const { alpha } = await open(world);
+    const { alpha } = await open(world, only("home", "view:Files", "notice"));
     const runtime = files.runtime(alpha);
     await press("Files");
     // spec/app/files/index.md, "Files is closed, unsupported, not yet allowed, denied, at the top, reading, unavailable or showing a place"

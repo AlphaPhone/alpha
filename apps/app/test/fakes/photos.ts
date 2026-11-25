@@ -29,9 +29,10 @@ export function photosScene(): PhotosScene {
 /** The native Photos plugin fixture talks to the real Eliza media bridge. */
 export function alphaPhotos(scene: PhotosScene): Faked {
   type Used = "libraryAccess" | "requestLibraryAccess" | "watchLibrary" | "list" | "listPermitted" | "read"
-    | "beginEdit" | "previewEdit" | "saveEdit" | "cancelEdit" | "albums" | "openLibrarySettings";
+    | "thumbnails" | "beginEdit" | "previewEdit" | "saveEdit" | "cancelEdit" | "albums" | "openLibrarySettings";
   return plugin<Pick<PhotosPlugin, Used>, { libraryChanged: undefined }>((emit) => {
     scene.changed = () => { if (scene.watching) emit("libraryChanged", undefined); };
+    const listed = (rows: PhotosScene["rows"], thumbnails?: boolean) => rows.map(({ image, ...row }) => ({ ...row, image: thumbnails ? image : undefined }));
     const owned = () => scene.rows.filter((item) => item.owned);
     const session = "alpha-test-photo-edit";
     const preview = { sessionId: session, operationId: session, image: photo, width: 1, height: 1, reduced: false, maxEdge: 1024, filter: "none", canReplace: true };
@@ -46,11 +47,12 @@ export function alphaPhotos(scene: PhotosScene): Faked {
         scene.watching = active;
         return Promise.resolve({ active });
       },
-      list: () => Promise.resolve({ items: owned(), next: "", access: scene.access }),
-      listPermitted({ before, query }: Parameters<PhotosPlugin["listPermitted"]>[0] = {}) {
+      list: ({ thumbnails }) => Promise.resolve({ items: listed(owned(), thumbnails), next: "", access: scene.access }),
+      listPermitted({ before, query, thumbnails }: Parameters<PhotosPlugin["listPermitted"]>[0] = {}) {
         const rows = scene.rows.filter((item) => query === undefined || item.name.toLowerCase().includes(query.toLowerCase()));
-        return Promise.resolve({ items: before === undefined ? rows.slice(0, 2) : rows.slice(2), next: before === undefined && rows.length > 2 ? "next" : "", access: scene.access });
+        return Promise.resolve({ items: listed(before === undefined ? rows.slice(0, 2) : rows.slice(2), thumbnails), next: before === undefined && rows.length > 2 ? "next" : "", access: scene.access });
       },
+      thumbnails: ({ ids }) => Promise.resolve({ items: ids.flatMap((id) => scene.rows.filter((row) => row.id === id).map((row) => ({ id, image: row.image }))) }),
       read({ id }) {
         scene.readCount++;
         return Promise.resolve(scene.rows.find((item) => item.id === id));

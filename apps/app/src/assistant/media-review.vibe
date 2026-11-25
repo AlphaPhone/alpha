@@ -1,6 +1,7 @@
 // spec/app/approvals/index.md, "Story: One action at a time"; spec/app/approvals/proposal.md, "Story: Decide"; spec/app/photos/agent.md, "Story: Let Alpha read my library"; spec/app/phone/comms.md, "Story: Approve what Alpha proposes, one thing at a time"; spec/app/messages/composer.md, "The agent's draft goes into the open conversation's draft only while it is empty, and never sends"
 import { DeviceExecution, NOT_DISPATCHED, type DeviceAgent, type ExecutorCall, type JournalIdentity, type RuntimeRequestHeaders } from "@elizaos/agent/client"
 import { readOperation, type DeviceOperation } from "@elizaos/agent/operations"
+import { filterLabel } from "@elizaos/plugin-files/client"
 import { Machine as Conversation } from "../../gen/app__assistant.effect.vibe"
 import { Machine as Chats } from "../../gen/app__assistant__chats.effect.vibe"
 import { Machine as Messages } from "../../gen/app__messages.effect.vibe"
@@ -147,7 +148,6 @@ function operation(raw: unknown) {
     case "photo_library_review":
       return value
     case "files_filter":
-      return value.from === undefined && value.to === undefined && value.kind !== "pdf" ? value : undefined
     case "files_open":
     case "files_folder_create":
       return value
@@ -183,7 +183,7 @@ function words(value: NonNullable<ReturnType<typeof operation>>): { title: strin
     case "photo_library_review": return { title: "Review photo changes", detail: `Review ${value.items.length} items in Photos` }
     case "photos_album_create": return { title: "Review a new album", detail: value.name }
     case "photos_share": return { title: "Review photos to share", detail: "Choose a destination in Photos" }
-    case "files_filter": return { title: "Filter Files", detail: value.text ?? "Show matching files" }
+    case "files_filter": return { title: "Filter Files", detail: filterLabel(value) }
     case "files_open": return { title: "Open a file", detail: "path" in value ? value.path : `Item ${value.shown} in the current list` }
     case "files_folder_create": return { title: "Create a folder", detail: value.name }
     case "files_share": return { title: "Share a file", detail: "paths" in value ? value.paths.join(", ") : "Open Android sharing" }
@@ -393,10 +393,11 @@ export const mediaReview = Layer.effect(MediaReview, effect {
         const held = try session()
         const live = held !== undefined && (try current(held))
         board.change({ media: board.snapshot().media.filter((one) => one !== card) })
-        if (!live || held === undefined) { board.change({ mediaNote: "That review expired. Ask again from the current screen." }); return }
+        const report = (text: string) => board.change({ mediaNote: { conversation: card.conversation, text } })
+        if (!live || held === undefined) { report("That review expired. Ask again from the current screen."); return }
         if (!approve) {
           const declined = tryPromise(() => held.decide(card.id, { digest: card.digest, approved: false })) catch () => undefined
-          board.change({ mediaNote: declined === undefined ? "Alpha couldn’t confirm the decline." : "Declined" })
+          report(declined === undefined ? "Alpha couldn’t confirm the decline." : "Declined")
           return
         }
         scopes.set(card.id, { active: current(held), ...(card.target === undefined ? {} : { target: card.target }) })
@@ -404,7 +405,7 @@ export const mediaReview = Layer.effect(MediaReview, effect {
           |> ensuring(%, sync(() => { scopes.delete(card.id) }))) catch () => undefined
         const note = result?.kind !== "settled" ? notStarted : result.result.tag === "Applied" ? completion(card.operation, result.synced)
           : result.result.tag === "Unknown" ? "The result could not be confirmed. Check before trying again." : "Nothing changed."
-        board.change({ mediaNote: note })
+        report(note)
       })
     },
   }
