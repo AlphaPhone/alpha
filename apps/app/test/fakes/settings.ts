@@ -1,16 +1,22 @@
 // spec/app/settings/index.md, "Story: Find a setting and come back"
-import type { DataResetPlugin } from "@elizaos/os/bridges/definitions/reset";
-import type { AndroidRoleStatus, LaunchTarget, LauncherAppsChange, NativeCrashEntry, SystemFacts, SystemHostPlugin, SystemPlugin, SystemSettingsPage } from "@elizaos/os/bridges/definitions/system";
-import type { ApprovedJoinResult, ConnectOptions, ConnectivityResult, WiFiNetwork, WiFiPlugin } from "@elizaos/os/bridges/definitions/wifi";
+import type { DataResetPlugin, AndroidRoleStatus, ElizaPasswordsPlugin, PasswordsStatus, LaunchTarget, LauncherAppsChange, NativeCrashEntry, SystemFacts, SystemHostPlugin, SystemPlugin, SystemSettingsPage, ApprovedJoinResult, ConnectOptions, ConnectivityResult, WiFiNetwork, WiFiPlugin } from "@elizaos/os-bridges";
 import type { LauncherScene } from "./launcher.ts";
 import { type Faked, plugin, rejection } from "./phone.ts";
 
 /** A field as Alpha's `AlphaCarrierSetup` plugin reports one. */
 export interface CarrierField { status: "available" | "permission-denied" | "unavailable" | "unsupported" | "not-read"; value?: string }
 
+export interface RecoveryScene {
+  retained: number;
+  archived: number;
+  starts: number;
+  readonly tokens: string[];
+}
+
 /** What the fake phone holds for Settings, and how it behaves; a journey changes it between steps. */
 export interface SettingsScene {
   facts: SystemFacts;
+  recovery?: RecoveryScene;
   roles: AndroidRoleStatus[];
   launcher: boolean;
   version: string;
@@ -21,6 +27,8 @@ export interface SettingsScene {
   grantsHome: boolean;
   readonly opened: string[];
   readonly copied: string[];
+  autofill: PasswordsStatus["autofill"];
+  autofillDestination: Awaited<ReturnType<ElizaPasswordsPlugin["openAutofillSettings"]>>["destination"];
   crashes: NativeCrashEntry[];
   reset: { status: string; message: string };
   readonly reviews: number[];
@@ -46,6 +54,7 @@ export function settingsScene(): SettingsScene {
     ],
     launcher: true, version: "1.4.0",
     hostFacts: { androidRelease: "16", permissions: { Microphone: false, Calendar: true } },
+    autofill: { supported: true, selected: "none" }, autofillDestination: "autofill-picker",
     gate: Promise.resolve(), grantsHome: true, opened: [], copied: [], crashes: [], reset: { status: "cancelled", message: "Nothing was reset." }, reviews: [],
     networks: [{ ssid: "home", bssid: "00:11:22:33:44:55", rssi: -50, frequency: 2412, capabilities: "[WPA2-PSK-CCMP]", secured: true, security: "wpa2" }],
     joinAnswer: "connected", joins: [], connectivity: { online: true, validated: true, captivePortal: false, ssid: "home" }, consents: [], refusesConsent: false, consentGate: Promise.resolve(),
@@ -186,6 +195,17 @@ export function alphaCarrierSetup(scene: SettingsScene): Faked {
   });
 }
 
+
+/** Android's autofill status and provider picker through the native Passwords bridge. */
+export function elizaPasswords(scene: SettingsScene): Faked {
+  return () => ({
+    status: () => Promise.resolve<PasswordsStatus>({ available: true, locked: true, unlockRemainingMs: 0, unlockSeconds: 60, biometric: false, autofill: { ...scene.autofill } }),
+    openAutofillSettings: async (): ReturnType<ElizaPasswordsPlugin["openAutofillSettings"]> => {
+      await page(scene, scene.autofillDestination);
+      return { status: "opened", destination: scene.autofillDestination };
+    },
+  });
+}
 
 /** The Android-only Settings methods exposed by AlphaDevice. */
 export function settingsHost(scene: SettingsScene) {

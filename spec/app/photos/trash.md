@@ -100,7 +100,9 @@ pure val weight_recovered = 4
 ## Story: See what I deleted
 
 > As the owner, I want to see what I deleted recently, scroll on through
-> it, and be told when it is loading, empty, or could not be read.
+> it, and be told when it is loading, empty, or could not be read. When
+> Android supplies an expiry date, I can see how many days an item has left
+> in the grid and when I open it.
 
 ### Opening Recently deleted reads it, only while Photos has access and never from the lock screen; closing it keeps nothing on screen
 

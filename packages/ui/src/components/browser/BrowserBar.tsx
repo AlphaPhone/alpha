@@ -38,11 +38,12 @@ export function BrowserBar({ leading, host, path = "", secure = false, private: 
   return (
     <header data-host-chrome="" className="relative z-10 flex h-13 shrink-0 items-center bg-background pr-1.5 in-data-[alpha-launcher]:mt-11 in-data-[alpha-launcher]:h-14 in-data-[alpha-launcher]:gap-0.5 in-data-[alpha-launcher]:pl-1.5">
       <div className="flex shrink-0 in-data-[alpha-launcher]:hidden [&>button]:size-13 [&>button]:rounded-lg">{leading}</div>
-      <button type="button" aria-label="Edit address" onClick={onEdit} disabled={onEdit === undefined}
+      <button type="button" onClick={onEdit} disabled={onEdit === undefined}
         className="mx-0.5 flex h-11 min-w-0 flex-1 items-center rounded-full bg-secondary px-3.5 text-sm">
+        <span className="sr-only">Edit address</span>
         {privateTab && <PrivateMark className="mr-2 size-4.5 shrink-0" />}
         {secure && <Lock role="img" aria-label="Secure connection" className="mr-1.5 size-3.25 shrink-0 text-muted-foreground" />}
-        <span className={cn("min-w-0 truncate", host === "" && "text-muted-foreground")}>{host === "" ? "New tab" : host}</span>
+        <span className={cn("min-w-0 truncate", host === "" && "text-muted-foreground")}>{host || (privateTab ? "New private tab" : "New tab")}</span>
         <span className="truncate text-muted-foreground">{path}</span>
       </button>
       <div role="group" aria-label="Page navigation" className="flex shrink-0">
@@ -50,7 +51,7 @@ export function BrowserBar({ leading, host, path = "", secure = false, private: 
         <Button variant="ghost" size="icon" aria-label="Previous page" className={pageControl} disabled={onBack === undefined} onClick={onBack}><ArrowLeft className="size-5" /></Button>
         <Button variant="ghost" size="icon" aria-label="Next page" className={pageControl} disabled={onForward === undefined} onClick={onForward}><ArrowRight className="size-5" /></Button>
       </div>
-      <Button variant="ghost" size="icon" aria-label="Tabs" className="h-13 w-11" onClick={onTabs} disabled={onTabs === undefined}>
+      <Button variant="ghost" size="icon" aria-label={`Tabs, ${tabs} open`} className="h-13 w-11" onClick={onTabs} disabled={onTabs === undefined}>
         <span className="flex size-5.25 items-center justify-center rounded-tab-count border-[1.6px] border-current px-0.75 text-tab-count font-bold">{tabs}</span>
       </Button>
       <Button variant="ghost" size="icon" aria-label="Menu" className="h-13 w-11" onClick={onMenu} disabled={onMenu === undefined}><Ellipsis /></Button>

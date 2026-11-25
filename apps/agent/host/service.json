@@ -1,4 +1,7 @@
 {
   "service": "ai.alphacompute.alphaphone.AlphaAgentService",
-  "notification": { "channel": "Alpha assistant", "title": "Alpha", "text": "Alpha is running on this phone." }
+  "notification": {
+    "channel": "Alpha assistant", "title": "Alpha", "text": "Alpha is running on this phone.",
+    "failure": { "channel": "Alpha alerts", "title": "Alpha stopped", "text": "Alpha stopped running on this phone. Tap to open Alpha, or restart the phone if it stays stopped." }
+  }
 }

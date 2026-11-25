@@ -1,6 +1,6 @@
 // spec/app/inbox/message.md, "Story: Read a message"
-import type { MailCard, MailMessage } from "@elizaos/cloud/client"
-import { type GmailReadResult, type GmailThreadPage, type MailFailure, protocolFailure } from "@elizaos/plugin-inbox/mailbox"
+import type { MailCard, MailMessage } from "@elizaos/cloud"
+import { type GmailReadResult, type GmailThreadPage, type MailFailure, protocolFailure } from "@elizaos/plugin-inbox-client"
 import type { Fault } from "../../gen/app__inbox__message.ts"
 import { Cloud } from "../platform/cloud.vibe"
 import { Mail } from "./gmail.vibe"

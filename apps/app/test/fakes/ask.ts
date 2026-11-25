@@ -1,5 +1,5 @@
 // spec/app/ask/index.md, "Story: Talk to my agent"
-import type { TurnReply } from "@elizaos/agent/client";
+import type { TurnReply } from "@elizaos/agent";
 import type { Route } from "./routes.ts";
 
 export interface AskScene {

@@ -4,7 +4,7 @@ One reply as Ask Alpha shows it while it is written and once it ends: the
 label shown while the agent works, its one brief acknowledgment, the text
 as it streams and the whole answer, the cards its lines become, its notices,
 and why it did not finish. The [conversation](./index.md) says how the turn
-ended; eliza's reply stream (`@elizaos/agent/client`) gives the text, the
+ended; eliza's reply stream (`@elizaos/agent`) gives the text, the
 planning label, the acknowledgment frame, each tool's label, the action
 results and the last frame with its failure kind and fix, none of which is
 restated here. Speaking the reply is the voice area's; the cue rules it

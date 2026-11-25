@@ -14,7 +14,7 @@ export interface PhoneTabsProps {
 
 const Dialpad = createLucideIcon({
   name: "Dialpad",
-  node: [["path", { d: "M6 6h.01M12 6h.01M18 6h.01M6 12h.01M12 12h.01M18 12h.01M6 18h.01M12 18h.01M18 18h.01" }]],
+  node: [["path", { key: "dots", d: "M6 6h.01M12 6h.01M18 6h.01M6 12h.01M12 12h.01M18 12h.01M6 18h.01M12 18h.01M18 18h.01" }]],
 });
 
 const tabs = [

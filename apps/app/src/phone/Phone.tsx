@@ -1,5 +1,5 @@
 // spec/app/phone/index.md, "Story: See my recent calls"; spec/app/phone/index.md, "Story: Give Alpha the call log"; spec/app/phone/index.md, "Story: Type a number"; spec/app/phone/index.md, "Story: Call a number"; spec/app/phone/voicemail.md, "Story: Listen to a voicemail"; spec/app/phone/voicemail.md, "Story: Delete a voicemail"
-import type { TelephonyCallLogEntry } from "@elizaos/os/bridges/phone";
+import type { TelephonyCallLogEntry } from "@elizaos/os-bridges";
 import { Alert, Button, Chip, Input, Spinner, Tabs, TabsContent, cn, focusRing } from "@repo/ui";
 import { Effect, type ManagedRuntime } from "effect";
 import { ArrowDownLeft, ArrowUpRight, Delete, Phone as Call } from "lucide-react";

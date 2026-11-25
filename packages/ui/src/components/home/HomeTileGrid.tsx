@@ -34,7 +34,7 @@ export type HomeTileGridProps = Omit<ComponentProps<"nav">, "children"> & {
 };
 
 /** App grids keep four columns while the measured text fits, then give each label more room. */
-const tileColumns = "grid grid-cols-[repeat(auto-fill,minmax(min(100%,max(calc(25%_-_.5px),calc(62px_*_var(--alpha-text-scale,1)))),1fr))] gap-y-6";
+const tileColumns = "grid grid-cols-[repeat(auto-fill,minmax(min(100%,max(calc(25%_-_.5px),calc(62px_*_var(--alpha-text-scale,1)))),1fr))] gap-y-[calc(var(--alpha-home-spacing,var(--spacing))*6)]";
 
 const steps: Partial<Record<string, -1 | 1>> = { ArrowLeft: -1, ArrowUp: -1, ArrowRight: 1, ArrowDown: 1 };
 
@@ -122,7 +122,7 @@ export function HomeTileGrid({ tiles, editing = false, onOpen, onBeginEditing, h
   return (
     <nav
       aria-label="Apps on Home"
-      className={cn(tileColumns, "px-4", className)}
+      className={cn(tileColumns, "px-[calc(var(--alpha-home-spacing,var(--spacing))*4)]", className)}
       onBlur={(event) => {
         if (event.relatedTarget) movedRef.current = null;
       }}

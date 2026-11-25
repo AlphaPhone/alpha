@@ -1,7 +1,7 @@
 // spec/app/notes/index.md, "The list holds the owner it shows, the notes and folders it last read with the store's revision, the folder it is narrowed to, and the folder numbers that are gone"; spec/app/notes/editor.md, "Story: Keep my draft through a restart"
-import { authoredNoteText, parseNoteFormat } from "@elizaos/plugin-notes/format"
-import { noteFolderId, notesFolderName, type NoteFolder } from "@elizaos/plugin-notes/organize"
-import type { NoteFormat, NotesSnapshot, StickyNote } from "@elizaos/plugin-notes/types"
+import { authoredNoteText, parseNoteFormat, projectAuthoredNoteContent } from "@elizaos/plugin-notes-client"
+import { noteFolderId, notesFolderName, type NoteFolder } from "@elizaos/plugin-notes-client"
+import type { NoteFormat, NotesSnapshot, StickyNote } from "@elizaos/plugin-notes-client"
 import type { Folder, Row } from "../../gen/app__notes.effect.vibe"
 import { type Kind, type Origin, type Source, unlinked } from "../../gen/app__notes__note.effect.vibe"
 import { Vault, type Slot } from "../platform/vault.vibe"
@@ -81,6 +81,34 @@ export function audioIdOf(note: StickyNote): string {
   return typeof audio === "object" && audio !== null && "audioId" in audio && typeof audio.audioId === "string" ? audio.audioId : ""
 }
 
+/** What the saved voice note offers for reading. The audio stays with the phone. */
+export function savedVoice(note: StickyNote) {
+  const format = note.format
+  if (format?.kind !== "voice") return undefined
+  const data = format.data
+  const projected = projectAuthoredNoteContent(format)
+  const stored = Array.isArray(data.lines) ? data.lines : []
+  const lines = (projected?.lines ?? []).filter((line) => line.text.trim() !== "").map((line) => {
+    const row = stored[line.index]
+    const fields = typeof row === "object" && row !== null && !Array.isArray(row) ? row : {}
+    return {
+      who: typeof fields.s === "string" ? fields.s : "",
+      at: typeof fields.at === "number" && Number.isFinite(fields.at) && fields.at >= 0 ? fields.at : 0,
+      text: line.text,
+    }
+  })
+  const audio = typeof data.audio === "object" && data.audio !== null && !Array.isArray(data.audio) ? data.audio : {}
+  const fallback = note.body.trim() || (typeof audio.transcript === "string" ? audio.transcript.trim() : "")
+  const duration = data.durationMs ?? audio.durationMs ?? (typeof data.dur === "number" ? data.dur * 1000 : undefined)
+  return {
+    durationMs: typeof duration === "number" && Number.isFinite(duration) && duration >= 0 ? duration : undefined,
+    segments: Array.isArray(data.segments) ? Math.max(1, data.segments.length) : 1,
+    lines: lines.length > 0 || fallback === "" ? lines : [{ who: "", at: 0, text: fallback }],
+    summary: (projected?.summary ?? []).filter((point) => point.trim() !== ""),
+    actions: (projected?.actions ?? []).map((item) => ({ text: item.text, done: item.done ?? false })),
+  }
+}
+
 /** The note's Source, named by the existing canonical metadata. */
 function sourced(note: StickyNote): { readonly origin: Origin; readonly source: Source } {
   const data = note.format?.data
@@ -139,8 +167,8 @@ export error FolderChanged
 
 /** The assessed collection and the separate editor words. Only the currently authenticated owner can publish either. */
 export service NoteContent {
-  snapshot(): { readonly collection: Collection; readonly draft: DraftWords | undefined }
-  subscribe(listener: () => void): () => void
+  readonly snapshot: () => { readonly collection: Collection; readonly draft: DraftWords | undefined }
+  readonly subscribe: (listener: () => void) => () => void
   collection(): Collection!!
   publish(owner: string, state: NotesSnapshot): Collection!UnreadableNotes
   clear(): void!!

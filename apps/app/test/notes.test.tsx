@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { Machine as Conversation } from "../gen/app__assistant.effect.vibe";
 import { Machine as Composer } from "../gen/app__assistant__composer.effect.vibe";
 import { Machine as Editor, waiting } from "../gen/app__notes__editor.effect.vibe";
+import { Machine as Trash } from "../gen/app__notes__trash.effect.vibe";
 import { Machine as Voice } from "../gen/app__notes__voice.effect.vibe";
 import { Machine as List, nothing, writing as listWriting } from "../gen/app__notes.effect.vibe";
 import { Machine as Talk } from "../gen/app__voice.effect.vibe";
@@ -15,7 +16,7 @@ import { agentOpen } from "../src/notes/agent.vibe";
 import { numberOf } from "../src/notes/content.vibe";
 import notes from "../src/notes/index.tsx";
 import { untimed } from "../src/runtime/reactor.vibe";
-import { closeAll, drawn, fill, only, open, press, underAct, until } from "./alpha.tsx";
+import { button, closeAll, drawn, fill, only, open, press, pressOnTop, underAct, until } from "./alpha.tsx";
 import { note, prepared } from "./fakes/notes.ts";
 import { scene } from "./fakes/scene.ts";
 
@@ -45,6 +46,57 @@ describe("Notes", () => {
     world.notes.failing = false;
     await press("Reconnect");
     await until(alpha, runtime, List, (s) => s.read.status === "Loaded" && s.rows.length === 6);
+  });
+
+  it("Reviews a deleted note in a sheet and recovers it (spec/app/notes/trash.md, \"Story: Delete a note and get it back\")", async () => {
+    const world = scene();
+    world.now = Date.now();
+    const deleted = world.notes.notes.pop();
+    if (deleted === undefined) throw new Error("The fixture needs a note to recover");
+    world.notes.trash.push({ note: deleted, deletedAt: new Date(world.now - 60_000).toISOString() });
+
+    const { alpha } = await open(world, only("view:Notes"));
+    await drawn(() => alpha.runtime.runPromise(Effect.flatMap(Shell, (shell) => shell.send({ type: "openView", view: "Notes" }))));
+    const runtime = notes.runtime(alpha);
+    await until(alpha, runtime, List, (state) => state.read.status === "Loaded");
+
+    await drawn(() => {
+      button("Notes options")?.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+    });
+    await drawn(() => {
+      const option = [...document.querySelectorAll<HTMLElement>("[role=menuitem]")]
+        .find((entry) => entry.textContent?.trim() === "Recently deleted");
+      if (option === undefined) throw new Error("no Recently deleted option");
+      option.click();
+    });
+    await until(alpha, runtime, Trash, (state) => state.showing && state.read.status === "Loaded" && state.entries.length === 1);
+
+    const row = button(deleted.title);
+    expect(row?.closest("ul")?.getAttribute("aria-label")).toBe("Recently deleted notes");
+    expect(row?.getAttribute("aria-description")).toMatch(/^Deleted /);
+    expect(button("Recover")).toBeUndefined();
+
+    await press(deleted.title);
+    await until(alpha, runtime, Trash, (state) => state.opened !== 0);
+    const dialog = () => document.querySelector("[role=dialog]");
+    expect(dialog()?.querySelector("h2")?.textContent).toBe(deleted.title);
+    expect(dialog()?.querySelector("p")?.textContent).toMatch(/^Deleted /);
+
+    await press("Delete now");
+    await until(alpha, runtime, Trash, (state) => state.question === "AskErase");
+    expect(dialog()?.querySelector("h2")?.textContent).toBe(`Delete “${deleted.title}”?`);
+    await press("Cancel");
+    await until(alpha, runtime, Trash, (state) => state.question === "NoQuestion" && state.opened !== 0);
+    expect(dialog()?.querySelector("h2")?.textContent).toBe(deleted.title);
+    expect(world.notes.trash).toHaveLength(1);
+
+    await press("Recover");
+    await until(alpha, runtime, Trash, (state) => state.entries.length === 0 && !state.showing);
+    await until(alpha, runtime, List, (state) => state.read.status === "Loaded" && state.rows.length === 6);
+    expect(world.notes.trash).toEqual([]);
+    expect(world.notes.notes).toContainEqual(deleted);
+    expect(dialog()).toBeNull();
+    expect(button(`Open ${deleted.title}`)).toBeDefined();
   });
 
   it("Keeps editor changes in the resident agent (spec/app/notes/editor.md, \"Story: Write a note\")", async () => {
@@ -88,6 +140,91 @@ describe("Notes", () => {
     await until(alpha, runtime, Editor, (s) => !s.showing && s.draft.sync === "Kept");
     expect(world.notes.notes.find((note) => note.id === "enclave")?.title).toBe("Enclave launch plan");
     await until(alpha, runtime, List, (s) => s.read.status === "Loaded" && s.version === world.notes.revision + 1);
+  });
+
+  it("Read and use the transcript (spec/app/notes/voice.md, \"Story: Read and use the transcript\")", async () => {
+    const world = scene();
+    world.ask.metadata = [];
+    const { alpha } = await open(world, only("assistant", "view:Notes"));
+    const runtime = assistant.runtime(alpha);
+    await drawn(() => runtime.runPromise(Effect.flatMap(Shell, (shell) => shell.send({ type: "openView", view: "Notes" }))));
+    await until(alpha, runtime, List, (state) => state.read.status === "Loaded");
+    await press("Open Design sync");
+    await until(alpha, runtime, Voice, (state) => state.showing && state.added > 0);
+    expect(document.body.textContent).toContain("Four heights. Pill, input, half, full.");
+    expect(document.body.textContent).toContain("Notifications stay as icons until unlock");
+
+    // spec/app/notes/voice.md, "Ask Alpha about this transcript hands Ask Alpha the transcript the note holds"
+    await until(alpha, runtime, Composer, (state) => state.slot === "Open");
+    await press("Ask Alpha about this transcript");
+    await until(alpha, runtime, Shell, (state) => state.assistant === "Sheet");
+    expect(world.ask.said).toEqual([]);
+    expect(document.querySelector<HTMLTextAreaElement>("textarea[aria-label='Message Alpha']")?.value).toBe("Summarize this for me");
+    expect(button("Remove Design sync")).toBeDefined();
+    const question = "What did we decide about notifications in this transcript?";
+    await fill("Message Alpha", question);
+    await press("Remove Design sync");
+    await until(alpha, runtime, Composer, (state) => !state.editor.transcript);
+
+    // spec/app/assistant/composer.md, "Story: Attach, quote and edit again"
+    await drawn(() => runtime.runPromise(Effect.flatMap(Shell, (shell) => shell.send({ type: "goBack" }))));
+    await press("Ask Alpha about this transcript");
+    await drawn(async () => { expect((await runtime.runPromise(Shell.use((shell) => shell.get()))).assistant).toBe("Bar"); });
+    await press("Back to notes");
+    await until(alpha, runtime, Voice, (state) => !state.showing);
+    await press("Open Design sync");
+    await until(alpha, runtime, Voice, (state) => state.showing && state.added > 0);
+    await press("Ask Alpha about this transcript");
+    await until(alpha, runtime, Shell, (state) => state.assistant === "Sheet");
+    expect(button("Remove Design sync")).toBeDefined();
+    expect(document.querySelector<HTMLTextAreaElement>("textarea[aria-label='Message Alpha']")?.value).toBe(question);
+    await until(alpha, runtime, Conversation, (state) => state.ready && state.context.selected);
+    await press("Send");
+    await drawn(() => vi.waitFor(() => expect(world.ask.said).toEqual([`Use the transcript of the selected voice note to answer this question.\n\n${question}`])));
+    expect(world.ask.metadata[0]).toMatchObject({
+      observation: { view: "notes", selectedObject: { kind: "canonical-note", id: "sync", revision: String(world.notes.revision) } },
+    });
+    await until(alpha, runtime, Composer, (state) => state.away === "Free" && !state.editor.transcript);
+    expect(button("Remove Design sync")).toBeUndefined();
+  });
+
+  it("Reviews a generated transcript before saving it (spec/app/notes/voice.md, \"Story: Read and use the transcript\")", async () => {
+    const world = scene();
+    world.phone = true;
+    const recordingId = "retained-recording";
+    const noteId = "voice-review";
+    const durationMs = 32_000;
+    const revision = world.notes.revision;
+    world.notes.notes.push(note(noteId, "Field recording", "", Date.now(), {
+      kind: "voice", data: { audioId: recordingId, durationMs, segments: [{ durationMs: 25_000 }, { durationMs: 7_000 }] },
+    }));
+    world.notes.audio.set(recordingId, { noteId, durationMs });
+    const windows: number[] = [];
+    world.voice.noteTranscription = (request) => {
+      expect(request).toMatchObject({ noteId, recordingId, durationMs });
+      windows.push(request.offsetMs);
+      return Promise.resolve(request.offsetMs === 0 ? "The door closes at dusk." : "Send a reminder on Thursday.");
+    };
+    const { alpha } = await open(world, only("view:Notes"));
+    const runtime = notes.runtime(alpha);
+    await drawn(() => runtime.runPromise(Effect.flatMap(Shell, (shell) => shell.send({ type: "openView", view: "Notes" }))));
+    await until(alpha, runtime, List, (state) => state.read.status === "Loaded");
+    await press("Open Field recording");
+    await until(alpha, runtime, Voice, (state) => state.showing);
+    expect(windows).toEqual([]);
+    await press("Generate transcript");
+    await until(alpha, runtime, Voice, (state) => state.listen.status === "Loaded");
+    expect(windows).toEqual([0, 25_000]);
+    await press("Review transcript");
+    expect(document.querySelector("[role=dialog]")?.textContent).toContain("Send a reminder on Thursday.");
+    expect(world.notes.revision).toBe(revision);
+    await pressOnTop("Add to note");
+    await until(alpha, runtime, Voice, (state) => state.writing.outcome === "Confirmed" && state.added === 2);
+    await until(alpha, runtime, List, (state) => state.read.status === "Loaded" && state.version === revision + 2);
+    expect(world.notes.notes.find((item) => item.id === noteId)?.format?.data.lines).toEqual([
+      { s: "me", t: "The door closes at dusk.", at: 0 },
+      { s: "me", t: "Send a reminder on Thursday.", at: 25 },
+    ]);
   });
 
   it("The agent opens the note I named, and only that, only for my request now (spec/app/notes/index.md, \"The agent opens the one note the owner named, as the list last read it, once for the owner's current request, and is told whether it opened\"; spec/app/notes/note.md, \"Only the owner opens a dialog or a question in Notes; a note is opened by the owner, or by the agent for the one the owner just named; and nothing opens while anything else of Notes is open\"; spec/app/assistant/index.md, \"Story: Let Alpha open what it is talking about\")", async () => {

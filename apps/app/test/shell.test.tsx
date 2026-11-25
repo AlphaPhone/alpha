@@ -87,26 +87,41 @@ describe("the shell", () => {
   // spec/app/shell/gestures.md, "Story: Swipe the way the phone expects"
   it("Swipe the way the phone expects (spec/app/shell/gestures.md, \"Story: Swipe the way the phone expects\")", async () => {
     const { alpha } = await open({ ...scene(), phone: true });
-    const swiped = (from: { x: number; y: number }, to: { x: number; y: number }) => drawn(() => {
-      const page = document.querySelector("main");
-      page?.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true, isPrimary: true, clientX: from.x, clientY: from.y }));
-      page?.dispatchEvent(new PointerEvent("pointerup", { bubbles: true, isPrimary: true, clientX: to.x, clientY: to.y }));
-    });
     await press("Notes");
     await until(alpha, alpha.runtime, Shell, (s) => s.trail.at(-1) === "Notes");
+    const page = document.querySelector("main");
+    if (!page) throw new Error("no Alpha shell");
+    // Happy DOM does not lay out the shell. Give the gesture the phone's canvas.
+    const width = 390;
+    const height = 844;
+    Object.defineProperties(page, {
+      offsetWidth: { value: width },
+      offsetHeight: { value: height },
+      getBoundingClientRect: { value: () => new DOMRect(0, 0, width, height) },
+    });
+    const swiped = (from: { x: number; y: number }, to: { x: number; y: number }) => drawn(() => {
+      page.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true, isPrimary: true, clientX: from.x, clientY: from.y }));
+      page.dispatchEvent(new PointerEvent("pointerup", { bubbles: true, isPrimary: true, clientX: to.x, clientY: to.y }));
+    });
 
     // spec/app/shell/gestures.md, "A swipe travels at least 46 points; a sideways one from within 30 points of a side edge, towards the middle, is Back": a short or mid-page swipe scrolls and changes nothing.
     await swiped({ x: 5, y: 300 }, { x: 40, y: 300 });
     await swiped({ x: 200, y: 300 }, { x: 300, y: 300 });
     expect((await alpha.runtime.runPromise(Shell.use((s) => s.get()))).trail).toEqual(["Notes"]);
-    await swiped({ x: 5, y: 300 }, { x: 80, y: 300 });
+    await drawn(() => {
+      const pointer = { bubbles: true, pointerType: "touch", pointerId: 7, isPrimary: true };
+      const touch = { target: page, identifier: 3, clientX: 5, clientY: 300 };
+      page.dispatchEvent(new PointerEvent("pointerdown", { ...pointer, clientX: touch.clientX, clientY: touch.clientY }));
+      page.dispatchEvent(new TouchEvent("touchstart", { bubbles: true, touches: [new Touch(touch)] }));
+      page.dispatchEvent(new PointerEvent("pointercancel", pointer));
+      page.dispatchEvent(new TouchEvent("touchend", { bubbles: true, changedTouches: [new Touch({ ...touch, clientX: 80 })] }));
+    });
     await until(alpha, alpha.runtime, Shell, (s) => s.trail.length === 0);
 
     // spec/app/shell/gestures.md, "On the launcher a pull down that Home allows opens Android's shade, and a swipe up from the bottom bar goes Home; nothing else is a swipe"
     await until(alpha, alpha.runtime, Canvas, (c) => c.mounted && c.launcher);
     await press("Notes");
     await until(alpha, alpha.runtime, Shell, (s) => s.trail.at(-1) === "Notes");
-    const height = window.innerHeight;
     await swiped({ x: 200, y: Math.round(height / 2) }, { x: 200, y: Math.round(height / 2) - 100 });
     expect((await alpha.runtime.runPromise(Shell.use((s) => s.get()))).trail).toEqual(["Notes"]);
     await swiped({ x: 200, y: height - 10 }, { x: 200, y: height - 100 });

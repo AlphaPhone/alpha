@@ -1,5 +1,5 @@
 // spec/app/home/index.md, "Story: See the apps on this phone"
-import type { InstalledApp } from "@elizaos/os/bridges/definitions/system"
+import type { InstalledApp } from "@elizaos/os-bridges"
 import type { Listed } from "../platform/launcher.vibe"
 
 /** What Home last read of each installed app beyond its key, which the spec never holds: its label, icon and profile. */

@@ -1,5 +1,5 @@
 // spec/app/files/preview.md, "A page is shown only when the worker drew it in isolation and handed it over unwritable"
-import type { PdfPage } from "@elizaos/os/bridges/definitions/media";
+import type { PdfPage } from "@elizaos/os-bridges";
 import { PDFWorker, getDocument } from "pdfjs-dist";
 import workerUrl from "pdfjs-dist/build/pdf.worker.min.mjs?url";
 

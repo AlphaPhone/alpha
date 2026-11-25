@@ -17,7 +17,7 @@ underAct();
 afterEach(closeAll);
 
 const hour = 3_600_000;
-const longDate = new Intl.DateTimeFormat(undefined, { weekday: "long", month: "long", day: "numeric" });
+const narrowDay = new Intl.DateTimeFormat(undefined, { weekday: "narrow" });
 
 /** A world at nine in the morning of a Tuesday, whose agent keeps a stand-up, a lunch it was invited to and a dentist's appointment, and whose phone keeps the gym. */
 function morning(phone: boolean): Scene & { at: (day: number, hours: number) => number; today: number } {
@@ -41,26 +41,28 @@ function morning(phone: boolean): Scene & { at: (day: number, hours: number) => 
 }
 
 /** The titles of the events the days show, in order: each event's button is named by its title and time. */
-const titles = () => [...document.querySelectorAll("[data-alpha-subview=calendar-list] button")].map((found) => found.getAttribute("aria-label") ?? "")
-  .map((text) => ["Standup", "Team lunch", "Dentist", "Gym", "Coffee"].find((title) => text.startsWith(`${title}, `)) ?? "").filter((title) => title !== "");
+const titles = () => [...document.querySelectorAll("[data-alpha-subview=calendar-list] button")].map((found) => (found.getAttribute("aria-label") ?? "").split(", "))
+  .map((names) => ["Standup", "Team lunch", "Dentist", "Gym", "Coffee"].find((title) => names.includes(title)) ?? "").filter((title) => title !== "");
 
-/** Tap the event whose name starts with `text`, as a row's or a block's does. */
+/** Tap the row or block with `text` as the event title. */
 async function tap(text: string) {
-  const found = [...document.querySelectorAll("button")].find((candidate) => (candidate.getAttribute("aria-label") ?? "").startsWith(`${text}, `));
+  const found = [...document.querySelectorAll("button")].find((candidate) => (candidate.getAttribute("aria-label") ?? "").split(", ").includes(text));
   if (!found) throw new Error(`no row ${text}`);
   await press(found.getAttribute("aria-label") ?? "");
 }
 
+const chooseDate = () => press(`Choose date: ${document.querySelector("[data-host-chrome] h1")?.textContent ?? ""}`);
+
 /** Open the month dialog under the title and choose `pill` there: a layout, or the Calendars sheet. */
 async function fromMonth(pill: string) {
-  await press("Choose date");
+  await chooseDate();
   await press(pill);
 }
 
 /** Bring Calendar forward, as Home, a notice or Ask Alpha does through the shell. */
 const openCalendar = (alpha: Alpha) => alpha.runtime.runPromise(Shell.use((shell) => shell.send({ type: "openView", view: "Calendar" })));
 
-const dayButton = (day: number) => longDate.format(dateOf(day));
+const dayButton = (day: number) => `${narrowDay.format(dateOf(day))} ${dateOf(day).getDate()}`;
 
 describe.each([["a browser", false], ["a phone", true]])("in %s", (_where, phone) => {
   it("See my days (spec/app/calendar/index.md, \"Story: See my days\"; spec/app/calendar/index.md, \"Story: Move through the days\")", async () => {
@@ -100,7 +102,7 @@ describe.each([["a browser", false], ["a phone", true]])("in %s", (_where, phone
     await until(alpha, runtime, View, (s) => s.anchor === world.today && s.google.status === "Loaded");
 
     // spec/app/calendar/index.md, "Choosing a layout closes the menu, and the agenda goes back to today"; spec/app/calendar/presentation.md, "A read for a day covers the month before it through the month after next": the agenda lists what is coming, not only today.
-    await press("Choose date");
+    await chooseDate();
     await until(alpha, runtime, View, (s) => s.overlay === "MonthDialog");
     await press("Schedule");
     await until(alpha, runtime, View, (s) => s.layout === "Agenda" && s.overlay === "NoOverlay");
