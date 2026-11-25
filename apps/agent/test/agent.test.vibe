@@ -1,6 +1,6 @@
 // spec/agent/index.md, "Story: Run Alpha's agent on the phone"
 // eslint-disable-next-line @typescript-eslint/consistent-type-imports -- ConversationRecord is the schema `schema Created` decodes with, a value the projection ESLint reads does not show
-import { ConversationRecord, TurnController, createRuntimeJsonClient } from "@elizaos/agent"
+import { ConversationRecord, TurnController, createRuntimeJsonClient, defineRoutes } from "@elizaos/agent"
 import { describe, expect, it } from "@effect/vitest"
 import { CleanupReceipt } from "@elizaos/plugin-notes-client"
 import { configurationExit, coreActions, entryCarried, launchViews, packedPlugins, productPluginName, refusedActions, workerAdmitted } from "../gen/agent.effect.vibe"
@@ -44,6 +44,7 @@ const answerOf = (status: number, body: string) => {
 
 schema Created { conversation: ConversationRecord }
 schema Listed { conversations: { id: string }[] }
+schema History { messages: { id: string; timestamp: Schema.Int }[] }
 schema Replied { fullText: string }
 schema Interacted { success: boolean; result: { state?: { notes: { title: string; body: string }[] } } }
 schema Approvals { approvals: Schema.Unknown[] }
@@ -109,6 +110,32 @@ describe("Run Alpha's agent on the phone", () => {
       try promise(() => controller.bind(opened))
       const result = try promise(() => controller.send({ text: "Remember the word heron." }, { stream: { onPreview: () => {} } }))
       try Effect.try(() => expect(result.kind === "Replied" ? result.reply.text : result.kind).toContain("You said: Remember the word heron."))
+      // spec/agent/index.md, "The page names the query values each gated route can receive"
+      const history = `/api/conversations/${opened.id}/messages`
+      const latest = try promise(() => call(first, "GET", history))
+      const { messages } = try Schema.decodeUnknownEffect(Schema.fromJsonString(History))(latest.body)
+      const { anchor, prior, centered, older } = try Effect.try(() => {
+        const anchor = messages.at(-1)
+        const prior = messages.at(-2)
+        if (anchor === undefined || prior === undefined) throw new Error("The sent turn has no two recorded messages")
+        const id = encodeURIComponent(anchor.id)
+        const centered = `${history}?around=${id}`
+        const cursor = `${history}?before=${anchor.timestamp}&beforeId=${id}`
+        const older = `${cursor}&limit=1`
+        const gate = defineRoutes(listed())
+        const admitted = (target: string) => gate.admit({ method: "GET", target, streamed: false, body: undefined }).tag === "Admitted"
+        expect([history, centered, older, `${older}&beforeId=${id}`, `${cursor}&limit=2`, `${history}?before=01&beforeId=${id}&limit=1`].map(admitted))
+          .toEqual([true, true, true, false, false, false])
+        return { anchor, prior, centered, older }
+      })
+      const near = try promise(() => call(first, "GET", centered))
+      const edge = try promise(() => call(first, "GET", older))
+      const nearPage = try Schema.decodeUnknownEffect(Schema.fromJsonString(History))(near.body)
+      const edgePage = try Schema.decodeUnknownEffect(Schema.fromJsonString(History))(edge.body)
+      try Effect.try(() => expect([
+        latest.status, near.status, edge.status, nearPage.messages.some((message) => message.id === anchor.id), edgePage.messages.map(({ id }) => id),
+      ]).toEqual([200, 200, 200, true, [prior.id]]))
+
       const title = "Route admission check"
       const routine = try promise(() => call(first, "POST", "/api/personal-assistant/routines", { title, idempotencyKey: "route-admission", times: ["14:20"] }))
       const listing = try promise(() => call(first, "GET", "/api/scheduled-tasks?ownerVisibleOnly=1"))
