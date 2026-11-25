@@ -43,7 +43,7 @@ export async function mountDock({ view = "Browser", withToast = false, flush }: 
     Layer.succeed(MediaHandoff, { attach: () => Effect.succeed(false) }),
     Layer.succeed(MediaExecutors, { execute: () => Effect.succeed(undefined) }),
   );
-  const runtime = ManagedRuntime.make(Layer.provideMerge(whole(together(resident, assisting, voicing, aloud)), platform));
+  const runtime = ManagedRuntime.make(Layer.provideMerge(whole(together(assisting, voicing, aloud)), Layer.provideMerge(resident, platform)));
   const host = document.body.appendChild(document.createElement("div"));
   const reactRoot = createRoot(host);
   await run(async () => {
