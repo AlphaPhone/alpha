@@ -6,12 +6,14 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { Machine as Shell } from "../gen/app__shell.effect.vibe";
 import { Machine as Messages } from "../gen/app__messages.effect.vibe";
 import { Machine as Composer } from "../gen/app__messages__composer.effect.vibe";
+import { Machine as Phone } from "../gen/app__phone.effect.vibe";
 import { Machine as Toasts } from "../gen/app__notices__toasts.effect.vibe";
 import { Machine as Voice } from "../gen/app__voice.effect.vibe";
 import { Machine as Tabs } from "../gen/app__browser.effect.vibe";
 import { Machine as Page } from "../gen/app__browser__address.effect.vibe";
 import { Machine as Home } from "../gen/app__home.effect.vibe";
 import { executeMedia } from "../src/assistant/media-executors.ts";
+import { readAgentSms } from "../src/messages/agent-send.vibe";
 import { Pages } from "../src/browser/browser.vibe";
 import browser from "../src/browser/index.tsx";
 import home from "../src/home/index.tsx";
@@ -302,6 +304,29 @@ describe("Messages on an Alpha image", () => {
     await press("Ben Ortiz");
     await ready(alpha.runtime, Messages, "another conversation selected", (state) => state.pane === "Conversation" && state.thread !== original.thread && state.page.status === "Loaded");
     expect([await read(), world.telephony.sent]).toEqual([refusal, []]);
+  });
+
+  it("Confirms reviewed agent SMS with the exact native operation (spec/app/contacts/agent.md, \"Only the owner approves, only what is shown as it is now, and only when the phone has ruled out an emergency call\")", async () => {
+    const world = image();
+    const { alpha } = await openImage(world);
+    await ready(alpha.runtime, Shell, "Alpha image admitted", (state) => state.image);
+    await ready(alpha.runtime, Phone, "Known call state", (state) => state.telecom === "NoCall");
+    const sms = { type: "sms_send", recipients: ["+14155550100"], body: "Meet at the front door", subscriptionId: 1 } as const;
+    const call = { proposalId: "reviewed-sms", operationId: "reviewed-sms", attemptId: 1 };
+    const approved = { current: () => Promise.resolve(true) };
+    let checks = 0;
+    await expect(executeMedia(alpha, sms, call, { current: () => Promise.resolve(++checks === 1) })).resolves.toMatchObject({ kind: "refused" });
+    await expect(executeMedia(alpha, { ...sms, subscriptionId: 9 }, call, approved)).resolves.toMatchObject({ kind: "refused" });
+    expect(world.telephony.sent).toEqual([]);
+
+    await expect(executeMedia(alpha, sms, call, approved)).resolves.toMatchObject({
+      kind: "applied", result: { kind: "sms-send", operationId: call.operationId, subscriptionId: 1 },
+    });
+    await expect(alpha.runtime.runPromise(readAgentSms({ ...sms, body: "Different text" }, call))).resolves.toBeUndefined();
+    await expect(alpha.runtime.runPromise(readAgentSms(sms, call))).resolves.toMatchObject({ kind: "found", result: { operationId: call.operationId } });
+    expect(world.telephony.sent.map(({ operationId, recipients, body }) => ({ operationId, recipients, body }))).toEqual([
+      { operationId: call.operationId, recipients: [...sms.recipients], body: sms.body },
+    ]);
   });
 
   it("Opens the exact notified conversation and follows an owner's safe link tap (spec/app/messages/index.md, \"A message notification opens its exact conversation once access is available\"; spec/app/messages/index.md, \"Story: Read a conversation\")", async () => {
