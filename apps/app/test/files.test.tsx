@@ -825,6 +825,24 @@ describe("Files on a phone", () => {
     await until(alpha, runtime, Bin, (s) => s.attempt.outcome === "Confirmed" && s.entries.length === 0 && s.listing.status === "Loaded");
     expect([world.files.trash, paths(world).filter((path) => path.endsWith("a.txt") || path.endsWith("b.txt"))]).toEqual([[], ["card:b.txt", "primary:Download/a.txt"]]);
 
+    // spec/app/files/trash.md, "A job ends as its answer says for each item: only what the phone confirmed is done, and the rest was refused or is unknown"
+    world.files.trash.push(
+      { id: "20", was: { volume: "primary", path: "Download/returned.txt", directory: false, mimeType: "text/plain", size: 1, modified: 1 }, deletedAt: world.files.now },
+      { id: "20", was: { volume: "card", path: "waiting.txt", directory: false, mimeType: "text/plain", size: 1, modified: 1 }, deletedAt: world.files.now },
+    );
+    world.files.refusing.push("storageRestore:card");
+    await press("Refresh");
+    await until(alpha, runtime, Bin, (s) => s.listing.status === "Loaded" && s.entries.length === 2);
+    await press("Restore all");
+    await until(alpha, runtime, Bin, (s) => s.attempt.outcome === "Unknown" && s.listing.status === "Loaded");
+    const partial = runtime.runSync(Bin.use((machine) => machine.get()));
+    expect([partial.done.map((entry) => entry.name), partial.entries.map((entry) => entry.name), paths(world).includes("primary:Download/returned.txt")]).toEqual([["returned.txt"], ["waiting.txt"], true]);
+    world.files.refusing.splice(0);
+    await press("waiting.txt");
+    await pressOnTop("Restore");
+    await until(alpha, runtime, Bin, (s) => s.attempt.outcome === "Confirmed" && s.entries.length === 0 && s.listing.status === "Loaded");
+    expect(paths(world)).toContain("card:waiting.txt");
+
     // spec/app/files/trash.md, "The owner is shown what will be erased, one item, the marked items or everything listed, and a change to the list voids the confirmation"
     world.files.trash.push(
       { id: "14", was: { volume: "primary", path: "Download/e.txt", directory: false, mimeType: "text/plain", size: 1, modified: 1 }, deletedAt: world.files.now },
