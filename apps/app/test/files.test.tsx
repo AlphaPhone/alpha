@@ -6,6 +6,9 @@ import { Machine as Shown } from "../gen/app__files__preview.effect.vibe";
 import { Machine as Recent } from "../gen/app__files__recent.effect.vibe";
 import { Machine as Bin } from "../gen/app__files__trash.effect.vibe";
 import { Machine as Shell } from "../gen/app__shell.effect.vibe";
+import { Machine as Inbox } from "../gen/app__inbox.effect.vibe";
+import { Machine as Drafts } from "../gen/app__inbox__drafts.effect.vibe";
+import { Letters } from "../src/inbox/composer.vibe";
 import { agentFilter, agentOpen, agentRead, approved, fileAction, offer, shownAt } from "../src/files/agent.vibe";
 import { showDownloads } from "../src/files/files.vibe";
 import files from "../src/files/index.tsx";
@@ -390,6 +393,36 @@ describe("Files on a phone", () => {
     await until(alpha, runtime, Shown, (s) => s.viewer === 0);
     expect(runtime.runSync(Recent.use((m) => m.get())).rows.map((row) => row.origin)).toEqual(["Picked"]);
 
+  });
+
+  it("Offer the file I am looking at to Inbox (spec/app/files/preview.md, \"Story: Act on the file I am looking at\"; spec/app/inbox/adding.md, \"Story: Add files and people to my draft\")", async () => {
+    const { alpha, runtime, world } = await onFiles();
+    const content = "A reviewed attachment";
+    world.files.stored.push({ volume: "primary", path: "Download/attach.txt", directory: false, mimeType: "text/plain", size: content.length, modified: 12 });
+    world.files.texts["Download/attach.txt"] = content;
+    await hardware("home");
+    await press("Inbox");
+    await until(alpha, alpha.runtime, Inbox, (state) => state.signedIn && state.selected.account !== 0 && state.accounts.status === "Loaded");
+    await hardware("home");
+    await press("Files");
+    await until(alpha, runtime, Browser, (state) => state.open && state.storage.status === "Loaded");
+    await press("Internal storage");
+    await press("Download");
+    await until(alpha, runtime, Browser, (state) => state.listing.status === "Loaded" && state.items.some((item) => item.name === "attach.txt"));
+    await press("attach.txt");
+    await until(alpha, runtime, Shown, (state) => state.content.status === "Loaded");
+
+    await choose("Use in email", "File actions");
+    await until(alpha, alpha.runtime, Shell, (state) => state.trail.at(-1) === "Inbox");
+    await until(alpha, runtime, Shown, (state) => state.attempt.outcome === "Confirmed");
+    expect(alpha.runtime.runSync(Drafts.use((model) => model.get())).open).toBe(false);
+    await pressOnTop("New email");
+
+    await until(alpha, alpha.runtime, Drafts, (state) => state.open && state.letter.attachments === 1);
+    const draft = alpha.runtime.runSync(Drafts.use((model) => model.get())).letter.id;
+    const words = alpha.runtime.runSync(Letters.use((letters) => Effect.sync(() => letters.words(draft))));
+    expect(words.files).toEqual([{ name: "attach.txt", mimeType: "text/plain", size: content.length, data: btoa(content) }]);
+    expect(world.inbox.changes.some((change) => change.startsWith("send "))).toBe(false);
   });
 
   it("Let the agent read my files (spec/app/files/index.md, \"Story: Let the agent read my files\")", async () => {

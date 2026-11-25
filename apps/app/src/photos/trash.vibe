@@ -2,6 +2,7 @@
 import type { TrashConfirmation } from "@elizaos/os/bridges/definitions/media"
 import * as Trash from "../../gen/app__photos__trash.effect.vibe"
 import * as Library from "../../gen/app__photos.effect.vibe"
+import type { Actor } from "../../gen/app__photos__actor.effect.vibe"
 import { PhotosPort } from "../platform/photos.vibe"
 import { answer, applying, following, reacting, started, together, type Job } from "../runtime/reactor.vibe"
 import { Catalog, type Row } from "./catalog.vibe"
@@ -67,7 +68,7 @@ effect function deleted(attempt: number, items: readonly number[]): Trash.Event!
 
 type Needs = PhotosPort | Catalog | Trash.Machine | Prepared
 
-function carry(fx: Trash.Effect): Job<Trash.Event, Needs, [Trash.Actor]> {
+function carry(fx: Trash.Effect): Job<Trash.Event, Needs, [Actor]> {
   return match (fx) {
     when { tag: "Fetch", let ticket, let page }: answer("trash", fetched(ticket, page), fail(ticket), "Phone");
     when { tag: "Recover", let attempt, let items }: answer(`recovery ${attempt}`, effect {

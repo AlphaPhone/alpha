@@ -1,4 +1,5 @@
 { "method": "GET", "path": "/api/health" }
+{ "method": "GET", "path": "/api/status" }
 { "method": "POST", "path": "/api/conversations" }
 { "method": "GET", "path": "/api/conversations" }
 { "method": "GET", "path": "/api/conversations/messages/search" }
