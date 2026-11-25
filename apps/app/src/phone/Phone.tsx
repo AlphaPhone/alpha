@@ -130,8 +130,6 @@ export function Phone({ runtime, alpha }: PhoneProps) {
           {state.chip === "MissedCalls" && can({ type: "pickChip", chip: "AllCalls" }) && <div className="px-4 pb-2"><Chip clearLabel="Show all calls" onClear={() => void send({ type: "pickChip", chip: "AllCalls" })}>Missed</Chip></div>}
           {rows.length > 0 && <div role="group" aria-label="Recent calls">{rows.map((row, index) => <RecentRow key={row.id} row={row}
             now={now} enabled={can({ type: "dialRecent", number: row.number })} call={dialRecent} first={index === 0} />)}</div>}
-          {state.chip === "AllCalls" && state.recents.status === "Loaded" && rows.length > 0 && can({ type: "pickChip", chip: "MissedCalls" }) &&
-            <div className="px-4 py-2"><Button variant="ghost" size="sm" className="text-muted-foreground" onClick={() => void send({ type: "pickChip", chip: "MissedCalls" })}>Missed</Button></div>}
         </TabsContent>
         <TabsContent value="Keypad" data-alpha-phone-keypad="" className="min-h-0 flex-1 overflow-y-auto rounded-none">
           <div className="mx-auto flex min-h-full max-w-103 flex-col pb-3.5 [--dial-key:clamp(3rem,18.93vw,4.875rem)]">

@@ -83,14 +83,12 @@ describe("Phone on an Alpha image", () => {
     await openPhone(alpha);
     await until(alpha, alpha.runtime, Phone, (s) => s.carrier === "CarrierReady" && s.telecom === "NoCall" && s.recents.status === "Loaded" && s.rows === 2);
     expect(world.telephony.dialed).toEqual([]);
+    expect(button("Missed")).toBeUndefined();
 
     // spec/app/phone/index.md, "Tapping a recent call hands its number to the dialer"; spec/app/phone/index.md, "With the dialer role a call is placed through Telecom, and counts as started only when Telecom accepted it"
     await press("Call Maya Chen");
     await until(alpha, alpha.runtime, Phone, (s) => s.dialled && s.dial.status === "Loaded");
     expect([world.telephony.dialed, world.telephony.placed]).toEqual([[], ["+14155550100"]]);
-
-    await press("Missed");
-    await until(alpha, alpha.runtime, Phone, (s) => s.chip === "MissedCalls" && s.recents.status === "Loaded" && s.rows === 1);
   });
 
   it("Type a number, and call it only when the phone can dial it (spec/app/phone/index.md, \"Story: Type a number\"; spec/app/phone/index.md, \"Story: Call a number\")", async () => {
@@ -322,6 +320,9 @@ describe("Phone on an Alpha image", () => {
     await until(alpha, alpha.runtime, Phone, (s) => s.missed === 1 && s.voicemail);
     await pressPhoneCard();
     await until(alpha, alpha.runtime, Phone, (s) => s.front && s.tab === "Recents" && s.chip === "MissedCalls" && s.recents.status === "Loaded" && s.rows === 1 && s.missed === 0);
+    // spec/app/phone/index.md, "The filter and \"Retry call history\" read the log again"
+    await press("Show all calls");
+    await until(alpha, alpha.runtime, Phone, (s) => s.chip === "AllCalls" && s.recents.status === "Loaded" && s.rows === 2);
 
     // spec/app/phone/voicemail.md, "The phone reports how many voicemails are unheard, for Home and the tab"
     world.telephony.calls = world.telephony.calls.filter((one) => one.type !== "missed");
