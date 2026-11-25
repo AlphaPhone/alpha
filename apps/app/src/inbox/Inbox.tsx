@@ -76,7 +76,7 @@ function arrived(receivedAt: string, today: number): string {
 const senderName = (from: string) => from.replace(/<[^>]*>/u, "").replace(/"/gu, "").trim() || from;
 const senderAddress = (from: string) => /<([^>]+)>/u.exec(from)?.[1] ?? from;
 
-/** Why the list has nothing to show, as the list's state says it; none where it has rows to show or is reading. */
+/** Why the list has nothing to show, as the list's state says it, else that the accounts are being checked or could not be; none where it has rows to show or is reading. */
 function emptyOf(s: Mailbox): InboxListStateKind | undefined {
   if (!s.signedIn || s.failure === "LeaseNeeded") return "signedOut";
   if (s.accounts.status === "Loaded" && s.selected.account === 0 && s.connected.length === 0) return "notConnected";
@@ -84,12 +84,14 @@ function emptyOf(s: Mailbox): InboxListStateKind | undefined {
   if (readable(s) && !searchableIn(s.selected.folder, s)) return "unavailable";
   if (s.list.status === "Failed") return s.failure === "Offline" ? "offline" : "failed";
   if (s.list.status === "Loaded" && s.pages > 0 && s.total === 0) return s.selected.query === "" ? "empty" : "noResults";
+  if (s.accounts.status === "Idle" || s.accounts.status === "Loading") return "checking";
+  if (s.accounts.status === "Failed") return "failed";
   return undefined;
 }
 
 /** What the list tells the owner above its messages, most pressing first. */
 function noticeOf(s: Mailbox): InboxNoticeKind | undefined {
-  if (s.failure === "Revoked") return "reconnect";
+  if (s.failure === "Revoked" || s.failure === "LeaseNeeded") return "reconnect";
   if (s.list.status === "Failed" && s.pages > 0) return s.failure === "Offline" ? "offline" : "unreachable";
   if (s.saved) return "savedList";
   if (s.doubtful) return "listOutOfDate";
@@ -355,6 +357,7 @@ export function Inbox({ runtime, alpha }: InboxProps & { alpha: Alpha }) {
     return changes.can(event, "Owner") ? () => void changes.send(event, "Owner") : undefined;
   };
   const kind = letters.length === 0 ? emptyOf(state) : undefined;
+  const notice = kind === "signedOut" ? undefined : noticeOf(state);
   // spec/app/inbox/index.md, "Select all chooses every message the list shows, in one change"
   const chooseAll = { type: "chooseAll", shown: letters.map((letter) => letter.message) } as const;
   const canSearch = !draftsFolder && readable(state) && searchableIn(folder, state);
@@ -414,8 +417,8 @@ export function Inbox({ runtime, alpha }: InboxProps & { alpha: Alpha }) {
             void send(event);
           }
         } : undefined}
-        notice={noticeOf(state)}
-        onNoticeAction={noticeOf(state) === "reconnect" ? signIn : retryList}
+        notice={notice}
+        onNoticeAction={notice === "reconnect" ? signIn : retryList}
         state={mustChoose ? undefined : kind}
         onStateAction={kind === "offline" || kind === "failed" ? retryList : kind === "signedOut" ? signIn : settings}
         chosen={state.chosen.length}

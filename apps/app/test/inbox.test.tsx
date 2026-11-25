@@ -227,6 +227,7 @@ describe.each([["a browser", false], ["a phone", true]])("in %s", (_where, phone
 it("Connect Gmail and keep to its grant (spec/app/inbox/index.md, \"Story: Connect Gmail and keep to its grant\")", async () => {
   const world = { ...scene(), phone: true };
   world.inbox.google = undefined;
+  world.inbox.offline = true;
   const { alpha } = await open(world);
   const runtime = inbox.runtime(alpha);
 
@@ -240,8 +241,14 @@ it("Connect Gmail and keep to its grant (spec/app/inbox/index.md, \"Story: Conne
   world.signedIn = true;
   await hardware("home");
 
-  // spec/app/inbox/index.md, "The owner can be signed out, have no account connected, have several to choose from, lack read access, be asked to reconnect Gmail, and a check can be asked again before the last answers"
+  // spec/app/inbox/index.md, "The answer names the connected accounts, their credentials and grants; the account chosen stays selected while it is connected, else the one account that may be read, else none and the owner chooses": a failed check changes nothing, and with nothing listed the list says mail could not be read and offers to check again
   await press("Inbox");
+  await until(alpha, runtime, List, (s) => s.accounts.status === "Failed");
+  expect([rows(), told()]).toEqual([[], expect.stringContaining("Mail could not be read")]);
+  world.inbox.offline = false;
+
+  // spec/app/inbox/index.md, "The owner can be signed out, have no account connected, have several to choose from, lack read access, be asked to reconnect Gmail, and a check can be asked again before the last answers"
+  await press("Try again");
   await until(alpha, runtime, List, (s) => s.accounts.status === "Loaded" && s.connected.length === 0);
   expect(told()).toContain("Connect Gmail");
 
@@ -288,6 +295,30 @@ it("Connect Gmail and keep to its grant (spec/app/inbox/index.md, \"Story: Conne
   const signedIn = await runtime.runPromise(List.use((list) => list.get()));
   expect([world.mailLease.held, world.mailLease.asked, world.mailLease.heldBack, signedIn.accounts.ticket, signedIn.signedIn, await generation()])
     .toEqual([true, 2, heldBack, after.accounts.ticket + 1, true, kept]);
+
+  // spec/app/inbox/index.md, "A check the phone holds back for want of the mail lease keeps the session and everything kept, and asks for one more sign-in": with mail on screen, the list keeps its saved rows and asks to Reconnect above them.
+  world.inbox.google = { email: "owner@gmail.test", connection: "grant-2", capabilities: ["google.basic_identity", "google.gmail.triage", "google.gmail.send", "google.gmail.manage"] };
+  await hardware("home");
+  await tile("Inbox");
+  await until(alpha, runtime, List, (s) => s.list.status === "Loaded" && s.pages >= 1);
+  const shown = rows();
+  expect(shown.length).toBeGreaterThan(0);
+  world.mailLease.held = false;
+  await hardware("home");
+  await tile("Inbox");
+  await until(alpha, runtime, List, (s) => s.failure === "LeaseNeeded");
+  expect([rows(), Boolean(button("Reconnect")), told().includes("Connect Eliza Cloud")]).toEqual([shown, true, false]);
+
+  // spec/app/inbox/message.md, "Only the newest read's answer is shown, while its account may still be read; a read that fails says why": a message the phone cannot read for want of the lease closes, back to the list and its Reconnect, never a Retry that cannot work.
+  await row(shown[0] ?? "");
+  await until(alpha, runtime, Shown, (s) => s.message === 0 && s.fault === "Revoked");
+  await until(alpha, runtime, List, (s) => s.failure === "LeaseNeeded" && s.accounts.status === "Failed");
+  expect([Boolean(button("Retry")), Boolean(button("Reconnect")), rows()]).toEqual([false, true, shown]);
+
+  // spec/app/platform/index.md, "The owner's tap on a mail sign-in control starts the phone's one more sign-in for mail where the phone wants it, then reads again once": Reconnect over the saved rows starts the sign-in for mail, and the list is read again with the lease.
+  await press("Reconnect");
+  await until(alpha, runtime, List, (s) => s.failure === "Fine" && s.accounts.status === "Loaded" && s.list.status === "Loaded");
+  expect([world.mailLease.held, world.mailLease.asked, Boolean(button("Reconnect")), rows()]).toEqual([true, 3, false, shown]);
 });
 
 it("Send a draft I reviewed (spec/app/inbox/sending.md, \"Story: Send a draft I reviewed\"; spec/app/inbox/drafts.md, \"Story: Write a message\"; spec/app/inbox/drafts.md, \"Story: Set a draft aside or discard it\"; spec/app/inbox/adding.md, \"Story: Add files and people to my draft\"; spec/app/inbox/suggestion.md, \"Story: Review what is offered into my email\"; spec/app/inbox/sending.md, \"Story: Save my draft to Gmail, or delete it there, knowingly\")", async () => {
