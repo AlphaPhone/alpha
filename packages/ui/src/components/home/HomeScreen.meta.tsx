@@ -9,7 +9,7 @@ const onOpenTile = fn();
 const editing: Partial<HomeScreenProps> = { editing: true, tiles: unbadged, onOpenTile: undefined, onBeginEditing: undefined };
 
 export const meta: ComponentMeta<HomeScreenProps> = {
-  args: { cards: homeCards, tiles: homeTiles, hidden: hiddenApps, onOpenTile },
+  args: { cards: homeCards, tiles: homeTiles, hidden: hiddenApps, onOpenTile, onOpenDrawer: undefined },
   decorator: (story) => <div className="h-dvh">{story()}</div>,
   examples: {
     "Reading saved tiles": { tiles: undefined, cards: [], onBeginEditing: undefined },
