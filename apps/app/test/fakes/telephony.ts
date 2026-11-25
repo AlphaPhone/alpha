@@ -31,7 +31,9 @@ export interface TelephonyScene {
   placed: string[];
   dialed: string[];
   carrier: "ready" | "unconfigured" | "unsupported";
-  mobileService: boolean;
+  mobileService: boolean | undefined;
+  callStateKnown: boolean;
+  readonly emergencyNumbers: Set<string>;
   voicemails: HeldVoicemail[];
   /** True while this fake phone's voicemail deletion is still in Android's Undo window. */
   holdVoicemailDeletion: boolean;
@@ -92,6 +94,8 @@ export function telephonyScene(): TelephonyScene {
     dialed: [],
     carrier: "ready",
     mobileService: true,
+    callStateKnown: true,
+    emergencyNumbers: new Set(["911", "112"]),
     voicemails: [{ id: 11, number: "+14155550100", date: 1_700_000_100_000, heard: false, deleted: false }],
     holdVoicemailDeletion: false,
     sms: "granted",
@@ -140,7 +144,12 @@ export function telephonyRoutes(world: TelephonyScene): Route[] {
 
 /** `ElizaTelephony`: eliza's calls, call log, voicemail and SMS provider, over `world`. */
 function telephony(world: TelephonyScene): Faked {
-  return plugin<PhoneNativePlugin & MessagesNativePlugin & { smsNoticePending(): Promise<unknown>; acknowledgeSmsNotice(input: { token: string }): Promise<void> }, Record<string, unknown>>((emit) => {
+  return plugin<PhoneNativePlugin & MessagesNativePlugin & {
+    classifyDialNumber(input: { number: string }): Promise<unknown>;
+    ownerDialScreen(input: { number: string }): Promise<unknown>;
+    smsNoticePending(): Promise<unknown>;
+    acknowledgeSmsNotice(input: { token: string }): Promise<void>;
+  }, Record<string, unknown>>((emit) => {
     world.changed = () => emit("messagesChanged", {});
     world.deliver = (operationId) => {
       const record = world.journal.get(operationId);
@@ -169,6 +178,10 @@ function telephony(world: TelephonyScene): Faked {
       addresses: [one.address], body: one.body, deliveryReport: one.box === "inbox" ? null : "pending", attachments: one.pictures ?? 0,
     });
     const voicemail = (id: string) => world.voicemails.find((one) => String(one.id) === id && !one.deleted);
+    const dial = ({ number }: { number: string }) => {
+      world.dialed.push(number);
+      return Promise.resolve({ status: "handed-off", target: "dialer", handler: "com.android.dialer", message: "Your phone app is open with the number." });
+    };
     return {
       imageCapability: () => Promise.resolve({ version: 1, image: true, feature: "android.hardware.telephony" }),
       status: () => Promise.resolve(status()),
@@ -186,10 +199,11 @@ function telephony(world: TelephonyScene): Faked {
         const rows = [...world.calls].sort((x, y) => y.date - x.date).slice(0, limit + 1);
         return Promise.resolve({ calls: rows.map((one) => ({ id: String(one.id), number: one.number, cachedName: one.name, date: one.date, durationSeconds: one.seconds ?? 30, type: one.type, isNew: one.type === "missed" })) });
       },
-      dial: ({ number }) => {
-        world.dialed.push(number);
-        return Promise.resolve({ status: "handed-off", target: "dialer", handler: "com.android.dialer", message: "Your phone app is open with the number." });
-      },
+      dial,
+      classifyDialNumber: ({ number }) => Promise.resolve({ kind: world.emergencyNumbers.has(number) ? "emergency" : "ordinary" }),
+      ownerDialScreen: (input) => world.callStateKnown && world.live.length > 0 && world.emergency !== false
+        ? Promise.reject(rejection("Wait for the possible emergency call to end.", "unavailable"))
+        : dial(input),
       placeCall: ({ number }) => {
         if (!world.dialer) return Promise.reject(rejection("Make this app your phone app to place calls here.", "role-required"));
         world.placed.push(number);
@@ -435,7 +449,13 @@ function ongoing(world: TelephonyScene): Faked {
 /** `AlphaCallState`: whether a call is live and whether it may be an emergency call, read and pushed with each report. */
 function callState(world: TelephonyScene): Faked {
   return (emit) => {
-    const reading = () => ({ inCall: world.live.length > 0, emergency: world.live.length > 0 ? world.emergency : false, emergencyLive: world.live.length > 0 && world.emergency !== false, watching: true, carrier: world.mobileService });
+    const reading = () => {
+      const inCall = world.callStateKnown ? world.live.length > 0 : null;
+      return {
+        inCall, emergency: inCall === true ? world.emergency : inCall === false ? false : null,
+        emergencyLive: inCall === true && world.emergency !== false, watching: true, carrier: world.mobileService,
+      };
+    };
     const told = world.report;
     world.report = () => {
       told();
