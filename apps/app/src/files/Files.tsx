@@ -67,7 +67,9 @@ function dateRange(filter: Filter): string {
   if (filter.from === everything.from) return filter.to === everything.to ? "" : `Through ${date(filter.to)}`;
   return filter.to === everything.to ? `Since ${date(filter.from)}` : `${date(filter.from)} – ${date(filter.to)}`;
 }
-type Naming = { work: Work; name: string };
+type Naming =
+  | { readonly work: Work; readonly name: string; readonly destinationRead?: never }
+  | { readonly work: "NewFolder"; readonly name: string; readonly destinationRead: number };
 const changeWords: Record<Work, string> = { NewFolder: "make the folder", Rename: "rename it", MoveTo: "move them", CopyTo: "copy them" };
 
 /** The name the phone's storage gives a number: its volume's name at a volume's root, else the last step of its path. */
@@ -329,6 +331,12 @@ type FileLayersProps = {
 function FileLayers({ state, picked, naming, setNaming, owner, tell, label }: FileLayersProps) {
   const [details] = detailed(state);
   const { change } = state;
+  const namingEvent = naming === undefined ? undefined : naming.destinationRead === undefined
+    ? { type: "begin", work: naming.work, name: naming.name.trim() } as const
+    : { type: "beginDestinationFolder", destinationTicket: naming.destinationRead, name: naming.name.trim() } as const;
+  const newDestination = { type: "beginDestinationFolder", destinationTicket: state.sheet.reading.ticket, name: unnamed } as const;
+  const destinationFolderFailed = change.work === "NewFolder" && change.folder === state.sheet.trail.at(-1)
+    && (change.attempt.outcome === "Refused" || change.attempt.outcome === "Unknown");
   return (
     <>
       <Dialog open={state.deleting.showing} onOpenChange={(open) => { if (!open && owner({ type: "keepFiles" })) tell({ type: "keepFiles" }); }}>
@@ -359,12 +367,10 @@ function FileLayers({ state, picked, naming, setNaming, owner, tell, label }: Fi
           <DialogTitle>{naming?.work === "Rename" ? "Rename" : "New folder"}</DialogTitle>
           <form className="flex flex-col gap-3" onSubmit={(event) => {
             event.preventDefault();
-            if (!naming) return;
-            const begin = { type: "begin", work: naming.work, name: naming.name.trim() } as const;
-            if (owner(begin)) { tell(begin); setNaming(undefined); }
+            if (namingEvent !== undefined && owner(namingEvent)) { tell(namingEvent); setNaming(undefined); }
           }}>
-            <Input aria-label="Name" value={naming?.name ?? ""} invalid={naming !== undefined && naming.name.trim() !== "" && !owner({ type: "begin", work: naming.work, name: naming.name.trim() })} onChange={(event) => setNaming(naming && { ...naming, name: event.target.value })} />
-            <Button type="submit" disabled={!naming || !owner({ type: "begin", work: naming.work, name: naming.name.trim() })}>{naming?.work === "Rename" ? "Rename" : "Make"}</Button>
+            <Input aria-label="Name" value={naming?.name ?? ""} invalid={namingEvent !== undefined && namingEvent.name !== "" && !owner(namingEvent)} onChange={(event) => setNaming(naming && { ...naming, name: event.target.value })} />
+            <Button type="submit" disabled={namingEvent === undefined || !owner(namingEvent)}>{naming?.work === "Rename" ? "Rename" : naming?.destinationRead === undefined ? "Make" : "Create"}</Button>
           </form>
         </DialogContent>
       </Dialog>
@@ -383,6 +389,7 @@ function FileLayers({ state, picked, naming, setNaming, owner, tell, label }: Fi
           title="Move or copy to"
           actions={(
             <>
+              {owner(newDestination) && <Button variant="ghost" onClick={() => setNaming({ work: "NewFolder", name: "", destinationRead: newDestination.destinationTicket })}><Plus />New folder</Button>}
               {owner({ type: "begin", work: "CopyTo", name: "" }) && <Button variant="outline" onClick={() => tell({ type: "begin", work: "CopyTo", name: "" })}>Copy here</Button>}
               {owner({ type: "begin", work: "MoveTo", name: "" }) && <Button onClick={() => tell({ type: "begin", work: "MoveTo", name: "" })}>Move here</Button>}
             </>
@@ -394,6 +401,7 @@ function FileLayers({ state, picked, naming, setNaming, owner, tell, label }: Fi
             ))}
             {state.sheet.trail.length > 0 && <span className="px-2 font-semibold">{label(state.sheet.trail[state.sheet.trail.length - 1] ?? 0)}</span>}
           </nav>
+          {destinationFolderFailed && <Alert variant="warn">{change.attempt.outcome === "Unknown" ? "Files could not confirm the new folder" : "The phone could not make the folder"}</Alert>}
           {state.sheet.reading.status === "Loading" && <Spinner label="Reading the folder" />}
           {state.sheet.reading.status === "Failed" && <Alert variant="warn">This folder cannot be read now</Alert>}
           <ListGroup surface="plain">

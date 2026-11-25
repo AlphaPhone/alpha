@@ -263,6 +263,14 @@ describe("Files on a phone", () => {
     await until(alpha, runtime, Browser, (s) => s.sheet.reading.status === "Loaded");
     await pressOnTop("Documents");
     await until(alpha, runtime, Browser, (s) => s.sheet.reading.status === "Loaded" && s.sheet.trail.length === 2);
+    // spec/app/files/index.md, "A new folder in the destination picker uses the parent as shown and opens the new folder in that picker"
+    await pressOnTop("New folder");
+    await fill("Name", "Filed copies");
+    await pressOnTop("Create");
+    await until(alpha, runtime, Browser, (s) => s.sheet.reading.status === "Loaded" && s.sheet.trail.length === 3);
+    expect([document.querySelector("nav[aria-label='Destination path']")?.textContent?.includes("Filed copies"), paths(world).includes("primary:Documents/Filed copies")]).toEqual([true, true]);
+    await pressOnTop("Documents");
+    await until(alpha, runtime, Browser, (s) => s.sheet.reading.status === "Loaded" && s.sheet.trail.length === 2 && s.picked.length === 1);
     await pressOnTop("Move here");
     // spec/app/files/index.md, "A change ends as its answer says, what a move took away is told, and the place is read again"
     await until(alpha, runtime, Browser, (s) => s.change.attempt.outcome === "Confirmed" && s.listing.status === "Loaded");
@@ -570,6 +578,17 @@ describe("Files on a phone", () => {
     changed.modified += 1;
     expect(await runtime.runPromise(fileAction(moving, move.call, move.review))).toEqual({ kind: "applied" });
     expect([paths(world).includes("primary:Download/during.pdf"), paths(world).includes("primary:Documents/Old/notes.txt"), world.files.calls.filter((method) => method === "move").length]).toEqual([true, true, 1]);
+
+    // spec/app/files/index.md, "An approved new folder is created once in the exact parent shown on the approval"
+    const creating = { type: "files_folder_create", parent: "Documents/Old", name: "Reviewed folder" } as const;
+    const staleParent = await ask(creating, "new-folder-stale-parent");
+    const parent = world.files.stored.find((item) => item.path === creating.parent);
+    if (parent === undefined) throw new Error("the phone's named parent is missing");
+    parent.modified += 1;
+    expect(await runtime.runPromise(fileAction(creating, staleParent.call, staleParent.review))).toEqual({ kind: "refused", code: "FILES_UNCHANGED" });
+    const newFolder = await ask(creating, "new-folder");
+    expect(await runtime.runPromise(fileAction(creating, newFolder.call, newFolder.review))).toEqual({ kind: "applied" });
+    expect([paths(world).includes("primary:Documents/Old/Reviewed folder"), now().trail.at(-1)]).toEqual([true, folder]);
 
     const deleting = { type: "files_trash", paths: ["Download/during.pdf", "Download/earlier.pdf"] } as const;
     const deletion = await ask(deleting, "trash-two");
