@@ -23,7 +23,7 @@ const Reminders = Sample.Machine;
 let depth = 0;
 const deep = area(Layer.empty, () => <p>Files</p>, { back: Effect.sync(() => depth-- > 0) });
 /** Alpha with the sample area at the Notes view, and that screen at Files, which only this journey mounts. */
-const withSample = [...mounts, at("view:Notes", () => import("./sample/index.tsx")), at("view:Files", () => Promise.resolve({ default: deep }))];
+const withSample = [...mounts.filter((m) => m.at !== "view:Notes" && m.at !== "view:Files"), at("view:Notes", () => import("./sample/index.tsx")), at("view:Files", () => Promise.resolve({ default: deep }))];
 const kept = "alpha/app/sample/index@1";
 const shown = () => [...document.querySelectorAll("section[aria-label=Reminders] li span")].map((title) => title.textContent);
 const told = () => document.querySelector("section[aria-label=Reminders] [role=alert]")?.textContent;
@@ -88,7 +88,7 @@ describe.each([["a browser", false], ["a phone", true]])("in %s", (_where, phone
     await press("Refresh");
     await until(alpha, reminders, Reminders, (s) => s.list.status === "Loaded");
 
-    // spec/app/shell/index.md, "Back closes one layer: the drawer, then Ask Alpha by a step, then the app on top": a Back the store does not take changes nothing, and neither the buttons nor what follows the shell stop for it.
+    // spec/app/shell/index.md, "Back closes one layer: Ask Alpha by a step, then the app on top": a Back the store does not take changes nothing, and neither the buttons nor what follows the shell stop for it.
     refusing = shellKept;
     await hardware("back");
     expect((await alpha.runtime.runPromise(Shell.use((shell) => shell.get()))).trail).toEqual(["Notes"]);

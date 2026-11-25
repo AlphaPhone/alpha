@@ -12,18 +12,18 @@ export type SearchFieldProps = Omit<InputProps, "type" | "value" | "defaultValue
   clearLabel?: string;
 };
 
-/** A field that finds or filters: the text between a search icon and a button that clears it. Name it with `aria-label`; `ref` reaches the field, to focus it. */
+/** A field that finds or filters, on a filled 48px bar: the text between a search icon and a button that clears it. Name it with `aria-label`; `ref` reaches the field, to focus it. */
 export function SearchField({ value, onValueChange, clearLabel = "Clear", disabled, className, ...props }: SearchFieldProps) {
   return (
     <div className={cn("relative flex items-center", className)}>
-      <Search aria-hidden className="pointer-events-none absolute left-4 size-5 text-muted-foreground" />
+      <Search aria-hidden className="pointer-events-none absolute left-4 size-4.5 text-muted-foreground" />
       <Input
         type="search"
         enterKeyHint="search"
         value={value}
         disabled={disabled}
         onChange={(event) => onValueChange(event.target.value)}
-        className="px-12 [&::-webkit-search-cancel-button]:appearance-none"
+        className="rounded-panel border-0 pr-12 pl-11 [&::-webkit-search-cancel-button]:appearance-none"
         {...props}
       />
       {value ? (
@@ -32,7 +32,7 @@ export function SearchField({ value, onValueChange, clearLabel = "Clear", disabl
           size="icon"
           aria-label={clearLabel}
           disabled={disabled}
-          className="absolute right-0.5 text-muted-foreground"
+          className="absolute right-1 size-10 min-w-10 [&_svg:not([class*='size-'])]:size-4.5"
           onClick={(event) => {
             onValueChange("");
             event.currentTarget.parentElement?.querySelector("input")?.focus();

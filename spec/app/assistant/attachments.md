@@ -180,6 +180,48 @@ pure def filesRead(a: Attachments, attempt: int, accepted: int): Moved =
     out: if (accepted > 0) List(Attach({ count: accepted })) else List() }
 ```
 
+### Each file is checked against its limits: an image is made to fit, audio and video never go, and the message's files fit together
+
+An image may be picked up to 20 MiB; one over its 5 MiB in base64, or of a
+type the agent does not take as it is (HEIC, TIFF, SVG), is encoded again
+as JPEG at a longest edge of 2048, 1600, 1280 or 1024 px and a quality of
+0.85, 0.72 or 0.6, the first that fits. Any other file must fit 15 MiB in
+base64. A name is 1 to 255 characters. The files of one message fit 19 MiB
+in base64 together.
+
+```quint
+type FileKind = Image | Document | Media
+
+pure val imageIntakeBytes = 20971520
+pure val imageBase64Cap = 5242880
+pure val fileBase64Cap = 15728640
+pure val batchBase64Cap = 19922944
+pure val nameLimit = 255
+
+pure def rawCap(base64Cap: int): int = base64Cap / 4 * 3
+
+pure def base64Of(bytes: int): int = (bytes + 2) / 3 * 4
+
+pure def fits(kind: FileKind, bytes: int, nameLength: int): bool =
+  kind != Media and nameLength >= 1 and nameLength <= nameLimit and bytes >= 1
+    and (if (kind == Image) bytes <= imageIntakeBytes else bytes <= rawCap(fileBase64Cap))
+
+pure def reencoded(kind: FileKind, bytes: int, native: bool): bool = kind == Image and (not(native) or base64Of(bytes) > imageBase64Cap)
+
+pure def batchFits(count: int, base64Total: int): bool = count >= 0 and count <= 4 and base64Total <= batchBase64Cap
+
+pure val base64CapValues = Set(0, 4, 5242880, 15728640)
+pure val bytesValues = Set(1, 3, 3932160, 20971521)
+pure val nameLengthValues = Set(0, 1, 255, 256)
+pure val base64TotalValues = Set(0, 19922944, 19922945)
+
+pure def lawARawCapFitsItsBase64(base64Cap: int): bool = base64Cap >= 0 implies base64Of(rawCap(base64Cap)) <= base64Cap
+
+pure def lawAFifthFileNeverFits(base64Total: int): bool = not(batchFits(5, base64Total))
+
+pure def lawAudioAndVideoNeverGo(bytes: int, nameLength: int): bool = not(fits(Media, bytes, nameLength))
+```
+
 ### A file refused for its type, name or size is never attached, and nothing beyond the room is
 
 ```quint

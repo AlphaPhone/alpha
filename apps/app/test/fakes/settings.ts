@@ -1,9 +1,8 @@
 // spec/app/settings/index.md, "Story: Find a setting and come back"
-import type { ElizaPasswordsPlugin, PasswordEntrySummary } from "@elizaos/os/bridges/definitions/passwords";
 import type { DataResetPlugin } from "@elizaos/os/bridges/definitions/reset";
-import type { LocationPermissionStatus, LocationPlugin } from "@elizaos/os/bridges/definitions/location";
-import type { AndroidRoleStatus, NativeCrashEntry, SystemFacts, SystemHostPlugin, SystemPlugin, SystemSettingsPage } from "@elizaos/os/bridges/definitions/system";
+import type { AndroidRoleStatus, LaunchTarget, LauncherAppsChange, NativeCrashEntry, SystemFacts, SystemHostPlugin, SystemPlugin, SystemSettingsPage } from "@elizaos/os/bridges/definitions/system";
 import type { ApprovedJoinResult, ConnectOptions, ConnectivityResult, WiFiNetwork, WiFiPlugin } from "@elizaos/os/bridges/definitions/wifi";
+import type { LauncherScene } from "./launcher.ts";
 import { type Faked, plugin, rejection } from "./phone.ts";
 
 /** A field as Alpha's `AlphaCarrierSetup` plugin reports one. */
@@ -15,12 +14,13 @@ export interface SettingsScene {
   roles: AndroidRoleStatus[];
   launcher: boolean;
   version: string;
-  location: LocationPermissionStatus;
+  hostFacts: { androidRelease: string; permissions: { Camera?: boolean; Microphone?: boolean; Calendar?: boolean } };
   /** Reads of the phone's facts wait for this before they answer. */
   gate: Promise<unknown>;
   /** Android takes the Home role for Alpha when its dialog closes. */
   grantsHome: boolean;
   readonly opened: string[];
+  readonly copied: string[];
   crashes: NativeCrashEntry[];
   reset: { status: string; message: string };
   readonly reviews: number[];
@@ -29,8 +29,12 @@ export interface SettingsScene {
   readonly joins: ConnectOptions[];
   connectivity: ConnectivityResult;
   carrier: { slots: Array<{ slotIndex: number; imei: CarrierField; simState: CarrierField }>; iccid: CarrierField; eid: CarrierField };
-  vault: { locked: boolean; entries: PasswordEntrySummary[] };
-  readonly vaultCalls: string[];
+  /** Each Google consent Alpha's host kept to launch the agent with, oldest first: one told again unchanged is kept once, as `AlphaAgentService.keep` does. */
+  readonly consents: Array<{ gmailChanges: boolean; calendarEdits: boolean }>;
+  /** Whether the host refuses each consent it is told, keeping what it had, as when Android cannot save it. */
+  refusesConsent: boolean;
+  /** What the host waits for before it answers a consent, as when a restart of the agent is slow. */
+  consentGate: Promise<void>;
 }
 
 export function settingsScene(): SettingsScene {
@@ -40,16 +44,15 @@ export function settingsScene(): SettingsScene {
       { role: "home", androidRole: "android.app.role.HOME", held: false, holders: ["com.android.launcher3"], available: true },
       { role: "assistant", androidRole: "android.app.role.ASSISTANT", held: false, holders: [], available: true },
     ],
-    launcher: true, version: "1.4.0", location: { location: "granted", accuracy: "approximate" },
-    gate: Promise.resolve(), grantsHome: true, opened: [], crashes: [], reset: { status: "cancelled", message: "Nothing was reset." }, reviews: [],
+    launcher: true, version: "1.4.0",
+    hostFacts: { androidRelease: "16", permissions: { Microphone: false, Calendar: true } },
+    gate: Promise.resolve(), grantsHome: true, opened: [], copied: [], crashes: [], reset: { status: "cancelled", message: "Nothing was reset." }, reviews: [],
     networks: [{ ssid: "home", bssid: "00:11:22:33:44:55", rssi: -50, frequency: 2412, capabilities: "[WPA2-PSK-CCMP]", secured: true, security: "wpa2" }],
-    joinAnswer: "connected", joins: [], connectivity: { online: true, validated: true, captivePortal: false, ssid: "home" },
+    joinAnswer: "connected", joins: [], connectivity: { online: true, validated: true, captivePortal: false, ssid: "home" }, consents: [], refusesConsent: false, consentGate: Promise.resolve(),
     carrier: {
       slots: [{ slotIndex: 0, imei: { status: "available", value: "356938035643809" }, simState: { status: "available", value: "Ready" } }, { slotIndex: 1, imei: { status: "permission-denied" }, simState: { status: "available", value: "Absent" } }],
       iccid: { status: "permission-denied" }, eid: { status: "available", value: "89049032000000000000000000000001" },
     },
-    vault: { locked: true, entries: [{ id: "a", label: "Bank", username: "ann", bindings: [{ kind: "web", facet: "https://bank.example", display: "bank.example" }], updatedAt: 1, revision: 1 }] },
-    vaultCalls: [],
   };
 }
 
@@ -58,63 +61,70 @@ const page = (scene: SettingsScene, name: string) => {
   return Promise.resolve();
 };
 
-/** `SystemPlugin.java`, the `ElizaSystem` plugin, as far as Settings reads and opens it. */
-export function elizaSystem(scene: SettingsScene): Faked {
-  return plugin<SystemPlugin & SystemHostPlugin>(() => ({
-    listLauncherApps: () => Promise.resolve({ apps: [] }),
-    launchApp: () => Promise.resolve(),
-    resolveDefaultApp: () => Promise.resolve({ role: "dial", available: false }),
-    openDefaultApp: () => Promise.resolve(),
-    getStatus: async () => {
-      await scene.gate;
-      return { packageName: "ai.alphacompute.alphaphone", roles: scene.roles.map((role) => ({ ...role })) };
-    },
-    requestRole: ({ role }) => {
-      if (role === "home" && scene.grantsHome) scene.roles = scene.roles.map((one) => (one.role === "home" ? { ...one, held: true, holders: ["ai.alphacompute.alphaphone"] } : one));
-      return Promise.resolve({ role, held: scene.grantsHome, resultCode: scene.grantsHome ? -1 : 0 });
-    },
-    openSettings: () => page(scene, "home"),
-    openNetworkSettings: () => page(scene, "network"),
-    getDeviceSettings: () => Promise.resolve({ brightness: 50, brightnessMode: "manual", canWriteSettings: false, volumes: [] }),
-    setScreenBrightness: () => Promise.reject(rejection("unsupported")),
-    setVolume: () => Promise.reject(rejection("unsupported")),
-    setFlashlight: () => Promise.resolve({ available: false, enabled: false }),
-    openWriteSettings: () => page(scene, "write-settings"),
-    openDisplaySettings: () => page(scene, "display"),
-    openSoundSettings: () => page(scene, "sound"),
-    getSystemFacts: async () => {
-      await scene.gate;
-      return { ...scene.facts };
-    },
-    openSettingsPage: ({ page: asked }: { page: SystemSettingsPage }) => {
-      scene.opened.push(asked);
-      return Promise.resolve({ status: "opened", page: asked, specific: asked !== "mobile" });
-    },
-    openNotificationShade: () => Promise.resolve({ status: "unsupported" }),
-    getBuildInfo: () => Promise.resolve({ launcher: scene.launcher, version: scene.version }),
-    getLaunchInfo: () => Promise.resolve({ assistant: false }),
-    getLocaleInfo: () => Promise.resolve({ locale: "en-US", hour24: false }),
-    openAppInfo: ({ packageName }) => page(scene, `app-info ${packageName}`),
-    openClock: () => Promise.reject(rejection("unsupported")),
-    crashLog: () => Promise.resolve({ entries: scene.crashes.map((entry) => ({ ...entry })), exitHistory: true }),
-    recordRendererFailure: () => Promise.resolve(),
-    clearCrashLog: () => {
-      scene.crashes = [];
-      return Promise.resolve();
-    },
-  }));
-}
-
-/** The `ElizaLocation` plugin, as far as Settings asks what it may do. */
-export function elizaLocation(scene: SettingsScene): Faked {
-  return plugin<LocationPlugin>(() => ({
-    getCurrentPosition: () => Promise.reject(rejection("TIMEOUT")),
-    watchPosition: () => Promise.reject(rejection("unsupported")),
-    clearWatch: () => Promise.resolve(),
-    checkPermissions: () => Promise.resolve({ ...scene.location }),
-    requestPermissions: () => Promise.resolve({ ...scene.location }),
-    removeAllListeners: () => Promise.resolve(),
-  }));
+/**
+ * `SystemPlugin.java`, the `ElizaSystem` plugin, as far as Home and Settings ask it: Home's apps, opening one or its
+ * info page, the shade and how Alpha is presented, from `home`; the phone's facts, roles and pages, from `scene`.
+ */
+export function elizaSystem(home: LauncherScene, scene: SettingsScene): Faked {
+  return plugin<SystemPlugin & SystemHostPlugin, { launcherAppsChanged: LauncherAppsChange }>((emit) => {
+    home.changed = () => emit("launcherAppsChanged", { reason: "changed" });
+    const known = (target: LaunchTarget) => target.packageName === "ai.alphacompute.alphaphone" || home.apps.some((app) => app.packageName === target.packageName);
+    return {
+      listLauncherApps: () => (home.unlisted ? Promise.reject(rejection("failed")) : Promise.resolve({ apps: home.apps })),
+      launchApp(target) {
+        home.opened.push(target.packageName);
+        const refused = home.refusing.get(target.packageName) ?? (known(target) ? undefined : "not-installed");
+        return refused === undefined ? Promise.resolve() : Promise.reject(rejection(refused));
+      },
+      resolveDefaultApp: () => Promise.resolve({ role: "dial", available: false }),
+      openDefaultApp: () => Promise.resolve(),
+      getStatus: async () => {
+        await scene.gate;
+        return { packageName: "ai.alphacompute.alphaphone", roles: scene.roles.map((role) => ({ ...role })) };
+      },
+      requestRole: ({ role }) => {
+        if (role === "home" && scene.grantsHome) scene.roles = scene.roles.map((one) => (one.role === "home" ? { ...one, held: true, holders: ["ai.alphacompute.alphaphone"] } : one));
+        return Promise.resolve({ role, held: scene.grantsHome, resultCode: scene.grantsHome ? -1 : 0 });
+      },
+      openSettings: () => page(scene, "home"),
+      openNetworkSettings: () => page(scene, "network"),
+      getDeviceSettings: () => Promise.resolve({ brightness: 50, brightnessMode: "manual", canWriteSettings: false, volumes: [] }),
+      setScreenBrightness: () => Promise.reject(rejection("unsupported")),
+      setVolume: () => Promise.reject(rejection("unsupported")),
+      setFlashlight: () => Promise.resolve({ available: false, enabled: false }),
+      openWriteSettings: () => page(scene, "write-settings"),
+      openDisplaySettings: () => page(scene, "display"),
+      openSoundSettings: () => page(scene, "sound"),
+      getSystemFacts: async () => {
+        await scene.gate;
+        return { ...scene.facts };
+      },
+      openSettingsPage: ({ page: asked }: { page: SystemSettingsPage }) => {
+        scene.opened.push(asked);
+        return Promise.resolve({ status: "opened", page: asked, specific: asked !== "mobile" });
+      },
+      openNotificationShade() {
+        home.shades += 1;
+        const shade = home.shade;
+        return shade === "silent" ? new Promise(() => {}) : Promise.resolve({ status: shade });
+      },
+      getBuildInfo: () => Promise.resolve({ launcher: home.launcher && scene.launcher, version: scene.version }),
+      getLaunchInfo: () => Promise.resolve({ assistant: home.assistant }),
+      getLocaleInfo: () => Promise.resolve({ locale: "en-US", hour24: false }),
+      openAppInfo(target) {
+        home.infos.push(target.packageName);
+        scene.opened.push(`app-info ${target.packageName}`);
+        return known(target) ? Promise.resolve() : Promise.reject(rejection("not-installed"));
+      },
+      openClock: () => Promise.reject(rejection("unsupported")),
+      crashLog: () => Promise.resolve({ entries: scene.crashes.map((entry) => ({ ...entry })), exitHistory: true }),
+      recordRendererFailure: () => Promise.resolve(),
+      clearCrashLog: () => {
+        scene.crashes = [];
+        return Promise.resolve();
+      },
+    };
+  });
 }
 
 /** The `ElizaReset` plugin: Android's review answers only that nothing was reset. */
@@ -147,6 +157,18 @@ export function elizaWiFi(scene: SettingsScene): Faked {
   }));
 }
 
+/** `AlphaDevicePlugin.setAgentGoogleConsent`, which hands the consent to `AlphaAgentService` for the agent's next launch. */
+export function alphaAgentConsent(scene: SettingsScene) {
+  return {
+    setAgentGoogleConsent: async (consent: { gmailChanges: boolean; calendarEdits: boolean }) => {
+      await scene.consentGate;
+      if (scene.refusesConsent) throw new Error("Agent consent could not be saved");
+      const kept = scene.consents.at(-1);
+      if (kept?.gmailChanges !== consent.gmailChanges || kept.calendarEdits !== consent.calendarEdits) scene.consents.push({ gmailChanges: consent.gmailChanges, calendarEdits: consent.calendarEdits });
+    },
+  };
+}
+
 /** Alpha's own `AlphaCarrierSetup` plugin, which reads only when asked. */
 export function alphaCarrierSetup(scene: SettingsScene): Faked {
   return () => ({
@@ -154,42 +176,49 @@ export function alphaCarrierSetup(scene: SettingsScene): Faked {
       canChooseSms: false, smsRole: { status: "available", value: "Messages" }, dialerRole: { status: "available", value: "Phone" }, eid: { status: "not-read" },
       hardware: { manufacturer: { status: "available", value: "Google" }, model: { status: "available", value: "Pixel" }, baseband: { status: "unsupported" } },
       slots: scene.carrier.slots,
-      subscriptions: { items: [{ subscriptionId: 1, embedded: true, carrier: { status: "available", value: "Carrier" }, iccid: scene.carrier.iccid, operator: { status: "available", value: "Carrier" }, operatorCode: { status: "available", value: "310260" }, dataEnabled: { status: "available", value: "on" }, roaming: { status: "available", value: "off" } }] },
+      subscriptions: { status: "available", items: [{ subscriptionId: 1, embedded: true, slotIndex: 0, defaultData: true, carrier: { status: "available", value: "Carrier" }, iccid: scene.carrier.iccid, operator: { status: "available", value: "Carrier" }, operatorCode: { status: "available", value: "310260" }, dataEnabled: { status: "available", value: "on" }, roaming: { status: "available", value: "off" } }] },
     }),
     readEid: () => Promise.resolve(scene.carrier.eid),
+    openSettings: async ({ page: target }: { page: string }) => {
+      await page(scene, target);
+      return { status: "opened", specific: true };
+    },
   });
 }
 
-/** The `ElizaPasswords` plugin: a vault that unlocks, lists entries without their passwords, and removes one. */
-export function elizaPasswords(scene: SettingsScene): Faked {
-  const call = <A>(name: string, answer: () => A) => {
-    scene.vaultCalls.push(name);
-    if (scene.vault.locked && name !== "unlock" && name !== "status") return Promise.reject(rejection("locked"));
-    return Promise.resolve(answer());
-  };
-  return plugin<ElizaPasswordsPlugin>(() => ({
-    status: () => Promise.resolve({ available: true, locked: scene.vault.locked, unlockRemainingMs: null, unlockSeconds: 300, biometric: true, autofill: { supported: true, selected: "other" } }),
-    unlock: () => call("unlock", () => {
-      scene.vault.locked = false;
-      return { unlocked: true as const, unlockRemainingMs: 300_000 };
-    }),
-    lock: () => {
-      scene.vault.locked = true;
-      scene.vaultCalls.push("lock");
-      return Promise.resolve({ locked: true as const });
+
+/** The Android-only Settings methods exposed by AlphaDevice. */
+export function settingsHost(scene: SettingsScene) {
+  return {
+    settingsFacts: () => Promise.resolve(scene.hostFacts),
+    copyText: ({ text }: { text: string }) => {
+      scene.copied.push(text);
+      return Promise.resolve();
     },
-    list: () => call("list", () => ({ entries: scene.vault.entries })),
-    save: () => call("save", () => ({ id: "b" })),
-    openEditor: () => call("openEditor", () => ({ status: "cancelled" as const })),
-    remove: ({ id }) => call(`remove ${id}`, () => {
-      scene.vault.entries = scene.vault.entries.filter((entry) => entry.id !== id);
-      return { removed: true as const };
+    openSettings: async ({ page: target }: { page: string }) => {
+      await page(scene, target);
+      return { status: "opened", specific: target === "all-files" };
+    },
+  };
+}
+
+/** The phone's notification delivery and the Android page for an exact channel. */
+export function elizaNotices(scene: SettingsScene): Faked {
+  return () => ({
+    status: () => Promise.resolve({
+      appEnabled: true, permissionGranted: true, interruption: "all", scope: "alpha-phone",
+      channels: [{ id: "opaque-reminders", name: "Reminders", importance: 0, blocked: true, groupBlocked: false }],
     }),
-    reset: () => call("reset", () => ({ reset: true as const })),
-    reveal: ({ id }) => call(`reveal ${id}`, () => ({ shown: true as const, hidesAfterMs: 30_000 })),
-    copy: ({ id }) => call(`copy ${id}`, () => ({ copied: true as const, clearsAfterMs: 60_000 })),
-    openAutofillSettings: () => call("autofill", () => ({ status: "opened" as const, destination: "autofill-picker" as const })),
-  }));
+    openChannelSettings: async ({ id }: { id: string }) => {
+      if (id !== "opaque-reminders") throw rejection("This notification channel is no longer available");
+      await page(scene, `channel ${id}`);
+      return { status: "opened" };
+    },
+    openNotificationAccess: async () => {
+      await page(scene, "notification-access");
+      return { status: "opened" };
+    },
+  });
 }
 
 /** The licence notices the page ships beside it, as the fake origin serves them. */

@@ -23,17 +23,17 @@ export effect function taking(place: string, took: () => Promise<boolean>): void
   try (try Backs).register(place, Effect.orElseSucceed(tryPromise(took), () => false))
 }
 
-// spec/app/shell/index.md, "When Alpha opens again the trail is kept, and the drawer and Ask Alpha are closed"
+// spec/app/shell/index.md, "When Alpha opens again the trail is kept, and Ask Alpha is closed"
 const kept = reacting(Shell, { keep: 1, open: [{ type: "reopen" }] })
 
 // spec/app/shell/layers.md, "Story: Keep a sheet or a dialog above the phone"
 const layered = reacting(Layers, {})
 
-// spec/app/shell/index.md, "Back closes one layer: the drawer, then Ask Alpha by a step, then the app on top"; spec/app/shell/layers.md, "Back goes first to the layer on top; with no layer, a held phone takes Back and Home and closes nothing; then a screen with a step of its own takes Back; otherwise the shell takes them"
+// spec/app/shell/index.md, "Back closes one layer: Ask Alpha by a step, then the app on top"; spec/app/shell/layers.md, "Back goes first to the layer on top; with no layer, a held phone takes Back and Home and closes nothing; then a screen with a step of its own takes Back; otherwise the shell takes them"
 /**
  * Back, from the phone as from the header: the layer on top first, which its area may take as a step of its own;
- * nothing while the phone is held; then the screen showing may take a step of its own, Home's menu, Add to Home and
- * editing included, under Ask Alpha at rest; then the drawer, Ask Alpha by a step and the app on top.
+ * nothing while the phone is held; then the screen showing may take a step of its own, Home's Add to Home and
+ * editing included, under Ask Alpha at rest; then Ask Alpha by a step and the app on top.
  */
 export effect function back(): void!!(Shell.Machine | Layers.Machine | Backs) {
   const shell = try Shell.Machine
@@ -48,6 +48,7 @@ export effect function back(): void!!(Shell.Machine | Layers.Machine | Backs) {
   if (taker === "ByHold") return
   const state = try shell.get()
   const view = state.trail.at(-1)
+  if (try screens.take("assistant")) return
   if (state.assistant === "Bar" && (try screens.take(view === undefined ? "home" : `view:${view}`))) return
   try contained(shell.send({ type: "goBack" }), "back")
 }

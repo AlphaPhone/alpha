@@ -36,7 +36,7 @@ type Need = SmsAccess | ContactsAccess
 type Page = { rows: int, failed: int, partial: int }
 type Messages = {
   front: bool, pane: Pane, sms: P::Permission, book: P::Permission,
-  list: R::Read, threads: int, older: bool, sought: bool, chip: Filter, unread: int,
+  list: R::Read, threads: int, moreThreads: bool, sought: bool, chip: Filter, unread: int,
   thread: int, page: R::Read, shown: Page, earlier: bool, smsApp: bool,
   confirming: bool, removal: A::Attempt,
   picker: R::Read, choices: int, moreChoices: bool,
@@ -46,7 +46,7 @@ pure val blankPage: Page = { rows: 0, failed: 0, partial: 0 }
 
 pure val initial: Messages = {
   front: false, pane: Threads, sms: P::unasked, book: P::unasked,
-  list: R::unread, threads: 0, older: false, sought: false, chip: AllThreads, unread: 0,
+  list: R::unread, threads: 0, moreThreads: false, sought: false, chip: AllThreads, unread: 0,
   thread: 0, page: R::unread, shown: blankPage, earlier: false, smsApp: false,
   confirming: false, removal: A::plan(0),
   picker: R::unread, choices: 0, moreChoices: false,
@@ -90,6 +90,7 @@ pure def removeMessage(id: int): List[Effect] = List(RemoveMessage({ id: id }))
 pure val ticketValues = Set(1, 2, 3)
 pure val idValues = Set(1, 2, 3)
 pure val threadValues = Set(0, 1, 2)
+pure val onlyValues = Set(0, 1)
 pure val countValues = Set(-1, 0, 1, 2)
 pure val seenValues = Set(
   blankPage,
@@ -136,7 +137,7 @@ pure def show(s: Messages): Moved = askThreads(false, { ...s, front: true, pane:
 
 ```quint
 pure def cleared(pane: Pane, s: Messages): Messages =
-  { ...s, pane: pane, thread: 0, threads: 0, older: false, shown: blankPage, earlier: false, confirming: false,
+  { ...s, pane: pane, thread: 0, threads: 0, moreThreads: false, shown: blankPage, earlier: false, confirming: false,
     choices: 0, moreChoices: false, list: idle(s.list), page: idle(s.page), picker: idle(s.picker) }
 
 pure def canLeave(s: Messages): bool = s.front
@@ -150,7 +151,7 @@ pure def leave(s: Messages): Messages = { ...cleared(Threads, s), front: false }
 pure def narrowed(s: Messages): bool = s.sought or s.chip != AllThreads
 
 pure def relisted(sought: bool, chip: Filter, s: Messages): Moved =
-  askThreads(false, { ...s, sought: sought, chip: chip, threads: 0, older: false })
+  askThreads(false, { ...s, sought: sought, chip: chip, threads: 0, moreThreads: false })
 
 pure def canPickChip(s: Messages, chip: Filter): bool = showingPane(s, Threads) and readable(s) and chip != s.chip
 
@@ -168,14 +169,16 @@ pure def retryThreads(s: Messages): Moved = askThreads(false, s)
 ### "Older conversations" reads further only when the phone said there are more
 
 ```quint
-pure def canOlderThreads(s: Messages): bool = showingPane(s, Threads) and s.older and s.list.status == R::Loaded
+pure def canOlderThreads(s: Messages): bool = showingPane(s, Threads) and s.moreThreads and s.list.status == R::Loaded
 
 pure def olderThreads(s: Messages): Moved = askThreads(true, s)
 ```
 
 ### Only the newest read of the list is shown, with what Android says about SMS access
 
-A read that fails or finds access missing shows no conversations.
+A read that fails or finds access missing shows no conversations. A
+conversation is titled by the names of the contacts on the phone that hold
+its numbers, and a number no contact holds is shown as it is.
 
 ```quint
 pure def canThreadsRead(s: Messages, ticket: int, count: int): bool =
@@ -184,15 +187,29 @@ pure def canThreadsRead(s: Messages, ticket: int, count: int): bool =
 pure def threadsRead(s: Messages, ticket: int, ok: bool, grant: P::Grant, count: int, further: bool): Messages =
   val sms = P::observe(s.sms, grant)
   val good = ok and P::allows(sms)
-  { ...s, sms: sms, list: R::answer(s.list, good), threads: if (good) count else 0, older: good and further and count > 0 }
+  { ...s, sms: sms, list: R::answer(s.list, good), threads: if (good) count else 0, moreThreads: good and further and count > 0 }
 ```
 
 ### The phone reports how many conversations are unread, for the list and Home
+
+Home shows the unread card while any conversation is unread.
 
 ```quint
 pure def canUnreadReported(s: Messages, count: int): bool = count >= 0
 
 pure def unreadReported(s: Messages, count: int): Messages = { ...s, unread: count }
+```
+
+### One tap on Home's unread card opens the conversation when exactly one is unread, and the list filtered to the unread ones when several are
+
+`only` is the one unread conversation, or none.
+
+```quint
+pure def canOpenUnread(s: Messages, only: int): bool =
+  showingPane(s, Threads) and readable(s) and s.unread > 0 and only >= 0 and (only > 0 implies s.unread == 1)
+
+pure def openUnread(s: Messages, only: int): Moved =
+  if (only > 0) openConversation(only, s) else relisted(false, UnreadThreads, s)
 ```
 
 ### No conversations, no matches, a failed read and missing access are told apart
@@ -216,8 +233,8 @@ rows.
 ```quint
 pure def alwaysRowsOnlyWhileShowing(s: Messages): bool = and {
   s.threads >= 0, s.choices >= 0, s.unread >= 0,
-  (s.threads > 0 or s.older) implies (showingPane(s, Threads) and readable(s)),
-  s.older implies s.threads > 0,
+  (s.threads > 0 or s.moreThreads) implies (showingPane(s, Threads) and readable(s)),
+  s.moreThreads implies s.threads > 0,
   (s.shown.rows > 0 or s.earlier) implies (showingPane(s, Conversation) and readable(s)),
   s.earlier implies s.shown.rows > 0,
   (s.choices > 0 or s.moreChoices) implies (showingPane(s, Picker) and P::allows(s.book)),
@@ -232,7 +249,7 @@ pure def sometimesNoThreads(s: Messages): bool = noThreads(s)
 pure def sometimesNoMatches(s: Messages): bool = noMatches(s) and s.chip == UnreadThreads
 pure def sometimesThreadsFailed(s: Messages): bool = threadsFailed(s)
 pure def sometimesSmsNeeded(s: Messages): bool = smsNeeded(s) and s.sms.asked
-pure def sometimesOlderConversations(s: Messages): bool = s.older and s.list.status == R::Loaded
+pure def sometimesOlderConversations(s: Messages): bool = s.moreThreads and s.list.status == R::Loaded
 pure def sometimesUnreadForHome(s: Messages): bool = s.unread > 0 and not(s.front)
 ```
 
@@ -269,7 +286,7 @@ pure def goToSettings(s: Messages, need: Need): Moved = { state: s, out: List(Op
 
 ```quint
 pure def forgotten(need: Need, s: Messages): Messages =
-  if (need == SmsAccess) { ...s, threads: 0, older: false, shown: blankPage, earlier: false, confirming: false }
+  if (need == SmsAccess) { ...s, threads: 0, moreThreads: false, shown: blankPage, earlier: false, confirming: false }
   else { ...s, choices: 0, moreChoices: false }
 
 pure def accessReported(s: Messages, need: Need, grant: P::Grant): Moved =
@@ -314,6 +331,25 @@ pure def openConversation(thread: int, s: Messages): Moved = askPage(false, { ..
 pure def canOpenThread(s: Messages, thread: int): bool = showingPane(s, Threads) and s.threads > 0 and thread > 0
 
 pure def openThread(s: Messages, thread: int): Moved = openConversation(thread, s)
+```
+
+### A message notification opens its exact conversation once access is available
+
+The phone provides the thread identifier after an owner taps its private
+notification. Alpha opens that thread even when the list is empty or
+filtered. It keeps an active delete confirmation and only acknowledges the
+notification after the conversation opens.
+
+```quint
+pure def canOpenNotice(s: Messages, thread: int): bool =
+  s.front and readable(s) and thread > 0 and not(s.confirming) and not(removing(s))
+
+pure def openNotice(s: Messages, thread: int): Moved =
+  if (s.thread == thread) { state: s, out: List() } else openConversation(thread, s)
+
+pure def stepNoticeOpensItsConversation(before: Messages, via: str, after: Messages): bool =
+  via == "openNotice" implies (after.pane == Conversation and after.thread > 0 and readable(after)
+    and not(before.confirming) and not(removing(before)))
 ```
 
 ### Back returns from a conversation or the picker to the list, and reads it again
@@ -446,7 +482,10 @@ pure def confirmDelete(s: Messages, clear: bool): Moved =
 
 ### The phone's answer ends the removal it names, and the conversation is read again unless it was refused
 
-When Alpha stops waiting for the answer, the outcome is unknown.
+Android can queue the exact message for deletion. Alpha offers Undo for
+that receipt while the Android window is open. The same receipt confirms
+deletion or that the message was kept. When Alpha cannot read a settled
+outcome, the outcome stays unknown.
 
 ```quint
 pure def canRemoved(s: Messages, id: int): bool = A::canConclude(s.removal, id)

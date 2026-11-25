@@ -1,6 +1,7 @@
-// spec/app/shell/index.md, "Phone and Messages exist only on an Alpha image, and Contacts only where that image admits it"; spec/app/platform/index.md, "Story: Reach the phone's native capabilities"
+// spec/app/shell/index.md, "Phone and Messages exist only on an Alpha image, and Contacts only where that image admits it"; spec/app/platform/index.md, "Story: Reach the phone's native capabilities"; spec/app/platform/index.md, "Mocks, fixtures and developer surfaces exist only when the build allows test mocks"
 import * as KeyValueStore from "effect/persistence/KeyValueStore"
-import { reachable, variantOf } from "../../gen/app__platform.effect.vibe"
+import { fixturesAllowed, reachable, variantOf } from "../../gen/app__platform.effect.vibe"
+import { allowsTestMocks } from "./build.ts"
 
 module web {
   import { Capacitor, registerPlugin } from "@capacitor/core"
@@ -9,6 +10,10 @@ module web {
   interface AlphaDevice {
     haptic(options: { kind: string }): Promise<void>
     recommendedTimeout(options: { baseMs: number }): Promise<{ timeoutMs: number }>
+    setSystemBarAppearance(options: { dark: boolean }): Promise<void>
+    setAgentGoogleConsent(options: { gmailChanges: boolean; calendarEdits: boolean }): Promise<void>
+    diagnosticsFacts(): Promise<unknown>
+    copyText(options: { text: string }): Promise<void>
   }
   let alphaDevice: AlphaDevice | undefined
   /** @throws {never} */
@@ -18,7 +23,9 @@ module web {
 
   /** Whether the phone's host registered `plugin` in this build. @throws {never} */
   export function registered(plugin: string): boolean {
-    return Capacitor.isNativePlatform() && Capacitor.isPluginAvailable(plugin)
+    if (!Capacitor.isNativePlatform()) return false
+    const headers = (globalThis as { Capacitor?: { PluginHeaders?: ReadonlyArray<{ readonly name: string }> } }).Capacitor?.PluginHeaders
+    return headers !== undefined ? headers.some((one) => one.name === plugin) : Capacitor.isPluginAvailable(plugin)
   }
   /** Whether the page runs inside the phone's host. @throws {never} */
   export function native(): boolean {
@@ -40,14 +47,29 @@ module web {
   export const pages = (): EventTarget => document
   /** @throws {never} */
   export const showing = (): boolean => document.visibilityState === "visible"
+  /** Copy the exact text after the owner's action. */
+  export async function copyToBrowser(text: string): Promise<void> {
+    await navigator.clipboard.writeText(text)
+  }
 }
-import { alpha, marked, native, page, pages, registered, showing, zoom } from web
+import { alpha, copyToBrowser, marked, native, page, pages, registered, showing, zoom } from web
 export { native, registered }
+
+/** Whether this build may load fixtures, the fake world and developer surfaces: only one made with `ELIZA_DEV_ALLOW_TEST_MOCKS=1`. */
+export function testMocks(): boolean {
+  return fixturesAllowed(allowsTestMocks())
+}
 
 /** What this phone admits: an Alpha image's apps, and Contacts where the image grants them. */
 export interface Capabilities {
   readonly image: boolean
   readonly contacts: boolean
+}
+
+/** What the owner lets the agent change through Google, as eliza's agent launch names it. */
+export interface GoogleConsent {
+  readonly gmailChanges: boolean
+  readonly calendarEdits: boolean
 }
 
 /** A hardware or gesture button the system hands to the launcher. */
@@ -79,6 +101,14 @@ export service Device {
   haptic(kind: string): void!!
   /** Whether the phone plays touch feedback. */
   feels(): boolean!!
+  /** Android's status and navigation bars drawn for a dark look or a light one; nothing where there are none. */
+  bars(dark: boolean): void!!
+  /** What Alpha's Android host says about its build for a support report, untrusted; none off the phone or where it could not say. */
+  buildFacts(): Option.Option<unknown>!!
+  /** Whether the phone's host took the Google consent it launches the agent with from now on, restarting a running agent when it changed; it keeps what it had when it refuses. True where no agent is hosted. */
+  agentConsent(consent: GoogleConsent): boolean!!
+  /** Whether the owner's text was put on the system clipboard. */
+  copyText(text: string): boolean!!
 }
 
 /**
@@ -136,6 +166,10 @@ export const phoneDevice = Layer.effect(Device, effect {
     timeoutScale: scaleOf,
     haptic: (kind: string) => registered(alphaDevice) ? ignore(tryPromise(() => alpha().haptic({ kind }))) : Effect.void,
     feels: () => sync(() => registered(alphaDevice)),
+    bars: (dark: boolean) => registered(alphaDevice) ? ignore(tryPromise(() => alpha().setSystemBarAppearance({ dark }))) : Effect.void,
+    buildFacts: () => registered(alphaDevice) ? Effect.option(tryPromise(() => alpha().diagnosticsFacts())) : succeed(Option.none<unknown>()),
+    agentConsent: (consent: GoogleConsent) => registered(alphaDevice) ? Effect.map(Effect.option(tryPromise(() => alpha().setAgentGoogleConsent(consent))), Option.isSome) : succeed(true),
+    copyText: (text: string) => registered(alphaDevice) ? Effect.map(Effect.option(tryPromise(() => alpha().copyText({ text }))), Option.isSome) : succeed(false),
     effect capabilities() {
       const variant = variantOf(native(), registered(telephony))
       return { image: variant === "Image", contacts: reachable("ImageOnly", variant) && registered(contacts) }
@@ -151,5 +185,9 @@ export const browserDevice = Layer.effect(Device, effect {
     timeoutScale: () => succeed(Option.none<number>()),
     haptic: () => Effect.void,
     feels: () => succeed(false),
+    bars: () => Effect.void,
+    buildFacts: () => succeed(Option.none<unknown>()),
+    agentConsent: () => succeed(true),
+    copyText: (text: string) => Effect.map(Effect.option(tryPromise(() => copyToBrowser(text))), Option.isSome),
   }
 })

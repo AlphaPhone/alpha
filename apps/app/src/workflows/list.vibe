@@ -1,0 +1,198 @@
+// spec/app/workflows/list.md, "Story: Find a workflow"; spec/app/workflows/list.md, "Story: Keep the list to its owner"
+import type { RemoteWorkflow } from "@elizaos/plugin-workflow/client"
+import type { Freshness } from "../../gen/app__home__cards.effect.vibe"
+import * as List from "../../gen/app__workflows__list.effect.vibe"
+import type { Effect as Out, Event } from "../../gen/app__workflows__list.effect.vibe"
+import { Machine as Shell, showing } from "../../gen/app__shell.effect.vibe"
+import { fromAreas } from "../home/cards.vibe"
+import type { Shell as ShellState } from "../../gen/app__shell.effect.vibe"
+import type { Agent } from "../platform/agent.vibe"
+import { Device } from "../platform/device.vibe"
+import { ownerAt } from "../platform/owner.vibe"
+import { type Job, answer, applying, reacting, started, together } from "../runtime/reactor.vibe"
+import { WorkflowsApi, type Prompt, type ScheduledTask, readPrompts, readSchedules, workflowsApi } from "./api.vibe"
+
+type Routine = { readonly kind: "Routine"; readonly record: RemoteWorkflow }
+type PromptRow = { readonly kind: "Prompt"; readonly record: Prompt }
+type TaskRow = { readonly kind: "Reminder" | "Schedule"; readonly record: ScheduledTask }
+type RowContent = Routine | PromptRow | TaskRow
+
+type UnnumberedRow = RowContent & { readonly id: string; readonly title: string; readonly summary: string; readonly on: boolean; readonly removed: boolean }
+export type WorkflowRow = UnnumberedRow & { readonly number: number }
+
+type Source = "Workflows" | "Removed workflows" | "Prompts" | "Scheduled tasks"
+
+interface Snapshot {
+  readonly owner: number
+  readonly rows: ReadonlyArray<WorkflowRow>
+  readonly problems: ReadonlyArray<Source>
+}
+
+const blank: Snapshot = { owner: 0, rows: [], problems: [] }
+
+export service Rows {
+  /** The last payload the list machine read for this owner. */
+  view(owner: number): Snapshot!!
+  /** The next number for this signed-in owner, or the number already assigned to it. */
+  owner(id: string): number!!
+  /** Whether `id` names the same owner as the request. */
+  sameOwner(id: string, number: number): boolean!!
+  /** The last payload's visible record, as the row's already assigned number names it. */
+  row(owner: number, number: number): (WorkflowRow | undefined)!!
+  /** Keep the words read under this ticket; row numbers are stable for a refresh by the same owner. */
+  store(owner: number, rows: readonly UnnumberedRow[], problems: readonly Source[]): void!!
+  clear(): void!!
+}
+
+const rows = Layer.sync(Rows, () => {
+  let shown = blank
+  let currentOwner = ""
+  let owner = 0
+  let nextRow = 0
+  const numbers = new Map<string, number>()
+  return {
+    view: (wanted: number) => succeed(shown.owner === wanted ? shown : blank),
+    owner: (id: string) => sync(() => {
+      if (currentOwner !== id) {
+        currentOwner = id
+        shown = blank
+        numbers.clear()
+        owner += 1
+      }
+      return owner
+    }),
+    sameOwner: (id: string, number: number) => succeed(id === currentOwner && number === owner),
+    row: (wanted: number, number: number) => succeed(shown.owner === wanted ? shown.rows.find((row) => row.number === number) : undefined),
+    store: (wanted: number, received: readonly UnnumberedRow[], problems: readonly Source[]) => sync(() => {
+      if (wanted !== owner) return
+      const numbered = received.map((row) => {
+        const key = `${row.kind}:${row.id}`
+        const number = numbers.get(key) ?? ++nextRow
+        numbers.set(key, number)
+        return { ...row, number }
+      })
+      shown = { owner, rows: numbered, problems }
+    }),
+    clear: () => sync(() => { currentOwner = ""; shown = blank; numbers.clear() }),
+  }
+})
+
+function routineRow(record: RemoteWorkflow): UnnumberedRow {
+  return { kind: "Routine", record, id: record.id, title: record.name, summary: record.description, on: record.active, removed: record.removed }
+}
+
+function promptRow(record: Prompt): UnnumberedRow {
+  return { kind: "Prompt", record, id: record.id, title: record.displayName, summary: record.instructions, on: record.enabled, removed: false }
+}
+
+function taskRow(record: ScheduledTask): UnnumberedRow {
+  const kind = record.kind === "personal-assistant.reminder" ? "Reminder" : "Schedule"
+  const on = record.trigger.kind !== "manual" && ["scheduled", "fired", "acknowledged"].includes(record.state.status)
+  const title = kind === "Reminder" ? record.promptInstructions : record.metadata.recordKey ?? record.kind
+  return { kind, record, id: record.taskId, title, summary: kind === "Reminder" ? "" : record.promptInstructions, on, removed: false }
+}
+
+effect function read(ticket: number, owner: number): Event!!(WorkflowsApi | Agent | Rows | List.Machine) {
+  const failed: Event = { type: "listRead", ticket, ok: false, count: 0, complete: false }
+  const { workflow } = try WorkflowsApi
+  const kept = try Rows
+  const expected = try List.Machine
+  const before = ownerAt() catch () => ""
+  if (!(try kept.sameOwner(before, owner))) return failed
+  const received = try all({
+    workflows: Effect.orElseSucceed(workflow.list(), () => undefined),
+    removed: Effect.orElseSucceed(workflow.removedWorkflows(), () => undefined),
+    prompts: Effect.orElseSucceed(readPrompts(), () => undefined),
+    schedules: Effect.orElseSucceed(readSchedules(), () => undefined),
+  }, { concurrency: "unbounded" })
+  const after = ownerAt() catch () => ""
+  if (after !== before) {
+    const current = try expected.get()
+    if (current.owner !== owner || !List.canListRead(current, ticket, 0)) return failed
+    try kept.clear()
+    return { type: "ownerChanged", owner: 0 }
+  }
+  const state = try expected.get()
+  if (state.owner !== owner || !List.canListRead(state, ticket, 0)) return failed
+  const problems: Source[] = []
+  if (received.workflows === undefined) problems.push("Workflows")
+  if (received.removed === undefined) problems.push("Removed workflows")
+  if (received.prompts === undefined) problems.push("Prompts")
+  if (received.schedules === undefined) problems.push("Scheduled tasks")
+  if (problems.length === 4) return failed
+  const found = [
+    ...(received.workflows ?? []).filter((record) => !record.removed).map(routineRow),
+    ...(received.removed ?? []).map(routineRow),
+    ...(received.prompts ?? []).map(promptRow),
+    ...(received.schedules ?? []).map(taskRow),
+  ]
+  try kept.store(owner, found, problems)
+  return { type: "listRead", ticket, ok: true, count: found.length, complete: problems.length === 0 }
+}
+
+function carry(fx: Out): Job<Event, Agent | WorkflowsApi | Rows | List.Machine, []> {
+  return match (fx) {
+    when { tag: "ReadList", let ticket, let owner }: answer("workflows list", read(ticket, owner), { type: "listRead", ticket, ok: false, count: 0, complete: false });
+  }
+}
+
+export effect function refresh(): void!!(Agent | Rows | List.Machine) {
+  const key = ownerAt() catch () => ""
+  const store = try Rows
+  const list = try List.Machine
+  const current = try list.get()
+  const owner = key === "" ? 0 : try store.owner(key)
+  if (key === "") try store.clear()
+  if (owner !== current.owner) try ignore(list.send({ type: "ownerChanged", owner }))
+  try ignore(list.send({ type: "readList" }))
+}
+
+export effect function backList(): boolean!!List.Machine {
+  const machine = try List.Machine
+  const current = try machine.get()
+  if (List.canDismissFilters(current)) {
+    try ignore(machine.send({ type: "dismissFilters" }))
+    return true
+  }
+  if (!List.canClosePlace(current)) return false
+  try ignore(machine.send({ type: "closePlace" }))
+  return true
+}
+
+// spec/app/home/cards.md, "The Workflows card shows the first two enabled rows and how many more, marked when they are not current, stale or partly unavailable, and is not drawn without a row"
+const place = (current: ShellState) => showing(current, "Workflows") ? "Workflows" : current.trail.length === 0 ? "Home" : "Away"
+
+const followPage = applying(Shell, (current) => {
+  const at = place(current)
+  return { at, assistant: at === "Workflows" && current.assistant !== "Bar" }
+}, effect ({ at, assistant }) => {
+  if (at !== "Workflows") {
+    const list = try List.Machine
+    try ignore(list.send({ type: "dismissFilters" }))
+    while (List.canClosePlace(try list.get())) {
+      const closed = (map(list.send({ type: "closePlace" }), () => true) catch () => false)
+      if (!closed) break
+    }
+  }
+  if (at === "Home" || (at === "Workflows" && !assistant)) try refresh()
+})
+
+const followForeground = started(effect {
+  const device = try Device
+  const shell = try Shell
+  try Stream.runForEach(device.visible, effect (visible) => {
+    if (visible && place(try shell.get()) !== "Away") try refresh()
+  })
+}, "refreshing Workflows on foreground")
+
+const home = applying(List.Machine, (state) => ({ owner: state.owner, read: state.list }), effect ({ owner, read }) => {
+  const source = try (try Rows).view(owner)
+  const displayed = source.rows.filter((row) => (row.kind === "Routine" || row.kind === "Prompt") && row.on && !row.removed)
+    .map((row) => ({ title: row.title, detail: "On" }))
+  const freshness: Freshness = read.status === "Failed" ? "Stale"
+    : source.problems.some((problem) => problem === "Workflows" || problem === "Prompts") ? "SomeUnavailable"
+      : read.status === "Loaded" ? "UpToDate" : "NotCurrent"
+  fromAreas.flows({ rows: displayed, freshness })
+})
+
+export const listing = together(reacting(List, { carry }), workflowsApi, rows, followPage, followForeground, home)

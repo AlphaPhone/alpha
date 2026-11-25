@@ -23,12 +23,13 @@ import attempt as A from "../../kit/attempt"
 
 type Playback = Stopped | Playing | Paused
 type Reach = CallBack | Message
+type Undo = NoUndo | CanUndo | Undoing | UndoExpired | Kept | KeepUnconfirmed
 type Voicemail = {
   front: bool, list: R::Read, items: int, unheard: int,
   open: bool, heard: bool,
   audio: R::Read, playback: Playback,
   transcript: R::Read, carrierText: bool, noRecognizer: bool,
-  confirming: bool, removal: A::Attempt,
+  confirming: bool, removal: A::Attempt, undo: Undo,
 }
 
 pure val initial: Voicemail = {
@@ -36,7 +37,7 @@ pure val initial: Voicemail = {
   open: false, heard: false,
   audio: R::unread, playback: Stopped,
   transcript: R::unread, carrierText: false, noRecognizer: false,
-  confirming: false, removal: A::plan(0),
+  confirming: false, removal: A::plan(0), undo: NoUndo,
 }
 ```
 
@@ -48,12 +49,13 @@ caller's number, and the removal of a voicemail under its number.
 
 ```quint
 type Effect =
-  | ReadList({ ticket: int })
+  | ReadList({ ticket: int, refresh: bool })
   | FetchAudio({ ticket: int })
   | TranscribeOnPhone({ ticket: int })
   | MarkHeard
-  | Prefill({ app: Reach })
+  | ReachCaller({ app: Reach })
   | Remove({ id: int })
+  | UndoRemoval({ id: int })
 
 type Moved = { state: Voicemail, out: List[Effect] }
 
@@ -79,13 +81,25 @@ pure val weight_listed = 3
 ### Voicemail reads the list each time its tab comes to the front
 
 ```quint
-pure def readList(front: bool, s: Voicemail): Moved =
+pure def readList(refresh: bool, front: bool, s: Voicemail): Moved =
   val list = R::ask(s.list)
-  { state: { ...s, front: front, list: list }, out: List(ReadList({ ticket: list.ticket })) }
+  { state: { ...s, front: front, list: list }, out: List(ReadList({ ticket: list.ticket, refresh: refresh })) }
 
 pure def canShow(s: Voicemail): bool = not(s.front)
 
-pure def show(s: Voicemail): Moved = readList(true, s)
+pure def show(s: Voicemail): Moved = readList(true, true, s)
+```
+
+### A carrier notice refreshes the visible list from the phone's latest read
+
+The Phone view keeps one voicemail observer in the foreground. Its notices
+also carry whether the carrier still offers visual voicemail and the number
+of unheard messages.
+
+```quint
+pure def canArrived(s: Voicemail): bool = s.front
+
+pure def arrived(s: Voicemail): Moved = readList(false, true, s)
 ```
 
 ### Leaving the tab forgets the list and closes the open voicemail, which stops playback
@@ -108,13 +122,16 @@ The read also tells how many voicemails are unheard.
 pure def canListed(s: Voicemail, ticket: int, count: int, unheard: int): bool =
   s.front and R::canAnswer(s.list, ticket) and 0 <= unheard and unheard <= count
 
-pure def listed(s: Voicemail, ticket: int, ok: bool, carrier: bool, count: int, unheard: int): Voicemail =
+pure def listed(s: Voicemail, ticket: int, ok: bool, carrier: bool, count: int, unheard: int, stillOpen: bool): Voicemail =
   val good = ok and carrier
   val read = { ...s, list: R::answer(s.list, good), items: if (good) count else 0, unheard: if (good) unheard else s.unheard }
-  if (read.items == 0) closing(true, read) else read
+  if (read.items == 0 or not(stillOpen)) closing(true, read) else read
 ```
 
 ### The phone reports how many voicemails are unheard, for Home and the tab
+
+Home's calls card leads to Recents while there are missed calls not yet
+seen, and otherwise to the Voicemail tab while any voicemail is unheard.
 
 ```quint
 pure def canUnheardReported(s: Voicemail, count: int): bool = count >= 0
@@ -145,10 +162,11 @@ pure def sometimesUnheardListed(s: Voicemail): bool = s.items > 0 and s.unheard 
 
 ### Opening a voicemail asks for its audio under a new ticket
 
-A transcript the carrier supplied is shown as it is.
+A transcript the carrier supplied is shown as it is. Selecting a different
+voicemail replaces the current one and stops its playback.
 
 ```quint
-pure def canOpen(s: Voicemail, carrierText: bool): bool = s.front and s.items > 0 and not(s.open)
+pure def canOpen(s: Voicemail, carrierText: bool): bool = s.front and s.items > 0 and not(s.confirming) and not(removing(s))
 
 pure def open(s: Voicemail, carrierText: bool): Moved =
   val audio = R::ask(s.audio)
@@ -302,14 +320,14 @@ pure def sometimesCarrierText(s: Voicemail): bool = s.carrierText and s.audio.st
 > As the owner, I want to call back or send a message to the caller from
 > the voicemail.
 
-### Call back and Message open Phone or Messages with the caller's number, and do nothing else
+### Call back hands the caller's number to Phone and Message opens Messages with it
 
 ```quint
 pure def canReach(s: Voicemail, how: Reach): bool = s.open and not(s.confirming)
 
-pure def reach(s: Voicemail, how: Reach): Moved = { state: s, out: List(Prefill({ app: how })) }
+pure def reach(s: Voicemail, how: Reach): Moved = { state: s, out: List(ReachCaller({ app: how })) }
 
-pure def stepReachingOnlyOpens(before: Voicemail, via: str, after: Voicemail, out: List[Effect]): bool =
+pure def stepReachingLeavesTheVoicemailAsItWas(before: Voicemail, via: str, after: Voicemail, out: List[Effect]): bool =
   via == "reach" implies after == before
 ```
 
@@ -339,27 +357,61 @@ pure def canConfirmDelete(s: Voicemail): bool = s.confirming and not(removing(s)
 
 pure def confirmDelete(s: Voicemail): Moved =
   val removal = A::dispatch(A::record(A::plan(s.removal.id + 1)))
-  { state: { ...s, confirming: false, removal: removal }, out: removeOne(removal.id) }
+  { state: { ...s, confirming: false, removal: removal, undo: NoUndo }, out: removeOne(removal.id) }
+```
+
+### Undo can keep a voicemail while Android's deletion window is open
+
+The phone's receipt names a staged deletion and its deadline. The owner can
+request Undo once. A native confirmation that Undo won is required before
+Alpha says the voicemail was kept.
+
+```quint
+pure def canRemovalStaged(s: Voicemail, id: int): bool = A::canConclude(s.removal, id) and s.undo == NoUndo
+
+pure def removalStaged(s: Voicemail, id: int): Voicemail = { ...s, undo: CanUndo }
+
+pure def canUndoExpired(s: Voicemail, id: int): bool = A::canConclude(s.removal, id) and s.undo == CanUndo
+
+pure def undoExpired(s: Voicemail, id: int): Voicemail = { ...s, undo: UndoExpired }
+
+pure def canUndoRemoval(s: Voicemail): bool = s.front and removing(s) and s.undo == CanUndo
+
+pure def undoRemoval(s: Voicemail): Moved =
+  { state: { ...s, undo: Undoing }, out: List(UndoRemoval({ id: s.removal.id })) }
+
+pure def canUndoRefused(s: Voicemail, id: int): bool = A::canConclude(s.removal, id) and s.undo == Undoing
+
+pure def undoRefused(s: Voicemail, id: int): Voicemail = { ...s, undo: KeepUnconfirmed }
+
+pure def alwaysUndoNeedsARemoval(s: Voicemail): bool =
+  (s.undo == CanUndo or s.undo == Undoing or s.undo == UndoExpired or s.undo == KeepUnconfirmed) implies removing(s)
+
+pure def stepUndoIsRequestedByItsControl(before: Voicemail, via: str, after: Voicemail, out: List[Effect]): bool =
+  out.some(e => match e { | UndoRemoval(r) => true | _ => false }) implies (via == "undoRemoval" and canUndoRemoval(before))
+
+pure def sometimesRemovingCanBeUndone(s: Voicemail): bool = canUndoRemoval(s)
 ```
 
 ### The phone's answer ends the removal it names
 
 A removal that was made, or whose outcome is unknown, closes the voicemail
-and reads the list again; a refused one keeps it open. When Alpha stops
-waiting for the answer, the outcome is unknown.
+and reads the list again; a refused one keeps it open. A queued deletion
+is still pending until Android's journal confirms the provider's result.
+When Alpha stops waiting for that result, the outcome is unknown.
 
 ```quint
 pure def canRemoved(s: Voicemail, id: int): bool = A::canConclude(s.removal, id)
 
-pure def canRemovalLost(s: Voicemail): bool = removing(s)
+pure def canRemovalLost(s: Voicemail, id: int): bool = A::canConclude(s.removal, id)
 
-pure def removalLost(s: Voicemail): Moved = removed(s, s.removal.id, false, false)
+pure def removalLost(s: Voicemail, id: int): Moved = removed(s, id, false, false, false)
 
-pure def removed(s: Voicemail, id: int, done: bool, known: bool): Moved =
-  val removal = A::conclude(s.removal, done, known)
-  val after = { ...s, removal: removal }
-  if (removal.outcome == A::Refused or not(s.front)) { state: after, out: List() }
-  else readList(true, closing(true, after))
+pure def removed(s: Voicemail, id: int, done: bool, known: bool, kept: bool): Moved =
+  val removal = A::conclude(s.removal, done and not(kept), known)
+  val after = { ...s, removal: removal, undo: if (known and kept) Kept else NoUndo }
+  if ((removal.outcome == A::Refused and not(kept)) or not(s.front)) { state: after, out: List() }
+  else readList(true, true, closing(true, after))
 ```
 
 ### A voicemail is removed only by confirming, once

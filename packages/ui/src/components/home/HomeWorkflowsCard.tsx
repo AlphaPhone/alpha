@@ -24,7 +24,7 @@ const marks: Record<HomeWorkflowsFreshness, string | undefined> = {
 /** The Workflows card: the first two enabled workflows and how many more; a press opens Workflows. */
 export function HomeWorkflowsCard({ lines, more, freshness, ...props }: HomeWorkflowsCardProps) {
   return (
-    <HomeCard title="Workflows" icon={<Workflow />} notCurrent={marks[freshness]} {...props}>
+    <HomeCard icon={<Workflow />} notCurrent={marks[freshness]} {...props}>
       <HomeCardLines lines={lines} />
       {more > 0 ? <span className="text-sm text-muted-foreground">+{more} more</span> : null}
     </HomeCard>

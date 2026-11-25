@@ -1,0 +1,154 @@
+// spec/app/inbox/adding.md, "Story: Add files and people to my draft"
+import * as Inbox from "../../gen/app__inbox.effect.vibe"
+import * as Adding from "../../gen/app__inbox__adding.effect.vibe"
+import type { Effect as Out, Event, Picked } from "../../gen/app__inbox__adding.effect.vibe"
+import * as Drafts from "../../gen/app__inbox__drafts.effect.vibe"
+import { canAttach } from "../../gen/app__inbox__letter.effect.vibe"
+import { Machine as Shell } from "../../gen/app__shell.effect.vibe"
+import { type Job, answer, contained, reacting, run, started, together, untimed } from "../runtime/reactor.vibe"
+import { type Attached, Letters, policy } from "./composer.vibe"
+import { ownerChanges } from "./mailbox.vibe"
+
+module web {
+  /** Ask the owner for one file through the page's own picker: the file chosen, or none where the picker was put away. @throws {never} */
+  export function chooseFile(): Promise<File | undefined> {
+    return new Promise((resolve) => {
+      const input = document.createElement("input")
+      input.type = "file"
+      input.hidden = true
+      const done = (file: File | undefined) => {
+        input.remove()
+        resolve(file)
+      }
+      input.addEventListener("change", () => done(input.files?.[0]))
+      input.addEventListener("cancel", () => done(undefined))
+      document.body.append(input)
+      input.click()
+    })
+  }
+
+  /** The bytes of `file`, as Gmail is sent them: base64. */
+  export async function base64Of(file: File): Promise<string> {
+    const bytes = new Uint8Array(await file.arrayBuffer())
+    let text = ""
+    for (const byte of bytes) text += String.fromCharCode(byte)
+    return btoa(text)
+  }
+}
+import { base64Of, chooseFile } from web
+
+/** How many MiB a file of `size` bytes counts for against an account's limits: at least one. */
+export function mibOf(size: number): number {
+  return Math.max(1, Math.ceil(size / 1_048_576))
+}
+
+/**
+ * The file on its way into a draft: the one the picker gave, or the one another part of Alpha handed over under
+ * review, held until the rules let it join or drop it. Only one is ever on its way.
+ */
+export service Incoming {
+  /** The file on its way, and where it came from. */
+  file(): { readonly attached: Attached; readonly source: "Picker" | "Files" | "Photos" } | undefined
+  hold(attached: Attached, source: "Picker" | "Files" | "Photos"): void
+  take(): Attached | undefined
+}
+
+export const incoming = Layer.sync(Incoming, () => {
+  let held: { readonly attached: Attached; readonly source: "Picker" | "Files" | "Photos" } | undefined
+  return {
+    file: () => held,
+    hold(attached: Attached, source: "Picker" | "Files" | "Photos") {
+      held = { attached, source }
+    },
+    take() {
+      const taken = held?.attached
+      held = undefined
+      return taken
+    },
+  }
+})
+
+// spec/app/inbox/adding.md, "A file is attached to the draft open only once the picker gives one that fits within the room its account leaves; one too large, unreadable or without room is refused and said so"
+/** The picker's answer under `ticket`: what the owner chose, how many MiB it counts for, and whether the draft has room for it. */
+effect function picked(ticket: number): Event!!(Incoming | Drafts.Machine) {
+  const file = tryPromise({ try: () => chooseFile(), catch: () => undefined }) catch () => undefined
+  if (file === undefined || file === null) return { type: "picked", ticket, result: "Cancelled", mib: 1, room: false }
+  const mib = mibOf(file.size)
+  if (mib > policy.mib) return { type: "picked", ticket, result: "TooLarge", mib, room: false }
+  const data = tryPromise({ try: () => base64Of(file), catch: () => undefined }) catch () => undefined
+  if (data === undefined) return { type: "picked", ticket, result: "Unreadable", mib, room: false }
+  const holder = try Incoming
+  holder.hold({ name: file.name, mimeType: file.type || "application/octet-stream", size: file.size, data }, "Picker")
+  const composer = try (try Drafts.Machine).get()
+  const result: Picked = "Fits"
+  return { type: "picked", ticket, result, mib, room: composer.open && canAttach(composer.letter, policy, mib) }
+}
+
+// spec/app/inbox/adding.md, "Nothing joins a draft but a file that fit, a file the owner saw, or a contact picked for it"
+/** The file on its way joins `draft`, or starts a new message from `account` where no draft is named. */
+effect function joined(draft: number, account: number, mib: number): void!!(Incoming | Drafts.Machine | Letters) {
+  const file = (try Incoming).take()
+  if (file === undefined) return
+  const composer = try Drafts.Machine
+  const words = try Letters
+  const event: Drafts.Event = draft !== 0 ? { type: "attached", now: untimed, draft, mib, policy } : { type: "startedWithFile", account, mib, policy }
+  const sent = try exit(composer.send(event, "Owner"))
+  if (!Exit.isSuccess(sent)) return
+  const into = sent.value.state.letter.id
+  const before = words.words(into)
+  words.set(into, { ...before, files: [...before.files, file] })
+}
+
+function carry(fx: Out): Job<Event, Incoming | Drafts.Machine | Letters | Shell, []> {
+  return match (fx) {
+    when { tag: "PickFile", let ticket }: answer("pick", picked(ticket), { type: "picked", ticket, result: "Cancelled", mib: 1, room: false });
+    when { tag: "Attach", let draft, let account, let mib }: run("attach", joined(draft, account, mib));
+    // spec/app/inbox/adding.md, "A contact is picked only where the phone has Alpha's contacts and Android allows them; without the permission the owner is asked once, and afterwards sent to Settings; on a phone without them nothing is asked and the owner is told"
+    when { tag: "PickContact" }: run("contact", effect { try ignore((try Shell).send({ type: "openView", view: "Contacts" })) });
+    when { tag: "AskForContacts" }: run("contacts", effect { try ignore((try Shell).send({ type: "openView", view: "Contacts" })) });
+    when { tag: "OpenContactsSettings" }: run("contacts", effect { try ignore((try Shell).send({ type: "openView", view: "Settings" })) });
+  }
+}
+
+// spec/app/inbox/adding.md, "Closing the draft, a new cloud session or a restart drops what was being added to it"
+const closing = started(effect {
+  const composer = try Drafts.Machine
+  const adding = try Adding.Machine
+  const open = Stream.changes(Stream.map(composer.changes, (state) => (state.open ? state.letter.id : 0)))
+  let before = 0
+  try Stream.runForEach(open, effect (draft) => {
+    if (before !== 0 && before !== draft) try contained(adding.send({ type: "draftClosed", draft: before }), "a draft closed")
+    before = draft
+  })
+}, "a draft closed")
+
+const sessions = started(effect {
+  const adding = try Adding.Machine
+  const incoming = try Incoming
+  try Stream.runForEach(ownerChanges, effect () => {
+    incoming.take()
+    try contained(adding.send({ type: "sessionChanged" }), "a new cloud session")
+  })
+}, "a new cloud session")
+
+// spec/app/inbox/adding.md, "A file handed over from Files or Photos is shown to the owner before it joins the draft open, or starts a new message from the account given, and only where it fits"
+/**
+ * Hand `file` from Files or Photos to Inbox, to be shown to the owner before it joins the draft open, or starts a new
+ * message from the list's account. Whether Inbox took it to show.
+ */
+export effect function handOver(file: Attached, source: "Files" | "Photos"): boolean!!(Incoming | Adding.Machine | Drafts.Machine | Inbox.Machine | Shell) {
+  const adding = try Adding.Machine
+  const composer = try (try Drafts.Machine).get()
+  const list = try (try Inbox.Machine).get()
+  const draft = composer.open ? composer.letter.id : 0
+  const event: Event = { type: "bring", thing: 1, mib: mibOf(file.size), draft, account: draft === 0 ? list.selected.account : 0 }
+  const sent = try exit(adding.send(event))
+  if (!Exit.isSuccess(sent)) return false
+  const holder = try Incoming
+  holder.hold(file, source)
+  try ignore((try Shell).send({ type: "openView", view: "Inbox" }))
+  return true
+}
+
+/** Files and contacts on their way into a draft: one at a time, dropped with the draft, the session or a restart. */
+export const adding = together(Layer.provideMerge(reacting(Adding, { open: [{ type: "restart" }], carry }), incoming), closing, sessions)

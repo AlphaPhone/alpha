@@ -1,9 +1,8 @@
 import type { ReactNode } from "react";
-import { ChevronLeft } from "lucide-react";
+import { ChevronLeft, Image } from "lucide-react";
+import { cn, focusRing } from "../../lib/cn.ts";
 import { Button } from "../Button.tsx";
-import { ListGroup } from "../ListGroup.tsx";
 import { Screen } from "../Screen.tsx";
-import { Skeleton } from "../Skeleton.tsx";
 import { InboxAttachmentRow, type InboxAttachmentRowProps } from "./InboxAttachmentRow.tsx";
 import { InboxMessageActions, type InboxMessageActionsProps } from "./InboxMessageActions.tsx";
 import { InboxMessageFault, type InboxMessageFaultProps } from "./InboxMessageFault.tsx";
@@ -51,27 +50,38 @@ export function InboxMessageScreen({
   imagesHidden = false, onShowImages, notice, onNoticeAction, attachments = [], children, ...actions
 }: InboxMessageScreenProps) {
   const body = reading ? (
-    <div role="status" aria-label="Loading message" className="flex flex-col gap-3 py-2"><Skeleton /><Skeleton /><Skeleton className="w-3/4" /></div>
+    <p role="status" aria-busy="true" className="mt-5.5 text-body text-muted-foreground">Loading…</p>
   ) : fault ? (
     <InboxMessageFault kind={fault} onAction={onFaultAction} />
   ) : (
     <>
-      {fromPhone ? <InboxNotice kind="savedMessage" /> : null}
-      {imagesHidden && onShowImages ? <InboxNotice kind="imagesHidden" onAction={onShowImages} /> : null}
-      <div className="text-base break-words">{children}</div>
-      {attachments.length > 0 ? <ListGroup heading="Attachments">{attachments.map(({ id, ...file }) => <InboxAttachmentRow key={id} {...file} />)}</ListGroup> : null}
+      {imagesHidden && onShowImages ? (
+        <p className="mt-4 mb-2">
+          <button type="button" aria-label="Show images" onClick={onShowImages} className={cn(focusRing, "inline-flex min-h-11 items-center gap-1.5 rounded-full bg-secondary px-3.5 text-meta text-primary")}><Image aria-hidden className="size-4" />Show</button>
+        </p>
+      ) : null}
+      <div className="mt-5.5 text-body [overflow-wrap:anywhere]">{children}</div>
+      {attachments.length > 0 ? (
+        <div className="mt-5.5 flex flex-col items-start gap-2">{attachments.map(({ id, ...file }) => <InboxAttachmentRow key={id} {...file} />)}</div>
+      ) : null}
     </>
   );
   return (
     <Screen
       title={subject}
+      titleControl={<span className="flex-1" />}
       leading={<Button variant="ghost" size="icon" aria-label="Back to the list" onClick={onClose}><ChevronLeft /></Button>}
-      actions={<InboxThreadNav place={place} count={count} onOlder={onOlder} onNewer={onNewer} />}
+      actions={reading || fault ? null : <InboxMessageActions {...actions} compact />}
+      className="motion-safe:animate-rise [&_main>div]:gap-0"
     >
-      <InboxMessageHeader sender={sender} address={address} to={to} cc={cc} replyTo={replyTo} date={date} />
-      {notice ? <InboxNotice kind={notice} onAction={onNoticeAction} /> : null}
-      {body}
-      {reading || fault ? null : <InboxMessageActions {...actions} />}
+      {fromPhone ? <p role="status" className="-mt-1 px-2 pb-2 text-xs text-muted-foreground">Saved copy · Links and attachments are off</p> : null}
+      <div className="flex flex-col px-2">
+        {count > 1 ? <InboxThreadNav place={place} count={count} onOlder={onOlder} onNewer={onNewer} /> : null}
+        <InboxMessageHeader sender={sender} address={address} to={to} cc={cc} replyTo={replyTo} date={date} />
+        <p aria-hidden="true" className="mt-5 font-display text-3xl font-light [overflow-wrap:anywhere]">{subject}</p>
+        {notice ? <div className="mt-4"><InboxNotice kind={notice} onAction={onNoticeAction} /></div> : null}
+        {body}
+      </div>
     </Screen>
   );
 }

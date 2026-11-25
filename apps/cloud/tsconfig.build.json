@@ -12,6 +12,7 @@
     "gen/*.ts",
     "gen/*.vibe",
     "profile",
-    "seed"
+    "seed",
+    "wrangler/*.json"
   ]
 }

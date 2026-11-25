@@ -186,16 +186,19 @@ pure def sometimesTookTheSavedDraft(c: Composer): bool =
 
 ### A restart closes the conversation and keeps the saved drafts, the send, access and the SIMs the phone has
 
-A suggestion asked before the restart is not taken after it.
+A suggestion asked before the restart is not taken after it. A send that
+lacked a final answer becomes unknown. Checking it reads its saved receipt.
 
 ```quint
 pure def restart(c: Composer): Composer =
-  { ...initial, saved: c.saved, outgoing: c.outgoing, sending: c.sending, simInfo: c.simInfo, sims: c.sims,
+  { ...initial, saved: c.saved, outgoing: if (S::busy(c.outgoing)) S::lost(c.outgoing) else c.outgoing,
+    sending: c.sending, simInfo: c.simInfo, sims: c.sims,
     suggestion: { ...c.suggestion, status: R::Idle } }
 
 pure def stepSavedDraftsSurviveARestart(before: Composer, via: str, after: Composer): bool =
-  via == "restart" implies (after.saved == before.saved and after.outgoing == before.outgoing and after.thread == 0
-    and after.sending == before.sending and after.simInfo == before.simInfo
+  val held = if (S::busy(before.outgoing)) S::lost(before.outgoing) else before.outgoing
+  via == "restart" implies (after.saved == before.saved and after.outgoing == held and after.thread == 0
+    and after.sending == before.sending and after.simInfo == before.simInfo and after.sims == before.sims
     and after.suggestion.ticket == before.suggestion.ticket and after.suggestion.status == R::Idle)
 ```
 
@@ -243,10 +246,33 @@ pure def suggested(c: Composer, ticket: int, ok: bool): Composer =
 
 ### Undo takes Alpha's draft away
 
+Alpha's draft is shown addressed, To the conversation's name and number,
+in the composer, where the owner may edit it before Send; it offers Send
+and Don't send. Don't send is this Undo: the draft is left as empty as the
+owner left it, and nothing is sent.
+
 ```quint
 pure def canUndo(c: Composer): bool = c.slot.author == AlphaWrote and not(bound(c))
 
 pure def undo(c: Composer): Composer = { ...c, slot: { author: Nobody, draft: D::edit(c.slot.draft) } }
+```
+
+### The agent's draft goes into the open conversation's draft only while it is empty, and never sends
+
+The agent may ask for a reply to the conversation open on screen, or for a
+draft to a number the owner wrote, whose conversation Messages opens first,
+as a number handed to it. Its text becomes Alpha's draft there, for the
+owner to edit and send. A draft already written, or one held by a send, is
+left as it is, and the agent is told the draft is occupied; with no
+conversation open it is told none is selected.
+
+```quint
+pure def canAgentDrafted(c: Composer, thread: int): bool = c.thread > 0 and thread == c.thread
+
+pure def agentDrafted(c: Composer, thread: int): Composer =
+  if (c.slot.author == Nobody and not(bound(c)))
+    { ...c, slot: { author: AlphaWrote, draft: D::edit(c.slot.draft) }, suggestion: { ...c.suggestion, status: R::Idle } }
+  else c
 ```
 
 ### Alpha writes a draft only where the owner had written nothing, and a draft of Alpha's saved meanwhile replaces the owner's only by the owner's choice
@@ -254,13 +280,14 @@ pure def undo(c: Composer): Composer = { ...c, slot: { author: Nobody, draft: D:
 ```quint
 pure def stepAlphaWritesOnlyAnEmptyDraft(before: Composer, via: str, after: Composer): bool =
   (after.slot.author == AlphaWrote and before.slot.author != AlphaWrote and after.thread == before.thread and via != "restart")
-    implies ((via == "suggested" and before.slot.author == Nobody) or via == "takeSaved")
+    implies (((via == "suggested" or via == "agentDrafted") and before.slot.author == Nobody) or via == "takeSaved")
 ```
 
 ### Alpha's draft can be offered, saved, and undone
 
 ```quint
 pure def sometimesAlphaDraft(c: Composer): bool = c.slot.author == AlphaWrote and settledDraft(c) and c.slot.draft.base > 0
+pure def sometimesAgentDraftWaits(c: Composer): bool = c.slot.author == AlphaWrote and c.suggestion.status == R::Idle and c.suggestion.ticket == 0 and c.thread > 0
 pure def sometimesUndone(c: Composer): bool = c.slot.author == Nobody and c.slot.draft.base > 0 and c.thread > 0 and savedFor(c.thread, c) == AlphaWrote
 ```
 
@@ -307,12 +334,17 @@ pure def pickSim(c: Composer, sim: int): Composer = { ...c, sim: sim }
 
 ### The owner attaches up to five pictures, and removes them one by one
 
+`fits` is the phone's word that the picture is a JPEG, PNG or GIF that keeps
+the message within the carrier's MMS size; any other file is never
+attached. Pictures come from the phone's pictures, several at once, or one
+taken with the camera. Several recipients or any picture go as one MMS.
+
 ```quint
 pure val maxPictures = 5
 
-pure def canAttach(c: Composer): bool = c.thread > 0 and c.pictures < maxPictures and not(bound(c))
+pure def canAttach(c: Composer, fits: bool): bool = c.thread > 0 and c.pictures < maxPictures and not(bound(c)) and fits
 
-pure def attach(c: Composer): Composer = { ...c, pictures: c.pictures + 1 }
+pure def attach(c: Composer, fits: bool): Composer = { ...c, pictures: c.pictures + 1 }
 
 pure def canDetach(c: Composer): bool = c.pictures > 0 and not(bound(c))
 
@@ -322,6 +354,9 @@ pure def detach(c: Composer): Composer = { ...c, pictures: c.pictures - 1 }
 ### What Alpha cannot send is handed to the messaging app
 
 `supported` is the phone's word that Alpha can send this message itself.
+A single plain text uses SMS. Pictures and groups use one MMS. If Alpha
+cannot send, the handoff opens the messaging app with the draft text for
+review.
 
 ```quint
 pure def canHandOff(c: Composer, supported: bool): bool = c.thread > 0 and not(supported)
@@ -332,7 +367,10 @@ pure def handOff(c: Composer, supported: bool): Moved = { state: c, out: List(Op
 ### Only the owner's Send sends: a draft or a picture, with send access, a SIM where there is a choice, and never during a call that may be an emergency call
 
 `clear` is Phone's fact that no call which may be an emergency call is
-live. A send whose outcome is unknown is read back instead.
+live. A send whose outcome is unknown is read back instead, including when
+reopening lost the attached pictures or the phone can no longer send. Send goes to
+the open conversation's own numbers, exactly as the phone listed them for
+that conversation, never to a number typed or named elsewhere.
 
 ```quint
 pure def ready(c: Composer, supported: bool, clear: bool): bool =
@@ -340,12 +378,16 @@ pure def ready(c: Composer, supported: bool, clear: bool): bool =
     and (c.sims == 1 or c.sim > 0) and supported and clear
 
 pure def canSend(c: Composer, supported: bool, clear: bool): bool =
-  ready(c, supported, clear) and S::canSend(c.outgoing, c.thread, c.recipients)
+  (if (S::uncertain(c.outgoing)) clear else ready(c, supported, clear))
+    and S::canSend(c.outgoing, c.thread, c.recipients)
 
 pure def send(c: Composer, supported: bool, clear: bool): Moved = withSend(S::send(c.outgoing, c.thread, c.recipients), c)
 ```
 
 ### The phone's answers move the send, and a message sent clears its conversation's draft
+
+The conversation then notes, quietly, that the message was sent, or
+delivered, to the person it names.
 
 ```quint
 pure def sentOff(o: S::Outgoing, c: Composer): Moved =

@@ -1,0 +1,621 @@
+// spec/kit/read.md, "Story: Read from outside"; spec/kit/attempt.md, "Story: Do something outside, once"
+import { replied } from "../../gen/app__platform.effect.vibe"
+import * as Msg from "./messaging.vibe"
+import { type Listening, type Wired, Unsent, remoteAt } from "./remote.vibe"
+
+/** User peer identifier. */
+export schema TelegramPeerUser {
+  readonly _type: "peerUser"
+  readonly user_id: number
+}
+
+/** Basic group peer identifier. */
+export schema TelegramPeerChat {
+  readonly _type: "peerChat"
+  readonly chat_id: number
+}
+
+/** Supergroup or broadcast channel peer identifier. */
+export schema TelegramPeerChannel {
+  readonly _type: "peerChannel"
+  readonly channel_id: number
+}
+
+/** MTProto-shaped peer identifier. */
+export schema TelegramPeer = TelegramPeerUser | TelegramPeerChat | TelegramPeerChannel
+
+/** Peer argument accepted by Telegram RPC calls: either an MTProto peer object or `"user:<id>"` / `"chat:<id>"` / `"channel:<id>"`. */
+export type TelegramPeerInput = TelegramPeer | string
+
+/** Telegram user profile record. */
+export schema TelegramUser {
+  readonly _type: "user"
+  readonly id: number
+  readonly first_name: string
+  readonly last_name?: string
+  readonly username?: string
+  readonly phone?: string
+  readonly self?: boolean
+  readonly online?: boolean
+}
+
+/** Telegram group, supergroup, or broadcast channel metadata. */
+export schema TelegramChat {
+  readonly _type: "chat" | "channel"
+  readonly id: number
+  readonly title: string
+  readonly username?: string
+  readonly megagroup?: boolean
+  readonly broadcast?: boolean
+  readonly participants_count: number
+}
+
+/** Telegram chat folder descriptor. */
+export schema TelegramFolder {
+  readonly id: number
+  readonly title: string
+}
+
+/** Reaction tally on a Telegram message. */
+export schema TelegramReactionCount {
+  readonly emoticon: string
+  readonly count: number
+  readonly chosen: boolean
+}
+
+/** Decoded Telegram message record. */
+export schema TelegramMessage {
+  readonly _type: "message"
+  readonly id: number
+  readonly peer_id: TelegramPeer
+  readonly peer_key: string
+  readonly from_id: number
+  readonly date: number
+  readonly message: string
+  readonly out: boolean
+  readonly reply_to_msg_id?: number
+  readonly edit_date?: number
+  readonly reactions: ReadonlyArray<TelegramReactionCount>
+  readonly mentioned: boolean
+}
+
+/** Dialog notification settings. */
+export schema TelegramNotifySettings {
+  readonly mute_until: number
+}
+
+/** Dialog summary returned by `messages.getDialogs`. */
+export schema TelegramDialogSummary {
+  readonly peer: TelegramPeer
+  readonly peer_key: string
+  readonly top_message: number
+  readonly read_inbox_max_id: number
+  readonly read_outbox_max_id: number
+  readonly unread_count: number
+  readonly unread_mentions_count: number
+  readonly pinned: boolean
+  readonly archived: boolean
+  readonly folder_id: number
+  readonly can_post: boolean
+  readonly notify_settings: TelegramNotifySettings
+  readonly top_date: number
+}
+
+/** Ordered update event delivered by `updates.getDifference` and `updates.stream`. */
+export schema TelegramUpdate {
+  readonly _type:
+    | "updateNewMessage"
+    | "updateEditMessage"
+    | "updateDeleteMessages"
+    | "updateMessageReactions"
+    | "updateReadHistoryInbox"
+    | "updateSessionRevoked"
+  readonly pts: number
+  readonly date: number
+  readonly peer?: TelegramPeer
+  readonly peer_key?: string
+  readonly message?: TelegramMessage
+  readonly messages?: ReadonlyArray<number>
+  readonly msg_id?: number
+  readonly reactions?: ReadonlyArray<TelegramReactionCount>
+  readonly max_id?: number
+  readonly session_token?: string
+}
+
+/** Code delivery descriptor inside `auth.sentCode`. */
+export schema TelegramSentCodeType {
+  readonly _type: string
+  readonly length: number
+}
+
+/** Decoded response from `POST /rpc/auth.sendCode`. */
+export schema TelegramSentCode {
+  readonly ok: true
+  readonly _type: "auth.sentCode"
+  readonly phone_code_hash: string
+  readonly type: TelegramSentCodeType
+  readonly timeout: number
+}
+
+/** Decoded user-session authorization from `auth.signIn` or `auth.checkPassword`. */
+export schema TelegramAuthorization {
+  readonly ok: true
+  readonly _type: "auth.authorization"
+  readonly session_token: string
+  readonly user: TelegramUser
+}
+
+/** Outcome of `signIn`: either authenticated immediately or awaiting 2FA password verification. */
+export type TelegramSignInResult =
+  | { readonly kind: "Authenticated"; readonly sessionToken: string; readonly user: TelegramUser }
+  | { readonly kind: "PasswordRequired"; readonly hint: string; readonly pendingAuthId: string }
+
+/** KDF descriptor inside `account.password`. */
+export schema TelegramPasswordAlgo {
+  readonly _type: string
+}
+
+/** Decoded response from `POST /rpc/account.getPassword`. */
+export schema TelegramPasswordInfo {
+  readonly ok: true
+  readonly _type: "account.password"
+  readonly has_password: boolean
+  readonly hint: string
+  readonly srp_id: string
+  readonly current_algo: TelegramPasswordAlgo
+}
+
+schema TelegramQrPendingWire {
+  readonly ok: true
+  readonly _type: "auth.loginToken"
+  readonly token: string
+  readonly expires: number
+  readonly login_url: string
+}
+
+schema TelegramQrSuccessAuth {
+  readonly _type: "auth.authorization"
+  readonly session_token: string
+  readonly user: TelegramUser
+}
+
+schema TelegramQrSuccessWire {
+  readonly ok: true
+  readonly _type: "auth.loginTokenSuccess"
+  readonly authorization: TelegramQrSuccessAuth
+}
+
+schema TelegramExportLoginTokenWire = TelegramQrPendingWire | TelegramQrSuccessWire
+
+/** Outcome of `exportLoginToken`: pending QR code or completed session authorization. */
+export type TelegramExportLoginTokenResult =
+  | { readonly kind: "Pending"; readonly token: string; readonly expires: number; readonly loginUrl: string }
+  | { readonly kind: "Success"; readonly sessionToken: string; readonly user: TelegramUser }
+
+/** Decoded response from `POST /rpc/auth.acceptLoginToken`. */
+export schema TelegramAcceptLoginTokenResponse {
+  readonly ok: true
+  readonly _type: "authorization"
+  readonly session_token: string
+  readonly user: TelegramUser
+}
+
+/** Decoded response from `POST /rpc/users.getMe`. */
+export schema TelegramMeResponse {
+  readonly ok: true
+  readonly user: TelegramUser
+}
+
+/** Decoded response from `POST /rpc/auth.logOut`. */
+export schema TelegramLogOutResponse {
+  readonly ok: true
+  readonly _type: "auth.loggedOut"
+}
+
+/** Decoded response from `POST /rpc/messages.getDialogs`. */
+export schema TelegramDialogsResponse {
+  readonly ok: true
+  readonly dialogs: ReadonlyArray<TelegramDialogSummary>
+  readonly chats: ReadonlyArray<TelegramChat>
+  readonly users: ReadonlyArray<TelegramUser>
+  readonly messages: ReadonlyArray<TelegramMessage>
+  readonly folders: ReadonlyArray<TelegramFolder>
+  readonly next_cursor: string
+  readonly has_more: boolean
+  readonly pts: number
+}
+
+/** Decoded response from `POST /rpc/messages.getHistory`. */
+export schema TelegramHistoryResponse {
+  readonly ok: true
+  readonly messages: ReadonlyArray<TelegramMessage>
+  readonly count: number
+  readonly next_cursor: string
+  readonly has_more: boolean
+  readonly pts: number
+}
+
+/** Decoded response from `messages.sendMessage`, `messages.editMessage`, and `messages.sendReaction`. */
+export schema TelegramMessageMutationResponse {
+  readonly ok: true
+  readonly message: TelegramMessage
+  readonly pts: number
+}
+
+/** Decoded response from `POST /rpc/messages.deleteMessages`. */
+export schema TelegramDeleteMessagesResponse {
+  readonly ok: true
+  readonly pts: number
+  readonly pts_count: number
+  readonly deleted_ids: ReadonlyArray<number>
+}
+
+/** Decoded response from `POST /rpc/messages.readHistory`. */
+export schema TelegramReadHistoryResponse {
+  readonly ok: true
+  readonly pts: number
+  readonly read_inbox_max_id: number
+  readonly unread_count: number
+}
+
+/** Decoded response from `POST /rpc/messages.searchGlobal`. */
+export schema TelegramSearchGlobalResponse {
+  readonly ok: true
+  readonly messages: ReadonlyArray<TelegramMessage>
+  readonly chats: ReadonlyArray<TelegramChat>
+  readonly users: ReadonlyArray<TelegramUser>
+  readonly count: number
+  readonly next_cursor: string
+  readonly has_more: boolean
+}
+
+/** Decoded response from `POST /rpc/account.updateNotifySettings`. */
+export schema TelegramNotifySettingsResponse {
+  readonly ok: true
+  readonly peer: TelegramPeer
+  readonly notify_settings: TelegramNotifySettings
+}
+
+/** State snapshot inside `updates.difference`. */
+export schema TelegramUpdatesState {
+  readonly pts: number
+  readonly date: number
+}
+
+/** Decoded response from `POST /rpc/updates.getDifference`. */
+export schema TelegramDifferenceResponse {
+  readonly ok: true
+  readonly _type: "updates.difference"
+  readonly new_messages: ReadonlyArray<TelegramMessage>
+  readonly other_updates: ReadonlyArray<TelegramUpdate>
+  readonly state: TelegramUpdatesState
+}
+
+schema TelegramErrorBody {
+  readonly ok: false
+  readonly error_code: number
+  readonly error_message: string
+}
+
+schema TelegramPasswordNeededBody {
+  readonly ok: false
+  readonly error_code: number
+  readonly error_message: "SESSION_PASSWORD_NEEDED"
+  readonly hint: string
+  readonly pending_auth_id: string
+}
+
+/** Options for `getDialogs`. */
+export interface TelegramGetDialogsOpts {
+  readonly folderId?: number
+  readonly archived?: boolean
+  readonly pinnedOnly?: boolean
+  readonly unreadOnly?: boolean
+  readonly cursor?: string
+  readonly offsetDate?: number
+  readonly limit?: number
+}
+
+/** Options for `getHistory`. */
+export interface TelegramGetHistoryOpts {
+  readonly offsetId?: number
+  readonly cursor?: string
+  readonly limit?: number
+}
+
+/** Request payload for `sendMessage`. */
+export interface TelegramSendMessageReq {
+  readonly peer: TelegramPeerInput
+  readonly message: string
+  readonly replyToMsgId?: number
+  readonly randomId?: string | number
+}
+
+/** Request payload for `editMessage`. */
+export interface TelegramEditMessageReq {
+  readonly peer: TelegramPeerInput
+  readonly id: number
+  readonly message: string
+}
+
+/** Request payload for `deleteMessages`. */
+export interface TelegramDeleteMessagesReq {
+  readonly peer: TelegramPeerInput
+  readonly ids: ReadonlyArray<number>
+}
+
+/** Request payload for `sendReaction`. */
+export interface TelegramSendReactionReq {
+  readonly peer: TelegramPeerInput
+  readonly msgId: number
+  readonly reaction?: string
+}
+
+/** Options for `searchGlobal`. */
+export interface TelegramSearchGlobalOpts {
+  readonly peer?: TelegramPeerInput
+  readonly offsetId?: number
+  readonly cursor?: string
+  readonly limit?: number
+}
+
+/** First-class Telegram user-account RPC+SSE client service (phone/code/2FA/QR user sessions only; bot tokens rejected). */
+export interface TelegramClient {
+  readonly baseUrl: string
+  sendCode(phone: string): TelegramSentCode!Msg.MessagingFailure
+  signIn(phone: string, phoneCodeHash: string, code: string): TelegramSignInResult!Msg.MessagingFailure
+  getPassword(pendingAuthId?: string, sessionToken?: string): TelegramPasswordInfo!Msg.MessagingFailure
+  checkPassword(pendingAuthId: string, password: string): TelegramAuthorization!Msg.MessagingFailure
+  exportLoginToken(token?: string): TelegramExportLoginTokenResult!Msg.MessagingFailure
+  acceptLoginToken(sessionToken: string, qrToken: string): TelegramAcceptLoginTokenResponse!Msg.MessagingFailure
+  getMe(sessionToken: string): TelegramMeResponse!Msg.MessagingFailure
+  logOut(sessionToken: string): TelegramLogOutResponse!Msg.MessagingFailure
+  getDialogs(token: string, opts?: TelegramGetDialogsOpts): TelegramDialogsResponse!Msg.MessagingFailure
+  getHistory(token: string, peer: TelegramPeerInput, opts?: TelegramGetHistoryOpts): TelegramHistoryResponse!Msg.MessagingFailure
+  sendMessage(token: string, req: TelegramSendMessageReq, idempotencyKey?: string): TelegramMessageMutationResponse!Msg.MessagingFailure
+  editMessage(token: string, req: TelegramEditMessageReq): TelegramMessageMutationResponse!Msg.MessagingFailure
+  deleteMessages(token: string, req: TelegramDeleteMessagesReq): TelegramDeleteMessagesResponse!Msg.MessagingFailure
+  sendReaction(token: string, req: TelegramSendReactionReq): TelegramMessageMutationResponse!Msg.MessagingFailure
+  readHistory(token: string, peer: TelegramPeerInput, maxId?: number): TelegramReadHistoryResponse!Msg.MessagingFailure
+  searchGlobal(token: string, query: string, opts?: TelegramSearchGlobalOpts): TelegramSearchGlobalResponse!Msg.MessagingFailure
+  updateNotifySettings(token: string, peer: TelegramPeerInput, muteUntil: number): TelegramNotifySettingsResponse!Msg.MessagingFailure
+  getDifference(token: string, pts: number): TelegramDifferenceResponse!Msg.MessagingFailure
+  updatesStream(token: string, pts?: number, listening?: Listening): Stream.Stream<TelegramUpdate, Msg.MessagingFailure>
+}
+
+/** Effect service tag for the Telegram user-account client. */
+export service Telegram: TelegramClient {}
+
+/** Without a native transport or an injected client, no Telegram request can leave Alpha. */
+export const unavailableTelegram = Layer.succeed(Telegram, (() => {
+  const cause = new Unsent({ cause: "Telegram transport is unavailable on this device" })
+  const unsent = () => Effect.fail(cause)
+  return {
+    baseUrl: "",
+    sendCode: unsent,
+    signIn: unsent,
+    getPassword: unsent,
+    checkPassword: unsent,
+    exportLoginToken: unsent,
+    acceptLoginToken: unsent,
+    getMe: unsent,
+    logOut: unsent,
+    getDialogs: unsent,
+    getHistory: unsent,
+    sendMessage: unsent,
+    editMessage: unsent,
+    deleteMessages: unsent,
+    sendReaction: unsent,
+    readHistory: unsent,
+    searchGlobal: unsent,
+    updateNotifySettings: unsent,
+    getDifference: unsent,
+    updatesStream: () => Stream.fail(cause),
+  } satisfies TelegramClient
+})())
+
+const TELEGRAM_BOT_TOKEN_PATTERN = /^(?:bot\d+:|(?:\d{5,}:[A-Za-z0-9_-]{10,}))/
+const FLOOD_WAIT_PATTERN = /^FLOOD_WAIT_(\d+)$/
+const TELEGRAM_AUTH_ERRORS = ["AUTH_KEY_UNREGISTERED", "SESSION_REVOKED"]
+const TELEGRAM_FORBIDDEN_ERRORS = ["CHAT_WRITE_FORBIDDEN", "MESSAGE_AUTHOR_REQUIRED"]
+
+/** Reject Telegram bot tokens at the client boundary; only user-account session tokens are permitted. */
+export effect function assertTelegramUserToken(token: string): string!Msg.BotTokenRejected {
+  if (TELEGRAM_BOT_TOKEN_PATTERN.test(token.trim())) {
+    throw new Msg.BotTokenRejected({ provider: "telegram", reason: "Telegram bot tokens are not allowed; use a user-account session" })
+  }
+  return token
+}
+
+function telegramErrorFromCode(code: string, status: number, retryAfter: string | undefined): Msg.MessagingFailure {
+  const floodMatch = FLOOD_WAIT_PATTERN.exec(code)
+  if (floodMatch !== null || status === 429) {
+    const floodSeconds = floodMatch !== null ? Number(floodMatch[1]) : Msg.parseRetryAfter(retryAfter, 1)
+    return new Msg.RateLimited({ provider: "telegram", retryAfter: floodSeconds, code })
+  }
+  if (code === "BOT_TOKENS_NOT_SUPPORTED") return new Msg.BotTokenRejected({ provider: "telegram", reason: code })
+  if (TELEGRAM_AUTH_ERRORS.includes(code) || status === 401) return new Msg.AuthRevoked({ provider: "telegram", code })
+  if (TELEGRAM_FORBIDDEN_ERRORS.includes(code) || status === 403) return new Msg.Forbidden({ provider: "telegram", code })
+  return new Msg.ProviderError({ provider: "telegram", code, status })
+}
+
+function telegramFailureFromBody(status: number, body: unknown, retryAfter: string | undefined): Msg.MessagingFailure {
+  const err = Schema.decodeUnknownOption(TelegramErrorBody)(body)
+  if (Option.isSome(err)) return telegramErrorFromCode(err.value.error_message, err.value.error_code, retryAfter)
+  return Msg.fallbackStatusError("telegram", status, retryAfter)
+}
+
+effect function callTelegram<A>(
+  wired: Wired,
+  request: HttpClientRequest.HttpClientRequest,
+  schema: Schema.Decoder<A>,
+): A!Msg.MessagingFailure {
+  return try Msg.executeJson(
+    wired,
+    request,
+    (opened: Msg.OpenedJson) => telegramFailureFromBody(opened.status, opened.body, opened.headers["retry-after"]),
+    effect (opened: Msg.OpenedJson) => {
+      const err = Schema.decodeUnknownOption(TelegramErrorBody)(opened.body)
+      if (Option.isSome(err)) throw telegramErrorFromCode(err.value.error_message, err.value.error_code, opened.headers["retry-after"])
+      return try Msg.decodeWith(schema, opened.body)
+    },
+  )
+}
+
+effect function callTelegramAuthed<A>(
+  wired: Wired,
+  token: string,
+  path: string,
+  body: Readonly<Record<string, unknown>>,
+  schema: Schema.Decoder<A>,
+  idempotencyKey?: string,
+): A!Msg.MessagingFailure {
+  const validToken = try assertTelegramUserToken(token)
+  return try callTelegram(wired, Msg.jsonPost(path, body, validToken, idempotencyKey), schema)
+}
+
+effect function signInUser(
+  wired: Wired,
+  phone: string,
+  phoneCodeHash: string,
+  code: string,
+): TelegramSignInResult!Msg.MessagingFailure {
+  const opened = try Msg.openJson(wired, Msg.jsonPost("/rpc/auth.signIn", {
+    phone_number: phone,
+    phone_code_hash: phoneCodeHash,
+    phone_code: code,
+  }))
+  if (!replied(opened.status)) {
+    const needPassword = Schema.decodeUnknownOption(TelegramPasswordNeededBody)(opened.body)
+    if (Option.isSome(needPassword)) {
+      return { kind: "PasswordRequired", hint: needPassword.value.hint, pendingAuthId: needPassword.value.pending_auth_id }
+    }
+    throw telegramFailureFromBody(opened.status, opened.body, opened.headers["retry-after"])
+  }
+  const auth = try Msg.decodeWith(TelegramAuthorization, opened.body)
+  return { kind: "Authenticated", sessionToken: auth.session_token, user: auth.user }
+}
+
+/** Telegram user-account client over HTTP+SSE at `base`. */
+export function telegramAt(base: string) {
+  return Layer.effect(Telegram, effect {
+    const wired = try remoteAt(base)
+    return {
+      baseUrl: base,
+      sendCode: (phone: string) => callTelegram(wired, Msg.jsonPost("/rpc/auth.sendCode", { phone_number: phone }), TelegramSentCode),
+      signIn: (phone: string, phoneCodeHash: string, code: string) => signInUser(wired, phone, phoneCodeHash, code),
+      getPassword: (pendingAuthId?: string, sessionToken?: string) => effect {
+        const validToken = sessionToken === undefined ? undefined : try assertTelegramUserToken(sessionToken)
+        return try callTelegram(wired, Msg.jsonPost("/rpc/account.getPassword", { pending_auth_id: pendingAuthId }, validToken), TelegramPasswordInfo)
+      },
+      checkPassword: (pendingAuthId: string, password: string) => callTelegram(
+        wired,
+        Msg.jsonPost("/rpc/auth.checkPassword", { pending_auth_id: pendingAuthId, password }),
+        TelegramAuthorization,
+      ),
+      exportLoginToken: (token?: string) => effect {
+        const wire = try callTelegram(wired, Msg.jsonPost("/rpc/auth.exportLoginToken", { token }), TelegramExportLoginTokenWire)
+        return wire._type === "auth.loginToken"
+          ? { kind: "Pending" as const, token: wire.token, expires: wire.expires, loginUrl: wire.login_url }
+          : { kind: "Success" as const, sessionToken: wire.authorization.session_token, user: wire.authorization.user }
+      },
+      acceptLoginToken: (sessionToken: string, qrToken: string) => callTelegramAuthed(
+        wired,
+        sessionToken,
+        "/rpc/auth.acceptLoginToken",
+        { token: qrToken },
+        TelegramAcceptLoginTokenResponse,
+      ),
+      getMe: (sessionToken: string) => callTelegramAuthed(wired, sessionToken, "/rpc/users.getMe", {}, TelegramMeResponse),
+      logOut: (sessionToken: string) => callTelegramAuthed(wired, sessionToken, "/rpc/auth.logOut", {}, TelegramLogOutResponse),
+      getDialogs: (token: string, opts?: TelegramGetDialogsOpts) => callTelegramAuthed(
+        wired,
+        token,
+        "/rpc/messages.getDialogs",
+        {
+          folder_id: opts?.folderId,
+          archived: opts?.archived,
+          pinned_only: opts?.pinnedOnly,
+          unread_only: opts?.unreadOnly,
+          cursor: opts?.cursor,
+          offset_date: opts?.offsetDate,
+          limit: opts?.limit,
+        },
+        TelegramDialogsResponse,
+      ),
+      getHistory: (token: string, peer: TelegramPeerInput, opts?: TelegramGetHistoryOpts) => callTelegramAuthed(
+        wired,
+        token,
+        "/rpc/messages.getHistory",
+        { peer, offset_id: opts?.offsetId, cursor: opts?.cursor, limit: opts?.limit },
+        TelegramHistoryResponse,
+      ),
+      sendMessage: (token: string, req: TelegramSendMessageReq, idempotencyKey?: string) => callTelegramAuthed(
+        wired,
+        token,
+        "/rpc/messages.sendMessage",
+        {
+          peer: req.peer,
+          message: req.message,
+          reply_to_msg_id: req.replyToMsgId,
+          random_id: req.randomId,
+        },
+        TelegramMessageMutationResponse,
+        idempotencyKey,
+      ),
+      editMessage: (token: string, req: TelegramEditMessageReq) => callTelegramAuthed(
+        wired,
+        token,
+        "/rpc/messages.editMessage",
+        { peer: req.peer, id: req.id, message: req.message },
+        TelegramMessageMutationResponse,
+      ),
+      deleteMessages: (token: string, req: TelegramDeleteMessagesReq) => callTelegramAuthed(
+        wired,
+        token,
+        "/rpc/messages.deleteMessages",
+        { peer: req.peer, id: req.ids },
+        TelegramDeleteMessagesResponse,
+      ),
+      sendReaction: (token: string, req: TelegramSendReactionReq) => callTelegramAuthed(
+        wired,
+        token,
+        "/rpc/messages.sendReaction",
+        { peer: req.peer, msg_id: req.msgId, reaction: req.reaction },
+        TelegramMessageMutationResponse,
+      ),
+      readHistory: (token: string, peer: TelegramPeerInput, maxId?: number) => callTelegramAuthed(
+        wired,
+        token,
+        "/rpc/messages.readHistory",
+        { peer, max_id: maxId },
+        TelegramReadHistoryResponse,
+      ),
+      searchGlobal: (token: string, query: string, opts?: TelegramSearchGlobalOpts) => callTelegramAuthed(
+        wired,
+        token,
+        "/rpc/messages.searchGlobal",
+        { q: query, peer: opts?.peer, offset_id: opts?.offsetId, cursor: opts?.cursor, limit: opts?.limit },
+        TelegramSearchGlobalResponse,
+      ),
+      updateNotifySettings: (token: string, peer: TelegramPeerInput, muteUntil: number) => callTelegramAuthed(
+        wired,
+        token,
+        "/rpc/account.updateNotifySettings",
+        { peer, mute_until: muteUntil },
+        TelegramNotifySettingsResponse,
+      ),
+      getDifference: (token: string, pts: number) => callTelegramAuthed(
+        wired,
+        token,
+        "/rpc/updates.getDifference",
+        { pts },
+        TelegramDifferenceResponse,
+      ),
+      updatesStream: (token: string, pts?: number, listening?: Listening) => Stream.unwrap(effect {
+        const validToken = try assertTelegramUserToken(token)
+        return Msg.openEventStream(wired, "telegram", Msg.queryGet("/rpc/updates.stream", { pts }, validToken), TelegramUpdate, telegramFailureFromBody, listening)
+      }),
+    }
+  })
+}

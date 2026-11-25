@@ -1,0 +1,38 @@
+// spec/app/phone/voicemail.md, "Closing the voicemail returns to the list"; spec/app/messages/index.md, "Back returns from a conversation or the picker to the list, and reads it again"; spec/app/contacts/index.md, "Closing the contact returns to the list"
+import * as Contacts from "../../gen/app__contacts.effect.vibe"
+import * as Messages from "../../gen/app__messages.effect.vibe"
+import * as Voicemail from "../../gen/app__phone__voicemail.effect.vibe"
+import { contained } from "../runtime/reactor.vibe"
+
+/** Whether `event` was a step of the screen's own, taken by the rules. */
+effect function stepped<Ev>(machine: { send(event: Ev): unknown!unknown }, event: Ev | undefined): boolean!! {
+  if (event === undefined) return false
+  return try contained(machine.send(event), "back")
+}
+
+/** Back on Phone: a delete question first, then the open voicemail. */
+export const phoneBack = effect {
+  const voicemail = try Voicemail.Machine
+  const state = try voicemail.get()
+  return try stepped(voicemail, state.confirming ? { type: "keep" } as const : state.open ? { type: "close" } as const : undefined)
+}
+
+/** Back on Messages: a delete question first, then the conversation or the picker. */
+export const messagesBack = effect {
+  const messages = try Messages.Machine
+  const state = try messages.get()
+  return try stepped(messages, state.confirming ? { type: "keep" } as const : state.pane !== "Threads" ? { type: "back" } as const : undefined)
+}
+
+/** Back on Contacts: a delete question, the form, then the open contact. */
+export const contactsBack = effect {
+  const contacts = try Contacts.Machine
+  const state = try contacts.get()
+  const step = state.confirming ? { type: "keep" } as const
+    : state.form !== "Shut" && !Contacts.pending(state) ? { type: "discard" } as const
+    : state.opened ? { type: "closeContact" } as const
+    : Contacts.canEndSearch(state) ? { type: "endSearch" } as const
+    : undefined
+  return try stepped(contacts, step)
+}
+

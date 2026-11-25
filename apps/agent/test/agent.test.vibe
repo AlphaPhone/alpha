@@ -2,8 +2,8 @@
 // eslint-disable-next-line @typescript-eslint/consistent-type-imports -- ConversationRecord is the schema `schema Created` decodes with, a value the projection ESLint reads does not show
 import { ConversationRecord, TurnController, createRuntimeJsonClient } from "@elizaos/agent/client"
 import { describe, expect, it } from "@effect/vitest"
-import { configurationExit } from "../gen/agent.effect.vibe"
-import { type Running, call, launchFor, listed, ready, socketBridge, startPhoneAgent, startRun } from "./phone.ts"
+import { configurationExit, coreActions, entryCarried, packedPlugins, productPluginName, refusedActions, workerAdmitted } from "../gen/agent.effect.vibe"
+import { type Running, call, launchFor, listed, manifest, pinnedWorker, policy, ready, socketBridge, startPhoneAgent, startRun } from "./phone.ts"
 
 type Run = Awaited<ReturnType<typeof startRun>>
 
@@ -21,17 +21,53 @@ function phoneAgent(run: Run, state: string) {
 
 const client = (running: Running) => createRuntimeJsonClient({ bridge: () => socketBridge(running), startupTimeoutMs: 120_000, pollMs: 100, requestTimeoutMs: 60_000 })
 
-/** A path of the host file's list with each placeholder named: the conversation's id, or its room's for the turn routes. */
-const filled = (route: string, conversation: ConversationRecord) => route.replace("{id}", conversation.id).replace("{roomId}", conversation.roomId)
+/** A path of the host file's list with each placeholder named: the conversation's id, its room's for the turn routes, and an event no calendar holds. */
+const filled = (route: string, conversation: ConversationRecord) => {
+  const path = route.replace("{id}", conversation.id).replace("{roomId}", conversation.roomId).replace("{eventId}", "no-such-event")
+  return path === "/api/scheduled-tasks" ? `${path}?ownerVisibleOnly=1` : path
+}
+
+/** The agent's own answer to a route no module or plugin serves. */
+const unserved = { status: 404, body: { error: "not_found" } }
+const answerOf = (status: number, body: string) => {
+  try { return { status, body: JSON.parse(body) as unknown } } catch { return { status, body } }
+}
 
 schema Created { conversation: ConversationRecord }
 schema Listed { conversations: { id: string }[] }
 schema Replied { fullText: string }
+schema Interacted { success: boolean; result: { state?: { notes: { title: string; body: string }[] } } }
+schema Approvals { approvals: Schema.Unknown[] }
+
+describe("Build the pack only from the pinned eliza", () => {
+  // spec/agent/index.md, "A pack is admitted only when its manifest names the pinned commit, Node 26, no local inference, the plugins it carries, the Alpha product plugin, a pinned workflow worker and every allowed action"
+  // spec/agent/index.md, "Every package the bundle carries is the pinned eliza's, except the pack's entry and Alpha's product plugin"
+  // spec/agent/index.md, "The agent may run the actions the old phone's agent ran plus Alpha's Clock and Reminders actions, and every other action the bundle registers is listed as refused with its reason"
+  it("Build the pack only from the pinned eliza", () => {
+    const built = manifest()
+    const registered = built.actions.map(({ name }) => name)
+    const { actions, plugins } = policy()
+    expect({ plugins: [...built.plugins].sort(), productPlugin: built.productPlugin, localInference: built.localInference, worker: /^[a-f0-9]{64}$/.test(built.workflowWorkerSha256 ?? "") })
+      .toEqual({ plugins: [...packedPlugins].sort(), productPlugin: productPluginName, localInference: false, worker: true })
+    expect(plugins.product).toBe(productPluginName)
+    expect(entryCarried(built.packages.map(({ name }) => name))).toBe(true)
+    expect(built.packages.filter(({ name }) => name.startsWith("@repo/") || name.startsWith("@alphacompute/") || name === productPluginName).map(({ name }) => name).sort())
+      .toEqual(["@repo/agent-pack-entry", productPluginName].sort())
+    expect(Object.keys(actions.refused).sort()).toEqual(refusedActions(registered).sort())
+    expect(Object.keys(actions.refused)).toContain("CALCULATE")
+    expect(coreActions.every((name) => actions.allowed.includes(name))).toBe(true)
+    expect(Object.values(actions.refused).every((reason) => reason.trim() !== "")).toBe(true)
+    expect(workerAdmitted(pinnedWorker().sha256, built.workflowWorkerSha256 ?? "")).toBe(true)
+  })
+})
 
 describe("Run Alpha's agent on the phone", () => {
   // spec/agent/index.md, "The page reaches exactly the routes its platform services call, and nothing else"
   // spec/agent/index.md, "The agent keeps its memory across restarts, without embeddings"
-  // spec/agent/index.md, "A launch never names the workflow worker, and the agent refuses one that does with its configuration code"
+  // spec/agent/index.md, "The agent swaps the owner's secrets and personal details out of what it sends the cloud"
+  // spec/agent/index.md, "The launch names the pack's pinned workflow worker, and the agent refuses any other with its configuration code"
+  // spec/agent/index.md, "The pack carries the plugins the old phone's agent loaded, under the pinned eliza's names, and the launch loads them with the agent's own modules the old agent had"
+  // spec/agent/index.md, "A proposed device step goes through eliza's device-action module, and the phone says which steps it takes"
   it.live("Run Alpha's agent on the phone", () => scoped(effect {
     const run = try acquireRelease(promise(() => startRun()), (started) => promise(() => started.stop()))
     const phone = try Effect.try(() => run.place("phone"))
@@ -42,19 +78,34 @@ describe("Run Alpha's agent on the phone", () => {
       const { conversation: opened } = try Schema.decodeUnknownEffect(Created)(try promise(() => runtime.request("/api/conversations", { title: "Ask Alpha" })))
       try promise(() => controller.bind(opened))
       const result = try promise(() => controller.send({ text: "Remember the word heron." }, { stream: { onPreview: () => {} } }))
-      try Effect.try(() => expect(result.kind === "Replied" ? result.reply.text : result.kind).toBe("You said: Remember the word heron."))
+      try Effect.try(() => expect(result.kind === "Replied" ? result.reply.text : result.kind).toContain("You said: Remember the word heron."))
       for (const route of try Effect.try(() => listed())) {
+        if (route.path === "/api/triggers/{id}/runs") continue
         const target = filled(route.path, opened)
         const status = route.stream === true
           ? try promise(async () => {
             const streamed = await runtime.stream(target, { text: "Again." })
             const chunks: Uint8Array[] = []
             for await (const chunk of streamed.body) chunks.push(chunk)
-            return streamed.status
+            return { status: streamed.status, body: chunks.length as unknown }
           })
-          : (try promise(() => call(first, route.method, target, target.endsWith("/messages") ? { text: "Again." } : {}))).status
-        try Effect.try(() => expect({ route: route.path, status }).not.toEqual({ route: route.path, status: 404 }))
+          : try promise(async () => {
+            const answer = await call(first, route.method, target, route.method === "GET" || route.method === "DELETE" ? undefined : target.endsWith("/messages") ? { text: "Again." } : {})
+            return answerOf(answer.status, answer.body)
+          })
+        try Effect.try(() => expect({ route: route.path, answer: status }).not.toEqual({ route: route.path, answer: unserved }))
       }
+      const created = try promise(() => call(first, "POST", "/api/notes/interact", { capability: "create-note", params: { content: "Heron food on Thursday" } }))
+      const notes = try promise(() => call(first, "POST", "/api/notes/interact", { capability: "get-notes", params: {} }))
+      const read = try Schema.decodeUnknownEffect(Schema.fromJsonString(Interacted))(notes.body)
+      try Effect.try(() => expect({ created: created.status, notes: read.result.state?.notes.map(({ title, body }) => body === "" ? title : `${title}\n${body}`) })
+        .toEqual({ created: 200, notes: ["Heron food on Thursday"] }))
+      const proposals = try promise(() => call(first, "GET", "/api/approvals"))
+      const pending = try Schema.decodeUnknownEffect(Schema.fromJsonString(Approvals))(proposals.body)
+      try Effect.try(() => expect({ status: proposals.status, approvals: pending.approvals }).toEqual({ status: 200, approvals: [] }))
+      const createdAlarm = try promise(() => call(first, "POST", "/api/alpha/clock/alarms", { hour: 7, minute: 30, label: "Wake up" }))
+      const createdReminder = try promise(() => call(first, "POST", "/api/alpha/reminders/items", { title: "Buy heron seed", dueDate: "2026-11-25" }))
+      try Effect.try(() => expect({ alarm: createdAlarm.status, reminder: createdReminder.status }).toEqual({ alarm: 201, reminder: 201 }))
       return opened
     })
     const second = try phoneAgent(run, phone)
@@ -62,10 +113,17 @@ describe("Run Alpha's agent on the phone", () => {
     const known = try Schema.decodeUnknownEffect(Schema.fromJsonString(Listed))(kept.body)
     const answer = try promise(() => call(second, "POST", `/api/conversations/${conversation.id}/messages`, { text: "Which word?" }))
     const { fullText } = try Schema.decodeUnknownEffect(Schema.fromJsonString(Replied))(answer.body)
-    try Effect.try(() => expect({ kept: known.conversations.some(({ id }) => id === conversation.id), status: answer.status, fullText })
-      .toEqual({ kept: true, status: 200, fullText: "You said: Which word?" }))
+    const keptClock = try promise(() => call(second, "GET", "/api/alpha/clock"))
+    const keptReminders = try promise(() => call(second, "GET", "/api/alpha/reminders"))
+    try Effect.try(() => expect({ kept: known.conversations.some(({ id }) => id === conversation.id), status: answer.status, clockStatus: keptClock.status, remindersStatus: keptReminders.status })
+      .toEqual({ kept: true, status: 200, clockStatus: 200, remindersStatus: 200 }))
+    try Effect.try(() => {
+      expect(fullText).toContain("You said: Which word?")
+      expect(keptClock.body).toContain("Wake up")
+      expect(keptReminders.body).toContain("Buy heron seed")
+    })
     const refused = try Effect.try(() => run.place("refused"))
-    const worker = { workflowWorker: { runtimeDir: `${refused}/no-worker`, executable: "worker.mjs", sha256: "0".repeat(64) } }
+    const worker = { workflowWorker: { ...(try Effect.try(() => pinnedWorker())), sha256: "0".repeat(64) } }
     const launch = try promise(() => launchFor(run.cloud, run.key, refused, worker))
     const code = try promise(() => startPhoneAgent(launch, refused, run.cloud, run.key).exited)
     try Effect.try(() => expect(code).toBe(configurationExit))

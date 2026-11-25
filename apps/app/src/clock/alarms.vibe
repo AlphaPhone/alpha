@@ -1,0 +1,232 @@
+// spec/app/clock/alarms.md, "Story: Manage my alarms"; spec/app/clock/alarms.md, "Story: Ring, snooze, dismiss, and recover alarms"
+import * as KeyValueStore from "effect/persistence/KeyValueStore"
+import * as Alarms from "../../gen/app__clock__alarms.effect.vibe"
+import type { Alarm, Event } from "../../gen/app__clock__alarms.effect.vibe"
+import type * as Toasts from "../../gen/app__notices__toasts.effect.vibe"
+import { type Said, offer, withdraw } from "../notices/toasts.vibe"
+import { contained, due, reacting, started, together, untimed } from "../runtime/reactor.vibe"
+import { Time } from "../runtime/time.vibe"
+import { type AlarmSound, clockRecords } from "./records.ts"
+import { detectHour24, nextAlarmFireAt } from "./time.ts"
+
+const metaStoreKey = "alpha/app/clock/meta@1"
+const undoArea = "clock-alarms"
+
+/** Persist Clock's external label/sound metadata to KeyValueStore. */
+export effect function persistClockMeta(): void!!KeyValueStore.KeyValueStore {
+  try ignore((try KeyValueStore.KeyValueStore).set(metaStoreKey, clockRecords.serialize()))
+}
+
+/** Input fields for creating or updating an alarm. */
+export interface AlarmDraft {
+  readonly hour: number
+  readonly minute: number
+  readonly daysMask: number
+  readonly label: string
+  readonly sound: AlarmSound
+  readonly snoozeMinutes: number
+  readonly vibrate: boolean
+}
+
+function alarmTimers(state: Alarms.Alarms) {
+  const deadlines = []
+  for (const item of state.items) {
+    if (item.enabled && item.phase !== "Ringing") {
+      const target = Alarms.dueAtOf(item)
+      if (target > 0) deadlines.push(due<Event, []>(`ring ${item.id}`, target, { type: "trigger", id: item.id, now: untimed }))
+    }
+    if (item.phase === "Ringing") {
+      const silenceAt = item.fireAt + Alarms.ringTimeout
+      const nextFireAt = item.daysMask > 0 ? nextAlarmFireAt(item.hour, item.minute, item.daysMask, silenceAt) : 0
+      deadlines.push(due<Event, []>(`silence ${item.id}`, silenceAt, { type: "autoSilence", id: item.id, nextFireAt, now: untimed }))
+    }
+  }
+  if (state.hasHidden && state.undo.holding === "Held") {
+    deadlines.push(due<Event, []>("commitDelete", state.undo.until, { type: "commitDelete", now: untimed }))
+  }
+  return deadlines
+}
+
+/** Create a new enabled alarm, persist its label/sound metadata, and arm its next ring deadline. */
+export effect function createAlarm(draft: AlarmDraft): number!!(Alarms.Machine | Time | KeyValueStore.KeyValueStore) {
+  const machine = try Alarms.Machine
+  const now = try (try Time).now()
+  const before = try machine.get()
+  const nextId = before.issued + 1
+  const fireAt = nextAlarmFireAt(draft.hour, draft.minute, draft.daysMask, now)
+  const hadPrior = clockRecords.snapshot().alarms.has(nextId)
+  const prior = clockRecords.alarm(nextId)
+  clockRecords.setAlarm(nextId, { label: draft.label.trim(), sound: draft.sound, remoteId: `alarm-${nextId}`, updatedAtMs: now })
+  const sent = try contained(
+    machine.send({
+      type: "create",
+      hour: draft.hour,
+      minute: draft.minute,
+      daysMask: draft.daysMask,
+      snoozeMinutes: draft.snoozeMinutes,
+      vibrate: draft.vibrate,
+      fireAt,
+    }),
+    "creating an alarm",
+  )
+  if (!sent) {
+    if (hadPrior) clockRecords.setAlarm(nextId, prior)
+    return 0
+  }
+  try persistClockMeta()
+  return nextId
+}
+
+effect function loadAlarm(id: number): { readonly machine: Context.Service.Shape<typeof Alarms.Machine>; readonly now: number; readonly current: Alarm | undefined }!!(Alarms.Machine | Time) {
+  const machine = try Alarms.Machine
+  const now = try (try Time).now()
+  const current = (try machine.get()).items.find((item) => item.id === id)
+  return { machine, now, current }
+}
+
+/** Update an existing alarm's schedule and metadata. */
+export effect function updateAlarm(id: number, draft: AlarmDraft): boolean!!(Alarms.Machine | Time | KeyValueStore.KeyValueStore) {
+  const { machine, now, current } = try loadAlarm(id)
+  if (current === undefined) return false
+  const fireAt = current.enabled ? nextAlarmFireAt(draft.hour, draft.minute, draft.daysMask, now) : 0
+  const prior = clockRecords.alarm(id)
+  clockRecords.setAlarm(id, { label: draft.label.trim(), sound: draft.sound, updatedAtMs: now })
+  const sent = try contained(
+    machine.send({
+      type: "update",
+      id,
+      hour: draft.hour,
+      minute: draft.minute,
+      daysMask: draft.daysMask,
+      snoozeMinutes: draft.snoozeMinutes,
+      vibrate: draft.vibrate,
+      fireAt,
+    }),
+    "updating an alarm",
+  )
+  if (!sent) {
+    clockRecords.setAlarm(id, prior)
+    return false
+  }
+  try persistClockMeta()
+  return true
+}
+
+/** Enable or disable an alarm, computing its next fire time when enabling. */
+export effect function toggleAlarm(id: number, enabled: boolean): boolean!!(Alarms.Machine | Time | KeyValueStore.KeyValueStore) {
+  const { machine, now, current } = try loadAlarm(id)
+  if (current === undefined) return false
+  const fireAt = enabled ? nextAlarmFireAt(current.hour, current.minute, current.daysMask, now) : 0
+  const prior = clockRecords.alarm(id)
+  clockRecords.setAlarm(id, { updatedAtMs: now })
+  const sent = try contained(machine.send({ type: "toggle", id, on: enabled, fireAt }), "toggling an alarm")
+  if (!sent) {
+    clockRecords.setAlarm(id, prior)
+    return false
+  }
+  try persistClockMeta()
+  return true
+}
+
+/** Delete an alarm with a five-second Undo toast. */
+export effect function deleteAlarmWithUndo(id: number): boolean!!(Alarms.Machine | Time | KeyValueStore.KeyValueStore | Said | Toasts.Machine) {
+  const machine = try Alarms.Machine
+  const now = try (try Time).now()
+  clockRecords.markAlarmDeleted(id)
+  const sent = try contained(machine.send({ type: "requestDelete", id, now: untimed }), "deleting an alarm")
+  if (!sent) {
+    clockRecords.unmarkAlarmDeleted(id)
+    return false
+  }
+  try persistClockMeta()
+  const store = try KeyValueStore.KeyValueStore
+  const undo = effect {
+    const prior = clockRecords.alarm(id)
+    clockRecords.unmarkAlarmDeleted(id)
+    clockRecords.setAlarm(id, { updatedAtMs: now + 1 })
+    const undone = try contained(machine.send({ type: "undoDelete", now: untimed }), "undoing an alarm deletion")
+    if (undone) {
+      try ignore(store.set(metaStoreKey, clockRecords.serialize()))
+    } else {
+      clockRecords.setAlarm(id, prior)
+      clockRecords.markAlarmDeleted(id)
+    }
+  }
+  const label = clockRecords.alarm(id).label
+  const message = label !== "" ? `Deleted “${label}”` : "Alarm deleted"
+  try offer(message, undoArea, id, undo)
+  return true
+}
+
+/** Snooze a ringing alarm for its configured snooze duration. */
+export effect function snoozeAlarm(id: number): boolean!!(Alarms.Machine | Time | KeyValueStore.KeyValueStore) {
+  const machine = try Alarms.Machine
+  const now = try (try Time).now()
+  const sent = try contained(machine.send({ type: "snooze", id, now: untimed }), "snoozing an alarm")
+  if (!sent) return false
+  clockRecords.setAlarm(id, { updatedAtMs: now })
+  try persistClockMeta()
+  return true
+}
+
+/** Dismiss a ringing or snoozed alarm, disabling one-off alarms and advancing repeating alarms. */
+export effect function dismissAlarm(id: number): boolean!!(Alarms.Machine | Time | KeyValueStore.KeyValueStore) {
+  const { machine, now, current } = try loadAlarm(id)
+  if (current === undefined) return false
+  const nextFireAt = current.daysMask > 0 ? nextAlarmFireAt(current.hour, current.minute, current.daysMask, now) : 0
+  const sent = try contained(machine.send({ type: "dismiss", id, nextFireAt, now: untimed }), "dismissing an alarm")
+  if (!sent) return false
+  clockRecords.setAlarm(id, { updatedAtMs: now })
+  try persistClockMeta()
+  return true
+}
+
+/** Clear the missed indicator on an alarm. */
+export effect function ackMissedAlarm(id: number): boolean!!(Alarms.Machine | KeyValueStore.KeyValueStore) {
+  const sent = try contained((try Alarms.Machine).send({ type: "ackMissed", id }), "acknowledging a missed alarm")
+  if (sent) try persistClockMeta()
+  return sent
+}
+
+/** Return the earliest upcoming enabled alarm and its due instant, or undefined when none is armed. */
+export function nextUpcomingAlarm(items: readonly Alarm[]): { readonly alarm: Alarm; readonly at: number } | undefined {
+  let best: { readonly alarm: Alarm; readonly at: number } | undefined
+  for (const item of items) {
+    if (!item.enabled || item.phase === "Ringing") continue
+    const at = Alarms.dueAtOf(item)
+    if (at <= 0) continue
+    if (best === undefined || at < best.at) best = { alarm: item, at }
+  }
+  return best
+}
+
+const restoredMeta = started(effect {
+  clockRecords.setHour24(detectHour24())
+  const kept = (try KeyValueStore.KeyValueStore).get(metaStoreKey) catch () => undefined
+  if (kept !== undefined) clockRecords.restore(kept)
+}, "restoring Clock metadata")
+
+const withdrawCommitted = started(effect {
+  const machine = try Alarms.Machine
+  let hiddenId = 0
+  try Stream.runForEach(machine.changes, effect (state) => {
+    if (state.hasHidden) {
+      hiddenId = state.hidden.id
+      return
+    }
+    if (hiddenId > 0) {
+      const id = hiddenId
+      hiddenId = 0
+      try withdraw(undoArea, id)
+    }
+  })
+}, "withdrawing Clock deletion Undo toast")
+
+const keptAlarms = reacting(Alarms, {
+  keep: 1,
+  open: [{ type: "reopen", now: untimed }],
+  timers: alarmTimers,
+})
+
+/** Resident alarms machine with persistent state, deadline timers, metadata restore, and Undo toast cleanup. */
+export const alarms = together(keptAlarms, restoredMeta, withdrawCommitted)

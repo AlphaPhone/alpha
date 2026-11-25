@@ -1,19 +1,22 @@
 import type { Effect, Layer, ManagedRuntime } from "effect";
 import type { ComponentType, ReactNode } from "react";
 import type { Place } from "../areas.ts";
+import type { MediaHandoff } from "../assistant/attachments.vibe";
+import type { ScanExports } from "../files/scanEntry.vibe";
+import type { BrowserDownloadsHandoff } from "../platform/browser.vibe";
 import type { Platform } from "../platform/platform.vibe";
 import type { resident } from "../resident.vibe";
 import type { Whole } from "./reactor.vibe";
 
 /** What the root runtime gives every area: the platform and the resident machines. */
-export type Resident = Platform | Layer.Success<typeof resident>;
+export type Resident = Platform | MediaHandoff | BrowserDownloadsHandoff | ScanExports | Layer.Success<typeof resident>;
 
 /** Alpha as boot.tsx opened it. */
 export interface Alpha {
   /** The root runtime: the platform and every resident machine, from launch to exit. */
   readonly runtime: ManagedRuntime.ManagedRuntime<Resident, unknown>;
   /** A runtime of an area's own machines over the root's, made once and kept until Alpha is disposed. */
-  over<I, E>(layer: Layer.Layer<I, E, Resident | I | Whole>): ManagedRuntime.ManagedRuntime<I | Resident, unknown>;
+  over<I, E>(layer: Layer.Layer<I, E, Resident | NoInfer<I> | Whole>): ManagedRuntime.ManagedRuntime<I | Resident, unknown>;
   /** The screens mounted at `place` (areas.ts), each loaded the first time it is drawn: what a screen draws where it offers other areas a place. */
   slot(place: Place): ReactNode;
   /** Back, from the header as from the phone: the shell's layers first, then the screen showing, then the app on top. */
@@ -41,7 +44,7 @@ export interface Area {
  * the resident machines do not provide each of them, this does not compile. `back` is the screen's own step back,
  * such as from a thread to its list: it says whether it took one.
  */
-export function area<I, E>(layer: Layer.Layer<I, E, Resident | I | Whole>, Screen: ComponentType<Shown<I | Resident>>, options: { back?: Effect.Effect<boolean, never, I | Resident> } = {}) {
+export function area<I, E>(layer: Layer.Layer<I, E, Resident | NoInfer<I> | Whole>, Screen: ComponentType<Shown<NoInfer<I> | Resident>>, options: { back?: Effect.Effect<boolean, never, NoInfer<I> | Resident> } = {}) {
   const opened = new WeakMap<Alpha, ManagedRuntime.ManagedRuntime<I | Resident, unknown>>();
   function runtime(alpha: Alpha) {
     const known = opened.get(alpha);

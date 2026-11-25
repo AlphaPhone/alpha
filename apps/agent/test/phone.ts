@@ -4,7 +4,7 @@ import fs from "node:fs";
 import net from "node:net";
 import path from "node:path";
 import type { RuntimeJsonBridge, RuntimeStatus, RuntimeStreamFrame } from "@elizaos/agent/client";
-import { type Cloud, type DeviceKey, said, scratch, startCloud } from "@repo/eliza-harness/services";
+import { type Cloud, type DeviceKey, packPrepared, said, scratch, startCloud } from "@repo/eliza-harness";
 
 /** The owner every journey of the pack signs in. */
 const owner = "owner@alpha.test";
@@ -33,15 +33,35 @@ export interface Listed {
   readonly stream?: boolean;
 }
 
+/** The policy the build wrote beside the bundle. */
+export const policy = () => read("policy.json") as { actions: { allowed: string[]; refused: Record<string, string> }; plugins: { load: string[]; product?: string } };
+
 /** The routes the host file admits for the page. */
 export const listed = () => read("host.json").routes as Listed[];
+
+/** The bundle's manifest as the build wrote it. */
+export const manifest = () => JSON.parse(fs.readFileSync(path.join(pack, "bundle/manifest.json"), "utf8")) as {
+  plugins: string[]; productPlugin?: string; packages: { name: string }[]; localInference: boolean; workflowWorkerSha256?: string; actions: { name: string }[];
+};
+
+/**
+ * The workflow worker the bundle pinned, where the pack's clone built it: the phone stages the same executable beside
+ * the bundle and names it in the launch (`spec/agent/index.md`, "The launch names the pack's pinned workflow worker").
+ */
+export function pinnedWorker() {
+  const plugins = (read("policy.json") as { plugins: { load: string[] } }).plugins.load.filter((name) => name.startsWith("@elizaos/plugin-"));
+  const clone = packPrepared(plugins);
+  const runtimeDir = path.join(clone.packages.get("@elizaos/plugin-workflow") ?? "", "dist");
+  const { executable } = JSON.parse(fs.readFileSync(path.join(runtimeDir, "workflow-worker.json"), "utf8")) as { executable: string };
+  return { runtimeDir, executable, sha256: manifest().workflowWorkerSha256 ?? "" };
+}
 
 /**
  * The launch document eliza's agent service writes from the pack's host files for a signed-in owner
  * (`spec/os/agentService/config.md`, "The launch carries the active key's account"), against the run's own cloud: its
- * origin and the model it offers stand where a hosted deployment's would. `extra` adds keys the pack never writes.
+ * origin and the model it offers stand where a hosted deployment's would. `extra` adds the keys the phone adds: the pinned workflow worker, unless a journey names another.
  */
-export async function launchFor(cloud: Cloud, key: DeviceKey, state: string, extra: Record<string, unknown> = {}) {
+export async function launchFor(cloud: Cloud, key: DeviceKey, state: string, extra: Record<string, unknown> = { workflowWorker: pinnedWorker() }) {
   const file = path.join(state, "launch.json");
   const host = read("host.json");
   const policy = read("policy.json") as { actions: { allowed: string[] }; plugins: { load: string[] } };
@@ -51,7 +71,7 @@ export async function launchFor(cloud: Cloud, key: DeviceKey, state: string, ext
   fs.writeFileSync(file, JSON.stringify({
     schema: 1, character: read("character.json"), policy: { actions: { allowed: policy.actions.allowed }, plugins: policy.plugins }, model,
     account: { userId: key.accountId, organizationId: key.organizationId }, embeddings: host.embeddings, persistMemory: host.persistMemory,
-    callerRole: host.callerRole, ...extra,
+    callerRole: host.callerRole, privacy: host.privacy, google: host.google, ...extra,
   }), { mode: 0o600 });
   return file;
 }
@@ -67,7 +87,7 @@ export interface Running {
 /**
  * Start `agent.mjs serve` exactly as eliza's agent service does: a cleared environment, one launch frame on stdin
  * with a fresh token and the device key as the credential. The only addition is the run certificate of the local
- * cloud, the one origin the agent must trust here (`found-by-alpha` item 3).
+ * cloud, the one origin the agent must trust here.
  */
 export function startPhoneAgent(launch: string, state: string, cloud: Cloud, key: DeviceKey): Running {
   const home = path.join(state, "agent");

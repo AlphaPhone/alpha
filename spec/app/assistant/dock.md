@@ -68,21 +68,17 @@ pure def applied(asks: List[Effect], s: S::Shell): S::Shell =
 pure def moves(e: Effect): bool = match e { | Tap => false | _ => true }
 ```
 
-### What the shell is asked brings Ask Alpha exactly where the gesture landed, from any shell with the drawer closed
-
-The drawer is open only over Ask Alpha on the bar, and no drag starts
-under it.
+### What the shell is asked brings Ask Alpha exactly where the gesture landed
 
 ```quint
-pure val phoneValues = Set({ trail: List(), drawer: false, assistant: S::Bar, image: false, contacts: false })
-  .union(Set({ trail: List(S::Notes), drawer: false, assistant: S::Sheet, image: false, contacts: false }))
-  .union(Set({ trail: List(S::Calendar, S::Notes), drawer: false, assistant: S::Full, image: true, contacts: false }))
-  .union(Set({ trail: List(), drawer: false, assistant: S::Typing, image: false, contacts: true }))
+pure val phoneValues = Set({ trail: List(), assistant: S::Bar, image: false, contacts: false })
+  .union(Set({ trail: List(S::Notes), assistant: S::Sheet, image: false, contacts: false }))
+  .union(Set({ trail: List(S::Calendar, S::Notes), assistant: S::Full, image: true, contacts: false }))
+  .union(Set({ trail: List(), assistant: S::Typing, image: false, contacts: true }))
 
 pure def lawTheShellSettlesWhereTheGestureLands(phone: S::Shell, direction: Direction, flick: bool, height: int, floor: int, full: int): bool =
-  not(phone.drawer) implies
-    applied(asked(phone.assistant, landing(phone.assistant, direction, flick, height, floor, full).detent), phone).assistant
-      == landing(phone.assistant, direction, flick, height, floor, full).detent
+  applied(asked(phone.assistant, landing(phone.assistant, direction, flick, height, floor, full).detent), phone).assistant
+    == landing(phone.assistant, direction, flick, height, floor, full).detent
 ```
 
 ### A flick of an open sheet goes by its direction alone
@@ -113,9 +109,9 @@ pure def lawAKeptHeightLiesBetweenTheZones(start: S::Detent, direction: Directio
 
 ```quint
 type Gesture = Idle | Pressed | Dragging
-type Dock = { gesture: Gesture, start: S::Detent, quiet: int, at: int, kept: int }
+type Dock = { gesture: Gesture, start: S::Detent, quiet: int, at: int, kept: int, voice: bool }
 
-pure val initial: Dock = { gesture: Idle, start: S::Bar, quiet: 0, at: 0, kept: 0 }
+pure val initial: Dock = { gesture: Idle, start: S::Bar, quiet: 0, at: 0, kept: 0, voice: false }
 
 pure val clickWindow = 400
 
@@ -138,7 +134,7 @@ pure def canPress(d: Dock, detent: S::Detent, now: int): bool = d.gesture == Idl
 
 pure def press(d: Dock, detent: S::Detent, now: int): Dock = { ...d, gesture: Pressed, start: detent, at: now }
 
-pure def canDrag(d: Dock): bool = d.gesture == Pressed
+pure def canDrag(d: Dock): bool = d.gesture == Pressed and not(d.voice and isOpen(d.start))
 
 pure def drag(d: Dock): Dock = { ...d, gesture: Dragging }
 ```
@@ -184,6 +180,23 @@ pure def canShift(d: Dock, now: int): bool = now >= d.at
 
 pure def shift(d: Dock, now: int): Moved =
   { state: { ...d, gesture: Idle, at: now, quiet: if (d.gesture == Idle) d.quiet else now + clickWindow }, out: List() }
+```
+
+### While voice owns Ask Alpha its open sheet is not dragged, a drag under way is let go, and the sheet is dragged again once voice ends
+
+The Talk and dictation controls stay where they are while voice runs; a
+press on them still taps.
+
+```quint
+pure def canVoicing(d: Dock, on: bool, now: int): bool = on != d.voice and now >= d.at
+
+pure def voicing(d: Dock, on: bool, now: int): Moved =
+  { state: { ...d, voice: on, at: now, gesture: if (on and d.gesture == Dragging) Idle else d.gesture,
+      quiet: if (on and d.gesture == Dragging) now + clickWindow else d.quiet }, out: List() }
+
+pure def alwaysVoiceDragsNoOpenSheet(d: Dock): bool = (d.voice and isOpen(d.start)) implies d.gesture != Dragging
+
+pure def sometimesVoiceHoldsTheSheet(d: Dock): bool = d.voice and isOpen(d.start) and d.gesture == Pressed
 ```
 
 ### Ask Alpha put away forgets the height its sheet was left at
@@ -250,14 +263,17 @@ pure def lawTheKeyboardLiftsNothingElse(keyboard: int, navigation: int): bool =
   composerLift(false, keyboard, navigation) == navigation
 ```
 
-### Focusing the composer on the bar raises Ask Alpha to typing
+### Focusing or tapping the composer on the bar opens Ask Alpha as a sheet
+
+Tapping or focusing the input bar from rest opens the half-screen conversation
+sheet immediately without requiring an upward drag, while leaving an already
+open sheet or full screen where it is.
 
 ```quint
-pure def focused(detent: S::Detent): List[Effect] = if (detent == S::Bar) List(Raise({ detent: S::Typing })) else List()
+pure def focused(detent: S::Detent): List[Effect] = if (not(isOpen(detent))) List(Raise({ detent: S::Sheet })) else List()
 
-pure def lawFocusingTheBarTypes(phone: S::Shell): bool =
-  not(phone.drawer) implies
-    applied(focused(phone.assistant), phone).assistant == (if (phone.assistant == S::Bar) S::Typing else phone.assistant)
+pure def lawFocusingTheBarOpensSheet(phone: S::Shell): bool =
+  applied(focused(phone.assistant), phone).assistant == (if (not(isOpen(phone.assistant))) S::Sheet else phone.assistant)
 ```
 
 ### A keyboard closed while typing puts Ask Alpha back on the bar
@@ -266,5 +282,5 @@ pure def lawFocusingTheBarTypes(phone: S::Shell): bool =
 pure def keyboardClosed(detent: S::Detent): List[Effect] = if (detent == S::Typing) List(Lower({ steps: 1 })) else List()
 
 pure def lawAClosedKeyboardLeavesTypingForTheBar(phone: S::Shell): bool =
-  not(phone.drawer) implies applied(keyboardClosed(phone.assistant), phone).assistant == (if (phone.assistant == S::Typing) S::Bar else phone.assistant)
+  applied(keyboardClosed(phone.assistant), phone).assistant == (if (phone.assistant == S::Typing) S::Bar else phone.assistant)
 ```

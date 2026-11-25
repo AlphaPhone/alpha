@@ -9,7 +9,10 @@ of what was saved and the save on its way.
 
 Old saved names, such as the Workflows tile saved under its earlier name,
 are turned into today's tiles by the storage service as it parses the
-record; a record it cannot parse is unreadable.
+record; a record it cannot parse is unreadable. An earlier Alpha's record
+(`alpha.launcher.favorites.v1`, its versions 1 and 2) is read only while
+Home has no record of its own, so it is taken up once: the first save
+writes today's record, and the earlier one is never read again.
 
 ## Story: Keep my apps on Home
 
@@ -51,11 +54,12 @@ pure def there(apps: Set[str], shell: S::Shell, tile: Tile): bool =
 
 ```quint
 pure val homeOrder: List[S::View] = List(
-  S::Phone, S::Messages, S::Inbox, S::Calendar, S::Browser, S::Camera, S::Photos,
+  S::Phone, S::Messages, S::Inbox, S::Calendar, S::Clock, S::Reminders, S::Browser, S::Camera, S::Photos,
   S::Maps, S::Notes, S::Contacts, S::Files, S::Workflows, S::Settings)
 
 pure val defaults: List[Tile] = List(
   Own({ view: S::Phone }), Own({ view: S::Messages }), Own({ view: S::Inbox }), Own({ view: S::Calendar }),
+  Own({ view: S::Clock }), Own({ view: S::Reminders }),
   Own({ view: S::Browser }), Own({ view: S::Camera }), Own({ view: S::Photos }), Own({ view: S::Maps }),
   Own({ view: S::Notes }), Own({ view: S::Contacts }), Own({ view: S::Files }), Own({ view: S::Workflows }),
   Own({ view: S::Settings }))
@@ -89,7 +93,7 @@ pure val tilesValues = Set(
   List(Own({ view: S::Inbox }), Own({ view: S::Inbox }), Installed({ app: "clock" })))
 pure val leftValues = Set(List(), List(Own({ view: S::Notes })), List(Installed({ app: "clock" }), Own({ view: S::Inbox })))
 pure val rightValues = leftValues
-pure val iValues = Set(-1, 0, 5, 12, 13)
+pure val iValues = Set(-1, 0, 5, 14, 15)
 pure val ticketValues = Set(1, 2, 3, 4, 5, 6)
 ```
 

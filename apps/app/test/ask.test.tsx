@@ -1,12 +1,16 @@
 // @vitest-environment happy-dom
 import { afterEach, describe, expect, it } from "vitest";
 import { Machine as Ask } from "../gen/app__ask.effect.vibe";
+import type { Mount } from "../src/areas.ts";
 import ask from "../src/ask/index.tsx";
 import { button, closeAll, fill, open, press, underAct, until } from "./alpha.tsx";
 import { scene } from "./fakes/scene.ts";
 
 underAct();
 afterEach(closeAll);
+
+/** The worked example at Ask Alpha's place, which only its own journeys mount. */
+const asked: Mount[] = [{ at: "assistant", load: () => import("../src/ask/index.tsx") }];
 
 const lines = () => [...document.querySelectorAll("section[aria-label='Ask Alpha'] ol li")].map((line) => line.textContent);
 
@@ -15,7 +19,7 @@ describe.each([["a browser", false], ["a phone", true]])("in %s", (_where, phone
   it("Talk to my agent (spec/app/ask/index.md, \"Story: Talk to my agent\")", async () => {
     const world = { ...scene(), phone };
     world.ask.down = true;
-    const { alpha } = await open(world);
+    const { alpha } = await open(world, asked);
     const asking = ask.runtime(alpha);
 
     // spec/app/ask/index.md, "The conversation is the one the agent names in answer to that opening, or none when it does not"

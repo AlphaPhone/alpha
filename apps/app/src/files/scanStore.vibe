@@ -1,0 +1,271 @@
+// spec/app/files/scan.md, "Story: Arrange the pages"; spec/app/files/scan.md, "Story: Keep the scan as I work"; spec/app/files/scan.md, "Story: Make the PDF, and keep the photo"
+import { createScanDraftStore } from "@elizaos/plugin-files/documents/scan-draft"
+import { scannedLinks } from "@elizaos/plugin-files/documents/scan-links"
+import type { ScanTextLine } from "@elizaos/plugin-files/documents/scan-text-layer"
+import { registered } from "../platform/device.vibe"
+import type { Page } from "../../gen/app__files__scanDraft.ts"
+
+export interface ScanImage {
+  readonly blob: Blob
+  readonly width: number
+  readonly height: number
+}
+export interface ScanWords {
+  readonly text: string
+  readonly lines: ReadonlyArray<ScanTextLine>
+  readonly links: ReadonlyArray<string>
+}
+export interface StoredPage extends ScanImage {
+  readonly page: Page
+  readonly words?: ScanWords
+}
+export interface PdfReceipt { readonly confirmed: boolean; readonly known: boolean; readonly selectionId?: string }
+
+export interface ScanSaved {
+  readonly revision: number
+  readonly pages: ReadonlyArray<StoredPage>
+}
+
+module web {
+  import type { PdfReceipt, ScanImage, ScanSaved, StoredPage } from "./scanStore.vibe"
+  import Draw from "./scanPdf.worker.ts?worker"
+  import { admittedTextLayer } from "@elizaos/plugin-files/documents/scan-text-layer"
+  import { scannedLinks } from "@elizaos/plugin-files/documents/scan-links"
+  import { registerPlugin } from "@capacitor/core"
+
+  interface ScanWriter {
+    begin(input: { length: number }): Promise<{ id: string }>
+    append(input: { id: string; offset: number; data: string }): Promise<void>
+    save(input: { id: string }): Promise<PdfReceipt>
+    abandon(input: { id: string }): Promise<void>
+  }
+  let android: ScanWriter | undefined
+  const chunk = 256 * 1024
+
+  function base64(bytes: Uint8Array): string {
+    const parts: string[] = []
+    const step = 8192
+    for (let at = 0; at < bytes.length; at += step) parts.push(String.fromCharCode(...bytes.subarray(at, at + step)))
+    return btoa(parts.join(""))
+  }
+
+  export async function saveAndroid(pdf: Blob): Promise<PdfReceipt> {
+    const plugin = (android ??= registerPlugin<ScanWriter>("AlphaScan"))
+    let id: string | undefined
+    let opened = false
+    try {
+      id = (await plugin.begin({ length: pdf.size })).id
+      for (let offset = 0; offset < pdf.size; offset += chunk) {
+        const part = new Uint8Array(await pdf.slice(offset, Math.min(pdf.size, offset + chunk)).arrayBuffer())
+        await plugin.append({ id, offset, data: base64(part) })
+      }
+      opened = true
+      return await plugin.save({ id })
+    } catch {
+      return { confirmed: false, known: !opened }
+    } finally {
+      if (id !== undefined) await plugin.abandon({ id }).catch(() => undefined)
+    }
+  }
+
+  const formats = new Set(["image/jpeg", "image/png", "image/webp"])
+  const table = "scan"
+  const key = "current"
+
+  /** @throws {never} */
+  export function source(file: Blob): string { return URL.createObjectURL(file) }
+  /** @throws {never} */
+  export function release(uri: string): void { URL.revokeObjectURL(uri) }
+
+  export async function scanImage(blob: Blob): Promise<ScanImage | undefined> {
+    if (!formats.has(blob.type) || blob.size === 0 || blob.size > 16 * 1024 * 1024) return undefined
+    const decoded = await createImageBitmap(blob)
+    try {
+      if (decoded.width < 1 || decoded.height < 1 || decoded.width > 10_000 || decoded.height > 10_000 || decoded.width * decoded.height > 32_000_000) return undefined
+      return { blob, width: decoded.width, height: decoded.height }
+    } finally {
+      decoded.close()
+    }
+  }
+
+  async function database(): Promise<IDBDatabase> {
+    return new Promise((resolve, reject) => {
+      const opened = indexedDB.open("alpha-scan-pages", 1)
+      opened.onupgradeneeded = () => { opened.result.createObjectStore(table) }
+      opened.onsuccess = () => resolve(opened.result)
+      opened.onerror = () => reject(opened.error)
+    })
+  }
+
+  function valid(value: unknown): value is ScanSaved {
+    if (value === null || typeof value !== "object" || !("revision" in value) || !Number.isSafeInteger(value.revision) || !("pages" in value)) return false
+    return Array.isArray(value.pages) && value.pages.length <= 20 && value.pages.every((one) =>
+      one !== null && typeof one === "object" && one.blob instanceof Blob && formats.has(one.blob.type)
+        && Number.isSafeInteger(one.width) && Number.isSafeInteger(one.height) && one.page !== null && typeof one.page === "object"
+        && Number.isSafeInteger(one.page.image) && one.page.image > 0 && typeof one.page.camera === "boolean"
+        && (one.page.text === 0
+          ? one.words === undefined && one.page.blank === false && one.page.edits === 0 && one.page.links === 0
+          : one.page.text === one.page.image && typeof one.page.blank === "boolean"
+            && Number.isSafeInteger(one.page.edits) && one.page.edits >= 0
+            && one.words !== null && typeof one.words === "object" && typeof one.words.text === "string"
+            && one.words.text.length <= 100_000 && admittedTextLayer(one.words.lines) !== undefined
+            && Array.isArray(one.words.links) && JSON.stringify(scannedLinks(one.words.text)) === JSON.stringify(one.words.links)
+            && one.page.links === (one.page.blank ? 0 : one.words.links.length)),
+    )
+  }
+
+  export async function loadDraft(): Promise<ScanSaved | "damaged" | undefined> {
+    const db = await database()
+    try {
+      return await new Promise((resolve, reject) => {
+        const request = db.transaction(table).objectStore(table).get(key)
+        request.onsuccess = () => resolve(request.result === undefined ? undefined : valid(request.result) ? request.result : "damaged")
+        request.onerror = () => reject(request.error)
+      })
+    } finally { db.close() }
+  }
+
+  export async function changeDraft(base: number, pages: ReadonlyArray<StoredPage> | undefined): Promise<{ landed: boolean; revision: number }> {
+    const db = await database()
+    try {
+      return await new Promise((resolve, reject) => {
+        const tx = db.transaction(table, "readwrite")
+        const place = tx.objectStore(table)
+        const read = place.get(key)
+        let landed = false
+        let revision = 0
+        read.onsuccess = () => {
+          const current: unknown = read.result
+          if (current !== undefined && !valid(current)) { tx.abort(); return }
+          revision = current === undefined ? 0 : current.revision
+          if (revision !== base) return
+          revision += 1
+          landed = true
+          place.put({ revision, pages: pages ?? [] }, key)
+        }
+        tx.oncomplete = () => resolve({ landed, revision })
+        tx.onabort = () => reject(tx.error)
+      })
+    } finally { db.close() }
+  }
+
+  export async function drawPdf(images: ReadonlyArray<Blob>, signal: AbortSignal): Promise<{ pdf: Blob } | { problem: "TooLarge" | "NotDrawn" }> {
+    const worker = new Draw()
+    try {
+      return await new Promise((resolve, reject) => {
+        if (signal.aborted) { reject(signal.reason); return }
+        const aborted = () => reject(signal.reason)
+        signal.addEventListener("abort", aborted, { once: true })
+        worker.onmessage = ({ data }: MessageEvent<{ pdf: Blob } | { problem: "TooLarge" | "NotDrawn" }>) => {
+          signal.removeEventListener("abort", aborted)
+          resolve(data)
+        }
+        worker.onerror = () => {
+          signal.removeEventListener("abort", aborted)
+          reject(new Error("The PDF worker stopped"))
+        }
+        worker.postMessage(images)
+      })
+    } finally { worker.terminate() }
+  }
+
+  function download(pdf: Blob): PdfReceipt {
+    const uri = source(pdf)
+    const link = document.createElement("a")
+    link.href = uri
+    link.download = "Scanned document.pdf"
+    document.body.append(link)
+    try {
+      link.click()
+      return { confirmed: false, known: false }
+    } finally {
+      link.remove()
+      release(uri)
+    }
+  }
+
+  export async function savePdf(pdf: Blob): Promise<PdfReceipt> {
+    const page = window as Window & {
+      showSaveFilePicker?: (input: { suggestedName: string; types: { description: string; accept: Record<string, string[]> }[] }) => Promise<FileSystemFileHandle>
+    }
+    if (page.showSaveFilePicker === undefined) return download(pdf)
+    let selected: FileSystemFileHandle
+    try {
+      selected = await page.showSaveFilePicker({ suggestedName: "Scanned document.pdf", types: [{ description: "PDF", accept: { "application/pdf": [".pdf"] } }] })
+    } catch (cause) {
+      return cause instanceof DOMException && cause.name === "AbortError" ? { confirmed: false, known: true } : download(pdf)
+    }
+    try {
+      const writer = await selected.createWritable()
+      await writer.write(pdf)
+      await writer.close()
+      return { confirmed: true, known: true }
+    } catch {
+      return { confirmed: false, known: false }
+    }
+  }
+
+  export async function copyText(text: string): Promise<void> {
+    await navigator.clipboard.writeText(text)
+  }
+
+  export function openLink(url: string): boolean {
+    const opened = window.open("", "_blank")
+    if (opened === null) return false
+    opened.opener = null
+    opened.location.replace(url)
+    return true
+  }
+
+  export async function rotateImage(image: Blob, turns: number): Promise<Blob> {
+    if (turns === 0) return image
+    const bitmap = await createImageBitmap(image)
+    try {
+      const odd = turns % 2 !== 0
+      const canvas = new OffscreenCanvas(odd ? bitmap.height : bitmap.width, odd ? bitmap.width : bitmap.height)
+      const context = canvas.getContext("2d", { alpha: false })
+      if (context === null) return image
+      context.translate(canvas.width / 2, canvas.height / 2)
+      context.rotate(turns * Math.PI / 2)
+      context.drawImage(bitmap, -bitmap.width / 2, -bitmap.height / 2)
+      return await canvas.convertToBlob({ type: "image/jpeg", quality: .9 })
+    } finally { bitmap.close() }
+  }
+
+  export async function photoData(file: Blob): Promise<string> {
+    const bytes = new Uint8Array(await file.arrayBuffer())
+    return base64(bytes)
+  }
+}
+import { changeDraft, copyText, drawPdf, loadDraft, openLink, photoData, release, rotateImage, saveAndroid, savePdf, scanImage, source } from web
+export { changeDraft, copyText, drawPdf, openLink, photoData, release, rotateImage, scanImage, source }
+
+const previous = createScanDraftStore("alpha.browser.scan-draft.v1")
+
+/** Adopt an older scan once, retaining its page order, original bytes and reviewed text. */
+export effect function readDraft(): (ScanSaved | "damaged" | undefined)!! {
+  const current = tryPromise(loadDraft) catch () => "damaged" as const
+  if (current !== undefined) return current
+  const legacy = previous.readScanDraft() catch () => "damaged" as const
+  if (legacy === undefined || legacy === "damaged") return legacy
+  const pages: StoredPage[] = []
+  for (const [index, file] of legacy.pages.entries()) {
+    const image = tryPromise(() => scanImage(file)) catch () => undefined
+    if (image === undefined) return "damaged"
+    const lines = legacy.textLayers?.[index]
+    const text = lines?.map((line) => line.text).join("\n").trim()
+    const words = lines === undefined || lines === null || text === undefined ? undefined : { text, lines, links: scannedLinks(text) }
+    const id = index + 1
+    pages.push({
+      ...image, words,
+      page: { image: id, camera: false, text: words === undefined ? 0 : id, blank: words?.text === "", edits: 0, links: words?.links.length ?? 0 },
+    })
+  }
+  const copied = tryPromise(() => changeDraft(0, pages)) catch () => undefined
+  if (copied?.landed === true) return { revision: copied.revision, pages }
+  return tryPromise(loadDraft) catch () => "damaged" as const
+}
+
+export effect function writePdf(pdf: Blob): PdfReceipt!! {
+  return tryPromise(() => registered("AlphaScan") ? saveAndroid(pdf) : savePdf(pdf)) catch () => ({ confirmed: false, known: false })
+}

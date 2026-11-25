@@ -1,75 +1,138 @@
 // spec/app/inbox/index.md, "Story: See my mail"
 import { CloudError } from "@elizaos/cloud/client"
+import { protocolFailure } from "@elizaos/plugin-inbox/mailbox"
 import * as KeyValueStore from "effect/persistence/KeyValueStore"
 import * as Inbox from "../../gen/app__inbox.effect.vibe"
 import type { Effect as Out, Event, Folder } from "../../gen/app__inbox.effect.vibe"
 import { Machine as Shell, showing } from "../../gen/app__shell.effect.vibe"
+import { waiting } from "../home/waiting.vibe"
+import { fromAreas } from "../home/cards.vibe"
+import { Device } from "../platform/device.vibe"
 import { Cloud } from "../platform/cloud.vibe"
-import { type Job, answer, contained, following, reacting, started, together, untimed } from "../runtime/reactor.vibe"
+import { type Job, answer, contained, reacting, started, stream, together, untimed } from "../runtime/reactor.vibe"
 import { Mail, asked, connections, failureOf, mail, page } from "./gmail.vibe"
 
+const owner = "alpha/inbox/owner"
+
+/** Each new owner session, including a different owner who is already signed in. */
+export const ownerChanges = Stream.unwrap(effect {
+  const list = try Inbox.Machine
+  const ledger = try Mail
+  const owners = Stream.map(list.changes, (state) => `${ledger.generation()}/${state.signedIn}`)
+  return Stream.drop(Stream.changes(owners), 1)
+})
+
 // spec/app/inbox/index.md, "The answer names the connected accounts, their credentials and grants; the account chosen stays selected while it is connected, else the one account that may be read, else none and the owner chooses"
-effect function checked(ticket: number): Event!!(Cloud | Mail) {
-  return effect {
-    const connected = try connections()
-    return { type: "accountsAnswered", ticket, ok: true, connected: [...connected] }
-  } catch () => ({ type: "accountsAnswered", ticket, ok: false, connected: [] })
+effect function checked(ticket: number): Event!!(Cloud | Mail | Inbox.Machine | KeyValueStore.KeyValueStore) {
+  const list = try Inbox.Machine
+  const ledger = try Mail
+  const reply = effect { return { accounts: try connections() } }
+    catch (cause) => ({ signedOut: protocolFailure(cause)?.status === 401 })
+  if (!Inbox.canAccountsAnswered(try list.get(), ticket)) return { type: "accountsAnswered", ticket, ok: false, connected: [] }
+  if ("signedOut" in reply) {
+    if (reply.signedOut) {
+      try ledger.forget()
+      try ignore((try KeyValueStore.KeyValueStore).remove(owner))
+      return { type: "sessionChanged", signedIn: false }
+    }
+    return { type: "accountsAnswered", ticket, ok: false, connected: [] }
+  }
+  return { type: "accountsAnswered", ticket, ok: true, connected: [...(try ledger.connected(reply.accounts))] }
 }
+
+const failed = (ticket: number, failure: Inbox.Failure): Event => ({
+  type: "listed", ticket, ok: false, failure, found: 0, following: 0, shifted: false, spamTrash: false, unread: 0, now: untimed,
+})
 
 // spec/app/inbox/index.md, "Only the newest read's answer is shown, and only while reading is allowed"
-effect function read(ticket: number, account: number, folder: Folder, query: string, cursor: number): Event!!(Cloud | Mail) {
+effect function read(ticket: number, account: number, folder: Folder, query: string, cursor: number): (Event | undefined)!!(Cloud | Mail | Inbox.Machine) {
   const ledger = try Mail
-  return effect {
-    const found = try page(account, folder, query, cursor)
-    const first = cursor === 0
-    try ledger.listed({ account, folder, query }, first, found.letters)
-    const unread = first ? found.letters.filter((letter) => letter.card.isUnread).length : 0
-    return {
-      type: "listed", ticket, ok: true, failure: "Fine", found: found.letters.length, following: found.following,
-      shifted: ledger.moved(first, found.history), spamTrash: found.spamTrash, unread, now: untimed,
-    }
-  } catch (cause) => ({
-    type: "listed", ticket, ok: false, failure: failureOf(cause), found: 0, following: 0, shifted: false, spamTrash: false, unread: 0, now: untimed,
-  })
+  const list = try Inbox.Machine
+  const before = try list.get()
+  const credential = Inbox.linkOf(before.connected, account).credential
+  const generation = ledger.generation(account)
+  const matches = (state: Inbox.Mailbox) => Inbox.canListed(state, ticket, 0, 0) && state.selected.account === account &&
+    state.selected.folder === folder && state.selected.query === query && Inbox.linkOf(state.connected, account).credential === credential
+  if (!matches(before)) return undefined
+  const result = page(account, folder, query, cursor, before.searchable) catch (cause) => failed(ticket, failureOf(cause))
+  if (!matches(try list.get()) || ledger.generation(account) !== generation) return undefined
+  if ("type" in result) return result
+  const staged = ledger.stage(ticket, { account, folder, query }, credential, cursor === 0, result)
+  return { type: "listed", ticket, ok: true, failure: "Fine", ...staged, spamTrash: result.supportsSpamTrash, now: untimed }
 }
 
-function carry(fx: Out): Job<Event, Cloud | Mail, []> {
+function carry(fx: Out): Job<Event, Cloud | Mail | Inbox.Machine | KeyValueStore.KeyValueStore, []> {
   return match (fx) {
     when { tag: "ReadAccounts", let ticket }: answer("accounts", checked(ticket), { type: "accountsAnswered", ticket, ok: false, connected: [] });
     when { tag: "ReadList", let ticket, let account, let folder, let query, let cursor }:
-      answer("list", read(ticket, account, folder, query, cursor), {
-        type: "listed", ticket, ok: false, failure: "Unreachable", found: 0, following: 0, shifted: false, spamTrash: false, unread: 0, now: untimed,
-      });
+      stream("list", Stream.filter(Stream.fromEffect(read(ticket, account, folder, query, cursor)), (event): event is Event => event !== undefined), failed(ticket, "Unreachable"));
   }
 }
 
 // spec/app/inbox/index.md, "A restart keeps the selection, the list kept for it and its credential, whether Spam and Trash can be searched, and the count as no longer fresh, and forgets the rest"
 const kept = reacting(Inbox, { keep: 1, open: [{ type: "restart" }], carry })
 
-const owner = "alpha/inbox/owner"
-
 // spec/app/inbox/index.md, "A new cloud session starts from nothing, and checks the accounts only once signed in"
-/** The cloud session Alpha opens in: told to the list only where it is not the one the list was kept for. */
-const session = started(effect {
+effect function recheck(): void!!(Cloud | Mail | Inbox.Machine | KeyValueStore.KeyValueStore) {
   const { client } = try Cloud
   const store = try KeyValueStore.KeyValueStore
   const machine = try Inbox.Machine
   const ledger = try Mail
-  const signedIn = machine.get() |> map(%, (state) => state.signedIn)
+  const generation = ledger.generation()
   const who = effect {
-    const account = try asked(() => client.account())
+    const account = try asked((signal) => client.account({ signal }))
     return account.id
   } catch (failed) => (failed.cause instanceof CloudError && failed.cause.failure.tag === "CloudCredentialInvalid" ? "" : undefined)
-  if (who === undefined) return
+  if (ledger.generation() !== generation) return
+  const state = try machine.get()
   const before = (store.get(owner) catch () => undefined) ?? ""
-  if (who === before && (try signedIn) === (who !== "")) return
+  if (who === undefined || (who === before && state.signedIn === (who !== ""))) {
+    if (state.signedIn) try contained(machine.send({ type: "checkAccess" }), "checking Gmail access")
+    return
+  }
   if (who !== before) try ledger.forget()
   try ignore(store.set(owner, who))
   try contained(machine.send({ type: "sessionChanged", signedIn: who !== "" }), "the cloud session")
-}, "the cloud session")
+}
 
 // spec/app/inbox/index.md, "Opening Inbox, and every change to Google access, checks the accounts again, even while a check is out"
-const opened = following(Shell, (shell) => showing(shell, "Inbox"), Inbox.Machine, (shown): Event | undefined => (shown ? { type: "checkAccess" } : undefined))
+const session = started(effect {
+  const shell = try Shell
+  const device = try Device
+  const opened = Stream.filter(Stream.changes(Stream.map(shell.changes, (state) => showing(state, "Inbox"))), (shown) => shown)
+  const resumed = Stream.filter(device.visible, (shown) => shown)
+  const checks = Stream.merge(Stream.concat(Stream.succeed(true), opened), resumed)
+  try Stream.runDrain(Stream.switchMap(checks, () => Stream.fromEffectDrain(recheck())))
+}, "the cloud session")
+
+// spec/app/inbox/index.md, "Attention says whether the owner is signed out, has no account, is being checked, or has a count of unread messages, fresh or no longer fresh, or could not be read"
+/** What Home's Inbox tile says waits: the unread messages of the first page, counted, and nothing else of the mail. */
+function waitingOf(said: Inbox.Attention): string | undefined {
+  if ((said.standing !== "Ready" && said.standing !== "Stale") || said.unread < 1) return undefined
+  return `${said.unread}${said.more ? "+" : ""} unread`
+}
+
+const home = started(effect {
+  const list = try Inbox.Machine
+  const ledger = try Mail
+  let previous = ""
+  try Stream.runForEach(list.changes, effect (state) => {
+    try ledger.accept(state)
+    const unread = Inbox.attention(state)
+    waiting.tell("Inbox", waitingOf(unread))
+    const connected = unread.standing === "Ready" || unread.standing === "Stale"
+    const rows = connected ? ledger.shown(state).filter(({ card }) => card.isUnread).slice(0, 2).map(({ card }) => ({
+      title: card.from.replace(/<[^>]*>/u, "").replace(/"/gu, "").trim() || card.from,
+      detail: card.subject || "No subject",
+    })) : []
+    const card = { connected, unread: unread.unread, rows, current: unread.standing === "Ready" }
+    const written = JSON.stringify(card)
+    if (written !== previous) {
+      previous = written
+      fromAreas.mail(card)
+    }
+  })
+}, "telling Home")
 
 /** Gmail's list, from launch: kept across restarts, read through the owner's cloud, and checked again each time Inbox opens. */
-export const mailbox = together(Layer.provideMerge(kept, mail), session, opened)
+export const mailbox = together(Layer.provideMerge(kept, mail), session, home)

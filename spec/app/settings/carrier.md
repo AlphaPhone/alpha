@@ -24,14 +24,14 @@ nothing.
 
 A field is what Android returned, or why it returned nothing: it denied
 access, it has no value, the phone does not support it, or it was not
-read. Each field names its slot or SIM by number.
+read. Each field names its slot or SIM by number. A read also reports whether Android could list active SIMs, each active SIM’s type, slot, default data status and current network, and the device hardware facts Android returned.
 
 ```quint
 import read as R from "../../kit/read"
 import timed as T from "./timed"
 
 type Status = Returned | AccessDenied | Missing | Unsupported | NotRead
-type Kind = Imei | SimState | Iccid | CarrierName | Operator | OperatorCode | MobileData | Roaming | Manufacturer | Model | Baseband | SmsRole | PhoneRole
+type Kind = Imei | SimState | Iccid | CarrierName | Operator | OperatorCode | MobileData | Roaming | Manufacturer | Model | DeviceName | AndroidVersion | Baseband | SmsRole | PhoneRole | ActiveSims | SimType | SimSlot | SimName | DataState | NetworkType | DefaultData
 type Field = { kind: Kind, index: int, status: Status, value: str }
 type Copied = NotCopied | CopiedIt | CopyFailed
 
@@ -156,7 +156,8 @@ pure def giveUpOnEid(s: Carrier, now: int): Carrier = { ...s, eidRead: T::answer
 
 ### Copy puts one identifier Android returned on the clipboard, one copy at a time, and the page says whether it was copied
 
-Only an IMEI, an ICCID or the EID the page shows can be copied.
+Only an IMEI, an ICCID or the EID the page shows can be copied. Whether it
+was copied is announced, as well as shown.
 
 ```quint
 pure val valueValues = Set("", "356938035643809")

@@ -1,19 +1,18 @@
-// spec/app/home/index.md, "Back closes one layer of Home's own: an app's menu, then Add to Home, then editing; Done ends editing"
-import { Effect, Layer } from "effect";
+// spec/app/home/index.md, "Back closes one layer of Home's own: Add to Home, then editing; Done ends editing"
+import { Effect } from "effect";
 import * as Home from "../../gen/app__home.effect.vibe";
-import type { Machine as PressMachine } from "../../gen/app__home__press.effect.vibe";
 import type { Machine as CardsMachine } from "../../gen/app__home__cards.effect.vibe";
 import { area } from "../runtime/area.tsx";
-import { HomeScreen } from "./Home.tsx";
+import { together } from "../runtime/reactor.vibe";
+import { HomePage } from "./Home.tsx";
 import { cards } from "./cards.vibe";
 import { home } from "./home.vibe";
-import { press } from "./press.vibe";
 
-/** The machines of Home's area: Home itself, the press on its tiles and the cards. */
-export type HomeMachines = Home.Machine | PressMachine | CardsMachine;
+/** The machines of Home's area: Home itself and the cards. */
+export type HomeMachines = Home.Machine | CardsMachine;
 
-/** Back on Home: an app's menu, then Add to Home, then editing, before the shell's own. */
-const back = Effect.flatMap(Home.Machine.asEffect(), (machine) => Effect.flatMap(machine.get(), (state) => (Home.canBackOut(state) ? Effect.as(Effect.orElseSucceed(machine.send({ type: "backOut" }, "Owner"), () => undefined), true) : Effect.succeed(false))));
+/** Back on Home: Add to Home, then editing, before the shell's own. */
+const back = Home.Machine.use((machine) => Effect.flatMap(machine.get(), (state) => (Home.canBackOut(state) ? Effect.as(Effect.orElseSucceed(machine.send({ type: "backOut" }, "Owner"), () => undefined), true) : Effect.succeed(false))));
 
 /** Home, the launcher: drawn with the first paint. */
-export default area(Layer.mergeAll(home, press, cards), HomeScreen, { back });
+export default area(together(home, cards), HomePage, { back });

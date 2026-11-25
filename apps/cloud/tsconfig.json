@@ -19,7 +19,8 @@
     "gen/*.vibe",
     "profile",
     "seed",
-    "*.config.ts"
+    "*.config.ts",
+    "wrangler/*.json"
   ],
   "vibe": {
     "sidecarDir": ".vibe/declarations"

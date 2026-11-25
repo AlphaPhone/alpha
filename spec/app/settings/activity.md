@@ -30,34 +30,69 @@ import timed as T from "./timed"
 
 type Connection = Ready | Starting | NeedsRestart | NeedsRetry | Offline | Unpackaged
 type Recovery = Restart | Retry
-type Row = { proposal: int, declinable: bool, unsettled: bool }
+type Row = { proposal: str, title: str, detail: str, outcome: str, declinable: bool, unsettled: bool }
+type WordResult = NoWord | WordTaken | WordUnconfirmed
 
-type Activity = { journal: T::Timed, rows: List[Row] }
+type Activity = { connection: Connection, recovering: bool, journal: T::Timed, rows: List[Row], wordResult: WordResult }
 
 type Effect =
   Recover({ how: Recovery })
   | ReadJournal({ reading: int })
-  | Reject({ proposal: int })
-  | Reconcile({ proposal: int, happened: bool })
+  | Reject({ proposal: str, reading: int })
+  | Reconcile({ proposal: str, happened: bool, reading: int })
 type Sent = { state: Activity, out: List[Effect] }
 
-pure val initial: Activity = { journal: T::unasked, rows: List() }
+pure val initial: Activity = { connection: Offline, recovering: false, journal: T::unasked, rows: List(), wordResult: NoWord }
 
 pure def needs(how: Recovery, connection: Connection): bool =
   if (how == Restart) connection == NeedsRestart else connection == NeedsRetry
 
-pure def canRecover(s: Activity, how: Recovery, connection: Connection): bool = needs(how, connection)
+pure def canRecover(s: Activity, how: Recovery, connection: Connection): bool = s.connection == connection and needs(how, connection) and not(s.recovering)
 
-pure def recover(s: Activity, how: Recovery, connection: Connection): Sent = { state: s, out: List(Recover({ how: how })) }
+pure def recover(s: Activity, how: Recovery, connection: Connection): Sent = { state: { ...s, recovering: true }, out: List(Recover({ how: how })) }
 ```
 
-### Asking for a recovery changes nothing on this page
+### A recovery is asked once at a time and leaves the journal alone
+
+The request is marked in flight until the host responds. Its response returns the last reported connection, or says the connection could not be read.
 
 ```quint
+pure def canRecoveryReported(s: Activity, connection: Connection): bool = s.recovering
+
+pure def recoveryReported(s: Activity, connection: Connection): Activity =
+  { ...s, connection: if (s.connection == Starting or s.connection == NeedsRetry) connection else s.connection, recovering: false }
+
+
 pure def isRecover(e: Effect): bool = match e { | Recover(r) => true | _ => false }
 
 pure def stepARecoveryIsHandedOver(before: Activity, after: Activity, out: List[Effect]): bool =
-  out.some(e => isRecover(e)) implies (after == before and out.length() == 1)
+  out.some(e => isRecover(e)) implies (after.recovering and after.journal == before.journal and after.rows == before.rows and out.length() == 1)
+```
+
+### About's Agent activity says whether the agent runs, is starting, needs the owner or is stopped
+
+A new connection report replaces the one the page is showing. The row carries the connection the phone reports, so a stopped or
+refused agent is seen from Settings: running only while it is ready,
+starting while it starts, needing the owner while it needs a restart or
+another try, and stopped otherwise.
+
+```quint
+pure def canConnectionReported(s: Activity, connection: Connection): bool = s.connection != connection
+
+pure def connectionReported(s: Activity, connection: Connection): Activity = { ...s, connection: connection }
+
+type AgentWord = AgentRunning | AgentStarting | AgentNeedsYou | AgentStopped
+
+pure def agentWord(connection: Connection): AgentWord =
+  if (connection == NeedsRestart or connection == NeedsRetry) AgentNeedsYou
+  else if (connection == Ready) AgentRunning
+  else if (connection == Starting) AgentStarting
+  else AgentStopped
+
+pure def lawRunningOnlyWhileReady(connection: Connection): bool = (agentWord(connection) == AgentRunning) iff (connection == Ready)
+
+pure def lawTheOwnerIsNeededExactlyWhenARecoveryIsOffered(connection: Connection): bool =
+  (agentWord(connection) == AgentNeedsYou) iff (needs(Restart, connection) or needs(Retry, connection))
 ```
 
 ## Story: Answer for what the agent did on the phone
@@ -80,10 +115,10 @@ pure val atValues = Set(0, 4000, 20000)
 
 pure def askJournal(at: int, s: Activity): Sent =
   val asking = T::ask(s.journal, at, readLimit)
-  { state: { ...s, journal: asking }, out: List(ReadJournal({ reading: asking.read.ticket })) }
+  { state: { ...s, journal: asking, wordResult: NoWord }, out: List(ReadJournal({ reading: asking.read.ticket })) }
 
 pure def canRefreshActions(s: Activity, at: int, connection: Connection): bool =
-  connection == Ready and not(T::busy(s.journal))
+  s.connection == connection and connection == Ready and not(T::busy(s.journal))
 
 pure def refreshActions(s: Activity, at: int, connection: Connection): Sent = askJournal(at, s)
 ```
@@ -94,14 +129,14 @@ pure def refreshActions(s: Activity, at: int, connection: Connection): Sent = as
 pure val readingValues = Set(1, 2, 3)
 pure val rowsValues = Set(
   List(),
-  List({ proposal: 1, declinable: true, unsettled: false }),
-  List({ proposal: 1, declinable: false, unsettled: true }, { proposal: 2, declinable: false, unsettled: false }),
+  List({ proposal: "one", title: "Phone action", detail: "", outcome: "Waiting", declinable: true, unsettled: false }),
+  List({ proposal: "one", title: "Phone action", detail: "", outcome: "Needs confirmation", declinable: false, unsettled: true }, { proposal: "two", title: "Phone action", detail: "", outcome: "Finished", declinable: false, unsettled: false }),
 )
 
-pure def canActionsRead(s: Activity, reading: int, ok: bool, rows: List[Row]): bool = T::canAnswer(s.journal, reading)
+pure def canActionsRead(s: Activity, reading: int, ok: bool, rows: List[Row], result: WordResult): bool = T::canAnswer(s.journal, reading)
 
-pure def actionsRead(s: Activity, reading: int, ok: bool, rows: List[Row]): Activity =
-  if (ok) { ...s, journal: T::answer(s.journal, true), rows: rows } else { ...s, journal: T::answer(s.journal, false) }
+pure def actionsRead(s: Activity, reading: int, ok: bool, rows: List[Row], result: WordResult): Activity =
+  if (ok) { ...s, journal: T::answer(s.journal, true), rows: rows, wordResult: result } else { ...s, journal: T::answer(s.journal, false), wordResult: result }
 
 pure val nowValues = Set(0, 4000, 20000, 40000)
 
@@ -110,7 +145,7 @@ pure def canGiveUpOnActions(s: Activity, now: int): bool = T::canGiveUp(s.journa
 pure def giveUpOnActions(s: Activity, now: int): Activity = { ...s, journal: T::answer(s.journal, false) }
 
 pure def stepTheActionsAreTheJournals(before: Activity, via: str, after: Activity): bool =
-  after.rows != before.rows implies (via == "actionsRead" and after.journal.read.status == R::Loaded)
+  after.rows != before.rows implies (via == "leaveHistory" or (via == "actionsRead" and after.journal.read.status == R::Loaded))
 ```
 
 ### Every read of the journal ends
@@ -128,27 +163,27 @@ the journal is then read again: what changes on screen is what the
 approvals area recorded.
 
 ```quint
-pure val proposalValues = Set(1, 2)
+pure val proposalValues = Set("one", "two")
 
-pure def listed(s: Activity, proposal: int, declining: bool): bool =
+pure def listed(s: Activity, proposal: str, declining: bool): bool =
   s.rows.some(r => r.proposal == proposal and (if (declining) r.declinable else r.unsettled))
 
 pure def ready(s: Activity, connection: Connection): bool =
-  connection == Ready and s.journal.read.status == R::Loaded
+  s.connection == connection and connection == Ready and s.journal.read.status == R::Loaded
 
-pure def canDecline(s: Activity, proposal: int, at: int, connection: Connection): bool =
+pure def canDecline(s: Activity, proposal: str, at: int, connection: Connection): bool =
   ready(s, connection) and listed(s, proposal, true)
 
-pure def decline(s: Activity, proposal: int, at: int, connection: Connection): Sent =
+pure def decline(s: Activity, proposal: str, at: int, connection: Connection): Sent =
   val again = askJournal(at, s)
-  { state: again.state, out: List(Reject({ proposal: proposal })).concat(again.out) }
+  { state: again.state, out: List(Reject({ proposal: proposal, reading: again.state.journal.read.ticket })) }
 
-pure def canReconcileAction(s: Activity, proposal: int, happened: bool, at: int, connection: Connection): bool =
+pure def canReconcileAction(s: Activity, proposal: str, happened: bool, at: int, connection: Connection): bool =
   ready(s, connection) and listed(s, proposal, false)
 
-pure def reconcileAction(s: Activity, proposal: int, happened: bool, at: int, connection: Connection): Sent =
+pure def reconcileAction(s: Activity, proposal: str, happened: bool, at: int, connection: Connection): Sent =
   val again = askJournal(at, s)
-  { state: again.state, out: List(Reconcile({ proposal: proposal, happened: happened })).concat(again.out) }
+  { state: again.state, out: List(Reconcile({ proposal: proposal, happened: happened, reading: again.state.journal.read.ticket })) }
 ```
 
 ### The owner's word goes only for an action shown that takes it, once, and is followed by reading the journal again
@@ -158,13 +193,22 @@ pure def isWord(e: Effect): bool = match e { | Reject(r) => true | Reconcile(r) 
 
 pure def stepAWordFitsTheActionShown(before: Activity, after: Activity, out: List[Effect]): bool =
   out.some(e => isWord(e)) implies
-    (before.journal.read.status == R::Loaded and out.length() == 2
+    (before.journal.read.status == R::Loaded and out.length() == 1 and T::busy(after.journal)
       and out.every(e => match e {
-        | Reject(r) => listed(before, r.proposal, true)
-        | Reconcile(r) => listed(before, r.proposal, false)
-        | ReadJournal(r) => r.reading == after.journal.read.ticket and T::busy(after.journal)
+        | Reject(r) => listed(before, r.proposal, true) and r.reading == after.journal.read.ticket
+        | Reconcile(r) => listed(before, r.proposal, false) and r.reading == after.journal.read.ticket
         | _ => false
       }))
+```
+
+### Leaving the history forgets the proposals and retires a read
+
+The phone reads it again on returning while the agent is ready. It reports an action decision that the agent did not confirm. A new read can never update a closed panel with rows from an earlier visit.
+
+```quint
+pure def canLeaveHistory(s: Activity): bool = s.journal.read.status != R::Idle or s.rows.length() > 0
+
+pure def leaveHistory(s: Activity): Activity = { ...s, journal: T::retire(s.journal), rows: List(), wordResult: NoWord }
 ```
 
 ### Nothing has been listed until the journal was read

@@ -1,0 +1,576 @@
+// spec/app/files/preview.md, "Story: Look at a file"; spec/app/files/preview.md, "Story: Act on the file I am looking at"; spec/app/files/preview.md, "Story: Get a file back when access was lost"; spec/app/files/recent.md, "Story: Find what I opened lately"
+import type { SelectedDocumentsClient, SelectionId } from "@elizaos/os/bridges/definitions/media"
+import * as KeyValueStore from "effect/persistence/KeyValueStore"
+import * as Browser from "../../gen/app__files.effect.vibe"
+import * as Shown from "../../gen/app__files__preview.effect.vibe"
+import * as Recent from "../../gen/app__files__recent.effect.vibe"
+import type { Item } from "../../gen/app__files__shared.effect.vibe"
+import { kindOf as storageKind } from "./entries.vibe"
+import { type MediaHandoff, attachToAlpha } from "../assistant/attachments.vibe"
+import * as Inbox from "../../gen/app__inbox.effect.vibe"
+import type { Machine as Adding } from "../../gen/app__inbox__adding.effect.vibe"
+import * as Drafts from "../../gen/app__inbox__drafts.effect.vibe"
+import type { Machine as Shell } from "../../gen/app__shell.effect.vibe"
+import { type Incoming, handOver } from "../inbox/adding.vibe"
+import type { Machine as Toasts } from "../../gen/app__notices__toasts.effect.vibe"
+import { type Said, say } from "../notices/toasts.vibe"
+import { adopt, keptAt } from "../platform/adoption.vibe"
+import { Documents, previewUrl } from "../platform/documents.vibe"
+import { type Files, called } from "../platform/files.vibe"
+import { type Job, answer, following, reacting, run, started, stop, together } from "../runtime/reactor.vibe"
+import { Handles } from "./handles.vibe"
+
+/** What a grant of Recent names: the selection the phone gave for the document, its number in Files, its name, type and revision. */
+export interface Grant {
+  readonly selection: string
+  readonly key: number
+  readonly name: string
+  readonly mimeType: string
+  readonly revision: number
+  readonly bytes?: number
+  readonly storage?: { readonly volume: string; readonly path: string; readonly label: string }
+}
+
+/** What the viewer shows of its file: its text, the address of a picture or recording, and the PDF page drawn. */
+export interface Content {
+  readonly viewer: number
+  readonly text?: string
+  readonly uri?: string
+  readonly page?: string
+  readonly firstPage?: { readonly uri: string; readonly revision: number }
+}
+
+module kept {
+  /** A grant as the store keeps it. */
+  export interface Stored {
+    readonly selection: string
+    readonly key: number
+    readonly name: string
+    readonly mimeType: string
+    readonly revision: number
+  }
+  /** The grants the store kept, by number. @throws {never} */
+  export function grantsOf(raw: string | undefined): Map<number, Stored> {
+    if (raw === undefined) return new Map()
+    try {
+      const found: unknown = JSON.parse(raw)
+      return new Map(Array.isArray(found) ? found.filter((one): one is [number, Stored] => Array.isArray(one) && typeof one[0] === "number" && typeof one[1]?.selection === "string") : [])
+    } catch {
+      return new Map()
+    }
+  }
+  /** @throws {never} */
+  export function textFromBase64(data: string): string | undefined {
+    try {
+      return new TextDecoder("utf-8", { fatal: true }).decode(Uint8Array.from(atob(data), (byte) => byte.charCodeAt(0)))
+    } catch {
+      return undefined
+    }
+  }
+
+  /** A document the earlier Alpha's Recent held access to. */
+  export interface Earlier {
+    readonly selection: string
+    readonly name: string
+    readonly mimeType: string
+    readonly at: number
+  }
+  /** The documents the earlier Alpha's Recent kept with access, the oldest first, at most `most` of the newest. @throws {never} */
+  export function earlierOf(raw: string, most: number): Earlier[] {
+    try {
+      const found: unknown = JSON.parse(raw)
+      if (!Array.isArray(found)) return []
+      const rows = found.flatMap((row): Earlier[] => typeof row?.selectionId === "string" && /^[A-Za-z0-9:._/-]{1,100}$/.test(row.selectionId) && row.kind === "selected"
+        && row.status === "ready" && typeof row.name === "string" && typeof row.mimeType === "string" && Number.isFinite(row.openedAt)
+        ? [{ selection: row.selectionId, name: row.name, mimeType: row.mimeType, at: Number(row.openedAt) }] : [])
+      return rows.sort((a, b) => a.at - b.at).slice(-most)
+    } catch {
+      return []
+    }
+  }
+}
+import { earlierOf, grantsOf, textFromBase64 } from kept
+
+/**
+ * The documents Recent holds access to, each by its grant's number, kept across restarts with what the owner calls
+ * them; and what the viewer showing has read, which no other viewer shows.
+ */
+export service Opened {
+  grant(grant: number): Option.Option<Grant>!!
+  give(grant: number, given: Grant): void!!
+  take(grant: number): Option.Option<Grant>!!
+  content(): Content!!
+  hold(content: Content): void!!
+}
+
+const grantsKey = "alpha/files/grants@1"
+
+export const opened = Layer.effect(Opened, effect {
+  const store = try KeyValueStore.KeyValueStore
+  const grants = grantsOf(store.get(grantsKey) catch () => undefined)
+  let shown: Content = { viewer: 0 }
+  const save = () => ignore(store.set(grantsKey, JSON.stringify([...grants])))
+  return {
+    grant: (grant: number) => sync(() => Option.fromNullishOr(grants.get(grant))),
+    effect give(grant: number, given: Grant): void!! {
+      grants.set(grant, given)
+      try save()
+    },
+    effect take(grant: number): Option.Option<Grant>!! {
+      const found = Option.fromNullishOr(grants.get(grant))
+      grants.delete(grant)
+      try save()
+      return found
+    },
+    content: () => sync(() => shown),
+    hold: (content: Content) => sync(() => { shown = content }),
+  }
+})
+
+/** How the viewer shows a file of this type. */
+export function kindOf(mimeType: string): Shown.Kind {
+  if (mimeType === "application/pdf") return "Pdf"
+  if (mimeType.startsWith("image/")) return "Photo"
+  if (mimeType.startsWith("audio/") || mimeType.startsWith("video/")) return "Media"
+  if (mimeType === "application/zip" || mimeType.includes("compressed") || mimeType.includes("archive")) return "Archive"
+  return "Text"
+}
+
+/** The phone's client of the documents it holds, failing where there is none. */
+effect function documents(): SelectedDocumentsClient!string!Documents {
+  const { client } = try Documents
+  if (Option.isNone(client)) throw "no documents plugin"
+  return client.value
+}
+
+/** The selection a grant of Recent names, where it still names one. */
+effect function selectionOf(grant: number): Option.Option<SelectionId>!!Opened {
+  const found = try (try Opened).grant(grant)
+  return Option.map(found, (one) => one.selection as SelectionId)
+}
+
+/** The grant through which the viewer reads `key`: the one of the document Recent says is open. */
+effect function grantOf(key: number): number!!Recent.Machine {
+  const shown = (try (try Recent.Machine).get()).shown
+  return shown.key === key ? shown.grant : 0
+}
+
+// spec/app/files/index.md, "The owner opens a file that is listed or found, with the names beside it, and Recent remembers it"
+/**
+ * Show a file of Files in the viewer: the phone selects it for Alpha, Recent remembers it with that access, and the
+ * preview shows it. Where the phone holds no documents for Alpha, Android opens it, read only, in the app the owner chooses.
+ */
+export effect function view(item: Item, siblings: ReadonlyArray<string>): void!!(Files | Handles | Documents | Opened | Recent.Machine | Shown.Machine) {
+  try ignore(effect {
+    const handles = try Handles
+    const spot = try handles.spot(item.id)
+    if (Option.isNone(spot)) return
+    if (Option.isNone((try Documents).client)) return try called("storageOpen", (plugin) => plugin.storageOpen(spot.value))
+    const selected = try called("storageSelect", (plugin) => plugin.storageSelect(spot.value))
+    if (selected.status !== "selected" || !("selectionId" in selected)) return try called("storageOpen", (plugin) => plugin.storageOpen(spot.value))
+    const recent = try Recent.Machine
+    try recent.send({ type: "remember", key: item.id }, "Phone")
+    const grant = (try recent.get()).shown.grant
+    const label = Option.getOrElse(try handles.label(item.volume), () => spot.value.volume === "primary" ? "Internal storage" : "Storage")
+    try (try Opened).give(grant, { selection: selected.selectionId, key: item.id, name: selected.name, mimeType: selected.mimeType,
+      revision: item.revision, bytes: item.bytes, storage: { volume: spot.value.volume, path: spot.value.path, label } })
+    try (try Shown.Machine).send({ type: "show", file: item.id, kind: kindOf(selected.mimeType), revision: item.revision, siblings: [...siblings] }, "Phone")
+  })
+}
+
+// spec/app/files/preview.md, "A file that holds a verification code or another secret is never handed to Ask Alpha"
+/** Whether a text holds a code or a password that must not reach the agent. */
+function secretive(text: string): boolean {
+  return /\b(verification|security|confirmation|login|one[- ]time) code\b|\bpass(word|code)\b|\b\d{6}\b/i.test(text)
+}
+
+// spec/app/files/preview.md, "What was read of a file is shown only in its own viewer, while it can be read"
+effect function read(ticket: number, item: number, revision: number): Shown.Event!!(Documents | Opened | Recent.Machine | Shown.Machine) {
+  const failed: Shown.Event = { type: "contentRead", ticket, ok: false, pages: 0, why: "Fine", secret: false }
+  return effect {
+    const machine = try Shown.Machine
+    const viewer = try machine.get()
+    if (viewer.item !== item || viewer.revision !== revision || viewer.content.ticket !== ticket) return failed
+    const current = effect {
+      const state = try machine.get()
+      return state.viewer === viewer.viewer && state.revision === revision && Shown.canContentRead(state, ticket, false, "Phone")
+    }
+    const selection = try selectionOf(try grantOf(item))
+    if (Option.isNone(selection)) return failed
+    const client = try documents()
+    const holder = try Opened
+    if (viewer.kind === "Pdf") {
+      const first = try Effect.timeoutOption(tryPromise(() => client.pdf(selection.value, 1)), "20 seconds")
+      if (Option.isNone(first)) return { ...failed, why: "TooSlow" }
+      if (first.value.status !== "rendered") return { ...failed, why: /encrypt|password/i.test(first.value.message) ? "Locked" : "Fine" }
+      const pages = Math.max(1, Math.trunc(first.value.pageCount ?? 1))
+      if (!first.value.imageUri || !(try current)) return failed
+      try holder.hold({ viewer: viewer.viewer, firstPage: { uri: previewUrl(first.value.imageUri), revision } })
+      return { type: "contentRead", ticket, ok: true, pages, why: "Fine", secret: false }
+    }
+    if (viewer.kind === "Text") {
+      const text = try tryPromise(() => client.read(selection.value))
+      if (!(try current)) return failed
+      if (text.status === "unavailable") try ignore(machine.send({ type: "lost" }, "Phone"))
+      if (text.status !== "read") return { ...failed, why: text.status === "too-large" ? "TooLarge" : "Fine" }
+      try holder.hold({ viewer: viewer.viewer, text: text.text ?? "" })
+      return { type: "contentRead", ticket, ok: true, pages: 0, why: "Fine", secret: secretive(text.text ?? "") }
+    }
+    const described = try tryPromise(() => client.describe(selection.value))
+    if (!(try current)) return failed
+    if (described.status === "renamed-reselect" || described.status === "unavailable") {
+      try ignore(machine.send({ type: "lost" }, "Phone"))
+      return failed
+    }
+    if (described.status !== "selected" || !described.uri || viewer.kind === "Archive") return failed
+    try holder.hold({ viewer: viewer.viewer, uri: previewUrl(described.uri) })
+    return { type: "contentRead", ticket, ok: true, pages: 0, why: "Fine", secret: false }
+  } catch () => failed
+}
+
+// spec/app/files/preview.md, "A page the worker takes too long to draw is given up, and its late answer shows nothing"; spec/app/files/preview.md, "A page is shown only when the worker drew it in isolation and handed it over unwritable"
+effect function drew(ticket: number, item: number, revision: number, page: number): Shown.Event!!(Documents | Opened | Recent.Machine | Shown.Machine) {
+  const failed: Shown.Event = { type: "drawn", ticket, ok: false, isolated: true, readOnly: true }
+  return effect {
+    const machine = try Shown.Machine
+    const viewer = try machine.get()
+    if (viewer.item !== item || viewer.revision !== revision || !Shown.canDrawn(viewer, ticket, "Phone")) return failed
+    const holder = try Opened
+    const content = try holder.content()
+    if (page === 1 && content.viewer === viewer.viewer && content.firstPage?.revision === revision) {
+      try holder.hold({ viewer: viewer.viewer, page: content.firstPage.uri })
+      return { type: "drawn", ticket, ok: true, isolated: true, readOnly: true }
+    }
+    const selection = try selectionOf(try grantOf(item))
+    if (Option.isNone(selection)) return failed
+    const client = try documents()
+    const timed = try Effect.timeoutOption(tryPromise(() => client.pdf(selection.value, page)), "20 seconds")
+    if (Option.isNone(timed)) return { type: "pageTimedOut", ticket }
+    const drawn = timed.value
+    const current = try machine.get()
+    if (current.viewer !== viewer.viewer || current.revision !== revision || !Shown.canDrawn(current, ticket, "Phone")) return failed
+    if (drawn.status !== "rendered" || !drawn.imageUri) return failed
+    try holder.hold({ ...(try holder.content()), viewer: viewer.viewer, page: previewUrl(drawn.imageUri) })
+    return { type: "drawn", ticket, ok: true, isolated: true, readOnly: true }
+  } catch () => failed
+}
+
+// spec/app/files/preview.md, "Ask Alpha, Transcribe and Open elsewhere hand the file on and change nothing here"; spec/app/files/preview.md, "A file that holds a verification code or another secret is never handed to Ask Alpha"
+effect function askAbout(item: number): void!!(Documents | Opened | Recent.Machine | Shown.Machine | MediaHandoff | Toasts | Said) {
+  const machine = try Shown.Machine
+  const shown = try machine.get()
+  if (shown.item !== item || !Shown.canAskAlpha(shown, "Owner")) return
+  const grant = try grantOf(item)
+  const selection = try selectionOf(grant)
+  if (Option.isNone(selection)) return
+  const docs = try Documents
+  const data = try docs.attachment(selection.value)
+  const current = try machine.get()
+  if (current.viewer !== shown.viewer || current.revision !== shown.revision
+    || !Shown.canAskAlpha(current, "Owner") || (try grantOf(item)) !== grant) return
+  if (Option.isNone(data)) {
+    try say("Alpha could not attach this file", true)
+    return
+  }
+  const { name, mimeType, dataBase64 } = data.value
+  if (current.kind === "Text") {
+    const text = textFromBase64(dataBase64)
+    if (text === undefined || secretive(text)) {
+      try say("Alpha could not attach this file", true)
+      return
+    }
+  }
+  if (!(try attachToAlpha({ id: selection.value, name, mimeType, data: dataBase64 }))) {
+    try say("Alpha could not attach this file", true)
+  }
+}
+
+// spec/app/files/preview.md, "Use in email offers the exact file to the selected Inbox account for review before it joins a new draft"
+export function emailAccount(mail: Inbox.Mailbox, composer: Drafts.Composer): Inbox.Linked | undefined {
+  const linked = Inbox.linkOf(mail.connected, mail.selected.account)
+  return mail.signedIn && Drafts.free(composer) && linked.account > 0 && linked.credential > 0 && linked.grant.send ? linked : undefined
+}
+
+type MailTarget = Incoming | Adding | Drafts.Machine | Inbox.Machine | Shell
+
+effect function emailTarget(): (Inbox.Linked | undefined)!!(Inbox.Machine | Drafts.Machine) {
+  return emailAccount(try (try Inbox.Machine).get(), try (try Drafts.Machine).get())
+}
+
+// spec/app/files/preview.md, "The answer to an email handoff says whether Inbox received the attachment for review"
+effect function offerEmail(ticket: number, viewer: number, item: number, revision: number, account: number): Shown.Event!!(Documents | Opened | Recent.Machine | Shown.Machine | MailTarget | Toasts | Said) {
+  const refused: Shown.Event = { type: "answered", ticket, confirmed: false, known: true }
+  const machine = try Shown.Machine
+  const current = effect {
+    const state = try machine.get()
+    return state.viewer === viewer && state.item === item && state.revision === revision && Shown.loaded(state) && Shown.canAnswered(state, ticket, "Phone")
+  }
+  const target = try emailTarget()
+  if (target?.account !== account || !(try current)) return refused
+  const grantId = try grantOf(item)
+  const file = try (try Opened).grant(grantId)
+  const selection = try selectionOf(grantId)
+  if (Option.isNone(file) || Option.isNone(selection)) return refused
+  const docs = documents() catch () => undefined
+  if (docs === undefined) return refused
+  const verified = tryPromise(() => docs.describe(selection.value)) catch () => undefined
+  if (verified?.status !== "selected" || (verified.modified !== undefined && Math.trunc(verified.modified) !== revision) || !(try current)) return refused
+  const bytes = try (try Documents).attachment(selection.value)
+  if (!(try current) || (try grantOf(item)) !== grantId) return refused
+  const fresh = try emailTarget()
+  if (fresh?.account !== account || fresh?.credential !== target.credential || Option.isNone(bytes)) {
+    try say("Alpha could not offer this file to Inbox", true)
+    return refused
+  }
+  const { name, mimeType, dataBase64: data } = bytes.value
+  const size = data.length / 4 * 3 - (data.endsWith("==") ? 2 : data.endsWith("=") ? 1 : 0)
+  if (name !== file.value.name || mimeType.toLowerCase() !== file.value.mimeType.toLowerCase() || data.length % 4 !== 0 || size <= 0
+    || (verified.size !== undefined && verified.size !== size)) {
+    try say("The selected file changed", true)
+    return refused
+  }
+  const confirmed = try handOver({ name, mimeType, data, size }, "Files")
+  if (!confirmed) try say("Alpha could not offer this file to Inbox", true)
+  return { type: "answered", ticket, confirmed, known: true }
+}
+
+/** Tell Recent what happened to the document it holds, where the rules still take it. */
+effect function toRecent(event: Recent.Event): void!!Recent.Machine {
+  try ignore((try Recent.Machine).send(event, "Phone"))
+}
+
+effect function samePreview(viewer: number, item: number, revision: number, grant: number): boolean!!(Shown.Machine | Recent.Machine) {
+  const state = try (try Shown.Machine).get()
+  return Shown.usable(state) && state.viewer === viewer && state.item === item && state.revision === revision && (try grantOf(item)) === grant
+}
+
+// spec/app/files/preview.md, "The owner can share the readable file shown through Android using its own selected-document grant"
+effect function shareViewed(viewer: number, item: number, revision: number): void!!(Documents | Opened | Recent.Machine | Shown.Machine | Toasts | Said) {
+  try ignore(effect {
+    const grant = try grantOf(item)
+    const selection = try selectionOf(grant)
+    if (Option.isNone(selection) || !(try samePreview(viewer, item, revision, grant))) return
+    const docs = try documents()
+    const held = try tryPromise(() => docs.describe(selection.value))
+    if (held.status !== "selected" || !(try samePreview(viewer, item, revision, grant))) return
+    const opened = try tryPromise(() => docs.share(selection.value))
+    if (opened.status !== "opened") try say("Android could not share this file", true)
+  })
+}
+
+type PreviewWorkspace = Browser.Machine | Documents | Files | Handles | Opened | Recent.Machine | Shown.Machine
+
+function parentPath(path: string): string {
+  return path.slice(0, Math.max(0, path.lastIndexOf("/")))
+}
+
+// spec/app/files/preview.md, "Rename, Move to and Move to Trash act on the storage-backed preview still showing"
+effect function actOnViewed(viewer: number, item: number, revision: number, action: Shown.StorageAction, name: string): void!!(PreviewWorkspace | Toasts | Said) {
+  const applied = effect {
+    const recent = try Recent.Machine
+    const row = (try recent.get()).shown
+    const grant = row.grant
+    if (row.origin !== "InFolder" || row.key !== item || !(try samePreview(viewer, item, revision, grant))) return false
+    const shown = try Shown.Machine
+    const files = try Browser.Machine
+    const handle = try Handles
+    const place = try handle.spot(item)
+    const document = try (try Opened).grant(grant)
+    const selection = try selectionOf(grant)
+    if (Option.isNone(place) || Option.isNone(document) || Option.isNone(selection)) return false
+    const { volume, path } = place.value
+    if (path === "" || (document.value.storage !== undefined && (document.value.storage.path !== path || document.value.storage.volume !== volume))) return false
+    const parent = parentPath(path)
+    const docs = try documents()
+    const described = try tryPromise(() => docs.describe(selection.value))
+    if (described.status !== "selected" || described.name !== document.value.name) return false
+    const reply = try called("storageList", (plugin) => plugin.storageList({ volume, path: parent }))
+    const listed = reply.status === "ready" ? reply.entries?.find((one) => one.path === path && !one.directory) : undefined
+    if (listed === undefined || listed.name !== described.name || Math.trunc(listed.modified) !== revision || !Browser.allowed(try files.get()) || !(try samePreview(viewer, item, revision, grant))) return false
+    if (described.size !== undefined && described.size !== listed.size) return false
+    const root = try handle.of({ volume, path: "" })
+    const exact: Item = { id: item, volume: root, name: listed.name, revision, bytes: Math.max(0, Math.trunc(listed.size)), kind: storageKind(listed) }
+    if (action === "RenameFile") {
+      const ticket = (try files.get()).change.attempt.id + 1
+      const siblings = (reply.entries ?? []).map((one) => one.name)
+      try files.send({ type: "renameShown", file: exact, name, siblings }, "Owner")
+      const settled = Stream.filter(files.changes, (next) => next.change.attempt.id >= ticket && next.change.attempt.outcome !== "Sent")
+      const answered = try Effect.timeoutOption(Stream.runHead(settled), "20 seconds")
+      if (Option.isNone(answered) || Option.isNone(answered.value) || answered.value.value.change.attempt.id !== ticket || answered.value.value.change.attempt.outcome !== "Confirmed") return false
+      const changedPath = parent === "" ? name : `${parent}/${name}`
+      const updated = try called("storageList", (plugin) => plugin.storageList({ volume, path: parent }))
+      const renamed = updated.status === "ready" ? updated.entries?.find((one) => one.path === changedPath && !one.directory) : undefined
+      const stillShowing = try samePreview(viewer, item, revision, grant)
+      if (stillShowing && renamed !== undefined) {
+        const key = try handle.of({ volume, path: changedPath })
+        const renamedItem = { ...exact, id: key, name: renamed.name, revision: Math.max(0, Math.trunc(renamed.modified)), bytes: Math.max(0, Math.trunc(renamed.size)) }
+        try view(renamedItem, (updated.entries ?? []).map((one) => one.name))
+      }
+      if (stillShowing && (try shown.get()).viewer === viewer) try ignore(shown.send({ type: "gone", file: item }, "Phone"))
+      try toRecent({ type: "gone", key: item })
+      return true
+    }
+    const segments = parent === "" ? [] : parent.split("/")
+    const parentTrail = [...(try handle.many(Array.from({ length: segments.length + 1 }, (_, depth) => ({ volume, path: segments.slice(0, depth).join("/") }))))]
+    const here = try files.get()
+    if (here.inCategory || here.trail.length !== parentTrail.length || !here.trail.every((id, at) => id === parentTrail[at])
+      || here.listing.status !== "Loaded" || !here.items.some((one) => one.id === exact.id && one.revision === exact.revision && one.bytes === exact.bytes)) {
+      try files.send({ type: "openPreviewParent", parentTrail }, "Phone")
+      const ticket = here.listing.ticket + 1
+      const read = Stream.filter(files.changes, (next) => next.listing.ticket >= ticket && next.listing.status !== "Loading")
+      const answer = try Effect.timeoutOption(Stream.runHead(read), "15 seconds")
+      if (Option.isNone(answer) || Option.isNone(answer.value)) return false
+    }
+    const now = try files.get()
+    if (now.inCategory || now.trail.length !== parentTrail.length || !now.trail.every((id, at) => id === parentTrail[at]) || !(try samePreview(viewer, item, revision, grant))) return false
+    try files.send({ type: "stagePreviewFile", file: exact, ticket: now.listing.ticket, trashing: action === "TrashFile" }, "Phone")
+    return true
+  } catch () => false
+  if (!applied) try say("Files could not confirm the action for this file", true)
+}
+
+function carryShown(fx: Shown.Effect): Job<Shown.Event, PreviewWorkspace | MediaHandoff | MailTarget | Toasts | Said, [by: Shown.Actor]> {
+  return match (fx) {
+    when { tag: "Read", let ticket, let item, let revision }: answer("read", read(ticket, item, revision), { type: "contentRead", ticket, ok: false, pages: 0, why: "Fine", secret: false }, "Phone");
+    when { tag: "Draw", let ticket, let item, let revision, let page }: answer("draw", drew(ticket, item, revision, page), { type: "drawn", ticket, ok: false, isolated: true, readOnly: true }, "Phone");
+    // spec/app/files/preview.md, "Every viewer is closed exactly once: the step that ends it says so, and no other"
+    when { tag: "Closed", let viewer, let item }: run(`closed ${viewer}`, effect {
+      const holder = try Opened
+      if ((try holder.content()).viewer === viewer) try holder.hold({ viewer: 0 })
+      const current = try (try Shown.Machine).get()
+      if (!Shown.showing(current) || current.item !== item) try toRecent({ type: "viewerClosed", key: item })
+    }, "Phone");
+    // spec/app/files/preview.md, "Open elsewhere hands the file over to read only"
+    when { tag: "OpenElsewhere", let item }: run("elsewhere", ignore(effect {
+      const selection = try selectionOf(try grantOf(item))
+      if (Option.isSome(selection)) {
+        const docs = try documents()
+        try tryPromise(() => docs.open(selection.value))
+      }
+    }), "Phone");
+    when { tag: "ShareFile", let viewer, let item, let revision }: run(`share ${viewer}`, shareViewed(viewer, item, revision), "Phone");
+    when { tag: "ActOnStoredFile", let viewer, let item, let revision, let action, let name }: run(`act on file ${viewer}`, actOnViewed(viewer, item, revision, action, name), "Phone");
+    when { tag: "Forget", let item }: run("forget", effect { try ignore((try Recent.Machine).send({ type: "forget", key: item }, "Owner")) }, "Phone");
+    when { tag: "Lost", let item }: run("lost", toRecent({ type: "lapsed", key: item }), "Phone");
+    when { tag: "SelectAgain", let item }: run("again", effect { try ignore((try Recent.Machine).send({ type: "openPicker", replacing: item }, "Owner")) }, "Phone");
+    when { tag: "AskAlpha", let item }: run("ask", askAbout(item), "Phone");
+    when { tag: "Transcribe" }: stop("transcribe");
+    when { tag: "OfferEmail", let ticket, let viewer, let item, let revision, let account }: answer("email", offerEmail(ticket, viewer, item, revision, account), { type: "answered", ticket, confirmed: false, known: false }, "Phone");
+  }
+}
+
+// spec/app/files/recent.md, "Opening a row again asks the phone first: it opens, moves to the front and is the document open, or its access has ended and it must be selected again, or its provider cannot be reached and it stays"
+effect function reached(ticket: number, key: number): Recent.Event!!(Documents | Opened | Recent.Machine) {
+  const failed: Recent.Event = { type: "reached", ticket, ok: false, ended: false }
+  return effect {
+    const asked = (try (try Recent.Machine).get()).asked
+    const selection = try selectionOf(asked.key === key ? asked.grant : 0)
+    if (Option.isNone(selection)) return { ...failed, ended: true }
+    const docs = try documents()
+    const described = try tryPromise(() => docs.describe(selection.value))
+    if (described.status === "selected") return { type: "reached", ticket, ok: true, ended: false }
+    return { ...failed, ended: described.status === "renamed-reselect" || described.status === "unavailable" }
+  } catch () => failed
+}
+
+// spec/app/files/recent.md, "A file opened from a folder is given access, listed first in place of its older row, and is the document open; the oldest row leaves a full list"
+effect function reopened(key: number, grant: number): void!!(Opened | Shown.Machine) {
+  try ignore(effect {
+    const given = try (try Opened).grant(grant)
+    if (Option.isNone(given)) return
+    try (try Shown.Machine).send({ type: "show", file: key, kind: kindOf(given.value.mimeType), revision: given.value.revision, siblings: [] }, "Phone")
+  })
+}
+
+// spec/app/files/recent.md, "An open picker closes once, and delivers a document only if it is the one whose choice counts"
+effect function picked(ticket: number): Recent.Event!!(Documents | Opened | Recent.Machine) {
+  const canceled: Recent.Event = { type: "pickerClosed", ticket, chose: false, keep: false }
+  return effect {
+    const docs = try documents()
+    const selected = try (try Documents).pick()
+    if (Option.isNone(selected)) return canceled
+    const choice = try tryPromise(() => docs.describe(selected.value))
+    const s = try (try Recent.Machine).get()
+    if (s.live !== ticket || choice.status !== "selected" || !choice.name) {
+      try ignore(tryPromise(() => docs.forget(selected.value)))
+      return canceled
+    }
+    const issued = s.issued + 1
+    try (try Opened).give(issued, { selection: selected.value, key: issued, name: choice.name, mimeType: choice.mimeType ?? "application/octet-stream", revision: Math.max(0, Math.trunc(choice.modified ?? 0)) })
+    return { ...canceled, chose: true, keep: true }
+  } catch () => canceled
+}
+
+function carryRecent(fx: Recent.Effect): Job<Recent.Event, Documents | Opened | Recent.Machine | Shown.Machine, [by: Recent.Actor]> {
+  return match (fx) {
+    // spec/app/files/recent.md, "Access is held by a row or by the document open, and what a step leaves unheld is given up in that step"
+    when { tag: "Release", let grant }: run(`release ${grant}`, ignore(effect {
+      const given = try (try Opened).take(grant)
+      if (Option.isSome(given)) {
+        const docs = try documents()
+        try tryPromise(() => docs.forget(given.value.selection as SelectionId))
+      }
+    }), "Phone");
+    when { tag: "Reach", let ticket, let key }: answer("reach", reached(ticket, key), { type: "reached", ticket, ok: false, ended: false }, "Phone");
+    when { tag: "Open", let key, let grant }: run(`open ${key}`, reopened(key, grant), "Phone");
+    when { tag: "AskPicker", let ticket }: answer(`picker ${ticket}`, picked(ticket), { type: "pickerClosed", ticket, chose: false, keep: false }, "Phone");
+  }
+}
+
+// spec/app/files/preview.md, "A restart closes the viewer and reports an insert cut off as unknown, so no answer from before it is taken"
+const previewing = reacting(Shown, { keep: 1, open: [{ type: "restart" }, "Phone"], carry: carryShown })
+
+// spec/app/files/recent.md, "A restart ends the folder session, closes the pickers, the viewer and the opening under way, and keeps the list"
+const recenting = reacting(Recent, { keep: 1, open: [{ type: "restart" }, "Phone"], carry: carryRecent })
+
+// spec/app/files/preview.md, "The owner closes the viewer, and so does leaving the screen or the phone locking"
+const hiding = following(Browser.Machine, (s) => s.open && Browser.allowed(s), Shown.Machine, (open): Shown.Event | undefined => (open ? undefined : { type: "hidden" }), "Phone")
+
+// spec/app/files/recent.md, "Back, or the phone locking, withdraws the picker, and its late choice is dropped"
+const hidePicker = following(Browser.Machine, (s) => s.open, Recent.Machine, (open): Recent.Event | undefined => (open ? undefined : { type: "cancelPicker" }), "Phone")
+
+// spec/app/files/preview.md, "The file can change while it is shown: it is read again, its page drawn again within its new length, and an email handoff still reading the previous file is refused"
+const revisions = started(effect {
+  const browser = try Browser.Machine
+  const machine = try Shown.Machine
+  const recent = try Recent.Machine
+  try Stream.runForEach(browser.changes, effect (shown) => {
+    const viewer = try machine.get()
+    if (!Shown.usable(viewer) || (try recent.get()).shown.origin !== "InFolder") return
+    const listed = shown.items.find((item) => item.id === viewer.item) ?? shown.search.hits.find((item) => item.id === viewer.item)
+    if (listed !== undefined && Shown.canChanged(viewer, listed.revision, "Phone")) {
+      try ignore(machine.send({ type: "changed", revision: listed.revision }, "Phone"))
+    }
+  })
+}, "the previewed file's revision")
+
+// spec/app/files/recent.md, "The earlier Alpha's Recent is carried over once, while this one is still empty: each document it held access to becomes a row of its own, the newest first; one it held without access, and the document it had open, are not carried"; spec/app/platform/adoption.md, "A value is moved by copying it only where the new place is still empty, and its earlier place is cleared only once the new place holds a value"
+const adopting = started(effect {
+  const recent = try Recent.Machine
+  const holder = try Opened
+  const current = {
+    effect read() {
+      const s = try recent.get()
+      return s.rows.length === 0 && s.issued === 0 ? Option.none<ReadonlyArray<ReturnType<typeof earlierOf>[number]>>() : Option.some([])
+    },
+    effect write(rows: ReadonlyArray<ReturnType<typeof earlierOf>[number]>) {
+      try recent.send({ type: "adopt", kept: rows.map((row) => row.selection) }, "Phone")
+      for (const [at, row] of rows.entries()) try holder.give(at + 1, { selection: row.selection, key: at + 1, name: row.name, mimeType: row.mimeType, revision: row.at })
+    },
+    clear: () => Effect.void,
+  }
+  try adopt(try keptAt("alpha.files.recent.v1"), current, (raw: string) => { const rows = earlierOf(raw, Recent.limit); return rows.length === 0 ? Option.none() : Option.some(rows) })
+  try ignore((try keptAt("alpha.files.open.v1")).clear())
+}, "adopting")
+
+/** The viewer and Recent, kept across restarts, over the documents the phone holds for Alpha. */
+export const preview = Layer.provideMerge(together(previewing, recenting, hiding, hidePicker, revisions, adopting), opened)
+
+// spec/app/files/preview.md, "A file that Files moved or put in the Trash closes its viewer"; spec/app/files/recent.md, "A file Files moved or the Trash took leaves the list, with the access no viewer holds"
+/** Files or the Trash took `items` away: the viewer showing one closes, and Recent forgets each. */
+export effect function taken(items: ReadonlyArray<number>): void!!(Shown.Machine | Recent.Machine) {
+  for (const key of items) {
+    try ignore((try Shown.Machine).send({ type: "gone", file: key }, "Phone"))
+    try toRecent({ type: "gone", key })
+  }
+}

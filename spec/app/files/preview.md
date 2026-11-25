@@ -18,7 +18,7 @@ with the names beside it that the preview was given.
 > told plainly while it loads or why it cannot be shown, and to close it
 > without anything of it staying behind.
 
-### The preview holds the viewer showing, the file it shows and the names beside it, what was read of it, the page drawn, the insert into an email under way and what it carried, and the email review
+### The preview holds the viewer showing, the file it shows and the names beside it, what was read of it, the page drawn, the handoff to Inbox under way and what it carries
 
 Viewers are numbered as they open; no viewer is showing when the number is
 zero. A file's revision changes whenever the file does.
@@ -26,25 +26,25 @@ zero. A file's revision changes whenever the file does.
 ```quint
 import read as R from "../../kit/read"
 import attempt as A from "../../kit/attempt"
-import review as V from "../../kit/review"
 import shared as F from "./shared"
 
 type Actor = Owner | Phone
 type Kind = Pdf | Photo | Media | Archive | Receipt | Text
 type Why = Fine | Locked | TooLarge | TooSlow | Unsealed
 type Seen = { item: int, revision: int }
+type StorageAction = MoveFile | TrashFile | RenameFile
 type Preview = {
   viewer: int, viewers: int, item: int, kind: Kind, revision: int, reachable: bool, siblings: List[str],
-  content: R::Read, playing: bool,
+  content: R::Read, playing: bool, secret: bool,
   page: int, pages: int, drawing: R::Read, drawnAt: int, why: Why,
-  attempt: A::Attempt, inserted: Seen, email: V::Review, account: int, draft: int,
+  attempt: A::Attempt, offered: Seen,
 }
 
 pure val initial: Preview = {
   viewer: 0, viewers: 0, item: 0, kind: Photo, revision: 0, reachable: false, siblings: List(),
-  content: R::unread, playing: false,
+  content: R::unread, playing: false, secret: false,
   page: 0, pages: 0, drawing: R::unread, drawnAt: 0, why: Fine,
-  attempt: A::plan(0), inserted: { item: 0, revision: 0 }, email: V::unreviewed, account: 0, draft: 0,
+  attempt: A::plan(0), offered: { item: 0, revision: 0 },
 }
 ```
 
@@ -52,8 +52,8 @@ pure val initial: Preview = {
 
 A viewer closing takes its listeners with it, and tells Recent which file
 it showed. The file is read for its viewer, and a PDF page is drawn by the
-worker, each for the revision shown. An insert into an email draft is sent
-once. Ask Alpha goes to
+worker, each for the revision shown. Email hands the selected file to
+[Inbox](../inbox/adding.md) for its one review before attachment. Ask Alpha goes to
 the [shell](../shell/), Transcribe to Notes, Open elsewhere to Android's
 chooser, and Lost, Select again and Forget to [Recent](./recent.md).
 
@@ -62,10 +62,12 @@ type Effect =
   | Closed({ viewer: int, item: int })
   | Read({ ticket: int, item: int, revision: int })
   | Draw({ ticket: int, item: int, revision: int, page: int })
-  | Insert({ ticket: int, item: int, revision: int, account: int, draft: int })
+  | OfferEmail({ ticket: int, viewer: int, item: int, revision: int, account: int })
   | AskAlpha({ item: int })
   | Transcribe({ item: int })
   | OpenElsewhere({ item: int, revision: int, writable: bool })
+  | ShareFile({ viewer: int, item: int, revision: int })
+  | ActOnStoredFile({ viewer: int, item: int, revision: int, action: StorageAction, name: str })
   | Lost({ item: int })
   | SelectAgain({ item: int })
   | Forget({ item: int })
@@ -75,7 +77,7 @@ pure def showing(s: Preview): bool = s.viewer != 0
 pure def usable(s: Preview): bool = showing(s) and s.reachable
 pure def busy(s: Preview): bool = s.attempt.outcome == A::Sent
 pure def loaded(s: Preview): bool = usable(s) and s.content.status == R::Loaded
-pure def doubtful(s: Preview): bool = s.attempt.outcome == A::Unknown and s.inserted == { item: s.item, revision: s.revision }
+pure def doubtful(s: Preview): bool = s.attempt.outcome == A::Unknown and s.offered == { item: s.item, revision: s.revision }
 ```
 
 ### What the simulator tries
@@ -87,8 +89,8 @@ pure val pageValues = Set(1, 2, 3)
 pure val ticketValues = Set(1, 2, 3, 4)
 pure val revisionValues = Set(1, 2)
 pure val accountValues = Set(1, 2)
-pure val draftValues = Set(1, 2)
 pure val siblingsValues = Set(List(), List("a"))
+pure val nameValues = Set("", "b", "c")
 ```
 
 ### Showing a file opens a new viewer, closing the one before, and reads it for that viewer
@@ -100,8 +102,8 @@ Recent hands over a file the owner chose.
 pure def closing(s: Preview): List[Effect] = if (showing(s)) List(Closed({ viewer: s.viewer, item: s.item })) else List()
 
 pure def emptied(viewer: int, s: Preview): Preview =
-  { ...s, viewer: viewer, reachable: false, content: F::drop(s.content), playing: false,
-    drawing: F::drop(s.drawing), email: V::dismiss(s.email) }
+  { ...s, viewer: viewer, reachable: false, content: F::drop(s.content), playing: false, secret: false,
+    drawing: F::drop(s.drawing) }
 
 pure def canShow(s: Preview, file: int, kind: Kind, revision: int, siblings: List[str], by: Actor): bool = file > 0
 
@@ -160,14 +162,14 @@ it has, or why it cannot be shown: locked, too large or too slow; its page
 is then drawn.
 
 ```quint
-pure def canContentRead(s: Preview, ticket: int, by: Actor): bool = by == Phone and usable(s) and R::canAnswer(s.content, ticket)
+pure def canContentRead(s: Preview, ticket: int, secret: bool, by: Actor): bool = by == Phone and usable(s) and R::canAnswer(s.content, ticket)
 
-pure def contentRead(s: Preview, ticket: int, ok: bool, pages: int, why: Why, by: Actor): Moved =
+pure def contentRead(s: Preview, ticket: int, ok: bool, pages: int, why: Why, secret: bool, by: Actor): Moved =
   val pdf = s.kind == Pdf
   val fine = ok and (not(pdf) or (pages > 0 and why == Fine))
   val page = if (s.page < 1) 1 else if (s.page > pages) pages else s.page
   val drawing = R::ask(s.drawing)
-  val answered = { ...s, content: R::answer(s.content, fine), why: if (fine or not(pdf) or why == Fine) Fine else why }
+  val answered = { ...s, content: R::answer(s.content, fine), why: if (fine or not(pdf) or why == Fine) Fine else why, secret: fine and secret }
   if (fine and pdf)
     { state: { ...answered, pages: pages, page: page, drawing: drawing, drawnAt: s.revision },
       out: List(Draw({ ticket: drawing.ticket, item: s.item, revision: s.revision, page: page })) }
@@ -228,14 +230,24 @@ pure def alwaysOnlyTheReadablePdfShownIsDrawn(s: Preview): bool =
     (loaded(s) and s.kind == Pdf and s.drawnAt == s.revision)
 ```
 
-### The file can change while it is shown: it is read again, its page drawn again within its new length, and the email review stops counting
+### A page the worker takes too long to draw is given up, and its late answer shows nothing
+
+```quint
+pure def canPageTimedOut(s: Preview, ticket: int, by: Actor): bool = by == Phone and usable(s) and R::canAnswer(s.drawing, ticket)
+
+pure def pageTimedOut(s: Preview, ticket: int, by: Actor): Preview = { ...s, drawing: R::answer(s.drawing, false), why: TooSlow }
+
+pure def sometimesAPageTookTooLong(s: Preview): bool = s.drawing.status == R::Failed and s.why == TooSlow
+```
+
+### The file can change while it is shown: it is read again, its page drawn again within its new length, and an email handoff still reading the previous file is refused
 
 ```quint
 pure def canChanged(s: Preview, revision: int, by: Actor): bool = by == Phone and usable(s) and revision != s.revision
 
 pure def changed(s: Preview, revision: int, by: Actor): Moved =
   val content = R::ask(s.content)
-  { state: { ...s, revision: revision, content: content, playing: false, drawing: F::drop(s.drawing), email: V::revise(s.email) },
+  { state: { ...s, revision: revision, content: content, playing: false, secret: false, drawing: F::drop(s.drawing) },
     out: List(Read({ ticket: content.ticket, item: s.item, revision: revision })) }
 ```
 
@@ -253,15 +265,16 @@ pure def sometimesAPhotoCouldNotBeRead(s: Preview): bool = s.content.status == R
 
 ## Story: Act on the file I am looking at
 
-> As the owner, I want to ask Alpha about it, rename it in Files, put it in an email,
-> transcribe a recording into Notes, open it in another app, or forget it.
+> As the owner, I want to see a file's details, share it in Android, ask
+> Alpha about it, rename it in Files, put it in an email, transcribe a
+> recording into Notes, open it in another app, or forget it.
 
 ### Ask Alpha, Transcribe and Open elsewhere hand the file on and change nothing here
 
 Transcribe is offered for a recording or a video.
 
 ```quint
-pure def canAskAlpha(s: Preview, by: Actor): bool = by == Owner and usable(s)
+pure def canAskAlpha(s: Preview, by: Actor): bool = by == Owner and loaded(s) and not(s.secret)
 
 pure def askAlpha(s: Preview, by: Actor): Moved = { state: s, out: List(AskAlpha({ item: s.item })) }
 
@@ -273,6 +286,61 @@ pure def canOpenElsewhere(s: Preview, by: Actor): bool = by == Owner and usable(
 
 pure def openElsewhere(s: Preview, by: Actor): Moved =
   { state: s, out: List(OpenElsewhere({ item: s.item, revision: s.revision, writable: false })) }
+```
+
+### The owner can share the readable file shown through Android using its own selected-document grant
+
+Android asks where it goes. A late request cannot share from a later viewer
+or a different revision. The viewer keeps the file and the chooser cannot
+write to it.
+
+```quint
+pure def canShareFile(s: Preview, by: Actor): bool = by == Owner and usable(s)
+
+pure def shareFile(s: Preview, by: Actor): Moved =
+  { state: s, out: List(ShareFile({ viewer: s.viewer, item: s.item, revision: s.revision })) }
+
+pure def stepSharingNamesTheExactPreview(before: Preview, via: str, after: Preview, out: List[Effect]): bool =
+  out.every(e => match e {
+    | ShareFile(x) => via == "shareFile" and usable(before) and x.viewer == before.viewer
+        and x.item == before.item and x.revision == before.revision and after == before
+    | _ => true
+  })
+```
+
+### Rename, Move to and Move to Trash act on the storage-backed preview still showing
+
+A document another provider holds may be shared through its selected grant.
+Only Files can rename, move or bin one of its own entries here. The phone
+opens the exact folder and selection before showing the usual Move to or
+Trash confirmation. A successful rename reopens the same document with
+its new name when that preview is still showing.
+
+```quint
+pure def canActOnStoredFile(s: Preview, action: StorageAction, name: str, stored: bool, by: Actor): bool =
+  by == Owner and usable(s) and stored and (action != RenameFile or F::freeName(name, s.siblings))
+
+pure def actOnStoredFile(s: Preview, action: StorageAction, name: str, stored: bool, by: Actor): Moved =
+  { state: s, out: List(ActOnStoredFile({ viewer: s.viewer, item: s.item, revision: s.revision, action: action, name: name })) }
+
+pure def stepAStoredActionNamesTheExactPreview(before: Preview, via: str, after: Preview, out: List[Effect]): bool =
+  out.every(e => match e {
+    | ActOnStoredFile(x) => via == "actOnStoredFile" and usable(before) and x.viewer == before.viewer
+        and x.item == before.item and x.revision == before.revision and after == before
+    | _ => true
+  })
+```
+
+### A file that holds a verification code or another secret is never handed to Ask Alpha
+
+The phone says so when it reads the file; it is said again each time the
+file is read.
+
+```quint
+pure def stepASecretIsNeverAsked(before: Preview, after: Preview, out: List[Effect]): bool =
+  out.every(e => match e { | AskAlpha(x) => not(before.secret) | _ => true })
+
+pure def sometimesASecretIsHeldBack(s: Preview): bool = loaded(s) and s.secret
 ```
 
 ### Open elsewhere hands the file over to read only
@@ -290,7 +358,36 @@ pure def canForget(s: Preview, by: Actor): bool = by == Owner and showing(s)
 pure def forget(s: Preview, by: Actor): Moved = { state: emptied(0, s), out: closing(s).append(Forget({ item: s.item })) }
 ```
 
-### An insert ends as its answer says
+### Use in email offers the exact file to the selected Inbox account for review before it joins a new draft
+
+The owner starts with a readable document, image or text file and an
+Inbox account that can send. An open draft stays as it was. A change to
+the view, file, account or open draft before handing it over refuses
+the request. Inbox owns the review, starts the draft only after the
+owner confirms, and never sends it from this action.
+
+```quint
+pure def canUseInEmail(s: Preview, account: int, by: Actor): bool =
+  by == Owner and loaded(s) and (s.kind == Pdf or s.kind == Photo or s.kind == Text) and
+    not(busy(s)) and not(doubtful(s)) and account > 0
+
+pure def useInEmail(s: Preview, account: int, by: Actor): Moved =
+  val attempt = A::dispatch(A::record(A::plan(s.attempt.id + 1)))
+  { state: { ...s, attempt: attempt, offered: { item: s.item, revision: s.revision } },
+    out: List(OfferEmail({ ticket: attempt.id, viewer: s.viewer, item: s.item, revision: s.revision, account: account })) }
+
+pure def stepAnEmailOfferNamesTheFileShown(before: Preview, via: str, after: Preview, out: List[Effect]): bool =
+  out.every(e => match e {
+    | OfferEmail(x) => via == "useInEmail" and x.ticket == after.attempt.id and loaded(before)
+        and x.viewer == before.viewer and x.item == before.item and x.revision == before.revision and x.account > 0
+    | _ => true
+  })
+```
+
+### The answer to an email handoff says whether Inbox received the attachment for review
+
+An acceptance does not mean the owner has added the attachment or sent the
+message. An answer from an earlier attempt is refused.
 
 ```quint
 pure def canAnswered(s: Preview, ticket: int, by: Actor): bool = by == Phone and A::canConclude(s.attempt, ticket)
@@ -299,74 +396,22 @@ pure def answered(s: Preview, ticket: int, confirmed: bool, known: bool, by: Act
   { ...s, attempt: A::conclude(s.attempt, confirmed, known) }
 ```
 
-### Use in email shows what will be put into which draft of which account; a change to the file, the account or the draft voids it, and a confirmed insert puts in exactly that
+### One handoff leaves at a time and one with an unknown result is not repeated for the same file revision
+
+The owner is told the handoff could not be confirmed and to look in Inbox
+before trying again.
 
 ```quint
-pure def canUseInEmail(s: Preview, account: int, draft: int, by: Actor): bool =
-  by == Owner and usable(s) and not(busy(s)) and not(doubtful(s)) and account > 0 and draft > 0
-
-pure def useInEmail(s: Preview, account: int, draft: int, by: Actor): Preview =
-  { ...s, account: account, draft: draft, email: V::present(s.email) }
-
-pure def canDraftChanged(s: Preview, by: Actor): bool = by == Phone and s.email.showing
-
-pure def draftChanged(s: Preview, by: Actor): Preview = { ...s, email: V::revise(s.email) }
-
-pure def canInsert(s: Preview, by: Actor): bool = by == Owner and usable(s) and not(busy(s)) and not(doubtful(s)) and V::canConfirm(s.email)
-
-pure def insert(s: Preview, by: Actor): Moved =
-  val attempt = A::dispatch(A::record(A::plan(s.attempt.id + 1)))
-  { state: { ...s, attempt: attempt, inserted: { item: s.item, revision: s.revision }, email: V::confirm(s.email) },
-    out: List(Insert({ ticket: attempt.id, item: s.item, revision: s.revision, account: s.account, draft: s.draft })) }
-
-pure def canCancelEmail(s: Preview, by: Actor): bool = by == Owner and s.email.showing
-
-pure def cancelEmail(s: Preview, by: Actor): Preview = { ...s, email: V::dismiss(s.email) }
-```
-
-### What is put into an email is the file, account and draft the owner confirmed as shown
-
-```quint
-pure def stepAnInsertIsWhatWasShown(before: Preview, after: Preview, out: List[Effect]): bool =
+pure def stepAnUncertainHandoffIsNotRepeated(before: Preview, after: Preview, out: List[Effect]): bool =
   out.every(e => match e {
-    | Insert(x) => V::canConfirm(before.email) and x.item == before.item and x.revision == before.revision
-        and x.account == before.account and x.draft == before.draft
+    | OfferEmail(x) => not(busy(before)) and after.attempt.id == before.attempt.id + 1
+        and not(before.attempt.outcome == A::Unknown and before.offered == { item: x.item, revision: x.revision })
     | _ => true
   })
-```
 
-### The email review is never shown ahead of the file it shows
-
-Discovered by the proof: were the review recorded as shown at a later
-revision than it has reached, a change to the file could bring a review
-that had stopped counting back to life.
-
-```quint
-pure def alwaysTheEmailReviewIsNotAhead(s: Preview): bool = s.email.shown <= s.email.revision
-```
-
-### One insert leaves at a time, and an insert left unknown is not sent again for the same revision of the file
-
-The owner is told the insert could not be confirmed, and to look at the
-draft before trying again.
-
-```quint
-pure def stepAnUncertainInsertIsNotRepeated(before: Preview, after: Preview, out: List[Effect]): bool =
-  out.every(e => match e {
-    | Insert(x) => not(busy(before)) and after.attempt.id == before.attempt.id + 1
-        and not(before.attempt.outcome == A::Unknown and before.inserted == { item: x.item, revision: x.revision })
-    | _ => true
-  })
-```
-
-### An insert can be confirmed, or left unknown and held back, and an email review can stop counting
-
-```quint
-pure def sometimesAnInsertIsConfirmed(s: Preview): bool = s.attempt.outcome == A::Confirmed
-pure def sometimesAnUncertainInsertIsHeldBack(s: Preview): bool = doubtful(s) and usable(s)
-pure def sometimesAnInsertCanBeTriedOnTheChangedFile(s: Preview): bool = s.attempt.outcome == A::Unknown and usable(s) and not(doubtful(s))
-pure def sometimesAnEmailReviewIsOpen(s: Preview): bool = V::canConfirm(s.email) and usable(s)
-pure def sometimesAnEmailReviewStoppedCounting(s: Preview): bool = s.email.showing and not(V::canConfirm(s.email))
+pure def sometimesInboxAcceptedAnOffer(s: Preview): bool = s.attempt.outcome == A::Confirmed
+pure def sometimesAnUncertainOfferIsHeldBack(s: Preview): bool = doubtful(s) and usable(s)
+pure def sometimesAnOfferCanBeTriedOnTheChangedFile(s: Preview): bool = s.attempt.outcome == A::Unknown and usable(s) and not(doubtful(s))
 ```
 
 ## Story: Get a file back when access was lost
@@ -412,11 +457,11 @@ pure def stepALostFileIsLeftAlone(before: Preview, after: Preview, out: List[Eff
   })
 ```
 
-### Nothing of a file is read, drawn or reviewed once its access is lost
+### Nothing of a file is read or drawn once its access is lost
 
 ```quint
 pure def alwaysALostFileShowsNothing(s: Preview): bool =
-  not(s.reachable) implies (s.drawing.status != R::Loaded and s.content.status != R::Loaded and not(s.email.showing))
+  not(s.reachable) implies (s.drawing.status != R::Loaded and s.content.status != R::Loaded)
 ```
 
 ### A file can need selecting again
@@ -428,7 +473,7 @@ pure def sometimesAFileMustBeSelectedAgain(s: Preview): bool = showing(s) and no
 ## Story: Come back to a preview after a restart
 
 > As the owner, I want a restart to close the preview cleanly and never
-> repeat an insert.
+> repeat an email handoff.
 
 ### A restart closes the viewer and reports an insert cut off as unknown, so no answer from before it is taken
 

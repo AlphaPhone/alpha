@@ -1,16 +1,25 @@
 // @vitest-environment happy-dom
+import { Effect } from "effect";
 import { afterEach, describe, expect, it } from "vitest";
 import { Machine as Shell } from "../gen/app__shell.effect.vibe";
 import { Machine as Layers } from "../gen/app__shell__layers.effect.vibe";
 import { type Engagement, Engagements } from "../src/update/activity.vibe";
 import * as Updates from "../gen/app__update.effect.vibe";
 import * as Page from "../gen/app__update__page.effect.vibe";
-import { button, closeAll, hardware, later, open, press, seen, underAct, until } from "./alpha.tsx";
+import { button, closeAll, drawn, hardware, later, open, press, seen, underAct, until } from "./alpha.tsx";
 import { scene } from "./fakes/scene.ts";
 import { apk, manifestDigest, release, tell } from "./fakes/update.ts";
 
 underAct();
 afterEach(closeAll);
+
+/** The pressable row whose title is `title`, regardless of its second-line detail. */
+const rowButton = (title: string) => [...document.querySelectorAll("button")].find((found) => found.querySelector("span > span")?.textContent === title);
+const pressRow = (title: string) => drawn(() => {
+  const found = rowButton(title);
+  if (!found) throw new Error(`no button ${title}`);
+  found.click();
+});
 
 const updatesOf = (alpha: Awaited<ReturnType<typeof open>>["alpha"]) => alpha.runtime.runPromise(Updates.Machine.use((updates) => updates.get()));
 
@@ -24,13 +33,13 @@ function phoneWith(offered: readonly ReturnType<typeof release>[], digest: strin
 
 /** What another area reports to updates, as that area does. */
 const report = (alpha: Awaited<ReturnType<typeof open>>["alpha"], area: string, engagement: Partial<Engagement>) =>
-  alpha.runtime.runPromise(Engagements.use((reports) => reports.report(area, engagement)));
+  alpha.runtime.runPromise(Effect.flatMap(Engagements, (reports) => reports.report(area, engagement)));
 
-/** Settings → About, where the update rows are drawn. */
-async function about(alpha: Awaited<ReturnType<typeof open>>["alpha"]) {
+/** Settings → General, where the update rows are drawn. */
+async function general(alpha: Awaited<ReturnType<typeof open>>["alpha"]) {
   await press("Settings");
   await until(alpha, alpha.runtime, Shell, (s) => s.trail.at(-1) === "Settings");
-  await press("About");
+  await press("General");
 }
 
 describe("Updates", () => {
@@ -43,7 +52,7 @@ describe("Updates", () => {
     // spec/app/update/index.md, "Of a complete manifest, Alpha keeps only the well-formed launcher release signed by the phone's own signing root"
     expect((await updatesOf(alpha)).offer.release.version).toBe(121);
     expect(world.update.installs).toEqual([]);
-    await about(alpha);
+    await general(alpha);
     // spec/app/update/index.md, "A version name is shown only when it has 1 to 64 characters, and notes only when they have at most 500"
     expect([document.body.textContent?.includes("Version 1.121 (121)"), document.body.textContent?.includes("Fixes the clock.")]).toEqual([true, true]);
     // spec/app/update/index.md, "Allow automatic updates is offered only while the permission is required, and opens Android's setting"
@@ -62,7 +71,7 @@ describe("Updates", () => {
     expect(document.body.textContent).toContain("Automatic updatesAllowed");
     let letGo = () => {};
     world.update.installHeld = new Promise<void>((resolve) => { letGo = resolve; });
-    await press("Install update");
+    await pressRow("Install update");
     // spec/app/update/index.md, "Settings shows Install update with the offered version while an offer applies, and its label says when it is downloading"
     await until(alpha, alpha.runtime, Updates.Machine, (s) => s.installing);
     expect([document.body.textContent?.includes("Downloading update"), button("Check for updates")]).toEqual([true, undefined]);
@@ -78,12 +87,12 @@ describe("Updates", () => {
     world.update.permission = "unsupported";
     const { alpha } = await open(world);
     await until(alpha, alpha.runtime, Updates.Machine, (s) => s.checked === "Fine" && s.offer.release.version === 121);
-    await about(alpha);
+    await general(alpha);
     // spec/app/update/index.md, "An install Android refused for its permission offers Allow automatic updates at once"
     world.update.installAnswer = "permission-required";
-    await press("Install update");
+    await pressRow("Install update");
     await until(alpha, alpha.runtime, Updates.Machine, (s) => !s.installing && s.permission === "Required");
-    expect([button("Allow automatic updates") !== undefined, button("Install update"), document.body.textContent?.includes("Allow Alpha to install updates, then try again.")]).toEqual([true, undefined, true]);
+    expect([button("Allow automatic updates") !== undefined, rowButton("Install update"), document.body.textContent?.includes("Allow Alpha to install updates, then try again.")]).toEqual([true, undefined, true]);
     // spec/app/update/index.md, "When the install ends, is put off, or finds its offer changed or withdrawn, Alpha is free again": a withdrawn offer goes, and a check falls due at once.
     world.update.permission = "supported";
     await seen(false);
@@ -91,14 +100,14 @@ describe("Updates", () => {
     await until(alpha, alpha.runtime, Updates.Machine, (s) => s.permission === "Supported");
     // spec/app/update/index.md, "After Install update, Settings says whether Android took the update, the offer is gone, Android's permission is missing, or it could not start": a changed offer waits for the next check.
     world.update.installAnswer = "offer-response-changed";
-    await press("Install update");
+    await pressRow("Install update");
     await until(alpha, alpha.runtime, Updates.Machine, (s) => !s.installing && s.note === "CouldNotStart");
     expect([(await updatesOf(alpha)).offer.manifest, document.body.textContent?.includes("The update couldn’t start. Try again.")]).toEqual([0, true]);
     world.update.installAnswer = "offer-withdrawn";
     world.update.manifest = undefined;
     world.update.digest = undefined;
     const checks = world.update.checks.length;
-    await press("Install update");
+    await pressRow("Install update");
     await until(alpha, alpha.runtime, Updates.Machine, (s) => !s.installing && s.offer.release.version === 0);
     expect(document.body.textContent).toContain("The update is no longer offered.");
     await until(alpha, alpha.runtime, Updates.Machine, (s) => s.checked === "Fine");
@@ -112,7 +121,7 @@ describe("Updates", () => {
     await until(alpha, alpha.runtime, Updates.Machine, (s) => s.checked === "Fine");
     // spec/app/update/index.md, "A check that fails never replaces the saved offer"
     world.update.unreadable = true;
-    await about(alpha);
+    await general(alpha);
     // spec/app/update/index.md, "Android's install permission is unsupported, required, starting or supported": a phone still starting says so, and installs nothing on its own.
     expect([document.body.textContent?.includes("Automatic updatesStarting"), world.update.installs]).toEqual([true, []]);
     await press("Check for updates");
@@ -194,7 +203,7 @@ describe("An open page during an update (spec/app/update/page.md, \"Story: Save 
     await hardware("back");
     await hardware("home");
     expect((await alpha.runtime.runPromise(Shell.use((shell) => shell.get()))).trail).toEqual(["Settings"]);
-    // spec/app/update/page.md, "\"Updating Alpha…\" shows while a page holds or an update is pending, and \"Continue update\" only while it is paused and Android allows"
+    // spec/app/update/page.md, "Updating Alpha… shows while a page holds or an update is pending, and Continue update only while it is paused and Android allows"
     world.update.state = { ...world.update.state, phase: "paused", canContinue: true };
     await later(alpha, 1_000);
     await until(alpha, alpha.runtime, Page.Machine, (s) => s.canContinue);

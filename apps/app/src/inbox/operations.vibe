@@ -1,4 +1,4 @@
-// spec/app/inbox/sending.md, "Story: Archive or trash mail, with Undo"; spec/app/inbox/sending.md, "Story: Restore mail I archived or trashed"
+// spec/app/inbox/sending.md, "Story: Send a draft I reviewed"; spec/app/inbox/sending.md, "Story: Archive or trash mail, with Undo"; spec/app/inbox/sending.md, "Story: Restore mail I archived or trashed"
 import * as Inbox from "../../gen/app__inbox.effect.vibe"
 import { accessOf } from "../../gen/app__inbox.effect.vibe"
 import * as Sending from "../../gen/app__inbox__sending.effect.vibe"
@@ -8,8 +8,12 @@ import { Machine as Shell } from "../../gen/app__shell.effect.vibe"
 import { Cloud } from "../platform/cloud.vibe"
 import { Attempts } from "../runtime/attempts.vibe"
 import { Time } from "../runtime/time.vibe"
-import { type Job, answer, contained, reacting, run, started, together, untimed } from "../runtime/reactor.vibe"
-import { Mail, relabel } from "./gmail.vibe"
+import { type Job, answer, contained, hearing, reacting, run, started, together, untimed } from "../runtime/reactor.vibe"
+import * as Drafts from "../../gen/app__inbox__drafts.effect.vibe"
+import type { Event as DraftEvent } from "../../gen/app__inbox__drafts.effect.vibe"
+import { Letters } from "./composer.vibe"
+import { Mail, operate, relabel } from "./gmail.vibe"
+import { ownerChanges } from "./mailbox.vibe"
 
 const labels = { Archive: "archive", Trash: "trash", Unarchive: "unarchive", Untrash: "untrash" } as const
 
@@ -28,17 +32,64 @@ effect function changed(attempt: number, kind: Kind, account: number, messages: 
   return { type: "answered", attempt, done, matches: known, gmail: 0 }
 }
 
-function carry(fx: Out): Job<Event, Cloud | Mail | Inbox.Machine | Shell, [by: Actor]> {
+// spec/app/inbox/sending.md, "A recorded operation sends its one request, for its own account under that account's grant now, exactly as reviewed: a draft while it is at the revision shown and its hand-over is written to the phone, archive and Trash once the undo window has passed"
+/** The draft `draft` sent from `account` exactly as the owner wrote it, once, under the attempt's own key. */
+effect function sent(attempt: number, account: number, draft: number): Event!!(Attempts | Cloud | Mail | Letters) {
+  const words = (try Letters).words(draft)
+  const ended = try operate(attempt, account, {
+    kind: "send", mode: words.mode, to: words.to, cc: words.cc, bcc: words.bcc, subject: words.subject, bodyText: words.text,
+    ...(words.answers === undefined ? {} : { replyMessageId: words.answers }),
+    ...(words.files.length === 0 ? {} : { attachments: words.files.map(({ name, mimeType, data }) => ({ name, mimeType, dataBase64: data })) }),
+  })
+  return { type: "answered", attempt, done: ended.done, matches: ended.known, gmail: 0 }
+}
+
+// spec/app/inbox/sending.md, "Story: Save my draft to Gmail, or delete it there, knowingly"
+/** The draft `draft` saved to Gmail's Drafts, over its copy `gmail` where it has one, or that copy deleted, once, under the attempt's own key. */
+effect function drafted(attempt: number, kind: Kind, account: number, draft: number, gmail: number): Event!!(Attempts | Cloud | Mail | Letters) {
+  const letters = try Letters
+  const words = letters.words(draft)
+  const copy = letters.copy(gmail)
+  if (kind !== "SaveDraft" && copy?.account !== account) return { type: "answered", attempt, done: false, matches: true, gmail: 0 }
+  const ended = kind === "DeleteDraft"
+    ? try operate(attempt, account, { kind: "draft-delete", draftId: copy?.id ?? "", expectedDigest: copy?.digest ?? "", confirmPermanentDelete: true })
+    : try operate(attempt, account, {
+      kind: kind === "SaveDraft" ? "draft-create" : "draft-replace", mode: words.mode, to: words.to, cc: words.cc, bcc: words.bcc, subject: words.subject, bodyText: words.text,
+      ...(words.answers === undefined ? {} : { replyMessageId: words.answers }),
+      ...(copy === undefined || kind === "SaveDraft" ? {} : { draftId: copy.id, expectedDigest: copy.digest }),
+      ...(words.files.length === 0 ? {} : { attachments: words.files.map(({ name, mimeType, data }) => ({ name, mimeType, dataBase64: data })) }),
+    })
+  const id = ended.result?.["draftId"]
+  const digest = ended.result?.["providerDigest"]
+  const saved = ended.done && kind !== "DeleteDraft" && typeof id === "string" && typeof digest === "string" ? letters.copied(account, id, digest) : 0
+  return { type: "answered", attempt, done: ended.done && (kind === "DeleteDraft" || saved !== 0), matches: ended.known, gmail: saved }
+}
+
+/** Tell the composer `event` about the draft an operation was handed. */
+const toDraft = (event: DraftEvent) => effect { try ignore((try Drafts.Machine).send(event, "World")) }
+
+function carry(fx: Out): Job<Event, Cloud | Mail | Letters | Inbox.Machine | Drafts.Machine | Shell, [by: Actor]> {
   return match (fx) {
+    when { tag: "Request", kind: "Send", let attempt, let access, let draft }:
+      answer(`request ${attempt}`, sent(attempt, access.account, draft), { type: "replyLost", attempt }, "World");
+    when { tag: "Request", kind: "SaveDraft", let attempt, let access, let draft, let gmail }:
+      answer(`request ${attempt}`, drafted(attempt, "SaveDraft", access.account, draft, gmail), { type: "replyLost", attempt }, "World");
+    when { tag: "Request", kind: "ReplaceDraft", let attempt, let access, let draft, let gmail }:
+      answer(`request ${attempt}`, drafted(attempt, "ReplaceDraft", access.account, draft, gmail), { type: "replyLost", attempt }, "World");
+    when { tag: "Request", kind: "DeleteDraft", let attempt, let access, let draft, let gmail }:
+      answer(`request ${attempt}`, drafted(attempt, "DeleteDraft", access.account, draft, gmail), { type: "replyLost", attempt }, "World");
     when { tag: "Request", let attempt, let kind, let access, let messages }:
       answer(`request ${attempt}`, changed(attempt, kind, access.account, messages), { type: "replyLost", attempt }, "World");
     // spec/app/inbox/index.md, "Messages handed to an operation are no longer chosen; once a change to the account's mail ends the first page is read again, and when its outcome is unknown the list says it may be out of date until Refresh"
     when { tag: "Changed", let account, let known }: run("changed", effect { try ignore((try Inbox.Machine).send({ type: "changed", account, known })) }, "World");
     // spec/app/inbox/sending.md, "While the account's grant lacks consent to send, nothing is sent, and Turn on hands over to Google access in Settings"
     when { tag: "OpenGoogleAccess" }: run("access", effect { try ignore((try Shell).send({ type: "openView", view: "Settings" })) }, "World");
-    when { tag: "HandOver" }: run("draft", Effect.void, "World");
-    when { tag: "Cleanup" }: run("draft", Effect.void, "World");
-    when { tag: "Ended" }: run("draft", Effect.void, "World");
+    // spec/app/inbox/drafts.md, "The draft an operation is confirmed for is handed to it, and the hand-over is written to the phone before the operation goes out"
+    when { tag: "HandOver", let draft, let attempt, let use }: run("draft", toDraft({ type: "handedOver", draft, attempt, use }), "World");
+    // spec/app/inbox/drafts.md, "Once its send is confirmed, a draft unchanged since the revision sent is forgotten; one edited after it, or whose write is in flight, is kept and marked as sent"
+    when { tag: "Cleanup", let draft, let attempt, let revision }: run("draft", toDraft({ type: "sentAway", draft, attempt, revision }), "World");
+    // spec/app/inbox/drafts.md, "Every other end of the operation a draft was handed to: an unknown send is remembered with its revision; a save lands or leaves the draft unsure of Gmail's copy; a deletion forgets the draft; anything refused or stopped leaves it as it was"
+    when { tag: "Ended", let draft, let attempt, let outcome, let revision, let gmail }: run("draft", toDraft({ type: "ended", draft, attempt, result: outcome, revision, gmail }), "World");
   }
 }
 
@@ -55,21 +106,41 @@ const released = started(effect {
   })
 }, "releasing a held change")
 
+/** A recorded operation with no undo window goes out as soon as it is ready: a restore at once, a draft once its hand-over is written to the phone. */
+const dispatched = started(effect {
+  const operations = try Sending.Machine
+  const list = try Inbox.Machine
+  const drafts = try Drafts.Machine
+  const ready = Stream.zipLatest(operations.changes, drafts.changes) |> Stream.map(%, ([op, draft]) => ({
+    attempt: op.attempt.id,
+    recorded: op.attempt.outcome === "Recorded" && !Sending.holdable(op.kind),
+    draft: Sending.ofDraft(op.kind),
+    kept: draft.open && draft.letter.id === op.draft && draft.letter.sending === op.attempt.id && draft.stored && Drafts.flushed(draft),
+    revision: draft.letter.revision,
+    account: op.account,
+  }))
+  try Stream.runForEach(Stream.changesWith(ready, (a, b) => JSON.stringify(a) === JSON.stringify(b)), effect (fact) => {
+    if (!fact.recorded) return
+    if (fact.draft && !fact.kept) return
+    const access = accessOf(try list.get(), fact.account)
+    try ignore(operations.send({ type: "dispatchNow", access, revision: fact.draft ? fact.revision : 0, kept: fact.draft, now: untimed }, "World"))
+  })
+}, "dispatching a recorded operation")
+
 // spec/app/inbox/sending.md, "Losing the grant stops a review open and an operation recorded and not yet sent; a request already sent is never disowned"; spec/app/inbox/sending.md, "A change to what is under review, or to a draft whose operation is recorded and not yet sent, stops it and says it must be looked at again"
 const told = started(effect {
   const operations = try Sending.Machine
   const list = try Inbox.Machine
   const facts = Stream.zipLatest(list.changes, operations.changes) |> Stream.map(%, ([mailbox, held]) => ({
-    access: accessOf(mailbox, held.account), revision: mailbox.revision, signedIn: mailbox.signedIn, review: held.review.showing,
+    access: accessOf(mailbox, held.account), revision: mailbox.revision, review: held.review.showing && !Sending.ofDraft(held.kind),
   }))
-  let signedIn: boolean | undefined
   try Stream.runForEach(Stream.changesWith(facts, (a, b) => JSON.stringify(a) === JSON.stringify(b)), effect (fact) => {
     try contained(operations.send({ type: "accessChanged", access: fact.access }, "World"), "the grant of the change")
     if (fact.review) try ignore(operations.send({ type: "outdated", revision: fact.revision }, "World"))
-    if (signedIn !== undefined && signedIn !== fact.signedIn) try contained(operations.send({ type: "sessionChanged" }, "World"), "the cloud session")
-    signedIn = fact.signedIn
   })
 }, "following the list")
 
+const sessions = hearing(ownerChanges, Sending.Machine, (): Event => ({ type: "sessionChanged" }), "World")
+
 /** Archive, Trash and their restores: kept across restarts, held for the undo window, and sent through the owner's cloud. */
-export const operations = together(reacting(Sending, { keep: 1, open: [{ type: "restart" }, "World"], carry }), released, told)
+export const operations = together(reacting(Sending, { keep: 1, open: [{ type: "restart" }, "World"], carry }), released, dispatched, told, sessions)

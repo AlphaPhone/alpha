@@ -27,7 +27,7 @@ type Marking = {
   told: Told, opened: Set[int], doubtful: Set[int],
 }
 
-type Effect = MarkMessage({ attempt: int, account: int, message: int, unread: bool })
+type Effect = MarkMessage({ attempt: int, account: int, message: int, unread: bool }) | CheckAccounts
 type Marks = { state: Marking, out: List[Effect] }
 
 pure val initial: Marking = {
@@ -96,7 +96,8 @@ pure def concluding(ended: A::Attempt, s: Marking): Marking = {
 
 pure def canMarked(s: Marking, attempt: int): bool = A::canConclude(s.attempt, attempt)
 
-pure def marked(s: Marking, attempt: int, done: bool, matches: bool): Marking = concluding(A::conclude(s.attempt, done, matches), s)
+pure def marked(s: Marking, attempt: int, done: bool, matches: bool, expired: bool): Marks =
+  { state: concluding(A::conclude(s.attempt, done, matches), s), out: if (rechecksAccount(s, expired)) List(CheckAccounts) else List() }
 
 pure def canMarkLost(s: Marking, attempt: int): bool = A::canConclude(s.attempt, attempt)
 
@@ -106,6 +107,21 @@ pure def leadsToAMarkEnds(s: Marking, later: Marking): bool = inFlight(s) implie
 
 pure val fair_marked = "strong"
 pure val fair_markLost = "strong"
+```
+
+### The owner's own mark that finds the cloud sign-in expired has the accounts checked again
+
+An automatic mark on opening checks nothing: the message read already
+told the list what it found.
+
+```quint
+pure def rechecksAccount(s: Marking, expired: bool): bool = expired and not(s.automatic) and inFlight(s)
+
+pure def stepOnlyTheOwnersExpiredMarkChecksTheAccounts(before: Marking, via: str, after: Marking, out: List[Effect]): bool =
+  out.every(e => match e {
+    | CheckAccounts => via == "marked" and not(before.automatic) and inFlight(before) and not(inFlight(after))
+    | _ => true
+  })
 ```
 
 ### A list read afresh lets unconfirmed marks be tried again, and the owner can put the message away

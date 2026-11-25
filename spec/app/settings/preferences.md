@@ -19,6 +19,8 @@ alert sounds is offered on the [Developer](./developer.md) page.
 Who sends an event matters here: the owner chooses, the phone answers and
 tells Alpha when it starts, comes back or opens Settings, and the agent
 changes nothing. A text size of zero is one the phone has not reported.
+Beside the device preferences they hold what Alpha last told the phone the
+agent may change in Gmail and Calendar.
 
 ```quint
 import read as R from "../../kit/read"
@@ -36,7 +38,7 @@ type Preferences = {
   size: int, sizing: T::Timed, changing: bool,
   document: T::Timed, askFirst: bool, images: bool, shares: List[Share],
   saving: T::Timed, nextAskFirst: bool, nextImages: bool, nextShares: List[Share],
-  recovering: T::Timed, notice: Notice,
+  recovering: T::Timed, notice: Notice, agentGoogle: AgentGoogle,
 }
 
 type Effect =
@@ -45,7 +47,7 @@ type Effect =
   | SetTextSize({ sizeAsk: int, percent: int })
   | ReadTextSize({ sizeRead: int })
   | ReadDocument({ docRead: int })
-  | SaveDocument({ save: int, saveAskFirst: bool, saveImages: bool, saveShares: List[Share] })
+  | SaveDocument({ save: int, saveAskFirst: bool, saveImages: bool, saveShares: List[Share], saveConsent: AgentGoogle })
   | RecoverDocument({ recovery: int })
 type Changed = { state: Preferences, out: List[Effect] }
 
@@ -54,7 +56,7 @@ pure val initial: Preferences = {
   size: 0, sizing: T::unasked, changing: false,
   document: T::unasked, askFirst: true, images: false, shares: List(),
   saving: T::unasked, nextAskFirst: true, nextImages: false, nextShares: List(),
-  recovering: T::unasked, notice: Quiet,
+  recovering: T::unasked, notice: Quiet, agentGoogle: Unsaid,
 }
 
 pure val limit = 10000
@@ -83,6 +85,18 @@ pure def lawSystemFollowsThePhone(look: Look): bool =
 pure def canPhoneLookChanged(s: Preferences, look: Look, by: Sender): bool = answers(by)
 
 pure def phoneLookChanged(s: Preferences, look: Look, by: Sender): Preferences = { ...s, phoneLook: look }
+```
+
+### Android's status and navigation bars follow the look Alpha draws
+
+On a phone the shell tells Android each time the look drawn changes, and
+never twice in a row for the same look; a browser has no bars to tell.
+
+```quint
+pure def barsDark(s: Preferences): bool = shown(s) == DarkLook
+
+pure def lawTheBarsAreDarkExactlyWhenAlphaIs(theme: Theme, look: Look): bool =
+  barsDark({ ...initial, theme: theme, phoneLook: look }) iff (theme == Dark or (theme == System and look == DarkLook))
 ```
 
 ### A choice shows at once and is kept on the phone, one at a time, with ten seconds to be kept
@@ -286,14 +300,16 @@ type Act = WebAction | CameraAction | PhotosAction | NoteWrite | InAppMove
 pure def governed(act: Act): bool = act == WebAction or act == CameraAction or act == PhotosAction
 ```
 
-### The device preferences are read when Alpha starts, when Settings opens, and when Alpha comes back while Settings shows, with ten seconds to answer, never while a change or a recovery is in flight
+### The device preferences are read when Alpha starts, when Settings opens, when Alpha comes back while Settings shows, and after a change the phone did not answer in time, with ten seconds to answer, never while a change or a recovery is in flight
 
 They hold Ask before Alpha acts, Load images in Inbox, and what Alpha may
 share or change without asking. On a phone updated from the previous
 Alpha, which kept these in a document of its own, the phone reads that
 document, once, while it has none of Alpha's: the choices made there stay,
 and a choice it lacks starts as on a new phone. Alpha never writes the
-previous document.
+previous document. A change the phone did not answer in time may still
+have been kept, so the phone reads them again once it has finished with
+that change, and Settings shows what it kept.
 
 ```quint
 pure def readAgain(at: int, s: Preferences): Changed =
@@ -312,7 +328,22 @@ pure def resumed(s: Preferences, at: int, showing: bool, by: Sender): Changed = 
 
 pure def stepTheDocumentIsReadOnlyWhenDue(before: Preferences, via: str, after: Preferences): bool =
   after.document.read.ticket != before.document.read.ticket implies
-    (via == "start" or ((via == "opened" or via == "resumed" or via == "recovered" or via == "giveUpOnRecovery") and not(T::busy(before.saving))))
+    (via == "start" or via == "giveUpOnSaving" or ((via == "opened" or via == "resumed" or via == "recovered" or via == "giveUpOnRecovery") and not(T::busy(before.saving))))
+```
+
+### A new phone lets Alpha act without asking first, load images in Inbox, use its location and the Browser page open, and change Gmail and Calendar
+
+Location is on because the launcher already holds the location grant on an
+Alpha image; the owner turns any of these off here, or revokes the grant in
+Android. A recovery restores these, and a choice the previous Alpha lacked
+starts as one of these.
+
+```quint
+type Chosen = { askFirst: bool, images: bool, shares: List[Share] }
+
+pure val newPhone: Chosen = { askFirst: false, images: true, shares: List(AgentLocation, BrowserPage, GmailChanges, CalendarEdits) }
+
+pure def lawANewPhoneAllowsEveryShare(share: Share): bool = newPhone.shares.includes(share) and not(newPhone.askFirst) and newPhone.images
 ```
 
 ### What the phone could not read is taken as asking first, loading no images and sharing nothing
@@ -330,12 +361,12 @@ pure def canDocumentRead(s: Preferences, docRead: int, readable: bool, askFirst:
   answers(by) and T::canAnswer(s.document, docRead)
 
 pure def documentRead(s: Preferences, docRead: int, readable: bool, askFirst: bool, images: bool, shares: List[Share], by: Sender): Preferences =
-  if (readable) { ...s, document: T::answer(s.document, true), askFirst: askFirst, images: images, shares: shares }
-  else safe(T::answer(s.document, false), s)
+  if (readable) { ...s, document: T::answer(s.document, true), askFirst: askFirst, images: images, shares: shares, agentGoogle: consentOf(shares) }
+  else { ...safe(T::answer(s.document, false), s), agentGoogle: consentOf(List()) }
 
 pure def canGiveUpOnDocument(s: Preferences, now: int, by: Sender): bool = answers(by) and T::canGiveUp(s.document, now)
 
-pure def giveUpOnDocument(s: Preferences, now: int, by: Sender): Preferences = safe(T::answer(s.document, false), s)
+pure def giveUpOnDocument(s: Preferences, now: int, by: Sender): Preferences = { ...safe(T::answer(s.document, false), s), agentGoogle: consentOf(List()) }
 
 pure def alwaysAnUnreadDocumentIsSafe(s: Preferences): bool =
   (s.document.read.status == R::Idle or s.document.read.status == R::Failed) implies (s.askFirst and not(s.images) and s.shares.length() == 0)
@@ -374,6 +405,53 @@ pure def allows(s: Preferences, share: Share): bool = s.document.read.status == 
 pure def lawAnUnreadDocumentSharesNothing(share: Share): bool = not(allows(initial, share))
 ```
 
+### The agent is launched allowed to change Gmail and Calendar exactly as the phone last read or saved, allowed neither once it could not read them, and Alpha says nothing of it before the first answer
+
+eliza's agent takes the owner's consent to change Gmail and to edit
+Calendar only from its launch (the pinned eliza's
+`spec/os/agentService/config.md`, "A launch carries the Google consent the
+owner saved, else the host file's"). On a phone the shell tells Alpha's
+host the consent each answered read gives; the host keeps it for every
+launch, restarts a running or starting agent only when it changed, and
+keeps what it had when it cannot. A consent the host refused is told again
+at the next read. Until the phone has answered the first read, Alpha has
+said nothing, so the agent launches with what the host kept, or else with
+the pack's host file, which allows neither, as the previous Alpha's host
+did until Settings had published the owner's switches. A browser launches
+no agent and is told nothing.
+
+A change to Gmail changes or Calendar edits is saved only once the host
+has taken it: the save carries the new consent, and when the host refuses
+it the phone puts back the document it had and answers that the change was
+not saved, so Settings never shows a refused change as saved. A save that
+changes neither carries none. The phone finishes one save, with its host
+call and any putting back, before it starts a read or tells the host
+another consent. Settings can still show what a read gave before the host
+has taken it; a consent the host refused at a read is told again at the
+next read.
+
+```quint
+type AgentGoogle = Unsaid | Consents({ gmailChanges: bool, calendarEdits: bool })
+
+pure def consentOf(shares: List[Share]): AgentGoogle =
+  Consents({ gmailChanges: shares.includes(GmailChanges), calendarEdits: shares.includes(CalendarEdits) })
+
+pure def consentChanged(was: List[Share], shares: List[Share]): AgentGoogle =
+  if (consentOf(shares) == consentOf(was)) Unsaid else consentOf(shares)
+
+pure def lawASaveCarriesTheConsentItChanges(on: bool): bool =
+  consentChanged(List(AgentLocation, CalendarEdits), List(AgentLocation, CalendarEdits, BrowserPage)) == Unsaid
+    and consentChanged(List(AgentLocation, CalendarEdits), if (on) List(AgentLocation, CalendarEdits, GmailChanges) else List(AgentLocation))
+      == Consents({ gmailChanges: on, calendarEdits: on })
+
+pure def alwaysTheAgentIsAllowedWhatThePhoneLastReadOrSaved(s: Preferences): bool =
+  (s.document.read.status == R::Loaded implies s.agentGoogle == consentOf(s.shares))
+    and (s.document.read.status == R::Failed implies s.agentGoogle == consentOf(List()))
+
+pure def stepTheAgentIsToldOnlyWhatThePhoneAnswered(before: Preferences, via: str, after: Preferences): bool =
+  after.agentGoogle != before.agentGoogle implies (via == "documentRead" or via == "giveUpOnDocument" or via == "documentSaved")
+```
+
 ### The owner changes Ask before Alpha acts, Load images or what Alpha may share only once the phone has read them, one save at a time, with ten seconds to save
 
 ```quint
@@ -384,7 +462,7 @@ pure def saveDocument(at: int, askFirst: bool, images: bool, shares: List[Share]
   val asking = T::ask(s.saving, at, limit)
   {
     state: { ...s, saving: asking, nextAskFirst: askFirst, nextImages: images, nextShares: shares, notice: Quiet },
-    out: List(SaveDocument({ save: asking.read.ticket, saveAskFirst: askFirst, saveImages: images, saveShares: shares })),
+    out: List(SaveDocument({ save: asking.read.ticket, saveAskFirst: askFirst, saveImages: images, saveShares: shares, saveConsent: consentChanged(s.shares, shares) })),
   }
 
 pure def canSetAskFirst(s: Preferences, askFirst: bool, at: int, by: Sender): bool = editable(s, by) and askFirst != s.askFirst
@@ -404,7 +482,7 @@ pure def alwaysASaveBuildsOnWhatWasRead(s: Preferences): bool =
   T::busy(s.saving) implies s.document.read.status == R::Loaded
 ```
 
-### A change takes effect when the phone saved it; otherwise, or when the phone does not answer in time, Alpha says it was not saved and nothing changes
+### A change takes effect when the phone saved it; when the phone refuses it, Alpha says it was not saved and nothing changes; when the phone does not answer in time, Alpha says it was not saved and reads the device preferences again
 
 ```quint
 pure val saveValues = Set(1, 2)
@@ -412,12 +490,12 @@ pure val saveValues = Set(1, 2)
 pure def canDocumentSaved(s: Preferences, save: int, ok: bool, by: Sender): bool = answers(by) and T::canAnswer(s.saving, save)
 
 pure def documentSaved(s: Preferences, save: int, ok: bool, by: Sender): Preferences =
-  if (ok) { ...s, saving: T::answer(s.saving, true), askFirst: s.nextAskFirst, images: s.nextImages, shares: s.nextShares }
+  if (ok) { ...s, saving: T::answer(s.saving, true), askFirst: s.nextAskFirst, images: s.nextImages, shares: s.nextShares, agentGoogle: consentOf(s.nextShares) }
   else { ...s, saving: T::answer(s.saving, false), notice: NotSaved }
 
 pure def canGiveUpOnSaving(s: Preferences, now: int, by: Sender): bool = answers(by) and T::canGiveUp(s.saving, now)
 
-pure def giveUpOnSaving(s: Preferences, now: int, by: Sender): Preferences = { ...s, saving: T::answer(s.saving, false), notice: NotSaved }
+pure def giveUpOnSaving(s: Preferences, now: int, at: int, by: Sender): Changed = readAgain(at, { ...s, saving: T::answer(s.saving, false), notice: NotSaved })
 ```
 
 ### Every save of the device preferences ends
@@ -437,7 +515,8 @@ pure def stepAskingStopsOnlyOnTheOwnersWord(before: Preferences, via: str, after
 
 ### When the device preferences cannot be read, the owner can recover them: the phone resets them to its defaults, and they are read again
 
-A recovery not answered in ten seconds is given up and the document is read
+The owner confirms first: a recovery puts back what a new phone has. A
+recovery not answered in ten seconds is given up and the document is read
 again; Alpha says when it did not recover.
 
 ```quint
@@ -495,6 +574,13 @@ pure def sometimesBrowserPageWithheld(s: Preferences): bool =
 
 ```quint
 pure def sometimesImagesLoad(s: Preferences): bool = loadsImages(s) and s.saving.read.status == R::Loaded and s.nextImages
+```
+
+### The owner can let the agent edit Calendar and not change Gmail
+
+```quint
+pure def sometimesCalendarEditsWithoutGmailChanges(s: Preferences): bool =
+  s.agentGoogle == Consents({ gmailChanges: false, calendarEdits: true })
 ```
 
 ### The device preferences can be under recovery, and a recovery can fail

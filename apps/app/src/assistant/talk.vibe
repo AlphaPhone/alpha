@@ -1,12 +1,46 @@
 // spec/app/assistant/chats.md, "Story: Find my conversations"; spec/app/assistant/composer.md, "Story: Keep what I am writing"
-import { ConversationRecord } from "@elizaos/agent/client"
+import type { ConversationRecord } from "@elizaos/agent/client"
 import * as KeyValueStore from "effect/persistence/KeyValueStore"
+import type { Binding } from "../../gen/app__assistant__composer.effect.vibe"
+import type { MediaCard } from "./media-review.vibe"
+import type { Failure, Fix } from "../../gen/app__assistant__reply.ts"
+import type { MailQuestion } from "../inbox/mail-context.vibe"
+import type { Sighting } from "../platform/location.vibe"
+import type { CommsPrompt } from "../phone/comms.vibe"
+
+/** One file selected by the owner, with the bytes admitted by the Ask Alpha attachment policy. */
+export interface Attached {
+  readonly id: string
+  readonly name: string
+  readonly mimeType: string
+  readonly data: string
+}
+
+/** The batch staged for one concrete send, under the composer's own hold number and binding. */
+export interface StagedFiles {
+  readonly ticket: number
+  readonly hold: number
+  readonly binding: Binding
+  readonly key?: string
+  readonly files: readonly Attached[]
+  readonly mail?: MailQuestion
+}
 
 /** One message of the conversation showing, as the agent keeps it. */
 export interface Line {
   readonly id: string
   readonly mine: boolean
   readonly text: string
+  /** The words of the message this one quotes. */
+  readonly quote?: string
+  /** Why a reply the agent keeps did not finish, as its history says, in Alpha's words. */
+  readonly failure?: Failure
+  readonly attachments?: readonly Attached[]
+}
+
+interface MessagePage {
+  readonly conversation: number
+  readonly lines: ReadonlyArray<Line>
 }
 
 /** A search hit: the conversation it is in, by its number, the message, by its number, and what it says. */
@@ -25,11 +59,21 @@ export interface Known {
 /** What the screen shows beside the machines' states: words, which the specs count but never hold. */
 export interface Seen {
   /** The messages of each page read, by the ticket that read it; the page showing is the one under the chats' newest ticket. */
-  readonly pages: ReadonlyMap<number, ReadonlyArray<Line>>
+  readonly pages: ReadonlyMap<number, MessagePage>
   /** The reply as it is written, until it ends. */
   readonly reply: string
+  /** What the agent says it is doing until its reply is written: its acknowledgment, its status or the app its tool uses. */
+  readonly label: string
+  /** Why the last reply did not finish, the fix the agent named, and how long the provider asked to wait, or -1. */
+  readonly failure: { readonly kind: Failure; readonly fix: Fix; readonly waitMs: number } | undefined
   /** The text in the composer's box, which its slot keeps. */
   readonly typed: string
+  readonly files: readonly Attached[]
+  readonly filesBinding: Binding | undefined
+  readonly attachmentNotice: string
+  readonly preview: { readonly ticket: number; readonly file: Attached } | undefined
+  readonly media: ReadonlyArray<MediaCard>
+  readonly mediaNote: { readonly conversation: number; readonly text: string } | undefined
   /** The text of a message the slot marks as sending, under review; or the saved copy of a conflict. */
   readonly saved: string
   /** The hits of each search, by the ticket that asked from the first hit. */
@@ -43,30 +87,53 @@ export interface Seen {
  * with `useSyncExternalStore`, and the shell writes. It holds no rule; each machine decides what counts.
  */
 export interface Board {
-  snapshot(): Seen
-  subscribe(listener: () => void): () => void
+  snapshot(this: void): Seen
+  subscribe(this: void, listener: () => void): () => void
   /** The owner typed `text` in the composer's box. */
   type(text: string): void
+  /** Hold `text` as the outgoing message for the send in hand. */
+  hold(text: string): void
+  /** Mark a send waiting for the new conversation to be made. */
+  queueSend(): void
   /** The text a send in hand carries, the last text sent, and a send that waits for its conversation to be made. */
   outgoing: string
   lastSent: string
+  /** The exact wire text, used only to reconcile a turn without a message ID. */
+  lastSentWire: string
+  /** The id the last message was posted under, as the agent keeps it, or "" where its post never said. */
+  lastSentId: string
   sendWhenMade: boolean
+  staged: StagedFiles | undefined
+  previewFile(file: Attached): number
+  /** Keep `sighting` under the `ticket` the locator accepted. */
+  rememberPosition(ticket: number, sighting: Sighting): void
+  /** Forget any remembered position once the locator has none. */
+  forgetPosition(): void
+  /** The remembered position for `ticket`, if the locator still holds that ticket. */
+  positionFor(ticket: number): Sighting | undefined
+  waitingRequest: CommsPrompt | undefined
+  postingRequest: CommsPrompt | undefined
   change(patch: Partial<Seen>): void
   /** The number of the conversation the agent names `record`, given the first time it is seen; its title where one is given. */
   numberOf(record: ConversationRecord, title?: string): number
   known(conversation: number): Known | undefined
-  /** The number of the message the agent names `id`. */
+  /** The number of the message the agent names `id`, given the first time it is seen. */
   messageNumber(id: string): number
+  /** The number given to the message the agent names `id`, or 0 for one never seen. */
+  numbered(id: string): number
   messageId(message: number): string | undefined
-  /** The page under `ticket`, and the page of the newest ticket. */
+  /** The page under `ticket`, and mutations of a turn's own page. */
   page(ticket: number): ReadonlyArray<Line>
-  latest(): ReadonlyArray<Line>
-  append(line: Line): void
-  drop(line: Line): void
+  line(conversation: number, message: number): Line | undefined
+  putPage(ticket: number, conversation: number, lines: ReadonlyArray<Line>): void
+  append(ticket: number, conversation: number, line: Line): void
+  rename(ticket: number, line: Line, id: string): void
+  drop(ticket: number, line: Line): void
 }
 
 export service Talk {
   readonly board: Board
+  readonly attachmentLock: Semaphore.Semaphore
 }
 
 /** Where the agent's conversations are kept by number, so that the conversation showing is found again after a restart. */
@@ -93,9 +160,11 @@ export const talk = Layer.effect(Talk, effect {
   const remembered = unkept(store.get(key) catch () => undefined)
   const records: Known[] = remembered.map((one) => ({ record: { id: one.id, roomId: one.roomId } as ConversationRecord, title: one.title }))
   const messages: string[] = []
+  const numbers = new Map<string, number>()
   const listeners = new Set<() => void>()
+  let position: { readonly ticket: number; readonly sighting: Sighting } | undefined
   let seen: Seen = {
-    pages: new Map(), reply: "", typed: "", saved: "", hits: [],
+    pages: new Map(), reply: "", label: "", failure: undefined, typed: "", files: [], filesBinding: undefined, attachmentNotice: "", preview: undefined, media: [], mediaNote: undefined, saved: "", hits: [],
     titles: new Map(records.map((one, at) => [at + 1, one.title])),
   }
   const keep = () => runFork(ignore(store.set(key, JSON.stringify({ conversations: records.map((one) => ({ id: one.record.id, roomId: one.record.roomId, title: one.title })) }))))
@@ -106,9 +175,24 @@ export const talk = Layer.effect(Talk, effect {
       return () => { listeners.delete(listener) }
     },
     type: (text) => board.change({ typed: text }),
+    hold: (text) => { board.outgoing = text },
+    queueSend: () => { board.sendWhenMade = true },
     outgoing: "",
     lastSent: "",
+    lastSentWire: "",
+    lastSentId: "",
     sendWhenMade: false,
+    staged: undefined,
+    previewFile: (file) => {
+      const ticket = (seen.preview?.ticket ?? 0) + 1
+      board.change({ preview: { ticket, file } })
+      return ticket
+    },
+    rememberPosition: (ticket, sighting) => { position = { ticket, sighting } },
+    forgetPosition: () => { position = undefined },
+    positionFor: (ticket) => (position?.ticket === ticket ? position.sighting : undefined),
+    waitingRequest: undefined,
+    postingRequest: undefined,
     change: (patch) => {
       seen = { ...seen, ...patch }
       for (const listener of listeners) listener()
@@ -130,22 +214,42 @@ export const talk = Layer.effect(Talk, effect {
     },
     known: (conversation) => records[conversation - 1],
     messageNumber: (id) => {
-      const at = messages.indexOf(id)
-      if (at >= 0) return at + 1
+      const number = numbers.get(id)
+      if (number !== undefined) return number
       messages.push(id)
+      numbers.set(id, messages.length)
       return messages.length
     },
+    numbered: (id) => numbers.get(id) ?? 0,
     messageId: (message) => messages[message - 1],
-    page: (ticket) => seen.pages.get(ticket) ?? [],
-    latest: () => board.page(Math.max(0, ...seen.pages.keys())),
-    append: (line) => {
-      const newest = Math.max(0, ...seen.pages.keys())
-      board.change({ pages: new Map([...seen.pages, [newest, [...board.page(newest), line]]]) })
+    page: (ticket) => seen.pages.get(ticket)?.lines ?? [],
+    line: (conversation, message) => {
+      const id = board.messageId(message)
+      if (id === undefined) return undefined
+      for (const page of seen.pages.values()) {
+        if (page.conversation !== conversation) continue
+        const line = page.lines.find((one) => one.id === id)
+        if (line !== undefined) return line
+      }
+      return undefined
     },
-    drop: (line) => {
-      const newest = Math.max(0, ...seen.pages.keys())
-      board.change({ pages: new Map([...seen.pages, [newest, board.page(newest).filter((one) => one !== line)]]) })
+    putPage: (ticket, conversation, lines) => {
+      board.change({ pages: new Map([...seen.pages, [ticket, { conversation, lines }]]) })
+    },
+    append: (ticket, conversation, line) => {
+      const current = board.page(ticket)
+      if (!current.some((one) => one.id === line.id)) board.putPage(ticket, conversation, [...current, line])
+    },
+    rename: (ticket, line, id) => {
+      const page = seen.pages.get(ticket)
+      if (page === undefined) return
+      const existing = page.lines.some((one) => one.id === id)
+      board.putPage(ticket, page.conversation, existing ? page.lines.filter((one) => one !== line) : page.lines.map((one) => (one === line ? { ...one, id } : one)))
+    },
+    drop: (ticket, line) => {
+      const page = seen.pages.get(ticket)
+      if (page !== undefined) board.putPage(ticket, page.conversation, page.lines.filter((one) => one !== line))
     },
   }
-  return { board }
+  return { board, attachmentLock: try Semaphore.make(1) }
 })

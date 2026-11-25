@@ -7,7 +7,12 @@ const onTrash = fn();
 
 export const meta: ComponentMeta<InboxSelectionBarProps> = {
   args: { count: 3, onArchive, onTrash },
-  examples: { One: { count: 1 }, "Cannot change the mailbox": { onArchive: undefined, onTrash: undefined } },
+  examples: {
+    One: { count: 1 },
+    "Cannot change the mailbox": { onArchive: undefined, onTrash: undefined },
+    "In Archive": { onArchive: undefined, onRestore: fn() },
+    "Some not chosen": { onChooseAll: fn() },
+  },
   play: {
     Default: async ({ canvasElement }: { canvasElement: HTMLElement }) => {
       onArchive.mockClear();

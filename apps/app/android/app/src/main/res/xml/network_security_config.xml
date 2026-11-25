@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Production policy: HTTPS only, trusting the platform's system CAs. User-added CAs
+     and cleartext are not trusted. -->
+<network-security-config>
+ <base-config cleartextTrafficPermitted="false">
+  <trust-anchors>
+   <certificates src="system" />
+  </trust-anchors>
+ </base-config>
+</network-security-config>

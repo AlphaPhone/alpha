@@ -1,4 +1,4 @@
-// spec/app/maps/guidance.md, "A fix guides only when it is usable, and only for the current session"
+// spec/app/maps/navigation.md, "A fix moves guidance only when it is precise, fresh and close: arrival within 25 meters, a turn passed within 40 meters or beyond 60, the route left beyond 75"
 
 /** A point in whole millionths of a degree, as every Maps machine keeps one. */
 export interface Point {
@@ -72,4 +72,9 @@ export function coordinateOf(p: Point) {
 /** Cloud's coordinate as a point. @throws {never} */
 export function pointOf(c: { readonly latitude: number; readonly longitude: number }): Point {
   return { lat: Math.round(c.latitude * 1e6), lng: Math.round(c.longitude * 1e6) };
+}
+
+/** A point as degrees, as the map draws it. @throws {never} */
+export function degreesOf(p: Point): { lat: number; lng: number } {
+  return { lat: p.lat / 1e6, lng: p.lng / 1e6 };
 }

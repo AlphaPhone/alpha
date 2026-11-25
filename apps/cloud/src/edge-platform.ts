@@ -1,5 +1,5 @@
-// spec/cloud/edge.md, "The API Worker is told the web host it was asked for, and gets none of the caller's forwarding or hop-by-hop headers"
-import { headerKept } from "../gen/cloud__edge.ts";
+// spec/cloud/rollout.md, "The API Worker is told the web host it was asked for, and gets none of the caller's forwarding or hop-by-hop headers"
+import { headerKept } from "../gen/cloud__rollout.ts";
 
 export const EdgeHeaders = globalThis.Headers;
 export const EdgeResponse = globalThis.Response;

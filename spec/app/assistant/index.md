@@ -11,8 +11,19 @@ for its reply. The rest of the area:
 - [Search](./search.md): searching every conversation and opening a hit
 - [Cards](./cards.md): what a reply carries, and each card's life
 - [Dock](./dock.md): how a drag of Ask Alpha chooses a height, and the keyboard
-- [Device actions](./actions.md): an action the agent proposes for the phone, reviewed and run at most once
+- [Reply](./reply.md): a reply as it is written: its label, acknowledgment, cards, notices and failures
+- [Turn context](./context.md): what a turn tells the agent besides the screen: location, Browser's page, Maps, the clock and capabilities
+- [Question](./question.md): Ask Alpha on a file, reviewed before it joins the draft
+- [Email card](./email.md): an email the agent drafted, sent from the chat once per version
 - [Kit extensions](./extend.md): what the area needs of the kit that it lacks
+
+Alpha shows the turn's status as pulsing dots or a shape at the foot of the
+conversation, with the status as its accessible name. The agent's own label
+stays visible, as does Check for reply where the owner must act. Why nothing
+can be sent, a draft too long to send and a draft still opening are said
+to a screen reader only, with Send disabled or the field closed. Attachment
+errors appear below the conversation header. Draft notices that ask the
+owner to act remain visible.
 
 Speaking a turn and reading a reply aloud belong to the voice area, the
 approval a proposal card asks for to the approvals area, and the height
@@ -36,6 +47,7 @@ the owner or broken off.
 import read as R from "../../kit/read"
 import attempt as A from "../../kit/attempt"
 import shell as S from "../shell"
+import settings as P from "../settings"
 import extend as X from "./extend"
 
 type Reply = Silent | Streaming | Complete | Stopped | Broken
@@ -59,7 +71,7 @@ The check of a stopped reply is under way while its one read is loading.
 
 ```quint
 type Showing = Home | App({ view: S::View })
-type Context = { showing: Showing, zone: str, day: int, selected: bool, sensitive: bool, revision: int }
+type Context = { showing: Showing, zone: str, day: int, selected: bool, sensitive: bool, section: P::Page, revision: int }
 type Check = Unchecked | Aborting | Finished | StoppedForSure | NotRecorded | LookLater
 type Conversation = {
   ready: bool, support: R::Read, observing: bool, turn: Turn, context: Context,
@@ -68,7 +80,7 @@ type Conversation = {
 
 pure val initial: Conversation = {
   ready: false, support: R::unread, observing: false, turn: quiet(0),
-  context: { showing: Home, zone: "", day: 0, selected: false, sensitive: false, revision: 0 },
+  context: { showing: Home, zone: "", day: 0, selected: false, sensitive: false, section: P::Top, revision: 0 },
   check: Unchecked, aborted: false, recheck: R::unread, opening: A::plan(0),
 }
 
@@ -671,6 +683,8 @@ pure def sometimesACheckSaysLookLater(c: Conversation): bool = c.check == LookLa
 
 ### The agent is told the view, the time zone, the day only from Calendar, and whether something is selected
 
+An ordinary Settings section supplies only its fixed [section name](../settings/index.md), and changing sections takes a new screen revision. A section name is kept only while Settings is the view; a sensitive section carries no selection.
+
 ```quint
 pure def onCalendar(showing: Showing): bool =
   match showing {
@@ -678,21 +692,30 @@ pure def onCalendar(showing: Showing): bool =
     | _ => false
   }
 
-pure def told(showing: Showing, zone: str, day: int, selected: bool, sensitive: bool, revision: int): Context =
-  { showing: showing, zone: zone, day: if (sensitive or not(onCalendar(showing)) or day < 0) 0 else day,
-    selected: selected and not(sensitive), sensitive: sensitive, revision: revision }
+pure def onSettings(showing: Showing): bool =
+  match showing {
+    | App(a) => a.view == S::Settings
+    | _ => false
+  }
+
+pure def told(showing: Showing, zone: str, day: int, selected: bool, sensitive: bool, section: P::Page, revision: int): Context =
+  val settings = onSettings(showing)
+  val hidden = sensitive or (settings and (section == P::CarrierPage or section == P::PhonePage))
+  val page = if (settings and not(hidden)) section else P::Top
+  { showing: showing, zone: zone, day: if (hidden or not(onCalendar(showing)) or day < 0) 0 else day,
+    selected: not(hidden) and (selected or P::selectionOf(page) != ""), sensitive: hidden, section: page, revision: revision }
 ```
 
 ### A sensitive screen says only that it is sensitive: no selection and no day
 
 A sensitive screen is the passwords view, a password surface in Settings,
-a locked or secure screen, a screen that is off, a hidden page, and the
-agent connection dialog.
+Settings' Carrier & SIM setup and Phone pages, a locked or secure screen, a
+screen that is off, a hidden page, and the agent connection dialog.
 
 ```quint
-pure def lawASensitiveScreenTellsNothingOfItself(showing: Showing, zone: str, day: int, selected: bool, sensitive: bool, revision: int): bool =
-  val t = told(showing, zone, day, selected, sensitive, revision)
-  t.day >= 0 and (t.day > 0 implies onCalendar(t.showing)) and (t.sensitive implies (not(t.selected) and t.day == 0))
+pure def lawASensitiveScreenTellsNothingOfItself(showing: Showing, zone: str, day: int, selected: bool, sensitive: bool, section: P::Page, revision: int): bool =
+  val t = told(showing, zone, day, selected, sensitive, section, revision)
+  t.day >= 0 and (t.day > 0 implies onCalendar(t.showing)) and (t.sensitive implies (not(t.selected) and t.day == 0 and t.section == P::Top))
 ```
 
 ### A screen that changed takes a new revision and stops the turn in flight; an unchanged one is ignored
@@ -701,11 +724,11 @@ A reply is for the screen it was asked from. When that screen changes,
 the turn is stopped as by Stop reply.
 
 ```quint
-pure def canLook(c: Conversation, showing: Showing, zone: str, day: int, selected: bool, sensitive: bool): bool =
-  told(showing, zone, day, selected, sensitive, c.context.revision) != c.context
+pure def canLook(c: Conversation, showing: Showing, zone: str, day: int, selected: bool, sensitive: bool, section: P::Page): bool =
+  told(showing, zone, day, selected, sensitive, section, c.context.revision) != c.context
 
-pure def look(c: Conversation, showing: Showing, zone: str, day: int, selected: bool, sensitive: bool): Moved =
-  val seen = { ...c, context: told(showing, zone, day, selected, sensitive, c.context.revision + 1) }
+pure def look(c: Conversation, showing: Showing, zone: str, day: int, selected: bool, sensitive: bool, section: P::Page): Moved =
+  val seen = { ...c, context: told(showing, zone, day, selected, sensitive, section, c.context.revision + 1) }
   if (awaited(c.turn)) halted(c.turn.send.id, seen) else { state: seen, out: List() }
 
 pure def stepAChangedScreenTakesTheNextRevision(before: Conversation, via: str, after: Conversation): bool =

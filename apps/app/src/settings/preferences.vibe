@@ -1,7 +1,7 @@
 // spec/app/settings/preferences.md, "Story: Choose how Alpha looks"; spec/app/settings/preferences.md, "Story: Keep my preferences through a restart"
 import * as KeyValueStore from "effect/persistence/KeyValueStore"
 import * as Prefs from "../../gen/app__settings__preferences.effect.vibe"
-import type { Effect as Out, Event, Look, Sender, Share, Theme } from "../../gen/app__settings__preferences.effect.vibe"
+import type { AgentGoogle, Effect as Out, Event, Look, Sender, Share, Theme } from "../../gen/app__settings__preferences.effect.vibe"
 import * as Pages from "../../gen/app__settings.effect.vibe"
 import { Machine as Shell, showing } from "../../gen/app__shell.effect.vibe"
 import { Device } from "../platform/device.vibe"
@@ -38,8 +38,8 @@ schema PreviousChoices {
   autoLoadMailImages?: boolean
 }
 
-/** What a new phone holds: Alpha asks first, loads no images, and may use the location and the open Browser page and change Gmail and Calendar. */
-const fresh: Choices = { askFirst: true, images: false, shares: ["AgentLocation", "BrowserPage", "GmailChanges", "CalendarEdits"] }
+// spec/app/settings/preferences.md, "A new phone lets Alpha act without asking first, load images in Inbox, use its location and the Browser page open, and change Gmail and Calendar"
+const fresh: Choices = Prefs.newPhone
 
 const look = (): Look => (darkPhone() ? "DarkLook" : "LightLook")
 const json = <A>(schema: Schema.Codec<A, A>) => Schema.fromJsonString(schema)
@@ -67,8 +67,8 @@ effect function keepTheme(keep: number, chosen: Theme, legible: boolean): Event!
   return { type: "themeKept", keep, ok }
 }
 
-// spec/app/settings/preferences.md, "What the phone could not read is taken as asking first, loading no images and sharing nothing"; spec/app/settings/preferences.md, "The device preferences are read when Alpha starts, when Settings opens, and when Alpha comes back while Settings shows, with ten seconds to answer, never while a change or a recovery is in flight"
-effect function readChoices(): (Choices | undefined)!!KeyValueStore.KeyValueStore {
+// spec/app/settings/preferences.md, "What the phone could not read is taken as asking first, loading no images and sharing nothing"; spec/app/settings/preferences.md, "The device preferences are read when Alpha starts, when Settings opens, when Alpha comes back while Settings shows, and after a change the phone did not answer in time, with ten seconds to answer, never while a change or a recovery is in flight"
+effect function readChoices(): (Choices | undefined)!KeyValueStore.KeyValueStoreError!KeyValueStore.KeyValueStore {
   const store = try KeyValueStore.KeyValueStore
   const own = try store.get(keys.choices)
   if (own !== undefined) return Schema.decodeUnknownOption(json(Choices))(own) |> Option.getOrUndefined(%)
@@ -87,24 +87,42 @@ effect function readChoices(): (Choices | undefined)!!KeyValueStore.KeyValueStor
   }
 }
 
+/**
+ * One turn at the device preferences and the host's consent at a time: a save, its host call and any putting back
+ * finish before a read starts or the host is told another consent, as v121's lock kept them.
+ */
+const turn = Semaphore.makeUnsafe(1)
+
 effect function documentRead(docRead: number): Event!!KeyValueStore.KeyValueStore {
-  const choices = readChoices() catch () => undefined
-  return choices === undefined
-    ? { type: "documentRead", docRead, readable: false, askFirst: true, images: false, shares: [] }
-    : { type: "documentRead", docRead, readable: true, askFirst: choices.askFirst, images: choices.images, shares: [...choices.shares] }
+  return try turn.withPermits(1)(effect {
+    const choices = readChoices() catch () => undefined
+    const read: Event = choices === undefined
+      ? { type: "documentRead", docRead, readable: false, askFirst: true, images: false, shares: [] }
+      : { type: "documentRead", docRead, readable: true, askFirst: choices.askFirst, images: choices.images, shares: [...choices.shares] }
+    return read
+  })
 }
 
-effect function saved(save: number, choices: Choices): Event!!KeyValueStore.KeyValueStore {
-  const store = try KeyValueStore.KeyValueStore
-  const ok = effect { try store.set(keys.choices, JSON.stringify(choices)); return true } catch () => false
-  return { type: "documentSaved", save, ok }
+// spec/app/settings/preferences.md, "The agent is launched allowed to change Gmail and Calendar exactly as the phone last read or saved, allowed neither once it could not read them, and Alpha says nothing of it before the first answer"
+effect function saved(save: number, choices: Choices, consent: AgentGoogle): Event!!(KeyValueStore.KeyValueStore | Device) {
+  return try Effect.uninterruptible(turn.withPermits(1)(effect {
+    const store = try KeyValueStore.KeyValueStore
+    const before = store.get(keys.choices) catch () => undefined
+    const ok = effect { try store.set(keys.choices, JSON.stringify(choices)); return true } catch () => false
+    if (!ok || consent.tag !== "Consents") return { type: "documentSaved", save, ok } satisfies Event
+    const taken = try (try Device).agentConsent({ gmailChanges: consent.gmailChanges, calendarEdits: consent.calendarEdits })
+    if (!taken) try ignore(before === undefined ? store.remove(keys.choices) : store.set(keys.choices, before))
+    return { type: "documentSaved", save, ok: taken } satisfies Event
+  }))
 }
 
 // spec/app/settings/preferences.md, "When the device preferences cannot be read, the owner can recover them: the phone resets them to its defaults, and they are read again"
 effect function recovered(recovery: number): Event!!KeyValueStore.KeyValueStore {
-  const store = try KeyValueStore.KeyValueStore
-  const ok = effect { try store.set(keys.choices, JSON.stringify(fresh)); return true } catch () => false
-  return { type: "recovered", recovery, ok, at: untimed }
+  return try turn.withPermits(1)(effect {
+    const store = try KeyValueStore.KeyValueStore
+    const ok = effect { try store.set(keys.choices, JSON.stringify(fresh)); return true } catch () => false
+    return { type: "recovered", recovery, ok, at: untimed } satisfies Event
+  })
 }
 
 // spec/app/settings/preferences.md, "The size shown is the one the phone says it applied; when it cannot say, Alpha says so and reads the size again"
@@ -131,7 +149,7 @@ function carry(fx: Out): Job<Event, KeyValueStore.KeyValueStore | Device | Shell
     when { tag: "SetTextSize", let sizeAsk, let percent }: answer("size", sizeApplied(sizeAsk, percent), { type: "sizeApplied", sizeAsk, result: "NotConfirmed", percent, at: untimed }, "Phone");
     when { tag: "ReadTextSize", let sizeRead }: answer("size", sizeAsked(sizeRead), { type: "giveUpOnSize", now: untimed, at: untimed }, "Phone");
     when { tag: "ReadDocument", let docRead }: answer("document", documentRead(docRead), { type: "giveUpOnDocument", now: untimed }, "Phone");
-    when { tag: "SaveDocument", let save, let saveAskFirst, let saveImages, let saveShares }: answer("save", saved(save, { askFirst: saveAskFirst, images: saveImages, shares: saveShares }), { type: "documentSaved", save, ok: false }, "Phone");
+    when { tag: "SaveDocument", let save, let saveAskFirst, let saveImages, let saveShares, let saveConsent }: answer("save", saved(save, { askFirst: saveAskFirst, images: saveImages, shares: saveShares }, saveConsent), { type: "documentSaved", save, ok: false }, "Phone");
     when { tag: "RecoverDocument", let recovery }: answer("recover", recovered(recovery), { type: "giveUpOnRecovery", now: untimed, at: untimed }, "Phone");
   }
 }
@@ -142,7 +160,7 @@ function timers(state: Prefs.Preferences): ReadonlyArray<Due<Event, [by: Sender]
     [state.keeping.read.status === "Loading", "keep", state.keeping.due, { type: "giveUpKeeping", now: untimed }],
     [state.sizing.read.status === "Loading", "size", state.sizing.due, { type: "giveUpOnSize", now: untimed, at: untimed }],
     [state.document.read.status === "Loading", "document", state.document.due, { type: "giveUpOnDocument", now: untimed }],
-    [state.saving.read.status === "Loading", "save", state.saving.due, { type: "giveUpOnSaving", now: untimed }],
+    [state.saving.read.status === "Loading", "save", state.saving.due, { type: "giveUpOnSaving", now: untimed, at: untimed }],
     [state.recovering.read.status === "Loading", "recover", state.recovering.due, { type: "giveUpOnRecovery", now: untimed, at: untimed }],
   ]
   return waits.flatMap(([busy, key, at, event]) => (busy ? [due<Event, [by: Sender]>(key, at, event, "Phone")] : []))
@@ -150,7 +168,7 @@ function timers(state: Prefs.Preferences): ReadonlyArray<Due<Event, [by: Sender]
 
 const machine = reacting(Prefs, { open: starting, carry, timers })
 
-// spec/app/settings/preferences.md, "The device preferences are read when Alpha starts, when Settings opens, and when Alpha comes back while Settings shows, with ten seconds to answer, never while a change or a recovery is in flight"
+// spec/app/settings/preferences.md, "The device preferences are read when Alpha starts, when Settings opens, when Alpha comes back while Settings shows, and after a change the phone did not answer in time, with ten seconds to answer, never while a change or a recovery is in flight"
 const opened = following(Shell, (shell) => showing(shell, "Settings"), Prefs.Machine, (shown): Event | undefined => (shown ? { type: "opened", at: untimed } : undefined), "Phone")
 
 const resumed = hearing(
@@ -179,6 +197,11 @@ const looked = applying(Prefs.Machine, (state) => Prefs.shown(state), effect (sh
   try sync(() => drawn(shown === "DarkLook"))
 })
 
+// spec/app/settings/preferences.md, "Android's status and navigation bars follow the look Alpha draws"
+const bars = applying(Prefs.Machine, Prefs.barsDark, effect (dark) => {
+  try (try Device).bars(dark)
+})
+
 // spec/app/settings/preferences.md, "Legible text is turned on or off by the owner and kept with the appearance, the same way"
 const legible = applying(Prefs.Machine, (state) => state.legible, effect (on) => {
   try (try Device).mark("legible", on ? "" : undefined)
@@ -189,5 +212,12 @@ const large = applying(Prefs.Machine, Prefs.largeText, effect (on) => {
   try (try Device).mark("large-text", on ? "" : undefined)
 })
 
-/** The owner's preferences, from launch: the look and the text the whole page follows, and what other areas ask before they act. */
-export const preferences = together(machine, opened, resumed, phoneLook, looked, legible, large)
+// spec/app/settings/preferences.md, "The agent is launched allowed to change Gmail and Calendar exactly as the phone last read or saved, allowed neither once it could not read them, and Alpha says nothing of it before the first answer"
+const consented = applying(Prefs.Machine, (state) => state.document.read, effect (read) => {
+  if (read.status !== "Loaded" && read.status !== "Failed") return
+  const said = (try (try Prefs.Machine).get()).agentGoogle
+  if (said.tag === "Consents") try turn.withPermits(1)(ignore((try Device).agentConsent({ gmailChanges: said.gmailChanges, calendarEdits: said.calendarEdits })))
+})
+
+/** The owner's preferences, from launch: the look and the text the whole page follows, what other areas ask before they act, and what the agent is launched allowed to change. */
+export const preferences = together(machine, opened, resumed, phoneLook, looked, bars, legible, large, consented)

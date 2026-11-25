@@ -1,10 +1,15 @@
 import type { ReactNode } from "react";
-import { Ear, KeyRound, ListChecks } from "lucide-react";
+import { Ear, ListChecks, SlidersHorizontal } from "lucide-react";
 import { ListGroup } from "../ListGroup.tsx";
 import { SettingsDeviceSwitch, type SettingsDeviceSwitchProps } from "./SettingsDeviceSwitch.tsx";
 import { SettingsNavRow } from "./SettingsNavRow.tsx";
 import { SettingsPage } from "./SettingsPage.tsx";
 import { type Neighbour, placed, type SettingsPageName, type SettingsPlaceProps } from "./vocabulary.ts";
+
+/** What Alpha may share with a chat turn or change: `Share` in spec/app/settings/preferences.md. */
+export type SettingsShare = "agent-location" | "browser-page" | "gmail-changes" | "calendar-edits" | "telegram-context" | "slack-context";
+
+const shared: SettingsShare[] = ["agent-location", "browser-page", "gmail-changes", "calendar-edits", "telegram-context", "slack-context"];
 
 export type SettingsPrivacyPageProps = SettingsPlaceProps & {
   /** How the phone's read of the device preferences stands. */
@@ -17,6 +22,10 @@ export type SettingsPrivacyPageProps = SettingsPlaceProps & {
   recovering?: boolean;
   /** Called with the owner's choice of Ask before Alpha acts. */
   onAskFirstChange?: (askFirst: boolean) => void;
+  /** What Alpha may share with a chat turn or change, each as read, or off when it could not be read. */
+  shares?: Partial<Record<SettingsShare, boolean>>;
+  /** Called with the owner's choice for one of the shares. */
+  onShareChange?: (share: SettingsShare, on: boolean) => void;
   /** Resets the device preferences to the phone's defaults; offered only when they cannot be read. */
   onRecover?: () => void;
   /** Goes back to the first page. */
@@ -32,22 +41,30 @@ export type SettingsPrivacyPageProps = SettingsPlaceProps & {
 };
 
 /**
- * Privacy: what Alpha may access, the walkthrough to set it up, whether Alpha asks before it acts, and the listener.
+ * Privacy: what Alpha may access, the walkthrough to set it up, whether Alpha asks before it acts, what it may share
+ * with a chat turn or change, and the listener.
  * @model spec/app/settings/index.md
  */
-export function SettingsPrivacyPage({ read, askFirst, saving, recovering, onAskFirstChange, onRecover, onBack, onOpen, onSetUpAccess, onHandOver, place, onPlace, children }: SettingsPrivacyPageProps) {
+export function SettingsPrivacyPage({ read, askFirst, saving, recovering, onAskFirstChange, shares = {}, onShareChange, onRecover, onBack, onOpen, onSetUpAccess, onHandOver, place, onPlace, children }: SettingsPrivacyPageProps) {
   const at = (row: number) => placed({ place, onPlace }, row);
   return (
-    <SettingsPage title="Privacy" onBack={onBack}>
+    <SettingsPage title="Privacy" onBack={onBack} backLabel="Back to Settings">
       <ListGroup>
-        <SettingsNavRow title="Permissions" icon={<ListChecks />} onOpen={onOpen && (() => onOpen("permissions"))} {...at(0)} />
-        <SettingsNavRow title="Set up Alpha access" icon={<KeyRound />} onOpen={onSetUpAccess} {...at(1)} />
-        <SettingsNavRow title="Listener" icon={<Ear />} onOpen={onHandOver && (() => onHandOver("listener"))} {...at(2)} />
-      </ListGroup>
-      <ListGroup>
+        <SettingsNavRow title="Permissions" icon={<SlidersHorizontal />} onOpen={onOpen && (() => onOpen("permissions"))} {...at(0)} />
         <SettingsDeviceSwitch setting="ask-first" read={read} checked={askFirst} saving={saving} recovering={recovering} onChange={onAskFirstChange} onRecover={onRecover} />
       </ListGroup>
+      <ListGroup heading="Share with Alpha">
+        {shared.map((share) => (
+          <SettingsDeviceSwitch key={share} setting={share} read={read} checked={read === "loaded" && shares[share] === true} saving={saving} recovering={recovering} onChange={onShareChange && ((on) => onShareChange(share, on))} />
+        ))}
+      </ListGroup>
+      <ListGroup>
+        <SettingsNavRow title="Listener" icon={<Ear />} onOpen={onHandOver && (() => onHandOver("listener"))} {...at(2)} />
+      </ListGroup>
       {children}
+      <ListGroup>
+        <SettingsNavRow title="Access setup" icon={<ListChecks />} onOpen={onSetUpAccess} {...at(1)} />
+      </ListGroup>
     </SettingsPage>
   );
 }

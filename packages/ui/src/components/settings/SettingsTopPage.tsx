@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { Code, Info, LayoutGrid, Mic, Settings, ShieldCheck, SlidersHorizontal, UserRound, RefreshCw } from "lucide-react";
+import { Code, Info, LayoutGrid, Mic, RefreshCw, Settings, Shield, UserRound } from "lucide-react";
 import { ListGroup } from "../ListGroup.tsx";
 import { StatusDot } from "../StatusDot.tsx";
 import { SettingsAndroidRow } from "./SettingsAndroidRow.tsx";
@@ -12,6 +12,10 @@ export type SettingsTopPageProps = SettingsAndroidProps &
   SettingsPlaceProps & {
     /** This is a development build, which has the Developer page. */
     developer?: boolean;
+  /** The device can open Android settings. */
+  onPhone?: boolean;
+  /** Commands in the Settings header. */
+  actions?: ReactNode;
     /** The voice area could not confirm the microphone stopped: the listener is linked from here. */
     micMayBeOn?: boolean;
     /** What Alpha tells about the last start of an Android page. */
@@ -22,11 +26,13 @@ export type SettingsTopPageProps = SettingsAndroidProps &
     onHandOver?: (neighbour: Neighbour) => void;
     /** The rows other areas own on this page, such as the update rows. */
     children?: ReactNode;
+    /** The shell's Back control when it offers one. */
+    leading?: ReactNode;
   };
 
 const links: SettingsPageLink[] = [
-  { page: "general", title: "General", icon: <SlidersHorizontal /> },
-  { page: "privacy", title: "Privacy", icon: <ShieldCheck /> },
+  { page: "general", title: "General", icon: <Settings /> },
+  { page: "privacy", title: "Privacy", icon: <Shield /> },
   { page: "apps", title: "Apps", icon: <LayoutGrid /> },
   { page: "about", title: "About", icon: <Info /> },
 ];
@@ -37,27 +43,31 @@ const links: SettingsPageLink[] = [
  * above it are shown.
  * @model spec/app/settings/index.md
  */
-export function SettingsTopPage({ developer = false, micMayBeOn = false, told, onOpen, onHandOver, starting, onAndroid, place, onPlace, children }: SettingsTopPageProps) {
+export function SettingsTopPage({ developer = false, onPhone = true, actions, micMayBeOn = false, told, onOpen, onHandOver, starting, onAndroid, place, onPlace, children, leading }: SettingsTopPageProps) {
   const at = (row: number) => placed({ place, onPlace }, row);
   const android = { starting, onAndroid };
   return (
-    <SettingsPage title="Settings" told={told}>
+    <SettingsPage title="Settings" leading={leading} top told={told} actions={actions}>
       {micMayBeOn ? (
         <ListGroup>
           <SettingsNavRow title="Microphone may be on" icon={<Mic />} value={<StatusDot status="error" label="Needs attention" />} onOpen={onHandOver && (() => onHandOver("listener"))} {...at(0)} />
         </ListGroup>
       ) : null}
       <ListGroup>
-        <SettingsNavRow title="Account and plan" icon={<UserRound />} onOpen={onHandOver && (() => onHandOver("account-and-plan"))} {...at(1)} />
+        <SettingsNavRow title="Account" icon={<UserRound />} onOpen={onHandOver && (() => onHandOver("account-and-plan"))} {...at(1)} />
       </ListGroup>
-      <ListGroup>
-        <SettingsPageLinks links={links} first={2} onOpen={onOpen} place={place} onPlace={onPlace} />
-        {developer ? <SettingsNavRow title="Developer" icon={<Code />} onOpen={onOpen && (() => onOpen("developer"))} {...at(6)} /> : null}
-      </ListGroup>
-      <ListGroup>
-        <SettingsAndroidRow target="android-home" title="Android settings" icon={<Settings />} {...android} {...at(7)} />
-        <SettingsAndroidRow target="accounts-sync" title="Accounts and sync" icon={<RefreshCw />} {...android} {...at(8)} />
-      </ListGroup>
+      {links.map((link, index) => (
+        <ListGroup key={link.page}>
+          <SettingsPageLinks links={[link]} first={index + 2} onOpen={onOpen} place={place} onPlace={onPlace} />
+        </ListGroup>
+      ))}
+      {developer ? <ListGroup><SettingsNavRow title="Developer" icon={<Code />} onOpen={onOpen && (() => onOpen("developer"))} {...at(6)} /></ListGroup> : null}
+      {onPhone ? (
+        <ListGroup>
+          <SettingsAndroidRow target="android-home" title="Android settings" icon={<Settings />} {...android} {...at(7)} />
+          <SettingsAndroidRow target="accounts-sync" title="Accounts and sync" icon={<RefreshCw />} {...android} {...at(8)} />
+        </ListGroup>
+      ) : null}
       {children}
     </SettingsPage>
   );

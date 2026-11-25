@@ -3,7 +3,8 @@ import type { StatusDotProps } from "../StatusDot.tsx";
 /** The pages of Settings, as `Page` in spec/app/settings/index.md names them. */
 export type SettingsPageName =
   | "top" | "general" | "display" | "sound" | "notifications" | "battery" | "phone" | "privacy" | "permissions" | "apps"
-  | "inbox" | "workflows" | "calendar" | "camera" | "photos" | "maps" | "notes" | "about" | "activity" | "licences" | "developer" | "problems";
+  | "inbox" | "workflows" | "calendar" | "camera" | "photos" | "maps" | "notes" | "about" | "activity" | "licences" | "developer" | "problems"
+  | "network" | "carrier";
 
 /** What another area owns, which a row hands over to: `Neighbour` in spec/app/settings/index.md. */
 export type Neighbour =
@@ -15,10 +16,10 @@ export type AndroidTarget =
   | "android-home" | "accounts-sync" | "wifi-networks" | "bluetooth-devices" | "mobile-networks" | "airplane-mode" | "screen-lock"
   | "default-apps" | "display-settings" | "brightness" | "sound-settings" | "do-not-disturb" | "battery-saver" | "alpha-alerts"
   | "alert-channel" | "notification-access" | "workflow-alerts" | "app-permissions" | "photo-permissions" | "location-settings"
-  | "about-phone" | "developer-options";
+  | "about-phone" | "developer-options" | "all-files-access" | "internet-panel" | "sim-cards" | "access-point-names";
 
 /** A page of Android's settings to open; a channel's page names its channel. */
-export type AndroidStart = { target: AndroidTarget; channel?: number };
+export type AndroidStart = { target: AndroidTarget; channel?: string };
 
 /** What Alpha tells about the last start: Android opened a nearby page, none, or did not answer. */
 export type AndroidTold = "nearby" | "unavailable" | "no-answer";

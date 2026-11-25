@@ -1,0 +1,93 @@
+// spec/app/photos/index.md, "Only the newest read's answer is shown, only while Photos is showing, and a further page only adds older items"
+import type { MediaCursor, MediaItem, OwnedAlbum, Reviewed } from "@elizaos/os/bridges/definitions/media"
+import type { BrowserCapture } from "../platform/photos.vibe"
+
+/** The payload behind a numbered item. Its native revision is the one shown to the owner. */
+export type Row = { readonly kind: "phone"; readonly item: MediaItem } | { readonly kind: "browser"; readonly item: BrowserCapture }
+
+export interface ListedAlbum {
+  readonly title: string
+  readonly target: "favorites" | "videos" | "camera" | "screenshots" | `custom:${string}`
+  readonly owned?: OwnedAlbum
+  readonly count: number
+  readonly cover?: string
+}
+
+export interface CatalogView {
+  readonly rows: ReadonlyMap<number, Row>
+  readonly albums: ReadonlyMap<number, ListedAlbum>
+  readonly trashCount: number
+}
+
+/** Native and browser payloads, separate from the machine's accepted identities. */
+export service Catalog {
+  index(rows: readonly Row[]): number[]!!
+  shelves(albums: readonly ListedAlbum[], trashed: number): number[]!!
+  displayed(): CatalogView!!
+  publish(rows: readonly Row[], numbers: readonly number[]): void!!
+  cursor(bin: boolean): (MediaCursor | null)!!
+  next(bin: boolean, cursor: MediaCursor | null): void!!
+  revision(): number!!
+  changed(): void!!
+  clear(): void!!
+}
+
+const period = 1024
+
+/** The time taken, in milliseconds, as shown by the platform. */
+export function taken(row: Row): number {
+  if (row.kind === "browser") return row.item.created
+  return [row.item.takenAt, row.item.dateTaken, row.item.taken, row.item.date].find((date) => date !== undefined && date > 0) ?? 0
+}
+
+/** The exact item and revision displayed for a native mutation. */
+export function reviewed(row: Row | undefined): Reviewed | undefined {
+  if (row?.kind !== "phone") return undefined
+  return { id: row.item.id, revision: row.item.mutationRevision ?? row.item.revision }
+}
+
+export const catalog = Layer.sync(Catalog, () => {
+  const rows = new Map<number, Row>()
+  const numbers = new Map<string, number>()
+  const ranks = new Map<number, number>()
+  const albums = new Map<number, ListedAlbum>()
+  const albumNumbers = new Map<string, number>()
+  let listing: MediaCursor | null = null
+  let trash: MediaCursor | null = null
+  let revision = 1
+  let trashCount = 0
+  return {
+    index: (page: readonly Row[]) => sync(() => page.map((row) => {
+      const known = numbers.get(row.item.id)
+      if (known !== undefined) return known
+      const date = Math.max(1, Math.min(Math.floor(Number.MAX_SAFE_INTEGER / period) - 1, Math.trunc(taken(row))))
+      const time = date * period
+      const number = ranks.get(time) ?? time
+      ranks.set(time, number - 1)
+      numbers.set(row.item.id, number)
+      return number
+    })),
+    shelves: (shelf: readonly ListedAlbum[], trashed: number) => sync(() => {
+      albums.clear()
+      trashCount = trashed
+      return shelf.map((album) => {
+        const number = albumNumbers.get(album.target) ?? albumNumbers.size + 1
+        albumNumbers.set(album.target, number)
+        albums.set(number, album)
+        return number
+      })
+    }),
+    displayed: () => sync(() => ({ rows, albums, trashCount })),
+    publish: (page: readonly Row[], ids: readonly number[]) => sync(() => {
+      page.forEach((row, at) => {
+        const id = ids[at]
+        if (id !== undefined) rows.set(id, row)
+      })
+    }),
+    cursor: (bin: boolean) => sync(() => bin ? trash : listing),
+    next: (bin: boolean, cursor: MediaCursor | null) => sync(() => { if (bin) trash = cursor; else listing = cursor }),
+    revision: () => sync(() => revision),
+    changed: () => sync(() => { revision += 1 }),
+    clear: () => sync(() => { rows.clear(); albums.clear(); listing = null; trash = null; trashCount = 0; revision += 1 }),
+  }
+})

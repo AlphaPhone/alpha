@@ -1,0 +1,172 @@
+// spec/app/maps/index.md, "The screen holds its connection, its trip, the search, the place on the card, the directions sheet, the saved places, the Calendar event it came from, the agent's question and the agent's last read"
+import type { CloudClient } from "../platform/cloud.vibe"
+import type { Point } from "./geometry.ts"
+
+/** What Cloud answered about the account's Maps: its provider, coverage, tiles and credits. */
+export type Coverage = Awaited<ReturnType<CloudClient["mapsCapabilities"]>>
+
+module web {
+  /** A random id for a handle that names a place on this phone only. @throws {never} */
+  export function fresh(): string {
+    return globalThis.crypto.randomUUID()
+  }
+}
+import { fresh } from web
+
+/** A place of the map beyond its number, which the spec never holds: what the provider said of it, or a dropped pin. */
+export interface Spot {
+  readonly name: string
+  readonly category: string
+  readonly at: Point
+  readonly providerId: string
+  /** The provider's id of the place, or none for a pin. */
+  readonly id: string
+  readonly google: boolean
+  readonly address?: string
+  readonly phone?: string
+  readonly website?: string
+  readonly hours?: string
+}
+
+/** One turn of a route: what to do, where, and how far it runs. */
+export interface Turn {
+  readonly instruction: string
+  readonly at: Point
+  readonly meters: number
+}
+
+/** A route beyond its ticket: its length, time, line and turns. */
+export interface Way {
+  readonly meters: number
+  readonly seconds: number
+  readonly line: readonly Point[]
+  readonly turns: readonly Turn[]
+}
+
+/** Where the phone was last seen, and whether the fix was only approximate. */
+export interface Here {
+  readonly at: Point
+  readonly accuracy: number
+  readonly approximate: boolean
+}
+
+/** A view of the map: its bounds in degrees and its whole zoom. */
+export interface View {
+  readonly north: number
+  readonly south: number
+  readonly east: number
+  readonly west: number
+  readonly zoom: number
+}
+
+/** What Maps last learned of the world, by the numbers its machine keeps. */
+export interface Seen {
+  readonly spots: ReadonlyMap<number, Spot>
+  readonly results: ReadonlyArray<number>
+  /** The places the newest search for a starting point found, in the provider's order. */
+  readonly origins: ReadonlyArray<number>
+  readonly ways: ReadonlyMap<number, ReadonlyArray<Way>>
+  readonly here: Here | undefined
+  /** Each coverage read's answer, by the ticket of the read: the machine decides which one is in force. */
+  readonly coverages: ReadonlyMap<number, Coverage>
+  /** The view the camera last settled on, and the area the last copyright request covers. */
+  readonly view: View | undefined
+  readonly credited: View | undefined
+  /** How many times "Use my location" asked the map to show the phone. */
+  readonly showings: number
+}
+
+const empty: Seen = { spots: new Map(), results: [], origins: [], ways: new Map(), here: undefined, coverages: new Map(), view: undefined, credited: undefined, showings: 0 }
+const accounts = new Map<string, number>()
+let current: Seen = empty
+const listeners = new Set<() => void>()
+const byProvider = new Map<string, number>()
+const handles = new Map<number, string>()
+let next = 1
+
+function change(patch: Partial<Seen>): void {
+  current = { ...current, ...patch }
+  for (const listener of [...listeners]) listener()
+}
+
+/**
+ * The world around the Maps machine: the places, routes, position and tiles its numbers stand for. The shell writes
+ * it before it tells the machine, and the screen reads it with `useSyncExternalStore`. It holds no rule.
+ */
+export const atlas = {
+  snapshot: (): Seen => current,
+  subscribe(listener: () => void): () => void {
+    listeners.add(listener)
+    return () => { listeners.delete(listener) }
+  },
+  // spec/app/maps/places.md, "A saved place keeps its name, its coordinates and the provider's identity of it, and nothing else"
+  /** The number of `spot`: the one the same place already has (its provider's id, or for a pin its coordinates), or a new one never given before. */
+  numberOf(spot: Spot): number {
+    const key = spot.id === "" ? `@${spot.at.lat},${spot.at.lng}` : `${spot.providerId}/${spot.id}`
+    const number = byProvider.get(key) ?? next++
+    byProvider.set(key, number)
+    change({ spots: new Map(current.spots).set(number, { ...current.spots.get(number), ...spot }) })
+    return number
+  },
+  spot: (place: number): Spot | undefined => current.spots.get(place),
+  /** The places a search found, in the provider's order. */
+  found(places: ReadonlyArray<number>): void {
+    change({ results: places })
+  },
+  /** The places a search for a starting point found. */
+  originsFound(places: ReadonlyArray<number>): void {
+    change({ origins: places })
+  },
+  /** The routes a plan's `ticket` brought, in the provider's order. */
+  routed(ticket: number, ways: ReadonlyArray<Way>): void {
+    change({ ways: new Map(current.ways).set(ticket, ways) })
+  },
+  /** The route `chosen` of those `ticket` brought. */
+  way: (ticket: number, chosen: number): Way | undefined => current.ways.get(ticket)?.[chosen],
+  located(here: Here): void {
+    change({ here })
+  },
+  /** "Use my location" found the phone: the map centres on it. */
+  showMe(): void {
+    change({ showings: current.showings + 1 })
+  },
+  /** The answer of the coverage read `ticket`. */
+  covered(ticket: number, coverage: Coverage): void {
+    change({ coverages: new Map(current.coverages).set(ticket, coverage) })
+  },
+  coverage: (ticket: number): Coverage | undefined => current.coverages.get(ticket),
+  viewed(view: View): void {
+    change({ view })
+  },
+  /** The area the copyright now asked for covers. */
+  creditedFor(credited: View): void {
+    change({ credited })
+  },
+  /** The number the machine knows the account `id` by: the one it already has, or the next. */
+  accountOf(id: string): number {
+    const known = accounts.get(id) ?? accounts.size + 1
+    accounts.set(id, known)
+    return known
+  },
+  /** The handle that names `place` to the agent on this phone: `maps_` and a random id, never a provider's id. */
+  handleOf(place: number): string {
+    const known = handles.get(place)
+    if (known !== undefined) return known
+    const made = `maps_${fresh()}`
+    handles.set(place, made)
+    return made
+  },
+  // spec/app/maps/index.md, "A place's details are read from its provider once it is on the card, and shown only while it still is"
+  /** Maps left the screen: what providers said of places beyond their names, positions and identities is forgotten. */
+  forgetDetails(): void {
+    change({ spots: new Map([...current.spots].map(([place, { address: _address, phone: _phone, website: _website, hours: _hours, ...kept }]) => [place, kept])) })
+  },
+  /** Everything of the last account, which another account never sees. */
+  forget(): void {
+    byProvider.clear()
+    handles.clear()
+    const kept = new Map([...current.spots].filter(([, spot]) => !spot.google))
+    current = { ...empty, spots: kept, here: current.here, view: current.view, showings: current.showings }
+    for (const listener of [...listeners]) listener()
+  },
+}

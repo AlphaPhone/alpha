@@ -1,0 +1,34 @@
+// spec/app/photos/index.md, "Story: Browse the library"; spec/app/photos/viewer.md, "Story: Look at a photo or video"
+import * as Library from "../../gen/app__photos.effect.vibe"
+import * as Trash from "../../gen/app__photos__trash.effect.vibe"
+import * as Viewer from "../../gen/app__photos__viewer.effect.vibe"
+import { scanBack } from "../files/scan.vibe"
+import * as Assistant from "../../gen/app__photos__agent.effect.vibe"
+
+/** Back closes the topmost Photos surface before it leaves the app. */
+export const back = effect {
+  if (try scanBack) return true
+  const review = try Assistant.Machine
+  if ((try review.get()).stage === "Shown") return Exit.isSuccess(try exit(review.send({ type: "decline" }, "Owner")))
+  const shown = try Viewer.Machine
+  const view = try shown.get()
+  if (view.cropping) return Exit.isSuccess(try exit(shown.send({ type: "cancelCrop" }, "Owner")))
+  if (view.editing) return Exit.isSuccess(try exit(shown.send({ type: "cancelEdit" }, "Owner")))
+  if (view.info) return Exit.isSuccess(try exit(shown.send({ type: "toggleInfo" }, "Owner")))
+  if (view.open !== 0) return Exit.isSuccess(try exit(shown.send({ type: "close" }, "Owner")))
+  const trashed = try Trash.Machine
+  const bin = try trashed.get()
+  if (bin.open) {
+    const event: Trash.Event = bin.prepared.length !== 0 ? { type: "cancelForever" }
+      : bin.selecting ? { type: "endSelect" } : { type: "leave" }
+    return Exit.isSuccess(try exit(trashed.send(event, "Owner")))
+  }
+  const controller = try Library.Machine
+  const state = try controller.get()
+  if (state.choosingImage) return Exit.isSuccess(try exit(controller.send({ type: "closeImageChoice", choice: state.imageChoice }, "Owner")))
+  const event: Library.Event = state.shelf.dialog !== "NoDialog" ? { type: "closeDialog" }
+    : state.selecting ? { type: "endSelect" }
+    : state.album !== 0 ? { type: "closeAlbum" }
+    : { type: "showTab", tab: "Library" }
+  return Exit.isSuccess(try exit(controller.send(event, "Owner")))
+}

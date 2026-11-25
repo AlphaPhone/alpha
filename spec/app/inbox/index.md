@@ -184,6 +184,14 @@ pure def canSearch(s: Mailbox, query: str): bool =
 pure def search(s: Mailbox, query: str): Moved = asking(0, turned({ ...s.selected, query: query }, s))
 ```
 
+### Back from a search shows its folder without the search, before Back leaves Inbox
+
+```quint
+pure def canClearSearch(s: Mailbox): bool = s.selected.query != "" and canSearch(s, "")
+
+pure def clearSearch(s: Mailbox): Moved = search(s, "")
+```
+
 ### Refresh reads the first page again, one read at a time, and keeps the list on screen until it answers
 
 Retry after a failed read is the same.
@@ -391,6 +399,22 @@ pure def unchoose(s: Mailbox, message: int): Mailbox =
   { ...s, chosen: s.chosen.exclude(Set(message)), revision: s.revision + 1 }
 ```
 
+### Select all chooses every message the list shows, in one change
+
+The messages are those on screen, which the shell names; a choice that
+adds nothing is no change.
+
+```quint
+pure val shownValues = Set(Set(1), Set(1, 2))
+
+pure def canChooseAll(s: Mailbox, shown: Set[int]): bool =
+  readable(s) and s.pages > 0 and not(s.saved) and shown.size() >= 1 and not(shown.contains(0))
+    and not(shown.subseteq(s.chosen))
+
+pure def chooseAll(s: Mailbox, shown: Set[int]): Mailbox =
+  { ...s, chosen: s.chosen.union(shown), revision: s.revision + 1 }
+```
+
 ### A swipe chooses that message alone, to be archived
 
 ```quint
@@ -463,8 +487,9 @@ pure def checkAccess(s: Mailbox): Moved =
 
 ### The answer names the connected accounts, their credentials and grants; the account chosen stays selected while it is connected, else the one account that may be read, else none and the owner chooses
 
-A list kept under a credential the account no longer has is dropped, and
-with it the saved list on screen. With read access the first page is
+A list kept under a credential the account no longer has is dropped.
+Replacing the selected credential clears the live list, its unread count,
+and the read in flight. With read access the first page is
 read when access is new, or when nothing fresh is on screen. Without it
 the screen is emptied. A failed check changes nothing.
 
@@ -484,11 +509,17 @@ pure def accountsAnswered(s: Mailbox, ticket: int, ok: bool, connected: List[Lin
   val told = { ...s, accounts: R::answer(s.accounts, ok) }
   val stays = isConnected(connected, s.selected.account)
   val account = if (stays) s.selected.account else soleReadable(connected)
-  val was = readable(s) and stays
+  val known = linkOf(s.connected, account).credential
+  val previous = if (known != 0) known else if (s.kept.account == account) s.keptCredential else 0
+  val rotated = stays and previous != 0 and linkOf(connected, account).credential != previous
+  val was = readable(s) and stays and not(rotated)
   val stamped = if (keptOutlived(connected, s)) withoutKept(told) else told
   val fresh = { ...stamped, connected: connected, checked: ticket, failure: if (s.failure == Revoked) Fine else s.failure }
   val placed =
-    if (stays) fresh
+    if (rotated) {
+      ...emptied(account, fresh), list: { ...fresh.list, status: R::Idle }
+    }
+    else if (stays) fresh
     else turned({ account: account, folder: Incoming, query: "" }, { ...fresh, searchable: false })
   if (not(ok)) { state: told, out: List() }
   else if (not(readable(placed))) { state: emptied(account, placed), out: List() }

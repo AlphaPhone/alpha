@@ -1,13 +1,11 @@
-// spec/app/settings/network.md, "Story: Join a nearby network"; spec/app/settings/carrier.md, "Story: Read what my carrier needs to activate a SIM"; spec/app/settings/passwords.md, "Story: Use my saved passwords only after Android unlocks them"
+// spec/app/settings/network.md, "Story: Join a nearby network"; spec/app/settings/carrier.md, "Story: Read what my carrier needs to activate a SIM"
 import * as Carrier from "../../gen/app__settings__carrier.effect.vibe"
 import * as Network from "../../gen/app__settings__network.effect.vibe"
-import * as Vault from "../../gen/app__settings__passwords.effect.vibe"
 import * as Pages from "../../gen/app__settings.effect.vibe"
 import { CarrierSetup } from "../platform/carrier.vibe"
 import { Device } from "../platform/device.vibe"
-import { Passwords } from "../platform/passwords.vibe"
 import { type Nearby, WiFi } from "../platform/wifi.vibe"
-import { type Due, type Job, answer, due, following, hearing, reacting, run, together, untimed } from "../runtime/reactor.vibe"
+import { type Due, type Job, answer, due, following, hearing, reacting, together, untimed } from "../runtime/reactor.vibe"
 
 /** The networks the last scan found, kept beside the machine that counts them: the rows of the Network page. */
 export service Found {
@@ -100,46 +98,17 @@ function carrierTimers(state: Carrier.Carrier): ReadonlyArray<Due<Carrier.Event,
 const carrier = together(
   reacting(Carrier, { carry: carryCarrier, timers: carrierTimers }),
   // spec/app/settings/carrier.md, "Opening the page reads nothing; leaving it, the phone locking or Alpha going to the background forgets everything it read, and an answer that comes later is refused"
-  following(Pages.Machine, (state) => state.page === "CarrierPage", Carrier.Machine, (shown): Carrier.Event => (shown ? { type: "show" } : { type: "hideCarrier" })),
-  hearing(Stream.unwrap(effect { return (try Device).visible }), Carrier.Machine, (visible): Carrier.Event | undefined => (visible ? undefined : { type: "hideCarrier" })),
+  hearing(
+    Stream.unwrap(effect {
+      const pages = Stream.map((try Pages.Machine).changes, (state) => state.page === "CarrierPage")
+      const device = try Device
+      const visible = Stream.concat(Stream.fromEffect(device.showing()), device.visible)
+      return Stream.changes(Stream.map(Stream.zipLatest(pages, visible), ([shown, front]) => shown && front))
+    }),
+    Carrier.Machine,
+    (shown): Carrier.Event => shown ? { type: "show" } : { type: "hideCarrier" },
+  ),
 )
 
-// spec/app/settings/passwords.md, "The vault is unavailable for a reason, locked, damaged, or unlocked still, which lists the entries"
-effect function vaultRead(visit: number): Vault.Event!!Passwords {
-  const state = try (try Passwords).state()
-  return { type: "vaultRead", visit, ...state }
-}
-
-// spec/app/settings/passwords.md, "Only Android's own authentication unlocks the vault, and the list follows the unlock"
-effect function listed(visit: number): Vault.Event!!Passwords {
-  const entries = try (try Passwords).list()
-  return Option.isSome(entries) ? { type: "listed", visit, entries: [...entries.value] } : { type: "taskAnswered", visit, answer: "WasLocked" }
-}
-
-effect function ran(visit: number, task: Vault.Task, id: string, revision: number): Vault.Event!!Passwords {
-  return { type: "taskAnswered", visit, answer: try (try Passwords).run(task, id, revision) }
-}
-
-const locked = effect {
-  try (try Passwords).run("Locking", "", 0)
-}
-
-function carryVault(fx: Vault.Effect): Job<Vault.Event, Passwords, []> {
-  return match (fx) {
-    when { tag: "ReadVault", let visit }: answer(`vault ${visit}`, vaultRead(visit), { type: "taskAnswered", visit, answer: "Refused" });
-    when { tag: "ListEntries", let visit }: answer(`list ${visit}`, listed(visit), { type: "taskAnswered", visit, answer: "WasLocked" });
-    when { tag: "RunTask", let visit, let task, let id, let revision }: task === "Locking"
-      ? run(`lock ${visit}`, locked)
-      : answer(`task ${visit}`, ran(visit, task, id, revision), { type: "taskAnswered", visit, answer: "Refused" });
-  }
-}
-
-const passwords = together(
-  reacting(Vault, { carry: carryVault }),
-  // spec/app/settings/passwords.md, "Opening the page starts a new visit that asks the vault how it is, and the agent observes nothing until the page is left"; spec/app/settings/passwords.md, "Alpha going to the background locks the vault, and leaving the page ends the visit and forgets everything"
-  following(Pages.Machine, (state) => state.page === "PasswordsPage", Vault.Machine, (shown): Vault.Event => (shown ? { type: "openPage" } : { type: "leavePage" })),
-  hearing(Stream.unwrap(effect { return (try Device).visible }), Vault.Machine, (visible): Vault.Event | undefined => (visible ? undefined : { type: "lock" })),
-)
-
-/** The pages that reach the phone's own hardware and vault: Network, Carrier & SIM setup and Passwords. */
-export const phone = together(network, carrier, passwords)
+/** The pages that reach the phone's own radios: Network and Carrier & SIM setup. */
+export const phone = together(network, carrier)

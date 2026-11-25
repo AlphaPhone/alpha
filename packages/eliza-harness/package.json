@@ -10,14 +10,9 @@
     "eliza-harness": "./src/cli.ts"
   },
   "exports": {
-    "./checkout": "./src/checkout.ts",
-    "./services": "./src/services.ts",
-    "./serve": "./src/serve.ts",
-    "./setup": "./src/setup.ts",
-    "./owned": "./src/owned.ts",
-    "./pinned": {
-      "types": "./dist/src/pinned.d.ts",
-      "default": "./dist/src/pinned.js"
+    ".": {
+      "types": "./dist/src/index.d.ts",
+      "default": "./dist/src/index.js"
     }
   },
   "scripts": {

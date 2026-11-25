@@ -139,6 +139,24 @@ pure def remember(s: Recent, key: int, by: Actor): Moved =
   { state: updated, out: dropped(s, updated) }
 ```
 
+### The earlier Alpha's Recent is carried over once, while this one is still empty: each document it held access to becomes a row of its own, the newest first; one it held without access, and the document it had open, are not carried
+
+The earlier Alpha kept each picked document by the selection Android gave
+it, which the phone still holds; the shell gives the earlier selections,
+the oldest first, at most twenty-four. A restart closes the viewer, so the
+document open when the earlier Alpha stopped is not shown again.
+
+```quint
+pure val keptValues = Set(List(), List("a"), List("a", "b"))
+
+pure def canAdopt(s: Recent, kept: List[str], by: Actor): bool =
+  by == Phone and kept.length() > 0 and kept.length() <= limit and s.rows.length() == 0 and s.issued == 0
+
+pure def adopt(s: Recent, kept: List[str], by: Actor): Recent = kept.foldl(s, (acc, selection) => given(Picked, 0, acc))
+
+pure def sometimesTheEarlierRecentWasCarried(s: Recent): bool = s.rows.length() > 1 and s.rows.every(r => r.origin == Picked and r.grant != 0)
+```
+
 ### The recent list never holds more than twenty-four rows
 
 ```quint

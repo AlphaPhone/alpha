@@ -6,7 +6,10 @@ import https from "node:https";
 import { type AddressInfo, createServer } from "node:net";
 import os from "node:os";
 import path from "node:path";
+import { pipeline } from "node:stream";
+import { Effect } from "effect";
 import { prepared } from "./checkout.ts";
+import { builtPack } from "./pack.ts";
 
 /** What the model answers next: the pieces of a reply, or one piece and then nothing until the caller gives up. */
 export type Reply = { readonly kind: "text"; readonly parts: readonly string[] } | { readonly kind: "stall"; readonly first: string };
@@ -21,9 +24,21 @@ export interface DeviceKey {
 }
 
 /**
+ * A real model the local cloud's provider forwards every call to, in place of the scripted one: an OpenAI-compatible
+ * endpoint, the model it is asked for, the output cap the cloud holds for a call that names none, and its key, which
+ * stays in this process and goes only to that endpoint.
+ */
+export interface RealModel {
+  readonly baseUrl: string;
+  readonly model: string;
+  readonly defaultMaxTokens: number;
+  readonly key: string;
+}
+
+/**
  * The local eliza cloud: eliza's own cloud command (`elizaos-cloud serve`) over a database of this run, with its
  * staging mailbox, an operator who funds each owner, and, where a real deployment has a model provider and a payment
- * provider, a scripted model and a read-only catalog of the two plans.
+ * provider, a scripted model or a real one, and a read-only catalog of the two plans.
  */
 export interface Cloud {
   /** The https origin the agent calls, and the certificate authority it must trust for it: an agent takes no other kind of origin. */
@@ -31,6 +46,8 @@ export interface Cloud {
   readonly caFile: string;
   /** The cloud's own listener, plain HTTP on loopback: what the page's proxy and the journeys call. */
   readonly local: string;
+  /** The one model it offers, as its profile and an agent's launch name it: the real model's own id, so the agent asks it as it would on the phone. */
+  readonly model: string;
   /** Where the scripted model is told what to say and asked what it heard (`/operator/model`, `/operator/asked`). */
   readonly provider: string;
   /** Each owner the cloud was started with, by email: signed in by the mailed code, with a device key, and funded. */
@@ -47,10 +64,10 @@ export interface Agent {
 
 const node = process.execPath;
 const base64url = (bytes: Buffer) => bytes.toString("base64url");
-/** The one model the local cloud offers, as the agent's launch and the cloud's profile both name it. */
-const model = "alpha-chat";
+/** The scripted model's id, which no provider serves: the one model the local cloud offers where it is given no real one. */
+const scriptedModel = "alpha-chat";
 /** Alpha as the cloud's staging registry knows it: the client a device signs in as. */
-const client = { clientId: "ai.alpha.phone", displayName: "Alpha", androidPackage: "ai.alpha.phone", certFingerprints: [Array.from({ length: 32 }, () => "AA").join(":")] };
+const client = { clientId: "ai.alphacompute.alphaphone", displayName: "Alpha", androidPackage: "ai.alphacompute.alphaphone", certFingerprints: [Array.from({ length: 32 }, () => "AA").join(":")] };
 
 /** A directory only this user reads, as the agent demands of its state. */
 function owned(directory: string) {
@@ -64,7 +81,7 @@ export const scratch = () => fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(
 const children = new Set<ChildProcess>();
 process.once("exit", () => { for (const child of children) child.kill("SIGKILL"); });
 
-export function ended(child: ChildProcess) {
+function ended(child: ChildProcess) {
   return new Promise<void>((done) => {
     children.delete(child);
     if (child.exitCode !== null || child.signalCode !== null) return done();
@@ -73,7 +90,7 @@ export function ended(child: ChildProcess) {
   });
 }
 
-export async function freePort() {
+async function freePort() {
   const server = createServer();
   await new Promise<void>((done) => server.listen(0, "127.0.0.1", done));
   const { port } = server.address() as AddressInfo;
@@ -89,11 +106,11 @@ interface Answer { readonly status: number; readonly text: string }
 function exchange(url: string, init: { method?: string; headers?: Record<string, string>; body?: unknown; within?: number } = {}): Promise<Answer> {
   return new Promise((done, fail) => {
     const body = init.body === undefined ? undefined : JSON.stringify(init.body);
-    const request = http.request(url, { method: init.method ?? (body === undefined ? "GET" : "POST"), headers: { ...(body === undefined ? {} : { "content-type": "application/json" }), ...init.headers } }, (response) => {
+    const request = http.request(url, { method: init.method ?? (body === undefined ? "GET" : "POST"), timeout: init.within, headers: { ...(body === undefined ? {} : { "content-type": "application/json" }), ...init.headers } }, (response) => {
       let text = "";
       response.setEncoding("utf8").on("data", (part: string) => { text += part; }).on("end", () => done({ status: response.statusCode ?? 0, text }));
     });
-    if (init.within !== undefined) request.setTimeout(init.within, () => request.destroy(new Error("no answer in time")));
+    if (init.within !== undefined) request.on("timeout", () => request.destroy(new Error("no answer in time")));
     request.on("error", fail).end(body);
   });
 }
@@ -103,7 +120,7 @@ async function answering(url: string, gone: () => string | undefined) {
   while (!(await exchange(url, { within: 2_000 }).then((answer) => answer.status === 200, () => false))) {
     const why = gone();
     if (why !== undefined) throw new Error(why);
-    await new Promise((done) => setTimeout(done, 100));
+    await Effect.runPromise(Effect.sleep(100));
   }
 }
 
@@ -115,9 +132,38 @@ export async function said<A>(url: string, init?: Parameters<typeof exchange>[1]
 
 interface Message { readonly role: string; readonly content?: unknown }
 
+/** A tool of a chat request, as the cloud forwards it to its provider. */
+interface Tool { readonly type: string; readonly function: { readonly name: string; readonly strict?: boolean } }
+
+/**
+ * `tools` strict only where every one is, and otherwise none of them, as Cerebras takes them: it refuses a list that
+ * mixes them (elizaOS/eliza#40482, #40485). The agent already sends Alpha's model a uniform list; this keeps any other
+ * caller of the local cloud, such as a journey's own call, from a refusal the phone never meets.
+ */
+const uniformTools = (tools: readonly Tool[]): Tool[] =>
+  tools.every((tool) => tool.function.strict === true) ? [...tools] : tools.map(({ function: { strict: _strict, ...declared }, ...tool }) => ({ ...tool, function: declared }));
+
+/** Send the cloud's call on to `real`, which the cloud already asks for by its own id, under its key, and its answer back as it comes, a stream included. */
+function forwarded(real: RealModel, input: Record<string, unknown>, outgoing: ServerResponse) {
+  const tools = input.tools as readonly Tool[] | undefined;
+  const url = new URL(`${real.baseUrl}/chat/completions`);
+  const upstream = (url.protocol === "https:" ? https : http).request(url, { method: "POST", headers: { "content-type": "application/json", authorization: `Bearer ${real.key}` } }, (answer) => {
+    const wait = answer.headers["retry-after"];
+    outgoing.writeHead(answer.statusCode ?? 502, { "content-type": answer.headers["content-type"] ?? "application/json", "cache-control": "no-store", ...(wait === undefined ? {} : { "retry-after": wait }) }).flushHeaders();
+    pipeline(answer, outgoing, () => undefined);
+  });
+  upstream.on("error", (cause) => {
+    if (outgoing.destroyed) return;
+    if (outgoing.headersSent) return void outgoing.destroy();
+    outgoing.writeHead(502, { "content-type": "application/json" }).end(JSON.stringify({ error: { type: "upstream_unreachable", message: cause.message } }));
+  });
+  outgoing.on("close", () => upstream.destroy());
+  upstream.end(JSON.stringify({ ...input, ...(tools === undefined ? {} : { tools: uniformTools(tools) }) }));
+}
+
 /** The two plans the cloud sells, as its payment provider's catalog lists them: the cloud checks them before it serves billing. */
-export const plans = { plus_monthly: { priceId: "price_plus", productId: "prod_plus", unitAmount: 3_000 }, pro_monthly: { priceId: "price_pro", productId: "prod_pro", unitAmount: 10_000 } };
-export const paymentKey = "sk_test_local";
+const plans = { plus_monthly: { priceId: "price_plus", productId: "prod_plus", unitAmount: 3_000 }, pro_monthly: { priceId: "price_pro", productId: "prod_pro", unitAmount: 10_000 } };
+const paymentKey = "sk_test_local";
 
 /** The payment provider's catalog, read-only: a price or a product of `plans`, as Stripe's API answers one. */
 function catalogued(route: string, authorization: string | undefined): [number, unknown] {
@@ -136,10 +182,11 @@ function catalogued(route: string, authorization: string | undefined): [number, 
 
 /**
  * The model provider a deployment's cloud pays: an OpenAI-compatible `chat/completions`, which says what a journey
- * scripted, or repeats the owner's last message, and reports the tokens it is paid for. An agent is told apart by
- * its character's system prompt, which begins the system message eliza sends, so journeys share one cloud.
+ * scripted, or repeats the owner's last message, and reports the tokens it is paid for; or, given a `real` model, asks
+ * that model instead. An agent is told apart by its character's system prompt, which begins the system message eliza
+ * sends, so journeys share one cloud.
  */
-export async function startProvider(key: string) {
+async function startProvider(key: string, real: RealModel | undefined) {
   const replies = new Map<string, Reply[]>();
   const asked = new Map<string, Message[][]>();
   const listed = <A>(lists: Map<string, A[]>, system: string) => lists.get(system) ?? lists.set(system, []).get(system)!;
@@ -158,6 +205,7 @@ export async function startProvider(key: string) {
     const character = messages.find((message) => message.role === "system")?.content;
     const system = typeof character === "string" ? character : "";
     listed(asked, system).push(messages);
+    if (real !== undefined) return forwarded(real, input, outgoing);
     const last = messages.findLast((message) => message.role === "user")?.content;
     const reply = listed(replies, scripted(system)).shift() ?? { kind: "text", parts: ["You said: ", typeof last === "string" ? last : JSON.stringify(last)] };
     const text = reply.kind === "text" ? reply.parts.join("") : reply.first;
@@ -222,7 +270,7 @@ function cloudCommand(secrets: string, args: readonly string[]) {
   return { child, exited, output: () => output };
 }
 
-export async function served(secrets: string, args: readonly string[], origin: string) {
+async function served(secrets: string, args: readonly string[], origin: string) {
   const running = cloudCommand(secrets, ["serve", ...args]);
   let over = false;
   void running.exited.then(() => { over = true; });
@@ -260,12 +308,13 @@ async function signIn(local: string, email: string, signInReturn: string): Promi
  * command needs the database to itself, so every owner of a run is made before the cloud serves that run: the cloud
  * serves once to sign them in, stops, is funded, and serves again at the same address.
  */
-export async function startCloud(state: string, emails: readonly string[], credits: number): Promise<Cloud> {
+export async function startCloud(state: string, emails: readonly string[], credits: number, real?: RealModel): Promise<Cloud> {
   const home = owned(path.join(state, "cloud"));
   const fixture = (name: string) => fs.readFileSync(path.join(prepared().cloud, "test/fixtures", name), "utf8");
   const file = (name: string, text: string) => { fs.writeFileSync(path.join(home, name), text, { mode: 0o600 }); return path.join(home, name); };
+  const model = real?.model ?? scriptedModel;
   const providerKey = base64url(randomBytes(24));
-  const provider = await startProvider(providerKey);
+  const provider = await startProvider(providerKey, real);
   const profile = JSON.parse(fixture("profile.json")) as { environments: { staging: { web: string } & Record<string, unknown> } };
   const { web } = profile.environments.staging;
   profile.environments.staging = {
@@ -275,10 +324,10 @@ export async function startCloud(state: string, emails: readonly string[], credi
       apiUrl: `${provider.origin}/stripe`, secretKeyEnv: "STRIPE_SECRET_KEY", webhookSecretEnv: "STRIPE_WEBHOOK_SECRET", publishableKey: "pk_test_local",
       plans: Object.fromEntries(Object.entries(plans).map(([plan, { priceId, productId }]) => [plan, { priceId, productId }])),
     },
-    inference: { providers: [{ id: "scripted", baseUrl: `${provider.origin}/v1`, apiKeyEnv: "CLOUD_UPSTREAM_KEY" }], models: [{ id: model, provider: "scripted", upstreamModel: model, vision: false, defaultMaxTokens: 1024 }] },
+    inference: { providers: [{ id: "scripted", baseUrl: `${provider.origin}/v1`, apiKeyEnv: "CLOUD_UPSTREAM_KEY" }], models: [{ id: model, provider: "scripted", upstreamModel: model, vision: false, defaultMaxTokens: real?.defaultMaxTokens ?? 1024 }] },
   };
-  const signInReturn = `${web}/apps/alpha/sign-in`;
-  const seed = { clients: [{ ...client, signInReturn, billingReturn: `${web}/apps/alpha/billing`, connectReturn: `${web}/apps/alpha/connect` }], prices: [{ modelId: model, inputPer1K: 150, outputPer1K: 600 }] };
+  const signInReturn = `${web}/alphaphone/auth/callback`;
+  const seed = { clients: [{ ...client, signInReturn, billingReturn: `${web}/alphaphone/billing/return` }], prices: [{ modelId: model, inputPer1K: 150, outputPer1K: 600 }] };
   const secrets = file("secrets.env", `${fixture("secrets.env")}\nCLOUD_UPSTREAM_KEY=${providerKey}\nSTRIPE_SECRET_KEY=${paymentKey}\nSTRIPE_WEBHOOK_SECRET=whsec_local\n`);
   const deployment = ["--profile", file("profile.json", JSON.stringify(profile)), "--environment", "staging", "--store", `pglite:${path.join(home, "cloud.pglite")}`];
   const port = await freePort();
@@ -298,7 +347,7 @@ export async function startCloud(state: string, emails: readonly string[], credi
     }
     const running = await served(secrets, at, local);
     const front = await startFront(home, new URL(local));
-    return { api: front.api, caFile: front.caFile, local, provider: provider.origin, owners, stop: async () => { await front.stop(); await ended(running); await provider.stop(); } };
+    return { api: front.api, caFile: front.caFile, local, model, provider: provider.origin, owners, stop: async () => { await front.stop(); await ended(running); await provider.stop(); } };
   } catch (cause) {
     await provider.stop();
     throw cause;
@@ -308,24 +357,27 @@ export async function startCloud(state: string, emails: readonly string[], credi
 /** The character of the agent of `email`: its system prompt names its owner, which is also how the local cloud's model tells one journey's agent from another's. */
 export const characterOf = (email: string) => ({ name: "Alpha", system: `You are Alpha, the phone agent of ${email}.` });
 
-/** The modules of eliza's agent Alpha's launch loads beside conversations: each serves the routes an area reads (`.eliza/packages/agent/src/plugins/profile.vibe`). */
-export const modules = ["approvals", "notifications", "reply-draft", "scheduled-tasks", "triggers", "tasks", "surface"].map((name) => `@elizaos/agent/${name}`);
-
-/** Start the agent bundle of the pinned checkout as the owner's, over `state`, with `key` as its cloud credential; `persist` keeps its conversations in `state`. */
+/**
+ * Start the agent pack the phone ships (`pnpm --filter @repo/agent build`) as the owner's, over `state`, with `key` as
+ * its cloud credential: its bundle, the plugins and modules its policy loads, the actions it allows and the workflow
+ * worker it pins; `persist` keeps its conversations in `state`.
+ */
 export async function startAgent(state: string, cloud: Cloud, key: DeviceKey, character: { name: string; system: string }, persist: boolean): Promise<Agent> {
+  const pack = await builtPack();
   const launch = path.join(owned(state), "launch.json");
   fs.writeFileSync(launch, JSON.stringify({
     schema: 1,
     character,
-    policy: { actions: { allowed: ["REPLY", "IGNORE", "NONE"] }, plugins: { load: modules } },
-    model: { backend: "cloud", cloudBaseUrl: cloud.api, smallModel: model, largeModel: model, imageModel: model },
+    policy: pack.policy,
+    workflowWorker: pack.workflowWorker,
+    model: { backend: "cloud", cloudBaseUrl: cloud.api, smallModel: cloud.model, largeModel: cloud.model, imageModel: cloud.model },
     account: { userId: key.accountId, organizationId: key.organizationId },
     embeddings: "none", persistMemory: persist, callerRole: "owner",
   }), { mode: 0o600 });
   const token = base64url(randomBytes(32));
   const port = await freePort();
   const home = owned(path.join(state, "agent"));
-  const child = spawn(node, [path.join(prepared().bundle, "agent.mjs"), "serve", "--launch", launch, "--state", home, "--http", `127.0.0.1:${port}`], {
+  const child = spawn(node, [pack.bundle, "serve", "--launch", launch, "--state", home, "--http", `127.0.0.1:${port}`], {
     env: { PATH: process.env.PATH, HOME: home, TMPDIR: home, TZ: "UTC", NODE_EXTRA_CA_CERTS: cloud.caFile },
     stdio: ["pipe", "ignore", "pipe"],
   });
@@ -338,17 +390,20 @@ export async function startAgent(state: string, cloud: Cloud, key: DeviceKey, ch
   return { origin, token, stop: () => ended(child) };
 }
 
-/** The owner the dev server signs in, and what the operator grants: enough for a day of talking to a scripted model. */
+/** The owner the dev server signs in, and what the operator grants: enough for a day of talking to the local cloud's model. */
 const owner = { email: "owner@alpha.test", credits: 50_000_000 };
 
 /**
- * The cloud and the agent a dev server runs against: one signed-in, funded owner. Their state is a directory of this
- * run, gone with it, so nothing piles up between runs; `keep` names a directory to keep the agent's in instead.
+ * The cloud and the agent a dev server runs against: one signed-in, funded owner, whose model is the scripted one or
+ * `real`, and whose agent is the pack's with the phone's own character, so a real model is given the phone's system
+ * prompt. Their state is a directory of this run, gone with it, so nothing piles up between runs; `keep` names a
+ * directory to keep the agent's in instead.
  */
-export async function startEliza(keep?: string) {
+export async function startEliza(keep?: string, real?: RealModel) {
+  const { character } = await builtPack();
   const state = scratch();
-  const cloud = await startCloud(state, [owner.email], owner.credits);
+  const cloud = await startCloud(state, [owner.email], owner.credits, real);
   const key = cloud.owners.get(owner.email)!;
-  const agent = await startAgent(keep ?? state, cloud, key, characterOf(owner.email), keep !== undefined);
+  const agent = await startAgent(keep ?? state, cloud, key, character, keep !== undefined);
   return { cloud, agent, key, stop: async () => { await agent.stop(); await cloud.stop(); fs.rmSync(state, { recursive: true, force: true }); } };
 }

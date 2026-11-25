@@ -1,0 +1,34 @@
+// spec/app/voice/index.md, "Story: Dictate into a field"; spec/app/voice/index.md, "Using the transcript fills the field dictation started in, and dictation never sends"
+import * as Composer from "../../gen/app__assistant__composer.effect.vibe"
+import * as Voice from "../../gen/app__voice.effect.vibe"
+import { contained } from "../runtime/reactor.vibe"
+import { VoiceWords, openDictation } from "../voice/voice.vibe"
+import { sameBinding } from "./attachments.vibe"
+import { Talk } from "./talk.vibe"
+
+export effect function dictate(): void!!(Voice.Machine | VoiceWords | Composer.Machine | Talk) {
+  const composer = try Composer.Machine
+  const { board } = try Talk
+  const before = try composer.get()
+  if (before.away !== "Free" || !Composer.canEdit(before, false, false)) return
+  try openDictation("ComposerField", effect (words: string) => {
+    const current = try composer.get()
+    if (!sameBinding(before.binding, current.binding) || current.read.ticket !== before.read.ticket || current.away !== "Free") return
+    const typed = board.snapshot().typed
+    const text = typed.trim() === "" ? words : `${typed}\n${words}`
+    const event: Composer.Event = { type: "edit", blank: text.trim() === "", long: text.length > Composer.textLimit }
+    if (!Composer.enabled(current, event)) return
+    board.type(text)
+    if (!(try contained(composer.send(event), "putting dictation in the Ask Alpha draft")) && board.snapshot().typed === text) board.type(typed)
+  })
+}
+
+export effect function editDictation(text: string): void!!(Voice.Machine | VoiceWords) {
+  const voice = try Voice.Machine
+  const current = try voice.get()
+  const event: Voice.Event = { type: "edit", words: text.trim() !== "" }
+  if (current.recorder.field !== "ComposerField" || !Voice.enabled(current, event)) return
+  const { memory } = try VoiceWords
+  memory.dictatedText = text
+  try ignore(voice.send(event))
+}

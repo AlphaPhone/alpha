@@ -37,7 +37,8 @@ describe("the documents name what exists", () => {
     const workspace = ["packages", "apps"].flatMap(within).filter((dir) => fs.existsSync(path.join(project, dir, "package.json")));
     // What pnpm itself provides, and what a document proposes rather than names.
     const scripts = new Set(["install", "exec", "add", "pack", ...["", "vibestack/studio", ...workspace, ...within("vibestack/examples")].flatMap((dir) => Object.keys(manifest(dir).scripts ?? {}))]);
-    const proposed = ["apps/billing", "packages/billing", "vibestack/README.md", "vibestack/LICENSE"];
+    const vibestackExports = new Set(Object.keys(manifest("").exports ?? {}).filter((key) => key.startsWith("./")).map((key) => `vibestack/${key.slice(2)}`));
+    const proposed = ["apps/billing", "packages/billing", "packages/plugin-assistant", "vibestack/README.md", "vibestack/LICENSE"];
     // A heading as GitHub links to it.
     const anchors = (file: string) => read(file).split("\n").flatMap((line) => /^#{1,6} /.test(line) ? [line.replace(/^#+ /, "").toLowerCase().replace(/[^\p{L}\p{N}\s_-]/gu, "").trim().replace(/\s/g, "-")] : []);
     const lost = DOCS.flatMap((doc) => {
@@ -50,7 +51,7 @@ describe("the documents name what exists", () => {
       }).map((m) => m[0]);
       // gen/ and generated/ are written by the tools, so a fresh checkout has none; vibestack/gen/ is the translator's source.
       const paths = code.flatMap((span) => [...span.matchAll(/(?<![\w./-])((?:vibestack|docs|packages|apps|\.github|\.agents|\.claude)\/[\w./@-]*)(?![\w<*{…])/g)].map((m) => m[1].replace(/[.:]+$/, "")))
-        .filter((file) => !fs.existsSync(path.join(project, file)) && !proposed.includes(file) && !/^(?!vibestack\/gen\/).*\/(gen|generated)(\/|$)/.test(file));
+        .filter((file) => !fs.existsSync(path.join(project, file)) && !proposed.includes(file) && !vibestackExports.has(file) && !/^(?!vibestack\/gen\/).*\/(gen|generated)(\/|$)/.test(file));
       const commands = code.flatMap((span) => [...span.matchAll(/\bpnpm ([a-z][\w:-]*)/g)].map((m) => m[1])).filter((script) => !scripts.has(script)).map((script) => `pnpm ${script}`);
       return [...links, ...paths, ...commands].map((what) => `${doc}: ${what}`);
     });
@@ -133,17 +134,21 @@ describe("the documents name what exists", () => {
     const jobs = [...read(".github/workflows/ci.yml").matchAll(/^ +tasks: (.+)$/gm)].flatMap(([, tasks]) => tasks.split(" "));
     assert.deepEqual(jobs.sort(), listed("verify").sort(), "CI's jobs run the tasks of pnpm verify between them, each once");
     const release = read(".github/workflows/release.yml");
-    assert.match(release, /^ +- run: pnpm selftest --only --concurrency=1$/m);
-    const releasePrerequisites = release.match(/^ +- run: pnpm all (.+) --concurrency=1$/m)?.[1].split(" ").sort();
     assert.match(scripts.prepare, /^node vibestack\/spec\.ts gen --install --skip-gen-on-pack \/\/#build(?: |$)/);
-    assert.deepEqual(["//#build", ...releasePrerequisites ?? []].sort(), JSON.parse(read("turbo.json")).tasks["//#selftest:tools:a"].dependsOn.toSorted(), "pack and the release tasks materialize every prerequisite before using the isolated CI shard cache");
+    if (/^ +- run: pnpm selftest --only --concurrency=1$/m.test(release)) {
+      const releasePrerequisites = release.match(/^ +- run: pnpm all (.+) --concurrency=1$/m)?.[1].split(" ").sort();
+      assert.deepEqual(["//#build", ...releasePrerequisites ?? []].sort(), JSON.parse(read("turbo.json")).tasks["//#selftest:tools:a"].dependsOn.toSorted(), "pack and the release tasks materialize every prerequisite before using the isolated CI shard cache");
+    } else {
+      assert.match(release, /^ +- run: pnpm --filter @repo\/app android build --release$/m);
+      assert.match(release, /^ +pnpm android verify$/m);
+    }
     const fuzz = read(".github/workflows/fuzz.yml");
     const nightly = fuzz.match(/^  vibestack-nightly-check:\n((?: {4}.*\n|\n)*)/m)?.[1] ?? "";
     assert.match(nightly, /^ +- run: pnpm all check --continue -- --nightly$/m);
     assert.deepEqual(fuzz.match(/^ +shard: \[(.+)\]$/m)?.[1].split(", "), shards.map((task) => task.split(":")[2]), "the nightly run names every shard");
     const [first, ...others] = shards.map((task) => JSON.parse(read("turbo.json")).tasks[`//#${task}`].dependsOn);
     assert.deepEqual(others, others.map(() => first), "the shards wait for the same integration prerequisites");
-    assert.deepEqual(fs.readdirSync(path.join(project, ".github/workflows")).filter((flow) => /\bdevelop\b/.test(read(`.github/workflows/${flow}`).replace(/^ +branches: \[[\w, ]+\]$/gm, ""))), [], "develop is named only where a workflow lists the branches that trigger it");
+    assert.deepEqual(fs.readdirSync(path.join(project, ".github/workflows")).filter((flow) => /\bdevelop\b/.test(read(`.github/workflows/${flow}`).replace(/^ +branches: \[[\w, -]+\]$/gm, ""))), [], "develop is named only where a workflow lists the branches that trigger it");
   });
 
   test("tasks wait for the root's gen where needed; selftest edits keep the CLI build cached, and Studio only reacts to its inputs", async (context) => {

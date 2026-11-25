@@ -1,6 +1,5 @@
-import { Download, ExternalLink, FileText } from "lucide-react";
-import { Button } from "../Button.tsx";
-import { ListRow } from "../ListRow.tsx";
+import { Download, File } from "lucide-react";
+import { cn, focusRing } from "../../lib/cn.ts";
 import { StatusDot } from "../StatusDot.tsx";
 
 export type InboxAttachmentRowProps = {
@@ -14,26 +13,35 @@ export type InboxAttachmentRowProps = {
   onSave?: () => void;
   /** A save of it may have happened and could not be confirmed: it is not offered again, and the owner is pointed to Files. */
   saveUnconfirmed?: boolean;
+  /** The save used the browser's downloads instead of Files. */
+  browserDownload?: boolean;
 };
 
 /**
- * One attachment of a message: its name and size, and opening or saving it, each reviewed first.
+ * One attachment of a message: its name and size on a rounded tile that opens it, and saving it, each reviewed first.
  *
  * @model spec/app/inbox/message.md
  */
-export function InboxAttachmentRow({ name, size, onOpen, onSave, saveUnconfirmed = false }: InboxAttachmentRowProps) {
+export function InboxAttachmentRow({ name, size, onOpen, onSave, saveUnconfirmed = false, browserDownload = false }: InboxAttachmentRowProps) {
   return (
-    <ListRow
-      title={name}
-      detail={saveUnconfirmed ? undefined : size}
-      leading={<FileText />}
-      trailing={
-        <>
-          {saveUnconfirmed ? <StatusDot status="warn" label="Save not confirmed, look in Files" /> : null}
-          {onOpen ? <Button variant="ghost" size="icon" aria-label={`Open ${name}`} onClick={onOpen}><ExternalLink /></Button> : null}
-          {onSave && !saveUnconfirmed ? <Button variant="ghost" size="icon" aria-label={`Save ${name}`} onClick={onSave}><Download /></Button> : null}
-        </>
-      }
-    />
+    <div className="flex max-w-full items-center gap-2">
+      <button
+        type="button"
+        aria-label={`Open ${name}`}
+        disabled={!onOpen}
+        onClick={onOpen}
+        className={cn(focusRing, "flex max-w-full min-w-0 items-center gap-3 rounded-tile bg-secondary py-3 pr-4.5 pl-3.5 text-left text-secondary-foreground")}
+      >
+        <span aria-hidden className="flex size-10 shrink-0 items-center justify-center rounded-sm bg-background text-primary"><File className="size-5" /></span>
+        <span className="flex min-w-0 flex-col">
+          <span className="truncate text-sm leading-tight font-semibold">{name}</span>
+          <span className="mt-0.5 text-xs leading-tight text-muted-foreground">{size}</span>
+        </span>
+      </button>
+      {saveUnconfirmed ? <StatusDot status="warn" label={browserDownload ? "Save not confirmed, check your downloads" : "Save not confirmed, look in Files"} /> : null}
+      {onSave && !saveUnconfirmed ? (
+        <button type="button" aria-label={`Save ${name}`} onClick={onSave} className={cn(focusRing, "flex size-11 shrink-0 items-center justify-center rounded-full text-muted-foreground active:bg-accent")}><Download aria-hidden className="size-5" /></button>
+      ) : null}
+    </div>
   );
 }

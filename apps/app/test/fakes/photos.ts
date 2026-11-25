@@ -1,0 +1,76 @@
+// spec/app/photos/index.md, "Story: Browse the library"; spec/app/photos/viewer.md, "Story: Look at a photo or video"
+import type { LibraryAccess, PhotosPlugin } from "@elizaos/os/bridges/definitions/media";
+import { plugin, type Faked } from "./phone.ts";
+
+const photo = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+T5XQAAAAASUVORK5CYII=";
+
+function row(id: number, name: string, owned: boolean) {
+  return { id: `lib:i:${id}:1`, name, owned, kind: "image", image: photo, date: 1795400000000 + id * 60_000, width: 1, height: 1, size: 68, revision: `rev-image-${id}` };
+}
+
+export interface PhotosScene {
+  access: LibraryAccess;
+  readonly rows: ReturnType<typeof row>[];
+  watching: boolean;
+  changed(): void;
+  promptCount: number;
+  readCount: number;
+  readonly saves: string[];
+}
+
+export function photosScene(): PhotosScene {
+  return {
+    access: { scope: "denied", images: "denied", videos: "denied" },
+    rows: [row(3, "Park.jpg", false), row(2, "Camera.jpg", true), row(1, "Original.jpg", false)],
+    watching: false, changed: () => {}, promptCount: 0, readCount: 0, saves: [],
+  };
+}
+
+/** The native Photos plugin fixture talks to the real Eliza media bridge. */
+export function alphaPhotos(scene: PhotosScene): Faked {
+  type Used = "libraryAccess" | "requestLibraryAccess" | "watchLibrary" | "list" | "listPermitted" | "read"
+    | "thumbnails" | "beginEdit" | "previewEdit" | "saveEdit" | "cancelEdit" | "albums" | "openLibrarySettings";
+  return plugin<Pick<PhotosPlugin, Used>, { libraryChanged: undefined }>((emit) => {
+    scene.changed = () => { if (scene.watching) emit("libraryChanged", undefined); };
+    const listed = (rows: PhotosScene["rows"], thumbnails?: boolean) => rows.map(({ image, ...row }) => ({ ...row, image: thumbnails ? image : undefined }));
+    const owned = () => scene.rows.filter((item) => item.owned);
+    const session = "alpha-test-photo-edit";
+    const preview = { sessionId: session, operationId: session, image: photo, width: 1, height: 1, reduced: false, maxEdge: 1024, filter: "none", canReplace: true };
+    return {
+      libraryAccess: () => Promise.resolve(scene.access),
+      requestLibraryAccess() {
+        scene.promptCount++;
+        scene.access = { scope: "full", images: "full", videos: "denied" };
+        return Promise.resolve(scene.access);
+      },
+      watchLibrary({ active }) {
+        scene.watching = active;
+        return Promise.resolve({ active });
+      },
+      list: ({ thumbnails }) => Promise.resolve({ items: listed(owned(), thumbnails), next: "", access: scene.access }),
+      listPermitted({ before, query, thumbnails }: Parameters<PhotosPlugin["listPermitted"]>[0] = {}) {
+        const rows = scene.rows.filter((item) => query === undefined || item.name.toLowerCase().includes(query.toLowerCase()));
+        return Promise.resolve({ items: listed(before === undefined ? rows.slice(0, 2) : rows.slice(2), thumbnails), next: before === undefined && rows.length > 2 ? "next" : "", access: scene.access });
+      },
+      thumbnails: ({ ids }) => Promise.resolve({ items: ids.flatMap((id) => scene.rows.filter((row) => row.id === id).map((row) => ({ id, image: row.image }))) }),
+      read({ id }) {
+        scene.readCount++;
+        return Promise.resolve(scene.rows.find((item) => item.id === id));
+      },
+      beginEdit: ({ id, revision }) => scene.rows.some((item) => item.id === id && item.revision === revision)
+        ? Promise.resolve(preview) : Promise.reject(new Error("This item changed")),
+      previewEdit: ({ sessionId, filter }) => sessionId === session
+        ? Promise.resolve({ ...preview, filter }) : Promise.reject(new Error("The session closed")),
+      saveEdit({ sessionId, filter }) {
+        if (sessionId !== session) return Promise.reject(new Error("The session closed"));
+        const copy = row(scene.rows.length + 1, "Edited copy.jpg", true);
+        scene.rows.unshift(copy);
+        scene.saves.push(filter);
+        return Promise.resolve({ status: "saved", operationId: session, id: copy.id, revision: copy.revision, replaced: false });
+      },
+      cancelEdit: () => Promise.resolve(),
+      albums: () => Promise.resolve({ items: [] }),
+      openLibrarySettings: () => Promise.resolve(undefined),
+    };
+  });
+}

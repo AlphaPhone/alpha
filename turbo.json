@@ -20,6 +20,9 @@
     ".cache/toolchain.json"
   ],
   "tasks": {
+    "//#no-bun": {
+      "cache": false
+    },
     "gen": {
       "outputs": [
         "gen/**",
@@ -334,6 +337,27 @@
         ".cache/test-result-*.json"
       ]
     },
+    "@repo/app#test": {
+      "dependsOn": [
+        "gen",
+        "//#gen",
+        "^build",
+        "@repo/agent#build"
+      ],
+      "outputs": [
+        ".cache/test-result-*.json"
+      ],
+      "env": [
+        "VIBESTACK_QUINT_EVALUATOR"
+      ]
+    },
+    "@repo/app#dev": {
+      "dependsOn": [
+        "@repo/agent#build"
+      ],
+      "cache": false,
+      "persistent": true
+    },
     "//#check": {
       "dependsOn": [
         "//#build",
@@ -354,7 +378,10 @@
         "@repo/deployment#test",
         "@repo/cloud#build",
         "@repo/cloud#typecheck",
-        "@repo/cloud#test"
+        "@repo/cloud#test",
+        "@repo/site#build",
+        "@repo/site#typecheck",
+        "@repo/site#test"
       ],
       "cache": false
     },
@@ -366,7 +393,8 @@
         "@repo/agent#typecheck",
         "@repo/deployment#typecheck",
         "@repo/cloud#typecheck",
-        "vibestack-studio#typecheck"
+        "vibestack-studio#typecheck",
+        "@repo/site#typecheck"
       ],
       "inputs": [
         "apps/**",

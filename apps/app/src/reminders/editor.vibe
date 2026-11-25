@@ -1,0 +1,251 @@
+// spec/app/reminders/editor.md, "Story: Create and edit a reminder safely"
+import * as KeyValueStore from "effect/persistence/KeyValueStore"
+import * as Editor from "../../gen/app__reminders__editor.effect.vibe"
+import { contained, reacting, started, together } from "../runtime/reactor.vibe"
+import type { ReminderRecurrence } from "./recurrence.ts"
+import { civilDayFromString } from "./recurrence.ts"
+import {
+  DEFAULT_LIST_ID,
+  type ReminderItemRecord,
+  type ReminderPriority,
+  type ReminderSubtaskRecord,
+  remindersStore,
+} from "./store.ts"
+
+/** Editable field payload kept beside the verified Editor draft machine. */
+export interface ReminderEditorFields {
+  readonly itemId: string | null
+  readonly title: string
+  readonly notes: string
+  readonly listId: string
+  readonly dueDate: string | null
+  readonly dueMinute: number | null
+  readonly alertMinutes: number | null
+  readonly recurrence: ReminderRecurrence
+  readonly priority: ReminderPriority
+  readonly flagged: boolean
+  readonly subtasks: readonly ReminderSubtaskRecord[]
+  readonly revision: number
+}
+
+const draftKey = "alpha.reminders.editorDraft@1"
+
+const SubtaskSchema = Schema.Struct({ id: Schema.String, title: Schema.String, done: Schema.Boolean })
+const DraftSchema = Schema.fromJsonString(Schema.Struct({
+  itemId: Schema.NullOr(Schema.String),
+  title: Schema.String,
+  notes: Schema.String,
+  listId: Schema.String,
+  dueDate: Schema.NullOr(Schema.String),
+  dueMinute: Schema.NullOr(Schema.Int),
+  alertMinutes: Schema.NullOr(Schema.Int),
+  recurrence: Schema.Literals(["none", "daily", "weekdays", "weekly", "monthly", "yearly"]),
+  priority: Schema.Literals(["none", "low", "medium", "high"]),
+  flagged: Schema.Boolean,
+  subtasks: Schema.Array(SubtaskSchema),
+  revision: Schema.Int,
+}))
+
+function blankEditorFields(listId = DEFAULT_LIST_ID): ReminderEditorFields {
+  return {
+    itemId: null,
+    title: "",
+    notes: "",
+    listId,
+    dueDate: null,
+    dueMinute: null,
+    alertMinutes: 0,
+    recurrence: "none",
+    priority: "none",
+    flagged: false,
+    subtasks: [],
+    revision: 0,
+  }
+}
+
+function fieldsFromItem(item: ReminderItemRecord): ReminderEditorFields {
+  return {
+    itemId: item.id,
+    title: item.title,
+    notes: item.notes,
+    listId: item.listId,
+    dueDate: item.dueDate,
+    dueMinute: item.dueMinute,
+    alertMinutes: item.alertMinutes,
+    recurrence: item.recurrence,
+    priority: item.priority,
+    flagged: item.flagged,
+    subtasks: item.subtasks.map((sub) => ({ ...sub })),
+    revision: item.revision,
+  }
+}
+
+let draftFields: ReminderEditorFields = blankEditorFields()
+const draftListeners = new Set<() => void>()
+
+function emitDraft(next: ReminderEditorFields): void {
+  draftFields = next
+  for (const listener of [...draftListeners]) listener()
+}
+
+/** External store for the reminder editor's rich form values. */
+export const editorDraftStore = {
+  snapshot: (): ReminderEditorFields => draftFields,
+  subscribe(listener: () => void): () => void {
+    draftListeners.add(listener)
+    return () => { draftListeners.delete(listener) }
+  },
+  set(next: ReminderEditorFields): void {
+    emitDraft(next)
+  },
+  reset(listId = DEFAULT_LIST_ID): void {
+    emitDraft(blankEditorFields(listId))
+  },
+}
+
+/** Persist the current draft fields in `KeyValueStore` for restart recovery. */
+effect function persistEditorDraft(fields: ReminderEditorFields): void!!KeyValueStore.KeyValueStore {
+  editorDraftStore.set(fields)
+  const serialized = Effect.try(() => JSON.stringify(fields)) catch () => undefined
+  if (serialized !== undefined) try ignore((try KeyValueStore.KeyValueStore).set(draftKey, serialized))
+}
+
+/** Clear any saved draft fields from `KeyValueStore`. */
+export effect function clearPersistedDraft(): void!!KeyValueStore.KeyValueStore {
+  editorDraftStore.reset()
+  try ignore((try KeyValueStore.KeyValueStore).remove(draftKey))
+}
+
+/** Apply field edits to the active draft, advancing the verified Editor machine and persisting the draft. */
+export effect function updateEditorDraft(patch: Partial<ReminderEditorFields>): void!!(Editor.Machine | KeyValueStore.KeyValueStore) {
+  const prev = editorDraftStore.snapshot()
+  const next: ReminderEditorFields = { ...prev, ...patch }
+  const editor = try Editor.Machine
+  if (patch.title !== undefined && patch.title !== prev.title) {
+    const state = try editor.get()
+    if (Editor.canEditTitle(state)) try contained(editor.send({ type: "editTitle", ok: patch.title.trim() !== "" }), "editing reminder title")
+  }
+  if (patch.notes !== undefined && patch.notes !== prev.notes) {
+    const state = try editor.get()
+    if (Editor.canEditNotes(state)) try contained(editor.send({ type: "editNotes", ok: true }), "editing reminder notes")
+  }
+  if (patch.listId !== undefined && patch.listId !== prev.listId) {
+    const listId = Math.max(1, remindersStore.specIdForList(patch.listId))
+    const state = try editor.get()
+    if (Editor.canSetList(state, listId)) try contained(editor.send({ type: "setList", listId }), "changing reminder list")
+  }
+  if (patch.dueDate !== undefined && patch.dueDate !== prev.dueDate) {
+    const on = patch.dueDate !== null
+    const dueDay = civilDayFromString(patch.dueDate) ?? 0
+    const state = try editor.get()
+    if (on !== state.hasDueDate && Editor.canToggleDueDate(state, on)) {
+      try contained(editor.send({ type: "toggleDueDate", on, dueDay }), "toggling reminder due date")
+    } else if (on && Editor.canSetDueDay(state, dueDay)) {
+      try contained(editor.send({ type: "setDueDay", dueDay }), "setting reminder due day")
+    }
+  }
+  if (patch.dueMinute !== undefined && patch.dueMinute !== prev.dueMinute) {
+    const on = patch.dueMinute !== null
+    const dueMinute = patch.dueMinute ?? 540
+    const state = try editor.get()
+    if (on !== state.hasDueTime && Editor.canToggleDueTime(state, on)) {
+      try contained(editor.send({ type: "toggleDueTime", on, dueMinute }), "toggling reminder due time")
+    } else if (on && Editor.canSetDueMinute(state, dueMinute)) {
+      try contained(editor.send({ type: "setDueMinute", dueMinute }), "setting reminder due minute")
+    }
+  }
+  if (patch.recurrence !== undefined && patch.recurrence !== prev.recurrence) {
+    const on = patch.recurrence !== "none"
+    const state = try editor.get()
+    if (Editor.canToggleRepeat(state, on)) try contained(editor.send({ type: "toggleRepeat", on }), "toggling reminder repeat")
+  }
+  if (patch.subtasks !== undefined) {
+    const state = try editor.get()
+    if (patch.subtasks.length > prev.subtasks.length && Editor.canAddSubtask(state)) {
+      try contained(editor.send({ type: "addSubtask" }), "adding reminder subtask")
+    } else if (patch.subtasks.length < prev.subtasks.length && Editor.canRemoveSubtask(state)) {
+      try contained(editor.send({ type: "removeSubtask" }), "removing reminder subtask")
+    } else if (Editor.canEditNotes(state)) {
+      try contained(editor.send({ type: "editNotes", ok: true }), "marking subtask edit dirty")
+    }
+  }
+  if (
+    (patch.priority !== undefined && patch.priority !== prev.priority)
+    || (patch.flagged !== undefined && patch.flagged !== prev.flagged)
+    || (patch.alertMinutes !== undefined && patch.alertMinutes !== prev.alertMinutes)
+  ) {
+    const state = try editor.get()
+    if (Editor.canEditNotes(state)) try contained(editor.send({ type: "editNotes", ok: true }), "marking draft dirty")
+  }
+  try persistEditorDraft(next)
+}
+
+/** Open the editor for a new reminder in `listId` with optional preset due date and flag. */
+export effect function beginNewReminder(
+  listId = DEFAULT_LIST_ID,
+  presets: { readonly dueDate?: string | null; readonly flagged?: boolean } = {},
+): void!!(Editor.Machine | KeyValueStore.KeyValueStore) {
+  const editor = try Editor.Machine
+  const listSpecId = Math.max(1, remindersStore.specIdForList(listId))
+  const cur = try editor.get()
+  if (cur.open && Editor.canClose(cur)) try contained(editor.send({ type: "close" }), "closing previous editor")
+  try contained(editor.send({ type: "openNew", listId: listSpecId }), "opening new reminder editor")
+  const presetDueDate = presets.dueDate ?? null
+  const initial: ReminderEditorFields = {
+    ...blankEditorFields(listId),
+    dueDate: presetDueDate,
+    flagged: presets.flagged ?? false,
+  }
+  if (presetDueDate !== null) {
+    const dueDay = civilDayFromString(presetDueDate) ?? 0
+    try contained(editor.send({ type: "toggleDueDate", on: true, dueDay }), "setting preset due date")
+  }
+  try persistEditorDraft(initial)
+}
+
+/** Open the editor for an existing reminder item. */
+export effect function beginEditReminder(item: ReminderItemRecord): void!!(Editor.Machine | KeyValueStore.KeyValueStore) {
+  const editor = try Editor.Machine
+  const cur = try editor.get()
+  if (cur.open && Editor.canClose(cur)) try contained(editor.send({ type: "close" }), "closing previous editor")
+  const itemSpecId = Math.max(1, remindersStore.specIdForItem(item.id))
+  const listSpecId = Math.max(1, remindersStore.specIdForList(item.listId))
+  const hasDueDate = item.dueDate !== null
+  const dueDay = civilDayFromString(item.dueDate) ?? 0
+  const hasDueTime = hasDueDate && item.dueMinute !== null
+  const dueMinute = hasDueTime ? (item.dueMinute ?? 540) : 0
+  const hasRepeat = hasDueDate && item.recurrence !== "none"
+  const subtaskCount = Math.min(Editor.maxSubtasks, item.subtasks.length)
+  try contained(editor.send({
+    type: "openExisting",
+    itemId: itemSpecId,
+    base: Math.max(1, item.revision),
+    listId: listSpecId,
+    hasDueDate,
+    dueDay,
+    hasDueTime,
+    dueMinute,
+    hasRepeat,
+    subtaskCount,
+  }), "opening reminder editor")
+  try persistEditorDraft(fieldsFromItem(item))
+}
+
+const restoredDraft = started(effect {
+  const raw = (try KeyValueStore.KeyValueStore).get(draftKey) catch () => undefined
+  if (raw === undefined) return
+  const decoded = Schema.decodeUnknownOption(DraftSchema)(raw)
+  if (Option.isSome(decoded)) {
+    const value = decoded.value
+    editorDraftStore.set({
+      ...value,
+      subtasks: value.subtasks.map((sub) => ({ ...sub })),
+    })
+  }
+}, "restoring reminder editor draft")
+
+/** Draft-backed reminder editor machine, kept across restarts. */
+export const reminderEditor = together(
+  reacting(Editor, { keep: 1, open: [{ type: "reopen" }] }),
+  restoredDraft,
+)

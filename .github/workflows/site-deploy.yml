@@ -1,0 +1,64 @@
+name: Alpha site
+# Builds apps/site (spec/site/) through turbo and uploads it to the Cloudflare Pages project alphaphone.
+# The GitHub environment alpha-site-production admits main and holds the CLOUDFLARE_ACCOUNT_ID variable and the
+# CLOUDFLARE_PAGES_API_TOKEN secret (Cloudflare Pages Edit on that account). The upload names the project's production
+# branch, vibestack, which is a label of the Pages project and not a GitHub branch; the deploy refuses if the project's
+# production branch is anything else, since the upload would then be a preview.
+on:
+  push:
+    branches: [main]
+    paths:
+      - apps/site/**
+      - spec/site/**
+      - packages/design-system/**
+      - packages/ui/**
+      - vibestack/**
+      - package.json
+      - pnpm-lock.yaml
+      - pnpm-workspace.yaml
+      - turbo.json
+      - .github/actions/setup/**
+      - .github/workflows/site-deploy.yml
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: alpha-site-production
+  cancel-in-progress: false
+env:
+  TURBO_TELEMETRY_DISABLED: "1"
+jobs:
+  deploy:
+    if: github.repository_id == '1396333361' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    environment:
+      name: alpha-site-production
+      url: https://alphaphone.dev/
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup
+        with:
+          job: ""
+          verification: "false"
+      - name: Build the site
+        run: pnpm all @repo/site#build
+      - name: Deploy to Cloudflare Pages
+        working-directory: apps/site
+        env:
+          CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_PAGES_API_TOKEN }}
+        run: |
+          if [[ -z "$CLOUDFLARE_ACCOUNT_ID" || -z "$CLOUDFLARE_API_TOKEN" ]]; then
+            echo 'Configure CLOUDFLARE_ACCOUNT_ID and CLOUDFLARE_PAGES_API_TOKEN in alpha-site-production.' >&2
+            exit 1
+          fi
+          production=$(curl -fsS -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
+            "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/pages/projects/alphaphone" | jq -er '.result.production_branch')
+          if [[ "$production" != vibestack ]]; then
+            echo "The Pages project alphaphone publishes $production, not vibestack: this upload would be a preview." >&2
+            exit 1
+          fi
+          pnpm dlx wrangler@4.166.0 pages deploy dist --project-name=alphaphone --branch=vibestack --commit-hash="$GITHUB_SHA" --commit-dirty=false
