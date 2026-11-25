@@ -17,8 +17,13 @@ export const meta: ComponentMeta<InboxListStateProps> = {
   },
   play: {
     Default: async ({ canvasElement }: { canvasElement: HTMLElement }) => {
+      const canvas = within(canvasElement);
+      await expect(canvas.getByText("Connect Eliza Cloud")).toBeVisible();
+      await expect(canvas.queryByRole("button")).toBeNull();
+    },
+    "Not connected": async ({ canvasElement }: { canvasElement: HTMLElement }) => {
       onAction.mockClear();
-      await userEvent.click(within(canvasElement).getByRole("button", { name: "Sign in" }));
+      await userEvent.click(within(canvasElement).getByRole("button", { name: "Add account" }));
       await expect(onAction.mock.calls.length).toBe(1);
     },
     Empty: ({ canvasElement }: { canvasElement: HTMLElement }) => expect(within(canvasElement).queryByRole("button")).toBeNull(),

@@ -3,8 +3,12 @@ package ai.alphacompute.alphaphone;
 
 import ai.eliza.plugins.messages.VoicemailPcm;
 import ai.eliza.plugins.messages.VoicemailStore;
+import ai.eliza.plugins.media.RecordingWindow;
 import ai.eliza.plugins.passwords.PasswordSurfaces;
+import ai.eliza.plugins.signin.CredentialReader;
+import ai.eliza.os.agent.AgentCredentials.Account;
 import ai.eliza.voice.LocalSpeechBridgePlugin;
+import ai.eliza.voice.RecordingPcm;
 import android.Manifest;
 import android.app.role.RoleManager;
 import android.content.Context;
@@ -20,6 +24,7 @@ import com.getcapacitor.annotation.Permission;
 import java.io.IOException;
 import java.util.Arrays;
 import java.util.Base64;
+import java.util.Objects;
 import java.util.function.BooleanSupplier;
 
 @CapacitorPlugin(name = "AlphaVoiceCloud",
@@ -34,6 +39,8 @@ public final class AlphaLocalSpeechPlugin extends LocalSpeechBridgePlugin {
    retireSpeechAuthority();
   }
  };
+ private CredentialReader.Subscription speechOwner;
+ private Account heldSpeechOwner;
  private final Object voicemailLock = new Object();
  private VoicemailRead activeVoicemail, nextVoicemail;
 
@@ -44,6 +51,24 @@ public final class AlphaLocalSpeechPlugin extends LocalSpeechBridgePlugin {
  @Override public void load() {
   super.load();
   PasswordSurfaces.addListener(secretSurface);
+  var credentials = new AlphaAgentCredentials(getContext());
+  heldSpeechOwner = AlphaTalkTransport.signedInAccount(credentials);
+  speechOwner = credentials.reader().listen(notice -> mainHandler().post(() -> {
+   if (destroyed()) return;
+   Account current = AlphaTalkTransport.signedInAccount(credentials);
+   if (!Objects.equals(current, heldSpeechOwner)) {
+    heldSpeechOwner = current;
+    retireSpeechAuthority();
+   }
+  }));
+ }
+
+ @Override protected ResidentRoute residentRoute(String ownerId) {
+  return () -> AlphaTalkTransport.open(getContext());
+ }
+
+ @Override protected boolean residentTransport() {
+  return AlphaTalkTransport.available();
  }
 
  @Override protected boolean sensitiveSurfaceActive() {
@@ -67,6 +92,42 @@ public final class AlphaLocalSpeechPlugin extends LocalSpeechBridgePlugin {
    if (dictationInFront()) super.transcribeLocalRecording(call);
    else call.reject("Open Alpha to transcribe the recording.", "dictation-obscured");
   });
+ }
+
+ /** Recognize one selected Notes recording window without transferring audio to the renderer. */
+ @PluginMethod public void transcribeSavedNote(PluginCall call) {
+  String request = call.getString("requestId", "");
+  final String recordingId = call.getString("recordingId");
+  final String noteId = call.getString("noteId");
+  final Long offset = noteMilliseconds(call, "offsetMs");
+  final Long duration = noteMilliseconds(call, "durationMs");
+  if (!request.startsWith("notes-") || !dictationInFront()) {
+   call.reject("Open Notes to transcribe the recording.");
+   return;
+  }
+  call.getData().put("replace", false);
+  transcribeSuppliedWav(call, cancelled -> {
+   BooleanSupplier retired = () -> cancelled.getAsBoolean() || !dictationInFront();
+   if (retired.getAsBoolean() || AlphaNotesPlugin.inCall(getContext())) throw new IOException();
+   try (RecordingWindow window = RecordingWindow.open(AlphaNotesPlugin.recordings(getContext()), getContext().getCacheDir(),
+       "noteId", recordingId, noteId, offset, duration, retired)) {
+    if (window.empty) throw new IOException();
+    byte[] decoded = RecordingPcm.decode(window.file, retired);
+    try {
+     window.check();
+     if (retired.getAsBoolean()) throw new IOException();
+     return decoded;
+    } catch (Exception failure) {
+     Arrays.fill(decoded, (byte) 0);
+     throw failure;
+    }
+   }
+  });
+ }
+
+ private static Long noteMilliseconds(PluginCall call, String key) {
+  Object number = call.getData().opt(key);
+  return number instanceof Integer || number instanceof Long ? ((Number) number).longValue() : null;
  }
 
  @PluginMethod public void transcribeVoicemail(PluginCall call) {
@@ -122,6 +183,7 @@ public final class AlphaLocalSpeechPlugin extends LocalSpeechBridgePlugin {
 
  @Override protected void handleOnDestroy() {
   PasswordSurfaces.removeListener(secretSurface);
+  if (speechOwner != null) speechOwner.close();
   stopVoicemailRead();
   super.handleOnDestroy();
  }

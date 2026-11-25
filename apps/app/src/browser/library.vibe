@@ -1,34 +1,57 @@
-// spec/app/browser/library.md, "The library is read when it opens and again on request, never under a write"; "The latest read gives the bookmarks and history, says it could not read them, or finds the bookmark list damaged and offers once to replace it"
-import { bookmarkBrowserUrl } from "@elizaos/os-bridges"
+// spec/app/browser/library.md, "The library is read when it opens and again on request, never under a write"; spec/app/browser/library.md, "The latest read gives the bookmarks and history, says it could not read them, or finds the bookmark list damaged and offers once to replace it"; spec/app/browser/library.md, "Bookmarking the shown page adds it when it is an HTTPS page without a user name or password and fewer than a hundred are saved, and otherwise says why not"; spec/app/browser/library.md, "A write that lands changes the lists, and one that fails changes nothing and says so"
+import { bookmarkBrowserUrl, type BrowserBookmarkList, type BrowserPageBinding } from "@elizaos/os-bridges"
+import { Machine as Tabs } from "../../gen/app__browser.effect.vibe"
 import * as Library from "../../gen/app__browser__library.effect.vibe"
+import { Machine as Shell, showing } from "../../gen/app__shell.effect.vibe"
 import { TabHost, hosted } from "../platform/browser.vibe"
-import { answer, reacting } from "../runtime/reactor.vibe"
-import { Pages } from "./browser.vibe"
+import { readWebBookmarks, writeWebBookmark, type FrameRequest } from "../platform/browserWeb.vibe"
+import { answer, contained, reacting } from "../runtime/reactor.vibe"
+import { Pages, idOf, pageOf } from "./browser.vibe"
 
 export type Bookmark = { readonly url: string; readonly title?: string }
+type BookmarkWrite = { readonly ticket: number; readonly entry: Bookmark; readonly saved: boolean }
+export type BookmarkPage = BrowserPageBinding | FrameRequest
 
-/** The native bookmark rows that go with the last accepted library count. */
+/** The saved rows and the address bound to a library write. */
 export service LibraryRows {
+  readonly turn: Semaphore.Semaphore
   bookmarks(): readonly Bookmark[]!!
   keep(bookmarks: readonly Bookmark[]): void!!
+  prepare(intent: BookmarkWrite): void!!
+  take(ticket: number): (BookmarkWrite | undefined)!!
 }
 
-const rows = Layer.sync(LibraryRows, () => {
+const rows = Layer.effect(LibraryRows, effect {
   let stored: readonly Bookmark[] = []
+  let offered: BookmarkWrite | undefined
+  const turn = try Semaphore.make(1)
   return {
+    turn,
     bookmarks: () => sync(() => stored),
     keep: (bookmarks: readonly Bookmark[]) => sync(() => { stored = bookmarks }),
+    prepare: (intent: BookmarkWrite) => sync(() => { offered = intent }),
+    take: (ticket: number) => sync(() => {
+      if (offered?.ticket !== ticket) return undefined
+      const intent = offered
+      offered = undefined
+      return intent
+    }),
   }
 })
 
+function entries(saved: BrowserBookmarkList): Bookmark[] {
+  const titles = new Map(saved.entries?.map((entry) => [entry.url, entry.title]))
+  return [...new Set(saved.urls.filter(bookmarkBrowserUrl))].slice(0, Library.maxMarks).map((url) => {
+    const title = titles.get(url)
+    return title ? { url, title } : { url }
+  })
+}
+
 effect function load(ticket: number): Library.Event!!(TabHost | Pages | LibraryRows | Library.Machine) {
   return effect {
-    const saved = try hosted("bookmarks", (plugin, session) => plugin.bookmarks({ session }))
-    const urls = [...new Set(saved.urls.filter(bookmarkBrowserUrl))].slice(0, Library.maxMarks)
-    const bookmarks = urls.map((url) => {
-      const title = saved.entries?.find((entry) => entry.url === url)?.title
-      return title ? { url, title } : { url }
-    })
+    const host = try TabHost
+    const saved = host.web === undefined ? try hosted("bookmarks", (plugin, session) => plugin.bookmarks({ session })) : try readWebBookmarks()
+    const bookmarks = entries(saved)
     const visits = try (try Pages).visits()
     const current = try (try Library.Machine).get()
     if (Library.canLoaded(current, ticket, bookmarks.length, visits.length)) try (try LibraryRows).keep(bookmarks)
@@ -36,10 +59,73 @@ effect function load(ticket: number): Library.Event!!(TabHost | Pages | LibraryR
   } catch () => ({ type: "loaded", ticket, ok: false, damaged: false, count: 0, entries: 0 })
 }
 
-/** The Browser's library reads the phone's saved bookmarks and its current visit list. */
+effect function setMarkInside(entry: Bookmark, saved: boolean): boolean!!(LibraryRows | Library.Machine) {
+  const rows = try LibraryRows
+  const machine = try Library.Machine
+  const s = try machine.get()
+  const known = (try rows.bookmarks()).some((bookmark) => bookmark.url === entry.url)
+  if (known === saved) return false
+  const secure = bookmarkBrowserUrl(entry.url)
+  if (saved ? !Library.canMark(s, secure, false) : !Library.canUnmark(s)) return false
+  const ticket = s.write + 1
+  const changes = !saved || (secure && s.marks < Library.maxMarks)
+  if (changes) try rows.prepare({ ticket, entry, saved })
+  const sent = try contained(machine.send(saved ? { type: "mark", secure, userInfo: false } : { type: "unmark" }), "choosing a bookmark")
+  if (!sent) try rows.take(ticket)
+  return changes && sent
+}
+
+/** Save or remove the exact entry the owner chose, after the library has read the saved list. */
+export effect function setMark(entry: Bookmark, saved: boolean): boolean!!(LibraryRows | Library.Machine) {
+  const rows = try LibraryRows
+  return try Semaphore.withPermit(rows.turn, setMarkInside(entry, saved))
+}
+
+/** Bind a menu bookmark to the current shown native page or opaque frame before accepting the write. */
+export effect function markPage(binding: BookmarkPage, saved: boolean): boolean!!(TabHost | Tabs | Shell | Pages | LibraryRows | Library.Machine) {
+  const rows = try LibraryRows
+  return try Semaphore.withPermit(rows.turn, effect {
+    const tabs = try (try Tabs).get()
+    const host = try TabHost
+    const id = idOf(tabs.selected)
+    if (tabs.layer !== "Menu" || binding.id !== id || !showing(try (try Shell).get(), "Browser")) return false
+    let title: string | undefined
+    if ("load" in binding) {
+      const page = try pageOf(tabs.selected)
+      if (page.phase !== "Shown" || page.load !== binding.load || (try sync(() => host.web?.current(id, page.load))) !== binding) return false
+      title = (try sync(() => host.web?.info(id)))?.title
+    } else {
+      if (!host.session.current(binding, id)) return false
+      title = host.session.info(id)?.title
+    }
+    return try setMarkInside(title && title !== binding.url ? { url: binding.url, title } : { url: binding.url }, saved)
+  })
+}
+
+effect function bookmarkWritten(ticket: number): Library.Event!!(TabHost | LibraryRows | Library.Machine) {
+  const rows = try LibraryRows
+  const intent = try rows.take(ticket)
+  const failed: Library.Event = { type: "written", ticket, ok: false }
+  if (intent === undefined) return failed
+  return effect {
+    const { entry, saved } = intent
+    const host = try TabHost
+    const before = (try rows.bookmarks()).map((bookmark) => bookmark.url)
+    const result = host.web === undefined
+      ? try hosted("setBookmark", (plugin, session) => plugin.setBookmark({ session, ...entry, saved }))
+      : try writeWebBookmark({ ...entry, saved, before, limit: Library.maxMarks })
+    const list = entries(result)
+    if (list.some((one) => one.url === entry.url) !== saved) return failed
+    const current = try (try Library.Machine).get()
+    if (Library.canWritten(current, ticket)) try rows.keep(list)
+    return { type: "written", ticket, ok: true }
+  } catch () => failed
+}
+
+/** The Browser's library reads the saved bookmarks and the current visit list. */
 export const library = Layer.provideMerge(reacting(Library, {
   carry: (fx: Library.Effect) => match (fx) {
     when { tag: "Load", let ticket }: answer("read library", load(ticket), { type: "loaded", ticket, ok: false, damaged: false, count: 0, entries: 0 } as Library.Event);
-    when { tag: "Write", let write }: answer("write library", Effect.succeed({ type: "written", ticket: write, ok: false } as Library.Event), { type: "written", ticket: write, ok: false } as Library.Event);
+    when { tag: "Write", let write }: answer("write library", bookmarkWritten(write), { type: "written", ticket: write, ok: false } as Library.Event);
   },
 }), rows)

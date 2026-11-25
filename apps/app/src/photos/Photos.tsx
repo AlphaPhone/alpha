@@ -1,21 +1,23 @@
 // spec/app/photos/index.md, "Story: Browse the library"; spec/app/photos/index.md, "Story: Select photos"; spec/app/photos/index.md, "Story: Change albums from what I am looking at"
 import { Effect } from "effect";
-import { Album, ChevronLeft, ChevronRight, Ellipsis, Heart, Image, Images, ListChecks, Plus, ScanText, Search, Share2, Trash2, Undo2, X } from "lucide-react";
+import { Album, ChevronLeft, ChevronRight, Ellipsis, Folder, Heart, Image, Images, ListChecks, Plus, ScanText, Search, Share2, Trash2, Undo2, X } from "lucide-react";
 import { useCallback, useRef, useState, type ReactNode } from "react";
-import { Alert, AppHeader, Button, Chip, ConfirmDialog, Dialog, DialogContent, DialogTitle, EmptyState, Input, ListRow, Menu, MenuContent, MenuItem, MenuTrigger, Sheet, SheetContent, Spinner, cn } from "@repo/ui";
+import { Alert, AppHeader, Button, Chip, ConfirmDialog, Dialog, DialogContent, DialogTitle, EmptyState, Input, ListRow, Menu, MenuContent, MenuItem, MenuTrigger, Sheet, SheetContent, Spinner, cn, dockClearance } from "@repo/ui";
 import { useMachine as useLibrary } from "../../gen/app__photos.react.ts";
 import { useMachine as useTrash } from "../../gen/app__photos__trash.react.ts";
 import { useMachine as useAgent } from "../../gen/app__photos__agent.react.ts";
 import { useMachine as useViewer } from "../../gen/app__photos__viewer.react.ts";
+import { useMachine as useShell } from "../../gen/app__shell.react.ts";
 import type { Event, Filter } from "../../gen/app__photos.ts";
 import type { Event as TrashEvent } from "../../gen/app__photos__trash.ts";
 import type { Shown, Resident } from "../runtime/area.tsx";
 import { Time } from "../runtime/time.vibe";
 import { Catalog } from "./catalog.vibe";
+import { returnsToCamera } from "./area.vibe";
 import { MediaGrid } from "./Grid.tsx";
 import { MediaViewer } from "./Viewer.tsx";
 import type { agentPhotos } from "./agent.vibe";
-import { consumeImageChoice, importImageChoice, PhotoChooser, type library } from "./photos.vibe";
+import { consumeImageChoice, importImageChoice, openCameraAlbum, PhotoChooser, type library } from "./photos.vibe";
 import { native } from "../platform/device.vibe";
 import { renderBrowserPhoto, type BrowserEditFrame } from "../platform/photoCanvas.vibe";
 import type { trash } from "./trash.vibe";
@@ -35,7 +37,7 @@ interface Tool {
 
 function ToolBar({ tools }: { tools: readonly Tool[] }) {
   return (
-    <div role="toolbar" aria-label="Selection actions" className="flex shrink-0 justify-around gap-1 border-t border-border bg-background px-2 py-2">
+    <div role="toolbar" aria-label="Selection actions" className={cn("flex shrink-0 justify-around gap-1 border-t border-border bg-background px-2 pt-2", dockClearance)}>
       {tools.map(({ icon, label, run }) => <Button key={label} variant="ghost" className="h-auto min-h-12 flex-col gap-1 px-2 py-1 text-xs" onClick={run}>{icon}{label}</Button>)}
     </div>
   );
@@ -59,8 +61,8 @@ interface ImageChoiceProps {
 function ImageChoice({ runtime, choice, canScan, close, focusTools }: ImageChoiceProps) {
   const readingRef = useRef<AbortController | undefined>(undefined);
   const ownsPickerRef = useRef(false);
-  const [picture, show] = useState<ImagePreview>();
-  const [status, describe] = useState("");
+  const [picture, setPicture] = useState<ImagePreview>();
+  const [status, setStatus] = useState("");
   const finishPick = useCallback(() => {
     if (!ownsPickerRef.current) return false;
     ownsPickerRef.current = false;
@@ -86,17 +88,17 @@ function ImageChoice({ runtime, choice, canScan, close, focusTools }: ImageChoic
     readingRef.current?.abort();
     const reading = new AbortController();
     readingRef.current = reading;
-    show(undefined);
+    setPicture(undefined);
     if (!imageTypes.split(",").includes(source.type) || source.size === 0 || source.size > 16 * 1024 * 1024) {
-      describe("Choose a JPEG, PNG or WebP image up to 16 MB.");
+      setStatus("Choose a JPEG, PNG or WebP image up to 16 MB.");
       return;
     }
-    describe("Checking image…");
+    setStatus("Checking image…");
     const prepared = await runtime.runPromiseExit(Effect.tryPromise(() => renderBrowserPhoto(source, { turns: 0, look: "none", whiteBackground: true })), { signal: reading.signal });
     if (reading.signal.aborted) return;
-    if (prepared._tag !== "Success") { describe("Unsupported image."); return; }
-    show({ source, frame: prepared.value, reading: reading.signal });
-    describe(`${source.name} · ${prepared.value.width} × ${prepared.value.height} copy`);
+    if (prepared._tag !== "Success") { setStatus("Unsupported image."); return; }
+    setPicture({ source, frame: prepared.value, reading: reading.signal });
+    setStatus(`${source.name} · ${prepared.value.width} × ${prepared.value.height} copy`);
   }
   async function scan() {
     if (!picture || picture.reading.aborted) return;
@@ -135,15 +137,20 @@ export function Photos({ runtime, alpha }: PhotosProps) {
   const library = useLibrary(runtime);
   const trash = useTrash(runtime);
   const viewer = useViewer(runtime);
+  const shell = useShell(alpha.runtime);
   const agent = useAgent(runtime);
   const scan = useScan(runtime);
-  const scanInput = useRef<HTMLInputElement>(null);
+  const scanInputRef = useRef<HTMLInputElement>(null);
   const scanPicker = useCallback((node: HTMLInputElement | null) => {
-    scanInput.current = node;
+    scanInputRef.current = node;
     if (!node) return;
     const cancel = () => { runtime.runSync(Effect.flatMap(PhotoChooser, (picker) => picker.finish())); };
     node.addEventListener("cancel", cancel);
     return () => node.removeEventListener("cancel", cancel);
+  }, [runtime]);
+  const openScanPicker = useCallback(() => {
+    const input = scanInputRef.current;
+    if (input && runtime.runSync(Effect.flatMap(PhotoChooser, (picker) => picker.begin()))) input.click();
   }, [runtime]);
   const toolsRef = useRef<HTMLButtonElement>(null);
   const [searching, setSearching] = useState(false);
@@ -168,6 +175,10 @@ export function Photos({ runtime, alpha }: PhotosProps) {
     return row === undefined ? [] : [{ number, row }];
   });
   const index = ids.indexOf(opened);
+  const offPageCamera = opened > 0 && opened === state.cameraItem && !ids.includes(opened);
+  const canAddCamera = offPageCamera && viewer.state?.read.status === "Loaded" && !viewer.state.gone && !viewer.state.editing;
+  const cameraAlbum = { type: "chooseCameraAlbum", photo: opened, revision: viewer.state?.revision ?? 0 } as const;
+  const backToCamera = viewer.state !== undefined && shell.state !== undefined && returnsToCamera(viewer.state, shell.state);
   const starred = new Set(state.starred);
   const favourites = selected.length > 0 && selected.every((number) => starred.has(number));
   const title = selection ? `${selected.length} selected` : inTrash ? "Recently deleted" : album?.title ?? (albumList ? "Albums" : "Photos");
@@ -185,7 +196,7 @@ export function Photos({ runtime, alpha }: PhotosProps) {
       if (inTrash) binTalk({ type: "toggle", photo: number }); else talk({ type: "toggle", photo: number });
       return;
     }
-    const event = { type: "openItem", photo: number, listed: ids.includes(number), secure, only: secureItems, reviewing: false } as const;
+    const event = { type: "openItem", photo: number, listed: ids.includes(number), secure, only: secureItems, reviewing: false, origin: "LibraryItem" } as const;
     if (viewer.can(event, "Owner")) void viewer.send(event, "Owner");
   };
   const select = async (photo: number): Promise<boolean> => {
@@ -198,7 +209,7 @@ export function Photos({ runtime, alpha }: PhotosProps) {
     return sent._tag === "Success" && (await library.send({ type: "toggle", photo }, "Owner"))._tag === "Success";
   };
   const viewerSelection = async (kind: "add" | "recover" | "delete") => {
-    if (opened === 0 || !viewer.can({ type: "close" }, "Owner")) return;
+    if (!ids.includes(opened) || !viewer.can({ type: "close" }, "Owner")) return;
     const closed = await viewer.send({ type: "close" }, "Owner");
     if (closed._tag !== "Success" || !await select(opened)) return;
     if (kind === "add") void library.send({ type: "chooseAlbum" }, "Owner");
@@ -235,11 +246,8 @@ export function Photos({ runtime, alpha }: PhotosProps) {
   const chooseImage = { type: "openImageChoice", browser } satisfies Event;
   if (!inTrash && opened === 0 && browser && (state.choosingImage || owner(chooseImage))) {
     menu.push({ label: "Choose image", icon: <Image />, run: () => talk(chooseImage) });
-  } else if (!browser && !selection && !inTrash && opened === 0 && state.visible && !secure && canScan) {
-    menu.push({ label: "Scan image text", icon: <ScanText />, run: () => {
-      if (scanInput.current && runtime.runSync(Effect.flatMap(PhotoChooser, (picker) => picker.begin()))) scanInput.current.click();
-    } });
   }
+  const scanFromMenu = !browser && !selection && !inTrash && opened === 0 && state.visible && !secure && canScan;
   const status = inTrash ? bin.read.status : state.library.status;
   const dialog = state.shelf.dialog;
   const request = agent.state?.stage === "Shown" ? agent.state.request : undefined;
@@ -256,12 +264,14 @@ export function Photos({ runtime, alpha }: PhotosProps) {
     leading={<Button variant="ghost" size="icon" aria-label={selection ? "Cancel selection" : inTrash || album ? "Back to albums" : "Back to apps"}
       onClick={() => selection ? cancelSelection() : void alpha.back()}>{selection ? <X /> : <ChevronLeft />}</Button>}>
     {selection && (inTrash ? binOwner({ type: "selectAll" }) : owner({ type: "selectAll" })) && <Button variant="ghost" onClick={() => inTrash ? binTalk({ type: "selectAll" }) : talk({ type: "selectAll" })}>Select all</Button>}
-    {!selection && menu.length > 0 && <Menu><MenuTrigger asChild><Button variant="ghost" size="icon" ref={toolsRef} aria-label="Photos tools"><Ellipsis /></Button></MenuTrigger>
-      <MenuContent>{menu.map(({ icon, label, run }) => <MenuItem key={label} onSelect={run}>{icon}{label}</MenuItem>)}</MenuContent></Menu>}
+    {!selection && (menu.length > 0 || scanFromMenu) && <Menu><MenuTrigger asChild><Button variant="ghost" size="icon" ref={toolsRef} aria-label="Photos tools"><Ellipsis /></Button></MenuTrigger>
+      <MenuContent>{menu.map(({ icon, label, run }) => <MenuItem key={label} onSelect={run}>{icon}{label}</MenuItem>)}
+        {scanFromMenu && <MenuItem onSelect={openScanPicker}><ScanText />Scan image text</MenuItem>}
+      </MenuContent></Menu>}
   </AppHeader>;
   return (
     <section aria-label="Photos" className="relative flex min-h-0 flex-1 flex-col bg-background">
-      <input ref={scanPicker} type="file" accept={imageTypes} hidden onChange={(event) => {
+      <Input ref={scanPicker} type="file" accept={imageTypes} className="hidden" onChange={(event) => {
         const source = event.currentTarget.files?.[0];
         event.currentTarget.value = "";
         if (source) void runtime.runPromiseExit(scanSelectedImage(source));
@@ -273,8 +283,8 @@ export function Photos({ runtime, alpha }: PhotosProps) {
       <div inert={opened !== 0} aria-hidden={opened !== 0 || undefined} className="flex min-h-0 flex-1 flex-col" data-alpha-subview="photos-list">
         {header}
         {!selection && !inTrash && !album && (owner({ type: "showTab", tab: "Library" }) || owner({ type: "showTab", tab: "Albums" })) &&
-          <div role="group" aria-label="Photos sections" className="mx-4 mb-3 grid shrink-0 grid-cols-2 gap-1 rounded-xl bg-secondary p-1">
-            {([{ tab: "Library", icon: <Images /> }, { tab: "Albums", icon: <Album /> }] as const).map(({ tab, icon }) => <Button key={tab}
+          <div role="group" aria-label="Photos sections" className={cn("mx-4 grid shrink-0 grid-cols-2 gap-1 rounded-xl bg-secondary p-1", state.tab === "Library" && allow === undefined ? "mb-7" : "mb-3")}>
+            {([{ tab: "Library", icon: <Images /> }, { tab: "Albums", icon: <Folder /> }] as const).map(({ tab, icon }) => <Button key={tab}
               variant="ghost" className={cn("h-11 rounded-lg", state.tab === tab && "bg-foreground text-background hover:bg-foreground/90")} aria-pressed={state.tab === tab}
               onClick={() => { setSearching(false); talk({ type: "showTab", tab }); }}>{icon}{tab}</Button>)}
           </div>}
@@ -306,7 +316,7 @@ export function Photos({ runtime, alpha }: PhotosProps) {
           {binOwner(openBin) && <ListRow title="Recently deleted" leading={<Trash2 />} trailing={<span className="flex items-center gap-3 text-sm text-muted-foreground">{content.trashCount}<ChevronRight /></span>} className="mt-5" onClick={() => binTalk(openBin)} />}
         </div>}
         {!albumList && (rows.length > 0 || canMore) &&
-          <MediaGrid rows={rows} runtime={runtime} revision={inTrash ? bin.revision : state.revision} trash={inTrash} density={state.density} resize={(density) => { void library.send({ type: "setDensity", density }, "Owner"); }} selection={selection ? new Set(selected) : undefined} grouped={!album && !inTrash} now={runtime.runSync(Time.use((time) => time.latest()))} open={open} start={!selection && canStart ? (number) => { void select(number); } : undefined}
+          <MediaGrid rows={rows} runtime={runtime} revision={inTrash ? bin.revision : state.revision} trash={inTrash} density={state.density} resize={(density) => { void library.send({ type: "setDensity", density }, "Owner"); }} selection={selection ? new Set(selected) : undefined} grouped={!album && !inTrash} now={runtime.runSync(Effect.flatMap(Time, (time) => time.latest()))} open={open} start={!selection && canStart ? (number) => { void select(number); } : undefined}
             more={canMore ? () => inTrash ? binTalk({ type: "loadMore" }) : talk({ type: "loadMore" }) : undefined} />}
         {status === "Loading" && <div role="status" aria-label="Loading photos" className="grid place-items-center p-5"><Spinner /></div>}
         {status === "Loaded" && !albumList && rows.length === 0 && <EmptyState className="m-4" icon={<Images />} title={inTrash ? "Recently deleted is empty" : state.filter !== "Everything" ? "No matches" : "No photos"} />}
@@ -326,8 +336,13 @@ export function Photos({ runtime, alpha }: PhotosProps) {
           <span className="max-h-28 overflow-y-auto">{request.items.map((number) => content.rows.get(number)?.item.name ?? "Photo").join(" · ")}</span>
         </span>}
       </ConfirmDialog>
-      <MediaViewer runtime={runtime} row={content.rows.get(opened)} before={index > 0 ? ids[index - 1] : undefined} after={index >= 0 ? ids[index + 1] : undefined} inTrash={inTrash}
-        onAddToAlbum={!inTrash && canStart ? () => { void viewerSelection("add"); } : undefined}
+      <MediaViewer runtime={runtime} onBack={() => { void alpha.back(); }} backToCamera={backToCamera}
+        row={content.rows.get(opened)} before={index > 0 ? ids[index - 1] : undefined} after={index >= 0 ? ids[index + 1] : undefined} inTrash={inTrash}
+        onAddToAlbum={!inTrash && (offPageCamera ? canAddCamera && owner(cameraAlbum) : canStart && ids.includes(opened))
+          ? () => {
+            if (offPageCamera && viewer.state !== undefined) void runtime.runPromiseExit(openCameraAlbum(opened, cameraAlbum.revision, viewer.state.read.ticket));
+            else void viewerSelection("add");
+          } : undefined}
         onRecover={inTrash && canStart ? () => { void viewerSelection("recover"); } : undefined}
         onDelete={inTrash && canStart ? () => { void viewerSelection("delete"); } : undefined} />
       <Sheet open={dialog === "NewAlbum" || dialog === "RenameAlbum" || dialog === "ChooseAlbum"} onOpenChange={(open) => { if (!open) talk({ type: "closeDialog" }); }}>

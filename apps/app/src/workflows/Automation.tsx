@@ -6,9 +6,10 @@ import { useState } from "react";
 import { type Event, type Change, maxText } from "../../gen/app__workflows__automations.ts";
 import { useMachine } from "../../gen/app__workflows__automations.react.ts";
 import type { Machine } from "../../gen/app__workflows__automations.effect.vibe";
-import type { Preset } from "../../gen/app__workflows__schedule.ts";
+import type { Preset, When } from "../../gen/app__workflows__schedule.ts";
 import type { Resident, Shown } from "../runtime/area.tsx";
-import { AutomationWords, editAutomation, reviewAutomation, rowOffers } from "./automations.vibe";
+import { AutomationWords, editAutomation, promptEditEvent, reviewAutomation, rowOffers } from "./automations.vibe";
+import type { Prompt } from "./api.vibe";
 import type { WorkflowRow } from "./list.vibe";
 
 interface AutomationProps extends Pick<Shown<Resident | Machine | AutomationWords>, "runtime"> {
@@ -31,13 +32,28 @@ function EditFields({ initial, onReview }: { initial: { title: string; text: str
     onReview(title, instructions);
   }}>
     <label className="grid gap-1 text-sm">Name
-      <Input value={title} maxLength={80} required onChange={(event) => setTitle(event.currentTarget.value)} />
+      <Input aria-label="Name" value={title} maxLength={80} required onChange={(event) => setTitle(event.currentTarget.value)} />
     </label>
     <label className="grid gap-1 text-sm">Instructions
-      <Textarea value={instructions} maxLength={maxText} required onChange={(event) => setInstructions(event.currentTarget.value)} />
+      <Textarea aria-label="Instructions" value={instructions} maxLength={maxText} required onChange={(event) => setInstructions(event.currentTarget.value)} />
     </label>
     <Button type="submit" disabled={title.trim() === "" || instructions.trim() === ""}>Review</Button>
   </form>;
+}
+
+function savedSchedule(prompt: Prompt): string {
+  switch (prompt.triggerType) {
+    case "once": return `Once at ${prompt.scheduledAtIso} · ${prompt.timezone}`;
+    case "event": return `On ${prompt.eventKind} · ${prompt.timezone}`;
+    case "cron": return `Cron ${prompt.cronExpression} · ${prompt.timezone}`;
+  }
+}
+
+function editedSchedule(when: When, time: string, zone: string): string {
+  const days = when.preset === "Custom"
+    ? weekdays.filter((_, index) => when.days.includes(index)).join(", ")
+    : schedules.find(([preset]) => preset === when.preset)?.[1];
+  return [days, `${time} in ${zone}`].filter(Boolean).join(" · ");
 }
 
 function eventFor(wanted: Change): Event {
@@ -61,8 +77,15 @@ export function Automation({ runtime, row, owner }: AutomationProps) {
   const draft = runtime.runSync(Effect.flatMap(AutomationWords, (content) => content.view()));
   const editing = state.editing && draft.owner === owner && draft.row === number;
   const toggle = state.on ? "Disable" : "Enable";
-  const canEdit = row?.kind === "Prompt" && model.can({ type: "editRow", chars: row.summary.length, hour: 8, minute: 0, zone: 0, workflow: 0 });
+  const observed = row?.kind === "Prompt"
+    ? runtime.runSync(Effect.flatMap(AutomationWords, (content) => content.current(owner, number, state.list.ticket)))
+    : undefined;
+  const canEdit = observed !== undefined && model.can(promptEditEvent(observed));
   const time = `${String(state.when.hour).padStart(2, "0")}:${String(state.when.minute).padStart(2, "0")}`;
+  const schedule = draft.source.kind === "Existing" && !state.timingEditable
+    ? savedSchedule(draft.source.prompt) : editedSchedule(state.when, time, draft.zone);
+  const reviewEdit = state.proposed === "Edit" || state.proposed === "Create";
+  const reviewedTitle = reviewEdit ? draft.title : row?.title ?? draft.title;
   return (
     <section aria-label={row === undefined ? "Automation" : "Automation controls"} className="flex flex-col gap-3">
       {row === undefined && !editing && model.can({ type: "openEditor", kind: "PromptTask", zone: 0 }) && (
@@ -86,7 +109,7 @@ export function Automation({ runtime, row, owner }: AutomationProps) {
         </div>
       )}
       {editing && <>
-        <fieldset className="flex flex-col gap-2">
+        {state.timingEditable ? <fieldset className="flex flex-col gap-2">
           <legend className="mb-2 text-sm">When</legend>
           <div className="flex flex-wrap gap-1">
             {schedules.map(([preset, label]) => <Button key={preset} size="sm" aria-pressed={state.when.preset === preset}
@@ -102,7 +125,7 @@ export function Automation({ runtime, row, owner }: AutomationProps) {
               if (hour !== undefined && minute !== undefined) send({ type: "setTime", hour, minute });
             }} />
           </label>
-        </fieldset>
+        </fieldset> : <p className="text-sm text-muted-foreground">{schedule}</p>}
         <EditFields key={number} initial={draft} onReview={(title, instructions) => void runtime.runPromiseExit(reviewAutomation(title, instructions))} />
         <Button variant="ghost" onClick={() => send({ type: "closeEditor" })}>Cancel</Button>
       </>}
@@ -116,10 +139,10 @@ export function Automation({ runtime, row, owner }: AutomationProps) {
         <Button size="sm" variant="secondary" onClick={() => send({ type: "readAutomations" })}>Refresh</Button>
       </Alert>}
       {state.change.attempt.outcome === "Refused" && state.fired === "NotFired" && <Alert variant="warn">The agent didn’t apply the change.</Alert>}
-      <ConfirmDialog open={state.review.showing} title={`${reviewLabel(state.proposed)} “${row?.title ?? draft.title}”?`}
+      <ConfirmDialog open={state.review.showing} title={`${reviewLabel(state.proposed)} “${reviewedTitle}”?`}
         confirmLabel={reviewLabel(state.proposed)} destructive={state.proposed === "Remove"}
         onConfirm={() => send({ type: "confirmChange" })} onCancel={() => send({ type: "cancelReview" })}>
-        {state.proposed === "Create" || state.proposed === "Edit" ? `${draft.text} · ${time} in ${draft.zone}` : undefined}
+        {reviewEdit ? `${draft.text} · ${schedule}` : undefined}
       </ConfirmDialog>
     </section>
   );

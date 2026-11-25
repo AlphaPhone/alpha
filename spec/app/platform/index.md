@@ -210,6 +210,32 @@ pure def lawAHoldForSignInReadsAs401(status: int): bool = cloudStatusOf(true, st
 pure def lawOtherwiseTheCloudsStatusStands(status: int): bool = cloudStatusOf(false, status) == status
 ```
 
+### A mail or calendar request the phone holds back for want of its mail lease reads as the cloud's own refusal of the device key there, never as a sign-out
+
+A phone signed in before mail leases existed holds a key and no lease, so
+its cloud plugin sends no mail or calendar request (eliza's
+`mail-lease-upgrade-required`), and the owner is still signed in. Alpha
+reads that as the answer the cloud gives the device key on a mail route,
+`403` with reason `device_key_not_allowed`, through eliza's cloud client as
+through a plain read, so an area tells a phone that needs one more sign-in
+for mail from an owner who signed out, and forgets nothing it keeps. Such a
+request never left the phone.
+
+```quint
+type Hold = HeldForSignIn | HeldForMailLease
+type HeldAnswer = { status: int, reason: str }
+
+pure val leaseRefusalStatus = 403
+pure val leaseRefusalCode = "access_denied"
+pure val leaseRefusalReason = "device_key_not_allowed"
+
+pure def heldAnswer(hold: Hold): HeldAnswer =
+  if (hold == HeldForSignIn) { status: signInStatus, reason: "" } else { status: leaseRefusalStatus, reason: leaseRefusalReason }
+
+pure def lawAHoldForTheLeaseIsNeverASignOut(hold: Hold): bool =
+  (hold == HeldForMailLease) implies (heldAnswer(hold).status != signInStatus and heldAnswer(hold).reason == leaseRefusalReason)
+```
+
 ## Story: Send while my phone has a network
 
 > As the owner, I want a message to go out whenever Android says my phone

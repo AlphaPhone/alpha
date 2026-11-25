@@ -8,6 +8,8 @@ import { type Item, type Kind, fitsKind } from "../../gen/app__files__shared.eff
 import * as Bin from "../../gen/app__files__trash.effect.vibe"
 import { Machine as Shell, showing } from "../../gen/app__shell.effect.vibe"
 import { Device } from "../platform/device.vibe"
+import type { Machine as Toasts } from "../../gen/app__notices__toasts.effect.vibe"
+import type { Said } from "../notices/toasts.vibe"
 import { Files, FilesFailed, called } from "../platform/files.vibe"
 import { type Job, answer, applying, due, following, hearing, reacting, run, together, untimed } from "../runtime/reactor.vibe"
 import { scan, scanBack } from "./scan.vibe"
@@ -16,7 +18,7 @@ import type { Machine as CorrectionMachine } from "../../gen/app__files__correct
 import { Handles, type Spot, handles } from "./handles.vibe"
 import { kindOf } from "./entries.vibe"
 import { TrashFacts, type TrashItemFacts, trashFacts } from "./trashFacts.vibe"
-import { CategoryGroups, categoryGroups, groupsFor } from "./category.vibe"
+import { type CategoryGroups, categoryGroups, groupsFor } from "./category.vibe"
 import * as Shown from "../../gen/app__files__preview.effect.vibe"
 import * as Recent from "../../gen/app__files__recent.effect.vibe"
 import type { Documents } from "../platform/documents.vibe"
@@ -491,7 +493,7 @@ effect function allowed(settings: boolean): Event!!(Files | Browser.Machine) {
   return try reported(true)
 }
 
-function carry(fx: Out): Job<Event, Files | Handles | Browser.Machine | Bin.Machine | Documents | Opened | Recent.Machine | Shown.Machine | Answers | CategoryGroups | Device | Shell, [by: Actor]> {
+function carry(fx: Out): Job<Event, Files | Handles | Browser.Machine | Bin.Machine | Documents | Opened | Recent.Machine | Shown.Machine | Answers | CategoryGroups | Device | Shell | Toasts | Said, [by: Actor]> {
   return match (fx) {
     when { tag: "AskAccess" }: answer("access", allowed(false), { type: "accessReported", grant: "Denied", supported: true }, "Phone");
     when { tag: "OpenSettings" }: answer("access", allowed(true), { type: "accessReported", grant: "Denied", supported: true }, "Phone");
@@ -500,7 +502,7 @@ function carry(fx: Out): Job<Event, Files | Handles | Browser.Machine | Bin.Mach
     when { tag: "Search", let ticket, let where, let filter }: answer("search", searched(ticket, where, filter), { type: "searched", ticket, ok: false, complete: false, entries: [] }, "Phone");
     when { tag: "LookInto", let ticket, let trail }: answer("sheet", destination(ticket, trail), { type: "destRead", ticket, ok: false, entries: [] }, "Phone");
     when { tag: "AgentLook", let ticket, let folder, let filter }: answer("peek", peeked(ticket, folder, filter), { type: "agentLooked", ticket, ok: false, entries: [] }, "Phone");
-    when { tag: "Tell", let request, let ok, let items }: run(`tell ${request}`, effect { try (try Answers).tell(request, { ok, items }) }, "Phone");
+    when { tag: "Tell", let request, let ok, let items, let complete }: run(`tell ${request}`, effect { try (try Answers).tell(request, { ok, items, complete }) }, "Phone");
     when { tag: "Perform", let ticket, let work, let items, let name, let folder, let dest, let replace, let downloads }: answer(`perform ${ticket}`, performed(ticket, work, items, name, folder, dest, replace, downloads), { type: "finished", ticket, done: [], failed: [] }, "Phone");
     when { tag: "ToTrash", let items, let approval }: run("trash", ignore(effect {
       if (approval === 0 || (try (try Answers).reviewed(approval)) === undefined) {
@@ -509,10 +511,14 @@ function carry(fx: Out): Job<Event, Files | Handles | Browser.Machine | Bin.Mach
       }
       try (try Bin.Machine).send({ type: "moveToTrash", items, approval }, "Phone")
     }), "Phone");
-    when { tag: "Show", let item, let siblings }: run("show", view(item, siblings), "Phone");
+    when { tag: "Show", let item, let siblings, let owner }: run("show", view(item, siblings, owner), "Phone");
     when { tag: "Share", let ticket, let channel, let items, let approval }: answer(`share ${ticket}`, shared(ticket, channel, items, approval), { type: "shareEnded", ticket, opened: false, known: false }, "Phone");
     when { tag: "Taken", let items }: run("taken", taken(items), "Phone");
-    when { tag: "Receipt", let ticket, let ran, let outcome, let done }: run(`receipt ${ticket}`, effect { try (try Answers).receipt(ticket, { ran, outcome, ...(outcome === "Refused" && done > 0 ? { partial: true } : {}) }) }, "Phone");
+    when { tag: "Receipt", let ticket, let ran, let outcome, let done }: run(`receipt ${ticket}`, effect {
+      const answers = try Answers
+      const bound = try answers.reviewed(ticket)
+      try answers.receipt(ticket, { ran, outcome, ...(bound === undefined ? {} : { done }) })
+    }, "Phone");
   }
 }
 
@@ -715,7 +721,11 @@ function carryBin(fx: Bin.Effect): Job<Bin.Event, Files | Handles | Bin.Machine 
       try taken(items)
       try (try Browser.Machine).send({ type: "refresh" }, "Phone")
     }), "Phone");
-    when { tag: "Receipt", let ticket, let ran, let outcome, let done }: run(`receipt ${ticket}`, effect { try (try Answers).receipt(ticket, { ran, outcome, ...(outcome === "Refused" && done > 0 ? { partial: true } : {}) }) }, "Phone");
+    when { tag: "Receipt", let ticket, let ran, let outcome, let done }: run(`receipt ${ticket}`, effect {
+      const answers = try Answers
+      const bound = try answers.reviewed(ticket)
+      try answers.receipt(ticket, { ran, outcome, ...(bound === undefined ? {} : { done }) })
+    }, "Phone");
   }
 }
 
