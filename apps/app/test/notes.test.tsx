@@ -106,6 +106,11 @@ describe("Notes", () => {
       world.ask.nextReplyChunks = ["Here it is."];
       world.ask.nextActions = actions ? (metadata) => [prepared(String((metadata as { viewClientId?: unknown }).viewClientId), "notes", true)] : undefined;
       const turn = (await runtime.runPromise(Effect.flatMap(Conversation, (c) => c.get()))).turn.send.id + 1;
+      // spec/app/shell/index.md, "Ask Alpha rises to typing, a sheet or the full screen, never over the drawer": over an app the dock is compact, and Type opens the field.
+      if (document.querySelector<HTMLTextAreaElement>("textarea[data-alpha-composer]")?.hidden) {
+        await press("Type");
+        await until(alpha, runtime, Shell, (s) => s.assistant === "Typing");
+      }
       act(() => {
         const box = document.querySelector<HTMLTextAreaElement>("textarea[aria-label='Message Alpha']");
         if (!box) throw new Error("no composer");
@@ -196,6 +201,8 @@ describe("Notes", () => {
     await ask("open my shopping list", true);
     await drawn(() => vi.waitFor(() => expect(results()).toHaveLength(3)));
     expect([results()[2], title()]).toEqual([{ switched: true, shown: { kind: "saved-note", noteId: "shopping" } }, "shopping list"]);
+    // spec/app/notes/index.md, "The agent opens the one note the owner named, as the list last read it, once for the owner's current request, and is told whether it opened": a delivery succeeded only where the view switched.
+    expect(world.notes.views.filter((one) => one.path === "result").map((one) => one.body.success)).toEqual([true, false, true]);
   });
 
   it("The agent opens the note I named aloud (spec/app/assistant/context.md, \"A spoken turn carries what a typed turn sent at that moment would, the view claim included\"; spec/app/notes/index.md, \"The agent opens the one note the owner named, as the list last read it, once for the owner's current request, and is told whether it opened\")", async () => {
