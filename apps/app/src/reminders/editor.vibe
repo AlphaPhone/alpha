@@ -141,7 +141,11 @@ export effect function updateEditorDraft(patch: Partial<ReminderEditorFields>): 
   if (patch.recurrence !== undefined && patch.recurrence !== prev.recurrence) {
     const on = patch.recurrence !== "none"
     const state = try editor.get()
-    if (Editor.canToggleRepeat(state, on)) try contained(editor.send({ type: "toggleRepeat", on }), "toggling reminder repeat")
+    if (on !== state.hasRepeat && Editor.canToggleRepeat(state, on)) {
+      try contained(editor.send({ type: "toggleRepeat", on }), "toggling reminder repeat")
+    } else if (Editor.canEditNotes(state)) {
+      try contained(editor.send({ type: "editNotes", ok: true }), "changing reminder recurrence")
+    }
   }
   if (patch.subtasks !== undefined) {
     const state = try editor.get()

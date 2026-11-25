@@ -125,6 +125,19 @@ export effect function startReminderEdit(selected: number, item: ReminderItemRec
   try contained(editor.send({ type: "editReminder", id: selected, revision: item.revision, day: civilDay(begin) }), "opening Calendar's reminder form")
 }
 
+/** Reload the edited event's latest saved fields into the form store and accept them. */
+export effect function takeSaved(day: number): Fields!!(Editor.Machine | KeyValueStore.KeyValueStore | Time) {
+  const editor = try Editor.Machine
+  const state = try editor.get()
+  const row = state.target > 0 ? shown.find(state.target) : undefined
+  const fields: Fields = row === undefined
+    ? blank(day, try (try Time).latest())
+    : { title: row.title, place: row.place, notes: row.notes, begin: row.begin, end: row.end, allDay: row.allDay, people: "" }
+  try ignore(keep(fields, state.owner))
+  try contained(editor.send({ type: "takeSavedChanges" }), "taking the saved event")
+  return fields
+}
+
 // spec/app/calendar/editor.md, "A note or a scan opens a new event already filled in, as edits to review, only when no other draft is kept"
 /** Notes or Scan hand Calendar what they read as an event for `day`: kept as the form's draft, for the owner to review and save. */
 export effect function fromNote(fields: Fields, day: number) {
@@ -265,7 +278,10 @@ schema Found {
 function endedBy(found: Found | undefined, row: Row, kind: WriteKind, reply: string): Written {
   const event = found?.events.find((candidate) => candidate.id === row.key)
   const readback: Readback = found === undefined ? "ReadbackFailed"
-    : kind === "AnswerKind" ? answerReadback(event !== undefined, event?.attendees.some((person) => person.self && person.responseStatus === reply) ?? false)
+    : kind === "AnswerKind"
+      ? (reply === "declined" && event === undefined
+        ? "ReadbackFound"
+        : answerReadback(event !== undefined, event?.attendees.some((person) => person.self && person.responseStatus === reply) ?? false))
     : event === undefined ? "ReadbackMissing" : "ReadbackFound"
   const seen = readbackSeen(kind, readback)
   return seen === "Saved" || seen === "Deleted" || seen === "DeletedByReceipt" ? { confirmed: true, known: true }
@@ -273,8 +289,8 @@ function endedBy(found: Found | undefined, row: Row, kind: WriteKind, reply: str
 }
 
 /** Read `row` back from the agent's calendar after a write of `kind` it confirmed, and say how the write ended. */
-effect function readBackAgent(row: Row, kind: WriteKind, reply: string): Written!!Agent {
-  const urlParams = feedParams(civilDay(row.begin))
+effect function readBackAgent(row: Row, kind: WriteKind, reply: string, day = civilDay(row.begin)): Written!!Agent {
+  const urlParams = feedParams(day)
   const found = ask(Agent, HttpClientRequest.get(`${calendarBase}/feed`, { urlParams }), Found) catch () => undefined
   return endedBy(found, row, kind, reply)
 }
@@ -348,10 +364,11 @@ effect function sendAgent(attempt: number, kind: "Update" | "Remove" | "Reply", 
   }
   if (kind === "Remove") {
     if (row.cancel === "NoCancellation" || row.managed) return refused
-    const cancellationMode = row.cancel === "DeclineInvitation" ? "decline_invitation" : "organizer_cancel"
+    const declining = row.cancel === "DeclineInvitation"
+    const cancellationMode = declining ? "decline_invitation" : "organizer_cancel"
     const sent = try attemptedWith(Agent, (key) => HttpClientRequest.delete(event, { urlParams: { ...scoped, expectedProviderVersion: row.version, idempotencyKey: key, cancellationMode, notifyAttendees: "false" } }), attempt)
     if (filed(sent.body)) return waiting
-    return sent.confirmed ? try readBackAgent(row, "DeleteKind", "") : { confirmed: sent.confirmed, known: sent.known }
+    return sent.confirmed ? try readBackAgent(row, declining ? "AnswerKind" : "DeleteKind", declining ? "declined" : "") : { confirmed: sent.confirmed, known: sent.known }
   }
   if (!row.editable) return refused
   const fields = try kept(0, try owner())
@@ -359,7 +376,7 @@ effect function sendAgent(attempt: number, kind: "Update" | "Remove" | "Reply", 
     ...agentFields(fields), notes: fields.notes, ...scoped, expectedProviderVersion: row.version, idempotencyKey: key,
   }), attempt)
   if (filed(sent.body)) return waiting
-  return sent.confirmed ? try readBackAgent(row, "ChangeKind", "") : { confirmed: sent.confirmed, known: sent.known }
+  return sent.confirmed ? try readBackAgent(row, "ChangeKind", "", civilDay(fields.begin)) : { confirmed: sent.confirmed, known: sent.known }
 }
 
 // spec/app/calendar/editor.md, "Saving sends the form once, as a new numbered write built on the revision its edits began from"; spec/app/calendar/editor.md, "No create is sent while an earlier one is in doubt, unless the owner asked for a separate event"

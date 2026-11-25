@@ -896,4 +896,145 @@ describe("in a browser", () => {
     await until(alpha, runtime, Editor, (e) => e.kind === "Reply" && e.write.outcome === "Confirmed" && e.latched.length === 0);
     expect(world.calendar.writes).toEqual(["answer ev-team-lunch accepted"]);
   });
+
+  async function openBrowserCalendar(extra: readonly ReturnType<typeof agentEvent>[] = []) {
+    const world = morning(false);
+    world.calendar.events.push(...extra);
+    const { alpha } = await open(world, only("view:Calendar"));
+    const runtime = calendar.runtime(alpha);
+    await openCalendar(alpha);
+    await until(alpha, runtime, View, (s) => s.googleRows === 2 + extra.filter((ev) => civilDay(Date.parse(ev.startAt)) === world.today).length);
+    return { world, alpha, runtime };
+  }
+
+  async function openStandupEditor(alpha: Alpha, runtime: ReturnType<typeof calendar.runtime>) {
+    await tap("Standup");
+    await until(alpha, runtime, View, (s) => s.open !== 0);
+    await press("Event actions");
+    await press("Edit event");
+    await until(alpha, runtime, Editor, (e) => e.shown && e.form === "EditEvent");
+  }
+
+  it("Opens a search match on the currently anchored day (spec/app/calendar/index.md, \"Story: Search my events and choose which calendars I see\")", async () => {
+    const { alpha, runtime } = await openBrowserCalendar();
+    await press("Search events");
+    await until(alpha, runtime, View, (s) => s.overlay === "Search");
+    await fill("Search events", "standup");
+    const hit = [...document.querySelectorAll<HTMLButtonElement>("[aria-label='Search results'] button")]
+      .find((row) => (row.getAttribute("aria-label") ?? "").includes("Standup"));
+    if (!hit) throw new Error("no search match Standup");
+    expect(hit.disabled).toBe(false);
+    await drawn(() => hit.click());
+    await until(alpha, runtime, View, (s) => s.overlay === "NoOverlay");
+    expect(titles()).toContain("Standup");
+  });
+
+  it("Creates an all-day event spanning at least one whole day (spec/app/calendar/editor.md, \"An event ends after it starts\")", async () => {
+    const { world, alpha, runtime } = await openBrowserCalendar();
+    await press("New event");
+    await until(alpha, runtime, Editor, (e) => e.shown && e.form === "NewEvent" && e.receipts.status === "Loaded");
+    await fill("Title", "Holiday");
+    const allDay = document.querySelector<HTMLElement>("[role=switch][aria-label='All day']");
+    if (!allDay) throw new Error("no All day switch");
+    await drawn(() => allDay.click());
+    await until(alpha, runtime, Editor, (e) => e.allDay && e.titled && e.kept);
+    await press("Save event");
+    await until(alpha, runtime, Editor, (e) => e.form === "NoForm" && e.write.outcome === "Confirmed");
+    const created = world.calendar.events.find((event) => event.title === "Holiday");
+    if (!created) throw new Error("Holiday was not created");
+    expect(created.isAllDay).toBe(true);
+    expect(Date.parse(created.endAt)).toBeGreaterThan(Date.parse(created.startAt));
+  });
+
+  it("Clears hidden declined events after reread and keeps series reach while sending (spec/app/calendar/deletions.md, \"A refused send shows the event again and says it was not deleted; a sent deletion hides it until a read no longer has it unchanged\")", async () => {
+    const seed = morning(false);
+    const { world, alpha, runtime } = await openBrowserCalendar([
+      agentEvent("Weekly sync", seed.at(0, 14), seed.at(0, 15), { id: "ev-weekly-1", externalId: "ev-weekly-1", recurringEventId: "series-weekly" }),
+      agentEvent("Weekly sync", seed.at(2, 14), seed.at(2, 15), { id: "ev-weekly-2", externalId: "ev-weekly-2", recurringEventId: "series-weekly" }),
+    ]);
+
+    await tap("Team lunch");
+    await until(alpha, runtime, View, (s) => s.open !== 0);
+    await press("No");
+    await until(alpha, runtime, Held, (d) => d.waiting !== 0);
+    await hardware("home");
+    await until(alpha, runtime, Editor, (e) => e.kind === "Remove" && e.write.outcome !== "Sent");
+    expect((await runtime.runPromise(Editor.use((e) => e.get()))).write.outcome).toBe("Confirmed");
+    await openCalendar(alpha);
+    await runtime.runPromise(View.use((v) => v.send({ type: "refresh" })));
+    await until(alpha, runtime, View, (s) => s.google.status === "Loaded");
+    expect((await runtime.runPromise(Held.use((d) => d.get()))).hiding).toBe(0);
+
+    await fromMonth("Schedule");
+    await until(alpha, runtime, View, (s) => s.layout === "Agenda" && s.overlay === "NoOverlay");
+    const weeklyButton = events().find((el) => (el.getAttribute("aria-label") ?? "").includes("Weekly sync"));
+    if (!weeklyButton) throw new Error("no Weekly sync row");
+    await drawn(() => (weeklyButton as HTMLElement).click());
+    await until(alpha, runtime, View, (s) => s.open !== 0);
+    await press("Event actions");
+    await press("Delete the series");
+    await until(alpha, runtime, Held, (d) => d.waiting !== 0);
+    world.calendar.stalled = true;
+    await hardware("home");
+    await until(alpha, runtime, Held, (d) => d.waiting === 0 && d.sending !== 0);
+    await openCalendar(alpha);
+    await drawn(() => {});
+    const remainingWeekly = events().filter((el) => (el.getAttribute("aria-label") ?? "").includes("Weekly sync"));
+    expect(remainingWeekly).toHaveLength(0);
+  });
+
+  it("Reloads saved fields when choosing Use the saved event on an edit conflict (spec/app/calendar/editor.md, \"Story: Write an event\")", async () => {
+    const { world, alpha, runtime } = await openBrowserCalendar();
+    await openStandupEditor(alpha, runtime);
+    await fill("Title", "Standup draft");
+    await until(alpha, runtime, Editor, (e) => e.draft.edits === 1 && e.kept);
+    const serverStandup = world.calendar.events.find((event) => event.id === "ev-standup");
+    if (!serverStandup) throw new Error("no Standup event");
+    serverStandup.title = "Standup renamed";
+    serverStandup.updatedAt = new Date(Date.parse(serverStandup.updatedAt) + 60_000).toISOString();
+    serverStandup.metadata = { ...serverStandup.metadata, etag: "2" };
+    await runtime.runPromise(View.use((v) => v.send({ type: "refresh" })));
+    await until(alpha, runtime, Editor, (e) => e.draft.sync === "Conflicted");
+    await press("Use the saved event");
+    await until(alpha, runtime, Editor, (e) => e.draft.sync === "Kept");
+    const titleInput = document.querySelector<HTMLInputElement>("input[aria-label='Title']");
+    expect(titleInput?.value).toBe("Standup renamed");
+  });
+
+  it("Reads back an edited agent event at its new date when moved outside the old read window (spec/app/calendar/writing.md, \"An applied create, change or answer is read back; only a read back that finds it as asked says saved\")", async () => {
+    const { world, alpha, runtime } = await openBrowserCalendar();
+    await openStandupEditor(alpha, runtime);
+    const futureDate = dateOf(world.today + 90);
+    const isoDay = `${futureDate.getFullYear()}-${String(futureDate.getMonth() + 1).padStart(2, "0")}-${String(futureDate.getDate()).padStart(2, "0")}`;
+    await fill("Calendar date", isoDay);
+    await until(alpha, runtime, Editor, (e) => e.draft.edits >= 1 && e.kept);
+    await press("Save event");
+    await until(alpha, runtime, Editor, (e) => e.write.outcome !== "Sent");
+    const after = await runtime.runPromise(Editor.use((e) => e.get()));
+    expect([after.form, after.write.outcome, after.latched]).toEqual(["NoForm", "Confirmed", []]);
+  });
+
+  it("Disables series-wide edit scopes on a managed Google repeating event (spec/app/calendar/writing.md, \"A managed Google event is never deleted here, and its other repeating changes reach one occurrence\")", async () => {
+    const seed = morning(false);
+    const { alpha, runtime } = await openBrowserCalendar([
+      agentEvent("Google recurring", seed.at(0, 16), seed.at(0, 17), {
+        id: "ev-google-rec",
+        externalId: "ev-google-rec",
+        provider: "google",
+        recurringEventId: "series-g1",
+        metadata: { etag: "1", managed: true },
+      }),
+    ]);
+
+    const row = events().find((el) => (el.getAttribute("aria-label") ?? "").includes("Google recurring"));
+    if (!row) throw new Error("no Google recurring row");
+    await drawn(() => (row as HTMLElement).click());
+    await until(alpha, runtime, View, (s) => s.open !== 0);
+    await press("Event actions");
+    await press("Edit event");
+    await until(alpha, runtime, Editor, (e) => e.shown && e.form === "EditEvent" && e.repeats);
+    expect(button("This event")?.disabled).toBe(false);
+    expect(button("This and following")?.disabled).toBe(true);
+    expect(button("All events")?.disabled).toBe(true);
+  });
 });
