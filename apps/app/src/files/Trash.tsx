@@ -38,7 +38,7 @@ export function Trash({ runtime, onBack }: TrashProps) {
   const erase = detail === undefined ? undefined : { type: "askToErase", entry: detail } as const;
   return (
     <section aria-label="Trash" className="flex min-h-0 flex-1 flex-col">
-      <AppHeader title="Trash" leading={onBack && <Button variant="ghost" size="icon" aria-label="Files" onClick={onBack}><ChevronLeft /></Button>}>
+      <AppHeader title="Trash" detail leading={onBack && <Button variant="ghost" size="icon" aria-label="Files" onClick={onBack}><ChevronLeft /></Button>}>
         {owner({ type: "refresh" }) && <Button variant="ghost" className="h-11 px-3.5" onClick={() => tell({ type: "refresh" })}>Refresh</Button>}
         {owner({ type: "restoreAll", now: untimed }) && <Button variant="ghost" className="h-11 px-3.5" onClick={() => tell({ type: "restoreAll", now: untimed })}>Restore all</Button>}
         {owner({ type: "askToEmpty" }) && <Button variant="ghost" aria-label="Empty the Trash" className="h-11 px-3.5 text-warn" onClick={() => tell({ type: "askToEmpty" })}>Empty</Button>}

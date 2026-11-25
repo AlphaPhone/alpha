@@ -22,7 +22,10 @@ do next.
   Fraunces behind it, at weight `light`: a screen's display title on the launcher, the date on Home, a large figure. The sizes
   are in rem, so Android's text size scales them: `base` is body text, `md` a row title or a field,
   `caption` and `sm` the quieter line beside it, `xl` a shared app header title in the browser, `3xl` a screen title
-  (also the shared app header title in `font-display` on the launcher), and `4xl` the Home date. Text up to `lg` is set at Public Sans's own line height (1.175), as develop sets it; copy that
+  (also the shared app header title in `font-display` on an app's first page on the launcher, drawn no larger than lets
+  a 4.4em word fit its own row above 150% text), `home-display` that title on a screen inside an app on the launcher, on
+  one line and cut with an ellipsis until above 150% text, where every header title takes its own row and wraps, and
+  `4xl` the Home date. Text up to `lg` is set at Public Sans's own line height (1.175), as develop sets it; copy that
   is read at length takes `leading-normal`. `tracking-caps` with `text-xs` is a small uppercase label; `text-label` names an app tile on
   Home and in the drawer. A list row reads `text-base`,
   `text-subject` and `text-snippet` line by line; `text-meta` is a status line under a header, and `text-body`
@@ -30,7 +33,7 @@ do next.
   keypad key's letters; `text-keypad-number` the number being dialled, `text-keypad-digit` a key's
   digit and `text-keypad-letters` the letters under it; `text-contact-name` and `text-contact-initials`, in
   `font-display`, are a contact's name and initials at the top of their card. `text-lead` is the street of the next turn,
-  `text-title` a document's name over its preview, and `text-figure` and `text-figure-sm` a route's time.
+  `text-title` a document's name over its preview and Notes' Recently deleted header on the launcher, and `text-figure` and `text-figure-sm` a route's time.
   `leading-row` sets `text-body` as a note's or a routine's title in a list.
   `text-badge` is a video's length over a thumbnail and `text-tile-name` an album's name under its cover.
   `text-headline` is an open voice or link note's title and `text-quote` a clip kept from a page.
@@ -104,6 +107,9 @@ this prose into tokens. To change the design, describe it, and have the change w
 | `info` | oklch(0.354 0.245 264.1) | oklch(0.704 0.157 278) |
 | `alpha` | oklch(0.45201372 0.31321437 264.05202064) | — |
 | `alpha-foreground` | oklch(1 0 0) | — |
+| `voice-paused` | oklch(0.42871365 0.17763819 275.87797693) | oklch(0.49371435 0.17497524 277.85975720) |
+| `voice-processing` | oklch(0.35317586 0.24472654 264.05202064) | oklch(0.53252567 0.26097330 273.09464102) |
+| `voice-speaking` | oklch(0.46315925 0.30554663 264.59166337) | — |
 | `call` | oklch(0.509 0.134 149.4) | oklch(0.614 0.162 149.3) |
 | `record` | oklch(0.578 0.206 29) | oklch(0.663 0.224 28.3) |
 | `dial` | oklch(0.614 0.162 149.3) | — |

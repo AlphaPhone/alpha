@@ -1,6 +1,6 @@
 // spec/app/workflows/builder.md, "Story: Write a workflow step by step"; spec/app/workflows/builder.md, "Story: Keep the draft on the phone"; spec/app/workflows/builder.md, "Story: Save a workflow on the agent once"; spec/app/workflows/generate.md, "Story: Have the agent draft a workflow"
 import * as KeyValueStore from "effect/persistence/KeyValueStore"
-import { type PhoneStep, type PhoneWorkflowCatalog, type PhoneWorkflowSaveExpectation, type PhoneWorkflowSpec, type PhoneWorkflowTrigger, WorkflowHttpError, WorkflowTypedRejected, validatePhoneWorkflowSpec, workflowUuid } from "@elizaos/plugin-workflow/client"
+import { type PhoneStep, type PhoneWorkflowCatalog, type PhoneWorkflowSaveExpectation, type PhoneWorkflowSpec, type PhoneWorkflowTrigger, WorkflowHttpError, WorkflowTypedRejected, validatePhoneWorkflowSpec, workflowUuid } from "@elizaos/plugin-workflow-client"
 import * as Build from "../../gen/app__workflows__builder.effect.vibe"
 import * as Generate from "../../gen/app__workflows__generate.effect.vibe"
 import * as List from "../../gen/app__workflows__list.effect.vibe"

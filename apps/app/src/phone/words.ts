@@ -1,5 +1,5 @@
 // spec/app/phone/index.md, "Each digit, or each digit taken back, is judged by the phone and looked up among the contacts on the phone"; spec/app/messages/index.md, "The filter chip and the search start a new list, and Retry reads it again"
-import { normalizePhoneNumber } from "@elizaos/os/bridges/definitions/phone";
+import { normalizePhoneNumber } from "@elizaos/os-bridges";
 import type { Typed } from "../../gen/app__phone.ts";
 
 /** Whether the keypad is blank, partial or holds a number Android can accept. @throws {never} */
@@ -25,7 +25,7 @@ export function callerTitle(number: string, name: string | null): string {
   return name || displayNumber(number);
 }
 
-/** Show a North American number as it is read out on Phone and keep international numbers intact. */
+/** Show a North American number as it is read out on Phone and keep international numbers intact. @throws {never} */
 export function displayNumber(number: string): string {
   const digits = number.replace(/\D/g, "");
   const local = digits.length === 11 && digits[0] === "1" ? digits.slice(1) : digits;

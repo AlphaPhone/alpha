@@ -1,7 +1,7 @@
 # Alpha's agent pack
 
 The resident agent the phone runs is eliza's: `agent.mjs`, built by
-`buildAgentBundle` of `@elizaos/agent/bundle` from the commit `eliza.lock.json`
+`buildAgentBundle` of `@elizaos/agent-host` from the commit `eliza.lock.json`
 pins, and started by eliza's Android agent service from three data files
 (`spec/os/agentService/config.md` in eliza). What the bundle may hold, how its
 manifest is written and read, and what it refuses are eliza's

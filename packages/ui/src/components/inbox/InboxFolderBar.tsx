@@ -27,6 +27,7 @@ export type InboxFolderBarProps = {
  */
 export function InboxFolderBar({ folder, unavailable = false, onChoose }: InboxFolderBarProps) {
   const moreSelected = moreFolders.some((name) => name === folder);
+  const moreLabel = moreSelected ? inboxFolders[folder] : "More";
   const refused = (name: InboxFolder) => !onChoose || (unavailable && (name === "spam" || name === "trashed"));
   return (
     <div role="group" aria-label="Folder" tabIndex={0} className={cn(focusRing, "-mx-4 flex touch-pan-x gap-2 overflow-x-auto px-5 pb-1.5")}>
@@ -38,10 +39,10 @@ export function InboxFolderBar({ folder, unavailable = false, onChoose }: InboxF
           </Chip>
         );
       })}
-      <Menu>
+      <Menu modal={false}>
         <MenuTrigger asChild>
-          <Button variant="secondary" size="sm" aria-label="More folders" disabled={!onChoose} className={cn("h-11 px-3 before:inset-0", moreSelected && "bg-foreground text-background hover:bg-foreground active:bg-foreground")}>
-            {moreSelected ? inboxFolders[folder] : "More"}<ChevronDown size={16} aria-hidden />
+          <Button variant="secondary" size="sm" aria-label={moreSelected ? `${moreLabel}, more folders` : "More folders"} disabled={!onChoose} className={cn("h-11 px-3 before:inset-0", moreSelected && "bg-foreground text-background hover:bg-foreground active:bg-foreground")}>
+            {moreLabel}<ChevronDown size={16} aria-hidden />
           </Button>
         </MenuTrigger>
         <MenuContent align="start">

@@ -1,15 +1,19 @@
 // spec/app/messages/index.md, "Story: Read a conversation"; spec/app/phone/index.md, "Story: Call a number"
 package ai.alphacompute.alphaphone;
 
+import ai.eliza.plugins.messages.SmsTelephony;
 import ai.eliza.plugins.messages.SmsTelephonyConfiguration;
 import ai.eliza.plugins.messages.TelephonyPlugin;
 import android.Manifest;
 import android.telephony.TelephonyManager;
+import android.webkit.WebView;
 import com.getcapacitor.JSObject;
 import com.getcapacitor.PluginCall;
 import com.getcapacitor.PluginMethod;
 import com.getcapacitor.annotation.CapacitorPlugin;
 import com.getcapacitor.annotation.Permission;
+import java.util.function.BooleanSupplier;
+import java.util.function.Consumer;
 
 @CapacitorPlugin(name = "ElizaTelephony", permissions = {
  @Permission(alias = "contacts", strings = { Manifest.permission.READ_CONTACTS }),
@@ -20,6 +24,38 @@ import com.getcapacitor.annotation.Permission;
 })
 public final class AlphaTelephonyPlugin extends TelephonyPlugin {
  @Override protected SmsTelephonyConfiguration configuration() { return AlphaTelephony.CONFIGURATION; }
+
+ void sendComposed(MainActivity activity, WebView view, PluginCall call, boolean mms, BooleanSupplier active, Consumer<Runnable> queue) {
+  long visit = activity.composerVisit();
+  BooleanSupplier current = () -> composerCurrent(activity, view, visit, active);
+  if (!current.getAsBoolean()) {
+   call.reject("Open and unlock Messages to send this draft.", "composer-not-started");
+   return;
+  }
+  SmsTelephony.DispatchGuard guard = () -> {
+   if (!current.getAsBoolean()) throw new IllegalStateException("The Messages composer is no longer current");
+  };
+  queue.accept(() -> {
+   try {
+    if (!current.getAsBoolean()) {
+     call.reject("Open and unlock Messages to send this draft.", "composer-not-started");
+     return;
+    }
+    if (mms) sendOwnerApprovedMms(call, guard);
+    else sendOwnerApprovedSms(call, guard);
+   } catch (RuntimeException unavailable) {
+    call.reject("The Messages send could not be confirmed.");
+   }
+  });
+ }
+
+ private boolean composerCurrent(MainActivity activity, WebView view, long visit, BooleanSupplier active) {
+  if (!active.getAsBoolean() || getActivity() != activity || activity.composerVisit() != visit
+    || activity.isAssistantSurface() || !view.isShown() || !admitted() || !unlockedForeground()
+    || !AlphaDevicePlugin.shareForeground(activity)) return false;
+  AlphaCallState.Reading call = AlphaCallState.read(getContext());
+  return call.inCall != null && !call.emergencyLive() && activity.composerVisit() == visit && active.getAsBoolean();
+ }
 
  @Override protected DeletionWindow deletionWindow() {
   return (kind, target) -> AlphaTelephonyDeletions.stage(getContext(), kind, target);

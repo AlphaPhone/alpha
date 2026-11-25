@@ -164,10 +164,9 @@ export function Maps({ runtime, alpha }: Shown<ScreenMachine | CreditsMachine | 
 
       {(now === "Browse" || now === "Search" || now === "Place") && (
         <MapsSearchBar
-          data-host-chrome=""
           className="absolute inset-x-3 top-2 z-10 in-data-[alpha-launcher]:top-13"
+          leading={now === "Browse" && <AppBack alpha={alpha} />}
           lead={now === "Browse" ? "search" : "back"}
-          back={now === "Browse" && alpha ? <AppBack alpha={alpha} className="size-13 rounded-full [&_svg]:size-5.5" /> : undefined}
           onLead={now === "Browse" ? openSearch : back}
           aria-label="Search Maps"
           placeholder="Search"

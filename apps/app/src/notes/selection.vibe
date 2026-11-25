@@ -36,8 +36,10 @@ export const noteSubjects = Stream.unwrap(effect {
 
 /** Only identifiers cross to the agent. The agent reads its own saved words after receiving an owner turn. */
 export effect function notesSelection(): (RendererNote | undefined)!!NotesSelection {
-  const shell = try (try Shell).get()
-  if (!showing(shell, "Notes") || !(try (try Device).showing()) || pageInert(try (try Layers).get())) return undefined
+  const shell = try Shell
+  if (!showing(try shell.get(), "Notes")) return undefined
+  const identity = ownerAt() catch () => ""
+  if (identity === "" || !(try (try Device).showing()) || !showing(try shell.get(), "Notes") || pageInert(try (try Layers).get())) return undefined
   if ((try (try Previous).get()).showing || (try (try Trash).get()).showing || unfinished(try (try Recorder).get())) return undefined
   const list = try (try Notes).get()
   const editor = try (try Editor).get()
@@ -45,8 +47,7 @@ export effect function notesSelection(): (RendererNote | undefined)!!NotesSelect
   const voice = try (try Voice).get()
   const id = chosen(list, editor, link, voice)
   const snapshot = try (try NoteContent).collection()
-  if (list.read.status !== "Loaded" || list.version !== snapshot.version || snapshot.owner === "" || numberOf("owner", snapshot.owner) !== list.owner) return undefined
-  if ((ownerAt() catch () => "") !== snapshot.owner) return undefined
+  if (list.read.status !== "Loaded" || list.version !== snapshot.version || snapshot.owner !== identity || numberOf("owner", identity) !== list.owner) return undefined
   const note = snapshot.noteByNumber.get(id)
   if (note !== undefined) return { kind: "canonical-note", id: note.id, revision: String(snapshot.version - 1) }
   if (editor.showing || link.showing || voice.showing) return undefined
