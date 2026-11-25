@@ -839,6 +839,8 @@ export function installSettingsAdapter(Component: any, views: Bag) {
       ?modelLabel(providerName,residentProvider.model):'Not reported';
     const manage = (page: string) => () => void device.openSettings({ page }).then(opened => { const notice = broaderPageNotice(page, opened); if (notice) api.toast(notice); }, () => api.toast('Unavailable'));
     const info = (label: string, val: string, id = label): Bag => ({ id, kInfo: true, label, val, hasVal: true, noAB: true });
+    // A text-only row: a label with an explanation under it (Carrier & SIM setup).
+    const note = (label: string, sub: string): Bag => ({ kInfo: true, label, val: '', hasVal: false, hasSub: true, sub, noAB: true });
     // Permission state: one word beside a dot (never colour alone).
     const permissionDot = (val: string) => val === 'Allowed' || val === 'All' || val === 'Precise' ? 'ok' : val === 'Ask' || val === 'Selected' || val === 'Limited' || val === 'Approx.' || val === 'Chosen files' || val === 'Alpha only' ? 'warn' : 'off';
     const permissionInfo = (label: string, val: string): Bag => ({ ...info(label, val), hasDot: val !== '—' && val !== 'Unavailable', dot: permissionDot(val) });
@@ -1291,7 +1293,7 @@ export function installSettingsAdapter(Component: any, views: Bag) {
         ...action(label,()=>void carrierSession.copy(token).then(copied=>{if(copied&&carrierCurrent())api.toast(label+' copied to the Android clipboard.');},()=>api.toast('Could not copy. Keep Alpha open and unlocked.'))),
         lbl:'Copy '+label,sub:carrierFieldText(field),hasSub:true,val:'Copy',hasVal:true,
       }:info(label,carrierFieldText(field));
-      const groups=[group([
+      const groups:Bag[]=[group([
         ...(native?[{...action(busy?'Reading identifiers…':data?'Refresh identifiers':'Show identifiers',()=>void carrierSession.show()),busy}]:[info('Device identifiers','Available only on an Android phone')]),
         note('Private device information','Read only when you tap above. Values clear when you leave this page. Copy uses the Android clipboard.'),
         ...(failed?[note('Read unavailable','Keep Alpha in front and the phone unlocked, then try again. You can also use Android device identifiers below.')]:[]),
