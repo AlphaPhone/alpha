@@ -39,7 +39,7 @@ function ConversationActions({ runtime }: AssistantProps) {
   const listed = listing && shown.list.status !== "Idle";
   if (free.replying && !(listed && shown.list.status === "Failed")) return null;
   return (
-    <ListGroup>
+    <ListGroup aria-label="Chat history">
       {free.replying ? null : <>
       <ListRow title="New" aria-label="New conversation" leading={<Plus />} disabled={!chats.can(start)} onClick={() => {
         void chats.send(start).then((result) => { if (result._tag === "Success") raise(); });
@@ -52,7 +52,7 @@ function ConversationActions({ runtime }: AssistantProps) {
         const title = seen.titles.get(id) ?? "Ask Alpha";
         const choose = { type: "choose", conversation: id, ...free } as const;
         return (
-          <ListRow key={id} title={title} aria-label={`Restore conversation: ${title}`} leading={<Undo2 />} disabled={!chats.can(choose)} onClick={() => {
+          <ListRow key={id} title={title} aria-label={`Restore conversation: ${title}`} selected={id === shown.chosen} leading={<Undo2 />} disabled={id !== shown.chosen && !chats.can(choose)} onClick={id === shown.chosen ? raise : () => {
             void chats.send(choose).then((result) => { if (result._tag === "Success") raise(); });
           }} />
         );
@@ -61,7 +61,7 @@ function ConversationActions({ runtime }: AssistantProps) {
       {listed && shown.list.status === "Failed" ? (
         <>
           <ListRow title="History" detail="Chats did not load" />
-          {free.replying ? null : <ListRow title="Retry" aria-label="Retry saved conversations" leading={<RotateCw />} onClick={() => void chats.send({ type: "browse" })} />}
+          {free.replying ? null : <ListRow title="Retry" aria-label="Retry saved conversation" leading={<RotateCw />} onClick={() => void chats.send({ type: "browse" })} />}
         </>
       ) : null}
     </ListGroup>
