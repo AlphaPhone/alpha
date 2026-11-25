@@ -40,6 +40,8 @@ export interface TelephonyScene {
   voicemails: HeldVoicemail[];
   /** True while this fake phone's voicemail deletion is still in Android's Undo window. */
   holdVoicemailDeletion: boolean;
+  readonly voicemailObservations: boolean[];
+  voicemailRetirementRefused: boolean;
   sms: "granted" | "denied";
   texts: Text[];
   /** Leaves the staged SMS deletion open so the owner can Undo. */
@@ -114,6 +116,8 @@ export function telephonyScene(): TelephonyScene {
     emergencyNumbers: new Set(["911", "112"]),
     voicemails: [{ id: 11, number: "+14155550100", date: 1_700_000_100_000, heard: false, deleted: false }],
     holdVoicemailDeletion: false,
+    voicemailObservations: [],
+    voicemailRetirementRefused: false,
     sms: "granted",
     texts: [{ id: 1, thread: 1, address: "+14155550100", box: "inbox", date: 1_700_000_050_000, body: "See you at five", read: false }],
     holdMessageDeletion: false,
@@ -263,7 +267,12 @@ function telephony(world: TelephonyScene): Faked {
         world.staged.push(staged);
         return deletionResponse({ status: "queued", deletion: staged });
       },
-      observeVoicemail: () => Promise.resolve(undefined),
+      observeVoicemail: ({ enabled }) => {
+        world.voicemailObservations.push(enabled);
+        return !enabled && world.voicemailRetirementRefused
+          ? Promise.reject(rejection("Couldn’t confirm voicemail observation stopped", "unavailable"))
+          : Promise.resolve(undefined);
+      },
       smsNoticePending: () => Promise.resolve(world.smsNotice ?? {}),
       acknowledgeSmsNotice: ({ token }) => {
         if (world.smsNotice?.token === token) world.smsNotice = undefined;
