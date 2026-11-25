@@ -137,7 +137,7 @@ export function Files({ runtime, alpha }: FilesProps) {
   const CategoryIcon = icons[state.category];
   const primary = state.volumes[0];
   const place = state.inCategory ? category : state.trail.length === 1 && state.trail[0] === primary?.id ? "All files" : label(state.trail.at(-1) ?? 0);
-  const title = selecting ? String(marks.size) : atTop ? "Files" : (place ?? "Files");
+  const title = selecting ? `${marks.size} selected` : atTop ? "Files" : (place ?? "Files");
   const wanted: Filter = { ...everything, text: text.trim(), kind: kind ?? "Other", anyKind: kind === undefined };
   const today = new Date(runtime.runSync(Effect.flatMap(Time, (time) => time.latest())));
   const parentOf = (item: Item) => {
