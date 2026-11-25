@@ -1,5 +1,10 @@
 // spec/app/files/preview.md, "Story: Look at a file"; spec/app/files/preview.md, "Story: Act on the file I am looking at"; spec/app/files/preview.md, "Story: Get a file back when access was lost"; spec/app/files/recent.md, "Story: Find what I opened lately"
 import type { SelectedDocumentsClient, SelectionId } from "@elizaos/os/bridges/definitions/media"
+import { MMS_MAX_TOTAL_BYTES } from "@elizaos/os/bridges/definitions/messages"
+import { type Machine as TextMessages } from "../../gen/app__messages.effect.vibe"
+import { type Machine as MessageComposer } from "../../gen/app__messages__composer.effect.vibe"
+import { type Drafts as MessageDrafts, handOverPicture, pictureMessagingReady } from "../messages/composer.vibe"
+import type { Telephony } from "../platform/telephony.vibe"
 import * as KeyValueStore from "effect/persistence/KeyValueStore"
 import * as Browser from "../../gen/app__files.effect.vibe"
 import * as Shown from "../../gen/app__files__preview.effect.vibe"
@@ -83,6 +88,20 @@ module kept {
   }
 
   /** @throws {never} */
+  export function pictureBytes(data: string, type: "image/png" | "image/jpeg", size: number, max: number): Uint8Array | undefined {
+    if (data.length % 4 !== 0 || data.length > Math.ceil(max / 3) * 4) return undefined
+    try {
+      const decoded = atob(data)
+      if (decoded.length !== size) return undefined
+      const signature = type === "image/png" ? [137, 80, 78, 71, 13, 10, 26, 10] : [255, 216, 255]
+      if (!signature.every((byte, at) => decoded.charCodeAt(at) === byte)) return undefined
+      return Uint8Array.from(decoded, (byte) => byte.charCodeAt(0))
+    } catch {
+      return undefined
+    }
+  }
+
+  /** @throws {never} */
   export function textFromBase64(data: string): string | undefined {
     try {
       return new TextDecoder("utf-8", { fatal: true }).decode(Uint8Array.from(atob(data), (byte) => byte.charCodeAt(0)))
@@ -112,7 +131,7 @@ module kept {
     }
   }
 }
-import { earlierOf, grantsOf, namesOf, textFromBase64, upgradePreview } from kept
+import { earlierOf, grantsOf, namesOf, pictureBytes, textFromBase64, upgradePreview } from kept
 
 /**
  * The documents Recent holds access to, each by its grant's number, kept across restarts with what the owner calls
@@ -379,6 +398,49 @@ effect function samePreview(viewer: number, item: number, revision: number, gran
   return Shown.usable(state) && state.viewer === viewer && state.item === item && state.revision === revision && (try grantOf(item)) === grant
 }
 
+/** A PNG or JPEG the phone can carry as one MMS picture. */
+export function pictureFits(file: Grant | undefined): boolean {
+  const size = file?.bytes
+  return (file?.mimeType === "image/png" || file?.mimeType === "image/jpeg") && size !== undefined && Number.isSafeInteger(size) && size > 0 && size <= MMS_MAX_TOTAL_BYTES
+}
+
+type MessageTarget = TextMessages | MessageComposer | MessageDrafts | Shell | Telephony
+
+// spec/app/files/preview.md, "Use in Messages offers the exact readable PNG or JPEG to the owner’s recipient picker"
+effect function offerPicture(viewer: number, item: number, revision: number): void!!(Documents | Opened | Recent.Machine | Shown.Machine | Files | MessageTarget | Toasts | Said) {
+  const offered = effect {
+    const grant = try grantOf(item)
+    const file = try (try Opened).grant(grant)
+    const selection = try selectionOf(grant)
+    if (Option.isNone(file) || Option.isNone(selection) || !pictureFits(file.value) || !(try samePreview(viewer, item, revision, grant))) return false
+    const contentType = file.value.mimeType
+    const size = file.value.bytes
+    if ((contentType !== "image/png" && contentType !== "image/jpeg") || size === undefined || !(try pictureMessagingReady())) return false
+    const docs = try documents()
+    const before = try tryPromise(() => docs.describe(selection.value))
+    const place = file.value.storage
+    const matches = (one: typeof before) => one.status === "selected" && one.selectionId === selection.value && one.name === file.value.name &&
+      one.mimeType === contentType && (one.size === undefined || one.size === size) &&
+      (place !== undefined && one.modified === undefined || Math.max(0, Math.trunc(one.modified ?? 0)) === revision)
+    if (!matches(before) || !(try samePreview(viewer, item, revision, grant))) return false
+    const attachment = try (try Documents).attachment(selection.value)
+    if (Option.isNone(attachment) || attachment.value.name !== file.value.name || attachment.value.mimeType !== contentType) return false
+    const bytes = pictureBytes(attachment.value.dataBase64, contentType, size, MMS_MAX_TOTAL_BYTES)
+    if (bytes === undefined) return false
+    const after = try tryPromise(() => docs.describe(selection.value))
+    if (!matches(after) || before.uri !== after.uri) return false
+    if (place !== undefined) {
+      const listed = try called("storageList", (plugin) => plugin.storageList({ volume: place.volume, path: parentPath(place.path) }))
+      if (listed.status !== "ready" || !listed.entries?.some((one) =>
+        one.path === place.path && !one.directory && one.name === file.value.name && one.size === size && Math.trunc(one.modified) === revision)) return false
+    }
+    if (!(try samePreview(viewer, item, revision, grant))) return false
+    const wireName = contentType === "image/png" ? "picture-1.png" : "picture-1.jpg"
+    return try handOverPicture({ name: file.value.name, wireName, contentType, bytes })
+  } catch () => false
+  if (!offered) try say("Messages could not open this picture", true)
+}
+
 // spec/app/files/preview.md, "The owner can share the readable file shown through Android using its own selected-document grant"
 effect function shareViewed(viewer: number, item: number, revision: number): void!!(Documents | Opened | Recent.Machine | Shown.Machine | Toasts | Said) {
   try ignore(effect {
@@ -504,7 +566,7 @@ effect function actOnViewed(viewer: number, item: number, revision: number, oper
   if (!applied) try say("Files could not confirm the action for this file", true)
 }
 
-function carryShown(fx: Shown.Effect): Job<Shown.Event, PreviewWorkspace | MediaHandoff | MailTarget | Toasts | Said, [by: Shown.Actor]> {
+function carryShown(fx: Shown.Effect): Job<Shown.Event, PreviewWorkspace | MediaHandoff | MailTarget | MessageTarget | Toasts | Said, [by: Shown.Actor]> {
   return match (fx) {
     when { tag: "Read", let ticket, let item, let revision }: answer("read", read(ticket, item, revision), { type: "contentRead", ticket, ok: false, pages: 0, why: "Fine", secret: false }, "Phone");
     when { tag: "Draw", let ticket, let item, let revision, let page }: answer("draw", drew(ticket, item, revision, page), { type: "drawn", ticket, ok: false, isolated: true, readOnly: true }, "Phone");
@@ -531,6 +593,7 @@ function carryShown(fx: Shown.Effect): Job<Shown.Event, PreviewWorkspace | Media
     when { tag: "SelectAgain", let item }: run("again", effect { try ignore((try Recent.Machine).send({ type: "openPicker", replacing: item }, "Owner")) }, "Phone");
     when { tag: "AskAlpha", let item }: run("ask", askAbout(item), "Phone");
     when { tag: "Transcribe" }: stop("transcribe");
+    when { tag: "OfferPicture", let viewer, let item, let revision }: run(`offer picture ${viewer}`, offerPicture(viewer, item, revision), "Phone");
     when { tag: "OfferEmail", let ticket, let viewer, let item, let revision, let account }: answer("email", offerEmail(ticket, viewer, item, revision, account), { type: "answered", ticket, confirmed: false, known: false }, "Phone");
   }
 }

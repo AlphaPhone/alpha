@@ -69,6 +69,7 @@ type Effect =
   | ShareFile({ viewer: int, item: int, revision: int })
   | ActOnStoredFile({ viewer: int, item: int, revision: int, operation: StorageAction, name: str })
   | RenamePicked({ viewer: int, item: int, revision: int, name: str })
+  | OfferPicture({ viewer: int, item: int, revision: int })
   | Lost({ item: int })
   | SelectAgain({ item: int })
   | Forget({ item: int })
@@ -412,6 +413,27 @@ pure def stepAnEmailOfferNamesTheFileShown(before: Preview, via: str, after: Pre
   out.every(e => match e {
     | OfferEmail(x) => via == "useInEmail" and x.ticket == after.attempt.id and loaded(before)
         and x.viewer == before.viewer and x.item == before.item and x.revision == before.revision and x.account > 0
+    | _ => true
+  })
+```
+
+### Use in Messages offers the exact readable PNG or JPEG to the owner’s recipient picker
+
+The photo must fit the phone’s message limit. The source grant and its
+revision are checked again after reading, and the file cannot be sent
+from this viewer.
+
+```quint
+pure def canUseInMessages(s: Preview, fitsPicture: bool, by: Actor): bool =
+  by == Owner and loaded(s) and s.kind == Photo and fitsPicture
+
+pure def useInMessages(s: Preview, fitsPicture: bool, by: Actor): Moved =
+  { state: s, out: List(OfferPicture({ viewer: s.viewer, item: s.item, revision: s.revision })) }
+
+pure def stepAPictureOfferNamesTheFileShown(before: Preview, via: str, after: Preview, out: List[Effect]): bool =
+  out.every(e => match e {
+    | OfferPicture(x) => via == "useInMessages" and loaded(before) and before.kind == Photo
+        and x.viewer == before.viewer and x.item == before.item and x.revision == before.revision and after == before
     | _ => true
   })
 ```
