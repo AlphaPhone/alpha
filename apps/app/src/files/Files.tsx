@@ -1,7 +1,7 @@
 // spec/app/files/index.md, "Story: Browse my storage"; spec/app/files/index.md, "Story: Arrange and filter what I see"; spec/app/files/index.md, "Story: Change my files"; spec/app/files/index.md, "Folders come before files in every sort: by name in the phone's order of names, by date the newest first, by size the largest first; choosing the sort again turns the order within the folders and within the files"; spec/app/files/index.md, "The owner sees a listed item's details: what it is, how big it is, when it last changed and where it is; they close when the owner closes them or moves, or when the item is no longer listed"
-import { Alert, AppHeader, Button, Checkbox, Chip, Dialog, DialogContent, DialogTitle, EmptyState, Input, ListGroup, ListRow, Menu, MenuContent, MenuItem, MenuTrigger, Progress, SearchField, Sheet, SheetContent, Spinner } from "@repo/ui";
+import { Alert, AppHeader, Button, Checkbox, Chip, Dialog, DialogContent, DialogTitle, EmptyState, FilesRow, FilesSelectionBar, Input, ListGroup, ListRow, Menu, MenuContent, MenuItem, MenuTrigger, Progress, SearchField, Sheet, SheetContent, Spinner } from "@repo/ui";
 import { Effect, Option, type Layer, type ManagedRuntime } from "effect";
-import { ArrowDown, ArrowDownWideNarrow, ArrowUp, AudioLines, ScanLine, ChevronRight, Download, Ellipsis, File, FileText, Folder, FolderInput, FolderOpen, HardDrive, Image, Info, LayoutGrid, List, Pencil, Plus, RefreshCw, Search, Share2, Trash2, Video, X, type LucideIcon } from "lucide-react";
+import { ArrowDown, ArrowDownWideNarrow, ArrowUp, AudioLines, ScanLine, Download, Ellipsis, File, FileArchive, FileText, Folder, FolderInput, FolderOpen, HardDrive, Image, Info, LayoutGrid, List, Pencil, Plus, RefreshCw, Search, Share2, Trash2, Video, X, type LucideIcon } from "lucide-react";
 import { Fragment, useMemo, useState, type MouseEvent } from "react";
 import type { Event as FilesEvent, Files as FilesState, Machine, Order } from "../../gen/app__files.effect.vibe";
 import { ahead, browse, chosen, detailed, empty, filled } from "../../gen/app__files.ts";
@@ -13,7 +13,7 @@ import type { Item, Kind } from "../../gen/app__files__shared.ts";
 import type { Machine as TrashMachine } from "../../gen/app__files__trash.effect.vibe";
 import type { Alpha, Resident } from "../runtime/area.tsx";
 import { AppBack } from "../shell/AppBack.tsx";
-import type { Time } from "../runtime/time.vibe";
+import { Time } from "../runtime/time.vibe";
 import { Handles } from "./handles.vibe";
 import type { Machine as PreviewMachine } from "../../gen/app__files__preview.effect.vibe";
 import type { Machine as RecentMachine } from "../../gen/app__files__recent.effect.vibe";
@@ -47,6 +47,21 @@ function sized(bytes: number): string {
   while (value >= 1024 && at < units.length - 1) { value /= 1024; at += 1; }
   return `${at === 0 || value >= 100 ? Math.round(value) : Math.round(value * 10) / 10} ${units[at]}`;
 }
+/** The kind a downloaded or unknown file shows by its name's extension, as develop names and draws it. */
+const byExtension: readonly [RegExp, string, LucideIcon][] = [
+  [/\.pdf$/i, "PDF", FileText], [/\.(jpe?g|png|gif|webp|heic)$/i, "Image", Image], [/\.(mp4|mov|webm|mkv)$/i, "Video", Video],
+  [/\.(mp3|m4a|wav|ogg|aac)$/i, "Audio", AudioLines], [/\.(zip|rar|7z|tar|gz)$/i, "Archive", FileArchive], [/\.(txt|md|docx?|rtf|odt)$/i, "Document", FileText],
+];
+/** What a listed file is and the icon it shows: "PDF" for a PDF, else its kind. */
+function kindOf(item: Item): { name: string; icon: LucideIcon } {
+  const found = byExtension.find(([pattern]) => pattern.test(item.name));
+  if (found && (item.kind === "Download" || item.kind === "Other" || found[1] === "PDF")) return { name: found[1], icon: found[2] };
+  return { name: kindNames[item.kind], icon: icons[item.kind] };
+}
+/** Develop's empty folder: a large muted icon over one line, well below the header. */
+const filesEmpty = "gap-3 px-4 pt-24 pb-4 [&_svg]:size-11";
+/** When a file last changed, as a listed file says it: Today, or the day. */
+const changedOn = (revision: number, now: number) => (new Date(revision).toDateString() === new Date(now).toDateString() ? "Today" : new Date(revision).toLocaleDateString(undefined, { month: "short", day: "numeric" }));
 type Naming = { work: Work; name: string };
 const changeWords: Record<Work, string> = { NewFolder: "make the folder", Rename: "rename it", MoveTo: "move them", CopyTo: "copy them" };
 
@@ -107,17 +122,17 @@ export function Files({ runtime, alpha }: FilesProps) {
   const grid = state.layout === "Grid";
   const category = categories.find(([kind]) => kind === state.category)?.[1];
   const place = state.inCategory ? category : label(state.trail.at(-1) ?? 0);
-  const title = selecting ? `${marks.size} selected` : atTop ? "Files" : (place ?? "Files");
+  const title = selecting ? String(marks.size) : atTop ? "Files" : (place ?? "Files");
   const wanted: Filter = { text: text.trim(), kind: kind ?? "Other", anyKind: kind === undefined };
   const primary = state.volumes[0];
-  const iconBox = "flex size-11 shrink-0 items-center justify-center rounded-lg bg-muted text-foreground";
-  const rowClass = "min-h-15 gap-3.5 rounded-xl px-2";
+  const today = runtime.runSync(Effect.flatMap(Time, (time) => time.latest()));
+  const described = (item: Item) => `${kindOf(item).name} · ${sized(item.bytes)} · ${changedOn(item.revision, today)}`;
   const row = (item: Item) => {
     const toggle = { type: "toggle", target: item.id } as const;
     const open = item.kind === "Folder" ? ({ type: "openFolder", target: item.id } as const) : ({ type: "view", file: item } as const);
     const selectable = owner(toggle);
     const selected = marks.has(item.id);
-    const Icon = icons[item.kind];
+    const Icon = kindOf(item).icon;
     const action = selecting ? toggle : open;
     const onClick = owner(action) ? () => tell(action) : undefined;
     const onContextMenu = selectable ? (event: MouseEvent) => {
@@ -126,25 +141,18 @@ export function Files({ runtime, alpha }: FilesProps) {
     } : undefined;
     return (
       <div key={item.id} className="group relative min-w-0">
-        {grid ? (
-          <Button variant="ghost" aria-label={item.name} aria-pressed={selecting ? selected : undefined} disabled={!onClick} className="h-auto w-full flex-col items-stretch gap-1.5 rounded-xl p-1.5 text-left" onClick={onClick} onContextMenu={onContextMenu}>
-            <span aria-hidden className="grid aspect-square place-items-center rounded-lg bg-muted"><Icon className="size-7" /></span>
-            <span className="line-clamp-2 min-h-9 text-wrap text-xs break-words">{item.name}</span>
-          </Button>
-        ) : (
-          <ListRow
-            className={`${rowClass} pr-11`}
-            aria-label={item.name}
-            aria-pressed={selecting ? selected : undefined}
-            title={item.name}
-            leading={<span className={iconBox}><Icon className="size-5" /></span>}
-            detail={item.kind === "Folder" ? undefined : sized(item.bytes)}
-            selected={selected}
-            onClick={onClick}
-            onContextMenu={onContextMenu}
-          />
-        )}
-        {selectable && <Checkbox aria-label={`Select ${item.name}`} checked={selected} className={`absolute right-2 min-h-6 min-w-6 rounded-full ${grid ? "top-3" : "top-1/2 -translate-y-1/2"} ${selecting ? "" : "opacity-0 group-hover:opacity-100 focus-visible:opacity-100"}`} onCheckedChange={() => tell(toggle)} />}
+        <FilesRow
+          layout={grid ? "tile" : "row"}
+          aria-label={item.name}
+          name={item.name}
+          detail={item.kind === "Folder" ? undefined : described(item)}
+          icon={<Icon />}
+          chosen={selecting ? selected : undefined}
+          disabled={!onClick}
+          onClick={onClick}
+          onContextMenu={onContextMenu}
+        />
+        {selectable && !selecting && <Checkbox aria-label={`Select ${item.name}`} checked={false} className={`absolute right-3 min-h-6 min-w-6 rounded-full opacity-0 group-hover:opacity-100 focus-visible:opacity-100 ${grid ? "top-3" : "top-1/2 -translate-y-1/2"}`} onCheckedChange={() => tell(toggle)} />}
       </div>
     );
   };
@@ -163,7 +171,7 @@ export function Files({ runtime, alpha }: FilesProps) {
       <div className="flex min-h-0 flex-1 flex-col">
         <AppHeader title={title} leading={selecting && owner({ type: "cancelSelection" }) ? <Button variant="ghost" size="icon" aria-label="Cancel" onClick={() => tell({ type: "cancelSelection" })}><X /></Button> : back}>
           {selecting && canDetails && <Button variant="ghost" size="icon" aria-label="Details" onClick={() => tell({ type: "showDetails", target: firstPicked.id })}><Info /></Button>}
-          {selecting && owner({ type: "selectAll" }) && <Button variant="ghost" size="sm" onClick={() => tell({ type: "selectAll" })}>Select all</Button>}
+          {selecting && owner({ type: "selectAll" }) && <Button variant="ghost" className="h-11 px-3" onClick={() => tell({ type: "selectAll" })}>Select all</Button>}
           {!selecting && showTools && (
             <Menu>
               <MenuTrigger asChild><Button variant="ghost" size="icon" aria-label={atTop ? "Files tools" : "Files options"}><Ellipsis /></Button></MenuTrigger>
@@ -184,20 +192,15 @@ export function Files({ runtime, alpha }: FilesProps) {
           )}
         </AppHeader>
         {!atTop && (
-          <nav aria-label="Folder path" className="flex shrink-0 items-center gap-1 overflow-x-auto px-3 pb-1 text-xs whitespace-nowrap text-muted-foreground">
-            {owner({ type: "openTop" }) && <Button variant="ghost" size="sm" onClick={() => tell({ type: "openTop" })}>Files</Button>}
+          <nav aria-label="Folder path" className="flex shrink-0 items-center gap-0.5 overflow-x-auto px-4.5 pb-1.5 text-meta whitespace-nowrap text-muted-foreground">
+            {owner({ type: "openTop" }) && <><button type="button" className="min-h-8" onClick={() => tell({ type: "openTop" })}>Files</button><span aria-hidden className="px-0.5">›</span></>}
             {state.inCategory
-              ? <><ChevronRight aria-hidden className="size-3 shrink-0" /><span aria-current="location" className="px-2 text-foreground">{category}</span></>
+              ? <span aria-current="location" className="text-foreground">{category}</span>
               : state.trail.map((handle, at) => {
                   const crumb = { type: "openCrumb", depth: at + 1 } as const;
-                  return (
-                    <Fragment key={handle}>
-                      <ChevronRight aria-hidden className="size-3 shrink-0" />
-                      {owner(crumb) && at < state.trail.length - 1
-                        ? <Button variant="ghost" size="sm" onClick={() => tell(crumb)}>{label(handle)}</Button>
-                        : <span aria-current="location" className="px-2 text-foreground">{label(handle)}</span>}
-                    </Fragment>
-                  );
+                  return at < state.trail.length - 1
+                    ? <Fragment key={handle}><button type="button" className="min-h-8" disabled={!owner(crumb)} onClick={() => tell(crumb)}>{label(handle)}</button><span aria-hidden className="px-0.5">›</span></Fragment>
+                    : <span key={handle} aria-current="location" className="text-foreground">{label(handle)}</span>;
                 })}
           </nav>
         )}
@@ -225,17 +228,17 @@ export function Files({ runtime, alpha }: FilesProps) {
                 {[state.search.filter.anyKind ? "" : kinds.find(([one]) => one === state.search.filter.kind)?.[1] ?? "", state.search.filter.text === "" ? "" : `“${state.search.filter.text}”`].filter(Boolean).join(" · ") || "Everything"}
               </Chip></div>
               {looked === "Looking" && <Spinner label="Looking" />}
-              {looked === "Nothing" && <EmptyState icon={<Search />} title="Nothing matches" />}
+              {looked === "Nothing" && <EmptyState icon={<Search />} title="Nothing matches" className={filesEmpty} />}
               {looked === "Trouble" && <Alert variant="warn">The search could not finish</Alert>}
               {looked === "Unfinished" && <Alert variant="info">Nothing found in what the phone could search</Alert>}
               {looked === "Found" && !state.search.complete && <Alert variant="info">Only part of this place could be searched</Alert>}
               {looked === "Found" && (
-                <ListGroup aria-label="Found" surface="plain">
+                <div role="group" aria-label="Found">
                   {state.search.hits.map((hit) => {
-                    const Icon = icons[hit.kind];
-                    return <ListRow key={hit.id} className={rowClass} title={hit.name} aria-label={hit.name} leading={<span className={iconBox}><Icon className="size-5" /></span>} detail={sized(hit.bytes)} onClick={owner({ type: "view", file: hit }) ? () => tell({ type: "view", file: hit }) : undefined} />;
+                    const Icon = kindOf(hit).icon;
+                    return <FilesRow key={hit.id} aria-label={hit.name} name={hit.name} icon={<Icon />} detail={described(hit)} disabled={!owner({ type: "view", file: hit })} onClick={() => tell({ type: "view", file: hit })} />;
                   })}
-                </ListGroup>
+                </div>
               )}
             </div>
           )}
@@ -245,32 +248,31 @@ export function Files({ runtime, alpha }: FilesProps) {
               {state.storage.status === "Failed" && <Alert variant="destructive"><span>Your storage cannot be read now</span>{refresh && <Button variant="ghost" size="sm" onClick={() => tell({ type: "refresh" })}>Retry</Button>}</Alert>}
               {(state.storage.status === "Loaded" || state.volumes.length > 0) && (
                 <>
-                  <ListGroup aria-label="Categories" surface="plain">
-                    {primary && owner({ type: "openVolume", target: primary.id }) && <ListRow className={rowClass} title="All files" leading={<span className={iconBox}><Folder className="size-5" /></span>} onClick={() => tell({ type: "openVolume", target: primary.id })} />}
+                  <div role="group" aria-label="Categories">
+                    {primary && owner({ type: "openVolume", target: primary.id }) && <FilesRow size="place" aria-label="All files" name="All files" icon={<Folder />} onClick={() => tell({ type: "openVolume", target: primary.id })} />}
                     {categories.map(([kind, name]) => {
                       const counted = state.tally.counts.find((count) => count.kind === kind);
-                      const total = counted && `${counted.items} · ${sized(counted.bytes)}`;
                       const Icon = icons[kind];
-                      return <ListRow key={kind} className={rowClass} title={name} aria-label={name} aria-description={total} leading={<span className={iconBox}><Icon className="size-5" /></span>} trailing={counted?.items} onClick={owner({ type: "openCategory", kind }) ? () => tell({ type: "openCategory", kind }) : undefined} />;
+                      return <FilesRow key={kind} size="place" aria-label={name} aria-description={counted && `${counted.items} · ${sized(counted.bytes)}`} name={name} icon={<Icon />} count={counted?.items || undefined} disabled={!owner({ type: "openCategory", kind })} onClick={() => tell({ type: "openCategory", kind })} />;
                     })}
-                  </ListGroup>
-                  <ListGroup heading="Storage" surface="plain" className="mt-3">
-                    {state.volumes.map((volume) => {
-                      const name = label(volume.id);
-                      return (
-                        <ListRow
-                          key={volume.id}
-                          className={rowClass}
-                          title={name}
-                          aria-label={name}
-                          leading={<span className={iconBox}><HardDrive className="size-5" /></span>}
-                          detail={volume.total > 0 && <><span className="block">{sized(Math.max(0, volume.total - volume.used))} free of {sized(volume.total)}</span><Progress className="mt-2 h-1.5" aria-label={`${name} used`} value={filled(volume.used, volume.total)} /></>}
-                          onClick={owner({ type: "openVolume", target: volume.id }) ? () => tell({ type: "openVolume", target: volume.id }) : undefined}
-                        />
-                      );
-                    })}
-                    {owner({ type: "openTrash" }) && <ListRow className={rowClass} title="Trash" aria-label="Trash" leading={<span className={iconBox}><Trash2 className="size-5" /></span>} trailing={state.tally.trashed || undefined} onClick={() => tell({ type: "openTrash" })} />}
-                  </ListGroup>
+                  </div>
+                  <h2 className="mx-2 mt-3.5 mb-1 text-meta font-semibold text-muted-foreground">Storage</h2>
+                  {state.volumes.map((volume) => {
+                    const name = label(volume.id);
+                    return (
+                      <FilesRow
+                        key={volume.id}
+                        size="place"
+                        aria-label={name}
+                        name={name}
+                        icon={<HardDrive />}
+                        detail={volume.total > 0 && <><span className="block">{`${sized(Math.max(0, volume.total - volume.used))} free of ${sized(volume.total)}`}</span><Progress className="mt-2 h-1.5" aria-label={`${name} used`} value={filled(volume.used, volume.total)} /></>}
+                        disabled={!owner({ type: "openVolume", target: volume.id })}
+                        onClick={() => tell({ type: "openVolume", target: volume.id })}
+                      />
+                    );
+                  })}
+                  {owner({ type: "openTrash" }) && <FilesRow size="place" aria-label="Trash" name="Trash" icon={<Trash2 />} count={state.tally.trashed || undefined} onClick={() => tell({ type: "openTrash" })} />}
                 </>
               )}
               <RecentFiles runtime={runtime} />
@@ -279,19 +281,19 @@ export function Files({ runtime, alpha }: FilesProps) {
             <>
               {shown === "Reading" && state.items.length === 0 && <Spinner label="Reading the folder" />}
               {shown === "Unreachable" && <Alert variant="destructive">This place cannot be read now</Alert>}
-              {empty(state) && <EmptyState icon={<Folder />} title="Nothing here" />}
+              {empty(state) && <EmptyState icon={<Folder />} title="Nothing here" className={filesEmpty} />}
               {shown === "Showing" && state.partial && <Alert variant="info">Only part of this place could be read</Alert>}
               {sorted.length > 0 && <div role="group" aria-label="Listed" className={grid ? "grid grid-cols-3 gap-2" : undefined}>{sorted.map(row)}</div>}
             </>
           )}
         </div>
         {selecting && (
-          <div role="toolbar" aria-label="Selection" className="mx-3 mb-2 flex shrink-0 items-stretch justify-around gap-1 rounded-xl border border-border bg-background p-1.5 shadow-md">
-            {owner({ type: "openShare", mail: false }) && <Button variant="ghost" className="h-13 flex-col gap-0.5 px-2 text-xs" onClick={() => tell({ type: "openShare", mail: false })}><Share2 />Share</Button>}
-            {owner({ type: "openMoveTo" }) && <Button variant="ghost" className="h-13 flex-col gap-0.5 px-2 text-xs" onClick={() => tell({ type: "openMoveTo" })}><FolderInput />Move or copy</Button>}
-            {owner({ type: "begin", work: "Rename", name: unnamed }) && <Button variant="ghost" className="h-13 flex-col gap-0.5 px-2 text-xs" onClick={() => setNaming({ work: "Rename", name: firstPicked?.name ?? "" })}><Pencil />Rename</Button>}
-            {owner({ type: "askToDelete" }) && <Button variant="ghost" className="h-13 flex-col gap-0.5 px-2 text-xs" onClick={() => tell({ type: "askToDelete" })}><Trash2 />Delete</Button>}
-          </div>
+          <FilesSelectionBar actions={[
+            { label: "Share", icon: <Share2 />, onPress: owner({ type: "openShare", mail: false }) ? () => tell({ type: "openShare", mail: false }) : undefined },
+            { label: "Move or copy", icon: <FolderInput />, onPress: owner({ type: "openMoveTo" }) ? () => tell({ type: "openMoveTo" }) : undefined },
+            { label: "Rename", icon: <Pencil />, onPress: owner({ type: "begin", work: "Rename", name: unnamed }) ? () => setNaming({ work: "Rename", name: firstPicked?.name ?? "" }) : undefined },
+            { label: "Delete", icon: <Trash2 />, onPress: owner({ type: "askToDelete" }) ? () => tell({ type: "askToDelete" }) : undefined },
+          ]} />
         )}
       </div>
       <FileLayers state={state} picked={picked} naming={naming} setNaming={setNaming} owner={owner} tell={tell} label={label} />
