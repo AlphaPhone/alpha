@@ -1,5 +1,6 @@
 import type { ComponentProps } from "react";
 import { cn } from "../../lib/cn.ts";
+import { Alert } from "../Alert.tsx";
 import { AssistantChatHeader, type AssistantChatHeaderProps } from "./AssistantChatHeader.tsx";
 import { AssistantComposer, type AssistantComposerProps } from "./AssistantComposer.tsx";
 import { AssistantTranscript, type AssistantTranscriptProps } from "./AssistantTranscript.tsx";
@@ -7,6 +8,8 @@ import { AssistantTranscript, type AssistantTranscriptProps } from "./AssistantT
 export type AssistantConversationProps = Omit<ComponentProps<"section">, "children"> & {
   /** The top of the sheet: handle, name, context and the ways to find or start a conversation. */
   header: AssistantChatHeaderProps;
+  /** Which files could not be attached or saved with the message. */
+  attachmentNotice?: string;
   /** The messages and the turn's state. */
   transcript: AssistantTranscriptProps;
   /** The composer at the foot. */
@@ -20,7 +23,7 @@ export type AssistantConversationProps = Omit<ComponentProps<"section">, "childr
  * Keeping the composer mounted in one slot across detents preserves focus and the native keyboard session on tap.
  * @model spec/app/assistant/index.md
  */
-export function AssistantConversation({ header, transcript, composer, detent = "sheet", className, ...props }: AssistantConversationProps) {
+export function AssistantConversation({ header, attachmentNotice, transcript, composer, detent = "sheet", className, ...props }: AssistantConversationProps) {
   const resting = detent === "bar";
   const full = detent === "full";
   return (
@@ -38,6 +41,7 @@ export function AssistantConversation({ header, transcript, composer, detent = "
     >
       <div hidden={resting} className={cn("min-h-0 flex-1 basis-auto flex-col", resting ? "hidden" : "flex")}>
         <AssistantChatHeader {...header} grabber={full ? undefined : header.grabber} />
+        {attachmentNotice && <Alert variant="warn" className="mx-3 shrink-0">{attachmentNotice}</Alert>}
         <AssistantTranscript {...transcript} className={cn("flex-1", transcript.className)} />
       </div>
       <AssistantComposer {...composer} variant={resting ? "bar" : "sheet"} />

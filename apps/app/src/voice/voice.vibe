@@ -371,15 +371,17 @@ function carryVoice(fx: Voice.Effect): Job<Voice.Event, Agent | VoiceBridge | Vo
       return started ? { type: "recordingStarted", ticket } : { type: "recordingFailed", ticket, failure: "NoMicrophone" }
     }, { type: "recordingFailed", ticket, failure: "NoMicrophone" });
     when { tag: "Transcribe", let ticket, let network }: answer("transcribe", effect {
-      const text = (try VoiceBridge).transcribe(ticket, network) catch () => ""
+      const text = (try VoiceBridge).transcribe(ticket, network) catch () => undefined
+      if (text === undefined) return { type: "transcribed", ticket, failure: "Recognition" } as Voice.Event
       const trimmed = text.trim()
-      if (trimmed !== "") {
+      if (trimmed === "") return { type: "transcribed", ticket, failure: "NoSpeech" } as Voice.Event
+      const current = try (try Voice.Machine).get()
+      if (Voice.canTranscribed(current, ticket, "NoFailure")) {
         (try VoiceWords).memory.dictatedText = trimmed
-        return { type: "transcribed", ticket, failure: "NoFailure" } as Voice.Event
       }
-      return { type: "transcribed", ticket, failure: "NoSpeech" } as Voice.Event
+      return { type: "transcribed", ticket, failure: "NoFailure" } as Voice.Event
     }, { type: "transcribed", ticket, failure: "Recognition" });
-    when { tag: "Abandon", let recording }: run("abandon", effect { try (try VoiceBridge).abandon(recording) });
+    when { tag: "Abandon", let recording }: run(`abandon ${recording}`, effect { try (try VoiceBridge).abandon(recording) });
     when { tag: "Fill", let field, let filling }: run(`fill ${filling}`, effect {
       const { memory } = try VoiceWords
       const target = memory.fillComposer
@@ -461,7 +463,9 @@ const bridgeEvents = hearing(
     when { kind: "transcript", let session, let final }: final ? { type: "turnEnded", session } : { type: "speechHeard", session };
     when { kind: "speechEnd", let session }: { type: "turnEnded", session };
     when { kind: "bargeIn", let session, let echo }: { type: "bargeIn", session, echo };
-    when { kind: "ended" }: undefined;
+    when { kind: "ended", let session, let reason }: reason === "ended"
+      ? undefined
+      : { type: "speechFailed", session, fault: "NotTheNetwork", wait: 0, deviceReady: false, now: untimed };
   },
 )
 
