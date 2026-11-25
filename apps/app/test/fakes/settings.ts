@@ -39,6 +39,7 @@ export interface SettingsScene {
   passwordsUnlocked: boolean;
   readonly passwords: PasswordEntrySummary[];
   readonly passwordEdits: Array<PasswordEditorInput | undefined>;
+  readonly passwordRowActions: Array<{ choice: "copy" | "reveal" | "remove"; id: string; revision: number }>;
   autofill: PasswordsStatus["autofill"];
   autofillDestination: Awaited<ReturnType<ElizaPasswordsPlugin["openAutofillSettings"]>>["destination"];
   crashes: NativeCrashEntry[];
@@ -68,7 +69,7 @@ export function settingsScene(): SettingsScene {
     ],
     launcher: true, version: "1.4.0",
     hostFacts: { androidRelease: "16", permissions: { Microphone: false, Calendar: true } },
-    passwordsUnlocked: false, passwords: [], passwordEdits: [],
+    passwordsUnlocked: false, passwords: [], passwordEdits: [], passwordRowActions: [],
     autofill: { supported: true, selected: "none" }, autofillDestination: "autofill-picker",
     gate: Promise.resolve(), grantsHome: true, opened: [], copied: [], refusesCopy: false, crashes: [], reset: { status: "cancelled", message: "Nothing was reset." }, reviews: [],
     networks: [{ ssid: "home", bssid: "00:11:22:33:44:55", rssi: -50, frequency: 2412, capabilities: "[WPA2-PSK-CCMP]", secured: true, security: "wpa2" }],
@@ -230,6 +231,13 @@ export function elizaSense(scene: SettingsScene, listener: ListenerScene): Faked
 
 /** Android's autofill status and provider picker through the native Passwords bridge. */
 export function elizaPasswords(scene: SettingsScene): Faked {
+  const check = (choice: "copy" | "reveal" | "remove", id: string, revision: number | undefined) => {
+    if (!scene.passwordsUnlocked) throw rejection("locked");
+    const index = scene.passwords.findIndex((entry) => entry.id === id && entry.revision === revision);
+    if (revision === undefined || index < 0) throw rejection("conflict");
+    scene.passwordRowActions.push({ choice, id, revision });
+    return index;
+  };
   return () => ({
     status: () => Promise.resolve<PasswordsStatus>({ available: true, locked: !scene.passwordsUnlocked, unlockRemainingMs: scene.passwordsUnlocked ? 60000 : 0, unlockSeconds: 60, biometric: false, autofill: { ...scene.autofill } }),
     unlock: async (): ReturnType<ElizaPasswordsPlugin["unlock"]> => {
@@ -243,6 +251,18 @@ export function elizaPasswords(scene: SettingsScene): Faked {
     list: async (): ReturnType<ElizaPasswordsPlugin["list"]> => {
       if (!scene.passwordsUnlocked) throw rejection("locked");
       return { entries: structuredClone(scene.passwords) };
+    },
+    reveal: async ({ id, expectedRevision }: Parameters<ElizaPasswordsPlugin["reveal"]>[0]): ReturnType<ElizaPasswordsPlugin["reveal"]> => {
+      check("reveal", id, expectedRevision);
+      return { shown: true, hidesAfterMs: 30_000 };
+    },
+    copy: async ({ id, expectedRevision }: Parameters<ElizaPasswordsPlugin["copy"]>[0]): ReturnType<ElizaPasswordsPlugin["copy"]> => {
+      check("copy", id, expectedRevision);
+      return { copied: true, clearsAfterMs: 30_000 };
+    },
+    remove: async ({ id, expectedRevision }: Parameters<ElizaPasswordsPlugin["remove"]>[0]): ReturnType<ElizaPasswordsPlugin["remove"]> => {
+      scene.passwords.splice(check("remove", id, expectedRevision), 1);
+      return { removed: true };
     },
     openEditor: async ({ entryId, expectedRevision }: Partial<PasswordEditorInput>): ReturnType<ElizaPasswordsPlugin["openEditor"]> => {
       if (!scene.passwordsUnlocked) throw rejection("locked");

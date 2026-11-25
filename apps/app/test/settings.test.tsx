@@ -312,6 +312,29 @@ describe("Settings", () => {
     await vi.waitFor(() => expect(titled("New account")).toBeDefined());
     expect(world.settings.passwordEdits).toEqual([{ entryId: "entry-47", expectedRevision: 4 }, undefined]);
 
+    const choosePasswordAction = async (label: string, choice: string) => {
+      await act(async () => button(`Options for ${label}`)?.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true })));
+      const item = () => [...document.querySelectorAll<HTMLElement>('[role="menuitem"]')].find((row) => row.textContent === choice);
+      await vi.waitFor(() => expect(item()).toBeDefined());
+      await act(async () => item()?.click());
+    };
+    await choosePasswordAction("Updated account", "Reveal password");
+    await vi.waitFor(() => expect(world.settings.passwordRowActions[0]).toEqual({ choice: "reveal", id: "entry-47", revision: 5 }));
+    await vi.waitFor(() => expect(titled("Updated account")).toBeDefined());
+    await choosePasswordAction("Updated account", "Copy password");
+    await vi.waitFor(() => expect(document.body.textContent).toContain("Password copied"));
+    await choosePasswordAction("New account", "Delete password");
+    await press("Cancel");
+    expect(world.settings.passwords.some(({ id }) => id === "entry-new")).toBe(true);
+    await choosePasswordAction("New account", "Delete password");
+    await press("Delete");
+    await vi.waitFor(() => expect(document.body.textContent).toContain("Password deleted"));
+    expect(world.settings.passwordRowActions).toEqual([
+      { choice: "reveal", id: "entry-47", revision: 5 },
+      { choice: "copy", id: "entry-47", revision: 5 },
+      { choice: "remove", id: "entry-new", revision: 1 },
+    ]);
+
     await seen(false);
     await vi.waitFor(() => expect(world.settings.passwordsUnlocked).toBe(false));
     await seen(true);

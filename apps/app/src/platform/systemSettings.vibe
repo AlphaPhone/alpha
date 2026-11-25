@@ -87,7 +87,7 @@ export interface PhoneReport {
 
 /** The phone's own settings, as Android reports them: its facts, its roles, its settings pages and the problem log it keeps. */
 export service SystemSettings {
-  readonly passwordVault: () => Pick<PasswordsClient, "status" | "unlock" | "lock" | "list" | "openEditor"> | undefined
+  readonly passwordVault: () => Pick<PasswordsClient, "status" | "unlock" | "lock" | "list" | "openEditor" | "reveal" | "copy" | "remove"> | undefined
   /** What the phone reports now; what it could not read is left out, never guessed. */
   report(include?: { readonly autofill: boolean }): PhoneReport!!
   boot(): number!!
