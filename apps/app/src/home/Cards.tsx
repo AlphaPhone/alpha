@@ -5,9 +5,10 @@ import { type ReactNode, useSyncExternalStore } from "react";
 import * as Cards from "../../gen/app__home__cards.ts";
 import type { Machine } from "../../gen/app__home__cards.effect.vibe";
 import { useMachine } from "../../gen/app__home__cards.react.ts";
+import { openCalls, openUnread } from "../phone/reports.vibe";
+import type { Resident } from "../runtime/area.tsx";
 import { useTimed } from "../runtime/react.ts";
 import { untimed } from "../runtime/reactor.vibe";
-import type { Time } from "../runtime/time.vibe";
 import { fromAreas, named, others } from "./cards.vibe";
 
 const where: Readonly<Record<Cards.Origin, string>> = { PhoneCalendar: "Calendar", AgentCalendar: "Alpha", Reminder: "Reminder" };
@@ -26,7 +27,7 @@ function shown(item: Cards.Item): HomeAgendaItem {
  * Home's row of cards, in the spec's order and only those drawn: the agenda, Messages, Phone, mail, the brief and
  * Workflows, each from what its area told Home; a press opens the card's app. Empty when no card is drawn.
  */
-export function useDayCards(runtime: ManagedRuntime.ManagedRuntime<Machine | Time, unknown>, image: boolean): readonly ReactNode[] {
+export function useDayCards(runtime: ManagedRuntime.ManagedRuntime<Machine | Resident, unknown>, image: boolean): readonly ReactNode[] {
   const { state, can, send } = useTimed(runtime, useMachine);
   useSyncExternalStore(named.subscribe, named.snapshot, named.snapshot);
   const given = useSyncExternalStore(fromAreas.subscribe, fromAreas.snapshot, fromAreas.snapshot);
@@ -45,8 +46,8 @@ export function useDayCards(runtime: ManagedRuntime.ManagedRuntime<Machine | Tim
       const next = first.overdue ? Cards.following(items, now)[0] : undefined;
       return <HomeAgendaCard key="agenda" item={shown(first)} overdue={first.overdue} next={next && shown(next)} notCurrent={Cards.agendaCard(state, now, told) === "NotUpdated"} {...open("AgendaCard")} />;
     },
-    MessagesCard: () => <HomeCallsCard key="messages" app="Messages" lines={told.messages} {...open("MessagesCard")} />,
-    PhoneCard: () => <HomeCallsCard key="phone" app="Phone" lines={told.phone} {...open("PhoneCard")} />,
+    MessagesCard: () => <HomeCallsCard key="messages" app="Messages" lines={told.messages} {...open("MessagesCard")} onClick={() => void runtime.runPromise(openUnread())} />,
+    PhoneCard: () => <HomeCallsCard key="phone" app="Phone" lines={told.phone} {...open("PhoneCard")} onClick={() => void runtime.runPromise(openCalls())} />,
     MailCard: () => <HomeMailCard key="mail" unread={told.mail.unread} lines={told.mail.rows} notCurrent={Cards.mailCard(told.mail) === "NotUpdated"} {...open("MailCard")} />,
     BriefOfToday: () => given.brief && (
       <HomeBriefCard key="brief" outcome={given.brief.outcome} summary={given.brief.outcome === "Finished" ? given.brief.summary : undefined} when={clock(given.brief.at)} {...open("BriefOfToday")} />

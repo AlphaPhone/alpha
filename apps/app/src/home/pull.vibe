@@ -126,7 +126,7 @@ export effect function openNotifications(): void!!(Home.Machine | Shell) {
   }
 }
 
-// spec/app/home/index.md, "A long press on bare Home starts editing, only on the phone and once the tiles are read"; spec/app/home/index.md, "An app's menu opens in the open drawer, for an app in the last reading, and says Add to Home or On Home"
+// spec/app/home/index.md, "A long press on bare Home starts editing, only on the phone and once the tiles are read"
 /** Wait for one physical long press. Its caller interrupts it when the pointer moves, releases or is canceled. */
 export effect function launcherHeld(held: () => void): void!! {
   try sleep("450 millis")

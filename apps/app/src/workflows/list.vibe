@@ -1,8 +1,10 @@
 // spec/app/workflows/list.md, "Story: Find a workflow"; spec/app/workflows/list.md, "Story: Keep the list to its owner"
 import type { RemoteWorkflow } from "@elizaos/plugin-workflow/client"
+import type { Freshness } from "../../gen/app__home__cards.effect.vibe"
 import * as List from "../../gen/app__workflows__list.effect.vibe"
 import type { Effect as Out, Event } from "../../gen/app__workflows__list.effect.vibe"
 import { Machine as Shell, showing } from "../../gen/app__shell.effect.vibe"
+import { fromAreas } from "../home/cards.vibe"
 import type { Shell as ShellState } from "../../gen/app__shell.effect.vibe"
 import { Agent } from "../platform/agent.vibe"
 import { Device } from "../platform/device.vibe"
@@ -177,4 +179,14 @@ const followForeground = started(effect {
   })
 }, "refreshing Workflows on foreground")
 
-export const listing = together(reacting(List, { carry }), workflowsApi, rows, followPage, followForeground)
+const home = applying(List.Machine, (state) => ({ owner: state.owner, read: state.list }), effect ({ owner, read }) => {
+  const source = try (try Rows).view(owner)
+  const displayed = source.rows.filter((row) => (row.kind === "Routine" || row.kind === "Prompt") && row.on && !row.removed)
+    .map((row) => ({ title: row.title, detail: "On" }))
+  const freshness: Freshness = read.status === "Failed" ? "Stale"
+    : source.problems.some((problem) => problem === "Workflows" || problem === "Prompts") ? "SomeUnavailable"
+      : read.status === "Loaded" ? "UpToDate" : "NotCurrent"
+  fromAreas.flows({ rows: displayed, freshness })
+})
+
+export const listing = together(reacting(List, { carry }), workflowsApi, rows, followPage, followForeground, home)

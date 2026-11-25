@@ -7,37 +7,10 @@ import { Machine as Voicemail } from "../../gen/app__phone__voicemail.effect.vib
 import { Machine as Shell } from "../../gen/app__shell.effect.vibe"
 import { Device } from "../platform/device.vibe"
 import { Telephony, telephony } from "../platform/telephony.vibe"
+import { fromAreas } from "../home/cards.vibe"
 import { waiting } from "../home/waiting.vibe"
 import { applying, contained, started, together } from "../runtime/reactor.vibe"
 import { recentsLimit } from "./phone.vibe"
-
-interface HomePreviewRows {
-  readonly missed: ReadonlyArray<Row>
-  readonly unread: ReadonlyArray<Row>
-  readonly voicemail: ReadonlyArray<Row>
-}
-
-export service HomePreview {
-  snapshot(): HomePreviewRows
-  subscribe(listener: () => void): () => void
-  show(rows: HomePreviewRows): void!!
-}
-
-const preview = Layer.sync(HomePreview, () => {
-  let current: HomePreviewRows = { missed: [], unread: [], voicemail: [] }
-  const listeners = new Set<() => void>()
-  return {
-    snapshot: () => current,
-    subscribe: (listener: () => void) => {
-      listeners.add(listener)
-      return () => { listeners.delete(listener) }
-    },
-    show: (rows: HomePreviewRows) => sync(() => {
-      current = rows
-      for (const listener of listeners) listener()
-    }),
-  }
-})
 
 const called = (row: { readonly cachedName: string | null; readonly number: string; readonly date: number }): Row => ({
   title: row.cachedName || row.number || "Unknown caller",
@@ -46,18 +19,15 @@ const called = (row: { readonly cachedName: string | null; readonly number: stri
 
 // spec/app/home/cards.md, "The Messages and Phone cards show their waiting rows, only on an Alpha image, and are not drawn without a row"
 /** The phone's existing native reports are the source of both the counts and the Home card rows. */
-effect function report(): void!!(Telephony | Phone | Messages | Voicemail | HomePreview) {
+effect function report(): void!!(Telephony | Phone | Messages | Voicemail) {
   const calls = telephony("recentCalls", (c) => c.phone.recentCalls({ limit: recentsLimit })) catch () => undefined
   const missed = calls?.calls.filter((call) => call.type === "missed" && call.isNew)
   const threads = telephony("threadPage", (c) => c.messages.threadPage()) catch () => undefined
   const unread = threads?.rows.flatMap((row) => "incomplete" in row || !row.unread ? [] : [row])
   const listing = telephony("refreshVoicemail", (c) => c.phone.refreshVoicemail("AutomaticRead")) catch () => undefined
   const unheard = listing?.carrier === "CarrierReady" ? listing.voicemails.filter((one) => !one.heard) : undefined
-  try (try HomePreview).show({
-    missed: missed?.slice(0, 2).map(called) ?? [],
-    unread: unread?.slice(0, 2).map((row) => ({ title: row.addresses.join(", ") || "Unknown sender", detail: row.snippet })) ?? [],
-    voicemail: unheard?.slice(0, 2).map(called) ?? [],
-  })
+  if (unread !== undefined) fromAreas.messages(unread.slice(0, 2).map((row) => ({ title: row.addresses.join(", ") || "Unknown sender", detail: row.snippet })))
+  if (missed !== undefined || unheard !== undefined) fromAreas.phone((missed?.length ? missed : unheard ?? []).slice(0, 2).map(called))
   if (missed !== undefined) try contained((try Phone).send({ type: "missedReported", count: missed.length }), "missed calls")
   if (unread !== undefined) try contained((try Messages).send({ type: "unreadReported", count: unread.length }), "unread conversations")
   if (listing !== undefined) try contained((try Phone).send({ type: "voicemailReported", ready: listing.carrier === "CarrierReady" }), "visual voicemail")
@@ -85,7 +55,7 @@ const phoneBadge = started(effect {
 }, "badging Home's Phone tile")
 
 /** Refresh Home's cards on foreground, and track the badges from the owning machines. */
-export const reports = together(preview, reporting, messageBadge, phoneBadge)
+export const reports = together(reporting, messageBadge, phoneBadge)
 
 // spec/app/phone/index.md, "One tap on the card opens Recents with the missed calls, and otherwise the Voicemail tab while a voicemail is unheard"
 /** Home's calls card, tapped: Phone opens on Recents with the missed calls, or else on the Voicemail tab. */
