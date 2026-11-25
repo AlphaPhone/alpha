@@ -14,7 +14,7 @@ import { Machine as Shell } from "../gen/app__shell.effect.vibe";
 import * as Layers from "../gen/app__shell__layers.effect.vibe";
 import settings from "../src/settings/index.tsx";
 import { button, closeAll, fill, hardware, later, only, open as openAlpha, press, seen, underAct, until } from "./alpha.tsx";
-import { account } from "./fakes/cloud.ts";
+import { account, checkoutSession, checkoutUrl, type CheckoutScene } from "./fakes/cloud.ts";
 import { type ListenerScene, notices } from "./fakes/settings.ts";
 import { type Scene, scene } from "./fakes/scene.ts";
 
@@ -176,6 +176,44 @@ describe("Settings", () => {
       else expect(document.body.textContent).toContain("Restart your phone");
     });
     expect(recovery.starts).toBe(archived === recovery.retained ? 1 : 0);
+  });
+
+  it("Reviews the price and confirms only the exact Stripe checkout (spec/app/account/billing.md, \"Story: Pay in the browser\"; spec/app/account/billing.md, \"Story: Keep billing to its sign-in\")", async () => {
+    const checkout: CheckoutScene = { starts: [], confirmations: [], opened: [], returned: null, paid: false };
+    const world = { ...scene(), phone: true, checkout };
+    await settingsOpen(world);
+    await press("Account");
+    await vi.waitFor(() => expect(document.querySelector('[aria-label="Cloud plan"]')?.textContent).toContain("No plan"));
+    await act(async () => document.querySelector<HTMLElement>('[role="dialog"] summary')?.click());
+    await vi.waitFor(() => expect(button("Review Plus subscription")).toBeTruthy());
+    await press("Review Plus subscription");
+    await vi.waitFor(() => expect(document.querySelector('[aria-label="Review subscription"]')?.textContent).toContain("$19.50"));
+    expect(checkout.starts).toEqual([]);
+    await press("Not now");
+    expect(checkout.opened).toEqual([]);
+    await press("Review Plus subscription");
+    world.voice.credentialId = "cred-new";
+    await press("Continue to Stripe");
+    await vi.waitFor(() => expect(button("Review Plus subscription")).toBeTruthy());
+    expect(checkout.starts).toEqual([]);
+    await press("Review Plus subscription");
+    await press("Continue to Stripe");
+    await vi.waitFor(() => expect(checkout.opened).toEqual([checkoutUrl]));
+    expect(checkout.starts).toHaveLength(1);
+    expect(checkout.starts[0]).toMatchObject({ planKey: "plus_monthly", presentation: "mobile", key: expect.any(String) });
+    await seen(false);
+    checkout.returned = "cs_test_other";
+    await seen(true);
+    await vi.waitFor(() => expect(checkout.returned).toBeNull());
+    expect(checkout.confirmations).toEqual([]);
+    checkout.paid = true;
+    checkout.returned = checkoutSession;
+    await act(async () => window.dispatchEvent(new Event("alpha-billing-return")));
+    await vi.waitFor(() => expect(checkout.confirmations).toEqual([checkoutSession]));
+    await vi.waitFor(() => expect(document.querySelector('[aria-label="Cloud plan"]')?.textContent).toContain("Plus"));
+    checkout.returned = checkoutSession;
+    await act(async () => window.dispatchEvent(new Event("alpha-billing-return")));
+    expect(checkout.confirmations).toEqual([checkoutSession]);
   });
 
   it("Make Alpha the Home app (spec/app/settings/facts.md, \"Story: Make Alpha the Home app\")", async () => {

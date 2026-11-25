@@ -3,6 +3,7 @@ import type { Grant } from "../../gen/kit__permission.ts"
 import type { Lens, Mode } from "../../gen/app__camera.ts"
 import type { CameraDevice, CameraPreviewResult } from "@elizaos/os-bridges"
 import { registered } from "./device.vibe"
+import { readVideoSize } from "./videoCanvas.vibe"
 
 module native {
   import { Capacitor, registerPlugin } from "@capacitor/core"
@@ -381,7 +382,9 @@ export const browserCamera = Layer.effect(CameraPort, effect {
       if (running.recording.state !== "inactive") try ignore(Effect.try(() => running.recording.stop()))
       const blob = try Deferred.await(running.answer)
       film = undefined
-      return blob === undefined ? undefined : kept(blob, view?.videoWidth ?? 0, view?.videoHeight ?? 0)
+      if (blob === undefined) return undefined
+      const size = Effect.timeout(tryPromise((signal) => readVideoSize(blob, signal)), 2000) catch () => undefined
+      return kept(blob, size?.width ?? 0, size?.height ?? 0)
     },
     release: (asset: CameraMedia) => asset.blob === undefined ? Effect.void : sync(() => revoke(asset.source)),
   }

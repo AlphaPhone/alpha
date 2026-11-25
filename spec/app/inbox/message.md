@@ -328,6 +328,10 @@ pure def alwaysAWarningBelongsToALinkUnderReview(s: MessageView): bool = s.warni
 
 ### An attachment is reviewed before it is opened or saved, and one use is in flight at a time
 
+Alpha shows the checked text or a raster of a supported image in the
+review, after getting the exact attachment named by the message and its
+revision. Closing it releases the preview.
+
 ```quint
 pure def canReviewAttachment(s: MessageView, attachment: int, handling: Handling): bool =
   s.body.status == R::Loaded and not(s.fromPhone) and attachment != 0 and s.attachment == 0 and s.link == 0
@@ -355,6 +359,10 @@ pure def stepAnAttachmentIsUsedOnlyFromItsReview(before: MessageView, after: Mes
 ```
 
 ### An attachment use ends as its own answer says, or unknown
+
+Android saves to a destination the owner picks. A browser with Files saves
+a copy there. Both confirm success only after reading back the same bytes.
+A browser download cannot confirm what was saved.
 
 ```quint
 pure def canAttachmentHandled(s: MessageView, attempt: int): bool = A::canConclude(s.file, attempt)

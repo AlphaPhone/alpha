@@ -20,6 +20,13 @@ export effect function readMessage(conversation: number, message: number): void!
   try contained((try Speaker.Machine).send({ type: "read", text: "Message", which: message }), "reading the settled message")
 }
 
+export effect function stopMessage(ticket: number): void!!Speaker.Machine {
+  const speaker = try Speaker.Machine
+  const reading = try speaker.get()
+  if (reading.text !== "Message" || reading.ticket !== ticket || !Speaker.canStop(reading)) return
+  try contained(speaker.send({ type: "stop" }, (state) => state.ticket === ticket), "stopping the selected message")
+}
+
 function sceneOf(shell: ShellState, chosen: number): string {
   return JSON.stringify([shell.trail, shell.assistant, chosen])
 }

@@ -50,6 +50,7 @@ public class MainActivity extends BridgeActivity {
 
  @Override public void onCreate(Bundle state) {
   SplashScreen.installSplashScreen(this);
+  BillingReturn.capture(getIntent());
   HostedDigestDelivery.get().capture(getIntent());
   MainActivity live = livePage.get();
   boolean frontStart = isFrontStart(getIntent());
@@ -70,6 +71,7 @@ public class MainActivity extends BridgeActivity {
   registerPlugin(AlphaSystemPlugin.class);
   registerPlugin(AlphaFilesPlugin.class);
   registerPlugin(AlphaSelectedDocumentsPlugin.class);
+  registerPlugin(AlphaInboxAttachmentsPlugin.class);
   registerPlugin(AlphaNotesPlugin.class);
   registerPlugin(AlphaAssistantDraftPlugin.class);
   registerPlugin(AlphaNoteDocumentsPlugin.class);
@@ -211,6 +213,9 @@ public class MainActivity extends BridgeActivity {
  }
 
  @Override protected void onNewIntent(Intent intent) {
+  if (BillingReturn.capture(intent) && getBridge() != null) {
+   getBridge().getWebView().evaluateJavascript("window.dispatchEvent(new Event('alpha-billing-return'))", null);
+  }
   HostedDigestDelivery.get().capture(intent);
   if (isFrontStart(intent)) {
    if (!handingOff) unansweredFrontStarts = 0;

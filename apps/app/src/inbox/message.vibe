@@ -13,6 +13,7 @@ import { reviewMailContext, MailContextRefused } from "@elizaos/plugin-inbox-cli
 import { Agent } from "../platform/agent.vibe"
 import { InboxBrowserLinks } from "../platform/browser.vibe"
 import { native, registered } from "../platform/device.vibe"
+import type { InboxAttachmentFiles } from "../platform/inboxAttachments.vibe"
 import { say, type Said } from "../notices/toasts.vibe"
 import { MailQuestions, sourceOf, type MailQuestion } from "./mail-context.vibe"
 import { Cloud } from "../platform/cloud.vibe"
@@ -141,7 +142,7 @@ const questionAbout = (account: number, message: number, revision: number) => ef
   try ignore(shell.send({ type: "raise", detent: "Sheet" }))
 }
 
-function carry(fx: Out): Job<Event, Cloud | Agent | MailQuestions | Mail | Inbox.Machine | Marking.Machine | Message.Machine | Shell | ThreadPages | AttachmentPreviews | InboxBrowserLinks | Toasts | Said, []> {
+function carry(fx: Out): Job<Event, Cloud | Agent | MailQuestions | Mail | Inbox.Machine | Marking.Machine | Message.Machine | Shell | ThreadPages | AttachmentPreviews | InboxAttachmentFiles | InboxBrowserLinks | Toasts | Said, []> {
   return match (fx) {
     when { tag: "ReadMessage", let ticket, let account, let message, let position, let place }:
       stream("read", Stream.filter(Stream.fromEffect(read(ticket, account, message, position, place)), (event): event is Event => event !== undefined),
