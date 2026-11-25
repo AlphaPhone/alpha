@@ -19,6 +19,8 @@ import { type VoiceEvent, VoiceBridge } from "../platform/voice.vibe"
 import { fresh } from "../runtime/attempts.vibe"
 import { type Job, answer, applying, contained, due, following, hearing, reacting, run, started, stream, together, untimed } from "../runtime/reactor.vibe"
 import { signedIn } from "./account.vibe"
+import { replyBlocks } from "../assistant/words.ts"
+import { dictationClock } from "./dictation-clock.vibe"
 
 const views: ReadonlyArray<Shell.View> = [
   "Phone", "Messages", "Inbox", "Calendar", "Clock", "Reminders", "Browser", "Camera", "Photos", "Maps", "Notes", "Contacts", "Files", "Workflows", "Settings",
@@ -56,11 +58,10 @@ export interface VoiceMemory {
   dictatedDurationMs: number | undefined
   fillTarget: { readonly field: Field; readonly filling: number; readonly apply: (words: string) => void!! } | undefined
   filesNavigation: FilesNavigation | undefined
-  /** The observation and any file the spoken request may attach from the screen now showing. */
-  screen: ((shown: Screen, spoken: string) => {
+  /** The observation and the open Files document a turn sent now from `shown` takes with it, read as Ask Alpha reads them. */
+  screen: ((shown: Screen) => {
     readonly metadata: TurnContext | undefined
     readonly attachment: Attached | undefined
-    readonly explicitlyRequested: boolean
   }!!) | undefined
   /** Whether the turn's spoken acknowledgment is queued and not yet handed to speech. */
   cueWaiting: boolean
@@ -362,12 +363,12 @@ function sendVoiceTurn(session: number, turn: number): Stream.Stream<Voice.Event
       if (provisional || awaitingFiles) return
       emitNavigation(written)
       if (replyNeedsReview(written)) return
-      const clean = speakableText(written)
+      const clean = speakableText(replyBlocks(written, true).words)
       if (clean.length <= shown.length) return
       shown = clean
       sayFrom(clean, false)
     }
-    const observation = told && screen !== undefined && memory.screen !== undefined ? try memory.screen(screen.context, spoken) : undefined
+    const observation = told && screen !== undefined && memory.screen !== undefined ? try memory.screen(screen.context) : undefined
     const current = conversation === undefined ? undefined : try conversation.get()
     const currentTurn = Voice.canSentence(try voice.get(), session, turn)
     const sameScreen = told && current !== undefined && current.observing && !current.context.sensitive && current.context.revision === screen?.context.revision
@@ -376,7 +377,6 @@ function sendVoiceTurn(session: number, turn: number): Stream.Stream<Voice.Event
     const entailsAttachment = sendsOpenDocument("Spoken", {
       filesShowing: sameScreen && showing?.tag === "App" && showing.view === "Files",
       readable: file?.mimeType === "text/plain",
-      explicitlyRequested: observation?.explicitlyRequested === true,
       sensitive: current?.context.sensitive ?? true,
       currentTurn,
     })
@@ -388,7 +388,7 @@ function sendVoiceTurn(session: number, turn: number): Stream.Stream<Voice.Event
     // spec/app/files/index.md, "An explicit request to open or filter Files may act directly on the same idle Files view"
     const alreadyInFiles = showing?.tag === "App" && showing.view === "Files"
     const selected = observation?.metadata?.observation?.selectedObject
-    const operation = sameScreen && images.length === 0 && observation?.explicitlyRequested !== true
+    const operation = sameScreen && images.length === 0
       && selected?.kind !== "document" ? requestedFilesOperation(spoken) : undefined
     const outside = !alreadyInFiles && operation !== undefined && !("shown" in operation) ? operation : undefined
     const review = operation === undefined || !alreadyInFiles && outside === undefined ? undefined : Option.getOrUndefined(try Effect.serviceOption(MediaReview))
@@ -466,7 +466,7 @@ function sendVoiceTurn(session: number, turn: number): Stream.Stream<Voice.Event
       Queue.endUnsafe(queue)
       return
     }
-    const full = speakableText(finalText)
+    const full = speakableText(replyBlocks(finalText).words)
     sayFrom(full.length >= shown.length ? full : shown, true)
     Queue.offerUnsafe(queue, { type: "replyEnds", session, turn, asks: false })
     Queue.endUnsafe(queue)
@@ -588,6 +588,12 @@ function carryVoice(fx: Voice.Effect): Job<Voice.Event, Agent | Device | Layers.
       return immediate === undefined ? Stream.empty : Stream.succeed(immediate)
     }), { type: "navigated", place });
     when { tag: "Record", let ticket }: answer("record", effect {
+      const current = try (try Voice.Machine).get()
+      if (Voice.canRecordingStarted(current, ticket)) {
+        const { memory } = try VoiceWords
+        memory.dictatedText = ""
+        memory.dictatedDurationMs = undefined
+      }
       const started = effect { try (try VoiceBridge).startRecording(ticket); return true } catch () => false
       return started ? { type: "recordingStarted", ticket } : { type: "recordingFailed", ticket, failure: "NoMicrophone" }
     }, { type: "recordingFailed", ticket, failure: "NoMicrophone" });
@@ -595,16 +601,15 @@ function carryVoice(fx: Voice.Effect): Job<Voice.Event, Agent | Device | Layers.
       if (automatic && !(try dictationVisible())) return { type: "transcribed", ticket, failure: "AgentUnavailable" } as Voice.Event
       const result = try (try VoiceBridge).transcribe(ticket, network, automatic)
       if (result.kind === "lost") return { type: "clipLost", ticket }
-      if (result.kind !== "recognized") return { type: "transcribed", ticket, failure: result.kind === "obscured" ? "AgentUnavailable" : "Recognition" }
-      const trimmed = result.text.trim()
-      if (trimmed === "") return { type: "transcribed", ticket, failure: "NoSpeech" } as Voice.Event
+      const trimmed = result.kind === "recognized" ? result.text.trim() : ""
+      const failure = result.kind === "obscured" ? "AgentUnavailable" : result.kind === "failed" ? "Recognition" : trimmed === "" ? "NoSpeech" : "NoFailure"
       const current = try (try Voice.Machine).get()
-      if (Voice.canTranscribed(current, ticket, "NoFailure")) {
+      if (Voice.canTranscribed(current, ticket, failure)) {
         const { memory } = try VoiceWords
         memory.dictatedText = trimmed
         memory.dictatedDurationMs = result.durationMs
       }
-      return { type: "transcribed", ticket, failure: "NoFailure" } as Voice.Event
+      return { type: "transcribed", ticket, failure } as Voice.Event
     }, { type: "transcribed", ticket, failure: "Recognition" });
     when { tag: "Abandon", let recording }: run(`abandon ${recording}`, effect { try (try VoiceBridge).abandon(recording) });
     when { tag: "Fill", let field, let filling }: run(`fill ${filling}`, effect {
@@ -731,6 +736,7 @@ export const voicing = Layer.provideMerge(
       timers: (v) => (v.retryAt > 0 ? [due("retry", v.retryAt, { type: "retryDue", now: untimed })] : []),
     }),
     autoPrewarm,
+    dictationClock,
     visibility,
     navigation,
     bridgeEvents,

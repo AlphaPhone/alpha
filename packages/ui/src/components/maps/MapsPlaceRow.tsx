@@ -16,8 +16,8 @@ export function MapsPlaceRow({ name, detail, icon, className, ...props }: MapsPl
     <button type="button" className={cn(focusRing, "flex w-full items-center gap-3.5 px-5 py-2.5 text-left active:bg-accent disabled:opacity-50", className)} {...props}>
       <span aria-hidden className="flex size-10.5 shrink-0 items-center justify-center rounded-full bg-secondary [&_svg]:size-5">{icon}</span>
       <span className="flex min-w-0 flex-col gap-0.5">
-        <span className="truncate text-body leading-tight font-semibold">{name}</span>
-        {detail ? <span className="truncate text-meta leading-tight text-muted-foreground">{detail}</span> : null}
+        <span className="truncate text-md font-semibold">{name}</span>
+        {detail ? <span className="truncate text-caption text-muted-foreground">{detail}</span> : null}
       </span>
     </button>
   );
