@@ -1,0 +1,131 @@
+// spec/app/assistant/index.md, "Story: Let Alpha open what it is talking about"; spec/app/assistant/context.md, "A spoken turn carries what a typed turn sent at that moment would, but the view claim"
+import * as Conversation from "../../gen/app__assistant.effect.vibe"
+import { type View, parseEvent } from "../../gen/app__shell.effect.vibe"
+import { Agent } from "../platform/agent.vibe"
+import { ask } from "../platform/remote.vibe"
+import * as KeyValueStore from "effect/persistence/KeyValueStore"
+import * as List from "../../gen/app__notes.effect.vibe"
+import * as Editor from "../../gen/app__notes__editor.effect.vibe"
+import * as Link from "../../gen/app__notes__linkNote.effect.vibe"
+import * as Voice from "../../gen/app__notes__voice.effect.vibe"
+import { Cloud } from "../platform/cloud.vibe"
+import { agentOpen } from "../notes/agent.vibe"
+import { Opens } from "../notes/opens.vibe"
+import { contained, started } from "../runtime/reactor.vibe"
+
+module web {
+  /** A fresh id for this page as a renderer of the agent's views. @throws {never} */
+  export function renderer(): string {
+    return crypto.randomUUID()
+  }
+}
+import { renderer } from web
+
+/** The renderer, installation and view a prepared navigation is bound to, as eliza's agent hands it back. */
+schema Binding {
+  readonly requestId: string
+  readonly clientId: string
+  readonly viewId: string
+  readonly viewType: "gui"
+  readonly installationId: string
+}
+
+/** A view the agent prepared for this screen in a turn's completed action. */
+schema Handoff {
+  readonly subview?: string
+  readonly navigationBinding: Binding
+}
+
+schema Prepared { readonly values: Handoff }
+const Claimed = Schema.Struct({ claimId: Schema.String, target: Schema.optionalKey(Schema.Struct({ kind: Schema.Literal("saved-note"), noteId: Schema.String })) })
+schema Answered { readonly ok: boolean }
+const preparedOf = Schema.decodeUnknownOption(Prepared)
+
+/** The Alpha view an agent's view id names: the same name, compared without its case, as the shell's own events name views. */
+function viewOf(viewId: string): View | undefined {
+  const opened = parseEvent({ type: "openView", view: `${viewId.charAt(0).toUpperCase()}${viewId.slice(1).toLowerCase()}` })
+  return opened?.type === "openView" ? opened.view : undefined
+}
+
+/**
+ * This screen as a renderer of the agent's views, and the view a typed turn's reply prepared for it, held by its turn
+ * until the reply is complete.
+ */
+export service Views {
+  readonly clientId: string
+  hold(ticket: number, handoff: Handoff): void!!
+  take(ticket: number): Option.Option<Handoff>!!
+}
+
+export const handoffs = Layer.sync(Views, () => {
+  const clientId = renderer()
+  let held: { readonly ticket: number; readonly handoff: Handoff } | undefined
+  return {
+    clientId,
+    hold: (ticket: number, handoff: Handoff) => sync(() => { held = { ticket, handoff } }),
+    take: (ticket: number) => sync(() => {
+      const found = held?.ticket === ticket ? held.handoff : undefined
+      held = undefined
+      return Option.fromNullishOr(found)
+    }),
+  }
+})
+
+// spec/app/assistant/context.md, "A spoken turn carries what a typed turn sent at that moment would, but the view claim"
+/** What a typed turn told of the screen adds so the agent may hand back a view to open on it: views as completed actions, this screen, and its saved-note editor. */
+export function delivery(clientId: string) {
+  return {
+    viewDelivery: "completed-action" as const,
+    viewClientId: clientId,
+    voiceUi: { viewDelivery: "completed-action" as const, uiClientId: clientId, uiNotesEditor: "saved-note-v1" as const },
+  }
+}
+
+/** The last view the reply's actions prepared for this screen, if any. */
+export function preparedIn(results: ReadonlyArray<{ readonly action: string; readonly data: unknown }>, clientId: string): Handoff | undefined {
+  const found = results.filter((result) => result.action === "VIEWS").map((result) => Option.getOrUndefined(preparedOf(result.data))?.values).at(-1)
+  return found?.navigationBinding.clientId === clientId ? found : undefined
+}
+
+/** Open `view` for the reply of `ticket`, once, as the conversation allows; whether it opened. */
+effect function navigated(ticket: number, view: View): boolean!!Conversation.Machine {
+  const conversation = try Conversation.Machine
+  if (!Conversation.canNavigate(try conversation.get(), ticket, view)) return false
+  try ignore(conversation.send({ type: "navigate", ticket, view }))
+  const ended = try Stream.runHead(Stream.filter(conversation.changes, (c) => c.opening.id !== ticket || c.opening.outcome !== "Sent"))
+  return Option.isSome(ended) && ended.value.opening.id === ticket && ended.value.opening.outcome === "Confirmed"
+}
+
+// spec/app/assistant/index.md, "A complete reply may open one view, once, while the screen it was asked from still shows"; spec/app/notes/index.md, "The agent opens the one note the owner named, as the list shows it now, once for the owner's current turn, and is told whether it opened"
+/** What carrying out a prepared view needs: this screen as a renderer, the agent, the conversation, and Notes' machines for a saved note. */
+export type Opening = Views | Agent | Conversation.Machine | List.Machine | Editor.Machine | Voice.Machine | Link.Machine | Opens | Cloud | KeyValueStore.KeyValueStore
+
+/**
+ * Carry out the view the complete reply of `ticket` prepared for this screen: claim it once, open it as the rules
+ * allow, a saved note in Notes' editor first, and tell the agent whether it switched. Nothing is said on screen.
+ */
+effect function openPrepared(ticket: number): void!!Opening {
+  const prepared = try (try Views).take(ticket)
+  if (Option.isNone(prepared)) return
+  const binding = prepared.value.navigationBinding
+  const saved = prepared.value.subview === "saved-note-v1"
+  const claim = ask(Agent, HttpClientRequest.post("/api/views/interact-claim") |> HttpClientRequest.bodyJsonUnsafe(%, { ...binding, ...(saved ? { targetProtocol: "saved-note-v1" } : {}) }), Claimed) catch () => undefined
+  if (claim === undefined) return
+  const view = viewOf(binding.viewId)
+  const c = try (try Conversation.Machine).get()
+  const target = claim.target
+  const allowed = view !== undefined && Conversation.canNavigate(c, ticket, view)
+  const open = !allowed ? false
+    : target === undefined ? try navigated(ticket, view)
+    : (try agentOpen(target.noteId, { turn: ticket, current: c.turn.send.id, sensitive: c.context.sensitive })) && (try navigated(ticket, view))
+  const result = { switched: open, ...(open && target !== undefined ? { shown: target } : {}) }
+  try ignore(ask(Agent, HttpClientRequest.post("/api/views/interact-result") |> HttpClientRequest.bodyJsonUnsafe(%, { ...binding, claimId: claim.claimId, success: true, result }), Answered))
+}
+
+// spec/app/assistant/index.md, "A complete reply may open one view, once, while the screen it was asked from still shows"
+/** Each reply that completes has what it prepared for this screen carried out once, to its end, whatever the turn does next. */
+export const carried = started(effect {
+  const conversation = try Conversation.Machine
+  const complete = Stream.filter(conversation.changes, (c) => c.turn.reply === "Complete")
+  try Stream.runForEach(Stream.changesWith(complete, (a, b) => a.turn.send.id === b.turn.send.id), (c) => contained(openPrepared(c.turn.send.id), "opening what a reply prepared"))
+}, "opening what a reply prepared")
