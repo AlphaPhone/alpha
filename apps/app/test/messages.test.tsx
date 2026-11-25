@@ -19,7 +19,7 @@ import { idOf, Pages } from "../src/browser/browser.vibe";
 import browser from "../src/browser/index.tsx";
 import home from "../src/home/index.tsx";
 import messages from "../src/messages/index.tsx";
-import { button, closeAll, drawn, hardware, only, open, press, underAct } from "./alpha.tsx";
+import { button, closeAll, drawn, hardware, later, only, open, press, underAct } from "./alpha.tsx";
 import { scene } from "./fakes/scene.ts";
 import { textReview } from "./fakes/text-review.ts";
 
@@ -397,6 +397,35 @@ describe("Messages on an Alpha image", () => {
     expect(world.telephony.sent.map(({ operationId, recipients, body }) => ({ operationId, recipients, body }))).toEqual([
       { operationId: call.operationId, recipients: [...sms.recipients], body: sms.body },
     ]);
+  });
+
+  it("Watches Android’s submitted text for the carrier’s exact receipt (spec/app/contacts/agent.md, \"Only the phone answers the action, and the request ends as that answer says\")", async () => {
+    const world = image();
+    world.telephony.holdSmsSubmission = true;
+    const { alpha } = await openImage(world);
+    await ready(alpha.runtime, Shell, "Alpha image admitted", (state) => state.image);
+    await ready(alpha.runtime, Phone, "Known call state", (state) => state.telecom === "NoCall");
+    const sms = { type: "sms_send", recipients: ["+14155550100"], body: "Meet at the front door", subscriptionId: 1 } as const;
+    const call = { proposalId: "carrier-receipt", operationId: "carrier-receipt", attemptId: 1 };
+    const send = executeMedia(alpha, sms, call, { current: () => Promise.resolve(true) });
+    const submitted = await vi.waitFor(() => {
+      const receipt = world.telephony.journal.get(call.operationId);
+      if (receipt?.status !== "submitted") throw new Error("The carrier has not been asked");
+      return receipt;
+    });
+    await expect(alpha.runtime.runPromise(readAgentSms(sms, call))).resolves.toBeUndefined();
+    const waitForRead = (count: number) => vi.waitFor(async () => {
+      await later(alpha, 500);
+      expect(world.telephony.smsQueries).toHaveLength(count);
+    }, { timeout: 4_000 });
+    await waitForRead(2);
+    world.telephony.journal.set(call.operationId, {
+      ...submitted, status: "sent", parts: [{ index: 0, recipientIndex: 0, partIndex: 0, sent: "success", delivery: "unknown" }],
+    });
+    await waitForRead(3);
+    await expect(send).resolves.toMatchObject({ kind: "applied", result: { operationId: call.operationId, status: "sent" } });
+    expect(world.telephony.smsQueries).toEqual(Array.from({ length: 3 }, () => call.operationId));
+    expect(world.telephony.sent.map(({ operationId }) => operationId)).toEqual([call.operationId]);
   });
 
   it("From Home, asks the owner to review the exact text the agent just proposed (spec/app/contacts/agent.md, \"Only the owner approves, only what is shown as it is now, and only when the phone has ruled out an emergency call\")", async () => {
