@@ -162,10 +162,16 @@ function Body({ read, images, onReview }: { read: MailMessage; images: boolean; 
   const frame = useCallback((node: HTMLIFrameElement | null) => node ? connectMailFrame(node, onReview) : undefined, [onReview]);
   const additional = links.flatMap((link, at) => formatted?.inline.has(link.url) ? [] : [{ ...link, at: at + 1 }]);
   const list = (
-    <ul aria-label="Links" className="flex flex-col items-start gap-1">
+    <ul aria-label="Links" className={formatted ? "flex flex-col items-start gap-1" : "mt-5 flex flex-col items-start gap-1"}>
       {additional.map((link) => (
         <li key={link.url} className="min-w-0 max-w-full text-sm [overflow-wrap:anywhere]">
-          {link.secure ? <Button variant="ghost" className="h-auto whitespace-normal text-left text-primary" onClick={() => onReview(link.at)}>{link.label}</Button> : link.label}
+          {link.secure ? (
+            <Button variant="ghost" size="sm" aria-label={link.mismatch ? link.label : link.url}
+              className="h-auto min-h-11 min-w-0 justify-start rounded-sm px-0 text-left font-normal whitespace-normal text-primary hover:bg-transparent active:bg-transparent"
+              onClick={() => onReview(link.at)}>
+              {link.mismatch ? link.label : URL.parse(link.url)?.hostname ?? link.label}
+            </Button>
+          ) : link.label}
         </li>
       ))}
     </ul>

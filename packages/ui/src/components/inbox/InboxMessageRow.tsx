@@ -82,7 +82,7 @@ export function InboxMessageRow({ sender, initial, subject, snippet, time, unrea
             <span className="shrink-0 text-xs whitespace-nowrap text-muted-foreground">{time}</span>
           </span>
           <span className="mt-0.5 flex h-4.25 items-center gap-2">
-            <span data-inbox-subject="" className={cn("min-w-0 flex-1 truncate text-subject", unread && "font-semibold")}>{subject}</span>
+            <span data-inbox-subject="" className="min-w-0 flex-1 truncate text-subject">{subject}</span>
             <span aria-hidden className={cn("size-2 shrink-0 rounded-full", unread && "bg-primary")} />
           </span>
           <span className="mt-0.5 block h-4 truncate text-snippet text-muted-foreground">{snippet}</span>
