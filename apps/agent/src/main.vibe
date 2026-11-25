@@ -7,12 +7,16 @@ import { deployment } from "@repo/deployment"
 import { pinnedCheckout, pinnedPack } from "@repo/eliza-harness"
 import {
   type Environment, type Manifest, bundledPlugins, calendarEdits, characterAdmitted, cloudModel, corePlugins, entryCarried, gmailChanges, googleAdmitted,
-  hostedPlugins, inputAdmitted, localEmbeddings, nativeSpeechRoutes, nativeSpeechRoutesAdmitted, notesTrashDays, packAdmitted, packEntry, packedFor, packedPlugins, persistMemory, personalDetailSwap,
+  hostedPlugins, inputAdmitted, localEmbeddings, nativeSpeechRoutes, nativeSpeechRoutesAdmitted, notesTrashDays, packAdmitted, packEntry, packedFor, packedPlugins, pageQueries, persistMemory, personalDetailSwap,
   policyAdmitted, privacyAdmitted, productPluginName, proposalsAdmitted, refusedActions, routeListAdmitted, secretSwap, viewPlugins,
 } from "../gen/agent.effect.vibe"
 
 module node {
   import { pathToFileURL } from "node:url"
+  import { isDeepStrictEqual } from "node:util"
+
+  /** @throws {never} */
+  export const sameRules = (left: unknown, right: unknown): boolean => isDeepStrictEqual(left, right)
 
   /** The words after the script on the command line. @throws {never} */
   export function words(): string[] {
@@ -29,14 +33,20 @@ module node {
     return import(pathToFileURL(`${dir}/packages/agent-host/dist/src/bundle/build.js`).href) as Promise<typeof import("@elizaos/agent-host")>
   }
 }
-import { builderOf, root, words } from node
+import { builderOf, root, sameRules, words } from node
 
 /** What makes the pack unfit to ship, in words a maker can act on. */
 export error Refused { message: string }
 
 const environments: Readonly<Record<string, Environment>> = { local: "Local", staging: "Staging", production: "Production" }
 
-schema RouteLine { method: "GET" | "POST" | "PUT" | "PATCH" | "DELETE"; path: string; stream?: boolean }
+schema QueryRule {
+  key: string
+  accepts: { kind: "any" } | { kind: "pattern"; pattern: string } | { kind: "pinned"; value: string }
+}
+schema RouteLine {
+  method: "GET" | "POST" | "PUT" | "PATCH" | "DELETE"; path: string; stream?: boolean; query?: QueryRule[]
+}
 schema Character { name: string; system: string; bio: string[] }
 schema Policy { schema: 1; actions: { allowed: string[]; refused: Record<string, string> }; plugins: { load: string[]; product?: string } }
 schema Notice { channel: string; title: string; text: string }
@@ -146,6 +156,18 @@ effect function routeLines(file: string) {
 const spelled = { GET: "Get", POST: "Post", PUT: "Put", PATCH: "Patch", DELETE: "Delete" } as const
 const onWire = { Get: "GET", Post: "POST", Put: "PUT", Patch: "PATCH", Delete: "DELETE" } as const
 
+function queries(route: RouteLine) {
+  return pageQueries.filter(({ method, path }) => method === spelled[route.method] && path === route.path)
+    .map(({ key, kind, value, example }): { rule: QueryRule; example: string } => ({
+      example,
+      rule: {
+        key,
+        accepts: kind === "AnyQuery" ? { kind: "any" }
+          : kind === "PatternQuery" ? { kind: "pattern", pattern: value } : { kind: "pinned", value },
+      },
+    }))
+}
+
 /** Refuse a route list unless it is the page's, and eliza's own gate admits each of its routes. */
 effect function admitRoutes(routes: readonly RouteLine[], native = false) {
   const described = routes.map((route) => ({ method: spelled[route.method], path: route.path, stream: route.stream === true }))
@@ -154,7 +176,13 @@ effect function admitRoutes(routes: readonly RouteLine[], native = false) {
   }
   const gate = defineRoutes(routes)
   for (const route of routes) {
-    const target = route.path.replace(/\{[a-zA-Z]+\}/g, "x")
+    const expected = native ? [] : queries(route)
+    if (!sameRules(route.query ?? [], expected.map(({ rule }) => rule))) {
+      throw new Refused({ message: `the query rules do not match ${route.method} ${route.path} (spec/agent/index.md)` })
+    }
+    const path = route.path.replace(/\{[a-zA-Z]+\}/g, "x")
+    const parameters = expected.map(({ rule, example }) => `${rule.key}=${encodeURIComponent(example)}`).join("&")
+    const target = parameters === "" ? path : `${path}?${parameters}`
     const admission = gate.admit({ method: route.method, target, streamed: route.stream === true, body: undefined })
     if (admission.tag !== "Admitted") throw new Refused({ message: `eliza's route gate does not admit ${route.method} ${route.path}` })
   }
@@ -233,8 +261,12 @@ effect function build(name: string) {
   try fs.makeDirectory(at.host, { recursive: true })
   for (const file of ["character.json", "policy.json"]) try fs.copyFile(`${at.data}/${file}`, `${at.host}/${file}`)
   const service = try decoded(`${at.data}/service.json`, Service)
+  const routes = (try routeLines(`${at.data}/routes.jsonl`)).map((route) => {
+    const query = queries(route).map(({ rule }) => rule)
+    return query.length === 0 ? route : { ...route, query }
+  })
   const host: Host = {
-    schema: 1, service: service.service, notification: service.notification, routes: try routeLines(`${at.data}/routes.jsonl`),
+    schema: 1, service: service.service, notification: service.notification, routes,
     nativeRoutes: nativeSpeechRoutes.map(({ method, path, stream }) => ({ method: onWire[method], path, stream })),
     model: { backend: "cloud", cloudBaseUrl: where.cloud, smallModel: cloudModel, largeModel: cloudModel, imageModel: "" },
     embeddings: localEmbeddings ? "local" : "none", persistMemory, callerRole: "owner", privacy: { secretSwap, piiSwap: personalDetailSwap },

@@ -161,8 +161,11 @@ approval, lifecycle and run decisions and reads back their outcomes.
 The builder reads the phone catalogue, generates and validates drafts,
 saves the reviewed spec and checks save receipts. Workflows also sends
 the owner's prompt and scheduled task changes. Scheduled Digests reads
-hosted sources, loops and retained results. It sends reviewed schedule
-changes and acknowledges an opened result.
+hosted sources, loops and retained results. The buffered results GET admits
+one query key, `clientId`, with the pinned provider's identifier pattern
+`[A-Za-z0-9][A-Za-z0-9_-]{0,127}`. The provider requires that key to read
+a page. Workflows sends reviewed schedule changes and acknowledges a
+retained page after storing it, using the final result's cursor and run ID.
 Notes reads the same owner identity and calls the Notes module to
 read and edit notes, erase Trash and finish recording cleanup. The scanner
 hands the owner’s reviewed scan text to Notes through that module. The approvals area lists the agent's proposals and resolves one
@@ -298,8 +301,38 @@ pure val nativeSpeechRoutes: List[Route] = List(
 pure def nativeSpeechRoutesAdmitted(listed: List[Route]): bool =
   listed.length() == nativeSpeechRoutes.length() and listed.every(route => nativeSpeechRoutes.includes(route))
     and nativeSpeechRoutes.every(route => listed.includes(route))
+pure val routeValues: Set[Route] = nativeSpeechRoutes.foldl(Set(), (routes, route) => routes.union(Set(route)))
 pure def lawSpeechRoutesAreAbsentFromThePage(route: Route): bool =
   nativeSpeechRoutes.includes(route) implies not(pageRoutes.includes(route))
+```
+
+### The page names the query values each gated route can receive
+
+Search sends its words, offset and twenty results per page. A conversation
+can request the window around a message. Home's agenda and Calendar send
+the start and end of their window, and Calendar may send a time zone.
+Calendar asks for up to fifty pending approvals. Workflows lists the owner's
+visible tasks, reads a result page for its
+client, and supplies the exact reviewed revision when removing a trigger.
+
+```quint
+type QueryKind = AnyQuery | PatternQuery | FixedQuery
+type RequestQuery = { method: Method, path: str, key: str, kind: QueryKind, value: str, example: str }
+
+pure val pageQueries: List[RequestQuery] = List(
+  { method: Get, path: "/api/conversations/messages/search", key: "q", kind: AnyQuery, value: "", example: "project notes + plan" },
+  { method: Get, path: "/api/conversations/messages/search", key: "offset", kind: PatternQuery, value: "0|[1-9][0-9]{0,15}", example: "0" },
+  { method: Get, path: "/api/conversations/messages/search", key: "limit", kind: FixedQuery, value: "20", example: "20" },
+  { method: Get, path: "/api/conversations/{id}/messages", key: "around", kind: PatternQuery, value: "[A-Za-z0-9_-]{1,128}", example: "test-message" },
+  { method: Get, path: "/api/lifeops/calendar/feed", key: "timeMin", kind: AnyQuery, value: "", example: "2026-11-24T00:00:00.000Z" },
+  { method: Get, path: "/api/lifeops/calendar/feed", key: "timeMax", kind: AnyQuery, value: "", example: "2026-11-25T00:00:00.000Z" },
+  { method: Get, path: "/api/lifeops/calendar/feed", key: "timeZone", kind: AnyQuery, value: "", example: "America/New_York" },
+  { method: Get, path: "/api/approvals", key: "state", kind: PatternQuery, value: "pending", example: "pending" },
+  { method: Get, path: "/api/approvals", key: "limit", kind: PatternQuery, value: "50", example: "50" },
+  { method: Get, path: "/api/scheduled-tasks", key: "ownerVisibleOnly", kind: FixedQuery, value: "1", example: "1" },
+  { method: Get, path: "/api/workflow/hosted/results", key: "clientId", kind: PatternQuery, value: "[A-Za-z0-9][A-Za-z0-9_-]{0,127}", example: "build-probe" },
+  { method: Delete, path: "/api/triggers/{id}", key: "expectedRevision", kind: PatternQuery, value: "[1-9][0-9]{0,15}", example: "1" },
+)
 ```
 
 ### The agent keeps its memory across restarts, without embeddings
