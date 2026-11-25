@@ -135,6 +135,7 @@ export * from "./components/messaging/ChatComposer.tsx";
 export * from "./components/messaging/ConversationRow.tsx";
 export * from "./components/messaging/MessageItem.tsx";
 export * from "./components/messaging/ReactionBar.tsx";
+export * from "./components/messaging/SmsReviewCard.tsx";
 export * from "./components/settings/SettingsAboutPage.tsx";
 export * from "./components/settings/SettingsAccessRow.tsx";
 export * from "./components/settings/SettingsActionRow.tsx";

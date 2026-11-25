@@ -1,10 +1,10 @@
 // spec/app/assistant/index.md, "Story: Ask Alpha something"; spec/app/assistant/index.md, "Story: Stop a reply"; spec/app/assistant/chats.md, "Story: Find my conversations"; spec/app/assistant/composer.md, "Story: Send what I wrote"; spec/app/assistant/dock.md, "Focusing or tapping the composer on the bar opens Ask Alpha as a sheet"; spec/app/assistant/search.md, "Story: Search my conversations"; spec/app/assistant/reply.md, "Story: Hear a brief acknowledgment and still get the whole answer"
 import {
-  Alert, AssistantCard, AssistantCardFrame, Button, AssistantConversation, AssistantGrabber, AssistantPhotoPreview, ConfirmDialog, Sheet, SheetContent, Textarea,
+  Alert, AssistantCard, AssistantCardFrame, Button, AssistantConversation, AssistantGrabber, AssistantPhotoPreview, ConfirmDialog, Sheet, SheetContent, SmsReviewCard, Textarea,
   type AssistantAttachment, type AssistantComposerProps, type AssistantDraftNoticeProps, type AssistantTurnNoteProps,
 } from "@repo/ui";
 import { Effect, type ManagedRuntime } from "effect";
-import { ClipboardCheck, FileText } from "lucide-react";
+import { FileText } from "lucide-react";
 import { type FormEvent, type ReactNode, type RefObject, useCallback, useId, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { type Conversation as Talking, Machine as ConversationMachine } from "../../gen/app__assistant.effect.vibe";
 import { askable, inFlight, pending } from "../../gen/app__assistant.ts";
@@ -134,6 +134,7 @@ function DeviceReview({ runtime, card }: { runtime: AssistantProps["runtime"]; c
         : "target" in card.operation && card.operation.target.kind === "number" ? [card.operation.target.number] : [] }
       : undefined;
   const line = card.sms?.subscription ?? card.composeLine?.subscription;
+  const textCard = text !== undefined && card.phone?.tag !== "Choices" && card.phone?.tag !== "Unavailable" && card.notice === undefined;
   return (
     <div className="grid gap-2" aria-busy={deciding}>
       {card.phone?.tag === "Choices" ? (
@@ -152,20 +153,20 @@ function DeviceReview({ runtime, card }: { runtime: AssistantProps["runtime"]; c
       ) : card.notice !== undefined ? (
         <Alert role="status">{`${card.title}: ${card.detail}. ${card.notice}`}</Alert>
       ) : text !== undefined ? (
-        <AssistantCardFrame icon={<ClipboardCheck />} title={card.title} data-alpha-review={card.id}
-          detail={line === undefined ? undefined : `SIM ${line.slot + 1} · ${line.displayName}`}
-          actions={<Button data-alpha-review-send="" disabled={deciding || unavailable} onClick={(event) => decide(true, event.nativeEvent.isTrusted ? "Tap" : undefined)}>Approve</Button>}>
-          <p className="font-semibold wrap-anywhere">{card.phone?.tag === "Exact" ? `${card.phone.selected.name} · ` : ""}{text.recipients.map(displayNumber).join(", ")}</p>
-          <p className="whitespace-pre-wrap wrap-anywhere">{text.body}</p>
-          {spokenText(card) !== undefined && <p className="text-meta text-muted-foreground">Say “Send this text”</p>}
-        </AssistantCardFrame>
+        <SmsReviewCard review={card.id} body={text.body}
+          to={card.phone?.tag === "Exact" ? card.phone.selected.name : text.recipients.map(displayNumber).join(", ")}
+          number={card.phone?.tag === "Exact" ? displayNumber(card.phone.selected.number) : undefined}
+          note={line === undefined ? undefined : `SIM ${line.slot + 1} · ${line.displayName}`}
+          hint={spokenText(card) === undefined ? undefined : "Say “Send this text”"}
+          sendDisabled={deciding || unavailable} declineDisabled={deciding}
+          onSend={(event) => decide(true, event.nativeEvent.isTrusted ? "Tap" : undefined)} onDecline={unavailable ? undefined : () => decide(false)} />
       ) : (
         <AssistantCard card={{ kind: "decision", variant: "proposal", title: card.title, detail: card.detail, waiting: deciding, action: card.operation.type === "sms_compose" ? "Open draft" : card.operation.type === "browser_navigate" ? "Open" : "Approve" }}
           onHandOn={unavailable ? undefined : () => decide(true)} />
       )}
       {unavailable
         ? <Alert role="status">Alpha couldn’t confirm the decision. Check Activity before trying again.</Alert>
-        : <Button className="justify-self-end" variant="ghost" disabled={deciding} onClick={() => decide(false)}>Decline</Button>}
+        : !textCard && <Button className="justify-self-end" variant="ghost" disabled={deciding} onClick={() => decide(false)}>Decline</Button>}
     </div>
   );
 }

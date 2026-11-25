@@ -19,6 +19,7 @@ import { idOf, Pages } from "../src/browser/browser.vibe";
 import browser from "../src/browser/index.tsx";
 import home from "../src/home/index.tsx";
 import messages from "../src/messages/index.tsx";
+import { displayNumber } from "../src/phone/words.ts";
 import { button, closeAll, drawn, hardware, later, only, open, press, underAct } from "./alpha.tsx";
 import { scene } from "./fakes/scene.ts";
 import { textReview } from "./fakes/text-review.ts";
@@ -456,14 +457,14 @@ describe("Messages on an Alpha image", () => {
     };
 
     await ask("unrelated-proposal", "Text +14155550100 from SIM 1 saying Meet at the front door");
-    expect([button("Approve"), review.decisions, review.confirmations, world.telephony.sent]).toEqual([undefined, [], [], []]);
+    expect([button("Send this text"), review.decisions, review.confirmations, world.telephony.sent]).toEqual([undefined, [], [], []]);
 
     await ask(review.proposal.id, "Use SIM 1 to send +14155550100 the text Meet at the front door");
-    await vi.waitFor(() => expect(button("Approve")).toBeDefined());
-    expect(document.body.textContent).toContain("Review this text on your phone");
+    await vi.waitFor(() => expect(button("Send this text")).toBeDefined());
+    expect(document.body.textContent).toContain(`To ${displayNumber(sms.recipients[0])}`);
     expect(document.body.textContent).toContain(sms.body);
     expect([review.decisions, review.confirmations, world.telephony.sent]).toEqual([[], [], []]);
-    await press("Approve");
+    await press("Send this text");
     try {
       await vi.waitFor(() => expect(review.confirmations).toHaveLength(1));
       const confirmation = review.confirmations[0];
@@ -511,12 +512,12 @@ describe("Messages on an Alpha image", () => {
       return metadata?.observation?.selectedObject;
     };
     expect(await ask()).toBeUndefined();
-    expect(button("Approve")).toBeUndefined();
+    expect(button("Send this text")).toBeUndefined();
     world.telephony.subscriptions = [first];
     const revision: unknown = expect.stringMatching(/^[a-f0-9-]{36}$/u);
     expect(await ask()).toEqual({ kind: "sms-subscription", id: String(first.id), revision });
-    await vi.waitFor(() => expect(button("Approve")).toBeDefined());
-    await press("Approve");
+    await vi.waitFor(() => expect(button("Send this text")).toBeDefined());
+    await press("Send this text");
     try {
       await vi.waitFor(() => expect(review.confirmations).toHaveLength(1));
       const confirmation = review.confirmations[0];
@@ -574,23 +575,23 @@ describe("Messages on an Alpha image", () => {
 
     const opaqueRevision: unknown = expect.stringMatching(/^[a-f0-9-]{36}$/u);
     expect(await ask()).toBeUndefined();
-    expect(button("Approve")).toBeUndefined();
+    expect(button("Send this text")).toBeUndefined();
     await choose("Carrier");
     expect(await ask()).toEqual({ kind: "sms-subscription", id: String(first.id), revision: opaqueRevision });
-    expect(button("Approve")).toBeUndefined();
+    expect(button("Send this text")).toBeUndefined();
     await giveBack();
     await press("Back");
     await ready(alpha.runtime, Messages, "Conversation closed", (state) => state.pane === "Threads");
     await press("Maya Chen");
     await ready(alpha.runtime, Messages, "Conversation reopened", (state) => state.pane === "Conversation" && state.page.status === "Loaded");
     expect(await ask()).toBeUndefined();
-    expect(button("Approve")).toBeUndefined();
+    expect(button("Send this text")).toBeUndefined();
     await choose("Personal line");
     expect(await ask()).toEqual({ kind: "sms-subscription", id: String(second.id), revision: opaqueRevision });
-    await vi.waitFor(() => expect(button("Approve")).toBeDefined());
+    await vi.waitFor(() => expect(button("Send this text")).toBeDefined());
 
     world.telephony.subscriptions = [first, { ...second, carrierName: "Replacement carrier" }];
-    await press("Approve");
+    await press("Send this text");
     await vi.waitFor(() => expect(review.receipts).toEqual([expect.objectContaining({ outcome: "failed", operationId: review.proposal.id })]));
     expect([review.confirmations, world.telephony.sent]).toEqual([[], []]);
   });
@@ -610,7 +611,7 @@ describe("Messages on an Alpha image", () => {
     await press("Open conversation");
     await ready(alpha.runtime, Shell, "Ask Alpha open", (state) => state.assistant === "Sheet");
 
-    const action = mode === "draft" ? "Open draft" : "Approve";
+    const action = mode === "draft" ? "Open draft" : "Send this text";
     world.ask.nextReplyChunks = ["Review the text for Maya."];
     world.ask.nextActions = () => [{ action: "PROPOSE_DEVICE_ACTION", data: { proposalId: review.proposal.id, state: "pending", executed: false, approvalRequired: true, awaitingUserInput: true } }];
     await write("Message Alpha", mode === "draft" ? "Draft a text for Maya: Meet at the front door" : "Text Maya: Meet at the front door");
@@ -674,10 +675,10 @@ describe("Messages on an Alpha image", () => {
     await vi.waitFor(() => expect(button("Send")?.disabled).toBe(false));
     await press("Send");
     await ready(runtime, Conversation, "The proposal is read", (state) => review.pendingReads >= 1 && state.turn.reply === "Complete");
-    await vi.waitFor(() => expect(button(draft ? "Open draft" : "Approve")).toBeDefined());
-    expect(document.body.textContent).toContain(draft ? "Open an editable text draft" : "Review this text on your phone");
+    await vi.waitFor(() => expect(button(draft ? "Open draft" : "Send this text")).toBeDefined());
+    expect(document.body.textContent).toContain(draft ? "Open an editable text draft" : `To ${displayNumber("+12025550142")}`);
     expect(document.body.textContent).not.toContain(draft ? "Review this text on your phone" : "Open an editable text draft");
-    expect(button(draft ? "Approve" : "Open draft")).toBeUndefined();
+    expect(button(draft ? "Send this text" : "Open draft")).toBeUndefined();
     expect([review.decisions, review.claims, review.confirmations, world.telephony.sent]).toEqual([[], [], [], []]);
   });
 
@@ -706,7 +707,7 @@ describe("Messages on an Alpha image", () => {
       expect(document.querySelector('[aria-label="Choose a phone number"]')).toBeNull();
     }
     expect(button("Decline")).toBeDefined();
-    expect([button("Approve"), button("Open draft")]).toEqual([undefined, undefined]);
+    expect([button("Send this text"), button("Open draft")]).toEqual([undefined, undefined]);
     expect([review.decisions, review.claims, review.confirmations, world.telephony.sent]).toEqual([[], [], [], []]);
   });
 

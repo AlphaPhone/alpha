@@ -843,11 +843,11 @@ describe("Talk from Ask Alpha's composer (spec/app/voice/index.md, \"Story: Hold
     await drawnUntil(alpha, area, Voice.Machine, (state) => state.sent === 1 && state.reviewPending && state.phase === "Listening" && state.mic === "On");
     expect(room.messages.some((line) => line.role === "user" && line.text === text)).toBe(true);
     expect(world.ask.metadata.at(-1)).toMatchObject({ observation: { selectedObject: { kind: "sms-subscription", id: "1" } } });
-    expect(button("Approve")).toBeDefined();
+    expect(button("Send this text")).toBeDefined();
     expect(document.body.textContent).toContain(operation.body);
     expect([review.decisions, review.claims, world.telephony.sent]).toEqual([[], [], []]);
 
-    const send = button("Approve");
+    const send = button("Send this text");
     const card = send?.closest<HTMLElement>("[data-alpha-review]");
     const viewport = card?.closest<HTMLElement>("[role='log']");
     if (send === undefined || !card || !viewport) throw new Error("The addressed text was not drawn in the conversation");
@@ -871,7 +871,7 @@ describe("Talk from Ask Alpha's composer (spec/app/voice/index.md, \"Story: Hold
       viewportBounds.mockRestore();
     }
     expect(world.ask.said).toEqual(["Start this chat", text]);
-    expect(button("Approve")).toBeUndefined();
+    expect(button("Send this text")).toBeUndefined();
     expect([review.decisions, review.claims, world.telephony.sent]).toEqual([
       [review.proposal.id], [review.proposal.id], [{ operationId: review.proposal.id, recipients: [...operation.recipients], body: operation.body }],
     ]);
