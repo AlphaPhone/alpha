@@ -36,7 +36,11 @@ Compute" (line 10); eliza's launch needs one, so that line, with the name, is
 its start. eliza's tools, notes and results name the person in the
 conversation "the owner", which the model repeated back to them, so the
 prompt also tells the agent to speak to that person as "you", never as "the
-owner" or "the user". The words are in `apps/agent/host/character.json`.
+owner" or "the user". The model also described example.com from memory when
+asked to summarize "this page" on Home, where no page goes with the turn, so
+the prompt tells the agent that it sees a web page only in the latest
+message's Browser page, and with none to say that no page is open rather
+than describe one. The words are in `apps/agent/host/character.json`.
 
 ```quint
 pure val characterName: str = "Alpha"
@@ -166,6 +170,48 @@ pure val deviceActionModules: List[str] = List("@elizaos/agent/device-actions", 
 pure val proposalAction: str = "PROPOSE_DEVICE_ACTION"
 pure def proposalsAdmitted(loaded: List[str], allowed: List[str]): bool =
   deviceActionModules.every(m => loaded.includes(m)) and allowed.includes(proposalAction)
+```
+
+### The launch names Home and every Alpha app but Notes as a view the agent may show, by the id the phone opens it by
+
+The old phone opened any of its apps, and Home, when the owner asked.
+eliza's views module declares, once at boot, the views of the plugins
+loaded before it and the launch's own `views` (`spec/agent/views.md` in
+eliza); its VIEWS action prepares a view only by a name declared there.
+Alpha's product plugin loads after every listed module, so a view it
+declared would never be seen, and Notes is `@elizaos/plugin-notes`'s own
+view. So the host file names Home and Alpha's other apps, in the order the
+phone lists them (`apps/app/src/shell/order.ts`), and eliza's agent service
+writes them into the launch (`spec/os/agentService/config.md`). Each id is
+the app's name in lower case, which the phone's renderer opens as that app.
+Clock and Reminders keep the other names the product plugin gave them, at
+most four each, as a launch allows. The model chooses which view a request means, by one of
+these names; nothing matches the owner's words. Whether a prepared view
+opens is the phone's: an app the phone does not admit, or any app over a
+sensitive screen, stays closed (`spec/app/assistant/index.md`, "Story: Let
+Alpha open what it is talking about").
+
+```quint
+type LaunchView = { id: str, label: str, path: str, aliases: List[str] }
+pure val launchViews: List[LaunchView] = List(
+  { id: "home", label: "Home", path: "/home", aliases: List() },
+  { id: "phone", label: "Phone", path: "/phone", aliases: List() },
+  { id: "messages", label: "Messages", path: "/messages", aliases: List() },
+  { id: "inbox", label: "Inbox", path: "/inbox", aliases: List() },
+  { id: "calendar", label: "Calendar", path: "/calendar", aliases: List() },
+  { id: "clock", label: "Clock", path: "/clock", aliases: List("alarms", "timers", "stopwatch", "world clock") },
+  { id: "reminders", label: "Reminders", path: "/reminders", aliases: List("reminder", "to-do", "todo", "tasks") },
+  { id: "browser", label: "Browser", path: "/browser", aliases: List() },
+  { id: "camera", label: "Camera", path: "/camera", aliases: List() },
+  { id: "photos", label: "Photos", path: "/photos", aliases: List() },
+  { id: "maps", label: "Maps", path: "/maps", aliases: List() },
+  { id: "contacts", label: "Contacts", path: "/contacts", aliases: List() },
+  { id: "files", label: "Files", path: "/files", aliases: List() },
+  { id: "workflows", label: "Workflows", path: "/workflows", aliases: List() },
+  { id: "wallet", label: "Wallet", path: "/wallet", aliases: List() },
+  { id: "settings", label: "Settings", path: "/settings", aliases: List() },
+)
+pure def viewsAdmitted(views: List[LaunchView]): bool = views == launchViews
 ```
 
 ### The page reaches exactly the routes its platform services call, and nothing else

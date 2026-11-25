@@ -3,6 +3,7 @@ import type { AndroidRoleStatus, DeviceSettingsStatus, FilesAccess, LibraryScope
 import type { Opened, Target } from "../../gen/app__settings__android.ts"
 import type { Access, AccessGrant, Alert, Holder, Reading } from "../../gen/app__settings__facts.ts"
 import type { Grant } from "../../gen/kit__permission.ts"
+import { appVersion } from "./build.ts"
 import { openCarrierSettings } from "./carrier.vibe"
 import { registered } from "./device.vibe"
 
@@ -185,6 +186,13 @@ function mirrorWord(mirror: MirrorStatus): string {
   return mirror.connected ? "on" : "waiting"
 }
 
+// spec/app/settings/facts.md, "Facts hold the newest asking, which facts and accesses its answer reported, the roles, and Set as Home in flight"
+/** Alpha's version: the one its package reports, or, where it reports none, the one this build was made as. */
+function bundled(packaged: string): ReadonlyArray<Reading> {
+  const version = packaged || appVersion()
+  return version === "" ? [] : [{ fact: "Versions", value: version }]
+}
+
 /** What the phone reports through its SDK plugins and Alpha's own build facts. */
 effect function phoneReport(include?: { readonly autofill: boolean }): PhoneReport!! {
   const [facts, status, build, located, stored, host, photo, delivery, deviceSettings, collection, passwords] = try.all [
@@ -212,7 +220,7 @@ effect function phoneReport(include?: { readonly autofill: boolean }): PhoneRepo
   const readings = [
     ...(Option.isSome(facts) ? switched(facts.value) : []),
     ...(Option.isSome(status) ? [{ fact: "Roles" as const, value: "" }] : []),
-    ...(Option.isSome(build) && build.value.version !== "" ? [{ fact: "Versions" as const, value: build.value.version }] : []),
+    ...bundled(Option.isSome(build) ? build.value.version : ""),
     ...(settings?.androidRelease === undefined ? [] : [{ fact: "AndroidVersion" as const, value: settings.androidRelease }]),
     ...(notices === undefined ? [] : [{ fact: "Alerts" as const, value: !allowedAlerts ? "off" : alerts.some(({ blocked }) => blocked) ? "some off" : "on" }]),
     ...(storage === undefined ? [] : [storage]),
@@ -268,14 +276,14 @@ effect function browserAccess(access: Access) {
   return name === undefined ? Option.none<{ readonly grant: Grant; readonly on: boolean }>() : permission(grantOf(try promise(() => asked(name))))
 }
 
-/** What a browser reports: no facts of a phone, and the browser's own answer for each access it knows. */
+/** What a browser reports: no facts of a phone, the version this build was made as, and the browser's own answer for each access it knows. */
 effect function browserReport(): PhoneReport!! {
   const grants: AccessGrant[] = []
   for (const access of ["CameraAccess", "MicrophoneAccess", "LocationAccess", "NotificationsAccess"] as const) {
     const seen = try browserAccess(access)
     if (Option.isSome(seen)) grants.push({ access, grant: seen.value.grant })
   }
-  return { ...empty, grants }
+  return { ...empty, readings: bundled(""), grants }
 }
 
 /** Android's pages for each target, as eliza's client opens them; a target eliza has no page for opens none. */

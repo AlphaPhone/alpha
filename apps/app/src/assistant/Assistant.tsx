@@ -123,6 +123,8 @@ function DeviceReview({ runtime, card }: { runtime: AssistantProps["runtime"]; c
         </div>
       ) : card.phone?.tag === "Unavailable" ? (
         <Alert role="status">{card.phone.reason}</Alert>
+      ) : card.notice !== undefined ? (
+        <Alert role="status">{`${card.title}: ${card.detail}. ${card.notice}`}</Alert>
       ) : (
         <AssistantCard card={{ kind: "decision", variant: "proposal", title: card.title, detail: card.detail, action: card.operation.type === "sms_compose" ? "Open draft" : "Approve" }}
           onHandOn={() => decide(true)} />
@@ -386,13 +388,14 @@ export function Assistant({ runtime, messageActions, speech, canReadAloud = fals
   const earlier = { type: "scroll", around: board.numbered(lines[0]?.id ?? "") } as const;
   const later = { type: "scroll", around: board.numbered(lines.at(-1)?.id ?? "") } as const;
   const replyWords = replyBlocks(seen.reply, true).words;
-  const writingReply = replyWords !== "" ? [{ id: "reply", author: "alpha", text: replyWords, streaming: true } as const] : [];
+  const onOpenLink = messageActions?.openLink;
+  const writingReply = replyWords !== "" ? [{ id: "reply", author: "alpha", text: replyWords, streaming: true, onOpenLink } as const] : [];
   // spec/app/assistant/reply.md, "A failed reply offers the fix the agent named, and a limit reached shows its live wait, never sending the message again"; spec/app/assistant/reply.md, "Out of funds is refused before any output, is never spoken, and offers only Manage plan"
   const mediaCards = seen.media.filter((card) => !talking.context.sensitive && card.conversation === shown.chosen && card.revision === talking.context.revision).map((card) => ({
     id: `media ${card.id}`, author: "alpha" as const, text: "", children: <DeviceReview runtime={runtime} card={card} />,
   }));
   const mediaNote = talking.context.sensitive || seen.mediaNote?.conversation !== shown.chosen
-    ? [] : [{ id: "media result", author: "alpha" as const, text: seen.mediaNote.text }];
+    ? [] : [{ id: "media result", author: "alpha" as const, text: seen.mediaNote.text, onOpenLink }];
   const failed = seen.failure === undefined ? [] : [{ id: "failure", author: "alpha", text: "", children: <ReplyFailure {...seen.failure} fix={seen.failure.kind === "OutOfFunds" ? "FundingFix" : seen.failure.fix} live onRetry={() => type(board.lastSent)} onSettings={settingsAction ? onSettings : undefined} /> } as const];
   const quotedLine = board.line(shown.chosen, writing.editor.quote);
   const quoted = quotedLine === undefined ? undefined : wordsOf(quotedLine);
@@ -443,7 +446,7 @@ export function Assistant({ runtime, messageActions, speech, canReadAloud = fals
         attachmentNotice={onComms ? undefined : seen.attachmentNotice}
         transcript={{
           messages,
-          liveMessages: [...(brief === "" ? [] : [{ id: `briefing:${subject}`, author: "alpha" as const, text: brief }]), ...writingReply, ...failed, ...mediaCards, ...mediaNote],
+          liveMessages: [...(brief === "" ? [] : [{ id: `briefing:${subject}`, author: "alpha" as const, text: brief, onOpenLink }]), ...writingReply, ...failed, ...mediaCards, ...mediaNote],
           position: { page: `${shown.chosen}/${shown.page.ticket}`, around: board.messageId(shown.around) },
           visible: open,
           status: shown.page.status === "Loading" ? "loading" : shown.page.status === "Failed" ? "failed" : "loaded",

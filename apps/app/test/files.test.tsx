@@ -721,7 +721,7 @@ describe("Files on a phone", () => {
   it('Opens or filters only what the owner asked for directly (spec/app/files/index.md, "An explicit request to open or filter Files may act directly on the same idle Files view")', async () => {
     const world = { ...scene(), phone: true, image: true };
     const filter = { type: "files_filter", kind: "pdf", folder: "Download" } as const;
-    const review = textReview(world.notes.owner, "reviewed-filter", filter);
+    const review = textReview(world.notes.owner, "asked-filter", filter);
     world.telephony.textReview = review;
     const { alpha, runtime } = await onFiles(world, "assistant");
     const chat = assistant.runtime(alpha);
@@ -738,7 +738,7 @@ describe("Files on a phone", () => {
       world.ask.nextReplyChunks = [proposed === "Nothing" ? "Your Downloads hold a lease and a photo." : "I found a Files action."];
       world.ask.nextActions = (metadata) => {
         expect(readTurnContext({ content: { metadata } }).voiceUi?.agentActionMode).toBe("direct-files-v1");
-        review.proposal.payload.requestMessageId = proposed === "Direct" ? `m${world.ask.said.length}u` : undefined;
+        review.proposal.payload.requestMessageId = proposed === "Nothing" ? undefined : `m${world.ask.said.length}u`;
         return proposed === "Nothing" ? [] : [{ action: "PROPOSE_DEVICE_ACTION", data: { proposalId: id, state: "pending", executed: false, approvalRequired: proposed === "Review",
           ...(proposed === "Direct" ? { awaitingDeviceExecution: true, directRequest: true } : { awaitingUserInput: true }) } }];
       };
@@ -753,14 +753,36 @@ describe("Files on a phone", () => {
     const after = runtime.runSync(Browser.use((m) => m.get()));
     expect([button("Approve"), review.decisions, review.claims, after.trail, after.search.filter]).toEqual([undefined, [], [], before.trail, before.search.filter]);
 
-    await send("reviewed-filter", "Could you tidy up my Downloads?", "Review");
-    await vi.waitFor(() => expect(button("Approve")).toBeDefined());
-    expect([review.decisions, review.claims]).toEqual([[], []]);
+    const changes = [
+      ["move-lease", "put the lease in my documents", { type: "files_move", paths: ["Download/lease.pdf"], dest: "Documents" }],
+      ["share-lease", "send the lease to someone", { type: "files_share", paths: ["Download/lease.pdf"] }],
+      ["trash-lease", "get rid of the lease", { type: "files_trash", paths: ["Download/lease.pdf"] }],
+      ["taxes-folder", "make a taxes folder in downloads", { type: "files_folder_create", parent: "Download", name: "Taxes" }],
+    ] as const;
+    for (const [id, text, change] of changes) {
+      review.proposal.payload.operation = change;
+      await send(id, text, "Review");
+      await vi.waitFor(() => expect(button("Approve")).toBeDefined());
+      expect([review.decisions, review.claims, world.files.shared, world.files.trash]).toEqual([[], [], [], []]);
+    }
 
+    review.proposal.payload.operation = filter;
     await send("asked-filter", "only the pdfs from my downloads please", "Direct");
     await vi.waitFor(() => expect(review.receipts).toEqual([expect.objectContaining({ outcome: "applied", operationId: "asked-filter" })]));
     expect(document.body.textContent).toContain("Showing 1 item in Files.");
     expect(button("Approve")).toBeUndefined();
+
+    // spec/app/assistant/context.md, "A turn an agent refuses whole for a direct-request mode it does not know is sent once more without it"
+    world.ask.knowsNoActionMode = true;
+    world.ask.metadata = [];
+    world.ask.nextReplyChunks = ["Your Downloads hold a lease and a photo."];
+    await fill("Message Alpha", "what is in my downloads?");
+    await vi.waitFor(() => expect(button("Send")?.disabled).toBe(false));
+    await press("Send");
+    await until(alpha, chat, Conversation, (s) => s.turn.reply === "Complete");
+    expect(world.ask.metadata.map((one) => readTurnContext({ content: { metadata: one } }).voiceUi?.agentActionMode)).toEqual(["direct-files-v1", undefined]);
+    expect(document.body.textContent).toContain("Your Downloads hold a lease and a photo.");
+    world.ask.knowsNoActionMode = false;
 
     review.proposal.payload.operation = { type: "files_open", path: "Documents/notes.txt" };
     world.files.refusing.push("readSelected");
@@ -865,6 +887,65 @@ describe("Files on a phone", () => {
     await vi.waitFor(() => expect(review.receipts.at(-1)).toMatchObject({ outcome: "applied", operationId: "home-open" }));
     expect(world.files.calls.filter((call) => call === "storageSelect")).toHaveLength(1);
     await until(alpha, alpha.runtime, Shell, (s) => s.trail.join("/") === "Files");
+  });
+
+  it('Shows a change asked away from Files as a notice, and its card once Files is open (spec/app/files/index.md, "A change the agent proposes while Files is not on screen shows a notice to open Files, and its card is built in Files, for Files as it then shows")', async () => {
+    const world = { ...scene(), phone: true, image: true };
+    const move = { type: "files_move", paths: ["Download/lease.pdf"], dest: "Documents" } as const;
+    const review = textReview(world.notes.owner, "move-lease", move);
+    world.telephony.textReview = review;
+    const { alpha } = await open(world, only("home", "view:Files", "assistant", "notice"));
+    const chat = assistant.runtime(alpha);
+    const storage = files.runtime(alpha);
+    await until(alpha, alpha.runtime, Preferences, (s) => s.document.read.status === "Loaded" && !s.askFirst);
+    await until(alpha, chat, Conversation, (s) => s.ready);
+    const askFromHome = async (id: string, text: string) => {
+      await until(alpha, alpha.runtime, Shell, (s) => s.trail.length === 0);
+      if (alpha.runtime.runSync(Shell.use((m) => m.get())).assistant !== "Sheet") await press("Open conversation");
+      await until(alpha, alpha.runtime, Shell, (s) => s.assistant === "Sheet");
+      review.proposal.id = id;
+      review.proposal.state = "pending";
+      const reads = review.pendingReads;
+      world.ask.nextReplyChunks = ["Review this request on your phone before it can run."];
+      world.ask.nextActions = (metadata) => {
+        expect(readTurnContext({ content: { metadata } }).voiceUi?.agentActionMode).toBe("direct-files-v1");
+        review.proposal.payload.requestMessageId = `m${world.ask.said.length}u`;
+        return [{ action: "PROPOSE_DEVICE_ACTION", data: { proposalId: id, state: "pending", executed: false, approvalRequired: true, awaitingUserInput: true } }];
+      };
+      await fill("Message Alpha", text);
+      await vi.waitFor(() => expect(button("Send")?.disabled).toBe(false));
+      await press("Send");
+      await until(alpha, chat, Conversation, (s) => review.pendingReads > reads && s.turn.reply === "Complete");
+    };
+    const openFiles = async () => {
+      await press("Minimize chat");
+      await until(alpha, alpha.runtime, Shell, (s) => s.assistant === "Bar");
+      await openFromHome("Files");
+      await until(alpha, storage, Browser, (s) => s.open && s.storage.status === "Loaded");
+      await press("Open conversation");
+      await until(alpha, alpha.runtime, Shell, (s) => s.trail.join("/") === "Files" && s.assistant === "Sheet");
+    };
+
+    await askFromHome("move-lease", "put the lease in my documents");
+    await vi.waitFor(() => expect(document.body.textContent).toContain("Open Files to review this action."));
+    expect([button("Approve"), review.decisions, review.claims, paths(world).includes("primary:Download/lease.pdf")]).toEqual([undefined, [], [], true]);
+
+    await openFiles();
+    await vi.waitFor(() => expect(button("Approve")).toBeDefined());
+    expect(document.body.textContent).not.toContain("Open Files to review this action.");
+    expect([review.decisions, review.claims, paths(world).includes("primary:Download/lease.pdf")]).toEqual([[], [], true]);
+    await press("Approve");
+    await vi.waitFor(() => expect(review.receipts).toEqual([expect.objectContaining({ outcome: "applied" })]));
+    expect([review.decisions, paths(world).includes("primary:Documents/lease.pdf")]).toEqual([["move-lease"], true]);
+
+    await hardware("home");
+    review.proposal.payload.operation = { type: "files_trash", paths: ["Documents/lease.pdf"] };
+    await askFromHome("trash-lease", "get rid of the lease");
+    await vi.waitFor(() => expect(document.body.textContent).toContain("Open Files to review this action."));
+    review.proposal.state = "expired";
+    await openFiles();
+    await later(alpha, 300);
+    expect([button("Approve"), document.body.textContent?.includes("Open Files to review this action."), review.decisions]).toEqual([undefined, false, ["move-lease"]]);
   });
 
   it("Come back after a restart (spec/app/files/index.md, \"Story: Come back after a restart\"; spec/app/files/change.md, \"Story: Come back to my changes after a restart\"; spec/app/files/trash.md, \"Story: Come back to the Trash after a restart\"; spec/app/files/preview.md, \"Story: Come back to a preview after a restart\")", async () => {
