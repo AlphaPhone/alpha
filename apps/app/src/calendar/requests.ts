@@ -1,5 +1,5 @@
 // spec/app/calendar/agent.md, "The agent proposes one change at a time, for the revision of the event it selected, and the card shows it"; spec/app/calendar/agent.md, "A card is complete only with known fields, a valid time and, for a change, a verified target"
-import type { Change, Reply } from "../../gen/app__calendar__agent.ts";
+import type { Change, Reply, RequestState } from "../../gen/app__calendar__agent.ts";
 import { cardComplete, targetVerified } from "../../gen/app__calendar__agent.ts";
 import type { Row } from "./shown.ts";
 import { externalStore } from "../runtime/store.ts";
@@ -40,7 +40,14 @@ export interface Request {
   /** Whether every key of the request is one Alpha knows how to show. */
   readonly known: boolean;
   readonly expiresAt: string;
+  /** Where the request stands in the agent's approvals list, an expired one included, as the card's status reads it. */
+  readonly state: RequestState;
 }
+
+const states: Readonly<Record<string, RequestState>> = {
+  pending: "RequestPending", expired: "RequestExpired", retryable: "RequestRetryable", rejected: "RequestRejected",
+  approved: "RequestDone", done: "RequestDone", executed: "RequestDone", failed: "RequestFailed",
+};
 
 const kinds: Readonly<Record<string, Change>> = { schedule_event: "Create", modify_event: "Update", cancel_event: "Delete", respond_invitation: "Respond" };
 const answers: Readonly<Record<string, Reply>> = { accepted: "Going", tentative: "Maybe", declined: "NotGoing" };
@@ -72,8 +79,8 @@ function fieldsOf(value: unknown): { fields: RequestFields | undefined; known: b
 const numbers = new Map<string, { filing: number; revision: string; changes: number }>();
 let next = 0;
 
-/** A Calendar request of the agent's approvals list, read from its untrusted wire row; none for a request of another kind. @throws {never} */
-export function requestOf(row: unknown, floor: number): Request | undefined {
+/** A Calendar request of the agent's approvals list at `now`, read from its untrusted wire row; none for a request of another kind. @throws {never} */
+export function requestOf(row: unknown, floor: number, now: number): Request | undefined {
   const wire = record(row);
   const payload = record(wire?.payload);
   const change = record(payload?.change);
@@ -97,6 +104,7 @@ export function requestOf(row: unknown, floor: number): Request | undefined {
     eventId: text(target?.eventId), calendarId: text(source?.calendarId), expectedVersion: text(target?.expectedVersion),
     notify: change.notifyAttendees === true, known: known && Object.keys(change).every((key) => changeKeys.has(key)),
     expiresAt: text(wire.expiresAt),
+    state: Date.parse(text(wire.expiresAt)) <= now ? "RequestExpired" : (states[text(wire.state)] ?? "RequestFailed"),
   };
 }
 
@@ -108,13 +116,17 @@ export function timeValid(request: Request): boolean {
   return Number.isFinite(start) && Number.isFinite(end) && end > start;
 }
 
-/** Whether the card may be approved: known fields, a valid time and, for a change, exactly one event of one calendar at the version asked. @throws {never} */
+/** Whether exactly one event of one calendar, the one the request names, holds the version it was made against. @throws {never} */
+export function verified(request: Request, rows: ReadonlyArray<Row>): boolean {
+  const matches = rows.filter((row) => row.key === request.eventId && (request.calendarId === "" || row.calendarId === request.calendarId));
+  const calendars = new Set(rows.filter((row) => row.key === request.eventId).map((row) => row.calendarId));
+  const only = matches.length === 1 ? matches[0] : undefined;
+  return targetVerified(calendars.size, matches.length, only !== undefined, only?.version === request.expectedVersion);
+}
+
+/** Whether the card may be approved: known fields, a valid time and, for a change, a verified target. @throws {never} */
 export function complete(request: Request, rows: ReadonlyArray<Row>): boolean {
-  const matches = rows.filter((row) => row.key === request.eventId);
-  const calendars = new Set(matches.map((row) => row.calendarId));
-  const same = matches.length === 1 && matches[0] !== undefined && (request.calendarId === "" || matches[0].calendarId === request.calendarId);
-  const verified = targetVerified(calendars.size, matches.length, same, same && matches[0]?.version === request.expectedVersion);
-  return cardComplete(request.change, request.known, verified, timeValid(request));
+  return request.state === "RequestPending" && cardComplete(request.change, request.known, verified(request, rows), timeValid(request));
 }
 
 const held = new Map<number, Request>();

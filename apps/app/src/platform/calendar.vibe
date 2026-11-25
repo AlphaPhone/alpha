@@ -1,11 +1,11 @@
 // spec/app/calendar/index.md, "Story: Let Calendar read my phone's calendar"; spec/app/calendar/editor.md, "Story: Write an event"; spec/app/calendar/editor.md, "Story: Never create an event twice"; spec/kit/permission.md, "Story: Ask for access"
-import type { AndroidCalendarDeletionScope, AndroidCalendarEditorFields, AndroidCalendarHandoffEvent, AndroidCalendarList, CalendarClient, CalendarPick, CalendarRange } from "@elizaos/os-bridges"
+import type { AndroidCalendarDeletionScope, AndroidCalendarEditorFields, AndroidCalendarHandoffEvent, AndroidCalendarList, AndroidCalendarSelection, CalendarClient, CalendarPick, CalendarRange } from "@elizaos/os-bridges"
 import type { WorkflowCalendarReadOperation } from "@elizaos/plugin-workflow-client"
 import { registered } from "./device.vibe"
 
 module held {
   import { calendarClient, calendarPlugin } from "@elizaos/os-bridges"
-  import type { AndroidCalendarEditorFields, AndroidCalendarHandoffEvent, CalendarClient } from "@elizaos/os-bridges"
+  import type { AndroidCalendarEditorFields, AndroidCalendarHandoffEvent, AndroidCalendarInspection, AndroidCalendarSelection, CalendarClient } from "@elizaos/os-bridges"
   import type { WorkflowCalendarReadOperation } from "@elizaos/plugin-workflow-client"
   import { rendererDeletionClock } from "@elizaos/os-bridges"
 
@@ -16,20 +16,39 @@ module held {
 
   /**
    * The calls of eliza's `ElizaCalendar` plugin that its typed client does not name yet: a create under a creation
-   * identity, which the plugin journals so that a lost answer is reconciled and never replayed, its receipts, opening
-   * an event in Android Calendar, and Android's own answer on access.
+   * identity, which the plugin journals so that a lost answer is reconciled and never replayed, the same for an event
+   * with an all-day span, a time zone or a repeat, its receipts, opening an event in Android Calendar, Android's own
+   * answer on access, the revisions of an event as the phone inspects it, and reviewed agent actions.
    */
   export interface Creations {
     checkPermissions(): Promise<{ calendar: string }>
-    requestWorkflowReadAccess(): Promise<unknown>
+    inspect(input: AndroidCalendarSelection): Promise<AndroidCalendarInspection>
+    prepareAgentSource(): Promise<{ status: string; sourceId?: string; sourceRevision?: string }>
+    requestWorkflowReadAccess(): Promise<{ status: string }>
     workflowCalendars(): Promise<unknown>
-    readWorkflowRange(input: Omit<WorkflowCalendarReadOperation, "type">): Promise<unknown>
+    readWorkflowRange(input: Omit<WorkflowCalendarReadOperation, "type">): Promise<{ status: string; events?: unknown }>
     open(input: { id: string; begin?: number; end?: number }): Promise<{ status: string }>
     save(input: AndroidCalendarEditorFields & { calendarId: string; creationId: string; separateCreation: boolean }): Promise<{ status: string; id?: string }>
     saveOptions(input: { event: OptionEvent; calendarId: string; creationId: string; separateCreation: boolean }): Promise<{ status: string; id?: string }>
     pendingCreations(): Promise<{ status: string; creations?: ReadonlyArray<{ creationId: string; status: string }> }>
+    executeAgent(input: AgentRun): Promise<{ status: string; result?: unknown; feedComplete?: boolean }>
+    cancelAgent(input: { operationId: string }): Promise<{ status: string }>
   }
   export type OptionEvent = Omit<AndroidCalendarHandoffEvent, "attendees" | "alerts"> & { timeZone: string }
+  /** One agent action as the phone's own review takes it, under the proposal's journal identity. */
+  export interface AgentRun {
+    readonly operation: unknown
+    readonly operationId: string
+    readonly journalIdentity?: { readonly scope: string; readonly proposalId: string }
+  }
+  /** The calendars, dates and limit of a reviewed range read, as the plugin's `readWorkflowRange` takes them. */
+  export interface RangeAsked {
+    readonly calendarIds: readonly string[]
+    readonly start: string
+    readonly end: string
+    readonly timeZone: string
+    readonly maximumEvents: number
+  }
 
   let made: CalendarClient | undefined
   /** eliza's client of the calendar plugin, made once: Capacitor registers a plugin a single time for the life of the page. @throws {never} */
@@ -42,7 +61,8 @@ module held {
     return (plugin ??= calendarPlugin() as unknown as Creations)
   }
 }
-import { type Creations, type OptionEvent, client, creations, untilElapsed } from held
+import { type AgentRun, type Creations, type OptionEvent, type RangeAsked, client, creations, untilElapsed } from held
+export type { AgentRun, RangeAsked }
 
 /** Android's calendar permission state before or after its one owner-triggered request. */
 export effect function calendarAccess(request: boolean): (string | undefined)!! {
@@ -64,6 +84,28 @@ export interface Written {
   readonly confirmed: boolean
   readonly known: boolean
 }
+
+/** An event of the phone's calendars as the phone inspected it: its own revision and its calendar's, which the agent's reads of it name. */
+export interface Inspected {
+  readonly revision: string
+  readonly sourceRevision: string
+}
+
+/** The phone's own calendar as the phone names it for a new event's form: its id and its revision now. */
+export interface Prepared {
+  readonly sourceId: string
+  readonly sourceRevision: string
+}
+
+/** What the phone's own review of an agent action answered: its status (applied, held, cancelled, conflict, unknown, and the refusals), the record it returned, and whether a read covered the whole feed. */
+export interface Reviewed {
+  readonly status: string
+  readonly result?: unknown
+  readonly feedComplete?: boolean
+}
+
+/** What the phone's calendars gave a reviewed range read: the events, or why none. */
+export type Ranged = { readonly status: "ready"; readonly events: unknown } | { readonly status: "permission-required" | "unavailable" }
 
 /** A timed occurrence uses the basic native save; all-day and repeating events use Android's option fields. */
 export type CalendarCreation = { kind: "Timed"; event: AndroidCalendarEditorFields } | { kind: "Options"; event: OptionEvent }
@@ -90,6 +132,10 @@ export service PhoneCalendar {
   workflowRange(range: Omit<WorkflowCalendarReadOperation, "type">): unknown!CalendarUnread
   requestAccess(): boolean!CalendarUnread
   open(id: string, begin: number, end: number): void!CalendarUnread
+  /** The revisions of the event `selection` names, while it is still as the phone last read it; none when it changed or is gone. */
+  inspect(selection: AndroidCalendarSelection): (Inspected | undefined)!CalendarUnread
+  /** Name the phone's own calendar, which a new event's form saves to; none where Android refuses or Alpha is not in front. */
+  prepareSource(): (Prepared | undefined)!CalendarUnread
   handOff(event: AndroidCalendarHandoffEvent): boolean!CalendarUnread
   create(creation: CalendarCreation, creationId: string, separate: boolean): Written!!
   created(creationId: string): boolean!CalendarUnread
@@ -98,6 +144,14 @@ export service PhoneCalendar {
   stage(pick: CalendarPick, scope: AndroidCalendarDeletionScope): Staged!!
   /** Send a staged deletion once its window is over; one the review still holds is refused, and nothing is sent. */
   dispatch(id: string): Written!!
+  /** An agent action the owner's card approved, handed to the phone's own review in Android, which reads its target again. */
+  review(run: AgentRun): Reviewed!CalendarUnread
+  /** Close the phone's review of the agent action `operationId`, if it still shows. */
+  cancelReview(operationId: string): void!!
+  /** Android's answer on reading every calendar of the phone, asked once. */
+  readAccess(): boolean!CalendarUnread
+  /** The events of the calendars and dates a reviewed step names, no more than its limit, read while the phone is in front. */
+  readRange(asked: RangeAsked): Ranged!CalendarUnread
 }
 
 const plugin = "ElizaCalendar"
@@ -128,6 +182,21 @@ export const phoneCalendar = Layer.sync(PhoneCalendar, () => {
     workflowRange: (range: Omit<WorkflowCalendarReadOperation, "type">) => tryPromise({ try: () => native().readWorkflowRange(range), catch: (cause) => new CalendarUnread({ cause }) }),
     requestAccess: () => tryPromise({ try: async () => (await client().requestAccess()).status === "granted", catch: (cause) => new CalendarUnread({ cause }) }),
     open: (id: string, begin: number, end: number) => tryPromise({ try: async () => { await native().open({ id, begin, end }) }, catch: (cause) => new CalendarUnread({ cause }) }),
+    inspect: (selection: AndroidCalendarSelection) => tryPromise({
+      try: async (): Promise<Inspected | undefined> => {
+        const reply = await native().inspect(selection)
+        return reply.status === "ready" ? { revision: reply.revision, sourceRevision: reply.sourceRevision } : undefined
+      },
+      catch: (cause) => new CalendarUnread({ cause }),
+    }),
+    prepareSource: () => tryPromise({
+      try: async (): Promise<Prepared | undefined> => {
+        const reply = await native().prepareAgentSource()
+        return reply.status === "ready" && typeof reply.sourceId === "string" && typeof reply.sourceRevision === "string"
+          ? { sourceId: reply.sourceId, sourceRevision: reply.sourceRevision } : undefined
+      },
+      catch: (cause) => new CalendarUnread({ cause }),
+    }),
     handOff: (event: AndroidCalendarHandoffEvent) => tryPromise({ try: async () => (await client().insertHandoff(event)).outcome === "Opened", catch: (cause) => new CalendarUnread({ cause }) }),
     create: (creation: CalendarCreation, creationId: string, separate: boolean) => Effect.orElseSucceed(tryPromise(async (): Promise<Written> => {
       const destination = { calendarId: "local", creationId, separateCreation: separate }
@@ -158,6 +227,16 @@ export const phoneCalendar = Layer.sync(PhoneCalendar, () => {
       const dispatched = await review.dispatchDeletion().then(writtenOf, (cause: unknown) => (typeof cause === "object" && cause !== null && "_tag" in cause && cause._tag === "CalendarNotAllowed" ? refused : lost))
       return dispatched
     }), () => lost),
+    review: (run: AgentRun) => tryPromise({ try: (): Promise<Reviewed> => native().executeAgent({ ...run }), catch: (cause) => new CalendarUnread({ cause }) }),
+    cancelReview: (operationId: string) => Effect.ignore(tryPromise(() => native().cancelAgent({ operationId }))),
+    readAccess: () => tryPromise({ try: async () => (await native().requestWorkflowReadAccess()).status === "granted", catch: (cause) => new CalendarUnread({ cause }) }),
+    readRange: (asked: RangeAsked) => tryPromise({
+      try: async (): Promise<Ranged> => {
+        const reply = await native().readWorkflowRange({ ...asked })
+        return reply.status === "ready" ? { status: "ready", events: reply.events } : { status: reply.status === "permission-required" ? "permission-required" : "unavailable" }
+      },
+      catch: (cause) => new CalendarUnread({ cause }),
+    }),
   }
 })
 
@@ -173,10 +252,16 @@ export const browserCalendar = Layer.succeed(PhoneCalendar, {
   workflowRange: () => fail(absent()),
   requestAccess: () => fail(absent()),
   open: () => fail(absent()),
+  inspect: () => fail(absent()),
+  prepareSource: () => fail(absent()),
   handOff: () => fail(absent()),
   create: () => succeed(refused),
   created: () => fail(absent()),
   update: () => succeed(refused),
   stage: () => succeed<Staged>({ kind: "refused" }),
   dispatch: () => succeed(refused),
+  review: () => fail(absent()),
+  cancelReview: () => Effect.void,
+  readAccess: () => fail(absent()),
+  readRange: () => fail(absent()),
 })

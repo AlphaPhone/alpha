@@ -196,6 +196,25 @@ pure def approve(s: AgentCalendar, by: Actor): Acted =
     out: List(Send({ attempt: w.id, filing: s.filing, change: s.change, reply: s.reply, id: s.id, series: s.series, revision: s.bound })) }
 ```
 
+### The request is read again at the tap; a newer revision is shown as updated, and nothing is sent
+
+Approving reads the agent's request again before the agent is asked to
+make it. Where the request or its event moved on since the card showed it,
+the approval is spent unsent and the card shows the change again at its
+new revision, marked updated, for the owner to approve or decline once
+more. A decision whose answer was lost is never sent again.
+
+```quint
+pure def canStaleAtTap(s: AgentCalendar, attempt: int, revision: int, complete: bool, by: Actor): bool =
+  by == World and s.stage == Sending and A::canConclude(s.write, attempt) and revision > s.revision
+
+pure def staleAtTap(s: AgentCalendar, attempt: int, revision: int, complete: bool, by: Actor): AgentCalendar =
+  { ...s, write: A::conclude(s.write, false, true), stage: Awaiting, revision: revision, bound: revision, complete: complete,
+    updated: true, card: V::present(V::revise(s.card)) }
+
+pure def sometimesStaleAtTap(s: AgentCalendar): bool = s.stage == Awaiting and s.updated and s.write.outcome == A::Refused
+```
+
 ### The owner declines, or the agent withdraws, and nothing is sent
 
 A decline tells the agent to drop its request; nothing reaches the
@@ -211,6 +230,20 @@ pure def canWithdraw(s: AgentCalendar, by: Actor): bool = by == Agent and s.stag
 
 pure def withdraw(s: AgentCalendar, by: Actor): Acted =
   { state: { ...s, stage: Idle, card: V::dismiss(s.card), result: Withdrawn }, out: List(Report({ result: Withdrawn })) }
+```
+
+### Back, a hidden page or leaving Calendar retires a card still waiting; the request stays the agent's
+
+Nothing is sent and the agent is told nothing: its request is still
+pending in its list, and the next read of the day proposes it again. A
+decision already sent stays until the agent answers.
+
+```quint
+pure def canRetire(s: AgentCalendar, by: Actor): bool = by == Owner and s.stage == Awaiting
+
+pure def retire(s: AgentCalendar, by: Actor): AgentCalendar = { ...s, stage: Idle, card: V::dismiss(s.card) }
+
+pure def sometimesACardRetired(s: AgentCalendar): bool = s.stage == Idle and s.result == NoResult and s.card.revision > 0 and not(s.card.showing)
 ```
 
 ### What is sent is exactly the change approved, for the revision the agent selected
@@ -273,18 +306,24 @@ pure def sent(s: AgentCalendar, attempt: int, confirmed: bool, known: bool, by: 
   else { state: { ...s, write: w, stage: Idle, result: result }, out: List(Report({ result: result })) }
 ```
 
-### The read back says whether the change is there, and the agent is told
+### The read back says whether the change is there as approved, and the agent is told
 
-The read back finds the event or not. A deletion is there when the event is
-gone; any other change when the event is found as changed.
+The read back reads the calendar the receipt names, over the window around
+the event's own day. A new event is there when an event of that calendar
+has every field the card showed: its title, start, end, all day and place.
+A change is there when the event it named has every field the change set;
+an answer when the owner's own reply is the one given. A deletion is there
+unless the event is still found at the version the owner reviewed: gone,
+or at its receipt's `deleted:` version, it is deleted. `asAsked` is that
+comparison: for a deletion, that the reviewed version is still there.
 
 ```quint
-pure def seen(change: Change, present: bool): bool = if (change == Delete) not(present) else present
+pure def seen(change: Change, asAsked: bool): bool = if (change == Delete) not(asAsked) else asAsked
 
 pure def canReadBack(s: AgentCalendar, ticket: int, by: Actor): bool = by == World and s.stage == ReadingBack and R::canAnswer(s.check, ticket)
 
-pure def readBack(s: AgentCalendar, ticket: int, present: bool, by: Actor): Acted =
-  val found = seen(s.change, present)
+pure def readBack(s: AgentCalendar, ticket: int, asAsked: bool, by: Actor): Acted =
+  val found = seen(s.change, asAsked)
   val result = if (found) Done else NotFound
   { state: { ...s, check: R::answer(s.check, found), stage: Idle, result: result }, out: List(Report({ result: result })) }
 ```
@@ -344,14 +383,14 @@ pure def stepToldWhenAChangeEnds(before: AgentCalendar, after: AgentCalendar, ou
   })
 ```
 
-### An approved change is reported in the end
+### An approved change is reported in the end, or shown again updated if it moved on
 
 Google's answers to the write and to the read back are not put off for
 ever; a restart may come between them.
 
 ```quint
 pure def leadsToAnApprovedChangeIsReported(s: AgentCalendar, later: AgentCalendar): bool =
-  (s.stage == Sending or s.stage == ReadingBack) implies later.stage == Idle
+  (s.stage == Sending or s.stage == ReadingBack) implies (later.stage == Idle or (later.stage == Awaiting and later.updated))
 
 pure val fair_sent = "weak"
 pure val fair_readBack = "weak"

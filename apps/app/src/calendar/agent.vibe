@@ -2,10 +2,12 @@
 import * as KeyValueStore from "effect/persistence/KeyValueStore"
 import * as Changes from "../../gen/app__calendar__agent.effect.vibe"
 import type { Actor, Effect as Out, Event } from "../../gen/app__calendar__agent.effect.vibe"
+import { EventRecord } from "@elizaos/plugin-calendar-client"
 import { Agent } from "../platform/agent.vibe"
 import { ask, attemptedWith } from "../platform/remote.vibe"
 import { type Attempts } from "../runtime/attempts.vibe"
-import { type Job, answer, contained, following, reacting, run, started, together } from "../runtime/reactor.vibe"
+import { type Job, answer, contained, following, hearing, reacting, run, started, together } from "../runtime/reactor.vibe"
+import { calendarInFront } from "./calendar.vibe"
 import * as View from "../../gen/app__calendar.effect.vibe"
 import { refreshes } from "../../gen/app__calendar__agent.ts"
 import { Time } from "../runtime/time.vibe"
@@ -18,15 +20,9 @@ const base = "/api/lifeops/calendar"
 /** What a read of the agent's calendar says, as far as Calendar asks: whether Google answered. */
 schema Answered { readonly state: "complete" | "partial" | "unavailable" }
 
-/** What a read back finds of the events around a change: each one's id, title, start and the owner's own reply. */
-schema Listed {
-  readonly events: ReadonlyArray<{
-    readonly id: string
-    readonly title: string
-    readonly startAt: string
-    readonly attendees: ReadonlyArray<{ readonly self: boolean; readonly responseStatus: string | null }>
-  }>
-}
+/** What a read back finds of the events around a change, as eliza's `EventRecord` of `@elizaos/plugin-calendar-client` reads each. */
+const Listed = Schema.Struct({ events: Schema.Array(EventRecord) })
+type Listed = typeof Listed.Type
 
 /** The agent's approvals list, as far as Calendar reads it: its rows, untrusted, which `requestOf` reads. */
 const Approvals = Schema.Struct({ approvals: Schema.Array(Schema.Unknown) })
@@ -50,12 +46,24 @@ effect function read(ticket: number): Event!!(Agent | Time) {
 const resolveOf = (request: Request, decision: "approve" | "reject") =>
   HttpClientRequest.post(`/api/approvals/${encodeURIComponent(request.id)}/resolve`) |> HttpClientRequest.bodyJsonUnsafe(%, { decision, revision: request.revision })
 
-// spec/app/calendar/agent.md, "What is sent is exactly the change approved, for the revision the agent selected"; spec/app/calendar/agent.md, "A change Google confirms is read back; a refused or unknown one ends there and is reported"
-/** Approve the request the card showed, at the revision the owner reviewed: the agent then makes exactly that change, once. */
-effect function send(change: Out & { tag: "Send" }): Event!!(Agent | Attempts) {
-  const request = requests.find(change.filing)
-  if (request === undefined) return { type: "sent", attempt: change.attempt, confirmed: false, known: true }
-  const sent = try attemptedWith(Agent, () => resolveOf(request, "approve"), change.attempt)
+/** The agent's pending requests, read from its approvals list; none where the list could not be read. */
+effect function pendingRequests(floor: number): (ReadonlyArray<Request> | undefined)!!(Agent | Time) {
+  const now = try (try Time).now()
+  const listed = ask(Agent, HttpClientRequest.get("/api/approvals", { urlParams: { state: "pending", limit: "50" } }), Approvals) catch () => undefined
+  return listed?.approvals.map((row) => requestOf(row, floor, now)).filter((request): request is Request => request !== undefined)
+}
+
+// spec/app/calendar/agent.md, "What is sent is exactly the change approved, for the revision the agent selected"; spec/app/calendar/agent.md, "A change Google confirms is read back; a refused or unknown one ends there and is reported"; spec/app/calendar/agent.md, "The request is read again at the tap; a newer revision is shown as updated, and nothing is sent"
+/** Approve the request the card showed, at the revision the owner reviewed, once the agent's list still holds it so: the agent then makes exactly that change, once. */
+effect function send(change: Out & { tag: "Send" }): Event!!(Agent | Attempts | Changes.Machine | Time) {
+  const reviewed = requests.find(change.filing)
+  const now = (try pendingRequests(change.filing))?.find((one) => one.id === reviewed?.id)
+  if (now === undefined || reviewed === undefined) return { type: "sent", attempt: change.attempt, confirmed: false, known: true }
+  requests.keep(now)
+  const rows = shown.all("Google")
+  const revision = revisionOf(now, rows)
+  if (revision > (try (try Changes.Machine).get()).revision) return { type: "staleAtTap", attempt: change.attempt, revision, complete: complete(now, rows) }
+  const sent = try attemptedWith(Agent, () => resolveOf(now, "approve"), change.attempt)
   if (!sent.confirmed) return { type: "sent", attempt: change.attempt, confirmed: false, known: sent.known }
   const kind = (Schema.decodeUnknownOption(Resolved)(sent.body) |> Option.getOrUndefined(%))?.kind ?? ""
   return { type: "sent", attempt: change.attempt, confirmed: kind === "succeeded", known: kind !== "blocked" && kind !== "" }
@@ -67,26 +75,45 @@ effect function reject(filing: number): void!!Agent {
   if (request !== undefined) try ignore(ask(Agent, resolveOf(request, "reject"), Schema.Unknown))
 }
 
-// spec/app/calendar/agent.md, "The read back says whether the change is there, and the agent is told"; spec/app/calendar/agent.md, "A read back that fails leaves a confirmed deletion deleted by its receipt, and any other change sent but unverified"
-/** The read back's answer, over the window around the change's own day: whether the event is there as the change left it. */
+/** Whether `event` holds every field `fields` sets: its title, place, notes, start, end and all day. */
+function holds(event: Listed["events"][number], fields: NonNullable<Request["fields"]>): boolean {
+  return event.title === fields.title && event.location === fields.location && event.description === fields.description
+    && Date.parse(event.startAt) === Date.parse(fields.startAt) && Date.parse(event.endAt) === Date.parse(fields.endAt) && event.isAllDay === fields.isAllDay
+}
+
+/** The version a deletion's receipt compares, as eliza's `eventVersion` reads it: the provider's etag, or the change time. */
+function versionOf(event: Listed["events"][number]): string {
+  const etag = typeof event.metadata["etag"] === "string" ? event.metadata["etag"] : ""
+  return etag !== "" ? etag : event.updatedAt
+}
+
+/** Whether `listed` shows the change `request` asked for as asked; for a deletion, whether the reviewed version is still there. */
+export function asAsked(request: Request, listed: Listed): boolean {
+  const reply = { Going: "accepted", Maybe: "tentative", NotGoing: "declined", NoReply: "" }[request.reply]
+  const onCalendar = (event: Listed["events"][number]) => request.calendarId === "" || event.calendarId === request.calendarId
+  if (request.change === "Create") return request.fields !== undefined && listed.events.some((event) => onCalendar(event) && holds(event, request.fields!))
+  const event = listed.events.find((one) => one.id === request.eventId && onCalendar(one))
+  if (event === undefined) return false
+  if (request.change === "Delete") return versionOf(event) === request.expectedVersion
+  if (request.change === "Respond") return event.attendees.some((person) => person.self && person.responseStatus === reply)
+  return request.fields === undefined || holds(event, request.fields)
+}
+
+// spec/app/calendar/agent.md, "The read back says whether the change is there as approved, and the agent is told"; spec/app/calendar/agent.md, "A read back that fails leaves a confirmed deletion deleted by its receipt, and any other change sent but unverified"
+/** The read back's answer, from the calendar the request names over the window around the change's own day: whether the change is there as approved. */
 effect function readBack(ticket: number, filing: number): Event!!(Agent | Time) {
   const request = requests.find(filing)
   const at = request?.fields === undefined ? shown.find(shown.number("Google", request?.eventId ?? ""))?.begin : Date.parse(request.fields.startAt)
-  const urlParams = feedParams(civilDay(at === undefined || !Number.isFinite(at) ? try (try Time).now() : at))
+  const window = feedParams(civilDay(at === undefined || !Number.isFinite(at) ? try (try Time).now() : at))
+  const urlParams = request === undefined || request.calendarId === "" ? window : { ...window, calendarId: request.calendarId }
   const listed = ask(Agent, HttpClientRequest.get(`${base}/feed`, { urlParams }), Listed) catch () => undefined
   if (listed === undefined || request === undefined) return { type: "readBackFailed", ticket }
-  const reply = { Going: "accepted", Maybe: "tentative", NotGoing: "declined", NoReply: "" }[request.reply]
-  const present = request.change === "Create"
-    ? listed.events.some((event) => event.title === request.fields?.title && Date.parse(event.startAt) === Date.parse(request.fields.startAt))
-    : listed.events.some((event) => event.id === request.eventId
-        && (request.change !== "Update" || request.fields === undefined || event.title === request.fields.title)
-        && (request.change !== "Respond" || event.attendees.some((person) => person.self && person.responseStatus === reply)))
-  return { type: "readBack", ticket, present }
+  return { type: "readBack", ticket, asAsked: asAsked(request, listed) }
 }
 
 const world: Actor = "World"
 
-function carry(fx: Out): Job<Event, Agent | Time, [by: Actor]> {
+function carry(fx: Out): Job<Event, Agent | Time | Changes.Machine, [by: Actor]> {
   return match (fx) {
     when { tag: "Ask", let ticket }: answer("ask", read(ticket), { type: "feedAnswered", ticket, ok: false }, world);
     when { tag: "Send" }: answer(`send ${fx.attempt}`, send(fx), { type: "sent", attempt: fx.attempt, confirmed: false, known: false }, world);
@@ -107,12 +134,11 @@ const decodeKept = Schema.decodeUnknownEffect(Schema.fromJsonString(Schema.Unkno
 
 // spec/app/calendar/agent.md, "The agent proposes one change at a time, for the revision of the event it selected, and the card shows it"; spec/app/calendar/agent.md, "When the event changes in Google, the card waiting for the owner no longer counts"; spec/app/calendar/agent.md, "A card voided by a change in Google is shown again at the event's new revision, marked updated"
 /** Read the agent's approvals list and tell the card what it holds: the oldest pending Calendar request, a new revision of the one shown, or that it is gone. */
-effect function listRequests(): void!!(Agent | Changes.Machine | KeyValueStore.KeyValueStore) {
+effect function listRequests(): void!!(Agent | Changes.Machine | KeyValueStore.KeyValueStore | Time) {
   const machine = try Changes.Machine
-  const listed = ask(Agent, HttpClientRequest.get("/api/approvals", { urlParams: { state: "pending", limit: "50" } }), Approvals) catch () => undefined
-  if (listed === undefined) return
   const s = try machine.get()
-  const pending = listed.approvals.map((row) => requestOf(row, s.filing)).filter((request): request is Request => request !== undefined)
+  const pending = try pendingRequests(s.filing)
+  if (pending === undefined) return
   const rows = shown.all("Google")
   for (const request of pending) requests.keep(request)
   if (s.stage === "Awaiting") {
@@ -159,5 +185,8 @@ const listing = started(effect {
 const applied = following(Changes.Machine, (a) => (a.stage === "Idle" && refreshes(a.result) ? a.write.id : 0), View.Machine,
   (write): View.Event | undefined => (write === 0 ? undefined : { type: "changeCommitted" }))
 
+// spec/app/calendar/agent.md, "Back, a hidden page or leaving Calendar retires a card still waiting; the request stays the agent's"
+const retired = hearing(Stream.filter(calendarInFront, (front) => !front), Changes.Machine, (): Event => ({ type: "retire" }), "Owner")
+
 /** The agent's changes to the owner's Google Calendar: kept across restarts, which end what was in flight. */
-export const changes = together(reacting(Changes, { keep: 1, open: [{ type: "restart" }, world], carry }), applied, listing, restored)
+export const changes = together(reacting(Changes, { keep: 1, open: [{ type: "restart" }, world], carry }), applied, listing, restored, retired)

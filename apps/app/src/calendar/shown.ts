@@ -58,7 +58,6 @@ const calendars = new Map<string, number>();
 const seen = new Map<string, { readonly content: string; readonly revision: number }>();
 const windows = new Map<Source, ReadonlyArray<Row>>();
 const last = new Map<number, Row>();
-const cut = new Set<Source>();
 const version = externalStore(0);
 let present = false;
 
@@ -115,10 +114,23 @@ export function repeatText(recurrence: ReadonlyArray<string>, recurring: boolean
   return interval === 1 ? `Repeats ${unit[0]}` : `Repeats every ${interval} ${unit[1]}`;
 }
 
+/** Whether the event overlaps this civil day. @throws {never} */
 export function onDay(row: Pick<Row, "begin" | "end">, day: number): boolean {
   const first = civilDay(row.begin);
   const last = civilDay(Math.max(row.begin, row.end - 1));
   return first <= day && day <= last;
+}
+
+// spec/app/calendar/index.md, "Search and the Calendars sheet open over the days, never over an open event"
+/** The words of a search as Calendar matches them: case-folded, split at spaces. @throws {never} */
+export function searchWords(query: string): ReadonlyArray<string> {
+  return query.toLocaleLowerCase().split(/\s+/).filter((word) => word !== "");
+}
+
+/** Whether `row`'s title, place or notes hold every word of a search, case-folded. @throws {never} */
+export function matchesSearch(row: Pick<Row, "title" | "place" | "notes">, words: ReadonlyArray<string>): boolean {
+  const text = `${row.title} ${row.place} ${row.notes}`.toLocaleLowerCase();
+  return words.every((word) => text.includes(word));
 }
 
 /** Android stores an all-day event's civil dates at UTC midnight. @throws {never} */
@@ -135,9 +147,7 @@ export const shown = {
   snapshot: version.snapshot,
   subscribe: version.subscribe,
   /** Keep what `source` answered for the window around `day`, numbered; the rows that fall on `day`. @throws {never} */
-  keep(source: Source, day: number, read: ReadonlyArray<Read>, partial = false): ReadonlyArray<Row> {
-    if (partial) cut.add(source);
-    else cut.delete(source);
+  keep(source: Source, day: number, read: ReadonlyArray<Read>): ReadonlyArray<Row> {
     const rows = read.map(({ changedAt, ...row }) => ({
       ...row, source, id: numbered(source, row.key), calendar: calendarNumber(source, row.calendarId), revision: revised(source, { ...row, changedAt }),
     }));
@@ -159,12 +169,9 @@ export const shown = {
     const both = [...(phone ? shown.all("Phone") : []), ...(google ? shown.all("Google") : [])];
     return both.filter((row) => rowShown(row.calendar, [...hidden])).sort((a, b) => a.begin - b.begin);
   },
-  /** Whether the last read of `source` said it gave only part of its window. @throws {never} */
-  partial: (source: Source): boolean => cut.has(source),
   /** Forget what `source` read: an account changed or a permission went. @throws {never} */
   drop(source: Source): void {
     windows.delete(source);
-    cut.delete(source);
     told();
   },
   /** Whether this phone has calendars of its own: a browser has none, and is never asked for access. @throws {never} */

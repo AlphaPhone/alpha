@@ -54,16 +54,17 @@ pure def there(apps: Set[str], shell: S::Shell, tile: Tile): bool =
 
 ```quint
 pure val homeCatalog: List[S::View] = List(
-  S::Phone, S::Messages, S::Inbox, S::Telegram, S::Slack, S::Calendar, S::Browser, S::Camera, S::Photos,
-  S::Maps, S::Notes, S::Contacts, S::Files, S::Workflows, S::Settings, S::Wallet)
+  S::Phone, S::Messages, S::Inbox, S::Calendar, S::Browser, S::Camera, S::Photos,
+  S::Maps, S::Notes, S::Contacts, S::Files, S::Workflows, S::Settings,
+  S::Clock, S::Reminders, S::Wallet, S::Telegram, S::Slack)
 
 pure val homeOrder: List[S::View] = List(
-  S::Phone, S::Messages, S::Inbox, S::Telegram, S::Slack, S::Calendar, S::Browser, S::Camera, S::Photos,
+  S::Phone, S::Messages, S::Inbox, S::Calendar, S::Browser, S::Camera, S::Photos,
   S::Maps, S::Notes, S::Contacts, S::Files, S::Workflows, S::Settings)
 
 pure val defaults: List[Tile] = List(
-  Own({ view: S::Phone }), Own({ view: S::Messages }), Own({ view: S::Inbox }), Own({ view: S::Telegram }),
-  Own({ view: S::Slack }), Own({ view: S::Calendar }), Own({ view: S::Browser }), Own({ view: S::Camera }),
+  Own({ view: S::Phone }), Own({ view: S::Messages }), Own({ view: S::Inbox }),
+  Own({ view: S::Calendar }), Own({ view: S::Browser }), Own({ view: S::Camera }),
   Own({ view: S::Photos }), Own({ view: S::Maps }), Own({ view: S::Notes }), Own({ view: S::Contacts }),
   Own({ view: S::Files }), Own({ view: S::Workflows }), Own({ view: S::Settings }))
 
@@ -81,9 +82,13 @@ pure def lawTheDefaultsAreHomeOrder(i: int): bool =
   defaults.length() == homeOrder.length()
     and ((0 <= i and i < homeOrder.length()) implies shows(defaults.nthOr(i, noTile), homeOrder.nthOr(i, S::Phone)))
 
-pure def lawTheCatalogOffersEveryDefaultAndWallet(i: int): bool =
-  homeCatalog.length() == homeOrder.length() + 1
-    and homeCatalog.nthOr(homeOrder.length(), S::Phone) == S::Wallet
+pure def lawTheCatalogOffersEveryDefaultAndOptional(i: int): bool =
+  homeCatalog.length() == homeOrder.length() + 5
+    and homeCatalog.nthOr(homeOrder.length(), S::Phone) == S::Clock
+    and homeCatalog.nthOr(homeOrder.length() + 1, S::Phone) == S::Reminders
+    and homeCatalog.nthOr(homeOrder.length() + 2, S::Phone) == S::Wallet
+    and homeCatalog.nthOr(homeOrder.length() + 3, S::Phone) == S::Telegram
+    and homeCatalog.nthOr(homeOrder.length() + 4, S::Phone) == S::Slack
     and ((0 <= i and i < homeOrder.length()) implies homeCatalog.nthOr(i, S::Phone) == homeOrder.nthOr(i, S::Phone))
 ```
 

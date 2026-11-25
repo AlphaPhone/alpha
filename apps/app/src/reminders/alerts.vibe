@@ -115,11 +115,14 @@ effect function cancelNative(item: ReminderItemRecord): void!!PhoneReminders {
     return
   }
   const phone = try PhoneReminders
-  if (phone.present) {
-    const occurrenceId = `${item.id}:${item.updatedAtMs}`
-    const target = { sourceId: item.id, sourceRevision: String(item.revision), reminderId: item.id, occurrenceId, revision: String(item.revision) }
-    try ignore(phone.cancel({ id: item.id, target, operationId: `cancel-${item.id}-${item.revision}`, bindingHash: `${item.id}:${item.revision}` }))
-  }
+  if (!phone.present) return
+  const list = phone.list() catch () => undefined
+  const alarm = list?.reminders.find((row) => row.id === item.id && row.target.reminderId === item.id && row.target.occurrenceId === row.occurrenceId)
+  if (alarm === undefined) return
+  const operation: AndroidReminderOperation = { type: "reminder_cancel", target: alarm.target }
+  const bindingHash = tryPromise(() => hash(operation)) catch () => undefined
+  if (bindingHash === undefined) return
+  try ignore(phone.cancel({ id: item.id, target: alarm.target, operationId: `cancel-${item.id}-${item.revision}`, bindingHash }))
 }
 
 effect function syncBannerAction(

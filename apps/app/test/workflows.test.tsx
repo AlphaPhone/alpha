@@ -1,4 +1,6 @@
 // @vitest-environment happy-dom
+import { workflowSha } from "@elizaos/plugin-workflow-client";
+import { Effect } from "effect";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { Machine as Listing } from "../gen/app__workflows__list.effect.vibe";
 import { Machine as Definition } from "../gen/app__workflows.effect.vibe";
@@ -399,5 +401,45 @@ describe("Workflows", () => {
       { operation: "restore", version: "monthly-statement-v4" },
     ]);
     expect(world.workflows.statement).toMatchObject({ removed: false, active: false });
+  });
+
+  // spec/app/workflows/builder.md, "Story: Keep the workflow draft I was writing before this version"
+  it('Adopts an earlier Alpha workflow draft once, clears its slot after readback, and never overwrites a kept draft (spec/app/workflows/builder.md, "The previous version\'s draft comes in once, only while none is kept, and its slot clears only after the kept draft reads back")', async () => {
+    const world = scene();
+    world.phone = true;
+    const identity = await Effect.runPromise(workflowSha(["https://device.alpha.invalid", world.notes.ownerIdentity, world.notes.owner]));
+    const slot = `workflow-draft:v1:${identity}`;
+    const earlierSpec = {
+      version: 1,
+      name: "Morning note",
+      description: "",
+      trigger: { kind: "manual" },
+      steps: [{ id: "s1", kind: "Read", operation: "supplied_text", text: "Good morning" }],
+    };
+    world.platform.earlier.set(slot, JSON.stringify({ format: 1, identity, spec: earlierSpec }));
+
+    const first = await openWorkflows(world);
+    const area = workflows.runtime(first);
+    await until(first, area, Listing, (state) => state.list.status === "Loaded");
+    await press("Add to Workflows");
+    await until(first, area, Listing, (state) => state.place.tag === "ListingAdd");
+    await press("More options");
+    await press(/^Steps/);
+    await until(first, area, Builder, (state) => state.offer.status === "Loaded" && state.name === earlierSpec.name.length && state.steps.length === 1);
+    expect(world.platform.earlier.has(slot)).toBe(false);
+
+    // A later earlier-slot value never replaces the kept draft and stays waiting in its slot.
+    world.platform.earlier.set(slot, JSON.stringify({ format: 1, identity, spec: { ...earlierSpec, name: "Another draft" } }));
+    await closeAll();
+
+    const second = await openWorkflows(world);
+    const secondArea = workflows.runtime(second);
+    await until(second, secondArea, Listing, (state) => state.list.status === "Loaded");
+    await press("Add to Workflows");
+    await until(second, secondArea, Listing, (state) => state.place.tag === "ListingAdd");
+    await press("More options");
+    await press(/^Steps/);
+    await until(second, secondArea, Builder, (state) => state.offer.status === "Loaded" && state.name === earlierSpec.name.length && state.steps.length === 1);
+    expect(world.platform.earlier.has(slot)).toBe(true);
   });
 });
