@@ -18,7 +18,7 @@ const formatDate = new Intl.DateTimeFormat(undefined, { dateStyle: "medium" });
 const formatTime = new Intl.DateTimeFormat(undefined, { timeStyle: "short" });
 
 interface Props {
-  readonly runtime: ManagedRuntime<Machine | OpenedPhoto | Time, unknown>;
+  readonly runtime: ManagedRuntime.ManagedRuntime<Machine | OpenedPhoto | Time, unknown>;
   readonly before?: number;
   readonly after?: number;
   readonly row?: Row;

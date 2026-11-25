@@ -28,7 +28,7 @@ export function photosScene(): PhotosScene {
 
 /** The native Photos plugin fixture talks to the real Eliza media bridge. */
 export function alphaPhotos(scene: PhotosScene): Faked {
-  return plugin<Partial<PhotosPlugin>, { libraryChanged: undefined }>((emit) => {
+  return plugin<Pick<PhotosPlugin, "libraryAccess" | "requestLibraryAccess" | "watchLibrary" | "list" | "listPermitted" | "read" | "beginEdit" | "previewEdit" | "saveEdit" | "cancelEdit" | "albums" | "openLibrarySettings">, { libraryChanged: undefined }>((emit) => {
     scene.changed = () => { if (scene.watching) emit("libraryChanged", undefined); };
     const owned = () => scene.rows.filter((item) => item.owned);
     const session = "alpha-test-photo-edit";
@@ -45,7 +45,7 @@ export function alphaPhotos(scene: PhotosScene): Faked {
         return Promise.resolve({ active });
       },
       list: () => Promise.resolve({ items: owned(), next: "", access: scene.access }),
-      listPermitted({ before, query } = {}) {
+      listPermitted({ before, query }: Parameters<PhotosPlugin["listPermitted"]>[0] = {}) {
         const rows = scene.rows.filter((item) => query === undefined || item.name.toLowerCase().includes(query.toLowerCase()));
         return Promise.resolve({ items: before === undefined ? rows.slice(0, 2) : rows.slice(2), next: before === undefined && rows.length > 2 ? "next" : "", access: scene.access });
       },
