@@ -67,7 +67,7 @@ export function mapsScene(): MapsScene {
       },
     },
     places: [harbour, gallery],
-    routes: [],
+    routes: [cloudRoute("default", { latitude: 43.7300, longitude: 7.4200 }, harbour.coordinate, 1900, 4)],
     limited: undefined,
     asked: [],
     here: { latitude: 43.7300, longitude: 7.4200, accuracy: 8 },

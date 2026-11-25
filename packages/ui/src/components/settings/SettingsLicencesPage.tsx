@@ -34,7 +34,7 @@ export type SettingsLicencesPageProps = SettingsPlaceProps & {
  */
 export function SettingsLicencesPage({ load, found, query, licences, onQuery, onOpen, onBack, place, onPlace }: SettingsLicencesPageProps) {
   return (
-    <SettingsPage title="Licences" onBack={onBack}>
+    <SettingsPage title="Licenses" onBack={onBack}>
       <SearchField aria-label="Search licences" value={query} onValueChange={(next) => onQuery?.(next)} disabled={load !== "loaded" || !onQuery} />
       {load === "loading" ? <Skeleton className="h-40 rounded-lg" /> : null}
       {load === "failed" ? <EmptyState title="Licences are unavailable" /> : null}

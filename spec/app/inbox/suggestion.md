@@ -75,14 +75,17 @@ pure def canSuggest(s: Offer, text: int, draft: int, by: Actor): bool = by == Ag
 pure def suggest(s: Offer, text: int, draft: int, revision: int, by: Actor): Offer =
   offering(text, by, ToDraft, draft, 0, 0, revision, s.used)
 
-pure def canUseInEmail(s: Offer, text: int, target: Target, draft: int, account: int, message: int, by: Actor): bool =
+pure def canUseInEmail(s: Offer, text: int, target: Target, draft: int, account: int, message: int, showing: bool, by: Actor): bool =
   by == Owner and text != 0 and aimed(target, draft, account, message)
 
-pure def useInEmail(s: Offer, text: int, target: Target, draft: int, account: int, message: int, revision: int, by: Actor): Offer =
-  offering(text, by, target, draft, account, message, revision, s.used)
+pure def useInEmail(s: Offer, text: int, target: Target, draft: int, account: int, message: int, revision: int, showing: bool, by: Actor): Offer =
+  val offered = offering(text, by, target, draft, account, message, revision, s.used)
+  if (showing) { ...offered, review: V::present(offered.review) } else offered
 ```
 
 ### Only the owner is shown it, against the draft as it is now; showing it again after the draft changed shows it against the change
+
+A handoff can open its own review in the same owner action.
 
 ```quint
 pure def canReview(s: Offer, by: Actor): bool = by == Owner and s.text != 0
