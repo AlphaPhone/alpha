@@ -104,6 +104,7 @@ public final class AlphaLocalSpeechPlugin extends LocalSpeechBridgePlugin {
 
  void cancelBrowserSpeech(String requestId) {
   cancelSpeech(requestId);
+  notifyListeners("playbackStopped", new JSObject().put("requestId", requestId));
  }
 
  @Override @PluginMethod public void transcribeLocalRecording(PluginCall call) {

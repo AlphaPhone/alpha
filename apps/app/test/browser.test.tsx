@@ -15,6 +15,7 @@ import { Machine as Home } from "../gen/app__home.effect.vibe";
 import { Machine as Inbox } from "../gen/app__inbox.effect.vibe";
 import { Machine as Offering } from "../gen/app__inbox__suggestion.effect.vibe";
 import { Machine as Shell, showing } from "../gen/app__shell.effect.vibe";
+import { Machine as Speaker } from "../gen/app__voice__output.effect.vibe";
 import assistant from "../src/assistant/index.tsx";
 import { Pages } from "../src/browser/browser.vibe";
 import browser from "../src/browser/index.tsx";
@@ -277,17 +278,40 @@ describe("The Browser on a phone", () => {
     const page = runtime.runSync(Effect.flatMap(Pages, (pages) => pages.of(tab)));
     await until(alpha, page, Page, (state) => state.phase === "Shown" && state.secure);
     placeNative();
-    await press("Menu");
-    await pressOnTop("Read aloud");
+    const readPage = async () => {
+      await press("Menu");
+      await pressOnTop("Read aloud");
+    };
+    const speaking = assistant.runtime(alpha);
+    const cancellations = () => world.browser.calls.filter((call) => call === "cancelReading").length;
+    await readPage();
     await drawn(() => vi.waitFor(() => expect(world.voice.spokenPages).toHaveLength(1)));
     await until(alpha, runtime, Reader, (state) => state.phase === "Idle");
+    await until(alpha, speaking, Speaker, (state) => state.stage === "Silent" && !state.retiring);
     expect(world.voice.spoken).toEqual([]);
-    expect(world.voice.spokenPages).toEqual([{ readingToken: "on-device-review", ownerId: reviewOwner, sessionId: reviewSession }]);
-    expect(world.browser.calls.filter((call) => call === "cancelReading")).toHaveLength(1);
+    expect(world.voice.spokenPages).toEqual([{ readingToken: "on-device-review", ownerId: reviewOwner, sessionId: reviewSession, requestId: expect.any(String) }]);
+    expect(cancellations()).toBe(1);
+
+    world.voice.holdPagePlayback = true;
+    await readPage();
+    await until(alpha, speaking, Speaker, (state) => state.text === "Page" && state.stage === "Playing");
+    const [earlier, active] = world.voice.spokenPages;
+    const emit = world.voice.emitLocal;
+    if (!earlier || !active || !emit) throw new Error("Missing native Browser playback");
+    expect(active.requestId).not.toBe(earlier.requestId);
+    // spec/app/browser/reading.md, "Story: Hear the page read aloud": the native dialog stops its reading without navigation.
+    await drawn(() => emit("playbackStopped", { requestId: earlier.requestId }));
+    expect(speaking.runSync(Speaker.use((machine) => machine.get())).stage).toBe("Playing");
+    expect(cancellations()).toBe(1);
+    await drawn(() => emit("playbackStopped", { requestId: active.requestId }));
+    await until(alpha, speaking, Speaker, (state) => state.stage === "Silent" && !state.retiring);
+    await until(alpha, runtime, Reader, (state) => state.phase === "Idle");
+    expect(cancellations()).toBe(2);
   });
 
   it("Reviews and edits a Browser excerpt before putting it in the chat draft (spec/app/browser/reading.md, \"Story: Review an excerpt to ask about\")", async () => {
     const world = { ...scene(), phone: true, image: true };
+    world.browser.pageTitle = (url) => url === "https://example.test/article" ? "Article 123456" : undefined;
     let release: ((text: string) => void) | undefined;
     world.browser.reviewQuestion = () => new Promise((resolve) => { release = (text) => resolve({ text }); });
     const { alpha } = await open(world, only("home", "assistant", "view:Browser"));
@@ -320,13 +344,14 @@ describe("The Browser on a phone", () => {
     await openReview();
     await drawn(() => release?.("The original article excerpt."));
     await until(alpha, runtime, Reader, (s) => s.phase === "Reviewing");
-    expect(dialog()).not.toBeNull();
+    expect(dialog()?.querySelector("[aria-label='Selected source']")?.textContent).toBe("Current page");
+    expect(dialog()?.textContent).not.toContain("123456");
     await fill("Question about content", "What does it say?");
     await fill("Content excerpt", "The exact edited excerpt.");
     await press("Use in conversation");
     await until(alpha, runtime, Shell, (s) => s.assistant === "Sheet");
     expect(document.querySelector<HTMLTextAreaElement>("textarea[aria-label='Message Alpha']")?.value)
-      .toBe("What does it say?\n\nSource: example.test\n\nThe exact edited excerpt.");
+      .toBe("What does it say?\n\nSource: Current page\n\nThe exact edited excerpt.");
     expect(await ask.runPromise(Effect.map(Conversation.use((m) => m.get()), (s) => s.turn.send.id))).toBe(turn);
   });
 

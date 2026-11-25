@@ -750,9 +750,13 @@ export const phoneVoiceBridge = Layer.effect(VoiceBridge, effect {
       readings.set(ticket, { id, stopped })
       try addFinalizer(() => ignore(silenceReading(ticket)))
       let playbackId: string | undefined
+      let stoppedInBrowser = false
       for (const [event, ok] of [["playbackEnded", true], ["playbackFailed", false], ["playbackStopped", false]] as const) {
         const listener = tryPromise(() => plugin.addListener(event, (data) => {
-          if (playbackId === undefined || typeof data !== "object" || data === null || !("playbackId" in data) || data.playbackId !== playbackId) return
+          if (typeof data !== "object" || data === null) return
+          if (typeof text !== "string" && event === "playbackStopped" && "requestId" in data && data.requestId === id) {
+            stoppedInBrowser = true
+          } else if (playbackId === undefined || !("playbackId" in data) || data.playbackId !== playbackId) return
           runFork(Deferred.succeed(stopped, ok))
         })) catch () => undefined
         if (listener === undefined) {
@@ -767,7 +771,7 @@ export const phoneVoiceBridge = Layer.effect(VoiceBridge, effect {
           ? plugin.synthesizeLocal({ requestId: id, text, replace: false })
           : plugin.synthesizeLocalBrowserReading({ ...text, requestId: id, replace: false }).then((receipt) => receipt.execution === "device" ? receipt : {}))
         const playback = prepared.playbackId
-        if (!playback || readings.get(ticket)?.id !== id || (stillCurrent !== undefined && !(try stillCurrent()))) return false
+        if (!playback || stoppedInBrowser || readings.get(ticket)?.id !== id || (stillCurrent !== undefined && !(try stillCurrent()))) return false
         playbackId = playback
         try tryPromise(() => plugin.play({ playbackId: playback, replace: false }))
         return true

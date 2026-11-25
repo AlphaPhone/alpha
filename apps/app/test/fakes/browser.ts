@@ -35,6 +35,7 @@ export interface BrowserScene {
   beforeSave?: (saved: BrowserSavedState) => Promise<void>;
   reviewQuestion?: (page: BrowserPageGuard) => Promise<{ text: string }>;
   reviewReading?: BrowserTabHostPlugin["reviewReading"];
+  pageTitle?: (url: string) => string | undefined;
   bookmarks: { url: string; title?: string }[];
   readonly tabs: Map<string, Held>;
   /** The tab drawn and where, as `present` last placed it. */
@@ -185,7 +186,7 @@ export function alphaBrowser(world: BrowserScene): Faked {
       const url = tab.history[tab.at];
       return {
         session, id: tab.id, sequence: tab.sequence, navigation: String(tab.navigation),
-        ...(url === undefined ? {} : { url, title: titleOf(url) }),
+        ...(url === undefined ? {} : { url, title: world.pageTitle?.(url) ?? titleOf(url) }),
         loading: tab.loading, committed: tab.committed, progress: tab.loading ? 30 : 100,
         canBack: tab.at > 0, canForward: tab.at < tab.history.length - 1, private: tab.private, error: tab.error,
         ...(tab.elsewhere === "" ? {} : { elsewhereUrl: tab.elsewhere }),

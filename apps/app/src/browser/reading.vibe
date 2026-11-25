@@ -88,7 +88,8 @@ export effect function reviewPage(tab: number, purpose: Reader.Purpose): void!!I
   const host = try TabHost
   const info = try sync(() => "load" in page ? host.web?.info(page.id) : host.session.info(page.id))
   const title = info?.title?.trim()
-  const source = title ? Array.from(title).filter((char) => char >= " " && char !== "\u007f").join("").slice(0, 120) || page.url : page.url
+  const label = title ? Array.from(title).filter((char) => char >= " " && char !== "\u007f").join("").slice(0, 120) || page.url : page.url
+  const source = purpose === "Ask" && sensitiveReadingText(label) ? "Current page" : label
   const target = { page, tab, source, excerpt: "" }
   const review: Review = draft !== undefined ? { ...target, purpose: "Ask", draft, question: proposed }
     : purpose === "OnPhone" ? { ...target, purpose } : { ...target, purpose: "Aloud", edited: false }
