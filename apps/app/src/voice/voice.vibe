@@ -713,13 +713,18 @@ function carryVoice(fx: Voice.Effect): Job<Voice.Event, Agent | Device | Layers.
     when { tag: "Send", let session, let turn }: stream(`send ${session}:${turn}`, sendVoiceTurn(session, turn), { type: "replyEnds", session, turn, asks: false });
     when { tag: "Play", let session, let turn }: answer(`play ${session}:${turn}:${fresh()}`, effect {
       const { memory } = try VoiceWords
+      const bridge = try VoiceBridge
+      const voice = try Voice.Machine
       const epoch = memory.playbackEpoch
+      const current = effect {
+        return memory.playbackEpoch === epoch && Voice.canSentencePlayed(try voice.get(), session, turn)
+      }
       try Semaphore.withPermit(memory.playLock, effect {
-        if (memory.playbackEpoch !== epoch) return
+        if (!(try current)) return
+        try bridge.awaitSpeechOutputWarmup(session)
+        if (!(try current)) return
         const piece = memory.dequeueSentence(turn)
-        if (piece !== undefined) {
-          try ignore((try VoiceBridge).playSentence(session, turn, piece.text, piece.append))
-        }
+        if (piece !== undefined) try ignore(bridge.playSentence(session, turn, piece.text, piece.append))
       })
       return { type: "sentencePlayed", session, turn }
     }, { type: "sentencePlayed", session, turn });

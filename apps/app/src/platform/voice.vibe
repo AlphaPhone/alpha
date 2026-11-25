@@ -181,6 +181,7 @@ export service VoiceBridge {
   releaseEngineHold(): void!!
   openMic(session: number, network: boolean): boolean!VoiceBridgeFailed
   closeMic(session: number): void!VoiceBridgeFailed
+  awaitSpeechOutputWarmup(session: number): void!!
   playSentence(session: number, turn: number, text: string, append: boolean): void!VoiceBridgeFailed
   setSpeakerMuted(session: number, muted: boolean): boolean!!
   hush(turn: number): void!!
@@ -219,6 +220,7 @@ const SIGN_IN_PLUGIN = "ElizaSignIn"
 export const CLOUD_ENVIRONMENT = "production" as EnvironmentName
 /** How long a background call to the relay, a warm-up or its timing records, may run before it is dropped. */
 const RELAY_WARMUP_BOUND = "5 seconds"
+const LOCAL_OUTPUT_WARMUP_BOUND = "10 seconds"
 
 function parseGrant(raw: string | undefined): VoiceGrant {
   return raw === "granted" ? "granted" : raw === "denied" ? "denied" : "prompt"
@@ -506,7 +508,15 @@ export const phoneVoiceBridge = Layer.effect(VoiceBridge, effect {
     try stopNativeCapture(session, false)
   }
 
-  effect function playSentence(_session: number, _turn: number, text: string, append: boolean): void!VoiceBridgeFailed {
+  effect function awaitSpeechOutputWarmup(session: number): void!! {
+    const warming = statusFlight
+    if (warming !== undefined && activeSession === session && cloudStream === undefined) {
+      try ignore(timeout(Deferred.await(warming), LOCAL_OUTPUT_WARMUP_BOUND))
+    }
+  }
+
+  effect function playSentence(session: number, _turn: number, text: string, append: boolean): void!VoiceBridgeFailed {
+    if (activeSession !== session) return
     if (cloudStream !== undefined) {
       const stream = cloudStream
       const abort = makeAbort()
@@ -524,7 +534,7 @@ export const phoneVoiceBridge = Layer.effect(VoiceBridge, effect {
       try: () => localPlugin().synthesizeLocal({ requestId, text, append, replace: !append }),
       catch: (cause) => new VoiceBridgeFailed({ method: "synthesizeLocal", cause }),
     })
-    if (prepared.playbackId !== undefined && prepared.playbackId !== "") {
+    if (activeSession === session && activePlaybackRequest === requestId && prepared.playbackId !== undefined && prepared.playbackId !== "") {
       const playbackId = prepared.playbackId
       try tryPromise({
         try: () => localPlugin().play({ playbackId, replace: !append }),
@@ -675,6 +685,7 @@ export const phoneVoiceBridge = Layer.effect(VoiceBridge, effect {
       : Effect.void,
     openMic,
     closeMic,
+    awaitSpeechOutputWarmup,
     playSentence,
     setSpeakerMuted,
     hush,
@@ -769,6 +780,7 @@ export const browserVoiceBridge = Layer.effect(VoiceBridge, effect {
     releaseEngineHold: () => Effect.void,
     openMic: () => Effect.fail(new VoiceBridgeFailed({ method: "openMic", cause: "browser-no-native-voice" })),
     closeMic: () => Effect.void,
+    awaitSpeechOutputWarmup: () => Effect.void,
     playSentence: () => Effect.void,
     setSpeakerMuted: () => succeed(false),
     hush: () => Effect.void,

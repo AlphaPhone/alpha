@@ -163,7 +163,12 @@ microphone. On a phone with the Cloud speech relay, warming the network
 route also has the relay open its connection to Cloud speech, so the first
 conversation starts on a warm connection; like the rest of the warm-up it
 shows nothing and its failure is ignored. Once warm, redundant prewarm requests are refused until Alpha
-returns to the foreground or the account changes.
+returns to the foreground or the account changes. A local reply waits up
+to ten seconds for any speech readiness probe already in flight, so
+warming cannot win the speaker request slot from its first sentence.
+Microphone capture and Cloud playback do not wait for the local probe.
+After the wait only the current session and turn may play, at the
+speaker's current gain.
 
 ```quint
 pure def canPrewarm(v: Voice, now: int): bool = not(v.warmed) and not(v.latched) and not(v.prompting)
