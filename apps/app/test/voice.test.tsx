@@ -323,6 +323,16 @@ describe("Voice Bug 1 & Bug 3 journeys", () => {
       "Call 555-123-4567 on 2026-11-24 at UTC+01:00, if you may 3 times.",
     ]);
     expect(world.ask.kept.get("c1")?.messages.at(-1)?.text).toBe(written.join(""));
+
+    // spec/app/assistant/reply.md, "The agent's turn tag is never drawn, copied, quoted, emailed or spoken, and a reply still being written holds back what may become one"
+    const tagged = [[["Sure.\n[answer] Paris"], ["Sure.", "Paris"]], [["Paris. [answer]"], ["Paris."]], [["<promise> One sec."], ["One sec."]], [["[ans", "wer] Paris"], ["Paris"]], [["[answer", "](https://example.com) is a link."], ["answer is a link."]]] as const;
+    for (const [index, [chunks, heard]] of tagged.entries()) {
+      const before = world.voice.spoken.length;
+      world.ask.nextReplyChunks = chunks;
+      speakUtterance(world, "Capital of France");
+      await until(runtime, Voice.Machine, (s) => s.phase === "Listening" && s.sent === 6 + index && s.turn === 7 + index);
+      expect(world.voice.spoken.slice(before).map((one) => one.text)).toEqual(heard);
+    }
   });
 
   // spec/app/assistant/reply.md, "A spoken acknowledgment starts at once; a reply ready before it is audible drops it, and an audible one finishes before the reply, within 2.5 s"

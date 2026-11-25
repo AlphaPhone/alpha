@@ -1,7 +1,7 @@
 // spec/app/clock/alarms.md, "Story: Manage my alarms"; spec/app/clock/alarms.md, "Story: Ring, snooze, dismiss, and recover alarms"
 import { Banner, Button, Card, EmptyState, StatusDot, Switch } from "@repo/ui";
 import type { ManagedRuntime } from "effect";
-import { AlarmClock, BellOff, Plus, Trash2 } from "lucide-react";
+import { Clock, Plus, Trash2 } from "lucide-react";
 import { useSyncExternalStore } from "react";
 import type { Machine as ClockViewMachine } from "../../gen/app__clock.effect.vibe";
 import { useMachine as useClockView } from "../../gen/app__clock.react.ts";
@@ -47,7 +47,7 @@ export function AlarmsTab({ runtime }: AlarmsTabProps) {
           )}
         </div>
         <Button size="sm" aria-label="Add alarm" disabled={!view.can({ type: "openSheet", sheet: { tag: "NewAlarm" } })} onClick={openNew}>
-          <Plus aria-hidden className="size-4" />
+          <Plus aria-hidden className="size-4.5" />
           Add alarm
         </Button>
       </div>
@@ -71,7 +71,7 @@ export function AlarmsTab({ runtime }: AlarmsTabProps) {
       })}
 
       {sorted.length === 0 ? (
-        <EmptyState icon={<AlarmClock aria-hidden />} title="No alarms set">
+        <EmptyState icon={<Clock aria-hidden />} title="No alarms set">
           <Button onClick={openNew}>Add alarm</Button>
         </EmptyState>
       ) : (
@@ -83,7 +83,7 @@ export function AlarmsTab({ runtime }: AlarmsTabProps) {
             const repeatText = describeDaysMask(item.daysMask);
             const detailParts = [record.label, repeatText, soundLabel(record.sound)].filter((part) => part !== "");
             return (
-              <Card key={item.id} className="gap-3">
+              <Card key={item.id} className="gap-3 rounded-tile border-0 bg-secondary">
                 <div className="flex items-center justify-between gap-3">
                   <button
                     type="button"
@@ -115,7 +115,7 @@ export function AlarmsTab({ runtime }: AlarmsTabProps) {
                       aria-label={`Delete alarm ${timeLabel}`}
                       onClick={() => void runtime.runPromise(deleteAlarmWithUndo(item.id))}
                     >
-                      <Trash2 aria-hidden className="size-4" />
+                      <Trash2 aria-hidden className="size-4.5" />
                     </Button>
                     <Switch
                       aria-label={`Toggle alarm ${timeLabel}`}
@@ -128,12 +128,11 @@ export function AlarmsTab({ runtime }: AlarmsTabProps) {
                 {item.phase !== "Idle" && (
                   <div className="flex items-center gap-2 pt-1">
                     {item.phase === "Ringing" && (
-                      <Button variant="secondary" size="sm" onClick={() => void runtime.runPromise(snoozeAlarm(item.id))}>
+                      <Button variant="secondary" size="sm" className="bg-background" onClick={() => void runtime.runPromise(snoozeAlarm(item.id))}>
                         {`Snooze ${item.snoozeMinutes}m`}
                       </Button>
                     )}
                     <Button variant="destructive" size="sm" onClick={() => void runtime.runPromise(dismissAlarm(item.id))}>
-                      <BellOff aria-hidden className="size-4" />
                       Dismiss
                     </Button>
                   </div>

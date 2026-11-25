@@ -19,6 +19,8 @@ export interface NotesScene {
   failing: boolean;
   /** Whether a write to the store fails while reads still answer, as an agent that cannot change its notes answers. */
   refusing: boolean;
+  deleteAtRevision?: boolean;
+  deleteRequests?: Array<{ readonly id: string; readonly expectedRevision: number | undefined }>;
   /** The note a claim of a prepared saved-note editor names, as eliza's view host hands it to the renderer it is bound to. */
   target?: string;
   /** Each claim and result a renderer sent eliza's views routes, in order. */
@@ -180,6 +182,7 @@ function interact(scene: NotesScene, input: unknown): Response {
   }
   if (present === undefined) return refused(404);
   if (capability === "delete-note") {
+    scene.deleteRequests?.push({ id: present.id, expectedRevision: params.expectedRevision });
     scene.notes = scene.notes.filter((item) => item !== present);
     scene.trash.push({ note: present, deletedAt: iso(at) });
     scene.revision += 1;
@@ -208,7 +211,8 @@ export function notesRoutes(scene: NotesScene): Route[] {
           deviceActions: { protocol: 1, capabilities: [] } });
       }
       if (request.method === "GET" && url.pathname === "/api/notes/state") {
-        return scene.failing ? refused(503) : Response.json({ success: true, data: snapshot(scene) });
+        const advertised = scene.deleteAtRevision === false ? {} : { deleteAtRevision: true };
+        return scene.failing ? refused(503) : Response.json({ success: true, data: { ...snapshot(scene), ...advertised } });
       }
       if (request.method === "POST" && url.pathname === "/api/notes/interact") return request.json().then((body: unknown) => interact(scene, body));
       if (request.method === "POST" && url.pathname === "/api/views/interact-claim") {
