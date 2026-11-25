@@ -8,6 +8,7 @@ export type BrowserMenuItem = {
   name?: string;
   /** The row's icon, before its words; decorative. */
   icon: ReactNode;
+  disabled?: boolean;
   onSelect: () => void;
 };
 
@@ -26,8 +27,8 @@ export function BrowserMenu({ items, onClose }: BrowserMenuProps) {
       <div role="dialog" aria-label="Browser menu"
         className="absolute top-24.5 right-2.5 z-20 flex max-h-[calc(100%-7.5rem)] w-59 max-w-[calc(100%-1.25rem)] animate-drop flex-col overflow-y-auto rounded-panel bg-card p-1.5 shadow-menu ring-1 ring-border">
         {items.map((item) => (
-          <button key={item.label} type="button" aria-label={item.name ?? item.label} onClick={item.onSelect}
-            className={cn(focusRing, "flex min-h-12.5 items-center gap-3.5 rounded-lg px-3.5 text-left text-base active:bg-accent [&_svg]:size-5 [&_svg]:shrink-0")}>
+          <button key={item.label} type="button" aria-label={item.name ?? item.label} disabled={item.disabled} onClick={item.onSelect}
+            className={cn(focusRing, "flex min-h-12.5 items-center gap-3.5 rounded-lg px-3.5 text-left text-base active:bg-accent disabled:opacity-45 [&_svg]:size-5 [&_svg]:shrink-0")}>
             {item.icon}{item.label}
           </button>
         ))}
