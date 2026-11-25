@@ -6,7 +6,7 @@ export type PrivateNoticeProps = ComponentProps<"p"> & { icon?: ReactNode };
 /** What a private tab keeps: nothing once it closes. */
 export function PrivateNotice({ className, icon, children, ...props }: PrivateNoticeProps) {
   return (
-    <p role="note" aria-label="Private tab notice" className={cn("text-subject text-muted-foreground", className)} {...props}>
+    <p role="note" aria-label="Private tab notice" className={cn("text-subject leading-normal text-muted-foreground", className)} {...props}>
       {icon}
       <span>{children ?? "Private · cleared on close"}</span>
     </p>

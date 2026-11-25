@@ -1,12 +1,11 @@
-import { Eraser } from "lucide-react";
-import { Button } from "../Button.tsx";
+import { RotateCw, Trash2 } from "lucide-react";
 import { ListGroup } from "../ListGroup.tsx";
 import { ListRow } from "../ListRow.tsx";
 import { Skeleton } from "../Skeleton.tsx";
 import { Spinner } from "../Spinner.tsx";
 import { StatusDot } from "../StatusDot.tsx";
+import { SettingsFactRow } from "./SettingsFactRow.tsx";
 import { SettingsExportRow, type SettingsExportRowProps } from "./SettingsExportRow.tsx";
-import { SettingsNavRow } from "./SettingsNavRow.tsx";
 import { SettingsPage } from "./SettingsPage.tsx";
 import { SettingsRecoverRow, type SettingsRecoverRowProps } from "./SettingsRecoverRow.tsx";
 
@@ -41,23 +40,13 @@ export function SettingsProblemLogPage({ log, problems, needs, clearing = false,
     <SettingsPage title="Problem log" onBack={onBack} backLabel="Back to Developer">
       <ListGroup>
         {log === "waiting" ? <Skeleton className="m-4 h-5 w-24" /> : null}
-        {log === "none" ? <ListRow title="No problems" trailing={<StatusDot status="ok" label="None" />} /> : null}
+        {log === "none" ? <SettingsFactRow title="No problems" reading={{ word: "reported", value: "None", status: "ok" }} /> : null}
         {log === "some" ? <ListRow title={`${problems} ${problems === 1 ? "problem" : "problems"}`} trailing={<StatusDot status="warn" label="Recorded" />} /> : null}
-        {log === "unavailable" ? (
-          <ListRow
-            title="The log is unavailable"
-            trailing={
-              <>
-                <StatusDot status="error" label="Unavailable" />
-                {onRetry ? <Button variant="outline" size="sm" onClick={onRetry}>Retry</Button> : null}
-              </>
-            }
-          />
-        ) : null}
+        {log === "unavailable" ? <ListRow title="Unavailable" aria-label={onRetry ? "Problem log unavailable, retry" : "Problem log unavailable"} leading={<RotateCw />} onClick={onRetry} /> : null}
       </ListGroup>
       <ListGroup>
-        <SettingsExportRow exporting={exporting} onExport={onExport} />
-        {log === "some" ? <SettingsNavRow title="Clear" icon={<Eraser />} value={clearing ? <Spinner size="sm" label="Clearing" /> : undefined} onOpen={clearing ? undefined : onClear} /> : null}
+        <SettingsExportRow title="Export" exporting={exporting} onExport={onExport} />
+        {log === "some" ? <ListRow title="Clear" aria-label={clearing ? "Clearing problem log" : "Clear problem log"} leading={<Trash2 />} trailing={clearing ? <Spinner size="sm" label="Clearing" /> : undefined} onClick={clearing ? undefined : onClear} /> : null}
       </ListGroup>
       {(log === "none" || log === "some") && needs.length ? (
         <ListGroup heading="Saved data needs recovery">

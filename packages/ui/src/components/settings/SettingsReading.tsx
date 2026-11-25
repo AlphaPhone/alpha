@@ -8,7 +8,7 @@ export type SettingsReadingProps = {
   reading: Reading;
 };
 
-const dots: Record<StatusDotProps["status"], string> = { ok: "bg-ok", warn: "bg-warn", error: "bg-destructive", off: "bg-muted-foreground", busy: "bg-info" };
+const dots: Record<StatusDotProps["status"], string> = { ok: "bg-status-ok", warn: "bg-status-warn", error: "bg-status-error", off: "bg-muted-foreground", busy: "bg-info" };
 
 /**
  * What a row says about a fact of the phone: a placeholder while the answer is awaited, "Unavailable" when the phone

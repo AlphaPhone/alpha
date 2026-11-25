@@ -32,8 +32,8 @@ export function SettingsAppearancePicker({ theme, keeping = false, onChoose }: S
   };
   return (
     <ListGroup>
-      <div className="flex min-h-15 items-center gap-3 py-2 pr-2.5 pl-4.5">
-        <span aria-hidden className="min-w-0 flex-1 text-md">Theme</span>
+      <div className="flex min-h-15 flex-wrap items-center gap-3 py-2 pr-2.5 pl-4.5">
+        <span aria-hidden className="flex-1 text-md">Theme</span>
         <RadioGroupPrimitive.Root
           value={theme}
           onValueChange={choose}
@@ -41,7 +41,7 @@ export function SettingsAppearancePicker({ theme, keeping = false, onChoose }: S
           aria-label="Theme"
           aria-busy={keeping || undefined}
           orientation="horizontal"
-          className="flex shrink-0 gap-0.5 rounded-full bg-background p-0.75"
+          className="ml-auto flex shrink-0 gap-0.5 rounded-full bg-background p-0.75"
         >
           {choices.map(({ value, title }) => (
             <RadioGroupPrimitive.Item

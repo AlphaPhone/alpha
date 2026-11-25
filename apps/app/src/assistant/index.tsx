@@ -49,7 +49,8 @@ function LiveAssistant({ runtime }: Shown<Layer.Success<typeof screens> | Reside
   const canTalk = available && noCall && audioFree && voice.can(talk);
   const canDictate = available && noCall && audioFree && composer.state?.away === "Free" && composer.can({ type: "edit", blank: false, long: false }) && voice.can({ type: "openRecorder", target: "ComposerField" });
   const recorder = voice.state?.recorder;
-  const review = recorder?.stage === "Review" && recorder.field === "ComposerField";
+  const dictating = recorder !== undefined && recorder.stage !== "Closed" && recorder.field === "ComposerField";
+  const recorderPanel = dictating ? <DictationControls runtime={runtime} /> : undefined;
   const readingAllowed = noCall && speaker !== undefined && !speaker.latched && voice.state !== undefined && quiet(voice.state) && recorder?.stage === "Closed" && runtime.runSync(bridge.canRead());
   return <Assistant
     runtime={runtime}
@@ -64,11 +65,11 @@ function LiveAssistant({ runtime }: Shown<Layer.Success<typeof screens> | Reside
         confirmed: quiet(voice.state) ? voice.state.phase === "Idle" && !voice.state.latched && recorder?.stage === "Closed" : undefined,
       },
       showUnavailableTalk: !available,
-      voiceReview: review ? <DictationControls runtime={runtime} /> : undefined,
+      voicePanel: recorderPanel,
       onTalk: canTalk ? () => void runtime.runPromise(beginTalk()) : undefined,
       onDictate: canDictate ? () => void runtime.runPromise(dictate()) : undefined,
-      voice: ({ compactDock, atBar, onKeyboard }) => recorder !== undefined && recorder.stage !== "Closed" && recorder.field === "ComposerField"
-        ? review ? undefined : <DictationControls runtime={runtime} />
+      voice: ({ compactDock, atBar, onKeyboard }) => dictating
+        ? recorderPanel
         : voice.state !== undefined && !quiet(voice.state)
           ? <TalkControls runtime={runtime} compact={compactDock || (atBar && !voice.state.network)} onKeyboard={onKeyboard} trailing={<VoiceEnd runtime={runtime} />} />
           : undefined,

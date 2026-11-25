@@ -244,7 +244,7 @@ export function elizaNotices(scene: SettingsScene): Faked {
   });
 }
 
-/** The licence notices the page ships beside it, as the fake origin serves them. */
+/** Licence notices as a test answers the shipped notices file with them. */
 export const notices = [
   { name: "effect", version: "4.1.1", license: "MIT", text: "MIT License", flags: [] },
   { name: "react", version: "19.2.0", license: "MIT", text: "MIT License", flags: [] },
