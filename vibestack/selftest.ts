@@ -4874,6 +4874,8 @@ test("the lint refuses, in a project's own code, a comment that is neither a cit
     "  export function readEmpty() {}",
     "  /** @throws { } */",
     "  export function readWhitespace() {}",
+    "  /** Describes a declaration. @throws {Error} on failure. */",
+    "  export function readDocumented() {}",
     "}",
   ]), ["6 code/comments", "8 code/comments", "11 code/comments", "13 code/comments"]);
   const hiding = [["useEffect(() => {}, []); // eslint-disable-line"], ["/* eslint-disable */", "// a note"], ["/* eslint-disable code/comments, code/effects -- it must */", "setTimeout(() => {}, 1);"], ["/* eslint code/comments: off, no-console: off */", `console.log("seen");`], ["// eslint-disable-next-line no-console -- it must", `console.log("seen");`]];
