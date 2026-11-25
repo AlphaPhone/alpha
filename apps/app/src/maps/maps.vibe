@@ -189,7 +189,7 @@ effect function planned(ticket: number, origin: Origin, travel: Travel, place: n
     const found = try asked((client, signal) => client.mapsRoutes({ from: coordinateOf(from), to: coordinateOf(to.at), mode: travelModes[travel] }, { signal }))
     const ways: Way[] = found.routes.map((route) => ({
       meters: Math.round(route.distanceMeters), seconds: Math.round(route.durationSeconds), line: route.geometry.map(pointOf),
-      turns: route.steps.map((step) => ({ instruction: step.instruction, at: pointOf(step.coordinate), meters: Math.round(step.distanceMeters) })),
+      turns: route.steps.map((step) => ({ instruction: step.instruction, at: pointOf(step.coordinate), meters: Math.round(step.distanceMeters), ...(step.maneuver === undefined ? {} : { maneuver: step.maneuver }) })),
     }))
     atlas.routed(ticket, ways)
     return { type: "answerRoute", ticket, ok: true, turns: Math.max(1, ways[0].turns.length), routes: ways.length }

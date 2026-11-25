@@ -33,6 +33,8 @@ export interface Turn {
   readonly instruction: string
   readonly at: Point
   readonly meters: number
+  /** The provider's kind of turn, such as "left" or "arrive", for its arrow; none when the provider names none. */
+  readonly maneuver?: string
 }
 
 /** A route beyond its ticket: its length, time, line and turns. */
