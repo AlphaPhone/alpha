@@ -112,12 +112,12 @@ export function AssistantComposer({
       {!compact && editing ? <AssistantQuoteBar kind="editing" /> : null}
       {voiceNotice}
       {voice}
-      <div hidden={Boolean(voice)} className={cn("items-center bg-secondary", voice ? "hidden" : "flex", compact ? "touch-none gap-0.5 self-center rounded-dock-compact p-1.25 shadow-dock-compact dark:shadow-dock-compact-dark" : bar ? "min-h-18.5 touch-pan-y gap-1 rounded-dock py-1.5 pr-2 pl-2.25 shadow-dock dark:shadow-dock-dark" : "min-h-17 touch-pan-y gap-1.5 rounded-sheet py-1.5 pr-1.5 pl-5")}>
+      <div hidden={Boolean(voice)} className={cn("items-center bg-secondary", voice ? "hidden" : "flex", compact ? "touch-none gap-0.5 self-center rounded-dock-compact p-1.25 shadow-dock-compact dark:shadow-dock-compact-dark" : bar ? "min-h-18.5 touch-pan-y gap-1 rounded-dock py-1.5 pr-2 pl-2.25 shadow-dock dark:shadow-dock-dark" : cn("min-h-17 touch-pan-y gap-1.5 rounded-sheet py-1.5 pr-1.5", targeting ? "pl-1.5 ring-[1.5px] ring-primary ring-inset" : "pl-5"))}>
         {leading}
         {bar ? opener ?? (onOpen ? (
           <Button size="icon" aria-label="Open conversation" className="overflow-hidden bg-alpha text-alpha-foreground hover:bg-alpha/90" onClick={onOpen}><Mark aria-hidden className="size-[118%]" /></Button>
         ) : null) : null}
-        {compact ? <Button variant="ghost" size="icon" aria-label="Type" disabled={closed} onClick={onType}><Keyboard /></Button> : targeting ? (onAttach ? <Button variant="ghost" size="icon" aria-label="Attach" disabled={closed} onClick={onAttach}><Plus /></Button> : null) : (
+        {compact ? <Button variant="ghost" size="icon" aria-label="Type" disabled={closed} onClick={onType}><Keyboard /></Button> : (
           <Menu>
             <MenuTrigger asChild>
               <Button variant="ghost" size="icon" aria-label="Chat actions" disabled={!acting} className="hover:bg-transparent disabled:opacity-40"><Plus /></Button>
@@ -147,7 +147,7 @@ export function AssistantComposer({
             event.preventDefault();
             if (!event.repeat && !closed && !onStop && !stopping) onSend?.();
           }}
-          className={cn("max-h-[min(10.5rem,28dvh)] min-h-11 min-w-0 flex-1 touch-auto rounded-full bg-transparent py-2.75 text-body leading-field", targeting ? "border border-alpha px-3" : cn("border-0 pr-0.5 focus-visible:outline-none", bar ? "pl-2" : "pl-0.5"), compact && "hidden")}
+          className={cn("max-h-[min(10.5rem,28dvh)] min-h-11 min-w-0 flex-1 touch-auto rounded-full bg-transparent py-2.75 text-body leading-field", cn("border-0 pr-0.5 focus-visible:outline-none", bar ? "pl-2" : "pl-0.5"), compact && "hidden")}
         />
         {onStop || stopping ? (
           <Button variant={compact ? "ghost" : undefined} size="icon" aria-label="Stop reply" loading={stopping} className={compact ? undefined : "bg-foreground text-background hover:bg-foreground/90"} onClick={onStop}><svg aria-hidden viewBox="0 0 24 24" className="size-5.5"><rect x="7" y="7" width="10" height="10" rx="2" fill="currentColor" /></svg></Button>
@@ -161,11 +161,11 @@ export function AssistantComposer({
             onClick={onSend}
           ><ArrowUp /></Button>
         ) : onTalk ? (
-          <Button variant="ghost" size="icon" aria-label="Talk" className={bar ? undefined : "bg-foreground text-background hover:bg-foreground/90"} onPointerDown={keepComposerFocus} onClick={onTalk}><Mic /></Button>
+          <Button variant="ghost" size="icon" aria-label="Talk" className={bar || targeting ? undefined : "bg-foreground text-background hover:bg-foreground/90"} onPointerDown={keepComposerFocus} onClick={onTalk}><Mic /></Button>
         ) : !compact && onDictate ? (
           <Button variant="ghost" size="icon" aria-label="Dictate" onPointerDown={keepComposerFocus} onClick={onDictate}><Mic /></Button>
         ) : compact || showUnavailableTalk ? (
-          <Button variant="ghost" size="icon" aria-label="Talk" className={cn("disabled:opacity-100", !bar && "bg-foreground text-background")} disabled><Mic /></Button>
+          <Button variant="ghost" size="icon" aria-label="Talk" className={cn("disabled:opacity-100", !bar && !targeting && "bg-foreground text-background")} disabled><Mic /></Button>
         ) : null}
       </div>
     </div>
