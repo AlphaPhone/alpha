@@ -5,7 +5,9 @@ import * as Comms from "../../gen/app__phone__comms.effect.vibe"
 import type { Event } from "../../gen/app__phone__comms.effect.vibe"
 import { Machine as Messages } from "../../gen/app__messages.effect.vibe"
 import { Machine as Phone, clear, liveCall } from "../../gen/app__phone.effect.vibe"
+import { Machine as Voicemail } from "../../gen/app__phone__voicemail.effect.vibe"
 import { contained, following, reacting, started, together } from "../runtime/reactor.vibe"
+import { Dialer } from "./phone.vibe"
 
 /** The actual shell app an entry in the communications stage can return to. */
 export function commsViewOf(app: Comms.CommsApp): "Phone" | "Messages" | "Contacts" {
@@ -87,5 +89,45 @@ const subjects = started(effect {
   })
 }, "comms subjects")
 
+export service CommsBriefing {
+  forSubject(key: string): string!!
+  put(key: string, text: string): void!!
+}
+
+const briefings = Layer.sync(CommsBriefing, () => {
+  let current = { key: "", text: "" }
+  return {
+    forSubject: (key: string) => sync(() => current.key === key ? current.text : ""),
+    put: (key: string, text: string) => sync(() => { current = { key, text } }),
+  }
+})
+
+// spec/app/phone/comms.md, "A subject is briefed once, only with the conversation open, and never from fixtures"
+/** Draw a short local briefing from the facts the phone already admitted to its views. */
+const phoneBriefing = started(effect {
+  const comms = try Comms.Machine
+  const shell = try Shell
+  const phone = try Phone
+  const voicemail = try Voicemail
+  const dialer = try Dialer
+  const brief = try CommsBriefing
+  const activity = Stream.zipLatest(phone.changes, voicemail.changes)
+  try Stream.runForEach(Stream.zipLatest(comms.changes, activity), effect ([stage, [calls, messages]]) => {
+    const page = try shell.get()
+    if (page.trail.at(-1) !== "Phone" || (page.assistant !== "Sheet" && page.assistant !== "Full")
+      || stage.app !== "PhoneApp" || !Comms.canBriefingShown(stage, stage.key, "Device")) return
+    const log = calls.log.grant === "Granted" ? (try dialer.get()).source : undefined
+    const missed = calls.log.grant === "Granted" ? Math.max(calls.missed, log?.filter((entry) => entry.isNew && entry.type === "missed").length ?? 0) : 0
+    const unheard = calls.voicemail ? messages.unheard : 0
+    const text = [
+      missed > 0 ? `You have ${missed} missed ${missed === 1 ? "call" : "calls"}.` : "",
+      unheard > 0 ? `You have ${unheard} new ${unheard === 1 ? "voicemail" : "voicemails"}.` : "",
+    ].filter((line) => line !== "").join(" ")
+    if (text === "") return
+    try brief.put(stage.key, text)
+    if (!(try contained(comms.send({ type: "briefingShown", key: stage.key }, "Device"), "showing the Phone briefing"))) try brief.put("", "")
+  })
+}, "briefing Phone from its reported facts")
+
 /** The stage of Phone, Messages and Contacts: kept across restarts, told of calls, rings, the subject on screen and Ask Alpha lowering. */
-export const comms = together(machine, prompts, calls, rings, detents, subjects)
+export const comms = together(machine, prompts, calls, rings, detents, subjects, briefings, phoneBriefing)

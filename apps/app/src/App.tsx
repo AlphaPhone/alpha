@@ -152,6 +152,7 @@ export function App({ alpha }: AppProps) {
         data-alpha-assistant-host=""
         hidden={!askAlphaDrawn(state)}
         className={cn(
+          "in-[body:has([data-alpha-notes-trash-sheet])]:invisible",
           comms && "shrink-0",
           !comms && "[&>[data-alpha-detent]]:absolute [&>[data-alpha-detent]]:inset-x-0 [&>[data-alpha-detent]]:bottom-0 [&>[data-alpha-detent]]:max-w-none",
           side && [

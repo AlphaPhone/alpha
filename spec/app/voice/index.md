@@ -892,7 +892,7 @@ pure def transcribingDictation(now: int, automatic: bool, v: Voice): Change =
 pure def stopRecording(v: Voice, now: int): Change = transcribingDictation(now, false, v)
 
 pure def canRecordingStopped(v: Voice, ticket: int, showing: bool, now: int): bool =
-  not(v.prompting) and D::canRecordingStopped(v.recorder, ticket)
+  not(v.prompting) and D::acceptsNativeStop(v.recorder, ticket)
 
 pure def recordingStopped(v: Voice, ticket: int, showing: bool, now: int): Change =
   if (showing) transcribingDictation(now, true, v)

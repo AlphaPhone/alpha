@@ -1,5 +1,6 @@
 // spec/app/voice/index.md, "Story: Hold a spoken conversation"; spec/app/voice/index.md, "The speech pipeline warms on startup, foreground return and account readiness without opening the microphone"; spec/app/voice/index.md, "A reply that needs the owner's review in chat keeps voice listening with the microphone open"; spec/app/voice/index.md, "An active voice conversation may ask the shell to open Home or any admitted screen"; spec/app/shell/index.md, "Agent navigation shows an admitted app or Home without lowering Ask Alpha"; spec/app/voice/index.md, "A spoken reply says a written date, clock time, range and percentage in words"; spec/app/voice/index.md, "A turn Cloud refuses because the account is out of funds ends voice quietly, as Stop does"
 import { ConversationRecord, TurnController } from "@elizaos/agent/client"
+import { Machine as Conversation } from "../../gen/app__assistant.effect.vibe"
 import { Machine as Phone } from "../../gen/app__phone.effect.vibe"
 import * as Shell from "../../gen/app__shell.effect.vibe"
 import * as Layers from "../../gen/app__shell__layers.effect.vibe"
@@ -8,6 +9,7 @@ import type { Field } from "../../gen/app__voice__dictation.ts"
 import { Agent, isCloudFundsRefusal } from "../platform/agent.vibe"
 import { Device } from "../platform/device.vibe"
 import { ask } from "../platform/remote.vibe"
+import { Views, delivery, preparedIn } from "../assistant/views.vibe"
 import { SystemSettings } from "../platform/systemSettings.vibe"
 import { type VoiceEvent, VoiceBridge } from "../platform/voice.vibe"
 import { fresh } from "../runtime/attempts.vibe"
@@ -253,6 +255,7 @@ effect function ensureConversation(): (ConversationRecord | undefined)!!(Agent |
   } catch () => undefined
 }
 
+// spec/app/assistant/context.md, "A spoken turn carries what a typed turn sent at that moment would, the view claim included"
 function sendVoiceTurn(session: number, turn: number): Stream.Stream<Voice.Event, never, Agent | VoiceWords> {
   return Stream.callback<Voice.Event, never, Agent | VoiceWords>((queue) => effect {
     const { runtime } = try Agent
@@ -265,6 +268,12 @@ function sendVoiceTurn(session: number, turn: number): Stream.Stream<Voice.Event
       Queue.endUnsafe(queue)
       return
     }
+    const rendering = try Effect.serviceOption(Views)
+    const conversation = try Effect.serviceOption(Conversation)
+    const views = Option.getOrUndefined(rendering)
+    const asked = views === undefined ? 0 : try views.begin()
+    const screen = Option.isSome(conversation) ? try conversation.value.get() : undefined
+    const told = views !== undefined && screen !== undefined && screen.observing && !screen.context.sensitive
     const controller = new TurnController(runtime)
     try ignore(tryPromise(() => controller.bind(record)))
     let shown = ""
@@ -297,7 +306,7 @@ function sendVoiceTurn(session: number, turn: number): Stream.Stream<Voice.Event
       shown = clean
       sayFrom(clean, false)
     }
-    const result = tryPromise(() => controller.send({ text: spoken }, { stream: { onPreview: feed } })) catch () => undefined
+    const result = tryPromise(() => controller.send({ text: spoken, ...(told && views !== undefined ? { metadata: delivery(views.clientId) } : {}) }, { stream: { onPreview: feed } })) catch () => undefined
     if (isCloudFundsRefusal(result)) {
       memory.lastReply = ""
       Queue.offerUnsafe(queue, { type: "refusedForFunds", session, turn })
@@ -305,6 +314,8 @@ function sendVoiceTurn(session: number, turn: number): Stream.Stream<Voice.Event
       return
     }
     const finalText = result?.kind === "Replied" ? result.reply.text : ""
+    const prepared = told && views !== undefined && result?.kind === "Replied" ? preparedIn(result.reply.actionResults, views.clientId) : undefined
+    if (views !== undefined && prepared !== undefined) try views.spoken({ asked, handoff: prepared })
     memory.lastReply = finalText
     emitNavigation(finalText)
     const asks = replyNeedsReview(finalText)
