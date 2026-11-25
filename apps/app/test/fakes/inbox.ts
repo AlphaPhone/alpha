@@ -52,6 +52,7 @@ export interface InboxScene {
   readonly attachmentReads: string[];
   readonly savedAttachments: Map<string, string>;
   loseSendReply?: boolean;
+  loseDraftReply?: boolean;
   readonly receiptReads: string[];
 }
 
@@ -156,7 +157,7 @@ function relabel(stored: Stored, kind: string) {
 
 export function inboxRoutes(scene: InboxScene): Route[] {
   const asked = new Map<string, Proposal>();
-  const sent = new Map<string, MailOperation>();
+  const receipts = new Map<string, MailOperation>();
   const forwarded = (source: Delivery["forwardAttachments"]) => {
     if (source === undefined) return [];
     const original = scene.mail.find(({ card }) => card.id === source.messageId && card.metadata.historyId === source.historyId);
@@ -271,7 +272,7 @@ export function inboxRoutes(scene: InboxScene): Route[] {
         scene.attached.push(...(proposal.attachments ?? []).map((file) => file.name), ...parts.map(({ file }) => file.name));
         scene.mail.push({ ...letter(scene.mail.length + 100, proposal.subject, ["SENT"], proposal.bodyText), card: { ...letter(scene.mail.length + 100, proposal.subject, ["SENT"]).card, to } });
         const confirmed = operation(requestId, "send", "succeeded");
-        sent.set(requestId, confirmed);
+        receipts.set(requestId, confirmed);
         if (!scene.loseSendReply) return Response.json(confirmed);
         scene.loseSendReply = false;
         return Response.json(operation(requestId, "send", "outcome-unknown"));
@@ -281,7 +282,7 @@ export function inboxRoutes(scene: InboxScene): Route[] {
       const requestId = new RegExp(`^${operations}/([^/]+)$`, "u").exec(url.pathname)?.[1];
       if (request.method !== "GET" || requestId === undefined) return;
       scene.receiptReads.push(requestId);
-      const found = url.searchParams.get("grantId") === scene.google?.connection ? sent.get(requestId) : undefined;
+      const found = url.searchParams.get("grantId") === scene.google?.connection ? receipts.get(requestId) : undefined;
       return found ? Response.json(found) : refused(404, "not_found");
     },
     (request, url) => {
@@ -290,11 +291,18 @@ export function inboxRoutes(scene: InboxScene): Route[] {
       if (request.method !== "POST" || requestId === undefined || (kind !== "draft-create" && kind !== "draft-replace" && kind !== "draft-delete")) return;
       return request.json().then(({ proposal }: { proposal: { to?: string[]; cc?: string[]; bcc?: string[]; subject?: string; bodyText?: string; mode?: string; draftId?: string; attachments?: unknown[] } }) => {
         scene.changes.push(`${kind} ${proposal.subject ?? proposal.draftId ?? ""}`);
-        const done = operation(requestId, kind, "succeeded");
         const draftId = proposal.draftId ?? `d${scene.changes.length}`;
+        const answer = (providerResult: Record<string, unknown>) => {
+          const done = operation(requestId, kind, "succeeded");
+          const confirmed = { ...done, receipt: { ...done.receipt, providerResult } };
+          receipts.set(requestId, confirmed);
+          if (!scene.loseDraftReply) return Response.json(confirmed);
+          scene.loseDraftReply = false;
+          return Response.json(operation(requestId, kind, "outcome-unknown"));
+        };
         if (kind === "draft-delete") {
           scene.drafts.delete(draftId);
-          return Response.json(done);
+          return answer({ draftId, deleted: true });
         }
         const messageId = `m${draftId}`;
         const providerDigest = (kind === "draft-create" ? "b" : "c").repeat(64);
@@ -302,7 +310,7 @@ export function inboxRoutes(scene: InboxScene): Route[] {
           id: draftId, messageId, providerDigest,
           content: { to: proposal.to ?? [], cc: proposal.cc ?? [], bcc: proposal.bcc ?? [], subject: proposal.subject ?? "", bodyText: proposal.bodyText ?? "", plainText: true, threaded: proposal.mode !== "compose", attachmentCount: proposal.attachments?.length ?? 0 },
         });
-        return Response.json({ ...done, receipt: { ...done.receipt, providerResult: { draftId, messageId, providerDigest } } });
+        return answer({ draftId, messageId, providerDigest });
       });
     },
     (request, url) => {

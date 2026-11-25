@@ -338,31 +338,38 @@ pure val fair_answered = "strong"
 pure val fair_replyLost = "strong"
 ```
 
-### A lookup that settles the unknown send changes only the outcome of that same draft and attempt
+### A Gmail receipt settles only the unknown operation of that same draft and attempt
 
 The composer applies the receipt to the draft. The operation can clear
-its uncertainty only while it still names that send.
+its uncertainty only while it still names the same request.
 
 ```quint
-pure def canReconciledSend(s: Operations, draft: int, attempt: int, by: Actor): bool =
-  by == World and live(s) and s.kind == Send and s.draft == draft and s.attempt.id == attempt and s.attempt.outcome == A::Unknown
+pure def canReconciledDraft(s: Operations, kind: Kind, draft: int, attempt: int, by: Actor): bool =
+  by == World and live(s) and ofDraft(kind) and s.kind == kind and s.draft == draft and s.attempt.id == attempt and s.attempt.outcome == A::Unknown
 
-pure def reconciledSend(s: Operations, draft: int, attempt: int, delivered: bool, by: Actor): Operations =
-  { ...s, attempt: A::conclude(s.attempt, delivered, true), noticed: true }
+pure def reconciledDraft(s: Operations, kind: Kind, draft: int, attempt: int, done: bool, by: Actor): Operations =
+  { ...s, attempt: A::conclude(s.attempt, done, true), noticed: true }
 ```
 
 ### An outcome that is unknown or confirmed is never sent again, and a later operation never hides an unknown one the owner has not seen
 
 A refused operation can be reviewed and confirmed again, under its own
-number.
+number. Choosing Send again acknowledges the unknown send and starts
+a review for the same draft under a new number. An exact receipt may
+settle an unknown operation without sending it again.
 
 ```quint
-pure def stepAnEndedOutcomeStays(before: Operations, after: Operations): bool =
-  ((before.attempt.outcome == A::Unknown or before.attempt.outcome == A::Confirmed) and after.attempt.id == before.attempt.id)
-    implies after.attempt == before.attempt
+pure def stepAnEndedOutcomeStays(before: Operations, via: str, after: Operations): bool =
+  (after.attempt.id == before.attempt.id) implies (
+    (before.attempt.outcome == A::Confirmed implies after.attempt == before.attempt)
+    and (before.attempt.outcome == A::Unknown and after.attempt != before.attempt implies
+      (via == "reconciledDraft" and after.kind == before.kind and after.draft == before.draft
+        and (after.attempt.outcome == A::Confirmed or after.attempt.outcome == A::Refused)))
+  )
 
 pure def stepAnUnknownIsNotHidden(before: Operations, after: Operations): bool =
-  (after.attempt.id != before.attempt.id) implies (before.attempt.outcome != A::Unknown or before.noticed)
+  (after.attempt.id != before.attempt.id) implies (before.attempt.outcome != A::Unknown or before.noticed
+    or (before.kind == Send and after.kind == Send and before.draft == after.draft and after.again and after.review.showing))
 
 pure def alwaysAnUnseenUnknownIsOfThisSession(s: Operations): bool =
   not(s.noticed) implies (live(s) and s.attempt.outcome == A::Unknown)
