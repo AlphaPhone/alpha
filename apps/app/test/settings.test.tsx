@@ -221,6 +221,16 @@ describe("Settings", () => {
     await tap("Location");
     await until(alpha, alpha.runtime, Prefs.Machine, (s) => s.saving.read.status === "Loaded" && !Prefs.allows(s, "AgentLocation"));
     expect(world.settings.consents).toHaveLength(3);
+    // spec/app/settings/preferences.md, "A change takes effect when the phone saved it; when the phone refuses it, Alpha says it was not saved and nothing changes; when the phone does not answer in time, Alpha says it was not saved and reads the device preferences again": a change the host takes too late is what Settings shows once the phone has finished with it.
+    world.settings.refusesConsent = false;
+    let answer = () => undefined as void;
+    world.settings.consentGate = new Promise((resolve) => { answer = resolve; });
+    await tap("Gmail changes");
+    await later(alpha, 10_000);
+    await until(alpha, alpha.runtime, Prefs.Machine, (s) => s.saving.read.status === "Failed" && s.document.read.status === "Loading" && !Prefs.allows(s, "GmailChanges"));
+    answer();
+    await until(alpha, alpha.runtime, Prefs.Machine, (s) => s.document.read.status === "Loaded" && Prefs.allows(s, "GmailChanges") && Prefs.allows(s, "CalendarEdits"));
+    await vi.waitFor(() => expect(world.settings.consents.at(-1)).toEqual({ gmailChanges: true, calendarEdits: true }));
   });
 
   it("A consent the host refused after a read is told again at the next read (spec/app/settings/preferences.md, \"Story: Decide whether Alpha asks before it acts\")", async () => {
@@ -236,7 +246,7 @@ describe("Settings", () => {
     await vi.waitFor(() => expect(world.settings.consents).toEqual([{ gmailChanges: false, calendarEdits: true }]));
   });
 
-  it("A phone updated from the previous Alpha keeps its choices (spec/app/settings/preferences.md, \"The device preferences are read when Alpha starts, when Settings opens, and when Alpha comes back while Settings shows, with ten seconds to answer, never while a change or a recovery is in flight\")", async () => {
+  it("A phone updated from the previous Alpha keeps its choices (spec/app/settings/preferences.md, \"The device preferences are read when Alpha starts, when Settings opens, when Alpha comes back while Settings shows, and after a change the phone did not answer in time, with ten seconds to answer, never while a change or a recovery is in flight\")", async () => {
     localStorage.setItem("alpha.browser.device.v1", JSON.stringify({ askBeforeAgentActions: false, agentLocationEnabled: false, autoLoadMailImages: true }));
     const { alpha } = await open({ ...scene(), phone: true });
     await until(alpha, alpha.runtime, Prefs.Machine, (s) => s.document.read.status === "Loaded");

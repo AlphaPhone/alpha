@@ -33,6 +33,8 @@ export interface SettingsScene {
   readonly consents: Array<{ gmailChanges: boolean; calendarEdits: boolean }>;
   /** Whether the host refuses each consent it is told, keeping what it had, as when Android cannot save it. */
   refusesConsent: boolean;
+  /** What the host waits for before it answers a consent, as when a restart of the agent is slow. */
+  consentGate: Promise<void>;
 }
 
 export function settingsScene(): SettingsScene {
@@ -46,7 +48,7 @@ export function settingsScene(): SettingsScene {
     hostFacts: { androidRelease: "16", permissions: { Microphone: false, Calendar: true } },
     gate: Promise.resolve(), grantsHome: true, opened: [], copied: [], crashes: [], reset: { status: "cancelled", message: "Nothing was reset." }, reviews: [],
     networks: [{ ssid: "home", bssid: "00:11:22:33:44:55", rssi: -50, frequency: 2412, capabilities: "[WPA2-PSK-CCMP]", secured: true, security: "wpa2" }],
-    joinAnswer: "connected", joins: [], connectivity: { online: true, validated: true, captivePortal: false, ssid: "home" }, consents: [], refusesConsent: false,
+    joinAnswer: "connected", joins: [], connectivity: { online: true, validated: true, captivePortal: false, ssid: "home" }, consents: [], refusesConsent: false, consentGate: Promise.resolve(),
     carrier: {
       slots: [{ slotIndex: 0, imei: { status: "available", value: "356938035643809" }, simState: { status: "available", value: "Ready" } }, { slotIndex: 1, imei: { status: "permission-denied" }, simState: { status: "available", value: "Absent" } }],
       iccid: { status: "permission-denied" }, eid: { status: "available", value: "89049032000000000000000000000001" },
@@ -158,11 +160,11 @@ export function elizaWiFi(scene: SettingsScene): Faked {
 /** `AlphaDevicePlugin.setAgentGoogleConsent`, which hands the consent to `AlphaAgentService` for the agent's next launch. */
 export function alphaAgentConsent(scene: SettingsScene) {
   return {
-    setAgentGoogleConsent: (consent: { gmailChanges: boolean; calendarEdits: boolean }) => {
-      if (scene.refusesConsent) return Promise.reject(new Error("Agent consent could not be saved"));
+    setAgentGoogleConsent: async (consent: { gmailChanges: boolean; calendarEdits: boolean }) => {
+      await scene.consentGate;
+      if (scene.refusesConsent) throw new Error("Agent consent could not be saved");
       const kept = scene.consents.at(-1);
       if (kept?.gmailChanges !== consent.gmailChanges || kept.calendarEdits !== consent.calendarEdits) scene.consents.push({ gmailChanges: consent.gmailChanges, calendarEdits: consent.calendarEdits });
-      return Promise.resolve();
     },
   };
 }

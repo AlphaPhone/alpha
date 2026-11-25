@@ -300,14 +300,16 @@ type Act = WebAction | CameraAction | PhotosAction | NoteWrite | InAppMove
 pure def governed(act: Act): bool = act == WebAction or act == CameraAction or act == PhotosAction
 ```
 
-### The device preferences are read when Alpha starts, when Settings opens, and when Alpha comes back while Settings shows, with ten seconds to answer, never while a change or a recovery is in flight
+### The device preferences are read when Alpha starts, when Settings opens, when Alpha comes back while Settings shows, and after a change the phone did not answer in time, with ten seconds to answer, never while a change or a recovery is in flight
 
 They hold Ask before Alpha acts, Load images in Inbox, and what Alpha may
 share or change without asking. On a phone updated from the previous
 Alpha, which kept these in a document of its own, the phone reads that
 document, once, while it has none of Alpha's: the choices made there stay,
 and a choice it lacks starts as on a new phone. Alpha never writes the
-previous document.
+previous document. A change the phone did not answer in time may still
+have been kept, so the phone reads them again once it has finished with
+that change, and Settings shows what it kept.
 
 ```quint
 pure def readAgain(at: int, s: Preferences): Changed =
@@ -326,7 +328,7 @@ pure def resumed(s: Preferences, at: int, showing: bool, by: Sender): Changed = 
 
 pure def stepTheDocumentIsReadOnlyWhenDue(before: Preferences, via: str, after: Preferences): bool =
   after.document.read.ticket != before.document.read.ticket implies
-    (via == "start" or ((via == "opened" or via == "resumed" or via == "recovered" or via == "giveUpOnRecovery") and not(T::busy(before.saving))))
+    (via == "start" or via == "giveUpOnSaving" or ((via == "opened" or via == "resumed" or via == "recovered" or via == "giveUpOnRecovery") and not(T::busy(before.saving))))
 ```
 
 ### A new phone lets Alpha act without asking first, load images in Inbox, use its location and the Browser page open, and change Gmail and Calendar
@@ -421,8 +423,12 @@ no agent and is told nothing.
 A change to Gmail changes or Calendar edits is saved only once the host
 has taken it: the save carries the new consent, and when the host refuses
 it the phone puts back the document it had and answers that the change was
-not saved, so Settings never shows a consent the agent does not launch
-with. A save that changes neither carries none.
+not saved, so Settings never shows a refused change as saved. A save that
+changes neither carries none. The phone finishes one save, with its host
+call and any putting back, before it starts a read or tells the host
+another consent. Settings can still show what a read gave before the host
+has taken it; a consent the host refused at a read is told again at the
+next read.
 
 ```quint
 type AgentGoogle = Unsaid | Consents({ gmailChanges: bool, calendarEdits: bool })
@@ -434,10 +440,9 @@ pure def consentChanged(was: List[Share], shares: List[Share]): AgentGoogle =
   if (consentOf(shares) == consentOf(was)) Unsaid else consentOf(shares)
 
 pure def lawASaveCarriesTheConsentItChanges(on: bool): bool =
-  val was = List(AgentLocation, CalendarEdits)
-  val changed = if (on) was.append(GmailChanges) else was.select(x => x != CalendarEdits)
-  consentChanged(was, was.append(BrowserPage)) == Unsaid
-    and consentChanged(was, changed) == Consents({ gmailChanges: on, calendarEdits: on })
+  consentChanged(List(AgentLocation, CalendarEdits), List(AgentLocation, CalendarEdits, BrowserPage)) == Unsaid
+    and consentChanged(List(AgentLocation, CalendarEdits), if (on) List(AgentLocation, CalendarEdits, GmailChanges) else List(AgentLocation))
+      == Consents({ gmailChanges: on, calendarEdits: on })
 
 pure def alwaysTheAgentIsAllowedWhatThePhoneLastReadOrSaved(s: Preferences): bool =
   (s.document.read.status == R::Loaded implies s.agentGoogle == consentOf(s.shares))
@@ -477,7 +482,7 @@ pure def alwaysASaveBuildsOnWhatWasRead(s: Preferences): bool =
   T::busy(s.saving) implies s.document.read.status == R::Loaded
 ```
 
-### A change takes effect when the phone saved it; otherwise, or when the phone does not answer in time, Alpha says it was not saved and nothing changes
+### A change takes effect when the phone saved it; when the phone refuses it, Alpha says it was not saved and nothing changes; when the phone does not answer in time, Alpha says it was not saved and reads the device preferences again
 
 ```quint
 pure val saveValues = Set(1, 2)
@@ -490,7 +495,7 @@ pure def documentSaved(s: Preferences, save: int, ok: bool, by: Sender): Prefere
 
 pure def canGiveUpOnSaving(s: Preferences, now: int, by: Sender): bool = answers(by) and T::canGiveUp(s.saving, now)
 
-pure def giveUpOnSaving(s: Preferences, now: int, by: Sender): Preferences = { ...s, saving: T::answer(s.saving, false), notice: NotSaved }
+pure def giveUpOnSaving(s: Preferences, now: int, at: int, by: Sender): Changed = readAgain(at, { ...s, saving: T::answer(s.saving, false), notice: NotSaved })
 ```
 
 ### Every save of the device preferences ends
