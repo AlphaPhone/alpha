@@ -1,3 +1,4 @@
+import type { NotificationsNativePlugin, PendingNoticeTap } from "@elizaos/os-bridges";
 import { Effect } from "effect";
 import { type DigestResult, type WorkflowPhoneReview, workflowSha } from "@elizaos/plugin-workflow-client";
 import type { NativeDigestSnapshot } from "../../src/platform/hosted-digests.vibe";
@@ -85,6 +86,48 @@ type Prompt = PromptTiming & {
   timezone: string;
 };
 
+type PostApprovalNotice = Parameters<NotificationsNativePlugin["postWorkflowApproval"]>[0];
+
+export interface NativeApprovalNotices {
+  readonly posted: PostApprovalNotice[];
+  readonly consumed: string[];
+  readonly withdrawn: string[];
+  pending?: PendingNoticeTap;
+  tap(request: PostApprovalNotice): void;
+}
+
+export function nativeApprovalNotices(): NativeApprovalNotices {
+  return { posted: [], consumed: [], withdrawn: [], tap() {} };
+}
+
+// spec/app/workflows/approvals.md, "Story: Open the run a notice names"
+type WorkflowHostScope = { kind: "signedOut" } | { kind: "owned"; userId: string; organizationId: string; agentId: string; epoch: number };
+
+export const workflowNoticesHost = (scene: NativeApprovalNotices, scope: () => WorkflowHostScope): Faked => (emit) => {
+  scene.tap = (request) => {
+    scene.pending = { ...request.route, operationId: request.id, bindingHash: request.bindingHash, token: "tap-1", retained: true };
+    emit("pendingWorkflowTap", {});
+  };
+  return {
+    workflowApprovalScope: () => Promise.resolve(scope()),
+    workflowPresentationCapabilities: () => Promise.resolve({ protocol: 2 }),
+    noticeOwner: () => Promise.resolve({ withdrawn: 0, suspended: [] }),
+    postWorkflowApproval: (notice: PostApprovalNotice) => {
+      if (!/^[a-f0-9]{64}$/.test(notice.route.scope)) return Promise.reject(rejection("Invalid notice scope"));
+      if (!scene.posted.some(({ id }) => id === notice.id)) scene.posted.push(notice);
+      return Promise.resolve({ status: "succeeded" });
+    },
+    withdrawWorkflowApproval: ({ id }: { id: string }) => { scene.withdrawn.push(id); return Promise.resolve(); },
+    pendingWorkflowTap: () => Promise.resolve(scene.pending ?? {}),
+    consumeWorkflowTap: ({ token }: { token: string }) => {
+      if (scene.pending?.token !== token) return Promise.reject(rejection("Approval tap changed"));
+      delete scene.pending;
+      scene.consumed.push(token);
+      return Promise.resolve();
+    },
+  };
+};
+
 export interface NativeDigestScene {
   snapshot: NativeDigestSnapshot;
   incoming: readonly DigestResult[] | undefined;
@@ -139,6 +182,7 @@ export interface WorkflowsScene {
   failingPrompts: boolean;
   hosted?: { entries: DigestResult[]; reads: number; acknowledgements: string[] };
   nativeDigests?: NativeDigestScene;
+  nativeNotices?: NativeApprovalNotices;
 }
 
 export const workflowsScene = (): WorkflowsScene => ({
@@ -203,6 +247,13 @@ export function workflowRoutes(world: WorkflowsScene): Route[] {
       const prompt = world.prompts.get(url.pathname.slice("/api/triggers/".length));
       if (url.pathname.startsWith("/api/triggers/") && prompt !== undefined) return Response.json({ trigger: prompt });
       switch (url.pathname) {
+        case "/api/notifications": {
+          if (url.searchParams.get("category") !== "workflow" || url.searchParams.get("limit") !== "50") return;
+          return Response.json({ serviceStatus: "ready", notifications: world.run && world.stage === "Waiting" ? [{
+            category: "workflow", data: { kind: "approval", workflowId: record.id, runId: receipt.id, versionId: record.versionId,
+              proposalId: `${approvalNode}:0`, expiresAt: 60_000 },
+          }] : [] });
+        }
         case "/api/workflow/status": return Response.json({
           engine: "eliza-typed", status: "ready", manualSubmissionProtocol: 1, lifecycleMutationProtocol: 1,
           typedAuthoringProtocol: 1, typedScheduleProtocol: 1, metadataMutationProtocol: 1, approvalReceiptProtocol: 1,

@@ -257,7 +257,7 @@ effect function admittedHost(host: string, registered: readonly string[]) {
   if (!privacyAdmitted(written.privacy.secretSwap, written.privacy.piiSwap)) throw new Refused({ message: "the launch must ask eliza's privacy service to swap secrets and personal details" })
   if (!googleAdmitted(written.google.gmailChanges, written.google.calendarEdits)) throw new Refused({ message: "the launch consents to Gmail changes or calendar edits the spec does not" })
   if (!viewsAdmitted(written.views.map(({ id, label, path, aliases }) => ({ id, label, path, aliases: aliases ?? [] })))) {
-    throw new Refused({ message: "the launch must name Home and every Alpha app but Notes as a view, in the phone's order (spec/agent/index.md)" })
+    throw new Refused({ message: "the launch must name Home and every Alpha app but Notes and Browser as a view, in the phone's order (spec/agent/index.md)" })
   }
   const document = JSON.stringify({
     schema: 1, character, policy: { actions: { allowed: policy.actions.allowed }, plugins: policy.plugins },

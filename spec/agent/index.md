@@ -230,15 +230,17 @@ pure def proposalsAdmitted(loaded: List[str], allowed: List[str]): bool =
   deviceActionModules.every(m => loaded.includes(m)) and allowed.includes(proposalAction)
 ```
 
-### The launch names Home and every Alpha app but Notes as a view the agent may show, by the id the phone opens it by
+### The launch names Home and every Alpha app but Notes and Browser as a view the agent may show, by the id the phone opens it by
 
 The old phone opened any of its apps, and Home, when the owner asked.
 eliza's views module declares, once at boot, the views of the plugins
 loaded before it and the launch's own `views` (`spec/agent/views.md` in
 eliza); its VIEWS action prepares a view only by a name declared there.
 Alpha's product plugin loads after every listed module, so a view it
-declared would never be seen, and Notes is `@elizaos/plugin-notes`'s own
-view. So the host file names Home and Alpha's other apps, in the order the
+declared would never be seen. Notes is `@elizaos/plugin-notes`'s own view
+and Browser is `@elizaos/plugin-browser`'s, with the commands it grants the
+agent, and a launch view may not replace a plugin's view, so the agent
+would refuse to start. So the host file names Home and Alpha's other apps, in the order the
 phone lists them (`apps/app/src/shell/order.ts`), and eliza's agent service
 writes them into the launch (`spec/os/agentService/config.md`). Each id is
 the app's name in lower case, which the phone's renderer opens as that app.
@@ -261,7 +263,6 @@ pure val launchViews: List[LaunchView] = List(
   { id: "calendar", label: "Calendar", path: "/calendar", aliases: List() },
   { id: "clock", label: "Clock", path: "/clock", aliases: List("alarms", "timers", "stopwatch", "world clock") },
   { id: "reminders", label: "Reminders", path: "/reminders", aliases: List("reminder", "to-do", "todo", "tasks") },
-  { id: "browser", label: "Browser", path: "/browser", aliases: List() },
   { id: "camera", label: "Camera", path: "/camera", aliases: List() },
   { id: "photos", label: "Photos", path: "/photos", aliases: List() },
   { id: "maps", label: "Maps", path: "/maps", aliases: List() },
@@ -325,8 +326,10 @@ pure val pageRoutes: List[Route] = List(
   { method: Post, path: "/api/conversations/{id}/messages", stream: false },
   { method: Post, path: "/api/conversations/{id}/messages/stream", stream: true },
   { method: Post, path: "/api/conversations/{id}/fork", stream: false },
-  { method: Post, path: "/api/turns/{roomId}/abort", stream: false },
   { method: Post, path: "/api/turns/warm", stream: false },
+  { method: Post, path: "/api/turns/{roomId}/abort", stream: false },
+  { method: Post, path: "/api/views/interact-claim", stream: false },
+  { method: Post, path: "/api/views/interact-result", stream: false },
   { method: Get, path: "/api/client-devices/capabilities", stream: false },
   { method: Post, path: "/api/client-devices/register", stream: false },
   { method: Get, path: "/api/client-devices/context", stream: false },
@@ -527,6 +530,8 @@ pure val pageQueries: List[RequestQuery] = List(
   { method: Get, path: "/api/lifeops/calendar/feed", key: "timeMin", kind: AnyQuery, value: "", example: "2026-11-24T00:00:00.000Z" },
   { method: Get, path: "/api/lifeops/calendar/feed", key: "timeMax", kind: AnyQuery, value: "", example: "2026-11-25T00:00:00.000Z" },
   { method: Get, path: "/api/lifeops/calendar/feed", key: "timeZone", kind: AnyQuery, value: "", example: "America/New_York" },
+  { method: Get, path: "/api/notifications", key: "category", kind: FixedQuery, value: "workflow", example: "workflow" },
+  { method: Get, path: "/api/notifications", key: "limit", kind: FixedQuery, value: "50", example: "50" },
   { method: Get, path: "/api/approvals", key: "state", kind: PatternQuery, value: "pending", example: "pending" },
   { method: Get, path: "/api/approvals", key: "limit", kind: PatternQuery, value: "50", example: "50" },
   { method: Get, path: "/api/scheduled-tasks", key: "ownerVisibleOnly", kind: FixedQuery, value: "1", example: "1" },

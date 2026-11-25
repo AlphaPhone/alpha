@@ -3,14 +3,27 @@ import type { ReminderItemRecord, ReminderListRecord, ReminderPriority, Reminder
 import type { Priority, SmartView, SortKey } from "../../gen/app__reminders.ts";
 import type { Repeat } from "../../gen/app__reminders__recurrence.ts";
 import { externalStore } from "../runtime/store.ts";
-import { civilDayFromString, civilDayNumber, dueInstantMs } from "./recurrence.ts";
+import { civilDayFromString, civilDayNumber, dueInstantMs, nextFutureOccurrence } from "./recurrence.ts";
 
-/** Keep the actual completed due instant, including when a repeat immediately moves on. @throws {never} */
-export function withReminderCompletion(item: ReminderItemRecord, completedAtMs: number): ReminderItemRecord {
+function withReminderCompletion(item: ReminderItemRecord, completedAtMs: number, skippedDates = 0): ReminderItemRecord {
   const dueAtMs = dueInstantMs(item.dueDate, item.dueMinute);
   if (dueAtMs === null) return item;
-  const record = { revision: item.revision, dueAtMs, completedAtMs };
+  const record = { revision: item.revision, dueAtMs, completedAtMs, ...(skippedDates > 0 ? { skippedDates } : {}) };
   return { ...item, history: [...(item.history ?? []), record].slice(-32) };
+}
+
+/** Land one actual occurrence and advance a repeat to its next future alert. @throws {never} */
+export function completeReminderOccurrence(item: ReminderItemRecord, now: number): ReminderItemRecord | undefined {
+  if (item.completed) return undefined;
+  const recurring = item.recurrence !== "none" && item.dueDate !== null;
+  const next = recurring && item.dueDate !== null ? nextFutureOccurrence(item.dueDate, item.recurrence, item.dueMinute, item.alertMinutes, now) : undefined;
+  if (recurring && next === undefined) return undefined;
+  const updated = {
+    ...withReminderCompletion(item, now, next?.skippedDates),
+    snoozedUntilMs: null, revision: item.revision + 1, updatedAtMs: now,
+  };
+  if (next === undefined) return { ...updated, completed: true, completedAtMs: now };
+  return { ...updated, dueDate: next.dueDate, subtasks: item.subtasks.map((row) => ({ ...row, done: false })), completedAtMs: null, notifiedAtMs: null };
 }
 
 /** Filter parameters applied to a reminder list view. */

@@ -346,7 +346,9 @@ async function handleRemindersManage(
     const items = queryReminders(store, params, timeZone);
     const nowMs = store.now();
     const lines = items.map((item) => `- ${item.title}${formatDueSummary(item, nowMs, timeZone)}${item.flagged ? " [flagged]" : ""}${item.priority !== "none" ? ` [${item.priority}]` : ""} (${item.id})`);
-    return { success: true, text: lines.length === 0 ? "No matching reminders." : `Reminders:\n${lines.join("\n")}`, data: { op, items, lists: store.getReminders().lists } };
+    return { success: true, text: lines.length === 0 ? "No matching reminders." : `Reminders:
+${lines.join("
+")}`, data: { op, items, lists: store.getReminders().lists, readOnlyOperation: true } };
   }
   if (op === "create") {
     const title = readString(params, "title");
@@ -447,27 +449,27 @@ export function remindersAction(store: AlphaAppsStore, timeZone: string): AgentA
   const action: AgentAction = {
     name: "REMINDERS_MANAGE",
     similes: ["MANAGE_REMINDERS", "ALPHA_REMINDERS", "REMINDER_LISTS"],
-    description: "The owner's reminders in Alpha's Reminders app: set one (it is saved, shows in Reminders and fires at its due time), or list, query, update, complete, reopen, snooze, flag, move or delete one, manage custom lists, and add or toggle subtasks.",
+    description: "Alpha Reminders app: items (due reminders fire on time), custom lists, subtasks, flags, priorities, smart views (use OWNER_REMINDERS for scheduled nudge/escalation reminders).",
     parameters: [
       {
-        name: "op", description: "What to do: list or query reminders, create, update, complete, reopen, snooze, flag, move or delete one, add or toggle a subtask, or create, rename or delete a list.", required: true,
+        name: "op", description: "Op.", required: true,
         schema: { type: "string", enum: ["list", "query", "create", "update", "complete", "reopen", "snooze", "flag", "move", "delete", "add_subtask", "toggle_subtask", "create_list", "rename_list", "delete_list"] },
       },
-      { name: "title", description: "The reminder's title to create one; for other operations, the title of the reminder to act on.", required: false, schema: { type: "string" } },
-      { name: "id", description: "The reminder's id, as the Reminders context lists it, to act on one reminder.", required: false, schema: { type: "string" } },
-      { name: "newTitle", description: "A new title for update.", required: false, schema: { type: "string" } },
-      { name: "notes", description: "The reminder's notes.", required: false, schema: { type: "string" } },
-      { name: "dueDate", description: "The day it is due, as YYYY-MM-DD in the owner's time zone.", required: false, schema: { type: "string" } },
-      { name: "dueMinute", description: "The time it is due, as minutes after midnight in the owner's time zone (6 PM is 1080).", required: false, schema: { type: "integer", minimum: 0, maximum: 1439 } },
-      { name: "recurrence", description: "How it repeats.", required: false, schema: { type: "string", enum: ["none", "daily", "weekdays", "weekly", "monthly", "yearly"] } },
-      { name: "priority", description: "Its priority.", required: false, schema: { type: "string", enum: ["none", "low", "medium", "high"] } },
-      { name: "flagged", description: "Whether it is flagged.", required: false, schema: { type: "boolean" } },
-      { name: "listName", description: "The list to act on: the list to put a new reminder in or to show, the destination for move, or the current name of the list for rename_list or delete_list.", required: false, schema: { type: "string" } },
-      { name: "name", description: "The new list's name for create_list, or the new name for rename_list.", required: false, schema: { type: "string" } },
-      { name: "view", description: "Which reminders to list.", required: false, schema: { type: "string", enum: ["all", "today", "scheduled", "flagged", "overdue", "completed"] } },
-      { name: "query", description: "Text to search reminder titles and notes for.", required: false, schema: { type: "string" } },
-      { name: "minutes", description: "Minutes to snooze for.", required: false, schema: { type: "integer", minimum: 1 } },
-      { name: "subtaskTitle", description: "A subtask's title, to add or toggle it.", required: false, schema: { type: "string" } },
+      { name: "title", description: "Title (create/target).", required: false, schema: { type: "string" } },
+      { name: "id", description: "ID from a prior list call.", required: false, schema: { type: "string" } },
+      { name: "newTitle", description: "New title (update).", required: false, schema: { type: "string" } },
+      { name: "notes", description: "Notes.", required: false, schema: { type: "string" } },
+      { name: "dueDate", description: "Due YYYY-MM-DD (owner zone).", required: false, schema: { type: "string" } },
+      { name: "dueMinute", description: "Min past midnight, owner zone (18:00=1080).", required: false, schema: { type: "integer", minimum: 0, maximum: 1439 } },
+      { name: "recurrence", description: "Repeat.", required: false, schema: { type: "string", enum: ["none", "daily", "weekdays", "weekly", "monthly", "yearly"] } },
+      { name: "priority", description: "Priority.", required: false, schema: { type: "string", enum: ["none", "low", "medium", "high"] } },
+      { name: "flagged", description: "Flagged.", required: false, schema: { type: "boolean" } },
+      { name: "listName", description: "List name (create/list/move/rename_list/delete_list).", required: false, schema: { type: "string" } },
+      { name: "name", description: "New name (create_list/rename_list).", required: false, schema: { type: "string" } },
+      { name: "view", description: "Filter view.", required: false, schema: { type: "string", enum: ["all", "today", "scheduled", "flagged", "overdue", "completed"] } },
+      { name: "query", description: "Search text.", required: false, schema: { type: "string" } },
+      { name: "minutes", description: "Snooze min.", required: false, schema: { type: "integer", minimum: 1 } },
+      { name: "subtaskTitle", description: "Subtask (add/toggle).", required: false, schema: { type: "string" } },
     ],
     validate: () => Promise.resolve(true),
     handler: async (runtime, _message, _state, options) => {

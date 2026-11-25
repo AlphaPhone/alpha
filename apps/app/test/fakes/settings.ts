@@ -1,5 +1,5 @@
 // spec/app/settings/index.md, "Story: Find a setting and come back"
-import type { DataResetPlugin, AndroidRoleStatus, ElizaPasswordsPlugin, ListenerStatus, PasswordEditorInput, PasswordEntrySummary, PasswordsStatus, LaunchTarget, LauncherAppsChange, NativeCrashEntry, SystemFacts, SystemHostPlugin, SystemPlugin, SystemSettingsPage, ApprovedJoinResult, ConnectOptions, ConnectivityResult, WiFiNetwork, WiFiPlugin } from "@elizaos/os-bridges";
+import type { DataResetPlugin, AndroidRoleStatus, ElizaPasswordsPlugin, ListenerStatus, PasswordEditorInput, PasswordEntrySummary, PasswordsStatus, LaunchTarget, LauncherAppsChange, MirrorChoice, MirrorHistoryRow, MirrorPolicyChange, MirrorStatus, NativeCrashEntry, SystemFacts, SystemHostPlugin, SystemPlugin, SystemSettingsPage, ApprovedJoinResult, ConnectOptions, ConnectivityResult, WiFiNetwork, WiFiPlugin } from "@elizaos/os-bridges";
 import type { PasswordProvider, PasswordProviderAction } from "../../src/platform/systemSettings.vibe";
 import type { PermissionState } from "@capacitor/core";
 import type { LauncherScene } from "./launcher.ts";
@@ -44,6 +44,9 @@ export interface SettingsScene {
   readonly passwords: PasswordEntrySummary[];
   readonly passwordEdits: Array<PasswordEditorInput | undefined>;
   readonly passwordRowActions: Array<{ choice: "copy" | "reveal" | "remove"; id: string; revision: number }>;
+  mirror: MirrorStatus;
+  readonly mirrorChoices: MirrorChoice[];
+  readonly mirrorHistory: MirrorHistoryRow[];
   autofill: PasswordsStatus["autofill"];
   autofillDestination: Awaited<ReturnType<ElizaPasswordsPlugin["openAutofillSettings"]>>["destination"];
   passwordProvider?: PasswordProvider;
@@ -78,6 +81,8 @@ export function settingsScene(): SettingsScene {
     launcher: true, version: "1.4.0",
     hostFacts: { androidRelease: "16", permissions: { Microphone: false, Calendar: true } },
     passwordsUnlocked: false, passwords: [], passwordEdits: [], passwordRowActions: [],
+    mirror: { revision: "policy-1", enabled: false, paused: false, accessGranted: true, connected: true, history: false, historyUnavailable: false, apps: [] },
+    mirrorChoices: [{ packageName: "example.reader", label: "News reader" }], mirrorHistory: [],
     autofill: { supported: true, selected: "none" }, autofillDestination: "autofill-picker",
     permissionRequests: [], permissionStates: {}, permissionReplies: {},
     gate: Promise.resolve(), grantsHome: true, opened: [], copied: [], refusesCopy: false, crashes: [], reset: { status: "cancelled", message: "Nothing was reset." }, reviews: [],
@@ -349,6 +354,33 @@ export function elizaNotices(scene: SettingsScene): Faked {
       if (id !== "opaque-reminders") throw rejection("This notification channel is no longer available");
       await page(scene, `channel ${id}`);
       return { status: "opened" };
+    },
+    crossAppStatus: async () => structuredClone(scene.mirror),
+    notificationApps: async () => ({ apps: structuredClone(scene.mirrorChoices) }),
+    setNotificationPolicy: async (requested: MirrorPolicyChange) => {
+      if (requested.expectedRevision !== scene.mirror.revision) throw rejection("changed");
+      const { enabled, history, apps } = requested;
+      const pinned = apps?.map(({ packageName, preview }) => {
+        const verified = scene.mirrorChoices.find((choice) => choice.packageName === packageName);
+        if (!verified) throw rejection("unavailable");
+        return { ...verified, preview, available: true };
+      });
+      scene.mirror = {
+        ...scene.mirror, revision: scene.mirror.revision + "-next",
+        enabled: enabled ?? scene.mirror.enabled, history: history ?? scene.mirror.history, apps: pinned ?? scene.mirror.apps,
+      };
+      scene.mirrorHistory.splice(0);
+      return structuredClone(scene.mirror);
+    },
+    resumeCrossApp: async ({ expectedRevision }: { expectedRevision: string }) => {
+      if (expectedRevision !== scene.mirror.revision) throw rejection("changed");
+      scene.mirror.paused = false;
+      return structuredClone(scene.mirror);
+    },
+    notificationHistory: async () => ({ items: structuredClone(scene.mirrorHistory) }),
+    clearNotificationHistory: async ({ expectedRevision }: { expectedRevision: string }) => {
+      if (expectedRevision !== scene.mirror.revision) throw rejection("changed");
+      scene.mirrorHistory.splice(0);
     },
     openNotificationAccess: async () => {
       await page(scene, "notification-access");

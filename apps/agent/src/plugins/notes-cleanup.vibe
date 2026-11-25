@@ -19,7 +19,10 @@ function owns(context: ModuleContext, scope: CleanupScope): boolean {
     && context.runtime.agentId === scope.agentId && context.epoch === scope.epoch
 }
 
-/** One resident launch may verify only the canonical receipt being confirmed by that native request. */
+/**
+ * One resident launch may verify only the canonical receipt being confirmed by that native request.
+ * @public main.vibe imports it by name in the generated host entry.
+ */
 export function makeNativeNotesCleanup(path: string) {
   const proving = new WeakMap<AbortSignal, NotesTrashRecordingCleanup>()
   const unavailable = { status: 409, body: { status: "unavailable" } }

@@ -36,7 +36,7 @@ final class AlphaMessagesComposerPort {
   AlphaMessagesComposerPort port = new AlphaMessagesComposerPort(activity, view);
   try {
    WebViewCompat.addWebMessageListener(view, "alphaMessagesComposer", Set.of(ORIGIN), (page, message, source, mainFrame, reply) -> {
-    if (page == view && mainFrame && packagedOrigin(source) && !activity.isAssistantSurface()) port.receive(message, reply);
+    if (page == view && mainFrame && packagedOrigin(source)) port.receive(message, reply);
    });
   } catch (RuntimeException unavailable) {
    android.util.Log.w("AlphaMessages", "The packaged composer port is unavailable");

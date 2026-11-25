@@ -170,6 +170,7 @@ module browser {
     rows(): Promise<readonly BrowserCapture[]>
     albums(): Promise<readonly BrowserAlbum[]>
     change(operation: BrowserChange, items: readonly BrowserCapture[]): Promise<readonly BrowserChangeRow[]>
+    emptyTrash(items: readonly BrowserCapture[]): Promise<readonly BrowserChangeRow[]>
     writeAlbum(request: BrowserAlbumWrite): Promise<boolean>
     shareFiles(items: readonly BrowserCapture[]): Promise<readonly File[] | undefined>
     share(files: readonly File[]): Promise<"opened" | "declined" | "unavailable">
@@ -321,8 +322,14 @@ module browser {
     } catch { return failed() }
   }
 
-  async function changeBrowserRows(operation: BrowserChange, items: readonly BrowserCapture[]): Promise<readonly BrowserChangeRow[]> {
-    const earlier = await inherited(items)
+  function combinedCaptures(raw: readonly unknown[], earlier: readonly BrowserCapture[]): readonly BrowserCapture[] {
+    const local = raw.filter(valid)
+    const present = new Set([...local, ...raw.filter(erased)].map((row) => row.id))
+    return [...local, ...earlier.filter((row) => !present.has(row.id))]
+  }
+
+  async function changeBrowserRows(operation: BrowserChange, items: readonly BrowserCapture[], entire = false): Promise<readonly BrowserChangeRow[]> {
+    const earlier = entire ? new Map((await earlierCaptures()).map((row) => [row.id, row])) : await inherited(items)
     const earlierErases: BrowserCapture[] = []
     const result = await libraryTransaction<BrowserChangeRow[]>([store, originals, albums], "readwrite", (tx, hold) => {
       const media = tx.objectStore(store)
@@ -330,37 +337,50 @@ module browser {
       const removed = new Set<string>()
       let pending = items.length
       hold(changed)
-      for (const expected of items) {
-        const read = media.get(expected.id)
-        read.onsuccess = () => {
-          const item = currentRow(read.result, expected, earlier)
-          const needsTrash = operation === "restore" || operation === "delete"
-          if (!matching(item, expected) || (item.trashedAt !== undefined) !== needsTrash) changed.push({ id: expected.id, status: "stale" })
-          else if (operation === "delete") {
-            if (item.id.startsWith(earlierPrefix)) {
-              media.put({ id: item.id, erased: true, pending: item } satisfies ErasedSource)
-              earlierErases.push(item)
-              changed.push({ id: item.id, status: "unverified" })
+      const applyReviewed = () => {
+        for (const expected of items) {
+          const read = media.get(expected.id)
+          read.onsuccess = () => {
+            const item = currentRow(read.result, expected, earlier)
+            const needsTrash = operation === "restore" || operation === "delete"
+            if (!matching(item, expected) || (item.trashedAt !== undefined) !== needsTrash) changed.push({ id: expected.id, status: "stale" })
+            else if (operation === "delete") {
+              if (item.id.startsWith(earlierPrefix)) {
+                media.put({ id: item.id, erased: true, pending: item } satisfies ErasedSource)
+                earlierErases.push(item)
+                changed.push({ id: item.id, status: "unverified" })
+              } else {
+                media.delete(item.id)
+                tx.objectStore(originals).delete(item.id)
+                removed.add(item.id)
+                changed.push({ id: item.id, status: "done" })
+              }
             } else {
-              media.delete(item.id)
-              tx.objectStore(originals).delete(item.id)
-              removed.add(item.id)
-              changed.push({ id: item.id, status: "done" })
+              const sourceRevision = item.id.startsWith(earlierPrefix) ? item.sourceRevision ?? item.revision : undefined
+              const next = operation === "favorite" || operation === "unfavorite"
+                ? { ...item, favorite: operation === "favorite", sourceRevision, revision: crypto.randomUUID() }
+                : { ...item, trashedAt: operation === "trash" ? Date.now() : undefined, sourceRevision, revision: crypto.randomUUID() }
+              media.put(next)
+              changed.push({ id: item.id, status: "done", item: next })
             }
-          } else {
-            const sourceRevision = item.id.startsWith(earlierPrefix) ? item.sourceRevision ?? item.revision : undefined
-            const next = operation === "favorite" || operation === "unfavorite"
-              ? { ...item, favorite: operation === "favorite", sourceRevision, revision: crypto.randomUUID() }
-              : { ...item, trashedAt: operation === "trash" ? Date.now() : undefined, sourceRevision, revision: crypto.randomUUID() }
-            media.put(next)
-            changed.push({ id: item.id, status: "done", item: next })
+            if (--pending === 0) pruneAlbumMembers(tx, removed)
           }
-          if (--pending === 0) pruneAlbumMembers(tx, removed)
+        }
+      }
+      if (!entire) applyReviewed()
+      else {
+        const read = media.getAll()
+        read.onsuccess = () => {
+          const raw: unknown[] = read.result
+          const current = new Map(combinedCaptures(raw, [...earlier.values()])
+            .filter((item) => item.trashedAt !== undefined).map((item) => [item.id, item]))
+          if (current.size === items.length && items.every((item) => matching(current.get(item.id), item))) applyReviewed()
+          else for (const { id } of items) changed.push({ id, status: "stale" })
         }
       }
     })
-    const completed = await finishEarlierErasures(earlierErases)
-    const settled = result.map((row) => completed.find((answer) => answer.id === row.id) ?? row)
+    const completed = new Map((await finishEarlierErasures(earlierErases)).map((answer) => [answer.id, answer]))
+    const settled = result.map((row) => completed.get(row.id) ?? row)
     if (settled.some((row) => row.status === "done" || row.status === "unverified") || earlierErases.length > 0) window.dispatchEvent(new Event(event))
     return settled
   }
@@ -492,6 +512,7 @@ module browser {
 
   export const browserLibrary: BrowserLibrary = {
     rows: browserCaptures, albums: browserAlbums, change: changeBrowserRows, writeAlbum: writeBrowserAlbum,
+    emptyTrash: (items) => changeBrowserRows("delete", items, true),
     shareFiles: browserShareFiles, share: browserShare,
   }
 
@@ -656,10 +677,7 @@ module browser {
       let raw = await readRows()
       const interrupted = raw.filter(erased).flatMap((row) => row.pending === undefined ? [] : [row.pending])
       if (interrupted.length > 0 && (await finishEarlierErasures(interrupted)).some((row) => row.status !== "unverified")) raw = await readRows()
-      const local = raw.filter(valid)
-      const present = new Set([...local, ...raw.filter(erased)].map((row) => row.id))
-      const earlier = await earlierCaptures()
-      return [...local, ...earlier.filter((row) => !present.has(row.id))]
+      return combinedCaptures(raw, await earlierCaptures())
     } finally { database.close() }
   }
 

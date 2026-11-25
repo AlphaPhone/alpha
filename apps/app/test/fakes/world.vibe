@@ -2,7 +2,7 @@
 import { TestClock } from "effect/testing"
 import { agentAt } from "../../src/platform/agent.vibe"
 import { cloudAt } from "../../src/platform/cloud.vibe"
-import { type Platform, pagePlatform, phonePlatform } from "../../src/platform/platform.vibe"
+import { type MessagingLayers, type Platform, pagePlatform, phonePlatform } from "../../src/platform/platform.vibe"
 import { plugIn } from "./phone.ts"
 import { plugins } from "./plugins.ts"
 import { type Answering, fetched } from "./routes.ts"
@@ -30,9 +30,15 @@ function clockAt(world: Scene) {
  * browser's fetch, answered by the fake services' routes, or, where `world.phone`, the plugins Android gives the page,
  * over the same routes.
  */
-export function fakeWorld(world: Scene, { agent, cloud } = services(world)): Layer.Layer<Platform | TestClock.TestClock> {
+export function fakeWorld(world: Scene, options?: Partial<ReturnType<typeof services>> & MessagingLayers): Layer.Layer<Platform | TestClock.TestClock> {
+  const defaults = services(world)
+  const agent = options?.agent ?? defaults.agent
+  const cloud = options?.cloud ?? defaults.cloud
+  const messaging = options?.slack || options?.telegram || options?.sessions
+    ? { slack: options.slack, telegram: options.telegram, sessions: options.sessions }
+    : undefined
   const platform = world.phone
-    ? Layer.provide(phonePlatform(), Layer.effectDiscard(acquireRelease(sync(() => plugIn(plugins(world, { agent, cloud }))), (unplug) => sync(unplug))))
-    : pagePlatform(Layer.provide(agentAt("http://agent.test"), fetching(agent)), Layer.provide(cloudAt("http://cloud.test"), fetching(cloud)))
+    ? Layer.provide(phonePlatform(messaging), Layer.effectDiscard(acquireRelease(sync(() => plugIn(plugins(world, { agent, cloud }))), (unplug) => sync(unplug))))
+    : pagePlatform(Layer.provide(agentAt("http://agent.test"), fetching(agent)), Layer.provide(cloudAt("http://cloud.test"), fetching(cloud)), messaging)
   return Layer.provideMerge(platform, clockAt(world))
 }

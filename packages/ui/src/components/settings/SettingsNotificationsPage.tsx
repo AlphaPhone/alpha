@@ -1,18 +1,31 @@
+import type { ReactNode } from "react";
 import { Bell, Radio, SlidersHorizontal } from "lucide-react";
+import { Banner } from "../Banner.tsx";
 import { ListGroup } from "../ListGroup.tsx";
 import { SettingsFactRow } from "./SettingsFactRow.tsx";
 import { SettingsAndroidRow } from "./SettingsAndroidRow.tsx";
 import { SettingsNavRow } from "./SettingsNavRow.tsx";
 import { SettingsPage } from "./SettingsPage.tsx";
+import { SettingsSwitchRow } from "./SettingsSwitchRow.tsx";
 import type { AndroidTold, Neighbour, Reading, SettingsAndroidProps } from "./vocabulary.ts";
 
 export type SettingsNotificationsPageProps = SettingsAndroidProps & {
+  /** The browser's own saved alert preference and its owner action. */
+  browserAlerts?: {
+    enabled?: boolean;
+    reading?: boolean;
+    saving?: boolean;
+    saveFailed?: boolean;
+    onChoose?: (enabled: boolean) => void;
+  };
   /** Whether Alpha's alerts are on, as the phone last said. */
   alerts: Reading;
   /** Do Not Disturb as Android reported it. */
   doNotDisturb?: Reading;
   /** Status of the phone's listener for other apps. */
   collection?: Reading;
+  /** Native notification collection is owned by the notices area. */
+  collectionPolicy?: ReactNode;
   /** The page can hand over to Android on an actual phone. */
   onPhone?: boolean;
   /** Alpha's alert channels, each with its own page in Android's settings. */
@@ -27,10 +40,21 @@ export type SettingsNotificationsPageProps = SettingsAndroidProps & {
 
 /**
  * Notifications: whether Alpha's notifications are on, Do Not Disturb, Android's page for them, each channel on its own
- * card, notification access, and the collection of other apps' notifications, which the notices area owns. Alerts are Android's: this page reads them and opens its pages.
+ * card, notification access, and the collection of other apps' notifications. The web shows its own saved Alerts choice.
  * @model spec/app/settings/facts.md
  */
-export function SettingsNotificationsPage({ alerts, doNotDisturb, collection, onPhone = true, channels, told, onBack, onHandOver, starting, onAndroid }: SettingsNotificationsPageProps) {
+export function SettingsNotificationsPage({ browserAlerts, alerts, doNotDisturb, collection, collectionPolicy, onPhone = true, channels, told, onBack, onHandOver, starting, onAndroid }: SettingsNotificationsPageProps) {
+  if (!onPhone) {
+    return (
+      <SettingsPage title="Notifications" onBack={onBack} backLabel="Back to General">
+        {browserAlerts?.saveFailed ? <Banner variant="warn">Couldn’t save alerts</Banner> : null}
+        <ListGroup>
+          <SettingsSwitchRow title="Alerts" checked={browserAlerts?.enabled === true} onCheckedChange={browserAlerts?.onChoose}
+            reading={browserAlerts?.reading} saving={browserAlerts?.saving} locked={browserAlerts?.enabled === undefined && !browserAlerts?.reading} />
+        </ListGroup>
+      </SettingsPage>
+    );
+  }
   const android = { starting, onAndroid };
   return (
     <SettingsPage title="Notifications" told={told} onBack={onBack} backLabel="Back to General">
@@ -44,13 +68,12 @@ export function SettingsNotificationsPage({ alerts, doNotDisturb, collection, on
           <SettingsAndroidRow target="alert-channel" channel={id} title={name} icon={<SlidersHorizontal />} {...android} />
         </ListGroup>
       ))}
-      {onPhone ? (
-        <ListGroup>
-          {collection ? <SettingsFactRow title="Other apps' notifications" icon={<Radio />} reading={collection} />
+      {collectionPolicy}
+      <ListGroup>
+        {collectionPolicy ? null : collection ? <SettingsFactRow title="Other apps' notifications" icon={<Radio />} reading={collection} />
             : <SettingsNavRow title="Other apps' notifications" icon={<Radio />} onOpen={onHandOver && (() => onHandOver("notification-collection"))} />}
-          <SettingsAndroidRow target="notification-access" title="Notification access" icon={<Bell />} {...android} />
-        </ListGroup>
-      ) : null}
+        <SettingsAndroidRow target="notification-access" title="Notification access" icon={<Bell />} {...android} />
+      </ListGroup>
     </SettingsPage>
   );
 }

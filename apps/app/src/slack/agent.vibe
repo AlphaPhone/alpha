@@ -1,0 +1,326 @@
+// spec/app/slack/agent.md, "Story: Let Alpha help across my Slack workspaces safely"
+import * as Agent from "../../gen/app__slack__agent.effect.vibe"
+import type { Actor, Effect as Out, Event, MutationTool, Pane, ReadTool } from "../../gen/app__slack__agent.effect.vibe"
+import * as Auth from "../../gen/app__slack__auth.effect.vibe"
+import * as Composer from "../../gen/app__slack__composer.effect.vibe"
+import * as Conversation from "../../gen/app__slack__conversation.effect.vibe"
+import * as Notices from "../../gen/app__slack__notices.effect.vibe"
+import * as Workspaces from "../../gen/app__slack.effect.vibe"
+import type { MessagingSessions } from "../platform/messaging.vibe"
+import type { Slack } from "../platform/slack.vibe"
+import { type Job, answer, contained, reacting, run, untimed } from "../runtime/reactor.vibe"
+import {
+  SlackLedger,
+  channelTitleOf,
+  runChannelAction,
+  runWorkspaceCall,
+  userNameOf,
+} from "./ledger.vibe"
+
+/** One bounded, secret-free message entry included in an ambient Slack context snapshot for Ask Alpha. */
+export interface SlackAmbientMessage {
+  readonly ts: string
+  readonly sender: string
+  readonly text: string
+}
+
+/** Bounded, secret-free ambient screen context emitted to Ask Alpha when allowed and non-sensitive. */
+export interface SlackAmbientSnapshot {
+  readonly workspaceId: string
+  readonly workspaceName: string
+  readonly pane: Pane
+  readonly channelId?: string
+  readonly channelName?: string
+  readonly threadTs?: string
+  readonly messages: ReadonlyArray<SlackAmbientMessage>
+  readonly charCount: number
+}
+
+/** Discriminated request union executed on behalf of Ask Alpha across connected Slack workspaces. */
+export type SlackAgentRequest =
+  | { readonly type: "SlackListWorkspaces" }
+  | { readonly type: "SlackListConversations"; readonly workspace: number; readonly limit?: number }
+  | { readonly type: "SlackReadMessages"; readonly workspace: number; readonly channel: number; readonly threadTs?: number; readonly limit?: number }
+  | { readonly type: "SlackSearchMessages"; readonly workspace: number; readonly query: string; readonly limit?: number }
+  | { readonly type: "SlackListMentionsAndThreads"; readonly workspace: number; readonly limit?: number }
+  | { readonly type: "SlackGetConversationInfo"; readonly workspace: number; readonly channel: number }
+  | { readonly type: "SlackDraftMessage"; readonly turn: number; readonly workspace: number; readonly channel: number; readonly threadTs?: number; readonly broadcast?: boolean; readonly text: string }
+  | { readonly type: "SlackEditMessage"; readonly turn: number; readonly workspace: number; readonly channel: number; readonly ts: number; readonly text: string }
+  | { readonly type: "SlackDeleteMessage"; readonly turn: number; readonly workspace: number; readonly channel: number; readonly ts: number }
+  | { readonly type: "SlackReact"; readonly turn: number; readonly workspace: number; readonly channel: number; readonly ts: number; readonly emoji: string; readonly add: boolean }
+  | { readonly type: "SlackMarkRead"; readonly turn: number; readonly workspace: number; readonly channel: number; readonly ts?: number }
+  | { readonly type: "SlackMuteChannel"; readonly turn: number; readonly workspace: number; readonly channel: number; readonly muted: boolean }
+
+/** Outcome returned by `executeSlackAgentRequest`. */
+export type SlackAgentResult =
+  | { readonly ok: true; readonly kind: "read"; readonly data: unknown }
+  | { readonly ok: true; readonly kind: "draft-staged"; readonly workspace: number; readonly channel: number; readonly threadTs: number; readonly broadcast: boolean }
+  | { readonly ok: true; readonly kind: "proposal"; readonly proposal: Agent.Proposal }
+  | { readonly ok: false; readonly reason: string }
+
+function scrubSecrets(text: string): string {
+  return text.replace(/xox[a-z]-[A-Za-z0-9-]+/gu, "[redacted]")
+}
+
+effect function executeReadTool(
+  tool: ReadTool,
+  workspace: number,
+  channel: number,
+  threadTs: number,
+  limit: number,
+  query: string,
+): unknown!!(Slack | SlackLedger | MessagingSessions | Auth.Machine) {
+  const ledger = try SlackLedger
+  const bounded = Math.max(1, Math.min(limit, Agent.maxReadLimit))
+  if (tool === "SlackListWorkspaces") {
+    const auth = try (try Auth.Machine).get()
+    return ledger.connectedMetas(auth.connected.map((w) => w.workspace)).map((m) => ({
+      workspace: m.num, teamId: m.teamId, name: m.name, ownerUserId: m.ownerUserId,
+    }))
+  }
+  if (tool === "SlackListConversations" || tool === "SlackListMentionsAndThreads") {
+    const res = try runWorkspaceCall(workspace, (slack, token) =>
+      slack.listConversations(token, { types: "public_channel,private_channel,im,mpim", excludeArchived: true, limit: bounded }))
+    if (!res.ok) return { error: "read_failed" }
+    const ownerId = ledger.workspaceMeta(workspace)?.ownerUserId ?? ""
+    const list = tool === "SlackListMentionsAndThreads"
+      ? res.value.channels.filter((ch) => (ch.latest?.text ?? "").includes(`<@${ownerId}>`) || (ch.latest?.reply_count ?? 0) > 0)
+      : res.value.channels
+    return list.slice(0, bounded).map((ch) => ({
+      channel: ledger.channelNum(workspace, ch.id), id: ch.id, name: ch.name,
+      unread: ch.unread_count_display ?? ch.unread_count ?? 0, muted: Boolean(ch.is_muted),
+    }))
+  }
+  if (tool === "SlackSearchMessages") {
+    const res = try runWorkspaceCall(workspace, (slack, token) => slack.searchMessages(token, query, { page: 1, count: bounded }))
+    if (!res.ok) return { error: "search_failed" }
+    return res.value.messages.matches.slice(0, bounded).map((m) => ({
+      ts: m.ts, channelId: m.channel.id, channelName: m.channel.name, user: m.username, text: scrubSecrets(m.text),
+    }))
+  }
+  const channelId = ledger.channelId(workspace, channel)
+  if (channelId === undefined) return { error: "channel_not_found" }
+  if (tool === "SlackGetConversationInfo") {
+    const res = try runWorkspaceCall(workspace, (slack, token) => slack.conversationInfo(token, channelId))
+    if (!res.ok) return { error: "info_failed" }
+    const ch = res.value.channel
+    return { id: ch.id, name: ch.name, topic: ch.topic?.value ?? "", purpose: ch.purpose?.value ?? "", muted: Boolean(ch.is_muted) }
+  }
+  const threadStr = threadTs > 0 ? ledger.tsStr(workspace, channel, threadTs) : undefined
+  const res = try runWorkspaceCall(workspace, (slack, token) =>
+    threadStr !== undefined ? slack.replies(token, channelId, threadStr, { limit: bounded }) : slack.history(token, channelId, { limit: bounded }))
+  if (!res.ok) return { error: "history_failed" }
+  const users = ledger.usersOf(workspace)
+  return res.value.messages.slice(0, bounded).map((m) => ({
+    ts: m.ts, sender: userNameOf(users, m.user), text: scrubSecrets(m.text), threadTs: m.thread_ts,
+  }))
+}
+
+effect function stageDraftInComposer(
+  workspace: number,
+  channel: number,
+  threadTs: number,
+  broadcast: boolean,
+): void!!(Composer.Machine | SlackLedger) {
+  const composer = try Composer.Machine
+  const state = try composer.get()
+  const sameTarget = state.active.workspace === workspace && state.active.channel === channel && state.active.threadTs === threadTs
+  if (!sameTarget && Composer.canOpenTarget(state, workspace, channel, threadTs, "Device")) {
+    try contained(composer.send({ type: "openTarget", workspace, channel, threadTs }, "Device"), "Slack open target for Alpha draft")
+  }
+  const afterOpen = try composer.get()
+  if (Composer.canAgentDraft(afterOpen, untimed, "Agent")) {
+    try contained(composer.send({ type: "agentDraft", now: untimed }, "Agent"), "Slack stage Alpha draft")
+  }
+  const afterDraft = try composer.get()
+  if (broadcast && threadTs > 0 && Composer.canToggleBroadcast(afterDraft, true, "Owner")) {
+    try contained(composer.send({ type: "toggleBroadcast", on: true }, "Owner"), "Slack stage broadcast")
+  }
+}
+
+effect function applyApprovedMutation(
+  turn: number,
+  workspace: number,
+  channel: number,
+  ts: number,
+  tool: MutationTool,
+): Event!!(Slack | SlackLedger | MessagingSessions | Auth.Machine | Notices.Machine) {
+  const ledger = try SlackLedger
+  const payload = ledger.pendingAgentMutation()
+  const ownerId = ledger.workspaceMeta(workspace)?.ownerUserId ?? ""
+  if (!payload || payload.turn !== turn) return { type: "answered", attempt: turn, ok: false, known: true }
+  const tsStr = ts > 0 ? (ledger.tsStr(workspace, channel, ts) ?? payload.tsStr) : payload.tsStr
+  if (tool === "SlackEditMessage") {
+    if (!tsStr || payload.text === undefined) return { type: "answered", attempt: turn, ok: false, known: true }
+    const text = payload.text
+    const out = try runChannelAction(workspace, channel, (s, t, cid) => s.updateMessage(t, { channel: cid, ts: tsStr, text }), (r, _cid, st) => st.updateMessageText(workspace, channel, tsStr, r.text))
+    return { type: "answered", attempt: turn, ...out }
+  }
+  if (tool === "SlackDeleteMessage") {
+    if (!tsStr) return { type: "answered", attempt: turn, ok: false, known: true }
+    const out = try runChannelAction(workspace, channel, (s, t, cid) => s.deleteMessage(t, { channel: cid, ts: tsStr }), (_r, _cid, st) => st.removeMessage(workspace, channel, tsStr))
+    return { type: "answered", attempt: turn, ...out }
+  }
+  if (tool === "SlackReact") {
+    if (!tsStr || !payload.emoji) return { type: "answered", attempt: turn, ok: false, known: true }
+    const emoji = payload.emoji
+    const add = payload.add !== false
+    const out = try runChannelAction(workspace, channel, (s, t, cid) => (add ? s.addReaction(t, { channel: cid, timestamp: tsStr, name: emoji }) : s.removeReaction(t, { channel: cid, timestamp: tsStr, name: emoji })), (_r, _cid, st) => st.applyReaction(workspace, channel, tsStr, emoji, ownerId, add))
+    return { type: "answered", attempt: turn, ...out }
+  }
+  if (tool === "SlackMarkRead") {
+    const latest = tsStr ?? ledger.channelMessagesOf(workspace, channel).at(-1)?.ts
+    if (!latest) return { type: "answered", attempt: turn, ok: false, known: true }
+    const out = try runChannelAction(workspace, channel, (s, t, cid) => s.markRead(t, cid, latest), (_r, _cid, st) => st.setChannelRead(workspace, channel, latest))
+    return { type: "answered", attempt: turn, ...out }
+  }
+  let finalMuted = Boolean(payload.muted)
+  const out = try runChannelAction(workspace, channel, (s, t, cid) => s.setMute(t, cid, finalMuted), (r, _cid, st) => {
+    finalMuted = r.is_muted
+    st.setChannelMuted(workspace, channel, r.is_muted)
+  })
+  if (out.ok) try contained((try Notices.Machine).send({ type: "muteChannelChanged", channel, isMuted: finalMuted }), "Slack agent mute sync")
+  return { type: "answered", attempt: turn, ...out }
+}
+
+effect function readBackMutation(
+  ticket: number,
+  workspace: number,
+  channel: number,
+  ts: number,
+): Event!!(Slack | SlackLedger | MessagingSessions | Auth.Machine) {
+  const ledger = try SlackLedger
+  const channelId = ledger.channelId(workspace, channel)
+  const tsStr = ts > 0 ? ledger.tsStr(workspace, channel, ts) : undefined
+  if (channelId === undefined) return { type: "readBackAnswered", ticket, ok: true, applied: false }
+  const res = try runWorkspaceCall(workspace, (slack, token) => slack.history(token, channelId, { limit: 20 }))
+  if (!res.ok) return { type: "readBackAnswered", ticket, ok: false, applied: false }
+  const applied = tsStr === undefined ? true : res.value.messages.some((m) => m.ts === tsStr)
+  return { type: "readBackAnswered", ticket, ok: true, applied }
+}
+
+function carry(
+  fx: Out,
+): Job<Event, Slack | SlackLedger | MessagingSessions | Auth.Machine | Composer.Machine | Notices.Machine, [by: Actor]> {
+  return match (fx) {
+    when { tag: "RunReadTool", let tool, let workspace, let channel, let threadTs, let limit, let query }:
+      run("slack-agent-read", executeReadTool(tool, workspace, channel, threadTs, limit, query), "Device");
+    when { tag: "StageDraft", let workspace, let channel, let threadTs, let broadcast }:
+      run("slack-agent-draft", stageDraftInComposer(workspace, channel, threadTs, broadcast), "Device");
+    when { tag: "ProposeMutation" }:
+      run("slack-agent-propose", Effect.void, "Device");
+    when { tag: "ApplyMutation", let turn, let workspace, let channel, let ts, let tool }:
+      answer(`slack-agent-apply-${turn}`, applyApprovedMutation(turn, workspace, channel, ts, tool), { type: "answered", attempt: turn, ok: false, known: false }, "Device");
+    when { tag: "ReadBackMutation", let ticket, let workspace, let channel, let ts }:
+      answer(`slack-agent-rb-${ticket}`, readBackMutation(ticket, workspace, channel, ts), { type: "readBackAnswered", ticket, ok: false, applied: false }, "Device");
+    when { tag: "ReportOutcome", let turn, let told }:
+      run(`slack-agent-report-${turn}`, sync(() => { return told }), "Device");
+  }
+}
+
+/** Read the current bounded, secret-free Slack ambient screen context for Ask Alpha, or `undefined` when suppressed. */
+export const slackAmbientSnapshot: (SlackAmbientSnapshot | undefined)!!(Agent.Machine | SlackLedger) = effect {
+  const state = try (try Agent.Machine).get()
+  const ledger = try SlackLedger
+  const rawMessages = state.pane === "ThreadPane" && state.activeChannel > 0 && state.activeThreadTs > 0
+    ? ledger.threadMessagesOf(state.activeWorkspace, state.activeChannel, state.activeThreadTs)
+    : state.pane === "ChannelPane" && state.activeChannel > 0
+      ? ledger.channelMessagesOf(state.activeWorkspace, state.activeChannel)
+      : []
+  const users = ledger.usersOf(state.activeWorkspace)
+  const bounded: SlackAmbientMessage[] = []
+  let charCount = 0
+  for (const msg of rawMessages.slice(-Agent.maxAmbientMessages)) {
+    const remaining = Agent.maxAmbientChars - charCount
+    if (remaining <= 0) break
+    const cleanText = scrubSecrets(msg.text)
+    const text = cleanText.length > remaining ? cleanText.slice(0, remaining) : cleanText
+    charCount += text.length
+    bounded.push({ ts: msg.ts, sender: userNameOf(users, msg.user), text })
+  }
+  const decision = Agent.ambientContext(state, bounded.length, charCount)
+  if (decision.tag === "NoContext") return undefined
+  const meta = ledger.workspaceMeta(decision.workspace)
+  if (!meta) return undefined
+  const channel = decision.channel > 0 ? ledger.channelOf(decision.workspace, decision.channel) : undefined
+  const threadTs = decision.channel > 0 && decision.threadTs > 0 ? ledger.tsStr(decision.workspace, decision.channel, decision.threadTs) : undefined
+  return {
+    workspaceId: meta.teamId,
+    workspaceName: meta.name,
+    pane: decision.pane,
+    channelId: channel?.id,
+    channelName: channel ? channelTitleOf(channel, users, meta.ownerUserId) : undefined,
+    threadTs,
+    messages: bounded,
+    charCount: decision.charCount,
+  }
+}
+
+/** Execute an Ask Alpha Slack read, draft-staging, or mutation-proposal request through the `app__slack__agent` spec machine. */
+export effect function executeSlackAgentRequest(
+  req: SlackAgentRequest,
+): SlackAgentResult!!(Agent.Machine | Composer.Machine | Slack | SlackLedger | MessagingSessions | Auth.Machine | Notices.Machine) {
+  const agent = try Agent.Machine
+  const ledger = try SlackLedger
+  const state = try agent.get()
+  if (req.type === "SlackDraftMessage") {
+    const threadTs = req.threadTs ?? 0
+    const broadcast = Boolean(req.broadcast)
+    const draftReq = { workspace: req.workspace, channel: req.channel, threadTs, broadcast }
+    if (!Agent.canStageDraft(state, req.turn, draftReq, "Agent")) return { ok: false, reason: "draft_not_allowed" }
+    ledger.setStagedAlphaDraft({ workspace: req.workspace, channel: req.channel, threadTs }, req.text)
+    try contained(agent.send({ type: "stageDraft", turn: req.turn, draftReq }, "Agent"), "Slack stage Alpha draft")
+    return { ok: true, kind: "draft-staged", workspace: req.workspace, channel: req.channel, threadTs, broadcast }
+  }
+  if (req.type === "SlackEditMessage" || req.type === "SlackDeleteMessage" || req.type === "SlackReact" || req.type === "SlackMarkRead" || req.type === "SlackMuteChannel") {
+    const ts = req.type === "SlackMuteChannel" ? 0 : (req.ts ?? 0)
+    const target = { workspace: req.workspace, channel: req.channel, ts, tool: req.type }
+    if (!Agent.canProposeMutation(state, req.turn, target, "Agent")) return { ok: false, reason: "proposal_not_allowed" }
+    ledger.setPendingAgentMutation({
+      turn: req.turn, workspace: req.workspace, channel: req.channel, ts, tool: req.type,
+      text: req.type === "SlackEditMessage" ? req.text : undefined,
+      emoji: req.type === "SlackReact" ? req.emoji : undefined,
+      add: req.type === "SlackReact" ? req.add : undefined,
+      muted: req.type === "SlackMuteChannel" ? req.muted : undefined,
+    })
+    const moved = agent.send({ type: "proposeMutation", turn: req.turn, target }, "Agent") catch () => undefined
+    if (!moved) return { ok: false, reason: "proposal_rejected" }
+    return { ok: true, kind: "proposal", proposal: moved.state.pending }
+  }
+  const readReq: Agent.ReadRequest = req.type === "SlackListWorkspaces"
+    ? { tool: "SlackListWorkspaces", workspace: 0, channel: 0, threadTs: 0, limit: Agent.maxReadLimit, query: "" }
+    : req.type === "SlackListConversations"
+      ? { tool: "SlackListConversations", workspace: req.workspace, channel: 0, threadTs: 0, limit: req.limit ?? Agent.maxReadLimit, query: "" }
+      : req.type === "SlackReadMessages"
+        ? { tool: "SlackReadMessages", workspace: req.workspace, channel: req.channel, threadTs: req.threadTs ?? 0, limit: req.limit ?? Agent.maxReadLimit, query: "" }
+        : req.type === "SlackSearchMessages"
+          ? { tool: "SlackSearchMessages", workspace: req.workspace, channel: 0, threadTs: 0, limit: req.limit ?? Agent.maxReadLimit, query: req.query }
+          : req.type === "SlackListMentionsAndThreads"
+            ? { tool: "SlackListMentionsAndThreads", workspace: req.workspace, channel: 0, threadTs: 0, limit: req.limit ?? Agent.maxReadLimit, query: "" }
+            : { tool: "SlackGetConversationInfo", workspace: req.workspace, channel: req.channel, threadTs: 0, limit: 1, query: "" }
+  if (!Agent.canRunRead(state, readReq, "Agent")) return { ok: false, reason: "read_not_allowed" }
+  try contained(agent.send({ type: "runRead", readReq }, "Agent"), "Slack agent read")
+  return { ok: true, kind: "read", data: try executeReadTool(readReq.tool, readReq.workspace, readReq.channel, readReq.threadTs, readReq.limit, readReq.query) }
+}
+
+/** Update the `app__slack__agent` screen state from current Slack auth, workspace, conversation, and privacy share. */
+export effect function syncSlackAgentScreen(
+  shareAllowed: boolean,
+): void!!(Agent.Machine | Auth.Machine | Workspaces.Machine | Conversation.Machine) {
+  const agent = try Agent.Machine
+  const auth = try (try Auth.Machine).get()
+  const ws = try (try Workspaces.Machine).get()
+  const conv = try (try Conversation.Machine).get()
+  const sensitive = Auth.sensitive(auth)
+  const pane: Pane = sensitive ? "AuthPane" : conv.channel > 0 && conv.threadTs > 0 ? "ThreadPane" : conv.channel > 0 ? "ChannelPane" : "ListPane"
+  const screen: Agent.Screen = pane === "AuthPane"
+    ? { pane: "AuthPane", workspace: 0, channel: 0, threadTs: 0 }
+    : { pane, workspace: conv.channel > 0 ? conv.workspace : ws.selected.workspace, channel: conv.channel > 0 ? conv.channel : 0, threadTs: pane === "ThreadPane" ? conv.threadTs : 0 }
+  const current = try agent.get()
+  if (Agent.canScreenUpdated(current, shareAllowed, screen, "Device")) {
+    try contained(agent.send({ type: "screenUpdated", shareAllowed, screen }, "Device"), "Slack agent screen sync")
+  }
+}
+
+/** Slack Ask Alpha integration machine layer. */
+export const slackAgent = reacting(Agent, { carry })

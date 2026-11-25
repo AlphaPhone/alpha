@@ -14,6 +14,7 @@ import { ownerAt } from "../platform/owner.vibe"
 import { type Job, answer, applying, reacting, run, started, together } from "../runtime/reactor.vibe"
 import { WorkflowsApi, type PromptRun, readPromptRuns } from "./api.vibe"
 import { Rows } from "./list.vibe"
+import { ApprovalTaps, currentTap } from "./native-approval.vibe"
 
 interface RunWords {
   readonly number: number
@@ -126,13 +127,14 @@ import { runReference } from handoff
 
 const selectedRow = (place: Listing.Place): number => place.tag === "ListingDetail" ? place.row : 0
 
-effect function reading(ticket: number, owner: number, after: number): Event!!(Agent | WorkflowsApi | Rows | HistoryWordsPort | Listing.Machine | Sheet.Machine) {
+effect function reading(ticket: number, owner: number, after: number): Event!!(Agent | WorkflowsApi | Rows | HistoryWordsPort | Listing.Machine | Sheet.Machine | ApprovalTaps) {
   const failed: Event = { type: "runsRead", ticket, ok: false, count: 0, more: false }
   const listing = try Listing.Machine
   const sheet = try Sheet.Machine
   const held = try Rows
   const history = try HistoryWordsPort
   const { workflow } = try WorkflowsApi
+  const tap = try (try ApprovalTaps).get()
   const current = try listing.get()
   const row = selectedRow(current.place)
   const selected = try held.row(owner, row)
@@ -143,7 +145,9 @@ effect function reading(ticket: number, owner: number, after: number): Event!!(A
     if (after > 0) return { all: (try history.view(owner, row)).all, newest: undefined }
     if (selected.kind === "Routine") {
       const { detail, executions } = try all({ detail: workflow.detail(selected.id), executions: workflow.executions(selected.id) }, { concurrency: 2 })
-      return { newest: detail, all: executions.map(workflowRun) }
+      const requested = tap?.route.workflowId === detail.id && !detail.removed && !executions.some((run) => run.id === tap.route.runId)
+        && (try currentTap(tap)) ? [tap.run, ...executions] : executions
+      return { newest: detail, all: requested.map(workflowRun) }
     }
     return { newest: undefined, all: (try readPromptRuns(selected.id)).map(promptRun) }
   } catch () => undefined
@@ -193,7 +197,7 @@ effect function output(ticket: number, number: number): Event!!(Agent | Workflow
   return { type: "outputRead", ticket, ok: true, text, status: statusOf(receipt) }
 }
 
-type Needs = Agent | WorkflowsApi | Rows | HistoryWordsPort | Listing.Machine | Sheet.Machine | RunVisibility | MediaHandoff | Toasts | Said
+type Needs = Agent | WorkflowsApi | Rows | HistoryWordsPort | Listing.Machine | Sheet.Machine | ApprovalTaps | RunVisibility | MediaHandoff | Toasts | Said
 
 effect function speak(id: number, runId: number): Event!!(Listing.Machine | HistoryWordsPort) {
   const listing = try (try Listing.Machine).get()
@@ -270,4 +274,36 @@ const followRun = started(effect {
   })))
 }, "following an open workflow run")
 
-export const history = together(reacting(Sheet, { carry }), remembered, followRow, followRun)
+// spec/app/workflows/approvals.md, "A tap reads the approval it names again from the agent, whatever the phone believed"
+const followTap = started(effect {
+  const tapShelf = try ApprovalTaps
+  const list = try Listing.Machine
+  const sheet = try Sheet.Machine
+  const rows = try Rows
+  const history = try HistoryWordsPort
+  const signals = Stream.merge(Stream.as(tapShelf.changes, undefined), Stream.merge(Stream.as(list.changes, undefined), Stream.as(sheet.changes, undefined)))
+  let entered = ""
+  try Stream.runForEach(signals, () => effect {
+    const tap = try tapShelf.get()
+    if (tap === undefined || tap.token === entered || !(try workflowsVisible())) return
+    const state = try list.get()
+    if (state.list.status !== "Loaded") return
+    const row = (try rows.view(state.owner)).rows.find((one) => one.kind === "Routine" && one.id === tap.route.workflowId && !one.removed)
+    if (row === undefined) return
+    if (state.place.tag === "ListingRows" && Listing.canOpenRow(state, row.number)) {
+      if (try currentTap(tap)) try ignore(list.send({ type: "openRow", row: row.number }))
+      return
+    }
+    if (state.place.tag !== "ListingDetail" || state.place.row !== row.number) return
+    const runSheet = try sheet.get()
+    if (runSheet.owner !== state.owner || runSheet.history.status !== "Loaded" || runSheet.runId !== 0) return
+    const current = try history.view(state.owner, row.number)
+    const run = current.all.find((one) => one.raw?.id === tap.route.runId && one.raw.versionId === tap.route.versionId)
+    if (run === undefined || !(try currentTap(tap))) return
+    const opened = sheet.send({ type: "openRun", runId: run.number, status: run.status, version: 1,
+      newest: current.workflow?.versionId === tap.route.versionId ? 1 : 2 }) catch () => undefined
+    if (opened !== undefined) entered = tap.token
+  })
+}, "showing the run named by an approval notification")
+
+export const history = together(reacting(Sheet, { carry }), remembered, followRow, followRun, followTap)

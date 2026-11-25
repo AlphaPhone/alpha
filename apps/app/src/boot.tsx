@@ -121,7 +121,12 @@ export function boot(platform: Layer.Layer<Platform>, mounts: readonly Mount[] =
       return true;
     }
     if (!(yield* signIn.confirmedAccount())) return false;
-    const access = yield* Access.Machine.use((permissions) => permissions.get());
+    const permissions = yield* Access.Machine;
+    const access = yield* permissions.get();
+    if (Access.canDone(access, "Owner")) {
+      yield* Effect.ignore(permissions.send({ type: "done" }, "Owner"));
+      return true;
+    }
     return !access.covered && (!access.begun || !Access.completed(access));
   }))));
   const stopped = (place: string, cause: unknown) => void root.runtime.runPromiseExit(Effect.logError(`the screen at ${place} stopped`, cause));

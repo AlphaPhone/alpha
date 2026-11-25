@@ -580,8 +580,10 @@ pure def sometimesGoneOnReturn(s: Calendar): bool = s.open == 0 and s.event.stat
 
 Search reads nothing new: it lists the rows the reads around the anchored
 day found whose title, place or notes hold every word typed, case-folded,
-and says which dates it covers. The Calendars sheet lists the agent's
-calendar and the phone's, each with its switch.
+and names the window from the first of last month through the end of next
+month. Empty standalone Search without a connected calendar says Not connected
+with or without a query. The Calendars sheet lists the agent's calendar and the
+phone's, each with its switch.
 
 ```quint
 pure def canOpenSearch(s: Calendar): bool = s.overlay == NoOverlay and s.open == 0 and s.reminder == 0 and s.front

@@ -109,7 +109,7 @@ export service Mail {
 }
 
 type ReadPage = { readonly found: number; readonly unread: number; readonly following: number; readonly shifted: boolean }
-type SearchPage = Omit<MailSearch, "messages"> & { readonly messages: ReadonlyArray<MailCard & { readonly draftId?: string }> }
+export type SearchPage = Omit<MailSearch, "messages"> & { readonly messages: ReadonlyArray<MailCard & { readonly draftId?: string }> }
 type Page = Kept & { readonly ticket: number; readonly credential: number; readonly history: string; readonly names: ReadonlyMap<number, string> }
 
 const sameSelection = (a: Selection, b: Selection): boolean => a.account === b.account && a.folder === b.folder && a.query === b.query
@@ -410,12 +410,18 @@ export effect function page(account: number, folder: Folder, query: string, curs
 
 /** The message `message` of `account`, read whole. */
 export effect function body(account: number, message: number): MailMessage!unknown!(Cloud | Mail) {
-  const { client } = try Cloud
   const ledger = try Mail
-  const grantId = ledger.grant(account)
-  if (grantId === undefined) throw missingGrant()
+  if (ledger.grant(account) === undefined) throw missingGrant()
   const id = ledger.gmailId(message, account)
   if (id === undefined) throw new CloudError({ failure: { tag: "CloudRefused", code: "NotFound", reason: "NoReason" }, cause: "no such message" })
+  return try bodyAt(account, id)
+}
+
+/** The body of a Gmail card already admitted to the account's list. */
+export effect function bodyAt(account: number, id: string): MailMessage!unknown!(Cloud | Mail) {
+  const { client } = try Cloud
+  const grantId = (try Mail).grant(account)
+  if (grantId === undefined) throw missingGrant()
   const found = try asked((signal) => client.gmailRead({ grantId, messageId: id }, { signal }))
   if (found.message.id !== id) throw new CloudError({ failure: { tag: "CloudRefused", code: "StaleRevision", reason: "NoReason" }, cause: "Gmail returned another message" })
   return found
@@ -502,9 +508,9 @@ export effect function operate(id: number, account: number, proposal: Proposal, 
 }
 
 /** Change one message's labels in Gmail, once, as `operate` does, at the history revision the list read it at. */
-export effect function relabel(id: number, account: number, message: number, kind: "mark-read" | "mark-unread" | "archive" | "unarchive" | "trash" | "untrash", at = 0): Changed!!(Cloud | Mail | Attempts) {
+export effect function relabel(id: number, account: number, message: number, kind: "mark-read" | "mark-unread" | "archive" | "unarchive" | "trash" | "untrash" | "star" | "unstar", at = 0, history?: string): Changed!!(Cloud | Mail | Attempts) {
   const ledger = try Mail
   const messageId = ledger.gmailId(message, account)
   if (messageId === undefined) return refusedBefore
-  return try operate(id, account, { kind, messageId, expectedHistoryId: ledger.card(message)?.metadata.historyId ?? "" }, { at })
+  return try operate(id, account, { kind, messageId, expectedHistoryId: history ?? ledger.card(message)?.metadata.historyId ?? "" }, { at })
 }

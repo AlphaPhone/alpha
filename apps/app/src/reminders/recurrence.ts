@@ -72,6 +72,22 @@ export function advanceDueDate(dueDate: string, recurrence: ReminderRecurrence):
   return formatCivilDate(nextOccurrence(parsed, dow, wireToSpec[recurrence]));
 }
 
+/** The next repeat whose alert or unalerted due time has not elapsed. @throws {never} */
+export function nextFutureOccurrence(dueDate: string, recurrence: ReminderRecurrence, dueMinute: number | null, alertMinutes: number | null, now: number): { readonly dueDate: string; readonly skippedDates: number } | undefined {
+  const elapsedAt = now + (alertMinutes ?? 0) * 60_000;
+  const elapsedDay = formatCivilDate(civilDateAt(elapsedAt));
+  let date = dueDate;
+  for (let skippedDates = 0; skippedDates < 40_000; skippedDates++) {
+    const next = advanceDueDate(date, recurrence);
+    if (next <= date) return undefined;
+    if (next > elapsedDay || (next === elapsedDay && (dueInstantMs(next, dueMinute) ?? 0) > elapsedAt)) {
+      return { dueDate: next, skippedDates };
+    }
+    date = next;
+  }
+  return undefined;
+}
+
 /** Shift a `CivilDate` forward by `offsetDays` days (non-negative). */
 export function addDaysToDate(date: CivilDate, offsetDays: number): CivilDate {
   const ms = Date.UTC(date.year, date.month - 1, date.day) + offsetDays * 86_400_000;

@@ -102,6 +102,14 @@ describe("Calendar without a connected account", () => {
     const timeline = document.querySelector('[aria-label="Calendar timeline"]');
     expect(timeline?.textContent).toContain("Not connected");
     expect(button("Open Calendar settings")).toBeDefined();
+    await chooseDate();
+    await until(alpha, runtime, View, (state) => state.overlay === "MonthDialog");
+    expect(document.querySelector<HTMLSelectElement>('select[aria-label="Calendar year"]')?.options).toHaveLength(101);
+    expect(button("Day")).toBeDefined();
+    expect(button("Schedule")).toBeDefined();
+    expect(button("Calendars")).toBeUndefined();
+    await hardware("back");
+    await until(alpha, runtime, View, (state) => state.overlay === "NoOverlay");
     await press("Open Calendar settings");
     await until(alpha, alpha.runtime, Settings, (state) => state.page === "CalendarApp");
     expect((await alpha.runtime.runPromise(Shell.use((shell) => shell.get()))).trail).toEqual(["Calendar", "Settings"]);
@@ -117,6 +125,34 @@ describe("Calendar without a connected account", () => {
     expect(titles()).toEqual(["Gym"]);
     expect(document.querySelector('[aria-label="Calendar timeline"]')?.textContent).not.toContain("Not connected");
     expect(button("Open Calendar settings")).toBeUndefined();
+  });
+
+  it("Shows the upcoming window and disconnection in standalone Schedule (spec/app/calendar/presentation.md, \"Schedule shows upcoming events and reminders through the end of next month\")", async () => {
+    const world = { ...morning(false), signedIn: false };
+    world.inbox.google = undefined;
+    const { alpha, runtime } = await onCalendar(world);
+    await until(alpha, runtime, View, (state) => state.front && state.owner === 0 && !state.connected);
+    await fromMonth("Schedule");
+    await until(alpha, runtime, View, (state) => state.layout === "Agenda" && state.overlay === "NoOverlay");
+    const schedule = document.querySelector('[aria-label="Schedule"][role="region"]');
+    expect(schedule?.textContent).toContain("Through Dec 31, 2026");
+    expect(schedule?.textContent).toContain("Not connected");
+    expect(schedule?.textContent).not.toContain("No upcoming events");
+  });
+
+  it("Shows the covered window and disconnection while searching standalone Calendar (spec/app/calendar/index.md, \"Search and the Calendars sheet open over the days, never over an open event\")", async () => {
+    const world = { ...morning(false), signedIn: false };
+    world.inbox.google = undefined;
+    const { alpha, runtime } = await onCalendar(world);
+    await until(alpha, runtime, View, (state) => state.front && state.owner === 0 && !state.connected);
+    await press("Search events");
+    await until(alpha, runtime, View, (state) => state.overlay === "Search");
+    const results = document.querySelector('[aria-label="Search results"][role="region"]');
+    expect(results?.textContent).toContain("Searching Oct 1, 2026 – Dec 31, 2026");
+    expect(results?.textContent).toContain("Not connected");
+    await fill("Search events", "Dentist");
+    expect(results?.textContent).toContain("Not connected");
+    expect(results?.textContent).not.toContain("No matching events");
   });
 
   it("Shows and completes the exact dated reminder in Calendar (spec/app/calendar/index.md, \"Story: See reminders among my events\")", async () => {
@@ -383,6 +419,30 @@ describe("Calendar without a connected account", () => {
     expect(button("Complete reminder occurrence")).toBeDefined();
     expect(world.reminders.items.find((item) => item.id === saved.id)).toMatchObject({ completed: false, dueDate: "2026-11-25", history: [
       { revision: saved.revision, dueAtMs: world.at(0, 9.5), completedAtMs: world.now },
+    ] });
+  });
+
+  it("Shows the elapsed repeat date skipped by a late completion (spec/app/reminders/index.md, \"Completing a reminder holds a five-second Undo snapshot and advances a repeating reminder to its next due day\")", async () => {
+    const world = morning(false);
+    const { alpha } = await open(world, only("view:Calendar"));
+    const runtime = calendar.runtime(alpha);
+    await openCalendar(alpha);
+    await until(alpha, alpha.runtime, Reminders, (state) => state.sync.status === "Loaded");
+    const saved = await alpha.runtime.runPromise(createReminderItem({
+      listId: DEFAULT_LIST_ID, title: "Read the agenda", dueDate: "2026-11-23", dueMinute: 510, alertMinutes: 0, recurrence: "daily",
+    }));
+    if (saved === undefined) throw new Error("Expected the daily reminder");
+    await until(alpha, alpha.runtime, Reminders, (state) => state.write.outcome === "Confirmed");
+    await press(dayButton(world.today - 1));
+    await until(alpha, runtime, View, (state) => state.anchor === world.today - 1 && state.reminders === 1);
+    await press(/^Read the agenda,/);
+    await press("Complete reminder occurrence");
+    await until(alpha, alpha.runtime, Reminders, (state) => state.write.outcome === "Confirmed");
+    const detail = document.querySelector('[data-alpha-subview="calendar-detail"]');
+    expect(detail?.textContent).toContain("Wednesday, Nov 25");
+    expect(detail?.textContent).toContain("1 elapsed repeat dates skipped");
+    expect(world.reminders.items.find((item) => item.id === saved.id)).toMatchObject({ dueDate: "2026-11-25", history: [
+      { dueAtMs: world.at(-1, 8.5), completedAtMs: world.now, skippedDates: 1 },
     ] });
   });
 });

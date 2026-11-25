@@ -29,11 +29,12 @@ export error ProfileRefused { file: string; problem: string }
 /** An address on this computer: loopback, by name or number. */
 const onThisComputer = /^(?:https?|wss?):\/\/(?:127\.0\.0\.1|localhost|\[::1\])(?::\d{1,5})?(?:\/|$)/
 
-/** Whether every adapter and provider `settings` names is on this computer: the mail and text messages loopback, each provider at a loopback address. */
+/** Whether every adapter and provider `settings` names is on this computer: the mail and text messages loopback, each provider at a loopback address (a Workers AI binding never is). */
 export function loopbackOnly(settings: EnvironmentProfile): boolean {
   const providers = [
     settings.billing?.apiUrl,
-    ...(settings.inference?.providers.map((provider) => provider.baseUrl) ?? []),
+    // A Workers AI provider is a Cloudflare binding, never on this computer.
+    ...(settings.inference?.providers.map((provider) => provider.kind === "workers-ai" ? `workers-ai:${provider.binding}` : provider.baseUrl) ?? []),
     settings.speech?.baseUrl, settings.speech?.realtimeUrl,
     settings.maps !== undefined && settings.maps.provider !== "none" ? settings.maps.baseUrl : undefined,
     ...(settings.google === undefined ? [] : [settings.google.accountsUrl, settings.google.tokenUrl, settings.google.revokeUrl, settings.google.jwksUrl, settings.google.apiUrl]),

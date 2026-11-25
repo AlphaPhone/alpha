@@ -237,6 +237,7 @@ export function Calendar({ runtime, alpha }: CalendarProps) {
   const deleting = useHeld(runtime).state;
   const canvas = useCanvas(runtime).state;
   const [width, setWidth] = useState(0);
+  const dateButtonRef = useRef<HTMLButtonElement>(null);
   const surface = useCallback((element: HTMLDivElement | null) => {
     if (!element) return;
     setWidth(element.clientWidth);
@@ -279,6 +280,8 @@ export function Calendar({ runtime, alpha }: CalendarProps) {
     && visible.length === 0 && dayReminders === 0;
   const searching = s.overlay === "Search";
   const listing = searching || s.layout === "Agenda";
+  const agendaFrom = dayStart(s.today);
+  const listWindow = { begin: readWindow(s.anchor).begin, end: dayStart(monthStart(s.anchor, 2)) };
   const largeAgenda = canvas?.agenda ?? false;
   const month = s.overlay === "MonthDialog" || s.overlay === "LayoutMenu";
   const anchorDate = dateOf(s.anchor);
@@ -328,7 +331,7 @@ export function Calendar({ runtime, alpha }: CalendarProps) {
   return (
     <div ref={surface} className="absolute inset-0 flex flex-col overflow-hidden leading-plain">
       <div className="relative shrink-0">
-      <CalendarHeader inert={pageCovered} title={title} expanded={month} onTitle={month ? send({ type: "closeOverlay" }) : view.can({ type: "openMonth" }) ? send({ type: "openMonth" }) : undefined}
+      <CalendarHeader inert={pageCovered} title={title} titleRef={dateButtonRef} expanded={month} onTitle={month ? send({ type: "closeOverlay" }) : view.can({ type: "openMonth" }) ? send({ type: "openMonth" }) : undefined}
         className="pr-2 pl-2" leading={alpha ? <AppBack alpha={alpha} className="size-13 [&_svg]:size-5.5" /> : null}>
         {month ? null : view.can({ type: "goToday" }) ? <CalendarHeaderAction aria-label="Today" onClick={send({ type: "goToday" })}><CalendarDays aria-hidden /></CalendarHeaderAction> : null}
         {!month && (searching || view.can({ type: "openSearch" })) ? (
@@ -339,7 +342,8 @@ export function Calendar({ runtime, alpha }: CalendarProps) {
       <Undo runtime={runtime} />
       </div>
       <div data-alpha-subview="calendar-list" inert={pageCovered} className="relative flex min-h-0 flex-1 flex-col">
-        {searching ? <Searching key={searchRound} runtime={runtime} reminders={reminders} query={query} onQuery={setQuery} open={openFound} /> : null}
+        {searching ? <Searching key={searchRound} runtime={runtime} rows={schedule} today={s.today} query={query} onQuery={setQuery} open={openFound}
+          range={listWindow} disconnected={disconnected} /> : null}
         <Access runtime={runtime} />
         {dayReminders > 0 && s.owner === 0 && !shown.present() && view.can({ type: "openAccountSettings" }) ? (
           <button type="button" aria-label="Open Calendar settings" onClick={send({ type: "openAccountSettings" })}
@@ -415,12 +419,13 @@ export function Calendar({ runtime, alpha }: CalendarProps) {
           </>
         )}
         {s.layout === "Agenda" && !searching ? (
-          <CalendarList aria-label="Schedule" range={`Through ${monthDayYear.format(readWindow(s.anchor).end - 1)}`}>
-            <Days rows={schedule.filter((row) => row.end > dayStart(s.today) && (!("record" in row) || row.begin < readWindow(s.anchor).end))} today={s.today} from={dayStart(s.today)} open={openRow} empty="No upcoming events" />
+          <CalendarList aria-label="Schedule" range={`Through ${monthDayYear.format(listWindow.end - 1)}`}>
+            <Days rows={schedule.filter((row) => row.end > agendaFrom && row.begin < listWindow.end)} today={s.today} from={agendaFrom} open={openRow}
+              empty={disconnected ? "Not connected" : "No upcoming events"} />
           </CalendarList>
         ) : null}
-        {month ? <Month runtime={runtime} reminders={reminders} /> : null}
       </div>
+      {month ? <Month runtime={runtime} reminders={reminders} restoreFocus={() => dateButtonRef.current?.focus({ preventScroll: true })} /> : null}
       <Calendars runtime={runtime} />
       {open === undefined ? null : <EventPage runtime={runtime} row={open} today={s.today} />}
       {openedReminder && alpha ? <ReminderPage alpha={alpha} runtime={runtime} row={openedReminder} onBack={send({ type: "closeReminder" })} /> : null}
@@ -472,13 +477,16 @@ function Invite({ runtime, row, today, onOpen }: CalendarProps & { row: Row; tod
 
 // spec/app/calendar/index.md, "The layout menu and the month dialog open over the days, never over an open event"; spec/app/calendar/index.md, "Picking a day in the week strip or the month dialog shows that day's timeline"
 /** The month dialog: a month's days to pick from, the layouts, and the calendars shown. */
-function Month({ runtime, reminders }: CalendarProps & { reminders: ReadonlyArray<DatedReminder> }) {
+function Month({ runtime, reminders, restoreFocus }: CalendarProps & { reminders: ReadonlyArray<DatedReminder>; restoreFocus: () => void }) {
   const view = useView(runtime);
   const [shift, setShift] = useState(0);
   const s = view.state;
   if (!s) return null;
   const first = monthStart(s.anchor, shift);
   const firstDate = dateOf(first);
+  const year = firstDate.getFullYear();
+  const firstYear = Math.max(1, year - 50);
+  const lastYear = Math.min(9999, year + 50);
   const lead = (firstDate.getDay() + 6) % 7;
   const cells = monthCells(monthStart(s.anchor, shift + 1) - first, lead);
   const visible = [...shown.visible(s.hidden, allows(s.access), s.connected), ...reminders];
@@ -498,11 +506,11 @@ function Month({ runtime, reminders }: CalendarProps & { reminders: ReadonlyArra
   };
   const selected = s.layout === "Columns" ? "Timeline" : s.layout;
   return (
-    <CalendarMonthPanel wide={s.wide} month={firstDate.getMonth()} year={firstDate.getFullYear()}
+    <CalendarMonthPanel wide={s.wide} month={firstDate.getMonth()} year={year}
       months={Array.from({ length: 12 }, (_, at) => ({ value: at, label: monthOnly.format(new Date(2000, at, 1)) }))}
-      years={Array.from({ length: 11 }, (_, at) => firstDate.getFullYear() - 5 + at).map((year) => ({ value: year, label: String(year) }))}
-      onMonth={(month) => toMonth(firstDate.getFullYear(), month)} onYear={(year) => toMonth(year, firstDate.getMonth())}
-      onPrevious={() => setShift(shift - 1)} onNext={() => setShift(shift + 1)} onClose={close}
+      years={Array.from({ length: lastYear - firstYear + 1 }, (_, at) => firstYear + at).map((option) => ({ value: option, label: String(option) }))}
+      onMonth={(month) => toMonth(year, month)} onYear={(nextYear) => toMonth(nextYear, firstDate.getMonth())}
+      onPrevious={() => setShift(shift - 1)} onNext={() => setShift(shift + 1)} onClose={close} onRestoreFocus={restoreFocus}
       days={Array.from({ length: cells }, (_, at) => first - lead + at).map((day) => ({
         key: day, date: dateOf(day).getDate(), label: cellLabel.format(dateOf(day)).replace(",", ""), outside: dateOf(day).getMonth() !== firstDate.getMonth(),
         today: day === s.today, selected: day === s.anchor, busy: visible.some((row) => onDay(row, day)),
@@ -513,7 +521,7 @@ function Month({ runtime, reminders }: CalendarProps & { reminders: ReadonlyArra
           <CalendarPill key={layout} pressed={selected === layout} disabled={selected !== layout && !(s.overlay === "LayoutMenu" ? view.can({ type: "chooseLayout", layout }) : view.can({ type: "closeOverlay" }))}
             onClick={selected === layout ? undefined : () => void choose(layout)()}>{label}</CalendarPill>
         ))}
-        <CalendarPill onClick={() => void calendars()}>Calendars</CalendarPill>
+        {s.owner > 0 || allows(s.access) ? <CalendarPill onClick={() => void calendars()}>Calendars</CalendarPill> : null}
       </div>
     </CalendarMonthPanel>
   );
@@ -663,21 +671,26 @@ function Undo({ runtime }: CalendarProps) {
 
 // spec/app/calendar/index.md, "Search and the Calendars sheet open over the days, never over an open event"
 /** Search over the days: a field under the header, and the events read whose title, place or notes hold every word typed. */
-function Searching({ runtime, reminders, query, onQuery, open }: CalendarProps & { reminders: ReadonlyArray<DatedReminder>; query: string; onQuery: (query: string) => void; open: (row: CalendarRow) => (() => void) | undefined }) {
+function Searching({ runtime, rows, today, query, onQuery, open, range, disconnected }: CalendarProps & {
+  rows: ReadonlyArray<CalendarRow>;
+  today: number;
+  query: string;
+  onQuery: (query: string) => void;
+  open: (row: CalendarRow) => (() => void) | undefined;
+  range: ReturnType<typeof readWindow>;
+  disconnected: boolean;
+}) {
   const view = useView(runtime);
-  const s = view.state;
-  if (!s) return null;
   const typed = query.toLocaleLowerCase().split(/\s+/).filter((word) => word !== "");
-  const range = readWindow(s.anchor);
-  const found = [...shown.visible(s.hidden, allows(s.access), s.connected), ...reminders.filter((row) => row.begin >= range.begin && row.begin < range.end)]
+  const found = rows
+    .filter((row) => row.end > range.begin && row.begin < range.end)
     .filter((row) => typed.every((word) => ("record" in row ? `${row.title} ${row.record.notes}` : `${row.title} ${row.place} ${row.notes}`).toLocaleLowerCase().includes(word)));
-  const read = s.phone.status === "Loaded" || s.google.status === "Loaded";
   return (
     <>
       <CalendarSearchBar aria-label="Search events" placeholder="Search events" autoFocus value={query} onChange={(event) => onQuery(event.target.value)}
         onClose={() => void view.send({ type: "closeOverlay" })} />
-      <CalendarList aria-label="Search results" range={read ? `Searching ${monthDayYear.format(range.begin)} – ${monthDayYear.format(range.end - 1)}` : undefined}>
-        <Days rows={found} today={s.today} from={range.begin} open={open} empty={typed.length > 0 ? "No matching events" : "No events"} />
+      <CalendarList aria-label="Search results" range={`Searching ${monthDayYear.format(range.begin)} – ${monthDayYear.format(range.end - 1)}`}>
+        <Days rows={found} today={today} from={range.begin} open={open} empty={disconnected ? "Not connected" : typed.length > 0 ? "No matching events" : "No events"} />
       </CalendarList>
     </>
   );

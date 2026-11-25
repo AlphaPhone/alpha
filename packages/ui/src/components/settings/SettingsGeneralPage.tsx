@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { AppWindow, Battery, Bell, Bluetooth, Lock, Phone, Plane, Signal, Smartphone, Sun, Volume2, Wifi, WifiCog } from "lucide-react";
+import { Battery, Bell, Bluetooth, Lock, Phone, Plane, Signal, SlidersHorizontal, Sun, Volume2, Wifi, WifiCog } from "lucide-react";
 import { ListGroup } from "../ListGroup.tsx";
 import { SettingsAndroidRow } from "./SettingsAndroidRow.tsx";
 import { SettingsNavRow } from "./SettingsNavRow.tsx";
@@ -31,7 +31,7 @@ export type SettingsGeneralPageProps = SettingsAndroidProps &
     onBack?: () => void;
     /** Opens a page that hangs from this one. */
     onOpen?: (page: SettingsPageName) => void;
-    /** Alpha runs on the phone itself, so Network, Carrier & SIM setup and Erase all data are on this page. */
+    /** Alpha runs on the phone itself, so Android settings and Erase all data can be offered here. */
     onPhone?: boolean;
     /** The phone's review of a reset is open. */
     reviewing?: boolean;
@@ -56,9 +56,8 @@ export type SettingsGeneralPageProps = SettingsAndroidProps &
 const themes = { system: "System", light: "Light", dark: "Dark" } as const;
 
 /**
- * General: Carrier & SIM setup on its own, its pages, the network as the phone reports it with the way into Android's
- * settings for it, who holds the Home and Assistant roles with Set as Home, default apps and the screen lock, Erase all
- * data, and the Phone page last, on an Alpha image.
+ * General: Carrier & SIM setup, Display and Notifications. On a phone, it also includes radio and device settings,
+ * role status, updates and reset. The Phone page appears last on an Alpha image.
  * Rows are numbered by slot, as on the first page.
  * @model spec/app/settings/index.md
  */
@@ -68,31 +67,29 @@ export function SettingsGeneralPage({ wifi, bluetooth, mobileData, theme, alerts
   return (
     <SettingsPage title="General" told={told} onBack={onBack} backLabel="Back to Settings" actions={actions}>
       {said ? <SettingsResetNotice said={said} /> : null}
-      {onPhone ? (
-        <ListGroup>
-          <SettingsNavRow title="Carrier & SIM setup" detail="IMEI, SIM status and activation" icon={<Smartphone />} onOpen={onOpen && (() => onOpen("carrier"))} {...at(13)} />
-        </ListGroup>
-      ) : null}
       <ListGroup>
-        <SettingsNavRow title="Display" icon={<Sun />} value={theme ? themes[theme] : undefined} onOpen={onOpen && (() => onOpen("display"))} {...at(0)} />
-        <SettingsNavRow title="Notifications" icon={<Bell />} detail={alerts ? <SettingsReading reading={alerts} /> : undefined} onOpen={onOpen && (() => onOpen("notifications"))} {...at(2)} />
-        <SettingsNavRow title="Sound" icon={<Volume2 />} onOpen={onOpen && (() => onOpen("sound"))} {...at(1)} />
-        <SettingsNavRow title="Battery" icon={<Battery />} onOpen={onOpen && (() => onOpen("battery"))} {...at(3)} />
+        <SettingsNavRow title="Carrier & SIM setup" detail="IMEI, SIM status and activation" className="pl-13.5" onOpen={onOpen && (() => onOpen("carrier"))} {...at(13)} />
       </ListGroup>
       <ListGroup>
-        {onPhone ? <SettingsNavRow title="Network" icon={<WifiCog />} onOpen={onOpen && (() => onOpen("network"))} {...at(12)} /> : null}
+        <SettingsNavRow title="Display" icon={<Sun />} value={theme ? <span className="mr-1.5">{themes[theme]}</span> : undefined} onOpen={onOpen && (() => onOpen("display"))} {...at(0)} />
+        <SettingsNavRow title="Notifications" icon={<Bell />} detail={alerts ? <SettingsReading reading={alerts} /> : undefined} onOpen={onOpen && (() => onOpen("notifications"))} {...at(2)} />
+      </ListGroup>
+      {onPhone ? <ListGroup>
+        <SettingsNavRow title="Sound" icon={<Volume2 />} onOpen={onOpen && (() => onOpen("sound"))} {...at(1)} />
+        <SettingsNavRow title="Battery" icon={<Battery />} onOpen={onOpen && (() => onOpen("battery"))} {...at(3)} />
+        <SettingsNavRow title="Network" icon={<WifiCog />} onOpen={onOpen && (() => onOpen("network"))} {...at(12)} />
         <SettingsAndroidRow target="wifi-networks" title="Wi-Fi" icon={<Wifi />} reading={wifi} {...android} {...at(5)} />
         <SettingsAndroidRow target="bluetooth-devices" title="Bluetooth" icon={<Bluetooth />} reading={bluetooth} {...android} {...at(6)} />
         <SettingsAndroidRow target="mobile-networks" title="Mobile data" icon={<Signal />} reading={mobileData} {...android} {...at(7)} />
         <SettingsAndroidRow target="airplane-mode" title="Airplane mode" icon={<Plane />} {...android} {...at(8)} />
-      </ListGroup>
-      <ListGroup>
-        {onPhone && home ? <SettingsRoleRow role="home" word={home} /> : null}
-        {onPhone && assistant ? <SettingsRoleRow role="assistant" word={assistant} /> : null}
+      </ListGroup> : null}
+      {onPhone ? <ListGroup>
+        {home ? <SettingsRoleRow role="home" word={home} /> : null}
+        {assistant ? <SettingsRoleRow role="assistant" word={assistant} /> : null}
         {requestingHome || onRequestHome ? <SettingsSetAsHomeRow requesting={requestingHome} onRequest={onRequestHome} {...at(14)} /> : null}
-        <SettingsAndroidRow target="default-apps" title="Default apps" icon={<AppWindow />} {...android} {...at(10)} />
+        <SettingsAndroidRow target="default-apps" title="Default apps" aria-label="Default apps in Android" icon={<SlidersHorizontal />} {...android} {...at(10)} />
         <SettingsAndroidRow target="screen-lock" title="Screen lock" icon={<Lock />} {...android} {...at(9)} />
-      </ListGroup>
+      </ListGroup> : null}
       {updates}
       {onPhone ? (
         <ListGroup>

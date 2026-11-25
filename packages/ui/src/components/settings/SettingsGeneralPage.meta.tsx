@@ -19,19 +19,22 @@ export const meta: ComponentMeta<SettingsGeneralPageProps> = {
     Reviewing: { onPhone: true, reviewing: true },
     "Not confirmed": { onPhone: true, said: "not-confirmed-its-you" },
     "Screen lock first": { onPhone: true, onErase, said: "set-a-screen-lock" },
-    "Android starting": { starting: { target: "wifi-networks" } },
+    "Android starting": { onPhone: true, starting: { target: "wifi-networks" } },
     "Can set as Home": { onPhone: true, home: "another", assistant: "alpha", onRequestHome },
     "Requesting Home": { onPhone: true, home: "another", assistant: "alpha", requestingHome: true },
     "Roles not on this phone": { onPhone: true, home: "not-on-this-phone", assistant: "not-on-this-phone" },
   },
   play: {
-    Default: async ({ canvasElement }: { canvasElement: HTMLElement }) => {
+    "On the phone": async ({ canvasElement }: { canvasElement: HTMLElement }) => {
       onOpen.mockClear();
       onAndroid.mockClear();
       const canvas = within(canvasElement);
       await userEvent.click(canvas.getByRole("button", { name: /^Display/ }));
+      await userEvent.click(canvas.getByRole("button", { name: "Network" }));
+      await userEvent.click(canvas.getByRole("button", { name: /^Carrier & SIM setup/ }));
       await userEvent.click(canvas.getByRole("button", { name: /Bluetooth/ }));
-      await expect([onOpen.mock.calls, onAndroid.mock.calls]).toEqual([[["display"]], [[{ target: "bluetooth-devices", channel: undefined }]]]);
+      await expect(onOpen.mock.calls).toEqual([["display"], ["network"], ["carrier"]]);
+      await expect(onAndroid.mock.calls).toEqual([[{ target: "bluetooth-devices", channel: undefined }]]);
     },
     "Can set as Home": async ({ canvasElement }: { canvasElement: HTMLElement }) => {
       onRequestHome.mockClear();
@@ -41,12 +44,13 @@ export const meta: ComponentMeta<SettingsGeneralPageProps> = {
     "Requesting Home": ({ canvasElement }: { canvasElement: HTMLElement }) => expect(within(canvasElement).queryByRole("button", { name: "Set as Home" })).toBeNull(),
     Reviewing: ({ canvasElement }: { canvasElement: HTMLElement }) => expect(within(canvasElement).queryByRole("button", { name: "Erase all data" })).toBeNull(),
     "Alpha image": ({ canvasElement }: { canvasElement: HTMLElement }) => expect(within(canvasElement).getByRole("button", { name: "Phone" })).toBeTruthy(),
-    "On the phone": async ({ canvasElement }: { canvasElement: HTMLElement }) => {
+    Default: async ({ canvasElement }: { canvasElement: HTMLElement }) => {
       onOpen.mockClear();
       const canvas = within(canvasElement);
-      await userEvent.click(canvas.getByRole("button", { name: "Network" }));
+      await expect(canvas.queryByRole("button", { name: "Network" })).toBeNull();
+      await expect(canvas.queryByRole("button", { name: /Bluetooth/ })).toBeNull();
       await userEvent.click(canvas.getByRole("button", { name: /^Carrier & SIM setup/ }));
-      await expect(onOpen.mock.calls).toEqual([["network"], ["carrier"]]);
+      await expect(onOpen.mock.calls).toEqual([["carrier"]]);
     },
   },
 };

@@ -4,6 +4,8 @@ const listed = {
   Phone: true,
   Messages: true,
   Inbox: true,
+  Telegram: true,
+  Slack: true,
   Calendar: true,
   Clock: true,
   Reminders: true,

@@ -362,8 +362,11 @@ restores the preceding reminder and its history together. Older reminders
 only show the completion information still present in their saved record.
 
 Completing an uncompleted repeating reminder keeps it active on the next due day
-while recording the prior due day in the Undo snapshot; completing a one-off
-reminder marks it completed; toggling a completed reminder reopens it.
+whose alert is after completion. A repeating reminder with no alert advances
+to its next future due time. Calendar shows how many elapsed repeat dates
+were skipped with the occurrence that was completed. Undo keeps the prior
+due day. Completing a one-off reminder marks it completed. Toggling a
+completed reminder reopens it.
 
 ```quint
 pure def canToggleComplete(s: Reminders, itemId: int, nextDueDay: int): bool =

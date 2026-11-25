@@ -5,6 +5,7 @@ import { pages } from "./settings/pages.vibe"
 import { preferences } from "./settings/preferences.vibe"
 import { shell } from "./shell/shell.vibe"
 import { toasts } from "./notices/toasts.vibe"
+import { browserAlerts } from "./notices/browserAlerts.vibe"
 import { haptics } from "./shell/haptics.vibe"
 import { canvas } from "./shell/canvas.vibe"
 import { focus } from "./shell/focus.vibe"
@@ -26,6 +27,10 @@ import { composer as messagesComposer } from "./messages/composer.vibe"
 import { messages } from "./messages/messages.vibe"
 import { contacts } from "./contacts/contacts.vibe"
 import { requests } from "./contacts/requests.vibe"
+import { defaultMessagingBridge } from "./messaging/bridge.vibe"
+import { messagingWire } from "./messaging/wire.vibe"
+import { telegramResident } from "./telegram/resident.vibe"
+import { slackResident } from "./slack/resident.vibe"
 import { notes } from "./notes/notes.vibe"
 import { startupReview } from "./startup/settingsAccess.vibe"
 import { clockResident } from "./clock/sync.vibe"
@@ -34,6 +39,7 @@ import { listing as workflowList } from "./workflows/list.vibe"
 import { digestBrief } from "./workflows/brief.vibe"
 import { browserDigestDelivery } from "./workflows/browser-digests.vibe"
 import { nativeDigestDelivery } from "./workflows/native-digests.vibe"
+import { nativeApprovalOwner } from "./workflows/native-approval.vibe"
 
 /**
  * The machines that live from launch to exit: those another area follows or tells, and those that must act while
@@ -44,6 +50,7 @@ const machines = together(
   scanEntry,
   shell,
   toasts,
+  browserAlerts,
   haptics,
   canvas,
   pages,
@@ -67,6 +74,10 @@ const machines = together(
   paging,
   focus,
   reports,
+  defaultMessagingBridge,
+  telegramResident,
+  slackResident,
+  messagingWire,
   notes,
   startupReview,
   clockResident,
@@ -75,6 +86,7 @@ const machines = together(
   digestBrief,
   browserDigestDelivery,
   nativeDigestDelivery,
+  nativeApprovalOwner,
 )
 
 /** The resident machines, closed: each machine one of them follows or tells is among them. */
