@@ -1,5 +1,5 @@
 // spec/app/browser/index.md, "Story: Open, pick and close tabs"; spec/app/browser/index.md, "Story: Let the agent open a page"; spec/app/browser/share.md, "Story: Share the page"; spec/app/browser/share.md, "Story: Open the page in another browser"; spec/app/browser/address.md, "Story: Go where I typed"; spec/app/browser/address.md, "Story: Watch a page load"; spec/app/browser/address.md, "Story: Browse privately"
-import { Button, BrowserAddressBar, type BrowserAddressChoice, BrowserAddressChoices, BrowserFindBar, BrowserBar, BrowserLibrary, type BrowserMenuItem, BrowserMenu, BrowserNewTab, BrowserReview, BrowserTabs, ConfirmDialog, PrivateMark } from "@repo/ui";
+import { Button, BrowserAddressBar, type BrowserAddressChoice, BrowserAddressChoices, BrowserFindBar, BrowserBar, BrowserLibrary, type BrowserMenuItem, BrowserMenu, BrowserNewTab, BrowserQuestion, BrowserReview, BrowserTabs, ConfirmDialog, Mark, PrivateMark } from "@repo/ui";
 import { ChevronLeft, Clock, Download, ExternalLink, Link, ListFilter, Lock, Mail, Plus, RotateCw, Search, Share2, Square, Star, Trash2 } from "lucide-react";
 import { Effect, Option } from "effect";
 import { useState, useSyncExternalStore } from "react";
@@ -11,6 +11,8 @@ import { verdict } from "../../gen/app__browser__address.ts";
 import { useMachine as usePage } from "../../gen/app__browser__address.react.ts";
 import { Machine as LibraryMachine } from "../../gen/app__browser__library.effect.vibe";
 import { useMachine as useLibrary } from "../../gen/app__browser__library.react.ts";
+import { useMachine as useReader } from "../../gen/app__browser__reading.react.ts";
+import type { Machine as ReaderMachine } from "../../gen/app__browser__reading.effect.vibe";
 import type { Machine as ShareMachine } from "../../gen/app__browser__share.effect.vibe";
 import type { Machine as SiteMachine } from "../../gen/app__browser__site.effect.vibe";
 import { useMachine as useShare } from "../../gen/app__browser__share.react.ts";
@@ -25,12 +27,13 @@ import type { ManagedRuntime } from "effect";
 import { Reviewing, approve, decline } from "./agent.vibe";
 import { Pages, type PageRuntime, addressOf, idOf, inputOf, openDownloads, openPasswords, placed } from "./browser.vibe";
 import { LibraryRows, editHistory, markPage, setMark } from "./library.vibe";
+import { askAboutPage, cancelReading, confirmQuestion, editQuestion, PageReading, sensitiveReadingText, SENSITIVE_READING_MESSAGE } from "./reading.vibe";
 import { SharePages, cancelExternal, confirmExternal, mailTarget, offerNativeHandoff, offerShare } from "./share.vibe";
 import { type SitePage, type SiteRows, clearSiteShown, siteShown } from "./site.vibe";
 
 export interface BrowserProps {
   /** Provides the Browser's tabs and each tab's page, `browser` of browser.vibe, over the resident machines and the phone's tab host. */
-  runtime: ManagedRuntime.ManagedRuntime<Machine | Pages | LibraryMachine | LibraryRows | ShareMachine | SharePages | Reviewing | SiteMachine | SiteRows | TabHost | Shell | Resident, unknown>;
+  runtime: ManagedRuntime.ManagedRuntime<Machine | Pages | LibraryMachine | LibraryRows | ReaderMachine | PageReading | ShareMachine | SharePages | Reviewing | SiteMachine | SiteRows | TabHost | Shell | Resident, unknown>;
   alpha: Alpha;
 }
 
@@ -70,6 +73,7 @@ function Tab({ runtime, alpha, tabs, page }: BrowserProps & { tabs: State; page:
   const { state, can, send } = usePage(page);
   const library = useLibrary(runtime);
   const share = useShare(runtime);
+  const reader = useReader(runtime);
   const [typed, setTyped] = useState("");
   const [refusal, setRefusal] = useState<string>();
   const [finding, setFinding] = useState("");
@@ -143,6 +147,10 @@ function Tab({ runtime, alpha, tabs, page }: BrowserProps & { tabs: State; page:
       : library.state?.notice === "Failed" ? "Could not change the bookmark."
         : library.state?.notice === "HistoryFailed" ? "Could not change Browser history." : undefined;
   const clearable = native && tabs.layer === "Menu" ? runtime.runSync(siteShown()) : undefined;
+  const readingPage = runtime.runSync(PageReading).review.held;
+  const readingNotice = reader.state?.phase === "Blocked" ? SENSITIVE_READING_MESSAGE : reader.state?.phase === "Unavailable"
+    ? readingPage === undefined ? "Load a public HTTPS page before asking about it." : "Page reading unavailable" : undefined;
+  const question = reader.state?.phase === "Reviewing" && reader.state.purpose === "Ask" ? readingPage : undefined;
   const offered: (BrowserMenuItem | false)[] = [
     (native || can({ type: "reload" })) && { label: "Reload", name: "Reload page", icon: <RotateCw />, onSelect: () => { void browser.send({ type: "uncover" }).then(() => can({ type: "reload" }) ? send({ type: "reload" }) : undefined); } },
     can({ type: "stop" }) && { label: "Stop", name: "Stop loading", icon: <Square />, onSelect: () => { void browser.send({ type: "uncover" }).then(() => send({ type: "stop" })); } },
@@ -154,6 +162,7 @@ function Tab({ runtime, alpha, tabs, page }: BrowserProps & { tabs: State; page:
     native && canShare && { label: "Share", icon: <Share2 />, onSelect: () => void runtime.runPromise(offerShare("System", binding)) },
     canShare && binding !== undefined && { label: "Copy link", icon: <Link />, onSelect: () => void runtime.runPromise(offerShare("Copy", binding)) },
     canMail && { label: "Email", name: "Email this page", icon: <Mail />, onSelect: () => void runtime.runPromise(offerShare("Email", binding)) },
+    (native || binding !== undefined) && reader.can({ type: "request", purpose: "Ask", secure: state.secure, supported: true }) && { label: "Ask", name: "Ask about page", icon: <Mark aria-hidden />, onSelect: () => void runtime.runPromise(askAboutPage(tab)) },
     { label: "Passwords", name: "Password manager", icon: <Lock />, onSelect: () => void runtime.runPromise(openPasswords) },
     canHandoff && { label: "Open externally", name: "Open externally, passkeys unsupported here", icon: <ExternalLink />, onSelect: () => void runtime.runPromise(offerNativeHandoff(nativePage)) },
     native && can({ type: "openFind" }) && { label: "Find", name: "Find in page", icon: <Search />, onSelect: () => { setFinding(""); void browser.send({ type: "uncover" }).then(() => send({ type: "openFind" })); } },
@@ -214,6 +223,7 @@ function Tab({ runtime, alpha, tabs, page }: BrowserProps & { tabs: State; page:
       {tabs.layer === "Menu" && <BrowserMenu items={offered.filter((item) => item !== false)} onClose={() => void browser.send({ type: "uncover" })} />}
       {tabs.layer === "Library" && <Library runtime={runtime} onBack={() => void browser.send({ type: "uncover" })} onOpen={submit} />}
       {libraryNotice && <p role="status" className="pointer-events-none absolute top-16 right-4 left-4 z-50 rounded-full bg-card px-5 py-3 text-center text-base shadow-menu">{libraryNotice}</p>}
+      {readingNotice && <p role="status" className="pointer-events-none absolute top-16 right-4 left-4 z-50 rounded-full bg-card px-5 py-3 text-center text-base shadow-menu">{readingNotice}</p>}
       {tabs.layer === "Switcher" && (
         <BrowserTabs
           leading={<Button variant="ghost" size="icon" aria-label="Back to page" onClick={() => void browser.send({ type: "uncover" })}><ChevronLeft /></Button>}
@@ -230,6 +240,13 @@ function Tab({ runtime, alpha, tabs, page }: BrowserProps & { tabs: State; page:
         The other browser may save {reviewed ? new URL(reviewed.url).host : "this page"} in its history.
       </ConfirmDialog>
       <AgentPageCard runtime={runtime} />
+      {question && <BrowserQuestion source={question.source} question={question.question} excerpt={question.excerpt}
+        ready={reader.can({ type: "confirm", safe: true })}
+        status={sensitiveReadingText(question.excerpt) ? "Remove secrets first" : undefined}
+        onQuestion={(value) => void runtime.runPromise(editQuestion("question", value))}
+        onExcerpt={(value) => void runtime.runPromise(editQuestion("excerpt", value))}
+        onConfirm={() => void runtime.runPromise(confirmQuestion())}
+        onCancel={() => void runtime.runPromise(cancelReading())} />}
       <BrowserReview open={clearingSite !== undefined} title={`Clear data for ${clearingSite?.host ?? ""}?`} confirmLabel="Clear data" destructive
         onConfirm={() => { if (clearingSite !== undefined) void runtime.runPromise(clearSiteShown(clearingSite)); setClearingSite(undefined); }}
         onCancel={() => setClearingSite(undefined)}>

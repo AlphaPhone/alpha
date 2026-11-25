@@ -218,6 +218,7 @@ export * from "./components/browser/BrowserMenu.tsx";
 export * from "./components/browser/BrowserTabs.tsx";
 export * from "./components/browser/BrowserFindBar.tsx";
 export * from "./components/browser/BrowserReview.tsx";
+export * from "./components/browser/BrowserQuestion.tsx";
 export * from "./components/workflows/WorkflowRow.tsx";
 export * from "./components/workflows/WorkflowChoice.tsx";
 export * from "./components/workflows/WorkflowActions.tsx";

@@ -33,6 +33,7 @@ interface Held {
 export interface BrowserScene {
   saved: BrowserSavedState;
   beforeSave?: (saved: BrowserSavedState) => Promise<void>;
+  reviewQuestion?: (page: BrowserPageGuard) => Promise<{ text: string }>;
   bookmarks: { url: string; title?: string }[];
   readonly tabs: Map<string, Held>;
   /** The tab drawn and where, as `present` last placed it. */
@@ -346,7 +347,13 @@ export function alphaBrowser(world: BrowserScene): Faked {
         return Promise.resolve({ site: new URL(options.url).host });
       },
       readingSupport: () => Promise.resolve({ available: false }),
-      reviewQuestion: () => Promise.reject(rejection("Reading unavailable")),
+      reviewQuestion: (page) => {
+        const tab = stateOf(held(page));
+        if (world.shown?.id !== page.id || !tab.committed || tab.loading || tab.private || tab.url !== page.url || tab.navigation !== page.navigation) {
+          return Promise.reject(rejection("The Browser page changed"));
+        }
+        return world.reviewQuestion?.(page) ?? Promise.reject(rejection("Reading unavailable"));
+      },
       reviewReading: () => Promise.reject(rejection("Reading unavailable")),
       cancelReading: () => Promise.resolve(),
       share: (options) => {

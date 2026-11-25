@@ -8,6 +8,7 @@ import { Machine as Tabs } from "../gen/app__browser.effect.vibe";
 import { Machine as Page } from "../gen/app__browser__address.effect.vibe";
 import { Machine as Library } from "../gen/app__browser__library.effect.vibe";
 import { Machine as Settings } from "../gen/app__settings.effect.vibe";
+import { Machine as Reader } from "../gen/app__browser__reading.effect.vibe";
 import { Machine as Share } from "../gen/app__browser__share.effect.vibe";
 import { Machine as Site } from "../gen/app__browser__site.effect.vibe";
 import { Machine as Home } from "../gen/app__home.effect.vibe";
@@ -255,6 +256,50 @@ describe("The Browser on a phone", () => {
     await press("Clear data");
     expect(world.browser.calls).not.toContain("clearSiteData");
     expect(runtime.runSync(Effect.flatMap(Site, (m) => m.get())).clear).toBe(0);
+  });
+
+  it("Reviews and edits a Browser excerpt before putting it in the chat draft (spec/app/browser/reading.md, \"Story: Review an excerpt to ask about\")", async () => {
+    const world = { ...scene(), phone: true, image: true };
+    let release: ((text: string) => void) | undefined;
+    world.browser.reviewQuestion = () => new Promise((resolve) => { release = (text) => resolve({ text }); });
+    const { alpha } = await open(world, only("home", "assistant", "view:Browser"));
+    const ask = assistant.runtime(alpha);
+    const runtime = browser.runtime(alpha);
+    await until(alpha, ask, Composer, (s) => s.slot === "Open");
+    const turn = await ask.runPromise(Effect.map(Conversation.use((m) => m.get()), (s) => s.turn.send.id));
+    await press("Browser");
+    await until(alpha, runtime, Tabs, (s) => s.hydrated);
+    await go("https://example.test/article");
+    const tab = runtime.runSync(Tabs.use((tabs) => tabs.get())).selected;
+    const page = runtime.runSync(Effect.flatMap(Pages, (pages) => pages.of(tab)));
+    await until(alpha, page, Page, (state) => state.phase === "Shown" && state.secure);
+    placeNative();
+    const openReview = async () => {
+      release = undefined;
+      await press("Menu");
+      await drawn(() => vi.waitFor(() => expect(button("Ask about page")).toBeTruthy()));
+      await pressOnTop("Ask about page");
+      await until(alpha, runtime, Reader, (s) => s.phase === "Reading");
+      await drawn(() => vi.waitFor(() => expect(release).toBeDefined()));
+    };
+    const dialog = () => document.querySelector("[role='dialog'][aria-label='Ask about selected content']");
+    await openReview();
+    await hardware("back");
+    await until(alpha, runtime, Reader, (s) => s.phase === "Idle");
+    await drawn(() => release?.("An earlier page answer."));
+    expect(dialog()).toBeNull();
+
+    await openReview();
+    await drawn(() => release?.("The original article excerpt."));
+    await until(alpha, runtime, Reader, (s) => s.phase === "Reviewing");
+    expect(dialog()).not.toBeNull();
+    await fill("Question about content", "What does it say?");
+    await fill("Content excerpt", "The exact edited excerpt.");
+    await press("Use in conversation");
+    await until(alpha, runtime, Shell, (s) => s.assistant === "Sheet");
+    expect(document.querySelector<HTMLTextAreaElement>("textarea[aria-label='Message Alpha']")?.value)
+      .toBe("What does it say?\n\nSource: example.test\n\nThe exact edited excerpt.");
+    expect(await ask.runPromise(Effect.map(Conversation.use((m) => m.get()), (s) => s.turn.send.id))).toBe(turn);
   });
 
   it.each([false, true])("Opens Password manager and returns through Settings (spec/app/settings/index.md, \"The owner can open Password manager from the Browser menu\") on phone %s", async (phone) => {

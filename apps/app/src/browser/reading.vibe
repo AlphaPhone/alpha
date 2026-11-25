@@ -1,0 +1,227 @@
+// spec/app/browser/reading.md, "Story: Review an excerpt to ask about"; spec/app/browser/reading.md, "Cancel, Back, Alpha going to the background and the page loading something else all end the reading, and sending nothing"
+import { type BrowserPageBinding, pageQuestionReading, readPublicPageSource, sensitiveReadingText, sensitiveReadingUrl, SENSITIVE_READING_MESSAGE, SENSITIVE_PAGE } from "@elizaos/os-bridges"
+import * as Reader from "../../gen/app__browser__reading.effect.vibe"
+import { Machine as Address } from "../../gen/app__browser__address.effect.vibe"
+import { Machine as Tabs } from "../../gen/app__browser.effect.vibe"
+import { Machine as Shell, showing } from "../../gen/app__shell.effect.vibe"
+import { MediaHandoff, type ReviewedDraft } from "../assistant/attachments.vibe"
+import { TabHost } from "../platform/browser.vibe"
+import type { FrameRequest } from "../platform/browserWeb.vibe"
+import { Device } from "../platform/device.vibe"
+import { type Job, answer, contained, reacting, run, started, stop, together } from "../runtime/reactor.vibe"
+import { idOf, pageOf, Pages, presentForAction } from "./browser.vibe"
+
+type Page = BrowserPageBinding | FrameRequest
+type Question = {
+  readonly page: Page
+  readonly tab: number
+  readonly source: string
+  readonly draft: ReviewedDraft
+  question: string
+  excerpt: string
+}
+
+export service PageReading {
+  readonly review: { held?: Question }
+}
+
+type Surface = Tabs | Pages | Shell | TabHost | Device
+type Inputs = Surface | Reader.Machine | PageReading
+
+const proposed = "Summarize this excerpt."
+const pageReading = Layer.sync(PageReading, () => ({ review: {} }))
+
+function eligible(address: string): boolean {
+  const url = URL.parse(address)
+  return url !== null && url.protocol === "https:" && url.username === "" && url.password === ""
+}
+
+effect function selected(tab: number): (Page | undefined)!!(Pages | TabHost) {
+  const panel = try pageOf(tab)
+  if (panel.phase !== "Shown" || panel.kind !== "Normal") return undefined
+  const host = try TabHost
+  const web = host.web
+  const id = idOf(tab)
+  return try sync(() => {
+    if (web === undefined) return panel.secure ? host.session.pageBinding(id, { https: true }) : undefined
+    return web.snapshot().frames.find(({ request, status }) => request.id === id && request.load === panel.load && status === undefined)?.request
+  })
+}
+
+effect function current(question: Question): boolean!!Surface {
+  const state = try (try Tabs).get()
+  if (state.selected !== question.tab || (state.layer !== "Uncovered" && state.layer !== "ReadingReview") ||
+    !showing(try (try Shell).get(), "Browser") || !(try (try Device).showing())) return false
+  const page = try selected(question.tab)
+  return "load" in question.page ? question.page === page : page !== undefined && !("load" in page) &&
+    page.id === question.page.id && page.url === question.page.url && page.navigation === question.page.navigation && page.revision === question.page.revision
+}
+
+/** Open the editor from the exact page under the open Browser menu. */
+export effect function askAboutPage(tab: number): void!!(Inputs | MediaHandoff) {
+  const reader = try Reader.Machine
+  const tabs = try Tabs
+  const state = try tabs.get()
+  if (state.layer !== "Menu" || state.selected !== tab || Reader.busy(try reader.get())) return
+  const page = try selected(tab)
+  const closeMenu = () => contained(tabs.send({ type: "uncover" }, (s) => s.layer === "Menu" && s.selected === tab), "showing the page to review")
+  const held = (try PageReading).review
+  if (page === undefined || !eligible(page.url)) {
+    if (!(try closeMenu())) return
+    held.held = undefined
+    try contained(reader.send({ type: "request", purpose: "Ask", secure: false, supported: true }), "refusing a page that cannot be read")
+    return
+  }
+  const draft = try (try MediaHandoff).reviewedDraft()
+  if (draft === undefined || !(try closeMenu())) return
+  const host = try TabHost
+  const info = try sync(() => "load" in page ? host.web?.info(page.id) : host.session.info(page.id))
+  const title = info?.title?.trim()
+  const source = title ? Array.from(title).filter((char) => char >= " " && char !== "\u007f").join("").slice(0, 120) || page.url : page.url
+  const question: Question = { page, tab, source, draft, question: proposed, excerpt: "" }
+  if (!(try current(question))) return
+  held.held = question
+  if (!(try contained(reader.send({ type: "request", purpose: "Ask", secure: true, supported: true }), "asking for the page excerpt")) && held.held === question) held.held = undefined
+}
+
+effect function cover(question: Question): boolean!!Surface {
+  const tabs = try Tabs
+  if (!(try current(question))) return false
+  return try contained(tabs.send({ type: "cover", layer: "ReadingReview" }, (s) => s.layer === "Uncovered" && s.selected === question.tab), "showing the page excerpt review")
+}
+
+effect function uncover(): void!!Tabs {
+  const tabs = try Tabs
+  if ((try tabs.get()).layer === "ReadingReview") try contained(tabs.send({ type: "uncover" }, (s) => s.layer === "ReadingReview"), "closing the page excerpt review")
+}
+
+function outcome(ticket: number, found: Reader.Found): Reader.Event {
+  return { type: "extracted", ticket, found }
+}
+
+effect function excerpt(ticket: number): Reader.Event!!Inputs {
+  const question = (try PageReading).review.held
+  const reader = try Reader.Machine
+  const state = try reader.get()
+  if (question === undefined || !Reader.canExtracted(state, ticket, "Visible") || !(try current(question))) return outcome(ticket, "Late")
+  if (sensitiveReadingUrl(question.page.url)) return outcome(ticket, "Sensitive")
+  const host = try TabHost
+  const page = question.page
+  let words: string | undefined
+  if ("load" in page) {
+    const read = Effect.option(tryPromise((signal: AbortSignal) => readPublicPageSource(page.url, signal)))
+    const result = Option.getOrUndefined(try read)
+    if (result?.blocked) return outcome(ticket, "Sensitive")
+    words = result?.text
+  } else if (Option.isSome(host.plugin)) {
+    const plugin = host.plugin.value
+    if (!(try presentForAction(page.id))) return outcome(ticket, "Late")
+    if (!(try current(question))) return outcome(ticket, "Late")
+    const read = try promise(() => pageQuestionReading(() => plugin.reviewQuestion(host.session.guard(page))).then(
+      (result) => ({ kind: "read" as const, result }),
+      (failure: unknown) => ({ kind: "failed" as const, failure }),
+    ))
+    if (read.kind === "failed") {
+      const failure = read.failure
+      return outcome(ticket, typeof failure === "object" && failure !== null && "code" in failure && failure.code === SENSITIVE_PAGE ? "Sensitive" : "Failed")
+    }
+    words = read.result.text
+  } else return outcome(ticket, "Failed")
+  if (!Reader.canExtracted(try reader.get(), ticket, "Visible") || !(try cover(question))) return outcome(ticket, "Late")
+  question.excerpt = words?.slice(0, 12000) ?? ""
+  return outcome(ticket, question.excerpt.trim() === "" ? "Unreadable" : "Visible")
+}
+
+/** Close a page review or a read that has yet to answer. */
+export effect function cancelReading(): boolean!!Inputs {
+  const reader = try Reader.Machine
+  const state = try reader.get()
+  if (!Reader.canCancel(state)) return false
+  const holder = (try PageReading).review
+  holder.held = undefined
+  const cancelled = try contained(reader.send({ type: "cancel" }), "cancelling the page reading")
+  if (cancelled) {
+    if (state.phase === "Reading") try cancelNative()
+    try uncover()
+  }
+  return cancelled
+}
+
+/** Keep the exact changed text associated with the machine's current review revision. */
+export effect function editQuestion(field: "question" | "excerpt", value: string): void!!(PageReading | Reader.Machine) {
+  const hold = (try PageReading).review.held
+  const machine = try Reader.Machine
+  const state = try machine.get()
+  if (hold === undefined || state.purpose !== "Ask" || state.phase !== "Reviewing") return
+  const previous = hold[field]
+  hold[field] = value.slice(0, field === "question" ? 2000 : 12000)
+  const event: Reader.Event = { type: "edit", question: hold.question.trim() !== "", excerpt: hold.excerpt.trim() !== "" ? "PageText" : "Empty" }
+  if (!(try contained(machine.send(event, (before) => before.review.revision === state.review.revision), "editing the page review"))) hold[field] = previous
+}
+
+/** Confirm the version currently drawn, after checking the text with Eliza's reading guard. */
+export effect function confirmQuestion(): void!!Inputs {
+  const question = (try PageReading).review.held
+  const machine = try Reader.Machine
+  const state = try machine.get()
+  if (question === undefined || state.purpose !== "Ask" || !(try current(question))) { try cancelReading(); return }
+  const safe = !sensitiveReadingText(question.excerpt)
+  if (!Reader.canConfirm(state, safe)) return
+  try contained(machine.send({ type: "confirm", safe }, (before) => before.review.revision === state.review.revision), "confirming the page review")
+}
+
+effect function fillDraft(ticket: number): void!!Inputs {
+  const holder = (try PageReading).review
+  const question = holder.held
+  if (question === undefined) return
+  const reader = try Reader.Machine
+  const environment = try Effect.context<Surface>()
+  const active = effect {
+    const state = try reader.get()
+    return holder.held === question && state.extract.ticket === ticket && state.phase === "Sent" && (try Effect.provideContext(current(question), environment))
+  }
+  const text = `${question.question.trim()}\n\nSource: ${question.source}\n\n${question.excerpt.trim()}`
+  try question.draft(text, active)
+  if (holder.held === question) { holder.held = undefined; try uncover() }
+}
+
+effect function cancelNative(): void!!TabHost {
+  const host = try TabHost
+  if (Option.isSome(host.plugin)) {
+    const plugin = host.plugin.value
+    try ignore(tryPromise(() => plugin.cancelReading({ session: host.session.session })))
+  }
+}
+
+function carry(fx: Reader.Effect): Job<Reader.Event, Inputs, []> {
+  return match (fx) {
+    when { tag: "Extract", let ticket }: answer(`page excerpt ${ticket}`, excerpt(ticket), outcome(ticket, "Failed"));
+    when { tag: "Cancel", let ticket }: stop(`page excerpt ${ticket}`);
+    when { tag: "Draft", let ticket }: run(`reviewed question ${ticket}`, fillDraft(ticket));
+    when { tag: "Speak" }: stop("page speech");
+  }
+}
+
+const retired = started(effect {
+  const shell = try Shell
+  const tabs = try Tabs
+  const pages = try Pages
+  const holder = (try PageReading).review
+  const device = try Device
+  const tab = Stream.changes(Stream.map(tabs.changes, (state) => state.selected))
+  const navigation = Stream.switchMap(tab, (selected) => Stream.unwrap(effect {
+    const runtime = try pages.of(selected)
+    return try promise(() => runtime.runPromise(Address.use((machine) => succeed(machine.changes))))
+  }))
+  const changes = Stream.merge(Stream.merge(shell.changes, tabs.changes), Stream.merge(navigation, device.visible))
+  try Stream.runForEach(changes, effect () => {
+    const question = holder.held
+    if (question === undefined || (try current(question))) return
+    try cancelReading()
+  })
+}, "following the page under review")
+
+/** Owns the single reviewed excerpt and its accepted text. */
+export const reading = Layer.provideMerge(together(reacting(Reader, { carry }), retired), pageReading)
+
+export { sensitiveReadingText, SENSITIVE_READING_MESSAGE }
