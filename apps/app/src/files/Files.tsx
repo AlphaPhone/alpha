@@ -301,7 +301,7 @@ export function Files({ runtime, alpha }: FilesProps) {
           ]} />
         )}
       </div>
-<FileLayers state={state} picked={picked} naming={naming} setNaming={setNaming} placing={placing} owner={owner} tell={tell} label={label} location={location} />
+      <FileLayers state={state} picked={picked} naming={naming} setNaming={setNaming} placing={placing} owner={owner} tell={tell} label={label} location={location} />
       <Preview runtime={runtime} today={today} />
       {scanner}
       <Sheet open={change.panel !== 0} onOpenChange={(open) => { if (!open && owner({ type: "closeShare" })) tell({ type: "closeShare" }); }}>
