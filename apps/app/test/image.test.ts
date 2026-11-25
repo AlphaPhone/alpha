@@ -197,10 +197,13 @@ describe("Build a candidate and sign it (spec/release/index.md, \"Story: Build a
     const stage = () => (JSON.parse(readFileSync(run, "utf8")) as { state: { stage: string; attempt: number; reviewed: boolean } }).state;
     // spec/release/index.md, "A build is a candidate only when its verification recorded it distributable: no test mocks, the production bundle audit passed, Alpha's one signer, the runtime packaged with its notices, an on-device voice slot, and for an image its platform certificate"
     expect(await released("candidate", "--run", run, "--number", "122", "--attempt", "1", "--apk-manifest", write(directory, "mocked.json", receipt(122, { testMocks: true })))).toMatchObject({ ok: false, tag: "ReleaseRefused" });
-    expect(await released("candidate", "--run", run, "--number", "122", "--attempt", "1", "--apk-manifest", write(directory, "unqualified.json", receipt(122, { voiceHost: undefined, runtimeNotices: undefined })))).toMatchObject({ ok: false, said: expect.stringMatching(/RuntimeNoticesMissing.*VoiceNotRecorded/) });
+    const unqualified = await released("candidate", "--run", run, "--number", "122", "--attempt", "1", "--apk-manifest", write(directory, "unqualified.json", receipt(122, { voiceHost: undefined, runtimeNotices: undefined })));
+    expect(unqualified.ok ? "" : unqualified.said).toContain("RuntimeNoticesMissing");
+    expect(unqualified.ok ? "" : unqualified.said).toContain("VoiceNotRecorded");
     // spec/release/index.md, "A candidate is built only when none is in flight, numbered by a run above every run before it, the floor and the published version"
     expect(await released("candidate", "--run", run, "--number", "74", "--attempt", "1", "--apk-manifest", write(directory, "before-floor.json", receipt(74)))).toMatchObject({ ok: false, tag: "ReleaseRefused" });
-    expect(await released("candidate", "--run", run, "--number", "123", "--attempt", "1", "--apk-manifest", verified)).toMatchObject({ ok: false, said: expect.stringContaining("does not record launcher version 123") });
+    const wrongVersion = await released("candidate", "--run", run, "--number", "123", "--attempt", "1", "--apk-manifest", verified);
+    expect(wrongVersion.ok ? "" : wrongVersion.said).toContain("does not record launcher version 123");
     const next = write(directory, "next.json", receipt(123));
     expect(await released("candidate", "--run", run, "--number", "122", "--attempt", "1", "--apk-manifest", verified)).toMatchObject({ ok: true, value: { stage: "Built", number: 122 } });
     expect(await released("candidate", "--run", run, "--number", "123", "--attempt", "1", "--apk-manifest", next)).toMatchObject({ ok: false, tag: "ReleaseRefused" });
