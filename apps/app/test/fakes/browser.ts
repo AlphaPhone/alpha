@@ -32,6 +32,7 @@ interface Held {
 /** What the fake phone's tab host keeps, as `AlphaBrowserPlugin` keeps it: its saved session, bookmarks and the tabs it holds. */
 export interface BrowserScene {
   saved: BrowserSavedState;
+  beforeSave?: (saved: BrowserSavedState) => Promise<void>;
   bookmarks: { url: string; title?: string }[];
   readonly tabs: Map<string, Held>;
   /** The tab drawn and where, as `present` last placed it. */
@@ -300,11 +301,12 @@ export function alphaBrowser(world: BrowserScene): Faked {
         session = asked;
         return Promise.resolve(world.saved);
       },
-      saveBrowsingState: ({ session: asked, ...saved }) => {
+      saveBrowsingState: async ({ session: asked, ...saved }) => {
         world.calls.push("saveBrowsingState");
         session = asked;
+        await world.beforeSave?.(saved);
         world.saved = saved;
-        return Promise.resolve(saved);
+        return saved;
       },
       clearBrowsingData: () => {
         const closed = [...world.tabs.values()].filter((tab) => !tab.private).map((tab) => tab.id);

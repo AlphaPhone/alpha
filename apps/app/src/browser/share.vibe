@@ -1,37 +1,75 @@
 // spec/app/browser/share.md, "Story: Share the page"; spec/app/browser/share.md, "The answer for the current choice says whether it was carried out"; spec/app/browser/share.md, "Story: Open the page in another browser"
-import type { BrowserPageBinding } from "@elizaos/os-bridges"
+import { isSecureWebAddress, type BrowserPageBinding } from "@elizaos/os-bridges"
 import { Machine as Tabs } from "../../gen/app__browser.effect.vibe"
 import * as Share from "../../gen/app__browser__share.effect.vibe"
+import type { Machine as Toasts } from "../../gen/app__notices__toasts.effect.vibe"
 import { Machine as Shell, showing } from "../../gen/app__shell.effect.vibe"
 import * as Inbox from "../../gen/app__inbox.effect.vibe"
 import * as Drafts from "../../gen/app__inbox__drafts.effect.vibe"
 import { type EmailDestination, emailDestination } from "../assistant/message-actions.vibe"
-import { useInEmail } from "../inbox/suggestion.vibe"
-import { say } from "../notices/toasts.vibe"
+import type { Machine as Suggestions } from "../../gen/app__inbox__suggestion.effect.vibe"
+import { type Offers, useInEmail } from "../inbox/suggestion.vibe"
+import { type Said, say } from "../notices/toasts.vibe"
 import { TabHost, hosted } from "../platform/browser.vibe"
+import { type FrameRequest } from "../platform/browserWeb.vibe"
 import { Device } from "../platform/device.vibe"
-import { answer, contained, following, reacting, started, together } from "../runtime/reactor.vibe"
-import { idOf, leaving } from "./browser.vibe"
+import { type Job, answer, contained, following, reacting, started, together } from "../runtime/reactor.vibe"
+import { Pages, idOf, leaving, pageOf } from "./browser.vibe"
 
 module page {
   /** Whether the Browser's document is in the foreground. @throws {never} */
   export function foreground(): boolean {
     return typeof document !== "undefined" && !document.hidden
   }
+
+  /** Open a reviewed page with its opener and referrer removed. @throws {never} */
+  export function openWebWindow(url: string): boolean {
+    let opened: Window | null = null
+    try {
+      opened = window.open("about:blank", "_blank")
+      if (opened === null) return false
+      opened.opener = null
+      const link = opened.document.createElement("a")
+      link.href = url
+      link.target = "_self"
+      link.rel = "noreferrer"
+      link.referrerPolicy = "no-referrer"
+      opened.document.body.append(link)
+      link.click()
+      return true
+    } catch {
+      opened?.close()
+      return false
+    }
+  }
 }
-import { foreground } from page
+import { foreground, openWebWindow } from page
+
+type ViewedPage = BrowserPageBinding | FrameRequest
 
 /** The exact page each admitted choice can use, held until that choice is carried out. */
 export service SharePages {
-  readonly pages: Map<number, BrowserPageBinding>
+  readonly pages: Map<number, ViewedPage>
+  readonly external: { frame: FrameRequest | undefined }
+  readonly reviewTurn: Semaphore.Semaphore
 }
 
-const choices = Layer.sync(SharePages, () => ({ pages: new Map<number, BrowserPageBinding>() }))
+const choices = Layer.effect(SharePages, effect {
+  const reviewTurn = try Semaphore.make(1)
+  return { pages: new Map<number, ViewedPage>(), external: { frame: undefined }, reviewTurn }
+})
 
-effect function currentPage(binding: BrowserPageBinding): boolean!!(Shell | Tabs | TabHost) {
+effect function currentPage(binding: ViewedPage): boolean!!(Shell | Tabs | TabHost | Pages) {
   const selector = try (try Tabs).get()
-  return showing(try (try Shell).get(), "Browser") &&
-    (try TabHost).session.current(binding, idOf(selector.selected), foreground())
+  const host = try TabHost
+  const id = idOf(selector.selected)
+  if (binding.id !== id || !foreground() || !showing(try (try Shell).get(), "Browser")) return false
+  if ("load" in binding) {
+    const page = try pageOf(selector.selected)
+    return page.phase === "Shown" && page.load === binding.load &&
+      (try sync(() => host.web?.snapshot().frames.some(({ request, status }) => request === binding && status === undefined))) === true
+  }
+  return host.session.current(binding, id)
 }
 
 // spec/app/browser/share.md, "Choosing where to send the page sends it once, if it is still the page the panel opened on, and closes the panel"
@@ -40,13 +78,18 @@ export const mailTarget: (EmailDestination | undefined)!!(Inbox.Machine | Drafts
   return emailDestination(try (try Inbox.Machine).get(), try (try Drafts.Machine).get())
 }
 
-/** Share the shown native page, copy its address or start an email with it, as selected in the Browser's menu. */
+/** Share the shown native page, copy the exact shown address or start an email with it, from the Browser menu. */
 export effect function offerShare(dest: "System" | "Copy" | "Email") {
   const tabs = try Tabs
   const selected = try tabs.get()
   if (selected.layer !== "Menu" || !showing(try (try Shell).get(), "Browser") || !foreground()) return
   const share = try Share.Machine
-  const link = (try TabHost).session.pageBinding(idOf(selected.selected))
+  const host = try TabHost
+  const id = idOf(selected.selected)
+  if (dest === "System" && host.web !== undefined) return
+  const address = try pageOf(selected.selected)
+  const link = host.web === undefined ? host.session.pageBinding(id)
+    : address.phase === "Shown" ? try sync(() => host.web?.current(id, address.load)) : undefined
   if (!(try contained(share.send({ type: "openPanel", ready: link !== undefined }), "reviewing the Browser page"))) return
   if (link === undefined) {
     try say("Load a page before sharing it.", true)
@@ -65,7 +108,7 @@ export effect function offerShare(dest: "System" | "Copy" | "Email") {
 }
 
 const absent = (panel: number): Share.Event => ({ type: "delivered", panel, ok: false, shown: false })
-const notOpened: Share.Event = { type: "launched", ok: false, found: true }
+const noBrowser: Share.Event = { type: "launched", ok: false, found: false }
 
 // spec/app/browser/share.md, "The other browser opens, or the owner is told that none could and the page is still here"
 /** Open the page in front in another browser, and say at the top of the screen when none could. */
@@ -93,11 +136,11 @@ effect function delivered(panel: number, dest: "System" | "Copy" | "Email") {
     if (foreground() && showing(try (try Shell).get(), "Browser")) try say("The page changed before sharing. Try again.", true)
     return absent(panel)
   }
-  const guard = (try TabHost).session.guard(link)
+  const host = try TabHost
   const ok = dest === "Copy"
     ? try (try Device).copyText(link.url)
     : dest === "Email" ? try drafted(link.url)
-    : try contained(hosted("share", (plugin) => plugin.share(guard)), "opening the Browser share sheet")
+    : "load" in link ? false : try contained(hosted("share", (plugin) => plugin.share(host.session.guard(link))), "opening the Browser share sheet")
   const shown = try currentPage(link)
   if (shown && Share.canDelivered(try machine.get(), panel, ok, shown)) {
     if (dest === "Copy") try say(ok ? "Link copied" : "Clipboard unavailable", !ok)
@@ -107,12 +150,69 @@ effect function delivered(panel: number, dest: "System" | "Copy" | "Email") {
   return { type: "delivered", panel, ok, shown } satisfies Share.Event
 }
 
+// spec/app/browser/share.md, "The owner can review opening a shown private web frame in another browser"; spec/app/browser/share.md, "The owner confirms the private page as shown, or cancels"
+/** Offer the exact currently presented private frame for review. */
+export effect function offerPrivateFrame(frame: FrameRequest) {
+  const held = try SharePages
+  return try Semaphore.withPermit(held.reviewTurn, effect {
+    const tabs = try (try Tabs).get()
+    const host = try TabHost
+    if (!frame.privateTab || !(try sync(() => isSecureWebAddress(frame.url))) || tabs.layer !== "Uncovered" ||
+      (try sync(() => host.web?.snapshot().placement?.id)) !== frame.id || !(try currentPage(frame))) return false
+    const machine = try Share.Machine
+    if (!Share.canReviewPrivateFrame(try machine.get(), true)) return false
+    held.external.frame = frame
+    if (try contained(machine.send({ type: "reviewPrivateFrame", ready: true }), "reviewing a private Browser page")) return true
+    held.external.frame = undefined
+    return false
+  })
+}
+
+/** Retire a private review before leaving its page. */
+export effect function cancelPrivateFrame() {
+  const held = try SharePages
+  const machine = try Share.Machine
+  if (!Share.canCancelExternally(try machine.get())) return false
+  held.external.frame = undefined
+  return try contained(machine.send({ type: "cancelExternally" }), "cancelling a private Browser review")
+}
+
+/** Confirm the same private frame the review displayed. */
+export effect function confirmPrivateFrame() {
+  const machine = try Share.Machine
+  const frame = (try SharePages).external.frame
+  if (frame === undefined || !Share.canConfirmExternally(try machine.get()) || !(try currentPage(frame))) {
+    try cancelPrivateFrame()
+    return
+  }
+  try contained(machine.send({ type: "confirmExternally" }), "confirming the private Browser page")
+}
+
+effect function launchPrivateFrame(confirmed: boolean): Share.Event!!(SharePages | Share.Machine | Shell | Tabs | TabHost | Pages | Device | Toasts | Said) {
+  const holder = (try SharePages).external
+  const frame = holder.frame
+  holder.frame = undefined
+  if (!confirmed || frame === undefined || !(try currentPage(frame))) return noBrowser
+  if (!Share.canLaunched(try (try Share.Machine).get(), false, true)) return noBrowser
+  const ok = try sync(() => openWebWindow(frame.url))
+  if (!ok && (try currentPage(frame))) try say("Could not open the browser. The page is still here.", true)
+  return { type: "launched", ok, found: true }
+}
+
+/** Open the reviewed private web frame when one is held, and otherwise the native page in front. */
+effect function elsewhereOf(confirmed: boolean) {
+  if ((try SharePages).external.frame !== undefined) return try launchPrivateFrame(confirmed)
+  return try launched(confirmed)
+}
+
 const sharingPage = reacting(Share, {
-  carry: (fx: Share.Effect) => match (fx) {
-    when { tag: "Sheet", let panel }: answer("share the page", delivered(panel, "System"), absent(panel));
-    when { tag: "CopyLink", let panel }: answer("copy the page link", delivered(panel, "Copy"), absent(panel));
-    when { tag: "Draft", let panel }: answer("start an email with the page link", delivered(panel, "Email"), absent(panel));
-    when { tag: "Elsewhere", let confirmed }: answer("open the page in another browser", launched(confirmed), notOpened);
+  carry(fx: Share.Effect): Job<Share.Event, SharePages | Share.Machine | Shell | Tabs | TabHost | Pages | Device | Toasts | Said | Inbox.Machine | Drafts.Machine | Suggestions | Offers, []> {
+    return match (fx) {
+      when { tag: "Sheet", let panel }: answer("share the page", delivered(panel, "System"), absent(panel));
+      when { tag: "CopyLink", let panel }: answer("copy the page link", delivered(panel, "Copy"), absent(panel));
+      when { tag: "Draft", let panel }: answer("start an email with the page link", delivered(panel, "Email"), absent(panel));
+      when { tag: "Elsewhere", let confirmed }: answer("open the page in another browser", elsewhereOf(confirmed), noBrowser);
+    }
   },
 })
 
