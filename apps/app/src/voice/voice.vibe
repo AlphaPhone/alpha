@@ -1,12 +1,15 @@
 // spec/app/voice/index.md, "Story: Hold a spoken conversation"; spec/app/voice/index.md, "The speech pipeline warms on startup, foreground return and account readiness without opening the microphone"; spec/app/voice/index.md, "A reply that needs the owner's review in chat keeps voice listening with the microphone open"; spec/app/voice/index.md, "An active voice conversation may ask the shell to open Home or any admitted screen"; spec/app/shell/index.md, "Agent navigation shows an admitted app or Home without lowering Ask Alpha"; spec/app/voice/index.md, "A spoken reply says a written date, clock time, range and percentage in words"; spec/app/voice/index.md, "A turn Cloud refuses because the account is out of funds ends voice quietly, as Stop does"
 import { ConversationRecord, TurnController } from "@elizaos/agent/client"
+import { Machine as Conversation } from "../../gen/app__assistant.effect.vibe"
 import { Machine as Phone } from "../../gen/app__phone.effect.vibe"
 import * as Shell from "../../gen/app__shell.effect.vibe"
+import * as Layers from "../../gen/app__shell__layers.effect.vibe"
 import * as Voice from "../../gen/app__voice.effect.vibe"
 import type { Field } from "../../gen/app__voice__dictation.ts"
 import { Agent, isCloudFundsRefusal } from "../platform/agent.vibe"
 import { Device } from "../platform/device.vibe"
 import { ask } from "../platform/remote.vibe"
+import { Views, delivery, preparedIn } from "../assistant/views.vibe"
 import { SystemSettings } from "../platform/systemSettings.vibe"
 import { type VoiceEvent, VoiceBridge } from "../platform/voice.vibe"
 import { fresh } from "../runtime/attempts.vibe"
@@ -252,6 +255,7 @@ effect function ensureConversation(): (ConversationRecord | undefined)!!(Agent |
   } catch () => undefined
 }
 
+// spec/app/assistant/context.md, "A spoken turn carries what a typed turn sent at that moment would, the view claim included"
 function sendVoiceTurn(session: number, turn: number): Stream.Stream<Voice.Event, never, Agent | VoiceWords> {
   return Stream.callback<Voice.Event, never, Agent | VoiceWords>((queue) => effect {
     const { runtime } = try Agent
@@ -264,6 +268,12 @@ function sendVoiceTurn(session: number, turn: number): Stream.Stream<Voice.Event
       Queue.endUnsafe(queue)
       return
     }
+    const rendering = try Effect.serviceOption(Views)
+    const conversation = try Effect.serviceOption(Conversation)
+    const views = Option.getOrUndefined(rendering)
+    const asked = views === undefined ? 0 : try views.begin()
+    const screen = Option.isSome(conversation) ? try conversation.value.get() : undefined
+    const told = views !== undefined && screen !== undefined && screen.observing && !screen.context.sensitive
     const controller = new TurnController(runtime)
     try ignore(tryPromise(() => controller.bind(record)))
     let shown = ""
@@ -296,7 +306,7 @@ function sendVoiceTurn(session: number, turn: number): Stream.Stream<Voice.Event
       shown = clean
       sayFrom(clean, false)
     }
-    const result = tryPromise(() => controller.send({ text: spoken }, { stream: { onPreview: feed } })) catch () => undefined
+    const result = tryPromise(() => controller.send({ text: spoken, ...(told && views !== undefined ? { metadata: delivery(views.clientId) } : {}) }, { stream: { onPreview: feed } })) catch () => undefined
     if (isCloudFundsRefusal(result)) {
       memory.lastReply = ""
       Queue.offerUnsafe(queue, { type: "refusedForFunds", session, turn })
@@ -304,6 +314,8 @@ function sendVoiceTurn(session: number, turn: number): Stream.Stream<Voice.Event
       return
     }
     const finalText = result?.kind === "Replied" ? result.reply.text : ""
+    const prepared = told && views !== undefined && result?.kind === "Replied" ? preparedIn(result.reply.actionResults, views.clientId) : undefined
+    if (views !== undefined && prepared !== undefined) try views.spoken({ asked, handoff: prepared })
     memory.lastReply = finalText
     emitNavigation(finalText)
     const asks = replyNeedsReview(finalText)
@@ -334,7 +346,12 @@ effect function navigateForVoice(place: number): (Voice.Event | undefined)!!(She
   return { type: "claimReleased", session: voice.session }
 }
 
-function carryVoice(fx: Voice.Effect): Job<Voice.Event, Agent | VoiceBridge | VoiceWords | SystemSettings | Shell.Machine | Voice.Machine, []> {
+effect function dictationVisible(): boolean!!(Device | Layers.Machine | VoiceBridge) {
+  if (!(try (try Device).showing()) || Layers.assistantInert(try (try Layers.Machine).get())) return false
+  return try (try VoiceBridge).dictationForeground()
+}
+
+function carryVoice(fx: Voice.Effect): Job<Voice.Event, Agent | Device | Layers.Machine | VoiceBridge | VoiceWords | SystemSettings | Shell.Machine | Voice.Machine, []> {
   return match (fx) {
     when { tag: "Prewarm", let network }: run("prewarm", effect { try (try VoiceBridge).prewarm(network) });
     when { tag: "HoldEngine" }: run("holdEngine", effect { try (try VoiceBridge).holdEngine() });
@@ -382,10 +399,12 @@ function carryVoice(fx: Voice.Effect): Job<Voice.Event, Agent | VoiceBridge | Vo
       const started = effect { try (try VoiceBridge).startRecording(ticket); return true } catch () => false
       return started ? { type: "recordingStarted", ticket } : { type: "recordingFailed", ticket, failure: "NoMicrophone" }
     }, { type: "recordingFailed", ticket, failure: "NoMicrophone" });
-    when { tag: "Transcribe", let ticket, let network }: answer("transcribe", effect {
-      const text = (try VoiceBridge).transcribe(ticket, network) catch () => undefined
-      if (text === undefined) return { type: "transcribed", ticket, failure: "Recognition" } as Voice.Event
-      const trimmed = text.trim()
+    when { tag: "Transcribe", let ticket, let network, let automatic }: answer("transcribe", effect {
+      if (automatic && !(try dictationVisible())) return { type: "transcribed", ticket, failure: "AgentUnavailable" } as Voice.Event
+      const result = try (try VoiceBridge).transcribe(ticket, network, automatic)
+      if (result.kind === "lost") return { type: "clipLost", ticket }
+      if (result.kind !== "recognized") return { type: "transcribed", ticket, failure: result.kind === "obscured" ? "AgentUnavailable" : "Recognition" }
+      const trimmed = result.text.trim()
       if (trimmed === "") return { type: "transcribed", ticket, failure: "NoSpeech" } as Voice.Event
       const current = try (try Voice.Machine).get()
       if (Voice.canTranscribed(current, ticket, "NoFailure")) {
@@ -483,22 +502,25 @@ const bridgeEvents = hearing(
   Stream.unwrap(effect {
     const bridge = try VoiceBridge
     const { memory } = try VoiceWords
-    return Stream.map(bridge.events, (event): VoiceEvent => {
+    return Stream.mapEffect(bridge.events, effect (event: VoiceEvent): (Voice.Event | undefined)!!(Device | Layers.Machine | VoiceBridge) => {
       if (event.kind === "speechEnd" && event.text !== "") memory.heardText = event.text
       else if (event.kind === "transcript" && event.final && event.text !== "") memory.heardText = event.text
-      return event
+      return match (event) {
+        when { kind: "speechStart", let session }: { type: "speechHeard", session };
+        when { kind: "transcript", let session, let final }: final ? { type: "turnEnded", session } : { type: "speechHeard", session };
+        when { kind: "speechEnd", let session }: { type: "turnEnded", session };
+        when { kind: "bargeIn", let session, let echo }: { type: "bargeIn", session, echo };
+        when { kind: "ended", let session, let reason }: reason === "ended"
+          ? undefined
+          : { type: "speechFailed", session, fault: "NotTheNetwork", wait: 0, deviceReady: false, now: untimed };
+        when { kind: "recordingStopped", let ticket, let recorded }: recorded
+          ? { type: "recordingStopped", ticket, showing: try dictationVisible(), now: untimed }
+          : { type: "recordingFailed", ticket, failure: "NoMicrophone" };
+      }
     })
   }),
   Voice.Machine,
-  (event): Voice.Event | undefined => match (event) {
-    when { kind: "speechStart", let session }: { type: "speechHeard", session };
-    when { kind: "transcript", let session, let final }: final ? { type: "turnEnded", session } : { type: "speechHeard", session };
-    when { kind: "speechEnd", let session }: { type: "turnEnded", session };
-    when { kind: "bargeIn", let session, let echo }: { type: "bargeIn", session, echo };
-    when { kind: "ended", let session, let reason }: reason === "ended"
-      ? undefined
-      : { type: "speechFailed", session, fault: "NotTheNetwork", wait: 0, deviceReady: false, now: untimed };
-  },
+  (event) => event,
 )
 
 export const voicing = Layer.provideMerge(

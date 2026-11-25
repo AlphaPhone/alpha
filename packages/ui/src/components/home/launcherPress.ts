@@ -9,15 +9,15 @@ type Press = { id: number; x: number; y: number; cancel?: () => void };
 
 /** A tile owns its pointer until contact ends or moves; the click that follows a hold has no second action. */
 export function useLauncherPress(hold: LauncherHold | undefined, onHold: (() => void) | undefined, onClick: ((event: MouseEvent<HTMLButtonElement>) => void) | undefined) {
-  const press = useRef<Press | undefined>(undefined);
-  const consumed = useRef(false);
+  const pressRef = useRef<Press | undefined>(undefined);
+  const consumedRef = useRef(false);
 
   const stop = () => {
-    press.current?.cancel?.();
-    press.current = undefined;
+    pressRef.current?.cancel?.();
+    pressRef.current = undefined;
   };
   const end = (event: PointerEvent<HTMLButtonElement>) => {
-    if (press.current?.id === event.pointerId) stop();
+    if (pressRef.current?.id === event.pointerId) stop();
   };
 
   return {
@@ -25,21 +25,21 @@ export function useLauncherPress(hold: LauncherHold | undefined, onHold: (() => 
     onPointerDown: (event: PointerEvent<HTMLButtonElement>) => {
       if (!event.isPrimary || event.button !== 0) return;
       stop();
-      consumed.current = false;
+      consumedRef.current = false;
       if (!hold || !onHold) return;
       const button = event.currentTarget;
       const started = { id: event.pointerId, x: event.clientX, y: event.clientY };
-      press.current = started;
+      pressRef.current = started;
       const cancel = hold(() => {
-        if (press.current !== started || !button.isConnected || button.disabled || !button.hasAttribute("data-launcher-hold") || button.closest("[inert]")) return;
-        press.current = undefined;
-        consumed.current = true;
+        if (pressRef.current !== started || !button.isConnected || button.disabled || !button.hasAttribute("data-launcher-hold") || button.closest("[inert]")) return;
+        pressRef.current = undefined;
+        consumedRef.current = true;
         onHold();
       });
-      if (press.current === started) press.current.cancel = cancel;
+      if (pressRef.current === started) pressRef.current.cancel = cancel;
     },
     onPointerMove: (event: PointerEvent<HTMLButtonElement>) => {
-      const start = press.current;
+      const start = pressRef.current;
       if (start?.id === event.pointerId && Math.hypot(event.clientX - start.x, event.clientY - start.y) > launcherPressSlop) stop();
     },
     onPointerUp: end,
@@ -49,16 +49,16 @@ export function useLauncherPress(hold: LauncherHold | undefined, onHold: (() => 
       if (!onHold) return;
       event.preventDefault();
       stop();
-      if (consumed.current) return;
-      consumed.current = true;
+      if (consumedRef.current) return;
+      consumedRef.current = true;
       onHold();
     },
     onClick: (event: MouseEvent<HTMLButtonElement>) => {
-      if (consumed.current && event.detail > 0) {
+      if (consumedRef.current && event.detail > 0) {
         event.preventDefault();
         event.stopPropagation();
       } else onClick?.(event);
-      consumed.current = false;
+      consumedRef.current = false;
     },
   };
 }
