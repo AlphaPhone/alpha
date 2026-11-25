@@ -23,6 +23,7 @@ import {
   SettingsFactRow,
   type SettingsFactReading,
   SettingsGeneralPage,
+  SettingsCarrierPage,
   type SettingsNeighbour,
   SettingsNotificationsPage,
   SettingsPage,
@@ -110,7 +111,7 @@ export interface Common {
   readonly onPlace: (row: number) => void;
 }
 
-const pageNames: Record<Exclude<Page, "BrowserPasswordsPage">, SettingsPageName> = {
+const pageNames: Record<Exclude<Page, "BrowserPasswordsPage" | "CarrierInfoPage">, SettingsPageName> = {
   Top: "top", General: "general", Display: "display", Sound: "sound", Notifications: "notifications", Battery: "battery",
   NetworkPage: "network", CarrierPage: "carrier", PhonePage: "phone", Privacy: "privacy", Permissions: "permissions", Apps: "apps",
   InboxApp: "inbox", WorkflowsApp: "workflows", CalendarApp: "calendar", CameraApp: "camera", PhotosApp: "photos", MapsApp: "maps", NotesApp: "notes", PasswordsPage: "passwords",
@@ -521,6 +522,7 @@ export type Drawn = (props: PageProps) => ReactNode;
 const drawn: Partial<Record<Page, Drawn>> = {
   Top,
   General,
+  CarrierInfoPage: ({ common }) => <SettingsCarrierPage fields={[]} onPhone={false} onBack={common.onBack} />,
   Display,
   Sound: ({ runtime, common }) => {
     const facts = useFacts(runtime).state;
@@ -574,7 +576,8 @@ export function Settings({ runtime, alpha, further }: { runtime: SettingsRuntime
       : undefined,
     onBack: can(goBack) ? () => void send(goBack) : undefined,
     onOpen: (name) => {
-      const open = { type: "open", page: pagesNamed[name] } as const;
+      const target = name === "carrier" && !state.phone ? "CarrierInfoPage" : pagesNamed[name];
+      const open = { type: "open", page: target } as const;
       if (can(open)) void send(open);
     },
     onHandOver: (name) => {
