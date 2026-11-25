@@ -1142,6 +1142,19 @@ const requested = started(effect {
   })
 }, "leaving the previous conversation before sending its replacement's request")
 
+// spec/app/files/index.md, "A change the agent proposes while Files is not on screen shows a notice to open Files, and its card is built in Files, for Files as it then shows"
+const reviewedInFiles = started(effect {
+  const conversation = try Conversation.Machine
+  const review = try MediaReview
+  let lookedAt = -1
+  try Stream.runForEach(conversation.changes, effect (talking) => {
+    const { context } = talking
+    if (context.revision === lookedAt || context.showing.tag !== "App" || context.showing.view !== "Files") return
+    lookedAt = context.revision
+    try review.reviewInFiles()
+  })
+}, "building the Files cards that waited for Files to be opened")
+
 const submitted = started(effect {
   try Stream.runForEach((try CommsPrompts).submissions, askComms)
 }, "asking what was typed on the communications dock")
@@ -1233,7 +1246,7 @@ export const assisting = Layer.provideMerge(
     reacting(Dock, { carry: carryDock }),
     Attachments.machine(),
     reacting(Locator, { carry: carryLocator }),
-    reached, looked, opening, saving, bound, requested, submitted, allowing, forgetting, rested, keyboardRest, steppingBack, carried, carriedAloud, agentWarmUp,
+    reached, looked, opening, saving, bound, requested, reviewedInFiles, submitted, allowing, forgetting, rested, keyboardRest, steppingBack, carried, carriedAloud, agentWarmUp,
   ),
   Layer.mergeAll(Layer.fresh(turns), talk, handoffs),
 )
