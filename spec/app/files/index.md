@@ -85,7 +85,7 @@ type Effect =
   | LookInto({ ticket: int, trail: List[int] })
   | AgentLook({ ticket: int, folder: int, filter: S::Filter })
   | Tell({ request: int, ok: bool, items: List[F::Item] })
-  | Perform({ ticket: int, work: C::Work, items: List[F::Item], name: str, folder: int, dest: int, replace: bool })
+  | Perform({ ticket: int, work: C::Work, items: List[F::Item], name: str, folder: int, dest: int, replace: bool, downloads: bool })
   | ToTrash({ items: List[int], approval: int })
   | Show({ item: F::Item, siblings: List[str] })
   | Share({ ticket: int, channel: C::Dest, items: List[F::Item], approval: int })
@@ -942,22 +942,40 @@ pure def alwaysTheSheetKeepsItsRules(s: Files): bool =
 
 ### A change starts from the selection, of the folder showing, into a destination only as the Move to sheet last read it, as Changes allows it
 
+New folder at the top opens the primary storage before showing the name
+form. In Downloads it uses the device's Download directory, creating
+that directory first only if it is missing.
+
 ```quint
-pure def performing(c: C::Change, s: Files): List[Effect] =
+pure def performAt(c: C::Change, s: Files, downloads: bool): List[Effect] =
   if (C::busy(c) and not(C::busy(s.change)))
-    List(Perform({ ticket: c.attempt.id, work: c.work, items: c.items, name: c.name, folder: c.folder, dest: c.dest.folder, replace: c.replace }))
+    List(Perform({ ticket: c.attempt.id, work: c.work, items: c.items, name: c.name, folder: c.folder, dest: c.dest.folder, replace: c.replace, downloads: downloads }))
   else List()
+
+pure def performing(c: C::Change, s: Files): List[Effect] = performAt(c, s, false)
 
 pure def moving(work: C::Work): bool = work == C::MoveTo or work == C::CopyTo
 
+pure def downloadsNewFolder(s: Files, work: C::Work): bool =
+  work == C::NewFolder and s.inCategory and s.category == F::Download and s.volumes.length() > 0
+
+pure def changeParent(s: Files, work: C::Work): int =
+  if (downloadsNewFolder(s, work)) s.volumes.nthOr(0, { id: 0, used: 0, total: 0 }).id else here(s)
+
 pure def canBegin(s: Files, work: C::Work, name: str, by: Actor): bool =
-  by == Owner and browse(s) == Showing and not(s.inCategory) and (not(moving(work)) or M::ready(s.sheet))
-    and C::canBegin(s.change, work, if (work == C::NewFolder) List() else chosen(s), names(s), here(s), name, M::place(s.sheet), 0)
+  by == Owner and browse(s) == Showing and (not(s.inCategory) or downloadsNewFolder(s, work)) and (not(moving(work)) or M::ready(s.sheet))
+    and C::canBegin(s.change, work, if (work == C::NewFolder) List() else chosen(s), names(s), changeParent(s, work), name, M::place(s.sheet), 0)
 
 pure def begin(s: Files, work: C::Work, name: str, by: Actor): Moved =
   val cleared = { ...selected(List(), s), sheet: M::close(s.sheet) }
-  val change = C::begin(cleared.change, work, if (work == C::NewFolder) List() else chosen(s), names(s), here(s), name, M::place(s.sheet), 0)
-  { state: { ...cleared, change: change }, out: performing(change, cleared) }
+  val change = C::begin(cleared.change, work, if (work == C::NewFolder) List() else chosen(s), names(s), changeParent(s, work), name, M::place(s.sheet), 0)
+  { state: { ...cleared, change: change }, out: performAt(change, cleared, downloadsNewFolder(s, work)) }
+
+pure def stepDownloadsFolderOnlyByOwner(before: Files, via: str, after: Files, out: List[Effect]): bool =
+  out.every(e => match e {
+    | Perform(p) => p.downloads implies (via == "begin" and downloadsNewFolder(before, p.work) and p.folder == changeParent(before, p.work))
+    | _ => true
+  })
 
 pure def stepADestinationIsAFolderAsRead(before: Files, via: str, after: Files): bool =
   (via == "begin" and moving(after.change.work) and after.change.attempt.id != before.change.attempt.id) implies

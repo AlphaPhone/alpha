@@ -345,7 +345,7 @@ effect function cleared(volume: string, folder: string, paths: ReadonlyMap<strin
 }
 
 // spec/app/files/index.md, "A change ends as its answer says, what a move took away is told, and the place is read again"
-effect function performed(ticket: number, work: string, items: ReadonlyArray<Item>, name: string, folder: number, dest: number, replace: boolean): Event!!(Files | Handles | Answers | Browser.Machine | Shell | Device) {
+effect function performed(ticket: number, work: string, items: ReadonlyArray<Item>, name: string, folder: number, dest: number, replace: boolean, downloads: boolean): Event!!(Files | Handles | Answers | Browser.Machine | Shell | Device) {
   const unknown: Event = { type: "finished", ticket, done: [], failed: [] }
   return effect {
     const done: number[] = []
@@ -366,9 +366,19 @@ effect function performed(ticket: number, work: string, items: ReadonlyArray<Ite
         }
         if (!(try reviewCurrent(approved))) return refused
       }
-      const reply = try called("storageCreateFolder", (plugin) => plugin.storageCreateFolder({ volume: at.value.volume, parent: at.value.path, name }))
+      let target = at.value.path
+      if (downloads) {
+        if (at.value.volume !== primary || target !== "" || change.approval !== 0) return { type: "finished", ticket, done, failed: [folder] }
+        target = "Download"
+        const ready = try called("storageList", (plugin) => plugin.storageList({ volume: primary, path: target }))
+        if (ready.status === "missing") {
+          const created = try called("storageCreateFolder", (plugin) => plugin.storageCreateFolder({ volume: primary, parent: "", name: target }))
+          if (created.status !== "ready" && created.status !== "exists") return { type: "finished", ticket, done, failed: [folder] }
+        } else if (ready.status !== "ready") return { type: "finished", ticket, done, failed: [folder] }
+      }
+      const reply = try called("storageCreateFolder", (plugin) => plugin.storageCreateFolder({ volume: at.value.volume, parent: target, name }))
       if (reply.status === "ready") {
-        if (reply.path === undefined || reply.path === "" || parentOf(reply.path) !== at.value.path) return unknown
+        if (reply.path === undefined || reply.path === "" || parentOf(reply.path) !== target) return unknown
         done.push(try (try Handles).of({ volume: at.value.volume, path: reply.path }))
       } else failed.push(folder)
       return { type: "finished", ticket, done, failed }
@@ -466,7 +476,7 @@ function carry(fx: Out): Job<Event, Files | Handles | Browser.Machine | Bin.Mach
     when { tag: "LookInto", let ticket, let trail }: answer("sheet", destination(ticket, trail), { type: "destRead", ticket, ok: false, entries: [] }, "Phone");
     when { tag: "AgentLook", let ticket, let folder, let filter }: answer("peek", peeked(ticket, folder, filter), { type: "agentLooked", ticket, ok: false, entries: [] }, "Phone");
     when { tag: "Tell", let request, let ok, let items }: run(`tell ${request}`, effect { try (try Answers).tell(request, { ok, items }) }, "Phone");
-    when { tag: "Perform", let ticket, let work, let items, let name, let folder, let dest, let replace }: answer(`perform ${ticket}`, performed(ticket, work, items, name, folder, dest, replace), { type: "finished", ticket, done: [], failed: [] }, "Phone");
+    when { tag: "Perform", let ticket, let work, let items, let name, let folder, let dest, let replace, let downloads }: answer(`perform ${ticket}`, performed(ticket, work, items, name, folder, dest, replace, downloads), { type: "finished", ticket, done: [], failed: [] }, "Phone");
     when { tag: "ToTrash", let items, let approval }: run("trash", ignore(effect {
       if (approval === 0 || (try (try Answers).reviewed(approval)) === undefined) {
         const shown = (try (try Browser.Machine).get()).items

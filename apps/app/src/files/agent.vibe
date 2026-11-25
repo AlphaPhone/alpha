@@ -176,10 +176,6 @@ const kinds: Readonly<Partial<Record<string, Kind>>> = {
   image: "Image", video: "Video", audio: "Audio", document: "Document", pdf: "Pdf", folder: "Folder",
 }
 
-effect function primaryAt(id: number, path: string): boolean!!Handles {
-  const spot = try (try Handles).spot(id)
-  return Option.isSome(spot) && spot.value.volume === "primary" && spot.value.path === path
-}
 
 effect function destination(path: string): (Place | undefined)!!(Files | Handles) {
   const volume = "primary"
@@ -361,7 +357,6 @@ export effect function fileAction(operation: DeviceOperation, call: ExecutorCall
   if (operation.type === "files_filter") return try filterFiles(operation, current)
   const shown = try (try Browser.Machine).get()
   if (!shown.open || shown.trash || !Browser.allowed(shown)) return notShown
-  const folder = Browser.here(shown)
   const answers = try Answers
   const request = try answers.next()
   switch (operation.type) {

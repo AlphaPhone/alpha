@@ -168,7 +168,12 @@ export function Files({ runtime, alpha }: FilesProps) {
   const changeLayout = { type: "showAs", layout: grid ? "Rows" : "Grid" } as const;
   const showFilter = owner({ type: "searchFor", wanted });
   const refresh = owner({ type: "refresh" });
-  const makeFolder = owner({ type: "begin", work: "NewFolder", name: unnamed });
+  const rootFolder = atTop && primary ? { type: "openVolume", target: primary.id } as const : undefined;
+  const makeFolder = rootFolder ? owner(rootFolder) : owner({ type: "begin", work: "NewFolder", name: unnamed });
+  const newFolder = () => {
+    if (rootFolder) tell(rootFolder);
+    setNaming({ work: "NewFolder", name: "" });
+  };
   const pickFile = { type: "openPicker", replacing: 0 } as const;
   const canPick = atTop && recent.can(pickFile, "Owner");
   const showTools = showFilter || refresh || makeFolder || owner(changeLayout) || canPick;
@@ -185,7 +190,7 @@ export function Files({ runtime, alpha }: FilesProps) {
               <MenuContent>
                 {atTop && <MenuItem onSelect={() => void runtime.runPromise(startScan())}><ScanLine />Scan document</MenuItem>}
                 {canPick && <MenuItem onSelect={() => void recent.send(pickFile, "Owner")}><FolderOpen />Open and remember a file</MenuItem>}
-                {makeFolder && <MenuItem onSelect={() => setNaming({ work: "NewFolder", name: "" })}><Plus />New folder</MenuItem>}
+                {makeFolder && <MenuItem onSelect={newFolder}><Plus />New folder</MenuItem>}
                 {owner(changeLayout) && <MenuItem onSelect={() => tell(changeLayout)}>{grid ? <List /> : <LayoutGrid />}{grid ? "List" : "Grid"}</MenuItem>}
                 {orders.map(([order, name]) => owner({ type: "sortBy", order }) && (
                   <MenuItem key={order} onSelect={() => tell({ type: "sortBy", order })}>
