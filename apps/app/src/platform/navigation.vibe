@@ -24,6 +24,24 @@ module held {
 }
 import { type Stopped, plugin } from held
 
+module voice {
+  /** Speak `text` through the web speech synthesiser when the host has one, dropping anything still speaking. @throws {never} */
+  export function said(text: string): void {
+    const speech = globalThis.speechSynthesis
+    if (speech === undefined || typeof SpeechSynthesisUtterance !== "function") return
+    try {
+      speech.cancel()
+      speech.speak(new SpeechSynthesisUtterance(text))
+    } catch { return }
+  }
+
+  /** Stop anything the web speech synthesiser is saying. @throws {never} */
+  export function hushed(): void {
+    try { globalThis.speechSynthesis?.cancel() } catch { return }
+  }
+}
+import { hushed, said } from voice
+
 /** How the notification of a journey ended it: Stop pressed on it, or Android lost the service. */
 export type Ended = { readonly journey: number; readonly by: "notification" | "lost" }
 
@@ -36,6 +54,10 @@ export service Navigation {
   /** One "Arrived at" notice while Maps is off screen. */
   arrived(title: string, text: string): void!!
   stop(journey: number): void!!
+  /** Speak one turn instruction aloud, replacing anything still being spoken. */
+  say(text: string): void!!
+  /** Stop any spoken turn instruction. */
+  hush(): void!!
   /** Whether the owner opened Alpha from the notification since it was last asked. */
   opened(): boolean!!
   /** Each journey whose service Android ended. */
@@ -58,6 +80,8 @@ export const phoneNavigation = Layer.sync(Navigation, () => {
       tryPromise(() => native.updateNavigation({ sessionId: sessionOf(journey), title, text })) |> Effect.map(%, (r) => r.active === true) |> Effect.orElseSucceed(%, () => false),
     arrived: (title: string, text: string) => tryPromise(() => native.navigationArrived({ title, text })) |> Effect.ignore(%),
     stop: (journey: number) => tryPromise(() => native.stopNavigation({ sessionId: sessionOf(journey) })) |> Effect.ignore(%),
+    say: (text: string) => sync(() => said(text)),
+    hush: () => sync(hushed),
     opened: () => tryPromise(() => native.consumeNavigationOpen()) |> Effect.map(%, (r) => r.open === true) |> Effect.orElseSucceed(%, () => false),
     ended: Stream.callback<Ended>((queue) => effect {
       try acquireRelease(
@@ -79,6 +103,8 @@ export const browserNavigation = Layer.succeed(Navigation, {
   update: () => succeed(false),
   arrived: () => Effect.void,
   stop: () => Effect.void,
+  say: (text: string) => sync(() => said(text)),
+  hush: () => sync(hushed),
   opened: () => succeed(false),
   ended: Stream.empty,
 })

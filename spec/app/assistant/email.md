@@ -41,7 +41,10 @@ pure def sendable(e: Email): bool = e.state == Drafting and e.account and e.reci
 The draft sent through Inbox: an unedited card under the request identity
 of the owner's turn that asked for it, each later version under one made
 from the card and that version, so that a retry of the same version reaches
-the same receipt instead of a second email.
+the same receipt instead of a second email. Gmail keeps a receipt only under
+an RFC UUID: the owner turn's identity is used as it is when it is one of
+versions 1 to 8, and otherwise a name-based UUID made from it, lowercased,
+so the same turn always reaches the same receipt.
 
 ```quint
 type Identity = OwnerTurn | OfVersion
@@ -62,7 +65,10 @@ pure val weight_answer = 3
 
 ### A turn offers at most one card: exactly one valid draft, with one to twenty recipients, a one-line subject and a body, staged once while its conversation is the one showing
 
-A thread reply, copies, attachments or a scheduled time are left to
+A draft is what the agent's inbox compose action hands this phone for the
+owner's turn that asked for it (eliza's `inboxComposeActionName`, as a
+local compose); another action's result, or one that names another turn,
+is none. A thread reply, copies, attachments or a scheduled time are left to
 Inbox. A card already on the shelf is shown as it was kept, never staged
 again.
 
@@ -101,6 +107,12 @@ pure def typed(e: Email, typing: bool): Email = { ...e, typing: typing }
 ```
 
 ### Send is offered for a draft with its account, valid recipients and a body, while the owner is not typing, once per version
+
+The card is checked again as the send is dispatched: it goes only while
+its conversation is still the one showing and the card still shows the
+version sent, and otherwise it says the email changed before sending and
+stays a draft. Inbox's own composer hands over the snapshot the owner
+confirmed and is not checked again.
 
 ```quint
 pure def canSend(e: Email): bool = sendable(e) and e.sentVersion != e.version

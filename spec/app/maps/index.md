@@ -8,7 +8,10 @@ location) and one [trip](./navigation.md) (the route and the guidance
 along it). The map's [credits and camera](./credits.md) follow the
 connection's surface. What the phone must do outside, the screen asks for as an
 effect; the answer comes back as an event naming its ticket. The
-[shell](../shell/) decides when Maps is on screen.
+[shell](../shell/) decides when Maps is on screen, and the agent brings it
+forward only as [admission](./admission.md) allows. The agent's Maps
+requests reach the phone as [delivery](./delivery.md) says, and its replies
+carry [cards](./cards.md) into the conversation.
 
 ## Story: Move between the screen's modes
 
@@ -42,8 +45,8 @@ import places as S from "./places"
 type Mode = Browse | Search | Place | Directions | Navigating
 type Sheet = Peek | Half | Full
 type Question = NoQuestion | ReadPlace | StartTrip
-type HandOff = SharePlace | EtaShare | Website | MapsApp | Call | CopyNumber
-type Change = Added | Renamed | Removed
+type HandOff = SharePlace | EmailPlace | CopyLink | EtaShare | Website | MapsApp | Call | CopyNumber
+type Change = Added | Renamed | Removed | Adopted
 type SavedNotice = NoNotice | PlaceSaved | PlaceRenamed | PlaceRemoved | NotKept
 type GuideNotice = Quiet | StoppedFromNotification | PausedAway | AccountChanged | RerouteKept
 type CopyNotice = Uncopied | NumberCopied | CopyFailed
@@ -126,6 +129,7 @@ pure val weight_pressMap = 5
 pure val weight_liftPress = 5
 pure val weight_pressHeld = 10
 pure val weight_pinAt = 5
+pure val weight_menuPin = 5
 pure val weight_clearRecent = 5
 pure val weight_savedKept = 10
 pure val weight_savedUnreadable = 2
@@ -265,7 +269,8 @@ pure def goBack(m: Maps): Stepped =
   else if (m.place != 0)
     { state: { ...dropped, place: 0, details: cleared(m.details), trip: N::forgetRoute(m.trip), sheet: if (m.searching) Half else Peek,
         review: voided(m.review), copyNotice: Uncopied, copying: false, startPlace: 0, origins: cleared(m.origins), originsFound: 0 }, out: List() }
-  else { state: { ...dropped, searching: false, query: "", search: cleared(m.search), results: 0, sheet: Peek, waitingProvider: false, pausing: false }, out: List() }
+  else { state: { ...dropped, searching: false, query: "", search: cleared(m.search), results: 0, sheet: Peek, waitingProvider: false, pausing: false, fromEvent: 0 },
+    out: if (m.fromEvent > 0) List(OpenEvent({ meeting: m.fromEvent })) else List() }
 ```
 
 ### Back never leaves more than one mode
@@ -491,17 +496,35 @@ pure def stepAPressPinsOnce(before: Maps, via: str, after: Maps, out: List[Effec
 pure def sometimesPinnedByHand(m: Maps): bool = m.pinning and m.presses > 0
 ```
 
+### A secondary click, or a menu opened with no finger down, drops a pin there at once
+
+On a desktop there is no finger to hold: its secondary click asks for the
+same pin at once, under the same limits as a held finger.
+
+```quint
+pure def canMenuPin(m: Maps, lat: int, lng: int): bool =
+  canPressMap(m, lat, lng, 0) and not(m.pressing)
+
+pure def menuPin(m: Maps, lat: int, lng: int): Stepped =
+  { state: { ...m, pinning: true }, out: List(MakePin({ lat: lat, lng: lng })) }
+
+pure def stepAMenuPinsOnlyWithNoFingerDown(before: Maps, via: str, after: Maps, out: List[Effect]): bool =
+  via == "menuPin" implies (not(before.pressing) and before.trip.guidance == N::Stopped and not(before.directions))
+```
+
 ### A query another app hands to Maps opens as a search, never over navigation
 
 A query handed over while no provider works waits for one, as a search
-does, and the owner's next action drops it before it is sent.
+does, and the owner's next action drops it before it is sent. A Calendar
+event hands over its place's words with its own number (other apps with
+none), and Back from that search goes back to the event.
 
 ```quint
-pure def canHandOver(m: Maps, query: str, chars: int): bool =
-  query != "" and fits(chars) and not(C::holding(m.link)) and m.trip.guidance == N::Stopped and onScreen(m)
+pure def canHandOver(m: Maps, query: str, chars: int, meeting: int): bool =
+  query != "" and fits(chars) and not(C::holding(m.link)) and m.trip.guidance == N::Stopped and onScreen(m) and meeting >= 0
 
-pure def handOver(m: Maps, query: str, chars: int): Stepped =
-  val opened = { ...m, searching: true, query: "", search: cleared(m.search), place: 0, directions: false, sheet: Half,
+pure def handOver(m: Maps, query: str, chars: int, meeting: int): Stepped =
+  val opened = { ...m, searching: true, query: "", search: cleared(m.search), place: 0, directions: false, sheet: Half, fromEvent: meeting,
       trip: N::forgetRoute(m.trip), copyNotice: Uncopied, copying: false, renaming: false, startPlace: 0,
       origins: cleared(m.origins), originsFound: 0, question: NoQuestion, review: voided(m.review), details: cleared(m.details) }
   search(opened, query, chars)
@@ -619,6 +642,25 @@ pure def stepSavedPlacesAreKeptOnThePhone(before: Maps, via: str, after: Maps, o
   after.saved != before.saved implies (via == "restoreSaved" or kept(out, after.saved))
 ```
 
+### A list this version never wrote takes the previous Alpha's places once, and keeps them
+
+When the shell finds no list of this version's own, it gives back the
+previous Alpha's places as [saved places](./places.md) adopt them, and
+the list they make is written at once, so the previous list is never taken
+again. A previous list that cannot be read gives back nothing.
+
+```quint
+pure def canAdoptPrevious(m: Maps, saved: List[S::Saved]): bool =
+  m.saved == List() and m.keepable and S::adopted(saved).length() > 0
+
+pure def adoptPrevious(m: Maps, saved: List[S::Saved]): Stepped =
+  val taken = S::adopted(saved)
+  { state: { ...m, saved: taken, notice: NoNotice }, out: List(KeepSaved({ saved: taken, change: Adopted })) }
+
+pure def stepThePreviousListIsTakenOnlyByAnUnusedList(before: Maps, via: str, after: Maps): bool =
+  via == "adoptPrevious" implies (before.saved == List() and before.keepable and S::distinctAndNamed(after.saved))
+```
+
 ### A saved list that cannot be read is never written over, and a change is told only once it reads back
 
 The owner reads "Saved places could not be read. Existing data has not been
@@ -635,7 +677,7 @@ pure def savedUnreadable(m: Maps): Maps = { ...m, keepable: false }
 
 pure def noticeOf(change: Change, ok: bool): SavedNotice =
   if (not(ok)) NotKept
-  else match change { | Added => PlaceSaved | Renamed => PlaceRenamed | Removed => PlaceRemoved }
+  else match change { | Added => PlaceSaved | Renamed => PlaceRenamed | Removed => PlaceRemoved | Adopted => NoNotice }
 
 pure def canSavedKept(m: Maps, change: Change, ok: bool): bool = m.keepable
 
@@ -673,7 +715,7 @@ and, where the phone has none, copies the text.
 ```quint
 pure def canHandOn(m: Maps, kind: HandOff): bool =
   m.place > 0 and onScreen(m) and (kind == EtaShare implies (m.trip.route != 0 and (mode(m) == Directions or mode(m) == Navigating)))
-    and ((kind == SharePlace or kind == CopyNumber) implies not(googleShown(m)))
+    and ((kind == SharePlace or kind == EmailPlace or kind == CopyLink or kind == CopyNumber) implies not(googleShown(m)))
     and (kind == Call implies m.dialer)
     and (kind == CopyNumber implies not(m.copying))
 
@@ -784,8 +826,11 @@ pure def stepDirectionsOpenOnlyFromACard(before: Maps, via: str, after: Maps): b
 ### A route is asked from coordinates or another place, which ends a pending "Use my location"
 
 From my location, the route is asked when the fix arrives; from coordinates
-or another place, from the coordinates the screen keeps for it. On Google's
-map no prompt for coordinates is offered.
+or another place, from the coordinates the screen keeps for it. No control
+of Maps prompts the owner for coordinates: a starting point is the phone, a
+saved place or a place found by its name, and only coordinates typed into
+Search drop a pin. Coordinates come only with the agent's proposal, and
+never on Google's map.
 
 ```quint
 pure def canPlanFrom(m: Maps, origin: N::Origin, lat: int, lng: int): bool =

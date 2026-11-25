@@ -35,7 +35,11 @@ export async function mountDock({ view = "Browser", withToast = false, flush }: 
           ? { version: "1", optionalFields: true }
           : url.pathname === "/api/conversations"
             ? { conversations: [] }
-            : {};
+            : url.pathname === "/api/auth/me"
+              ? { identity: { kind: "owner", id: "agent-owner" }, access: { role: "OWNER", mode: "local" } }
+              : url.pathname === "/api/client-devices/capabilities"
+                ? { protocol: 1, agentId: "agent-owner", identityId: "owner-identity", deviceActions: { protocol: 1, capabilities: [] } }
+                : {};
       return Effect.succeed(HttpClientResponse.fromWeb(request, new Response(JSON.stringify(body), { headers: { "content-type": "application/json" } })));
     }),
   );

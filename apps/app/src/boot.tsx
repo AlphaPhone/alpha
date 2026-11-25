@@ -4,6 +4,7 @@ import { captureReviewedDraft, MediaHandoff, stageAttachment, stageTranscript } 
 import { readPage, stopPage } from "./assistant/read-aloud.vibe";
 import { executeMedia } from "./assistant/media-executors.ts";
 import { FileContext } from "./assistant/file-context.vibe";
+import { MapsContext } from "./assistant/maps-context.vibe";
 import { Machine as Shell, showing } from "../gen/app__shell.effect.vibe";
 import { Machine as Layers, pageInert } from "../gen/app__shell__layers.effect.vibe";
 import { MediaExecutors } from "./assistant/media-review.vibe";
@@ -98,13 +99,19 @@ export function boot(platform: Layer.Layer<Platform>, mounts: readonly Mount[] =
       return browser.runtime(alpha).runPromise(openMessageLink(href, "Inbox", current), { signal });
     }).pipe(Effect.orElseSucceed(() => false)),
   });
+  const mapsContext = Layer.succeed(MapsContext, {
+    selected: () => Effect.tryPromise(async (signal) => {
+      const [{ default: maps }, { mapsSelected }] = await Promise.all([import("./maps/index.tsx"), import("./maps/agent.vibe")]);
+      return maps.runtime(alpha).runPromise(mapsSelected(), { signal });
+    }).pipe(Effect.orElseSucceed(() => undefined)),
+  });
   const scans = Layer.succeed(ScanExports, {
     record: (selection) => Effect.tryPromise(async () => {
       const [{ default: files }, { retainScanExport }] = await Promise.all([import("./files/index.tsx"), import("./files/scan.vibe")]);
       await files.runtime(alpha).runPromise(retainScanExport(selection));
     }).pipe(Effect.orElseSucceed(() => undefined)),
   });
-  const root = rooted(Layer.provideMerge(Layer.provideMerge(startupSignIn(requireNativeSignIn), resident), Layer.mergeAll(platform, media, executors, fileContext, downloads, agentPages, inboxLinks, scans)));
+  const root = rooted(Layer.provideMerge(Layer.provideMerge(startupSignIn(requireNativeSignIn), resident), Layer.mergeAll(platform, media, executors, fileContext, mapsContext, downloads, agentPages, inboxLinks, scans)));
   const placed = new Map<Place, ReactElement[]>();
   const alpha: Alpha = {
     runtime: root.runtime,

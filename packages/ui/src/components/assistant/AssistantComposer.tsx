@@ -84,6 +84,8 @@ export type AssistantComposerProps = Omit<ComponentProps<"div">, "children" | "o
   onPreviewAttachment?: (id: string) => void;
   /** Takes the quote off. */
   onUnquote?: () => void;
+  /** Takes the editing mark off while keeping the text in the field. */
+  onStopEditing?: () => void;
 };
 
 const reasons = { away: "Alpha cannot be reached", sensitive: "This screen is private and is never sent" };
@@ -135,7 +137,7 @@ function keepComposerFocus(event: PointerEvent<HTMLButtonElement>) {
  */
 export function AssistantComposer({
   variant = "sheet", value, onValueChange, closed = false, notice, unavailable, attachments = [], limit = 4, quote, editing = false, lift,
-  onSend, onStop, stopping = false, onAttach, onSearch, onNew, making = false, onHistory, onTalk, onDictate, showUnavailableTalk = false, voice, voiceNotice, onOpen, onType, onSwipeUp, leading, opener, placeholder, onFocusField, fieldRef, fieldPull, onRemoveAttachment, onPreviewAttachment, onUnquote, className, style, ...props
+  onSend, onStop, stopping = false, onAttach, onSearch, onNew, making = false, onHistory, onTalk, onDictate, showUnavailableTalk = false, voice, voiceNotice, onOpen, onType, onSwipeUp, leading, opener, placeholder, onFocusField, fieldRef, fieldPull, onRemoveAttachment, onPreviewAttachment, onUnquote, onStopEditing, className, style, ...props
 }: AssistantComposerProps) {
   const written = value.trim() !== "" || attachments.length > 0;
   // spec/app/assistant/dock.md, "A press does one thing: a tap is never also a drag, and a late click never taps"
@@ -152,7 +154,7 @@ export function AssistantComposer({
       {unavailable ? <span role="status" className="sr-only">{reasons[unavailable]}</span> : null}
       {!compact && attachments.length ? <AssistantPendingAttachments attachments={attachments} limit={limit} onRemove={onRemoveAttachment} onPreview={onPreviewAttachment} /> : null}
       {!compact && quote ? <AssistantQuoteBar kind="quote" text={quote} onRemove={onUnquote} /> : null}
-      {!compact && editing ? <AssistantQuoteBar kind="editing" /> : null}
+      {!compact && editing ? <AssistantQuoteBar kind="editing" onRemove={onStopEditing} /> : null}
       {voiceNotice}
       {voice}
       <div {...swiping} hidden={Boolean(voice)} className={cn("items-center bg-secondary", voice ? "hidden" : "flex", compact ? "touch-none gap-0.5 self-center rounded-dock-compact p-1.25 shadow-dock-compact dark:shadow-dock-compact-dark" : bar ? cn("min-h-[calc(--spacing(18.5)_-_2_*_var(--alpha-composer-fit,0px))] gap-1 rounded-dock py-1.5 pr-2 pl-2.25 shadow-dock dark:shadow-dock-dark", draggable ? "touch-none" : "touch-pan-y") : cn("min-h-[calc(--spacing(17)_-_2_*_var(--alpha-composer-fit,0px))] touch-pan-y gap-1.5 rounded-sheet py-1.5 pr-1.5", targeting ? "pl-1.5 ring-[1.5px] ring-primary ring-inset" : "pl-5"))}>

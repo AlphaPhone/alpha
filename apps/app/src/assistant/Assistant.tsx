@@ -648,7 +648,7 @@ export function Assistant({ runtime, messageActions, speech, canReadAloud = fals
   const failure = seen.failure;
   const liveFix = failure?.kind === "OutOfFunds" ? "FundingFix" : failure?.fix ?? "NoFix";
   const readAgain = failure?.messageId !== undefined && lines.some((line) => line.id === failure.messageId && line.failure === failure.kind);
-  const failed = failure === undefined || (readAgain && !liveAddsToHistory(failure.kind, liveFix, failure.waitMs)) ? [] : [{ id: "failure", author: "alpha", text: "", children: <ReplyFailure kind={failure.kind} fix={liveFix} waitMs={failure.waitMs} live onRetry={() => type(board.lastSent)} onSettings={settingsAction ? onSettings : undefined} /> } as const];
+  const failed = failure === undefined || (readAgain && !liveAddsToHistory(failure.kind, liveFix, failure.waitMs)) ? [] : [{ id: "failure", author: "alpha", text: "", children: <ReplyFailure kind={failure.kind} fix={liveFix} waitMs={failure.waitMs} cutOff={failure.cutOff} live onRetry={() => type(board.lastSent)} onSettings={settingsAction ? onSettings : undefined} /> } as const];
   const quotedLine = board.line(shown.chosen, writing.editor.quote);
   const quoted = quotedLine === undefined ? undefined : wordsOf(quotedLine);
   const view = talking.context.showing.tag === "App" ? talking.context.showing.view : "Home";
@@ -810,6 +810,7 @@ export function Assistant({ runtime, messageActions, speech, canReadAloud = fals
             } else void runtime.runPromise(removeFile(id));
           },
           onUnquote: composer.can({ type: "unquote" }) ? () => void composer.send({ type: "unquote" }) : undefined,
+          onStopEditing: composer.can({ type: "stopEditing" }) ? () => void composer.send({ type: "stopEditing" }) : undefined,
         }}
       />}
       <MailReviewDialogs open={!onComms && open} review={reviewed} attach={attachMail} dismiss={dismissMail} />

@@ -30,6 +30,8 @@ export interface AskScene {
   /** The failure fields of the resident's terminal reply. */
   refusal?: Pick<TurnReply, "cloudCode" | "planAction"> & { readonly failureKind: NonNullable<TurnReply["failureKind"]> };
   nextReplyChunks?: readonly string[];
+  /** The agent chooses not to reply: its turn ends with no text. */
+  silent?: boolean;
   nextReplyProvisional?: boolean;
   /** The actions the next reply says it ran, made from the turn's metadata, as eliza's agent lists them on its done frame. */
   nextActions?: (metadata: unknown) => readonly unknown[];
@@ -118,6 +120,11 @@ function reply(scene: AskScene, room: string, text: string, keep: (said: string)
       }
       if (scene.acknowledgment !== undefined) controller.enqueue(frame({ type: "acknowledgment", text: scene.acknowledgment }));
       if (scene.acknowledgment !== undefined) controller.enqueue(frame({ type: "tool", name: "CALENDAR", label: "Using Calendar" }));
+      if (scene.silent) {
+        controller.enqueue(frame({ type: "done", fullText: "", ...named(scene.said.length) }));
+        controller.close();
+        return;
+      }
       if (scene.stalled) {
         for (const piece of custom ?? ["Thinking"]) controller.enqueue(frame({ type: "token", text: piece }));
         scene.turns.set(room, () => controller.close());
@@ -268,5 +275,7 @@ export function askRoutes(scene: AskScene): Route[] {
       scene.cloudWarmCalls += 1;
       return Response.json({ started: true }, { status: 202 });
     },
+    /** The one agent the resident runs, named as its owner route names it (`.eliza/packages/agent-host/src/host/status.vibe`). */
+    (request, url) => (request.method === "GET" && url.pathname === "/api/agents" ? Response.json({ agents: [{ id: "agent-owner", name: "Alpha", status: "running" }] }) : undefined),
   ];
 }
