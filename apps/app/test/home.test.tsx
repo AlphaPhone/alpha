@@ -267,12 +267,13 @@ describe("Home on a phone", () => {
   // spec/app/home/cards.md, "Story: See my day at a glance"
   it("See my day as it is where I am, west of UTC and east of it (spec/app/home/cards.md, \"Story: See my day at a glance\")", async () => {
     const hour = 3_600_000;
-    const agenda = () => [...document.querySelectorAll("button")].find((found) => /^(Next|Overdue reminder)/.test(found.textContent ?? ""));
-    // spec/app/home/cards.md, "Story: See my day at a glance": Home tells the day as it is where the owner is, west of UTC after its midnight as well as east of it. Home carries no date heading, as on the earlier Alpha, so the UTC day ("23 Monday" on Tuesday the 24th in Los Angeles) is never drawn; the agenda card tells its event's time in the owner's zone. Each place is opened later than the last, as a restart keeps the day it last read.
+    const agenda = () => document.querySelector<HTMLButtonElement>("button[aria-label^='Open calendar event:']");
+    const dated = (at: number) => new Date(at).toLocaleDateString([], { weekday: "short", month: "short", day: "numeric" });
+    // spec/app/home/cards.md, "Story: See my day at a glance": Home tells the day as it is where the owner is, west of UTC after its midnight as well as east of it. The agenda card heads its event with the owner's day and tells its time in the owner's zone, so the UTC day ("Mon, Nov 23" on Tuesday the 24th in Los Angeles) is never drawn. Each place is opened later than the last, as a restart keeps the day it last read.
     const zone = process.env.TZ;
     const day = 10 * 86_400_000;
     const seenThere: Array<{ readonly card: string | undefined; readonly utcDay: boolean }> = [];
-    const wanted: string[] = [];
+    const wanted: string[][] = [];
     try {
       for (const [where, at] of [["Asia/Tokyo", day - 3 * hour], ["UTC", day + 8 * hour], ["America/Los_Angeles", day + 18 * hour]] as const) {
         process.env.TZ = where;
@@ -283,17 +284,17 @@ describe("Home on a phone", () => {
         const opened = await open(there);
         await until(opened.alpha, home.runtime(opened.alpha), Cards.Machine, (c) => c.calendar.source === "Ready" && c.calendar.items.length === 1);
         await drawn(() => undefined);
-        const utcMidnight = new Date(Math.floor(at / 86_400_000) * 86_400_000).toLocaleDateString([], { weekday: "long", day: "numeric" });
-        const localDay = new Date(at).toLocaleDateString([], { weekday: "long", day: "numeric" });
-        seenThere.push({ card: agenda()?.textContent ?? undefined, utcDay: utcMidnight !== localDay && (document.body.textContent ?? "").includes(utcMidnight) });
-        wanted.push(new Date(at + 2 * hour).toLocaleTimeString([], { hour: "numeric", minute: "2-digit", timeZone: where }));
+        const utcMidnight = Math.floor(at / 86_400_000) * 86_400_000;
+        const utcDays = [dated(utcMidnight), new Date(utcMidnight).toLocaleDateString([], { weekday: "long", day: "numeric" })];
+        seenThere.push({ card: agenda()?.textContent ?? undefined, utcDay: dated(utcMidnight) !== dated(at) && utcDays.some((shown) => (document.body.textContent ?? "").includes(shown)) });
+        wanted.push(["Standup", dated(at + 2 * hour), new Date(at + 2 * hour).toLocaleTimeString([], { hour: "numeric", minute: "2-digit", timeZone: where })]);
         await opened.close();
       }
     } finally {
       if (zone === undefined) delete process.env.TZ;
       else process.env.TZ = zone;
     }
-    expect(seenThere.map(({ card, utcDay }, at) => [card?.includes(`Standup${wanted[at]}`) ?? false, utcDay])).toEqual(seenThere.map(() => [true, false]));
+    expect(seenThere.map(({ card, utcDay }, at) => [wanted[at]?.every((part) => card?.includes(part)) ?? false, utcDay])).toEqual(seenThere.map(() => [true, false]));
   });
 
   // spec/app/home/cards.md, "Story: The other cards"; spec/app/home/cards.md, "Story: Open my day from a card"
