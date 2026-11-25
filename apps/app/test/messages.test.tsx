@@ -675,10 +675,10 @@ describe("Messages on an Alpha image", () => {
     await vi.waitFor(() => expect(button("Send")?.disabled).toBe(false));
     await press("Send");
     await ready(runtime, Conversation, "The proposal is read", (state) => review.pendingReads >= 1 && state.turn.reply === "Complete");
-    await vi.waitFor(() => expect(button(draft ? "Open draft" : "Approve")).toBeDefined());
-    expect(document.body.textContent).toContain(draft ? "Open an editable text draft" : "Review this text on your phone");
+    await vi.waitFor(() => expect(button(draft ? "Open draft" : "Send this text")).toBeDefined());
+    expect(document.body.textContent).toContain(draft ? "Open an editable text draft" : `To ${displayNumber("+12025550142")}`);
     expect(document.body.textContent).not.toContain(draft ? "Review this text on your phone" : "Open an editable text draft");
-    expect(button(draft ? "Approve" : "Open draft")).toBeUndefined();
+    expect(button(draft ? "Send this text" : "Open draft")).toBeUndefined();
     expect([review.decisions, review.claims, review.confirmations, world.telephony.sent]).toEqual([[], [], [], []]);
   });
 
@@ -707,7 +707,7 @@ describe("Messages on an Alpha image", () => {
       expect(document.querySelector('[aria-label="Choose a phone number"]')).toBeNull();
     }
     expect(button("Decline")).toBeDefined();
-    expect([button("Approve"), button("Open draft")]).toEqual([undefined, undefined]);
+    expect([button("Send this text"), button("Open draft")]).toEqual([undefined, undefined]);
     expect([review.decisions, review.claims, review.confirmations, world.telephony.sent]).toEqual([[], [], [], []]);
   });
 
