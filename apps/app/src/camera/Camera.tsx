@@ -150,7 +150,7 @@ function Viewfinder({ state, native, sheet, zoom, focusAt, bind }: {
           key={state.focus}
           role="status"
           aria-label={state.confirmed === state.focus ? "Camera focus applied" : "Focus target"}
-          className={cn("pointer-events-none absolute z-10 size-10.5 -translate-1/2 rounded-camera-stop border-2 shadow-focus-target", state.confirmed === state.focus ? "border-camera-focused" : "border-camera-focus")}
+          className="pointer-events-none absolute z-10 size-10.5 -translate-1/2 rounded-camera-stop border-2 border-camera-focus shadow-focus-target"
           style={{ left: `${target.x * 100}%`, top: `${target.y * 100}%` }}
         />
       )}
@@ -335,7 +335,7 @@ export function Camera({ runtime, alpha }: Shown<Runtime>) {
       </header>
 
       {state.countdown > 0 && (
-        <span role="timer" aria-label={`Photo in ${state.countdown} ${state.countdown === 1 ? "second" : "seconds"}`} className="pointer-events-none absolute inset-x-0 top-75 z-10 flex justify-center text-camera-countdown font-light text-foreground tabular-nums [text-shadow:0_2px_12px_color-mix(in_oklab,var(--color-background)_60%,transparent)] landscape:right-33">
+        <span role="timer" aria-label={`Photo in ${state.countdown} ${state.countdown === 1 ? "second" : "seconds"}`} className="pointer-events-none absolute inset-x-0 top-75 z-10 flex justify-center text-camera-countdown font-light text-foreground tabular-nums [text-shadow:0_2px_12px_color-mix(in_oklab,var(--background)_60%,transparent)] landscape:right-33">
           {state.countdown}
         </span>
       )}

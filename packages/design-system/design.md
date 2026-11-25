@@ -18,7 +18,7 @@ do next.
   and a chosen box or radio, is `alpha` with `alpha-foreground`, Alpha blue in both themes. `destructive`, `ok`, `warn` and `info` are states,
   `call` a live or answerable call (the same green in both themes, behind white text), `call-ended` the moment after one ends,
   `dial` the button that places one, `hangup` the red behind or inside a control that ends a call or removes a recording,
-  never text, `record` a running recording and `record-shutter` the Video shutter. `map` marks pins, the phone and the route on a map, and `alpha-deep` the tab under Maps guidance's banner, both the same in both themes. Camera's access notice is `camera-panel`, its focus target `camera-focus`, and `camera-focused` once the camera confirms it. A state color always sits beside a
+  never text, `record` a running recording and `record-shutter` the Video shutter. `map` marks pins, the phone and the route on a map, and `alpha-deep` the tab under Maps guidance's banner, both the same in both themes. Camera's access notice is `camera-panel` and its focus target `camera-focus`, which stays that color: a target is not a claim that the camera focused. A state color always sits beside a
   word or an accessible name, never alone.
 - **Type.** `font-sans` is Public Sans, for everything read or pressed. `font-display` is Denton, with
   Fraunces behind it, at weight `light`: a screen's display title on the launcher, the date on Home, a large figure. The sizes
@@ -131,7 +131,6 @@ this prose into tokens. To change the design, describe it, and have the change w
 | `camera-panel` | oklch(0.2264 0 0) | — |
 | `record-shutter` | oklch(0.6083 0.209 27.03) | — |
 | `camera-focus` | oklch(0.8819 0.1534 90.23) | — |
-| `camera-focused` | oklch(0.8086 0.1479 154.1) | — |
 | `map` | oklch(0.414 0.266 266.5) | — |
 | `alpha-deep` | oklch(0.354 0.245 264.1) | — |
 
