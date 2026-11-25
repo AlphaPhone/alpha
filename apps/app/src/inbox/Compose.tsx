@@ -1,6 +1,6 @@
 // spec/app/inbox/drafts.md, "Story: Write a message"; spec/app/inbox/drafts.md, "Story: Set a draft aside or discard it"; spec/app/inbox/sending.md, "Story: Send a draft I reviewed"
 import { Button, InboxComposer, InboxDiscardDialog, InboxDraftReview, InboxFileOfferSheet, InboxSuggestionSheet, type InboxNoticeKind, type InboxSendOutcomeProps } from "@repo/ui";
-import { Effect, type ManagedRuntime } from "effect";
+import type { ManagedRuntime } from "effect";
 import { useMemo } from "react";
 import { type Mailbox, accessOf } from "../../gen/app__inbox.ts";
 import type { Machine as Writing } from "../../gen/app__inbox__drafts.effect.vibe";
@@ -81,15 +81,17 @@ export function Compose({ runtime, list }: ComposeProps) {
   const shell = useShell(runtime).state;
   const account = state?.letter.account;
   const recent = useMemo(() => list.selected.account === account
-    ? runtime.runSync(Mail.use((mail) => Effect.sync(() => correspondents(mail.shown(list)))))
+    ? correspondents(runtime.runSync(Mail).shown(list))
     : [], [account, list, runtime]);
   if (!state || !ops.state || !adding.state || !state.open) return null;
   const letter = state.letter;
   const draft = letter.id;
-  const words = runtime.runSync(Letters.use((all) => Effect.sync(() => all.words(draft))));
+  const letters = runtime.runSync(Letters);
+  const mail = runtime.runSync(Mail);
+  const words = letters.words(draft);
   const typing = words.pending ?? emptyAddressFields;
   const access = accessOf(list, letter.account);
-  const from = runtime.runSync(Mail.use((mail) => Effect.sync(() => mail.email(letter.account))));
+  const from = mail.email(letter.account);
   const contactState = adding.state;
   const contactsOpen = contactState.contactDraft === draft;
   const contactTicket = contactState.people.ticket;
@@ -99,7 +101,7 @@ export function Compose({ runtime, list }: ComposeProps) {
   const write = { type: "write", now: untimed } as const;
   const change = (next: Partial<Words>) => {
     if (!can(write, "Owner")) return;
-    runtime.runSync(Letters.use((all) => Effect.sync(() => all.set(draft, { ...all.words(draft), ...next }))));
+    letters.set(draft, { ...letters.words(draft), ...next });
     void send(write, "Owner");
   };
   const line = (name: "to" | "cc" | "bcc") => ({
@@ -119,13 +121,13 @@ export function Compose({ runtime, list }: ComposeProps) {
         return;
       }
       if (!can(added, "Owner")) return;
-      runtime.runSync(Letters.use((all) => Effect.sync(() => all.set(draft, { ...all.words(draft), [name]: [...words[name], address], pending }))));
+      letters.set(draft, { ...letters.words(draft), [name]: [...words[name], address], pending });
       void send(added, "Owner");
     },
     onRemove: (address: string) => {
       const removed = { type: "removeRecipient", now: untimed, valid: acceptable(address) } as const;
       if (!can(removed, "Owner")) return;
-      runtime.runSync(Letters.use((all) => Effect.sync(() => all.set(draft, { ...words, [name]: words[name].filter((one) => one !== address) }))));
+      letters.set(draft, { ...words, [name]: words[name].filter((one) => one !== address) });
       void send(removed, "Owner");
     },
   });
@@ -133,7 +135,7 @@ export function Compose({ runtime, list }: ComposeProps) {
   const addressedTo = new Set(words.to.map((email) => email.toLowerCase()));
   const eligible = recent.filter(({ email }) => email.toLowerCase() !== from.toLowerCase() && !addressedTo.has(email.toLowerCase()));
   const suggested = query === "" ? (words.to.length === 0 ? eligible.slice(0, 3) : []) : eligible.filter(({ name, email }) => name.toLowerCase().includes(query) || email.toLowerCase().includes(query));
-  const page = contactsOpen && contactState.people.status === "Loaded" ? runtime.runSync(ContactAddresses.use(({ current }) => Effect.sync(current))) : undefined;
+  const page = contactsOpen && contactState.people.status === "Loaded" ? runtime.runSync(ContactAddresses).current() : undefined;
   const choices = page?.ticket === contactTicket ? page.addresses.flatMap((person, at) => {
     const event = { type: "chooseContact", draft, ticket: contactTicket, address: at + 1 } as const;
     return addressedTo.has(person.email.toLowerCase()) || !adding.can(event) ? [] : [{ ...person, onChoose: () => void adding.send(event) }];
@@ -146,17 +148,17 @@ export function Compose({ runtime, list }: ComposeProps) {
   const kept = state.stored && flushed(state);
   const addressed = Object.values(typing).every((value) => value.trim() === "");
   const changeFrom = (account: number) => ({ type: "changeFrom", account, access: accessOf(list, account), typing: !addressed }) as const;
-  const accounts = runtime.runSync(Mail.use((mail) => Effect.sync(() => [
+  const accounts = [
     { id: String(letter.account), email: from, grant: access.grant },
     ...list.connected.filter(({ account }) => can(changeFrom(account), "Owner")).map(({ account, grant }) => ({ id: String(account), email: mail.email(account), grant })),
-  ])));
+  ];
   const sending = { type: "prepare", kind: "Send", access, letter, kept: kept && addressed, again: false } as const;
   // spec/app/inbox/sending.md, "Story: Save my draft to Gmail, or delete it there, knowingly"
   const saving = { type: "prepare", kind: letter.gmail === 0 ? "SaveDraft" : "ReplaceDraft", access, letter, kept: kept && addressed, again: false } as const;
   const lookUp = { type: "lookUp", access } as const;
   const checkCopy = kept && addressed && can(lookUp, "Owner") ? () => void send(lookUp, "Owner") : undefined;
   const clash = letter.draft.sync === "Conflicted";
-  const copy = clash ? runtime.runSync(Letters.use((all) => Effect.sync(() => all.copy(letter.gmail)))) : undefined;
+  const copy = clash ? letters.copy(letter.gmail) : undefined;
   const latest = choiceOf(copy);
   const gmail = clash ? "clash" : letter.draft.sync === "Saving" ? "saving" : letter.gmail === 0 || letter.unsure ? "none" : letter.draft.sync === "Edited" ? "unsaved" : "saved";
   const deleting = { type: "prepare", kind: "DeleteDraft", access, letter, kept, again: false } as const;
@@ -186,7 +188,7 @@ export function Compose({ runtime, list }: ComposeProps) {
     const event = { type: "detach", now: untimed, mib: mibOf(file?.size ?? 0) } as const;
     if (!file || !can(event, "Owner")) return undefined;
     return () => {
-      runtime.runSync(Letters.use((all) => Effect.sync(() => all.set(draft, { ...words, files: words.files.filter((_, at) => at !== Number(id)) }))));
+      letters.set(draft, { ...words, files: words.files.filter((_, at) => at !== Number(id)) });
       void send(event, "Owner");
     };
   };
@@ -270,7 +272,7 @@ export function FileOffer({ runtime }: { runtime: ComposeProps["runtime"] }) {
   const { state, can, send } = useAdding(runtime);
   const drafts = useDrafts(runtime);
   if (!state || !drafts.state) return null;
-  const held = runtime.runSync(Incoming.use((files) => Effect.sync(() => files.file())));
+  const held = runtime.runSync(Incoming).file();
   const open = state.thing !== 0 && held !== undefined && held.source !== "Picker";
   const room = state.into === 0 || (drafts.state.open && drafts.state.letter.id === state.into && canAttach(drafts.state.letter, policy, state.mib));
   const takeIn = { type: "takeIn", room } as const;
@@ -305,9 +307,10 @@ export function Suggested({ runtime }: { runtime: ComposeProps["runtime"] }) {
   const composer = drafts.state;
   const letter = state.target !== "ToDraft" ? undefined : composer.open && composer.letter.id === state.draft ? composer.letter : held(composer.shelf, state.draft);
   const revision = letter?.revision ?? 0;
-  const text = runtime.runSync(Offers.use((offers) => Effect.sync(() => offers.text(state.text))));
-  const account = runtime.runSync(Mail.use((mail) => Effect.sync(() => mail.email(letter?.account ?? state.account))));
-  const before = letter === undefined ? "" : runtime.runSync(Letters.use((all) => Effect.sync(() => all.words(letter.id).text)));
+  const offers = runtime.runSync(Offers);
+  const text = offers.text(state.text);
+  const account = runtime.runSync(Mail).email(letter?.account ?? state.account);
+  const before = letter === undefined ? "" : runtime.runSync(Letters).words(letter.id).text;
   const review = { type: "review", revision } as const;
   // spec/app/inbox/suggestion.md, "Only the owner puts it in, once, as it was last shown, into the draft as it still is, adding or replacing as the owner chooses; text that does not fit is refused whole and the offer stays"
   const using = (appends: boolean) => {
@@ -322,7 +325,7 @@ export function Suggested({ runtime }: { runtime: ComposeProps["runtime"] }) {
       open
       text={text}
       from={state.from === "Agent" ? "alpha" : "owner"}
-      source={runtime.runSync(Offers.use((offers) => Effect.sync(() => offers.source(state.text))))}
+      source={offers.source(state.text)}
       account={account}
       target={targets[state.target]}
       tooLong={state.blocked}
