@@ -48,6 +48,7 @@ export service Launcher {
   presentation(): Presentation!!
   apps(): ReadonlyArray<Listed>!Unlisted
   open(app: InstalledApp): Asked!!
+  info(app: InstalledApp): Asked!!
   shade(): Asked!!
   /** Each time the phone's apps change. */
   readonly changes: Stream.Stream<void>
@@ -59,6 +60,12 @@ const refusals: Readonly<Record<string, Why>> = {
 }
 
 const refused = (code: string | undefined): Asked => ({ done: false, why: refusals[code ?? ""] ?? "Unable" })
+
+const targetOf = (app: InstalledApp) => ({
+  packageName: app.packageName,
+  ...(app.activityName ? { activityName: app.activityName } : {}),
+  ...(app.user ? { user: app.user } : {}),
+})
 
 /** An installed app and its key: its package, its activity and its profile, as eliza's `appKey` names it. */
 export interface Listed {
@@ -83,12 +90,15 @@ export const phoneLauncher = Layer.effect(Launcher, effect {
       return listed.apps.map((app) => ({ key: loaded.appKey(app), app }))
     },
     effect open(app: InstalledApp) {
-      const target = { packageName: app.packageName, ...(app.activityName ? { activityName: app.activityName } : {}), ...(app.user ? { user: app.user } : {}) }
       return effect {
-        try tryPromise({ try: () => system.launchApp(target), catch: (cause) => new LaunchRefused({ cause }) })
+        try tryPromise({ try: () => system.launchApp(targetOf(app)), catch: (cause) => new LaunchRefused({ cause }) })
         const done: Asked = { done: true }
         return done
       } catch (error) => refused(refusalOf(error.cause))
+    },
+    effect info(app: InstalledApp) {
+      const handed = tryPromise(() => system.openAppInfo(targetOf(app))) catch () => undefined
+      return handed?.outcome === "Opened" ? { done: true } : refused(handed?.refusal)
     },
     effect shade() {
       const handed = tryPromise(() => system.openNotificationShade()) catch () => undefined
@@ -106,6 +116,7 @@ export const browserLauncher = Layer.succeed(Launcher, {
   presentation: () => succeed({ phone: false, launcher: false, assistant: false }),
   apps: () => Effect.fail(new Unlisted({ cause: "no launcher in a browser" })),
   open: () => succeed<Asked>({ done: false, why: "Unable" }),
+  info: () => succeed<Asked>({ done: false, why: "Unable" }),
   shade: () => succeed<Asked>({ done: false, why: "Unable" }),
   changes: Stream.empty,
 })

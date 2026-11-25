@@ -171,6 +171,53 @@ describe("Home on a phone", () => {
     expect(dialog()).toBeNull();
   });
 
+  it('Holds a native app for App info and to pin it (spec/app/home/drawer.md, "Story: Act on an installed app from its menu")', async () => {
+    const world = { ...scene(), phone: true };
+    const { alpha } = await open(world, only("home"));
+    const homes = home.runtime(alpha);
+    const menu = () => document.querySelector('[role="menu"][aria-label="Clock"]');
+    const action = (label: string) => [...(menu()?.querySelectorAll<HTMLElement>('[role="menuitem"]') ?? [])]
+      .find((item) => item.textContent === label);
+    const selectAction = async (label: string) => {
+      const item = action(label);
+      expect(item).toBeInstanceOf(HTMLElement);
+      await drawn(() => item?.click());
+    };
+    const holdClock = async () => {
+      const clock = button("Open Clock");
+      expect(clock).toBeInstanceOf(HTMLButtonElement);
+      await drawn(() => clock?.dispatchEvent(pointer("pointerdown", 100, 235)));
+      await later(alpha, 450);
+      await vi.waitFor(() => expect(menu()).not.toBeNull());
+      await drawn(() => clock?.dispatchEvent(pointer("pointerup", 100, 235)));
+    };
+
+    await until(alpha, homes, Home.Machine, (state) => state.host === "AsApp" && state.tiles.load.status === "Loaded");
+    await press("Apps");
+    await until(alpha, homes, Home.Machine, (state) => state.installed.read.status === "Loaded");
+    await holdClock();
+    await hardware("back");
+    await vi.waitFor(() => expect(menu()).toBeNull());
+    expect((await alpha.runtime.runPromise(Shell.use((shell) => shell.get()))).drawer).toBe(true);
+    expect(world.launcher.opened).toEqual([]);
+
+    await holdClock();
+    await selectAction("App info");
+    await until(alpha, homes, Home.Machine, (state) => state.handoff.ask.tag === "AppInfo" && state.handoff.attempt.outcome === "Confirmed");
+    expect([world.launcher.infos, world.launcher.opened, menu()]).toEqual([["org.fixture.clock"], [], null]);
+
+    await holdClock();
+    await selectAction("Add to Home");
+    await until(alpha, homes, Home.Machine, (state) => state.tiles.save.outcome === "Confirmed");
+    await until(alpha, alpha.runtime, Shell, (state) => !state.drawer);
+    expect(tiles()).toContain("app:org.fixture.clock/org.fixture.clock.Main");
+
+    await press("Apps");
+    await until(alpha, alpha.runtime, Shell, (state) => state.drawer);
+    await holdClock();
+    expect(action("On Home")?.getAttribute("aria-disabled")).toBe("true");
+  });
+
   // spec/app/home/cards.md, "Story: See my day at a glance"; spec/app/home/cards.md, "Story: The agenda card"; spec/app/home/cards.md, "Story: Open my day from a card"
   it("See my day at a glance and open it from a card (spec/app/home/cards.md, \"Story: See my day at a glance\"; spec/app/home/cards.md, \"Story: The agenda card\"; spec/app/home/cards.md, \"Story: Open my day from a card\")", async () => {
     const hour = 3_600_000;

@@ -21,9 +21,16 @@ function phoneAgent(run: Run, state: string) {
 
 const client = (running: Running) => createRuntimeJsonClient({ bridge: () => socketBridge(running), startupTimeoutMs: 120_000, pollMs: 100, requestTimeoutMs: 60_000 })
 
-/** A path of the host file's list with each placeholder named: the conversation's id, its room's for the turn routes, and an event no calendar holds. */
+/** A concrete path that probes route admission without targeting an existing record outside the test conversation. */
 const filled = (route: string, conversation: ConversationRecord) => {
-  const path = route.replace("{id}", conversation.id).replace("{roomId}", conversation.roomId).replace("{eventId}", "no-such-event")
+  const path = route
+    .replace("{id}", conversation.id)
+    .replace("{roomId}", conversation.roomId)
+    .replace("{eventId}", "no-such-event")
+    .replace("{nodeId}", "review")
+    .replace("{iteration}", "0")
+    .replace("{mutationId}", conversation.id)
+    .replace("{submissionId}", conversation.id)
   return path === "/api/scheduled-tasks" ? `${path}?ownerVisibleOnly=1` : path
 }
 

@@ -38,6 +38,8 @@ import { MailQuestions, withMail } from "../inbox/mail-context.vibe"
 import { type Job, answer, applying, contained, following, reacting, run, started, stream, together, untimed } from "../runtime/reactor.vibe"
 import { Time } from "../runtime/time.vibe"
 import { VoiceWords } from "../voice/voice.vibe"
+import type { FileSelection } from "../files/preview.vibe"
+import { FileContext, asksAboutOpenFile, documentObservation } from "./file-context.vibe"
 import { MediaReview, mediaReview } from "./media-review.vibe"
 import { type Board, type Line, Talk, talk } from "./talk.vibe"
 import { Views, carried, carriedAloud, delivery, handoffs, preparedIn } from "./views.vibe"
@@ -193,6 +195,7 @@ type ScreenContext = Locator.Machine | Prefs.Machine | Location | Time | Talk | 
 interface ScreenTold {
   readonly metadata: TurnContext | undefined
   readonly sms: MessageSmsRequest | undefined
+  readonly file: FileSelection | undefined
 }
 
 /** A review from Messages must use the same selected SIM that its outgoing observation names. */
@@ -204,9 +207,10 @@ effect function screenTold(told: boolean, context: Conversation.Context, transcr
     (transcript === undefined ? try notesSelection() : (try transcriptCurrent(transcript)) ? transcript.record : undefined) : undefined
   const note = seen?.kind === "canonical-note" && !context.selected ? undefined : seen
   const selection = seeSelection && view === "messages" ? try captureSmsSelection() : undefined
-  const metadata = observed(told, context, location, note ?? selection?.observation)
+  const file = seeSelection && view === "files" ? try (try FileContext).selected() : undefined
+  const metadata = observed(told, context, location, note ?? selection?.observation ?? (file === undefined ? undefined : documentObservation(file)))
   const sms = view === "messages" ? { selection: metadata?.observation?.selectedObject?.kind === "sms-subscription" ? selection : undefined } : undefined
-  return { metadata, sms }
+  return { metadata, sms, file }
 }
 
 // spec/app/assistant/context.md, "A spoken turn carries what a typed turn sent at that moment would, the view claim included"
@@ -214,7 +218,12 @@ effect function screenTold(told: boolean, context: Conversation.Context, transcr
 export const spokenScreen = started(effect {
   const { memory } = try VoiceWords
   const context = try Effect.context<ScreenContext>()
-  memory.screen = (shown) => Effect.map(Effect.provideContext(screenTold(true, shown), context), (observed) => observed.metadata)
+  memory.screen = (shown, spoken) => Effect.provideContext(effect {
+    const { metadata, file } = try screenTold(true, shown)
+    const explicitlyRequested = asksAboutOpenFile(spoken)
+    const attachment = file !== undefined && explicitlyRequested ? try (try FileContext).read(file) : undefined
+    return { metadata, attachment, explicitlyRequested }
+  }, context)
 }, "telling voice the screen")
 
 effect function syncAlphaApps(): void!!(Agent | KeyValueStore.KeyValueStore | Time) {
@@ -277,6 +286,8 @@ function posted(ticket: number, told: boolean, context: Conversation.Context): S
     const review = try MediaReview
     const enrolled = context.sensitive ? undefined : try review.session()
     const messageTarget = enrolled === undefined ? undefined : try review.messageTarget()
+    const requestedFiles = enrolled !== undefined && request === undefined && told && viewOf(context.showing) === "files"
+      ? try review.filesContext() : undefined
     try ignore(reply.send({ type: "begin", turn: ticket }))
     const attachment = staged?.mail
     const transcript = staged?.transcript
@@ -385,8 +396,17 @@ function posted(ticket: number, told: boolean, context: Conversation.Context): S
       board.append(pageTicket, chats.chosen, { id: result.reply.messageId, mine: false, text: result.reply.text })
       try syncAlphaApps()
       if (enrolled !== undefined && result.reply.userMessageId !== undefined) {
+        const replied = streamed(result.clientMessageId)
+        const currentFiles = effect {
+          const now = try conversation.get()
+          return Conversation.canFinish(now, ticket) && !now.turn.stopping && !now.context.sensitive
+            && now.context.revision === context.revision && board.lastSentId === result.clientMessageId && (try history.get()).chosen === chats.chosen
+        }
+        const directFiles = requestedFiles === undefined || !replied || result.reply.failureKind !== undefined || held.mail || held.transcript || files.length > 0
+          ? undefined : { text, files: requestedFiles, current: currentFiles, report: (note: string) => board.change({ mediaNote: { conversation: chats.chosen, text: note } }) }
         const media = try review.pending(enrolled, result.reply.userMessageId, chats.chosen, context.revision, messageTarget,
-          { clientMessageId: result.clientMessageId, actionResults: streamed(result.clientMessageId) ? result.reply.actionResults : [], ...(sms === undefined ? {} : { sms }) })
+          { clientMessageId: result.clientMessageId, actionResults: replied ? result.reply.actionResults : [], ...(sms === undefined ? {} : { sms }),
+            ...(directFiles === undefined ? {} : { directFiles }) })
         if (board.lastSentId === result.clientMessageId && (try conversation.get()).context.revision === context.revision
           && (try history.get()).chosen === chats.chosen) board.change({ media })
       }
