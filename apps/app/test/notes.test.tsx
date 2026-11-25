@@ -99,7 +99,7 @@ describe("Notes", () => {
     await until(alpha, runtime, Composer, (s) => s.slot === "Open");
     await until(alpha, runtime, Conversation, (s) => s.ready);
     const editor = () => alpha.runtime.runPromise(Effect.flatMap(Editor, (e) => e.get()));
-    const list = () => alpha.runtime.runPromise(List.use((l) => l.get()));
+    const list = () => alpha.runtime.runPromise(Effect.flatMap(List, (l) => l.get()));
     const title = () => document.querySelector<HTMLInputElement>("input[aria-label='Title']")?.value;
     const results = () => world.notes.views.filter((one) => one.path === "result").map((one) => one.body.result);
     const ask = async (text: string, actions: boolean) => {
@@ -214,7 +214,7 @@ describe("Notes", () => {
     world.ask.metadata = [];
     world.ask.nextReplyChunks = ["Here it is."];
     world.ask.nextActions = (metadata) => [prepared(String((metadata as { viewClientId?: unknown }).viewClientId), "notes", true)];
-    await drawn(async () => world.voice.emitLocal?.("liveCaptureTranscript", { captureId: world.voice.activeMicSession, final: { turnId: "spoken", text: "open my shopping list note", mode: "device" } }));
+    await drawn(() => Promise.resolve(world.voice.emitLocal?.("liveCaptureTranscript", { captureId: world.voice.activeMicSession, final: { turnId: "spoken", text: "open my shopping list note", mode: "device" } })));
     const results = () => world.notes.views.filter((one) => one.path === "result").map((one) => one.body.result);
     await drawn(() => vi.waitFor(() => expect(world.ask.said).toEqual(["open my shopping list note"])));
     expect(world.ask.metadata[0]).toMatchObject({ viewDelivery: "completed-action", voiceUi: { uiNotesEditor: "saved-note-v1" } });
