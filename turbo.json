@@ -425,7 +425,7 @@
       "outputs": []
     },
     "//#analyze": {
-      "dependsOn": ["//#gen", "@repo/design-system#build", "@repo/ui#gen", "vibestack-studio#gen"],
+      "dependsOn": ["//#gen", "@repo/design-system#build", "@repo/eliza-harness#build", "@repo/ui#gen", "vibestack-studio#gen"],
       "inputs": [
         "apps/**",
         "packages/**",
@@ -435,6 +435,7 @@
         "!**/.DS_Store",
         "!{apps,packages,vibestack/studio}/**/gen/**",
         "package.json",
+        "eliza.lock.json",
         "pnpm-workspace.yaml",
         "tsconfig.json",
         "*.config.js",

@@ -53,7 +53,7 @@ files and the `vibestack/fixtures/` they read, besides the tools every task is k
 as `@repo/app`'s are. `pnpm lint:js` on its own needs what `gen` and `typecheck` write (`gen/`, `.vibe/declarations`);
 `pnpm lint` runs them first.
 `pnpm all //#analyze` also runs or restores the application and Studio generators,
-the UI stories and the design theme before analysis reads their outputs.
+the UI stories, the design theme and the Eliza harness before analysis reads their outputs.
 
 The hosted VibeStack app build keys its `//#gen` dependency on `apps/app/gen/`.
 Its other inputs come from `apps/app/` and the declared workspace builds. Add any
