@@ -22,7 +22,7 @@ export interface WalletScene {
   operations: Operation[];
   /** Every route answers 502, as a wallet whose network is down does. */
   unreachable: boolean;
-  /** The sentence the next asking, review or approval is refused with; the refusal spends it. */
+  /** The sentence the next asking, review or approval is refused with, as when the wallet cannot cover a transfer or the desk is full; the refusal spends it. */
   refusal: string;
   /** An approval is signed and its broadcast is not acknowledged. */
   unresolved: boolean;
@@ -62,7 +62,7 @@ export function agentAsks(scene: WalletScene, asked: Omit<Asked, "id" | "asker">
   scene.requests.push({ ...asked, id: ++scene.issued, asker: "agent" });
 }
 
-const refused = (reason: string) => Response.json({ error: "refused", reason }, { status: 409 });
+const refused = (error: string) => Response.json({ error, code: "refused" }, { status: 409 });
 
 function status(scene: WalletScene) {
   const held = scene.custody !== "none";
@@ -122,7 +122,7 @@ async function decide(scene: WalletScene, request: Request, id: number, now: num
     scene.requests = scene.requests.filter((one) => one.id !== id);
     return Response.json({ status: "declined" });
   }
-  if (decision !== "approve") return Response.json({ error: "invalid_request" }, { status: 400 });
+  if (decision !== "approve") return Response.json({ error: "The wallet could not read that request.", code: "invalid_request" }, { status: 400 });
   if (open === undefined || body.intentId !== open.intentId || body.commitment !== open.commitment) return refused("This decision no longer matches an open review for the authenticated owner.");
   scene.reviews.delete(id);
   if (now > open.expiresAt) return refused("This wallet review expired.");
@@ -149,7 +149,7 @@ export function walletRoutes(scene: WalletScene, now: () => number): Route[] {
   return [
     (request, url) => {
       if (!url.pathname.startsWith("/api/wallet")) return;
-      if (scene.unreachable) return Response.json({ error: "unreachable", reason: "The wallet could not reach its network." }, { status: 502 });
+      if (scene.unreachable) return Response.json({ error: "The wallet could not reach its network.", code: "unreachable" }, { status: 502 });
       const { method } = request;
       const path = url.pathname.slice("/api/wallet".length);
       if (path === "" && method === "GET") return Response.json(status(scene));

@@ -1,4 +1,5 @@
 // @vitest-environment happy-dom
+import { Effect } from "effect";
 import { afterEach, describe, expect, it } from "vitest";
 import { Machine as Shell } from "../gen/app__shell.effect.vibe";
 import { Machine as Ledger } from "../gen/app__wallet.effect.vibe";
@@ -24,13 +25,13 @@ function holding(phone: boolean, custody: Scene["wallet"]["custody"] = "ready"):
   return world;
 }
 
-/** Alpha over `world` with Wallet on top, as its Home tile opens it. */
+/** Alpha over `world` with Wallet on top, as its Home tile opens it; an Alpha that stopped there opens there again. */
 async function opened(world: Scene) {
   const running = await open(world, only("view:Wallet"));
   const runtime = wallet.runtime(running.alpha);
-  await running.alpha.runtime.runPromise(Shell.use((shell) => shell.send({ type: "openView", view: "Wallet" })));
-  const ledger = () => runtime.runPromise(Ledger.use((machine) => machine.get()));
-  const sending = () => runtime.runPromise(Sending.use((machine) => machine.get()));
+  await running.alpha.runtime.runPromise(Effect.flatMap(Shell, (shell) => Effect.ignore(shell.send({ type: "openView", view: "Wallet" }))));
+  const ledger = () => runtime.runPromise(Effect.flatMap(Ledger, (machine) => machine.get()));
+  const sending = () => runtime.runPromise(Effect.flatMap(Sending, (machine) => machine.get()));
   return { ...running, runtime, ledger, sending };
 }
 
@@ -87,7 +88,7 @@ describe.each([["a browser", false], ["a phone", true]])("in %s", (_where, phone
     expect(first.past.map((past) => past.fate)).toEqual(["Pending", "Arrived", "Reverted", "NotSent"]);
 
     world.wallet.unread = [];
-    world.wallet.operations[0] = { ...world.wallet.operations[0]!, status: "confirmed" };
+    world.wallet.operations[0] = { ...world.wallet.operations[0], status: "confirmed" };
     await returned(alpha, runtime);
     const second = await ledger();
     expect([second.held.map((held) => held.symbol), readingOf("Solana", second), second.past[0]?.fate]).toEqual([["ETH", "SOL"], "Something", "Arrived"]);
@@ -116,7 +117,7 @@ describe.each([["a browser", false], ["a phone", true]])("in %s", (_where, phone
     // spec/app/wallet/index.md, "Receive opens over a wallet that serves and has an account, and closes when it no longer does": Back puts the address away and stays in Wallet.
     await hardware("back");
     await until(alpha, runtime, Ledger, (s) => !s.receiving);
-    expect([(await ledger()).copy.status, (await alpha.runtime.runPromise(Shell.use((shell) => shell.get()))).trail]).toEqual(["Idle", ["Wallet"]]);
+    expect([(await ledger()).copy.status, (await alpha.runtime.runPromise(Effect.flatMap(Shell, (shell) => shell.get()))).trail]).toEqual(["Idle", ["Wallet"]]);
   });
 
   it("Send (spec/app/wallet/transfer.md, \"Story: Send\")", async () => {
@@ -148,7 +149,7 @@ describe.each([["a browser", false], ["a phone", true]])("in %s", (_where, phone
     world.wallet.unresolved = true;
     await asked(friend, "0.25");
     await until(alpha, runtime, Sending, (s) => s.stage === "Reviewing");
-    const unresolved = world.wallet.requests[0]!;
+    const unresolved = world.wallet.requests[0];
     await pressOnTop("Approve");
     await until(alpha, runtime, Sending, (s) => s.said === "Unresolved");
     world.wallet.requests.push(unresolved);
@@ -165,6 +166,7 @@ describe.each([["a browser", false], ["a phone", true]])("in %s", (_where, phone
     world.wallet.refusal = "That is not an address on this chain.";
     await asked("not an address", "1");
     await until(alpha, runtime, Sending, (s) => s.stage === "Writing" && s.said === "TurnedDown");
+    expect([(await sending()).why, world.wallet.requests]).toEqual(["That is not an address on this chain.", []]);
     await fill("Recipient", friend);
     await pressOnTop("Review");
     await until(alpha, runtime, Sending, (s) => s.stage === "Reviewing");
@@ -183,7 +185,7 @@ describe.each([["a browser", false], ["a phone", true]])("in %s", (_where, phone
     // spec/app/wallet/transfer.md, "A decision ends as the agent says: submitted, signed but unresolved, declined, turned down, or unknown": an approval the agent turns down leaves the request to be opened afresh.
     world.wallet.refusal = "The transfer authority changed before signing.";
     await pressOnTop("Approve");
-    await until(alpha, runtime, Sending, (s) => s.stage === "Stale" && s.said === "TurnedDown");
+    await until(alpha, runtime, Sending, (s) => s.stage === "Stale" && s.said === "TurnedDown" && s.why === "The transfer authority changed before signing.");
     await pressOnTop("Review again");
     await until(alpha, runtime, Sending, (s) => s.stage === "Reviewing");
     await pressOnTop("Approve");
@@ -212,9 +214,11 @@ describe.each([["a browser", false], ["a phone", true]])("in %s", (_where, phone
     await until(alpha, runtime, Sending, (s) => s.said === "Submitted");
     await until(alpha, runtime, Ledger, (s) => s.desk.status === "Loaded" && s.waiting.length === 2);
 
-    // spec/app/wallet/transfer.md, "The owner declines a waiting request from the wallet's list or from its review, once"
+    // spec/app/wallet/transfer.md, "The owner declines a waiting request from the wallet's list or from its review, once": a request the wallet cannot cover is told in the agent's words, and is declined without a review.
+    world.wallet.refusal = "This wallet holds too little SOL for the transfer and its network fee.";
     await press(`Review 3 SOL to ${payee}`);
-    await until(alpha, runtime, Sending, (s) => s.stage === "Reviewing");
+    await until(alpha, runtime, Sending, (s) => s.stage === "Stale" && s.said === "TurnedDown");
+    expect([(await sending()).why, Boolean(button("Approve"))]).toEqual(["This wallet holds too little SOL for the transfer and its network fee.", false]);
     await pressOnTop("Decline");
     await until(alpha, runtime, Sending, (s) => s.said === "Declined");
     await until(alpha, runtime, Ledger, (s) => s.desk.status === "Loaded" && s.waiting.length === 1);
