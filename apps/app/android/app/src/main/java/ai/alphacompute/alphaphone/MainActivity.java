@@ -70,6 +70,7 @@ public class MainActivity extends BridgeActivity {
   registerPlugin(AlphaSystemPlugin.class);
   registerPlugin(AlphaFilesPlugin.class);
   registerPlugin(AlphaSelectedDocumentsPlugin.class);
+  registerPlugin(AlphaInboxAttachmentsPlugin.class);
   registerPlugin(AlphaNotesPlugin.class);
   registerPlugin(AlphaAssistantDraftPlugin.class);
   registerPlugin(AlphaNoteDocumentsPlugin.class);
