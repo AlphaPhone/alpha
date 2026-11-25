@@ -7,7 +7,7 @@ const key = "a".repeat(64);
 const attemptId = "device-attempt-1";
 
 type Sms = Extract<DeviceOperation, { type: "sms_send" }>;
-type ReviewOperation = Extract<DeviceOperation, { type: "sms_send" | "sms_compose" | "sms_latest_sender" | "messages_read_selected" | "voicemail_read_selected" | "files_filter" | "files_open" | "files_move" | "files_share" | "files_trash" | "files_folder_create" }>;
+type ReviewOperation = Extract<DeviceOperation, { type: "sms_send" | "sms_compose" | "sms_latest_sender" | "messages_read_selected" | "voicemail_read_selected" | "voicemail_delete_selected" | "files_filter" | "files_open" | "files_move" | "files_share" | "files_trash" | "files_folder_create" }>;
 interface ReadOrigin { readonly version: 1; readonly requestId: string; readonly conversationId: string; readonly inReplyTo: string }
 
 type Confirmation = Pick<Sms, "recipients" | "body" | "subscriptionId"> & { operationId: string; confirm(): void };

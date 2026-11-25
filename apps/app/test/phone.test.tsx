@@ -74,10 +74,28 @@ const tab = (name: string) => drawn(() => {
   found.dispatchEvent(new MouseEvent("mousedown", { bubbles: true, button: 0 }));
 });
 
-async function openVoicemail(alpha: Alpha, requireFront = false) {
+async function openVoicemail(alpha: Alpha, matches: (state: PhoneState) => boolean = () => true) {
   await openPhone(alpha);
-  await until(alpha, alpha.runtime, Phone, (state) => state.voicemail && (!requireFront || state.front));
+  await until(alpha, alpha.runtime, Phone, (state) => state.voicemail && matches(state));
   await tab("Voicemail");
+}
+
+async function openReviewedVoicemail(
+  world: ReturnType<typeof image>,
+  review: ReturnType<typeof textReview>,
+  matches?: (state: PhoneState) => boolean,
+) {
+  world.telephony.textReview = review;
+  const alpha = await mountedImage(world);
+  const runtime = assistant.runtime(alpha);
+  await openVoicemail(alpha, matches);
+  return { alpha, runtime };
+}
+
+async function askOverPhone(alpha: Alpha, runtime: ReturnType<typeof assistant.runtime>) {
+  await until(alpha, runtime, Conversation, (state) => state.ready && state.context.showing.tag === "App" && state.context.showing.view === "Phone");
+  await press("Open Alpha");
+  await until(alpha, alpha.runtime, Shell, (state) => state.assistant === "Sheet");
 }
 
 /** The button named `name` in the agent's request, if it offers one. */
@@ -395,19 +413,11 @@ describe("Phone on an Alpha image", () => {
     const transcribe = vi.fn(() => Promise.resolve("Unrequested on-device transcript"));
     world.voice.voicemailTranscription = transcribe;
     const review = textReview(world.notes.owner, "reviewed-voicemail", { type: "voicemail_read_selected" });
-    world.telephony.textReview = review;
-    const { alpha } = await openPhoneWorld(world);
-    const runtime = assistant.runtime(alpha);
-    await until(alpha, alpha.runtime, Shell, (state) => state.image);
-    await openPhone(alpha);
-    await until(alpha, alpha.runtime, Phone, (state) => state.voicemail);
-    await tab("Voicemail");
+    const { alpha, runtime } = await openReviewedVoicemail(world, review);
     await until(alpha, alpha.runtime, Voicemail, (state) => state.list.status === "Loaded" && state.items === 1);
     await pressVoicemailRow();
     await until(alpha, alpha.runtime, Voicemail, (state) => state.open && state.carrierText && state.audio.status === "Loaded");
-    await until(alpha, runtime, Conversation, (state) => state.ready && state.context.showing.tag === "App" && state.context.showing.view === "Phone");
-    await press("Open Alpha");
-    await until(alpha, alpha.runtime, Shell, (state) => state.assistant === "Sheet");
+    await askOverPhone(alpha, runtime);
 
     const ask = async (prompt: string) => {
       const reads = review.pendingReads;
@@ -453,19 +463,11 @@ describe("Phone on an Alpha image", () => {
     const replacement = { ...original, transcript: "Replacement voicemail", deletionWitness: `v1:${"b".repeat(64)}` };
     world.telephony.voicemails = [original];
     const review = textReview(world.notes.owner, "delete-voicemail-original", { type: "voicemail_delete_selected" });
-    world.telephony.textReview = review;
-    const { alpha } = await openPhoneWorld(world);
-    const runtime = assistant.runtime(alpha);
-    await until(alpha, alpha.runtime, Shell, (state) => state.image);
-    await openPhone(alpha);
-    await until(alpha, alpha.runtime, Phone, (state) => state.voicemail && state.telecom === "NoCall");
-    await tab("Voicemail");
+    const { alpha, runtime } = await openReviewedVoicemail(world, review, (state) => state.telecom === "NoCall");
 
     const ask = async (request: string) => {
       await until(alpha, alpha.runtime, Voicemail, (state) => state.open && state.audio.status === "Loaded");
-      await until(alpha, runtime, Conversation, (state) => state.ready && state.context.showing.tag === "App" && state.context.showing.view === "Phone");
-      await press("Open Alpha");
-      await until(alpha, alpha.runtime, Shell, (state) => state.assistant === "Sheet");
+      await askOverPhone(alpha, runtime);
       world.ask.nextReplyChunks = ["Review the deletion in Phone."];
       world.ask.nextActions = () => [{ action: "PROPOSE_DEVICE_ACTION", data: {
         proposalId: review.proposal.id, state: "pending", executed: false, approvalRequired: true, awaitingUserInput: true,
@@ -584,7 +586,7 @@ describe("Phone on an Alpha image", () => {
     const world = image();
     world.telephony.holdVoicemailDeletion = true;
     const alpha = await mountedImage(world);
-    await openVoicemail(alpha, true);
+    await openVoicemail(alpha, (state) => state.front);
     await until(alpha, alpha.runtime, Voicemail, (s) => s.list.status === "Loaded" && s.items === 1);
     await pressVoicemailRow();
     await until(alpha, alpha.runtime, Voicemail, (s) => s.open);
