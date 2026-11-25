@@ -1,11 +1,12 @@
 // spec/agent/index.md, "Story: Run Alpha's agent on the phone"
+import type { ClockSnapshot, ReminderItemRecord, RemindersSnapshot } from "@repo/launcher-records";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
 import { AlphaAppsStore, alphaAppsPluginName, createAlphaAppsPlugin } from "../src/plugins/index.ts";
 import { advanceDueDate } from "../src/plugins/store.ts";
-import type { AgentRoute, AgentRuntimeLike, ClockSnapshot, ReminderItemRecord, RemindersSnapshot } from "../src/plugins/types.ts";
+import type { AgentRoute, AgentRuntimeLike } from "../src/plugins/types.ts";
 
 const emptyMessage = (text: string, metadata?: Record<string, unknown>) =>
   ({ content: { text }, metadata }) as unknown as Parameters<NonNullable<ReturnType<typeof createAlphaAppsPlugin>["plugin"]["actions"]>[number]["handler"]>[1];

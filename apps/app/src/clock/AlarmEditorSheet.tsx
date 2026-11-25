@@ -1,4 +1,5 @@
 // spec/app/clock/alarms.md, "Story: Manage my alarms"; spec/app/clock/index.md, "One sheet opens at a time, and editing an alarm requires a positive alarm id"
+import type { ClockSound } from "@repo/launcher-records";
 import { Button, Chip, Input, Label, Select, SelectContent, SelectItem, SelectTrigger, Sheet, SheetContent, Switch } from "@repo/ui";
 import { Effect, type ManagedRuntime } from "effect";
 import { Minus, Plus, Trash2, Volume2 } from "lucide-react";
@@ -10,7 +11,7 @@ import type { Machine as ToastsMachine } from "../../gen/app__notices__toasts.ef
 import type { Said } from "../notices/toasts.vibe";
 import { createAlarm, deleteAlarmWithUndo, updateAlarm } from "./alarms.vibe";
 import { playChimePulse } from "./chime.ts";
-import { ALARM_SOUNDS, type AlarmSound, SNOOZE_OPTIONS, clockRecords } from "./records.ts";
+import { ALARM_SOUNDS, SNOOZE_OPTIONS, clockRecords } from "./records.ts";
 import type { ClockResident } from "./sync.vibe";
 import { clockNow } from "./ticker.vibe";
 import {
@@ -47,7 +48,7 @@ export function AlarmEditorSheet({ runtime, alarmId, onClose }: AlarmEditorSheet
   const [minute, setMinute] = useState<number>(() => existing?.minute ?? 0);
   const [daysMask, setDaysMask] = useState<number>(() => existing?.daysMask ?? 0);
   const [label, setLabel] = useState<string>(() => existingMeta?.label ?? "");
-  const [sound, setSound] = useState<AlarmSound>(() => existingMeta?.sound ?? "radar");
+  const [sound, setSound] = useState<ClockSound>(() => existingMeta?.sound ?? "radar");
   const [snoozeMinutes, setSnoozeMinutes] = useState<number>(() => existing?.snoozeMinutes ?? defaultSnooze);
   const [vibrate, setVibrate] = useState<boolean>(() => existing?.vibrate ?? true);
 
@@ -157,7 +158,7 @@ export function AlarmEditorSheet({ runtime, alarmId, onClose }: AlarmEditorSheet
           <div className="flex flex-col gap-2">
             <Label htmlFor="alarm-sound-select">Sound</Label>
             <div className="flex items-center gap-2">
-              <Select value={sound} onValueChange={(next) => setSound(next as AlarmSound)}>
+              <Select value={sound} onValueChange={(next) => setSound(next as ClockSound)}>
                 <SelectTrigger id="alarm-sound-select" aria-label="Alarm sound" className="flex-1" />
                 <SelectContent>
                   {ALARM_SOUNDS.map((option) => (

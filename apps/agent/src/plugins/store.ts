@@ -1,12 +1,12 @@
 // spec/agent/index.md, "Story: Run Alpha's agent on the phone"
+import type {
+  ClockAlarmPhase, ClockAlarmRecord, ClockSnapshot, ClockSound, ClockTimerRecord, ClockTimerStatus, WorldCityRecord,
+  ReminderItemRecord, ReminderListColor, ReminderListIcon, ReminderListRecord, ReminderPriority,
+  ReminderRecurrence, ReminderSubtaskRecord, RemindersSnapshot,
+} from "@repo/launcher-records";
 import { randomUUID } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
-import type {
-  ClockAlarmPhase, ClockAlarmRecord, ClockSnapshot, ClockSound, ClockTimerRecord, ClockTimerStatus,
-  ReminderItemRecord, ReminderListColor, ReminderListIcon, ReminderListRecord, ReminderPriority,
-  ReminderRecurrence, RemindersSnapshot, ReminderSubtaskRecord, WorldCityRecord,
-} from "./types.ts";
 
 /** Default list identifier always present in Reminders. */
 export const DEFAULT_LIST_ID = "default";

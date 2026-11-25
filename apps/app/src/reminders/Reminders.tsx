@@ -1,4 +1,5 @@
 // spec/app/reminders/index.md, "Story: Organize reminders across smart views and custom lists"; spec/app/reminders/index.md, "Story: Create, update, flag, move, complete and delete reminders with Undo"
+import type { ReminderItemRecord, ReminderListColor, ReminderListIcon, ReminderListRecord } from "@repo/launcher-records";
 import {
   Banner,
   Button,
@@ -61,10 +62,6 @@ import {
   groupScheduledItems,
   isItemOverdue,
   listActiveCount,
-  type ReminderItemRecord,
-  type ReminderListColor,
-  type ReminderListIcon,
-  type ReminderListRecord,
   remindersStore,
   searchReminders,
   selectViewItems,

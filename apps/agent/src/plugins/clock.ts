@@ -1,4 +1,5 @@
 // spec/agent/index.md, "Story: Run Alpha's agent on the phone"
+import type { ClockAlarmRecord, ClockTimerRecord, WorldCityRecord } from "@repo/launcher-records";
 import { showsApp } from "@elizaos/agent-host";
 import {
   type AlphaAppsStore, DEFAULT_SNOOZE_MINUTES, isValidTimeZone, normalizeSound,

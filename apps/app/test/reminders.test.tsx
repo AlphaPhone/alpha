@@ -1,5 +1,6 @@
 // @vitest-environment happy-dom
 // spec/app/reminders/index.md, "Story: Organize reminders across smart views and custom lists"; spec/app/reminders/index.md, "Story: Create, update, flag, move, complete and delete reminders with Undo"; spec/app/reminders/alerts.md, "Story: Alert on due reminders and act from the banner"; spec/app/reminders/recurrence.md, "Story: Advance recurring reminder dates cleanly across months and leap years"
+import type { ReminderItemRecord, ReminderListRecord, RemindersSnapshot } from "@repo/launcher-records";
 import { HttpClient, HttpClientResponse } from "effect/http";
 import { Effect, Layer } from "effect";
 import { TestClock } from "effect/testing";
@@ -29,10 +30,7 @@ import {
   computeSmartCounts,
   DEFAULT_LIST_ID,
   defaultSnapshot,
-  type ReminderItemRecord,
-  type ReminderListRecord,
   remindersStore,
-  type RemindersSnapshot,
 } from "../src/reminders/store.ts";
 import { button, closeAll, drawn, fill, later, only, openOver, press, pressOnTop, underAct, until } from "./alpha.tsx";
 import { scene } from "./fakes/scene.ts";

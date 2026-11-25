@@ -1,4 +1,5 @@
 // spec/agent/index.md, "Story: Run Alpha's agent on the phone"
+import type { ReminderItemRecord, ReminderSubtaskRecord } from "@repo/launcher-records";
 import { randomUUID } from "node:crypto";
 import { type ScheduledTasksApi, readTurnContext, scheduledTasksServiceType, showsApp } from "@elizaos/agent-host";
 import {

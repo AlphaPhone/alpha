@@ -18,6 +18,7 @@
     "@elizaos/agent-host": "link:../../.eliza/packages/agent-host",
     "@repo/deployment": "workspace:*",
     "@repo/eliza-harness": "workspace:*",
+    "@repo/launcher-records": "workspace:*",
     "effect": "4.1.1",
     "vibelang-runtime": "0.0.13"
   },
