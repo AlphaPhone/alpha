@@ -1,4 +1,5 @@
 // @vitest-environment happy-dom
+import { Effect } from "effect";
 import { act } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { Machine as Conversation } from "../gen/app__assistant.effect.vibe";
@@ -10,7 +11,7 @@ import assistant from "../src/assistant/index.tsx";
 import { agentOpen } from "../src/notes/agent.vibe";
 import notes from "../src/notes/index.tsx";
 import { closeAll, drawn, fill, only, open, press, underAct, until } from "./alpha.tsx";
-import { prepared } from "./fakes/notes.ts";
+import { note, prepared } from "./fakes/notes.ts";
 import { scene } from "./fakes/scene.ts";
 
 underAct();
@@ -86,20 +87,19 @@ describe("Notes", () => {
 
   it("The agent opens the note I named, and only that, only for my request now (spec/app/notes/index.md, \"The agent opens the one note the owner named, as the list shows it now, once for the owner's current turn, and is told whether it opened\"; spec/app/notes/note.md, \"Only the owner opens a dialog or a question in Notes; a note is opened by the owner, or by the agent for the one the owner just named; and nothing opens while anything else of Notes is open\"; spec/app/assistant/index.md, \"Story: Let Alpha open what it is talking about\")", async () => {
     const world = scene();
-    const at = new Date().toISOString();
-    world.notes.notes.push({ id: "shopping", title: "shopping list", body: "", color: "yellow", format: { kind: "list", data: { items: [{ t: "milk", done: false }] } }, createdAt: at, updatedAt: at });
+    world.notes.notes.push(note("shopping", "shopping list", "", Date.now(), { kind: "list", data: { items: [{ t: "milk", done: false }] } }));
     world.notes.target = "shopping";
     const { alpha } = await open(world, only("assistant", "view:Notes"));
     const runtime = assistant.runtime(alpha);
     await until(alpha, runtime, Composer, (s) => s.slot === "Open");
     await until(alpha, runtime, Conversation, (s) => s.ready);
-    const editor = () => alpha.runtime.runPromise(Editor.use((e) => e.get()));
+    const editor = () => alpha.runtime.runPromise(Effect.flatMap(Editor, (e) => e.get()));
     const title = () => document.querySelector<HTMLInputElement>("input[aria-label='Title']")?.value;
     const results = () => world.notes.views.filter((one) => one.path === "result").map((one) => one.body.result);
     const ask = async (text: string, actions: boolean) => {
       world.ask.nextReplyChunks = ["Here it is."];
       world.ask.nextActions = actions ? (metadata) => [prepared(String((metadata as { viewClientId?: unknown }).viewClientId), "notes", true)] : undefined;
-      const turn = (await runtime.runPromise(Conversation.use((c) => c.get()))).turn.send.id + 1;
+      const turn = (await runtime.runPromise(Effect.flatMap(Conversation, (c) => c.get()))).turn.send.id + 1;
       act(() => {
         const box = document.querySelector<HTMLTextAreaElement>("textarea[aria-label='Message Alpha']");
         if (!box) throw new Error("no composer");
@@ -144,7 +144,8 @@ describe("Notes", () => {
     await ask("open my shopping list", true);
     await drawn(() => vi.waitFor(() => expect(results()).toHaveLength(2)));
     expect(results()[1]).toEqual({ switched: false });
-    expect([(await editor()).showing, waiting(await editor()), world.notes.revision, world.notes.notes.find((one) => one.id === "enclave")?.title]).toEqual([false, true, revision, "Enclave launch"]);
+    const turnOpened = (await alpha.runtime.runPromise(List.use((list) => list.get()))).agentTurn;
+    expect([(await editor()).showing, waiting(await editor()), world.notes.revision, world.notes.notes.find((one) => one.id === "enclave")?.title, turnOpened]).toEqual([false, true, revision, "Enclave launch", first]);
 
     // spec/app/notes/index.md, "The agent opens the one note the owner named, as the list shows it now, once for the owner's current turn, and is told whether it opened": a reply that prepared nothing for this screen, as one whose note came from a tool's output, opens nothing and claims nothing.
     await alpha.runtime.runPromise(Editor.use((e) => e.send({ type: "discardDraft" }, "Owner")));
