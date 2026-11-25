@@ -33,7 +33,7 @@ const onThisComputer = /^(?:https?|wss?):\/\/(?:127\.0\.0\.1|localhost|\[::1\])(
 export function loopbackOnly(settings: EnvironmentProfile): boolean {
   const providers = [
     settings.billing?.apiUrl,
-    ...(settings.inference?.providers.map((provider) => provider.baseUrl) ?? []),
+    ...(settings.inference?.providers.map((provider) => provider.kind === "workers-ai" ? "workers-ai:" : provider.baseUrl) ?? []),
     settings.speech?.baseUrl, settings.speech?.realtimeUrl,
     settings.maps !== undefined && settings.maps.provider !== "none" ? settings.maps.baseUrl : undefined,
     ...(settings.google === undefined ? [] : [settings.google.accountsUrl, settings.google.tokenUrl, settings.google.revokeUrl, settings.google.jwksUrl, settings.google.apiUrl]),

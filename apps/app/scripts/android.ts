@@ -199,7 +199,7 @@ export function buildWeb() {
 }
 
 const REQUIRED_POLICY = ["default-src 'self'", "script-src 'self' 'wasm-unsafe-eval'", "object-src 'none'", "base-uri 'none'"];
-const DEVELOPMENT_TEXT = ["10.0.2.2", "127.0.0.1:", "http://localhost:", "ALPHA_FAKES", "/test/fakes/", "api-staging.eliza.app", "cloud-staging.eliza.app", "staging.alphacompute.cc",
+const DEVELOPMENT_TEXT = ["10.0.2.2", "127.0.0.1:", "http://localhost:", "ALPHA_FAKES", "/test/fakes/", "api-staging.eliza.app", "cloud-staging.eliza.app", "staging.alphacompute.cc", "api-staging.alphaphone.dev", "cloud-staging.alphaphone.dev",
   "Maya Chen", "Ben Ortiz", "Harbour Cafe", "Harbour Gallery"];
 const TEST_ONLY_PATH = /(?:^|\/)(?:fixtures?(?:[.-][^/]*)?\.(?:js|mjs|css|json)|[^/]+\.meta(?:[.-][^/]*)?\.js|[^/]+\.stories(?:[.-][^/]*)?\.js|storybook-static\/|mockServiceWorker\.js$)/i;
 const ENGINE_PATH = /\.(?:onnx|ort|gguf|tflite|safetensors|pte)$|onnxruntime|ort-wasm|sherpa|k2fsa/i;
