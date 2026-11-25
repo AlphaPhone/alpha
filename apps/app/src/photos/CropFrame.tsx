@@ -81,6 +81,9 @@ export function CropFrame({ source, bounds, onApply }: Props) {
   const ratio = frameRatio(draft.aspect, source);
   const imageRatio = source.width / source.height;
   const rect = draft.bounds;
+  const left = percent(rect.x), top = percent(rect.y);
+  const right = percent(rect.x + rect.width), bottom = percent(rect.y + rect.height);
+  const outside = `polygon(evenodd, 0% 0%, 100% 0%, 100% 100%, 0% 100%, 0% 0%, ${left} ${top}, ${right} ${top}, ${right} ${bottom}, ${left} ${bottom}, ${left} ${top})`;
 
   function begin(event: PointerEvent<HTMLElement>, corner?: Corner) {
     if (event.button !== 0 || gestureRef.current) return;
@@ -118,9 +121,10 @@ export function CropFrame({ source, bounds, onApply }: Props) {
     <div className="relative flex min-h-0 flex-1 items-center justify-center px-4 [container-type:size]">
       <div ref={imageRef} className="relative touch-none overflow-hidden" style={{ width: `min(100cqw, calc(100cqh * ${imageRatio}))`, aspectRatio: imageRatio }}>
         <img src={source.image} alt="" draggable={false} className="pointer-events-none absolute inset-0 size-full" />
+        <div aria-hidden className="pointer-events-none absolute inset-0 bg-background/65" style={{ clipPath: outside }} />
         <div ref={frameFocus} tabIndex={0} role="group" aria-label="Crop area" aria-describedby="alpha-photos-crop-keys"
-          className="absolute cursor-move border-2 border-foreground shadow-[0_0_0_200vmax_color-mix(in_oklab,var(--background)_65%,transparent)] focus-visible:outline-focus"
-          style={{ left: percent(rect.x), top: percent(rect.y), width: percent(rect.width), height: percent(rect.height) }}
+          className="absolute cursor-move border-2 border-foreground focus-visible:outline-focus"
+          style={{ left, top, width: percent(rect.width), height: percent(rect.height) }}
           onPointerDown={(event) => begin(event)} onPointerMove={move} onPointerUp={end} onPointerCancel={end} onLostPointerCapture={end} onKeyDown={nudge}>
           <span aria-hidden className="pointer-events-none absolute inset-x-0 top-1/3 h-1/3 border-y border-foreground/40" />
           <span aria-hidden className="pointer-events-none absolute inset-y-0 left-1/3 w-1/3 border-x border-foreground/40" />

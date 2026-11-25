@@ -298,11 +298,13 @@ function journaled(id: number, recipients: number): Stream.Stream<Event, never, 
     const next: Outgoing = { ...send, sim, selectedSim: undefined, trustedTap: undefined, operation, mms: bound === undefined ? undefined : { hash: bound.hash, attachments: bound.binding.attachments } }
     if (!(try store.bindOutgoing(next)) || !(try current())) return denied
     const to = send.to as PhoneNumber[]
-    const wire = sendFromComposer(send.trustedTap === true, () => runPromise(current()), (client) => {
-      const sent = review !== undefined ? client.sendMms(review, operation)
-        : client.sendSms({ recipients: to, body: send.body, subscriptionId: sim } satisfies SmsReview & { subscriptionId: number }, operation)
-      return sent.then((receipt) => receipt.status)
-    }) catch (failure) => refusedSend(failure)
+    const wire = effect {
+      return sendFromComposer(send.trustedTap === true, () => runPromise(current()), (client) => {
+        const sent = review !== undefined ? client.sendMms(review, operation)
+          : client.sendSms({ recipients: to, body: send.body, subscriptionId: sim } satisfies SmsReview & { subscriptionId: number }, operation)
+        return sent.then((receipt) => receipt.status)
+      }) catch (failure) => refusedSend(failure)
+    }
     const left = Effect.as(Stream.runHead(Stream.filter(messages.changes, (state) => !openThread(state))), undefined)
     const status = try race(wire, left)
     const latest = try store.outgoing()

@@ -45,6 +45,10 @@ export interface VoiceScene {
   streamTiming: unknown;
   stopCloudSpeechCalls: number;
   hushCalls: number;
+  speakerMuted: boolean;
+  speakerGainGate?: (muted: boolean) => Promise<void>;
+  readonly speakerGainRequests: boolean[];
+  readonly speakerMutedAtPlayback: boolean[];
   readonly spoken: SpokenSentence[];
   activeMicSession: string | undefined;
   emitLocal?: (event: string, data: unknown) => void;
@@ -85,6 +89,9 @@ export function voiceScene(): VoiceScene {
     streamTiming: { format: "alpha-cloud-stream-timing-v1", records: [] },
     stopCloudSpeechCalls: 0,
     hushCalls: 0,
+    speakerMuted: false,
+    speakerGainRequests: [],
+    speakerMutedAtPlayback: [],
     spoken: [],
     activeMicSession: undefined,
   };
@@ -151,8 +158,14 @@ export function alphaVoiceCloud(voice: VoiceScene): Faked {
         return Promise.resolve({ playbackId });
       },
       play: ({ playbackId }: { playbackId: string }) => {
+        voice.speakerMutedAtPlayback.push(voice.speakerMuted);
         emit("playbackEnded", { playbackId });
         return Promise.resolve({});
+      },
+      setSpeechOutputMuted: async ({ muted }: { muted: boolean }) => {
+        voice.speakerGainRequests.push(muted);
+        await voice.speakerGainGate?.(muted);
+        voice.speakerMuted = muted;
       },
       stopPlayback: () => {
         voice.hushCalls += 1;

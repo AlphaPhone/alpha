@@ -158,7 +158,8 @@ export effect function messageAction(operation: DeviceOperation, target: Message
   const live = tryPromise(current) catch () => false
   if (!live || !(try (try Device).capabilities()).image || !(try (try Device).showing())) return refused
   if (operation.type === "sms_reply_selected") {
-    if (target === undefined || !(try stage(body, target.thread, tryPromise(current) catch () => false, target))) return refused
+    const approved = effect { return tryPromise(current) catch () => false }
+    if (target === undefined || !(try stage(body, target.thread, approved, target))) return refused
     return { kind: "applied", result: { kind: "sms-reply", status: "drafted" } }
   }
   if (!reviewedCompose(operation)) return refused

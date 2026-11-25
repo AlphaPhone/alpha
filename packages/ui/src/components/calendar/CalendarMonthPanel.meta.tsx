@@ -1,6 +1,8 @@
 import type { ComponentMeta } from "vibestack/stories";
 import type { CalendarMonthPanelProps } from "./CalendarMonthPanel.tsx";
 
+const dateLabel = new Intl.DateTimeFormat("en-US", { month: "long", day: "numeric" });
+
 export const meta: ComponentMeta<CalendarMonthPanelProps> = {
   args: {
     month: 10,
@@ -12,8 +14,9 @@ export const meta: ComponentMeta<CalendarMonthPanelProps> = {
     onPrevious: () => undefined,
     onNext: () => undefined,
     onClose: () => undefined,
-    days: Array.from({ length: 35 }, (_, at) => ({
-      key: at, date: ((at + 25) % 30) + 1, label: `Day ${at}`, outside: at < 6, today: at === 29, busy: at % 3 === 0, onPick: () => undefined,
-    })),
+    days: Array.from({ length: 42 }, (_, at) => {
+      const date = new Date(2026, 9, 26 + at);
+      return { key: at, date: date.getDate(), label: dateLabel.format(date), outside: date.getMonth() !== 10, today: at === 29, busy: at % 3 === 0, onPick: () => undefined };
+    }),
   },
 };

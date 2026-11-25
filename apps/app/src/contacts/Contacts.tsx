@@ -130,11 +130,7 @@ export function Contacts({ runtime, alpha }: ContactsProps & { alpha: Alpha }) {
       )}
       <CommsBar runtime={runtime}
         person={state.opened && held.card !== undefined ? { label: held.card.displayName, initials: callerInitials(held.card.displayName) } : undefined}
-        closed={!state.opened && !searching && can({ type: "search", typed: true }) ? (ask) => (
-          <form className="min-w-0 flex-1" onSubmit={(event) => { event.preventDefault(); ask(query.trim()); }}>
-            <SearchField data-alpha-composer aria-label="Search or ask" placeholder="Search or ask" value={query} onValueChange={search} maxLength={128} />
-          </form>
-        ) : undefined} />
+        filter={!state.opened && !searching && can({ type: "search", typed: true }) ? { value: query, onChange: search, maxLength: 128 } : undefined} />
     </section>
   );
   if (!phoneTabs) return content;

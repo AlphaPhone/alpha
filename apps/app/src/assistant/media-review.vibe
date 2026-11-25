@@ -181,6 +181,16 @@ export interface MediaCard {
   readonly phone?: NamedPhoneReview
 }
 
+function visibleCards(entries: readonly ({ card: MediaCard; fromTerminal: boolean } | undefined)[], terminalCurrent: boolean): readonly MediaCard[] {
+  const firstRead = entries.find((entry) => entry?.card.operation.type === "messages_read_selected")?.card
+  const visible: MediaCard[] = []
+  for (const entry of entries) {
+    if (entry === undefined || (entry.fromTerminal && !terminalCurrent)) continue
+    if (entry.card.operation.type !== "messages_read_selected" || entry.card === firstRead) visible.push(entry.card)
+  }
+  return visible
+}
+
 interface Session {
   readonly epoch: number
   readonly identity: JournalIdentity
@@ -409,8 +419,7 @@ export const mediaReview = Layer.effect(MediaReview, effect {
     const front = (tryPromise(() => enrollment().authority()) |> map(%, (one) => one.active === true)) catch () => false
     return status?.state === "running" && status.epoch === opened.epoch && owner === opened.identity.ownerId && front && (try device.showing())
   }
-  effect function reviewContext(revision: number): boolean!!Conversation {
-    const conversation = try Conversation
+  effect function reviewContext(revision: number, conversation: Conversation.Shape): boolean!! {
     const showing = (try conversation.get()).context
     const { assistant } = try shell.get()
     return showing.revision === revision && !showing.sensitive && (assistant === "Sheet" || assistant === "Full") && (try device.showing())
@@ -475,12 +484,13 @@ export const mediaReview = Layer.effect(MediaReview, effect {
     },
     messageTarget,
     effect pending(opened: Session, message: string, conversation: number, revision: number, target: MessageDraftTarget | undefined, reply: DeviceActionReply) {
+      const view = try Conversation
       const answer = try proposals(opened)
       if (answer === undefined) return []
       const bound = sameTarget(target, try messageTarget()) ? target : undefined
       const actions = reviewedDeviceActions(reply.actionResults)
-      const currentReview = answer.some((proposal) => commsFromReply(proposal, opened, actions)) && (try reviewContext(revision))
-        && (try enrollmentIsCurrent(opened)) && opened === latest && (try reviewContext(revision))
+      const currentReview = answer.some((proposal) => commsFromReply(proposal, opened, actions)) && (try reviewContext(revision, view))
+        && (try enrollmentIsCurrent(opened)) && opened === latest && (try reviewContext(revision, view))
       const at = try Clock.currentTimeMillis
       for (const [id, pin] of pinnedFiles) if (pin.expiresAt <= at) pinnedFiles.delete(id)
       const cards = try Effect.forEach(answer, effect (proposal) => {
@@ -513,9 +523,9 @@ export const mediaReview = Layer.effect(MediaReview, effect {
         const detail = words(op)
         const labelled = sms === undefined ? detail : { ...detail, detail: `SIM ${sms.subscription.slot + 1}\n${detail.detail}` }
         const query = namedReviewQuery(op)
-        if (query !== undefined && (!(try reviewContext(revision)) || !(try enrollmentIsCurrent(opened)) || !(try reviewContext(revision)))) return undefined
+        if (query !== undefined && (!(try reviewContext(revision, view)) || !(try enrollmentIsCurrent(opened)) || !(try reviewContext(revision, view)))) return undefined
         const phone = query === undefined ? undefined : try Effect.provideService(phoneContactChoices(query), Telephony, telephony)
-        if (phone !== undefined && (opened !== latest || !(try reviewContext(revision)))) return undefined
+        if (phone !== undefined && (opened !== latest || !(try reviewContext(revision, view)))) return undefined
         const card: MediaCard = { id: proposal.id, digest: proposal.digest, operation: op, expiresAt, message, conversation, revision, enrollmentId: opened.identity.enrollmentId, ...labelled,
           ...(selected && bound !== undefined ? { target: bound } : {}),
           ...(sms === undefined ? {} : { sms }),
@@ -525,17 +535,11 @@ export const mediaReview = Layer.effect(MediaReview, effect {
             + (op.type === "files_move" ? ` → ${op.dest || "Internal storage"}` : "") }) }
         return { card, fromTerminal: request === undefined }
       }, { concurrency: 4 })
-      const firstRead = cards.find((entry) => entry?.card.operation.type === "messages_read_selected")?.card
-      const shown: MediaCard[] = []
-      const stillShowing = currentReview && opened === latest && (try reviewContext(revision))
-      for (const entry of cards) {
-        if (entry === undefined || (entry.fromTerminal && !stillShowing)) continue
-        if (entry.card.operation.type !== "messages_read_selected" || entry.card === firstRead) shown.push(entry.card)
-      }
-      return shown
+      return visibleCards(cards, currentReview && opened === latest && (try reviewContext(revision, view)))
     },
     effect choosePhone(card: MediaCard, choice: number) {
       const { board } = try Talk
+      const view = try Conversation
       const chats = try Chats
       const option = card.phone?.tag === "Choices" ? card.phone.options[choice] : undefined
       const query = namedReviewQuery(card.operation)
@@ -544,7 +548,7 @@ export const mediaReview = Layer.effect(MediaReview, effect {
         const time = try Clock.currentTimeMillis
         return opened === latest && card.enrollmentId === opened.identity.enrollmentId
           && board.snapshot().media.includes(card) && card.conversation === (try chats.get()).chosen
-          && card.reviewRequest === board.lastSentId && time < card.expiresAt && (try reviewContext(card.revision))
+          && card.reviewRequest === board.lastSentId && time < card.expiresAt && (try reviewContext(card.revision, view))
       }
       try lock.withPermits(1)(effect {
         const opened = try session()
@@ -570,7 +574,7 @@ export const mediaReview = Layer.effect(MediaReview, effect {
         if (session !== latest || (card.target !== undefined && !sameTarget(card.target, try messageTarget())) || (card.sms !== undefined && !(try sameSms(card.sms)))
           || card.enrollmentId !== session.identity.enrollmentId || card.conversation !== chosen
           || card.revision !== showing.revision || showing.sensitive || time >= card.expiresAt) return false
-        return card.reviewRequest === undefined || (board.lastSentId === card.reviewRequest && (try reviewContext(card.revision)))
+        return card.reviewRequest === undefined || (board.lastSentId === card.reviewRequest && (try reviewContext(card.revision, conversation)))
       }
       effect function current(session: Session): boolean!! {
         return (try matches(session)) && (try enrollmentIsCurrent(session)) && (try matches(session))
