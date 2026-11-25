@@ -166,6 +166,7 @@ function Tab({ runtime, alpha, tabs, page }: BrowserProps & { tabs: State; page:
         : <BrowserBar
             leading={leading}
             host={host}
+            hint={shown === undefined ? undefined : "Search or address"}
             path={path}
             secure={state.secure}
             private={privateTab}
