@@ -499,14 +499,15 @@ effect function present(tab: number, host: TabHost.Shape): void!! {
     : plugin.value.present({ session: host.session.session, id: idOf(tab), ...place })))
 }
 
-// spec/app/settings/index.md, "A notice or Ask Alpha may open a section directly, at its top, and Back from it goes to its parent"
-/** Open Passwords settings and leave the Browser available to return to. */
-export const openPasswords: void!!(Tabs.Machine | TabHost | Shell | Settings) = effect {
+// spec/app/settings/index.md, "The owner can open Password manager from the Browser menu"
+/** Open Password manager with the Settings root as its parent. */
+export const openPasswords: void!!(Tabs.Machine | Shell | Settings) = effect {
   const shell = try Shell
-  if (Option.isNone((try TabHost).plugin) || !showing(try shell.get(), "Browser") || (try (try Tabs.Machine).get()).layer !== "Menu") return
-  if (!(try tellTabs({ type: "uncover" }))) return
-  if (try contained(shell.send({ type: "openView", view: "Settings" }), "opening Settings")) {
-    try contained((try Settings).send({ type: "openSection", page: "PasswordsPage" }), "opening Passwords settings")
+  const tabs = try Tabs.Machine
+  if (!showing(try shell.get(), "Browser") || (try tabs.get()).layer !== "Menu") return
+  if (!(try contained(tabs.send({ type: "uncover" }, (before) => before.layer === "Menu"), "closing the Browser menu"))) return
+  if (try contained(shell.send({ type: "openView", view: "Settings" }, (before) => showing(before, "Browser")), "opening Settings")) {
+    if (showing(try shell.get(), "Settings")) try contained((try Settings).send({ type: "openBrowserPasswords" }), "opening Password manager")
   }
 }
 

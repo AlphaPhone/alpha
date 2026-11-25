@@ -257,12 +257,29 @@ describe("The Browser on a phone", () => {
     expect(runtime.runSync(Effect.flatMap(Site, (m) => m.get())).clear).toBe(0);
   });
 
-  it("Opens Passwords settings from the Browser menu (spec/app/settings/index.md, \"A notice or Ask Alpha may open a section directly, at its top, and Back from it goes to its parent\")", async () => {
-    const { alpha, runtime } = await onBrowser();
-    await until(alpha, runtime, Tabs, (s) => s.hydrated);
+  it.each([false, true])("Opens Password manager and returns through Settings (spec/app/settings/index.md, \"The owner can open Password manager from the Browser menu\") on phone %s", async (phone) => {
+    const world = { ...scene(), phone, image: phone };
+    const { alpha } = await open(world, only("home", "view:Browser", "view:Settings"));
+    await until(alpha, home.runtime(alpha), Home, (s) => s.tiles.load.status === "Loaded");
+    await press("Browser");
+    await until(alpha, browser.runtime(alpha), Tabs, (s) => s.hydrated);
     await press("Menu");
     await press("Password manager");
-    await until(alpha, alpha.runtime, Settings, (s) => s.page === "PasswordsPage");
+    await until(alpha, alpha.runtime, Settings, (s) => s.page === "BrowserPasswordsPage");
+    if (phone) {
+      await drawn(() => vi.waitFor(() => expect(button("Unlock")).toBeDefined()));
+      await press("Unlock");
+      await drawn(() => vi.waitFor(() => expect(button("Add password")).toBeDefined()));
+    } else {
+      expect(document.body.textContent).toContain("Proton Pass");
+      expect(button("Unlock")).toBeUndefined();
+    }
+    await press("Back to Settings");
+    await until(alpha, alpha.runtime, Settings, (s) => s.page === "Top");
+    await drawn(() => vi.waitFor(() => expect(world.settings.passwordsUnlocked).toBe(false)));
+    expect(world.settings.opened).toEqual([]);
+    await hardware("back");
+    expect(button("Search or type address")).toBeDefined();
   });
 
   it("Only opens a private HTTPS page after the owner confirms it (spec/app/browser/share.md, \"Story: Open the page in another browser\")", async () => {

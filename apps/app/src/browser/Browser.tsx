@@ -154,7 +154,7 @@ function Tab({ runtime, alpha, tabs, page }: BrowserProps & { tabs: State; page:
     native && canShare && { label: "Share", icon: <Share2 />, onSelect: () => void runtime.runPromise(offerShare("System", binding)) },
     canShare && binding !== undefined && { label: "Copy link", icon: <Link />, onSelect: () => void runtime.runPromise(offerShare("Copy", binding)) },
     canMail && { label: "Email", name: "Email this page", icon: <Mail />, onSelect: () => void runtime.runPromise(offerShare("Email", binding)) },
-    native && { label: "Passwords", name: "Password manager", icon: <Lock />, onSelect: () => void runtime.runPromise(openPasswords) },
+    { label: "Passwords", name: "Password manager", icon: <Lock />, onSelect: () => void runtime.runPromise(openPasswords) },
     canHandoff && { label: "Open externally", name: "Open externally, passkeys unsupported here", icon: <ExternalLink />, onSelect: () => void runtime.runPromise(offerNativeHandoff(nativePage)) },
     native && can({ type: "openFind" }) && { label: "Find", name: "Find in page", icon: <Search />, onSelect: () => { setFinding(""); void browser.send({ type: "uncover" }).then(() => send({ type: "openFind" })); } },
     clearable !== undefined && { label: "Clear site", name: "Clear site data", icon: <ListFilter />, onSelect: () => { setClearingSite(clearable); void browser.send({ type: "uncover" }); } },
