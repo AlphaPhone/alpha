@@ -276,7 +276,7 @@ function ContactValues({ kind, values, base, locked, change }: ContactValuesProp
         return (
           // eslint-disable-next-line @eslint-react/no-array-index-key -- The editor keeps focus on the slot when its value changes.
           <div key={at} className="flex min-h-14 items-center gap-2 rounded-tile bg-secondary pr-1.5 pl-4.5">
-            <Input className="h-14 border-0 bg-transparent px-0 text-lg shadow-none focus-visible:outline-none" type={phone ? "tel" : "email"} autoComplete="off" disabled={locked}
+            <Input className="h-14.5 border-0 bg-transparent px-0.5 py-px text-lg shadow-none focus-visible:outline-none" type={phone ? "tel" : "email"} autoComplete="off" disabled={locked}
               maxLength={phone ? CONTACT_MAX_NUMBER : CONTACT_MAX_ADDRESS} aria-label={label} placeholder={label} value={value}
               onChange={(event) => change(values.map((one, index) => index === at ? event.target.value : one))} />
             {(value !== "" || values.length > 1) && <Button type="button" size="icon" variant="ghost" disabled={locked} className="text-muted-foreground"
@@ -306,7 +306,7 @@ function Editor({ runtime }: ContactsProps) {
     void send(event);
   };
   const title = state.form === "Adding" ? "New contact" : "Edit contact";
-  const add = "min-h-11 flex-[1_1_140px] rounded-lg p-2 text-sm font-normal text-muted-foreground";
+  const add = "h-11 flex-[1_1_140px] justify-start rounded-lg p-2 text-sm font-normal text-muted-foreground";
   return (
     <div className="flex min-h-0 flex-1 flex-col">
       <form aria-label={title} noValidate className="flex min-h-0 flex-1 flex-col pt-[max(3.25rem,calc(env(safe-area-inset-top)+0.5rem))]" onSubmit={(event) => {
@@ -326,7 +326,7 @@ function Editor({ runtime }: ContactsProps) {
           <Input className={nameField} aria-label="Last name" placeholder="Last name" autoCapitalize="words" autoComplete="off" maxLength={CONTACT_MAX_NAME} disabled={locked} value={form.familyName} onChange={(event) => update({ ...form, familyName: event.target.value }, "Names")} />
           <ContactValues kind="Phone" locked={locked} base={editBase} values={form.phones} change={(phones) => update({ ...form, phones }, "Phones")} />
           <ContactValues kind="Email" locked={locked} base={editBase} values={form.emails} change={(emails) => update({ ...form, emails }, "Emails")} />
-          {state.sheet.notable ? <Textarea className="min-h-24 rounded-tile border-0 bg-secondary px-4.5 py-3.5 text-lg leading-normal focus-visible:outline-none" aria-label="Notes" placeholder="Notes" maxLength={CONTACT_MAX_NOTES} disabled={locked} value={form.notes} onChange={(event) => update({ ...form, notes: event.target.value }, "Notes")} />
+          {state.sheet.notable ? <Textarea className="field-sizing-fixed min-h-24 resize-y rounded-tile border-0 bg-secondary px-4.5 py-3.5 text-lg leading-normal focus-visible:outline-none" rows={3} autoComplete="off" aria-label="Notes" placeholder="Notes" maxLength={CONTACT_MAX_NOTES} disabled={locked} value={form.notes} onChange={(event) => update({ ...form, notes: event.target.value }, "Notes")} />
             : <p data-alpha-contact-notes-unavailable="" className="rounded-tile bg-secondary px-4.5 py-3.5 text-base leading-normal text-muted-foreground">Notes can’t be edited here. Use Android Contacts to change them.</p>}
           <div className="flex flex-wrap gap-2.5">
             {form.phones.length < maxEach && <Button type="button" variant="ghost" disabled={locked} className={add} onClick={() => update({ ...form, phones: [...form.phones, ""] }, "Phones")}>Add another phone</Button>}
