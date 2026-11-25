@@ -78,7 +78,8 @@ export function textReviewRoute(review: TextReviewScene, subjectUserId: string):
     }
     if (request.method === "GET" && resource === "proposals") {
       review.pendingReads += 1;
-      return Response.json({ proposals: [{ ...proposal, ...(review.readOrigin === undefined ? {} : { readReplyOrigin: review.readOrigin }) }] });
+      const execution = ["executing", "reconciliation_required", "done"].includes(proposal.state) ? { attemptId } : undefined;
+      return Response.json({ proposals: [{ ...proposal, execution, ...(review.readOrigin === undefined ? {} : { readReplyOrigin: review.readOrigin }) }] });
     }
     if (request.method !== "POST" || !resource.startsWith(`proposals/${proposal.id}/`)) return reject(404);
     const step = resource.split("/").at(-1);
@@ -102,7 +103,8 @@ export function textReviewRoute(review: TextReviewScene, subjectUserId: string):
       }
       if (step === "receipt" && proposal.state === "executing" && body.attemptId === attemptId) {
         review.receipts.push(body.receipt);
-        proposal.state = "done";
+        proposal.state = typeof body.receipt === "object" && body.receipt !== null && "outcome" in body.receipt && body.receipt.outcome === "unknown"
+          ? "reconciliation_required" : "done";
         return Response.json({ digest: proposal.digest, proposal });
       }
       const origin = review.readOrigin;

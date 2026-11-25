@@ -77,6 +77,8 @@ export interface TelephonyScene {
   hold: Promise<void> | undefined;
   /** Android submitted this SMS and has not reported its carrier outcome. */
   holdSmsSubmission: boolean;
+  /** Android saved the SMS receipt and the bridge lost its answer. */
+  loseSmsReply: boolean;
   readonly smsQueries: string[];
   /** Android accepted this MMS and has not reported its carrier outcome. */
   holdMmsSubmission: boolean;
@@ -144,6 +146,7 @@ export function telephonyScene(): TelephonyScene {
     deliver: () => {},
     hold: undefined,
     holdSmsSubmission: false,
+    loseSmsReply: false,
     smsQueries: [],
     holdMmsSubmission: false,
     mmsAttempts: [],
@@ -332,6 +335,7 @@ function telephony(world: TelephonyScene): Faked {
         const record = { kind: "sms-send", operationId, subscriptionId, bindingHash, status: submitted ? "submitted" : "sent", parts, createdAt: 1_700_000_400_000 };
         world.journal.set(operationId, record);
         world.changed();
+        if (world.loseSmsReply) throw rejection("Reply lost after dispatch", "reply-lost");
         return record;
       },
       async sendMms({ operationId, recipients, body, attachments, subscriptionId }) {
