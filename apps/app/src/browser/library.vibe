@@ -13,7 +13,7 @@ import { currentPage, Pages, type PageBinding } from "./browser.vibe"
 export type Bookmark = { readonly url: string; readonly title?: string }
 type BookmarkWrite = { readonly ticket: number; readonly entry: Bookmark; readonly saved: boolean }
 
-/** The native rows and the address bound to a library write. */
+/** The saved rows and the address bound to a library write. */
 export service LibraryRows {
   readonly turn: Semaphore.Semaphore
   bookmarks(): readonly Bookmark[]!!
@@ -60,31 +60,37 @@ effect function load(ticket: number): Library.Event!!(TabHost | Pages | LibraryR
   } catch () => ({ type: "loaded", ticket, ok: false, damaged: false, count: 0, entries: 0 })
 }
 
+effect function setMarkInside(entry: Bookmark, saved: boolean): boolean!!(LibraryRows | Library.Machine) {
+  const rows = try LibraryRows
+  const machine = try Library.Machine
+  const s = try machine.get()
+  const known = (try rows.bookmarks()).some((bookmark) => bookmark.url === entry.url)
+  if (known === saved) return false
+  const secure = bookmarkBrowserUrl(entry.url)
+  if (saved ? !Library.canMark(s, secure, false) : !Library.canUnmark(s)) return false
+  const ticket = s.write + 1
+  const changes = !saved || (secure && s.marks < Library.maxMarks)
+  if (changes) try rows.prepare({ ticket, entry, saved })
+  const sent = try contained(machine.send(saved ? { type: "mark", secure, userInfo: false } : { type: "unmark" }), "choosing a bookmark")
+  if (!sent) try rows.take(ticket)
+  return changes && sent
+}
+
 /** Save or remove the exact entry the owner chose, after the library has read the saved list. */
 export effect function setMark(entry: Bookmark, saved: boolean): boolean!!(LibraryRows | Library.Machine) {
   const rows = try LibraryRows
-  return try Semaphore.withPermit(rows.turn, effect {
-    const machine = try Library.Machine
-    const s = try machine.get()
-    const known = (try rows.bookmarks()).some((bookmark) => bookmark.url === entry.url)
-    if (known === saved) return false
-    const secure = bookmarkBrowserUrl(entry.url)
-    if (saved ? !Library.canMark(s, secure, false) : !Library.canUnmark(s)) return false
-    const ticket = s.write + 1
-    const changes = !saved || (secure && s.marks < Library.maxMarks)
-    if (changes) try rows.prepare({ ticket, entry, saved })
-    const sent = try contained(machine.send(saved ? { type: "mark", secure, userInfo: false } : { type: "unmark" }), "choosing a bookmark")
-    if (!sent) try rows.take(ticket)
-    return changes && sent
-  })
+  return try Semaphore.withPermit(rows.turn, setMarkInside(entry, saved))
 }
 
-/** Bind a menu bookmark to the page the owner saw, before asking the saved list to change. */
+/** Bind a menu bookmark to the current shown native page or opaque frame before accepting the write. */
 export effect function markPage(binding: PageBinding, saved: boolean): boolean!!(TabHost | Tabs | Shell | Layers | Pages | Device | LibraryRows | Library.Machine) {
-  if (("privateTab" in binding && binding.privateTab) || !(try currentPage(binding, "Menu"))) return false
-  const host = try TabHost
-  const title = host.web === undefined ? host.session.info(binding.id)?.title : try sync(() => host.web?.info(binding.id)?.title)
-  return try setMark(title && title !== binding.url ? { url: binding.url, title } : { url: binding.url }, saved)
+  const rows = try LibraryRows
+  return try Semaphore.withPermit(rows.turn, effect {
+    if (!(try currentPage(binding, "Menu"))) return false
+    const host = try TabHost
+    const title = host.web === undefined ? host.session.info(binding.id)?.title : try sync(() => host.web?.info(binding.id)?.title)
+    return try setMarkInside(title && title !== binding.url ? { url: binding.url, title } : { url: binding.url }, saved)
+  })
 }
 
 effect function bookmarkWritten(ticket: number): Library.Event!!(TabHost | LibraryRows | Library.Machine) {
@@ -95,9 +101,10 @@ effect function bookmarkWritten(ticket: number): Library.Event!!(TabHost | Libra
   return effect {
     const { entry, saved } = intent
     const host = try TabHost
+    const before = (try rows.bookmarks()).map((bookmark) => bookmark.url)
     const result = host.web === undefined
       ? try hosted("setBookmark", (plugin, session) => plugin.setBookmark({ session, ...entry, saved }))
-      : try writeWebBookmark({ ...entry, saved, limit: Library.maxMarks })
+      : try writeWebBookmark({ ...entry, saved, before, limit: Library.maxMarks })
     const list = entries(result)
     if (list.some((one) => one.url === entry.url) !== saved) return failed
     const current = try (try Library.Machine).get()
@@ -106,7 +113,7 @@ effect function bookmarkWritten(ticket: number): Library.Event!!(TabHost | Libra
   } catch () => failed
 }
 
-/** The Browser's library reads the phone's saved bookmarks and its current visit list. */
+/** The Browser's library reads the saved bookmarks and the current visit list. */
 export const library = Layer.provideMerge(reacting(Library, {
   carry: (fx: Library.Effect) => match (fx) {
     when { tag: "Load", let ticket }: answer("read library", load(ticket), { type: "loaded", ticket, ok: false, damaged: false, count: 0, entries: 0 } as Library.Event);

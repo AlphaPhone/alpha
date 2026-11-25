@@ -94,9 +94,9 @@ function Tab({ runtime, alpha, tabs, page }: BrowserProps & { tabs: State; page:
   const opening = (kind: "Normal" | "Private") => (canOpenTab(tabs, kind) ? () => {
     void browser.send({ type: "openTab", kind }).then(readSuggestions);
   } : undefined);
-  const binding = tabs.layer !== "Menu" ? undefined : native
-    ? tabHost.session.pageBinding(idOf(tab))
-    : state.phase === "Shown" ? tabHost.web?.current(idOf(tab), state.load) : undefined;
+  const binding = tabs.layer === "Menu" && state.phase === "Shown"
+    ? tabHost.web === undefined ? tabHost.session.pageBinding(idOf(tab)) : tabHost.web.current(idOf(tab), state.load)
+    : undefined;
   const shareable = binding !== undefined && "navigation" in binding ? binding : undefined;
   const booked = binding !== undefined && runtime.runSync(Effect.flatMap(LibraryRows, (rows) => rows.bookmarks())).some((entry) => entry.url === binding.url);
   const canBookmark = library.can(booked ? { type: "unmark" } : { type: "mark", secure: state.secure, userInfo: false });
@@ -108,7 +108,7 @@ function Tab({ runtime, alpha, tabs, page }: BrowserProps & { tabs: State; page:
     void runtime.runPromise(markPage(binding, !booked)).then((sent) => { if (sent) void browser.send({ type: "uncover" }); });
   };
   const menu = () => void browser.send({ type: "cover", layer: "Menu" }).then(() => {
-    if (hasLibrary && (!native || library.state?.read.status !== "Loaded")) void loadLibrary(runtime);
+    if (hasLibrary && (tabHost.web !== undefined || library.state?.read.status !== "Loaded")) void loadLibrary(runtime);
   });
   const bookmarkNotice = library.state?.notice === "NotSecure" ? "HTTPS only"
     : library.state?.notice === "Full" ? "The bookmark list is full."
@@ -118,7 +118,7 @@ function Tab({ runtime, alpha, tabs, page }: BrowserProps & { tabs: State; page:
     can({ type: "stop" }) && { label: "Stop", name: "Stop loading", icon: <Square />, onSelect: () => { void browser.send({ type: "uncover" }).then(() => send({ type: "stop" })); } },
     canOpenTab(tabs, "Normal") && { label: "New tab", icon: <Plus />, onSelect: () => opening("Normal")?.() },
     canOpenTab(tabs, "Private") && { label: "Private tab", name: "New private tab", icon: <PrivateMark aria-hidden />, onSelect: () => opening("Private")?.() },
-    hasLibrary && (native || !privateTab) && { label: booked ? "Bookmarked" : "Bookmark", icon: <Star fill={booked ? "currentColor" : "none"} />, disabled: !canBookmark, onSelect: chooseBookmark },
+    hasLibrary && { label: booked ? "Bookmarked" : "Bookmark", icon: <Star fill={booked ? "currentColor" : "none"} />, disabled: !canBookmark, onSelect: chooseBookmark },
     hasLibrary && { label: "Library", name: "Library, bookmarks and history", icon: <History />, onSelect: openLibrary },
     native && { label: "Downloads", icon: <Download />, onSelect: () => void runtime.runPromise(openDownloads) },
     shareable !== undefined && { label: "Share", icon: <Share2 />, onSelect: () => void runtime.runPromise(handoffPageLink({ kind: "Share", binding: shareable })) },
@@ -158,7 +158,7 @@ function Tab({ runtime, alpha, tabs, page }: BrowserProps & { tabs: State; page:
             onTabs={cover("Switcher")}
             onMenu={cover("Menu") && menu}
           />}
-      {state.phase === "Loading" && <div role="progressbar" aria-label="Loading website" className="h-0.75 shrink-0 overflow-hidden bg-secondary"><div className="h-full w-1/3 bg-primary" /></div>}
+      {state.phase === "Loading" && <div role="progressbar" aria-label="Loading website" className="h-0.75 shrink-0 overflow-hidden bg-secondary"><div className="h-full w-[35%] bg-alpha motion-safe:animate-page-loading motion-reduce:w-full" /></div>}
       <div inert={tabs.layer !== "Uncovered"} className="relative flex min-h-0 flex-1 flex-col overflow-y-auto">
         {state.phase === "Blank"
           ? <BrowserNewTab private={privateTab} privateNotice={privateNotice} onSearch={cover("Address") && edit} />

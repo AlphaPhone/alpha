@@ -1,6 +1,8 @@
 import { area } from "../runtime/area.tsx";
 import { stepping } from "../shell/shell.vibe";
 import { Machine } from "../../gen/app__workflows__list.effect.vibe";
+import { Machine as DigestSchedules } from "../../gen/app__digests__schedules.effect.vibe";
+import { Machine as ClockState } from "../../gen/app__workflows__clock.effect.vibe";
 import { Workflows } from "./Workflows.tsx";
 import { backHistory, history } from "./history.vibe";
 import { Effect } from "effect";
@@ -9,12 +11,19 @@ import { backRuns, runs } from "./runs.vibe";
 import { approvals } from "./approvals.vibe";
 import { authoring, backDraft } from "./authoring.vibe";
 import { backList } from "./list.vibe";
-import { together } from "../runtime/reactor.vibe";
+import { applying, together } from "../runtime/reactor.vibe";
 import { automations, backAutomations } from "./automations.vibe";
 import { backClock, clock } from "./clock.vibe";
 import { backDigests, digests } from "./digests.vibe";
+import { NativeDigestPanel } from "./native-digests.vibe";
 
-const mounted = together(history, lifecycle, runs, approvals, authoring, automations, clock, digests, stepping("view:Workflows", Machine, (state) => state.sheet || state.place.tag !== "ListingRows"));
+const clockNotice = applying(ClockState, (state) => state.open,
+  (blocked) => Effect.flatMap(NativeDigestPanel, (view) => view.deferNotice("Clock", blocked)));
+const scheduleNotice = applying(DigestSchedules,
+  (state) => state.open && (state.editing || state.review.showing || state.runReview.showing || state.change.live || state.runNow.live),
+  (blocked) => Effect.flatMap(NativeDigestPanel, (view) => view.deferNotice("Schedule", blocked)));
+const mounted = together(history, lifecycle, runs, approvals, authoring, automations, clock, digests, clockNotice, scheduleNotice,
+  stepping("view:Workflows", Machine, (state) => state.sheet || state.place.tag !== "ListingRows"));
 
 const back = Effect.gen(function* () {
   for (const step of [backClock(), backDigests(), backDraft(), backAutomations(), backRuns(), backLifecycle(), backHistory()]) {

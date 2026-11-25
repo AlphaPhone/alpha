@@ -149,6 +149,7 @@ export function Workflows({ runtime, alpha }: Shown<Resident | Rows | Machine | 
         </>}
       </>}
       {state && place?.tag === "ListingDigests" && <Digests runtime={runtime} owner={state.owner} result={place.result}
+        notice={place.notice.runId === "" ? undefined : place.notice}
         onResult={(result) => dispatch({ type: "openDigestResult", result })} />}
       {place?.tag === "ListingDetail" && (selected === undefined || state === undefined
         ? <EmptyState title="This item is no longer listed" />
