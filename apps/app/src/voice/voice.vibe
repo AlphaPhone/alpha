@@ -1,4 +1,4 @@
-// spec/app/voice/index.md, "Story: Hold a spoken conversation"; spec/app/voice/index.md, "The speech pipeline warms on startup, foreground return and account readiness without opening the microphone"; spec/app/voice/index.md, "A reply that needs the owner's review in chat keeps voice listening with the microphone open"; spec/app/voice/index.md, "An active voice conversation may ask the shell to open Home or any admitted screen"; spec/app/shell/index.md, "Agent navigation shows an admitted app or Home without lowering Ask Alpha"; spec/app/voice/index.md, "A spoken reply says a written date, clock time, range and percentage in words"; spec/app/voice/index.md, "A turn Cloud refuses because the account is out of funds ends voice quietly, as Stop does"
+// spec/app/voice/index.md, "Story: Hold a spoken conversation"; spec/app/voice/index.md, "The speech pipeline warms on startup, foreground return and account readiness without opening the microphone"; spec/app/voice/index.md, "A reply that needs the owner's review in chat keeps voice listening with the microphone open"; spec/app/voice/index.md, "An active voice conversation may ask the shell to open Home or any admitted screen"; spec/app/shell/index.md, "Agent navigation shows an admitted app or Home without lowering Ask Alpha"; spec/app/voice/index.md, "A spoken reply says a written date, clock time, range and percentage in words"; spec/app/voice/index.md, "A turn Cloud refuses because the account is out of funds ends voice quietly, as Stop does"; spec/app/assistant/reply.md, "The agent's turn tag is never drawn, copied, quoted, emailed or spoken, and a reply still being written holds back what may become one"
 import { ConversationRecord, TurnController, type TurnContext, type TurnTransport } from "@elizaos/agent"
 import { Machine as Conversation, type Context as Screen } from "../../gen/app__assistant.effect.vibe"
 import { Machine as Chats } from "../../gen/app__assistant__chats.effect.vibe"
@@ -151,6 +151,7 @@ export effect function openDictation<R>(field: Field, apply: (words: string) => 
 
 module pure {
   import { clockWords, meridiemOf, twelveHour } from "../../gen/app__voice.ts"
+  import { withoutTurnTags } from "../assistant/words.ts"
 
   const reviewTag = /\[(APPROVAL|PROPOSAL|REVIEW|DRAFT|CALENDAR_APPROVAL|EMAIL_DRAFT)\b/i
   const navigateTag = /\[NAVIGATE:([a-zA-Z]+)\]/i
@@ -166,9 +167,9 @@ module pure {
     return found?.[1]
   }
 
-  /** The reply's speakable text: each run of spaces is one space and each line break is kept as one, so no spoken form joins two lines. @throws {never} */
+  /** The reply's speakable text, without the agent's turn tag: each run of spaces is one space and each line break is kept as one, so no spoken form joins two lines. @throws {never} */
   export function speakableText(text: string): string {
-    return text
+    return withoutTurnTags(text)
       .replace(/\[NAVIGATE:[a-zA-Z]+\]/gi, "")
       .replace(/\[(APPROVAL|PROPOSAL|REVIEW|DRAFT|CALENDAR_APPROVAL|EMAIL_DRAFT)[^\]]*\]/gi, "")
       .replace(/:[ \t]*(?=\r?\n)/g, ".")

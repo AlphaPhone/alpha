@@ -354,7 +354,11 @@ pure def micCloseFailed(v: Voice, session: int): Change = shutDown(D::NoMicropho
 ### Alpha's reply is spoken a sentence at a time, sentences streamed before the reply is complete included, and only for the current turn
 
 Hearing Alpha speak shows the voice service works again, so the quiet
-retries start over.
+retries start over. A sentence is said without the agent's turn tag
+([reply](../assistant/reply.md), "The agent's turn tag is never drawn,
+copied, quoted, emailed or spoken, and a reply still being written holds
+back what may become one"), and a streamed reply that ends in what may
+become one is not said past it until the next words decide.
 
 ```quint
 pure def canSentence(v: Voice, session: int, turn: int): bool =
