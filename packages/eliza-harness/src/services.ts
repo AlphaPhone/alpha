@@ -395,13 +395,15 @@ const owner = { email: "owner@alpha.test", credits: 50_000_000 };
 
 /**
  * The cloud and the agent a dev server runs against: one signed-in, funded owner, whose model is the scripted one or
- * `real`. Their state is a directory of this run, gone with it, so nothing piles up between runs; `keep` names a
+ * `real`, and whose agent is the pack's with the phone's own character, so a real model is given the phone's system
+ * prompt. Their state is a directory of this run, gone with it, so nothing piles up between runs; `keep` names a
  * directory to keep the agent's in instead.
  */
 export async function startEliza(keep?: string, real?: RealModel) {
+  const { character } = await builtPack();
   const state = scratch();
   const cloud = await startCloud(state, [owner.email], owner.credits, real);
   const key = cloud.owners.get(owner.email)!;
-  const agent = await startAgent(keep ?? state, cloud, key, characterOf(owner.email), keep !== undefined);
+  const agent = await startAgent(keep ?? state, cloud, key, character, keep !== undefined);
   return { cloud, agent, key, stop: async () => { await agent.stop(); await cloud.stop(); fs.rmSync(state, { recursive: true, force: true }); } };
 }

@@ -1,4 +1,4 @@
-import { ConfirmDialog } from "../ConfirmDialog.tsx";
+import { InboxReviewDialog } from "./InboxReviewDialog.tsx";
 
 export type InboxDiscardDialogProps = {
   /** Whether the question is being asked; the parent keeps it. */
@@ -19,8 +19,8 @@ export type InboxDiscardDialogProps = {
  */
 export function InboxDiscardDialog({ open, gmailCopy = false, onDiscard, onKeep }: InboxDiscardDialogProps) {
   return (
-    <ConfirmDialog open={open} title="Discard this draft?" confirmLabel="Discard" cancelLabel="Keep" destructive onConfirm={onDiscard} onCancel={onKeep}>
-      {gmailCopy ? "Its copy in Gmail Drafts stays there." : undefined}
-    </ConfirmDialog>
+    <InboxReviewDialog open={open} title="Discard this draft?" noLabel="Keep" yesLabel="Discard" onYes={onDiscard} onNo={onKeep}>
+      {gmailCopy ? <p className="text-muted-foreground">Its copy in Gmail Drafts stays there.</p> : undefined}
+    </InboxReviewDialog>
   );
 }

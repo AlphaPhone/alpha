@@ -27,6 +27,7 @@ export type Told =
   | { readonly kind: "state"; readonly raw: unknown }
   | { readonly kind: "opened"; readonly raw: unknown }
   | { readonly kind: "closed"; readonly raw: unknown }
+  | { readonly kind: "found"; readonly raw: unknown }
 
 /**
  * The phone's web pages in native tabs: eliza's client of Alpha's `AlphaBrowser` tab host and the session that holds
@@ -52,11 +53,11 @@ const name = "AlphaBrowser"
 export const phoneTabHost = Layer.sync(TabHost, () => {
   if (!registered(name)) return { plugin: Option.none(), session: session(), told: Stream.empty }
   const plugin = client(name)
-  const heard = (event: "stateChanged" | "tabOpened" | "tabClosed", kind: Told["kind"]) => Stream.callback<Told>((queue) => acquireRelease(
+  const heard = (event: "stateChanged" | "tabOpened" | "tabClosed" | "findResult", kind: Told["kind"]) => Stream.callback<Told>((queue) => acquireRelease(
     promise((): Promise<BrowserTabHostListener> => plugin.addListener(event as "stateChanged", (raw: unknown) => { Queue.offerUnsafe(queue, { kind, raw }) })),
     (handle) => promise(async () => { await handle.remove() }),
   ))
-  return { plugin: Option.some(plugin), session: session(), told: Stream.mergeAll([heard("stateChanged", "state"), heard("tabOpened", "opened"), heard("tabClosed", "closed")], { concurrency: "unbounded" }) }
+  return { plugin: Option.some(plugin), session: session(), told: Stream.mergeAll([heard("stateChanged", "state"), heard("tabOpened", "opened"), heard("tabClosed", "closed"), heard("findResult", "found")], { concurrency: "unbounded" }) }
 })
 
 /** A browser: no native tabs, which the Browser says rather than drawing pages itself. */

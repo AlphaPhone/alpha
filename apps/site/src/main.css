@@ -2,38 +2,89 @@
 @import "@repo/design-system/theme.css";
 @import "@repo/ui/styles.css";
 
-@keyframes float {
-  0%,
-  100% {
-    transform: translateY(0) rotateZ(-9deg) rotateX(9deg) rotateY(-17deg);
-  }
+html {
+  scroll-behavior: smooth;
+}
 
-  50% {
-    transform: translateY(-0.55rem) rotateZ(-6deg) rotateX(5deg) rotateY(-10deg);
+@media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto;
   }
 }
 
-@keyframes typing {
+@keyframes turn {
+  to {
+    rotate: 360deg;
+  }
+}
+
+@keyframes nudge {
   0%,
+  60%,
   100% {
-    opacity: 0.45;
-    transform: none;
+    translate: 0;
   }
 
-  50% {
-    opacity: 1;
-    transform: translateY(-0.2em);
+  30% {
+    translate: 0 0.25rem;
   }
 }
 
 @keyframes enter {
   from {
     opacity: 0;
-    transform: translateY(0.5em);
+    translate: 0 0.6em;
+  }
+}
+
+@keyframes reveal {
+  from {
+    clip-path: inset(0 100% 0 0);
   }
 
   to {
+    clip-path: inset(0);
+  }
+}
+
+@keyframes typing {
+  0%,
+  100% {
+    opacity: 0.4;
+    translate: 0;
+  }
+
+  50% {
     opacity: 1;
-    transform: none;
+    translate: 0 -0.2em;
+  }
+}
+
+@keyframes touch {
+  0% {
+    opacity: 0;
+    scale: 0.4;
+  }
+
+  35% {
+    opacity: 1;
+    scale: 1;
+  }
+
+  100% {
+    opacity: 0;
+    scale: 1.5;
+  }
+}
+
+@keyframes listen {
+  0% {
+    opacity: 0.28;
+    scale: 1;
+  }
+
+  100% {
+    opacity: 0;
+    scale: 1.75;
   }
 }

@@ -3,8 +3,8 @@ import { act } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { Machine as Conversation } from "../gen/app__assistant.effect.vibe";
 import { Machine as Composer } from "../gen/app__assistant__composer.effect.vibe";
-import { Machine as List } from "../gen/app__notes.effect.vibe";
 import { Machine as Editor, waiting } from "../gen/app__notes__editor.effect.vibe";
+import { Machine as List } from "../gen/app__notes.effect.vibe";
 import { Machine as Shell, showing } from "../gen/app__shell.effect.vibe";
 import assistant from "../src/assistant/index.tsx";
 import { agentOpen } from "../src/notes/agent.vibe";
@@ -41,6 +41,27 @@ describe("Notes", () => {
     await until(alpha, runtime, List, (s) => s.read.status === "Loaded" && s.rows.length === 6);
   });
 
+  it("Keeps editor changes in the resident agent (spec/app/notes/editor.md, \"Story: Write a note\")", async () => {
+    const world = scene();
+    const { alpha } = await open(world);
+    await press("Notes");
+    const runtime = notes.runtime(alpha);
+    await until(alpha, runtime, List, (state) => state.read.status === "Loaded");
+    await press("New note");
+    await until(alpha, runtime, Editor, (state) => state.showing && state.fresh);
+    await fill("Title", "Studio invoice");
+    await fill("Note", "Send by Friday");
+    await press("Done");
+    await until(alpha, runtime, List, (state) => state.read.status === "Loaded" && state.rows.length === 7);
+    expect(world.notes.notes.filter((row) => row.title === "Studio invoice").map((row) => row.body.trim())).toEqual(["Send by Friday"]);
+    await press("Open Studio invoice");
+    await until(alpha, runtime, Editor, (state) => state.showing && !state.fresh);
+    await fill("Note", "Send by Monday");
+    await press("Done");
+    await until(alpha, runtime, List, (state) => state.read.status === "Loaded" && state.version === world.notes.revision + 1 && world.notes.notes.some((row) => row.body.includes("Monday")));
+    expect(world.notes.notes.filter((row) => row.title === "Studio invoice").map((row) => row.body.trim())).toEqual(["Send by Monday"]);
+  });
+
   it("Write a note (spec/app/notes/editor.md, \"Story: Write a note\")", async () => {
     const world = scene();
     const { alpha } = await open(world);
@@ -60,7 +81,7 @@ describe("Notes", () => {
     await press("Done");
     await until(alpha, runtime, Editor, (s) => !s.showing && s.draft.sync === "Kept");
     expect(world.notes.notes.find((note) => note.id === "enclave")?.title).toBe("Enclave launch plan");
-    await until(alpha, runtime, List, (s) => s.read.status === "Loaded" && s.version === world.notes.revision);
+    await until(alpha, runtime, List, (s) => s.read.status === "Loaded" && s.version === world.notes.revision + 1);
   });
 
   it("The agent opens the note I named, and only that, only for my request now (spec/app/notes/index.md, \"The agent opens the one note the owner named, as the list shows it now, once for the owner's current turn, and is told whether it opened\"; spec/app/notes/note.md, \"Only the owner opens a dialog or a question in Notes; a note is opened by the owner, or by the agent for the one the owner just named; and nothing opens while anything else of Notes is open\"; spec/app/assistant/index.md, \"Story: Let Alpha open what it is talking about\")", async () => {
@@ -103,7 +124,7 @@ describe("Notes", () => {
     const opens = (noteId: string, asked: { turn: number; current: number; sensitive: boolean }) => alpha.runtime.runPromise(agentOpen(noteId, asked));
     expect(await opens("enclave", { turn: first + 1, current: first + 1, sensitive: false })).toBe(false);
     await press("Done");
-    await until(alpha, alpha.runtime, Editor, (e) => !e.showing);
+    await until(alpha, alpha.runtime, Editor, (e) => !e.showing && !waiting(e));
     expect(await opens("enclave", { turn: first, current: first, sensitive: false })).toBe(false);
     expect(await opens("enclave", { turn: first + 1, current: first + 2, sensitive: false })).toBe(false);
     expect(await opens("enclave", { turn: first + 1, current: first + 1, sensitive: true })).toBe(false);
@@ -123,7 +144,7 @@ describe("Notes", () => {
     await ask("open my shopping list", true);
     await drawn(() => vi.waitFor(() => expect(results()).toHaveLength(2)));
     expect(results()[1]).toEqual({ switched: false });
-    expect([(await editor()).showing, waiting(await editor()), world.notes.revision]).toEqual([false, true, revision]);
+    expect([(await editor()).showing, waiting(await editor()), world.notes.revision, world.notes.notes.find((one) => one.id === "enclave")?.title]).toEqual([false, true, revision, "Enclave launch"]);
 
     // spec/app/notes/index.md, "The agent opens the one note the owner named, as the list shows it now, once for the owner's current turn, and is told whether it opened": a reply that prepared nothing for this screen, as one whose note came from a tool's output, opens nothing and claims nothing.
     await alpha.runtime.runPromise(Editor.use((e) => e.send({ type: "discardDraft" }, "Owner")));

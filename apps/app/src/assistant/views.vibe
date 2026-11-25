@@ -3,14 +3,7 @@ import * as Conversation from "../../gen/app__assistant.effect.vibe"
 import { type View, parseEvent } from "../../gen/app__shell.effect.vibe"
 import { Agent } from "../platform/agent.vibe"
 import { ask } from "../platform/remote.vibe"
-import * as KeyValueStore from "effect/persistence/KeyValueStore"
-import * as List from "../../gen/app__notes.effect.vibe"
-import * as Editor from "../../gen/app__notes__editor.effect.vibe"
-import * as Link from "../../gen/app__notes__linkNote.effect.vibe"
-import * as Voice from "../../gen/app__notes__voice.effect.vibe"
-import { Cloud } from "../platform/cloud.vibe"
 import { agentOpen } from "../notes/agent.vibe"
-import { Opens } from "../notes/opens.vibe"
 import { contained, started } from "../runtime/reactor.vibe"
 
 module web {
@@ -97,14 +90,11 @@ effect function navigated(ticket: number, view: View): boolean!!Conversation.Mac
 }
 
 // spec/app/assistant/index.md, "A complete reply may open one view, once, while the screen it was asked from still shows"; spec/app/notes/index.md, "The agent opens the one note the owner named, as the list shows it now, once for the owner's current turn, and is told whether it opened"
-/** What carrying out a prepared view needs: this screen as a renderer, the agent, the conversation, and Notes' machines for a saved note. */
-export type Opening = Views | Agent | Conversation.Machine | List.Machine | Editor.Machine | Voice.Machine | Link.Machine | Opens | Cloud | KeyValueStore.KeyValueStore
-
 /**
  * Carry out the view the complete reply of `ticket` prepared for this screen: claim it once, open it as the rules
  * allow, a saved note in Notes' editor first, and tell the agent whether it switched. Nothing is said on screen.
  */
-effect function openPrepared(ticket: number): void!!Opening {
+effect function openPrepared(ticket: number) {
   const prepared = try (try Views).take(ticket)
   if (Option.isNone(prepared)) return
   const binding = prepared.value.navigationBinding

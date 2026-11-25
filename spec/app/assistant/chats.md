@@ -41,13 +41,15 @@ pure def listedHas(conversation: int, c: Chats): bool = c.ids.includes(conversat
 
 ### What chats need done outside comes back as an answer naming its ticket
 
-The list of conversations read, a page of a conversation's messages read
-(around a message, or its latest), a conversation created, a fork made
-from a message, and a message read aloud by the voice area.
+The list of conversations read, to show or to open its newest, a page of a
+conversation's messages read (around a message, or its latest), a
+conversation created, a fork made from a message, and a message read aloud
+by the voice area.
 
 ```quint
 type Effect =
   | ReadList({ ticket: int })
+  | ReadLatest({ ticket: int })
   | ReadPage({ conversation: int, around: int, ticket: int })
   | Create({ ticket: int })
   | Fork({ conversation: int, message: int, ticket: int })
@@ -169,6 +171,44 @@ pure def restart(c: Chats): Moved =
   val listing = if (making(c)) browse(rest) else { state: rest, out: List() }
   val paging = shown(c.chosen, 0, c.origin, listing.state)
   if (c.chosen > 0) { state: paging.state, out: listing.out.concat(paging.out) } else listing
+```
+
+### A conversation the agent says it does not have is forgotten, and the agent's newest conversation shows in its place, or a new chat when it has none
+
+The agent answers a read of a conversation's latest messages with 404 when
+it has no such conversation, as after its store was reset or the phone
+paired with another agent. That is not a read that failed, and nothing is
+said about it: the conversation leaves the list, none shows, and the list
+is read again. A draft written in it stays in its slot on the phone. A 404
+to a read around a message says only that the message is unknown, and like
+any other failed read keeps the conversation showing, to be read again.
+
+```quint
+pure def canGone(c: Chats, ticket: int): bool = R::canAnswer(c.page, ticket) and c.around == 0
+
+pure def gone(c: Chats, ticket: int): Moved =
+  val list = R::ask(c.list)
+  { state: { ...c, ids: c.ids.select(i => i != c.chosen), chosen: 0, origin: 0,
+      list: list, page: X::dropped(c.page), around: 0, messages: 0 },
+    out: List(ReadLatest({ ticket: list.ticket })) }
+```
+
+### The list read after a conversation was gone opens the first it lists, the most recently used, while the new chat is blank and none other is showing or being made
+
+The agent lists the conversation used most recently first. Its answer is
+taken as any newest list is. The shell passes, as `blank`, whether nothing
+is written or attached in the new chat, so what the owner began there is
+never carried into a conversation they did not choose. With none listed,
+the read failed, or the new chat not blank, the new chat stays.
+
+```quint
+pure def canLatest(c: Chats, ticket: int, ids: List[int], blank: bool): bool = canListed(c, ticket, ids)
+
+pure def latest(c: Chats, ticket: int, ok: bool, ids: List[int], blank: bool): Moved =
+  val read = listed(c, ticket, ok, ids)
+  if (ok and blank and ids.length() > 0 and c.chosen == 0 and not(making(c)))
+    shown(ids.head(), 0, 0, read)
+  else { state: read, out: List() }
 ```
 
 ### Another owner or agent session leaves every conversation behind

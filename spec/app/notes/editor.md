@@ -131,12 +131,19 @@ pure def reopenDraft(e: Editor, covered: bool, by: Actor): Editor = { ...e, show
 The phone says whether it could store the draft. While it cannot, because
 its storage is full, the owner is told, and the draft is stored again with
 the next change it can store or the next save that lands. Nothing is typed
-into a note on its way to Recently deleted.
+into a note on its way to Recently deleted. Switching between text and a
+checklist counts as an edit and is kept and saved the same way.
 
 ```quint
 pure def canEdit(e: Editor, by: Actor): bool = by == Owner and e.showing and not(e.deleting)
 
 pure def edit(e: Editor, kept: bool, by: Actor): Editor = { ...e, draft: D::edit(e.draft), full: not(kept) }
+
+pure def canFormatNote(e: Editor, kind: Kind, by: Actor): bool =
+  canEdit(e, by) and writable(kind) and kind != e.kind
+
+pure def formatNote(e: Editor, kind: Kind, kept: bool, by: Actor): Editor =
+  { ...edit(e, kept, by), kind: kind }
 
 pure def alwaysAFullStoreLeavesTheDraftUnsaved(e: Editor): bool = e.full implies D::unsaved(e.draft)
 ```

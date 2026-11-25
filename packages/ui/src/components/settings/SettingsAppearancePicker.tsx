@@ -49,7 +49,7 @@ export function SettingsAppearancePicker({ theme, keeping = false, onChoose }: S
               value={value}
               className={cn(
                 focusRing,
-                "min-h-11 min-w-13 rounded-full px-3.5 text-snippet font-semibold text-muted-foreground transition-colors duration-fast ease-standard disabled:pointer-events-none disabled:opacity-50 data-[state=checked]:bg-primary data-[state=checked]:text-primary-foreground",
+                "min-h-11 min-w-13 rounded-full px-3.5 text-snippet font-semibold text-muted-foreground transition-colors duration-fast ease-standard disabled:pointer-events-none disabled:opacity-50 data-[state=checked]:bg-alpha data-[state=checked]:text-alpha-foreground",
               )}
             >
               {title}

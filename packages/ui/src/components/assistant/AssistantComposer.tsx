@@ -1,7 +1,6 @@
 import type { ComponentProps, PointerEvent, ReactNode, Ref } from "react";
-import { ArrowUp, AudioLines, Clock, Mic, Paperclip, Plus, Search } from "lucide-react";
+import { ArrowUp, Clock, Mic, Paperclip, Plus, Search } from "lucide-react";
 import { cn } from "../../lib/cn.ts";
-import { Banner } from "../Banner.tsx";
 import { Button } from "../Button.tsx";
 import { Mark } from "../Mark.tsx";
 import { Menu, MenuContent, MenuItem, MenuTrigger } from "../Menu.tsx";
@@ -22,12 +21,10 @@ export type AssistantComposerProps = Omit<ComponentProps<"div">, "children" | "o
   closed?: boolean;
   /** Something to tell or ask about the saved draft, above the field. */
   notice?: AssistantDraftNoticeProps;
-  /** Why nothing can be sent now: Alpha cannot be reached, or the screen is sensitive and is never sent. */
+  /** Why nothing can be sent now: Alpha cannot be reached, or the screen is sensitive and is never sent. Said to a screen reader only; no text is written by the composer. */
   unavailable?: "away" | "sensitive";
   /** What waits to go with the message. */
   attachments?: AssistantAttachment[];
-  /** Which files could not be attached or saved with the message. */
-  attachmentNotice?: string;
   /** How many files the upload allows. */
   limit?: number;
   /** The message the next send quotes. */
@@ -54,7 +51,7 @@ export type AssistantComposerProps = Omit<ComponentProps<"div">, "children" | "o
   onHistory?: () => void;
   /** Starts a spoken turn; the voice area owns it. */
   onTalk?: () => void;
-  /** Records a transcript the owner can edit before it enters the draft. */
+  /** Records a transcript the owner can edit before it enters the draft; its mic stands where Talk does, only where Talk is not offered. */
   onDictate?: () => void;
   /** Takes the field's place while a voice conversation owns the composer. */
   voice?: ReactNode;
@@ -94,7 +91,7 @@ function keepComposerFocus(event: PointerEvent<HTMLButtonElement>) {
  * @model spec/app/assistant/composer.md
  */
 export function AssistantComposer({
-  variant = "sheet", value, onValueChange, closed = false, notice, unavailable, attachments = [], attachmentNotice, limit = 4, quote, editing = false, lift,
+  variant = "sheet", value, onValueChange, closed = false, notice, unavailable, attachments = [], limit = 4, quote, editing = false, lift,
   onSend, onStop, stopping = false, onAttach, onSearch, onNew, making = false, onHistory, onTalk, onDictate, voice, voiceNotice, onOpen, leading, opener, placeholder, onFocusField, fieldRef, onRemoveAttachment, onPreviewAttachment, onUnquote, className, style, ...props
 }: AssistantComposerProps) {
   const written = value.trim() !== "" || attachments.length > 0;
@@ -104,8 +101,7 @@ export function AssistantComposer({
   return (
     <div data-host-chrome={bar ? "" : undefined} className={cn("flex shrink-0 flex-col gap-2", bar ? "mx-4 mb-[max(1.75rem,calc(max(var(--alpha-native-inset-bottom,0px),env(safe-area-inset-bottom))_+_0.75rem))]" : "mx-3 mb-[max(1.875rem,calc(max(var(--alpha-native-inset-bottom,0px),env(safe-area-inset-bottom))_+_0.75rem))]", className)} style={lift ? { marginBottom: lift, ...style } : style} {...props}>
       {notice ? <AssistantDraftNotice {...notice} /> : null}
-      {unavailable ? <Banner variant="warn">{reasons[unavailable]}</Banner> : null}
-      {attachmentNotice ? <Banner variant="warn">{attachmentNotice}</Banner> : null}
+      {unavailable ? <span role="status" className="sr-only">{reasons[unavailable]}</span> : null}
       {attachments.length ? <AssistantPendingAttachments attachments={attachments} limit={limit} onRemove={onRemoveAttachment} onPreview={onPreviewAttachment} /> : null}
       {quote ? <AssistantQuoteBar kind="quote" text={quote} onRemove={onUnquote} /> : null}
       {editing ? <AssistantQuoteBar kind="editing" /> : null}
@@ -146,7 +142,6 @@ export function AssistantComposer({
           }}
           className={cn("max-h-[min(10.5rem,28dvh)] min-h-11 min-w-0 flex-1 touch-auto rounded-full bg-transparent py-2.75 text-body leading-field", targeting ? "border border-alpha px-3" : cn("border-0 pr-0.5", bar ? "pl-2" : "pl-0.5"))}
         />
-        {onDictate && <Button variant="ghost" size="icon" aria-label="Dictate" onClick={onDictate}><AudioLines /></Button>}
         {onStop || stopping ? (
           <Button size="icon" aria-label="Stop reply" loading={stopping} className="bg-foreground text-background hover:bg-foreground/90" onClick={onStop}><svg aria-hidden viewBox="0 0 24 24" className="size-5.5"><rect x="7" y="7" width="10" height="10" rx="2" fill="currentColor" /></svg></Button>
         ) : written ? (
@@ -160,6 +155,8 @@ export function AssistantComposer({
           ><ArrowUp /></Button>
         ) : onTalk ? (
           <Button variant="ghost" size="icon" aria-label="Talk" className={bar ? undefined : "bg-foreground text-background hover:bg-foreground/90"} onPointerDown={keepComposerFocus} onClick={onTalk}><Mic /></Button>
+        ) : onDictate ? (
+          <Button variant="ghost" size="icon" aria-label="Dictate" onPointerDown={keepComposerFocus} onClick={onDictate}><Mic /></Button>
         ) : null}
       </div>
     </div>
