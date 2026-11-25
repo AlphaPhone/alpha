@@ -17,7 +17,7 @@ import { Effect } from "effect";
 import { Letters, nothing } from "../src/inbox/composer.vibe";
 import { Mail } from "../src/inbox/gmail.vibe";
 import { letter } from "./fakes/inbox.ts";
-import { scene } from "./fakes/scene.ts";
+import { type Scene, scene } from "./fakes/scene.ts";
 
 underAct();
 afterEach(closeAll);
@@ -57,7 +57,7 @@ const title = () => document.querySelector("main[aria-label]:not([aria-label=Inb
 const step = (name: string) => process.stderr.write(`STEP ${name}\n`);
 const tile = (view: string) => drawn(() => {
   const found = document.querySelector<HTMLButtonElement>(`[data-home-tile='view:${view}']`);
-  if (!found) throw new Error(`no tile ${view}`);
+  if (!found) throw new Error(`no tile ${view}; visible text: ${told().slice(0, 240)}`);
   found.click();
 });
 const action = (name: string) => drawn(() => {
@@ -66,6 +66,17 @@ const action = (name: string) => drawn(() => {
   found.click();
 });
 const search = (text: string) => fill("Search mail", text).then(() => document.querySelector("form[role=search]")?.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true })));
+const inboxMounts = only("home", "view:Inbox", "view:Browser", "view:Settings", "assistant", "notice");
+
+async function homeIsReady(alpha: Alpha) {
+  await until(alpha, home.runtime(alpha), Home, (state) => state.tiles.load.status === "Loaded");
+}
+
+async function openInbox(world: Scene) {
+  const opened = await open(world, inboxMounts);
+  await homeIsReady(opened.alpha);
+  return opened;
+}
 
 describe.each([["a browser", false], ["a phone", true]])("in %s", (_where, phone) => {
   it("See my mail (spec/app/inbox/index.md, \"Story: See my mail\")", async () => {
@@ -81,7 +92,7 @@ describe.each([["a browser", false], ["a phone", true]])("in %s", (_where, phone
     termSheet.attachmentData = { "2": new TextEncoder().encode(attachmentText) };
     const earlierLunch = letter(0, "Earlier lunch plan", ["SENT"], "Could you make it Friday?", undefined, Date.parse(termSheet.card.receivedAt) - 3_600_000);
     world.inbox.mail.push({ ...earlierLunch, card: { ...earlierLunch.card, threadId: "t1" } });
-    const first = await open(world);
+    const first = await openInbox(world);
     const { alpha } = first;
     const runtime = inbox.runtime(alpha);
 
@@ -251,7 +262,7 @@ describe.each([["a browser", false], ["a phone", true]])("in %s", (_where, phone
     await first.close();
 
     // spec/app/inbox/index.md, "A restart keeps the selection, the list kept for it and its credential, whether Spam and Trash can be searched, and the count as no longer fresh, and forgets the rest"; spec/app/inbox/index.md, "The saved list can be on screen while Gmail cannot be reached"
-    const second = await open(world);
+    const second = await open(world, inboxMounts);
     const again = inbox.runtime(second.alpha);
     await until(second.alpha, again, List, (s) => s.saved && s.accounts.status === "Failed");
     step("17");
@@ -271,7 +282,7 @@ it("Connect Gmail and keep to its grant (spec/app/inbox/index.md, \"Story: Conne
   const world = { ...scene(), phone: true };
   world.inbox.google = undefined;
   world.inbox.offline = true;
-  const { alpha } = await open(world);
+  const { alpha } = await openInbox(world);
   const runtime = inbox.runtime(alpha);
 
   // spec/app/platform/index.md, "The owner's tap on a mail sign-in control starts the phone's one more sign-in for mail where the phone wants it, then reads again once": signed out, the phone wants no mail sign-in and Connect Eliza Cloud opens Settings as it always did.
@@ -371,7 +382,7 @@ it("Send a draft I reviewed (spec/app/inbox/sending.md, \"Story: Send a draft I 
   const bytes = new TextEncoder().encode("Meeting actions");
   original.files = [{ partId: "1", name: "actions.txt", mimeType: "text/plain", size: bytes.length, supported: true }];
   original.attachmentData = { "1": bytes };
-  const { alpha, close } = await open(world);
+  const { alpha, close } = await openInbox(world);
   const runtime = inbox.runtime(alpha);
   await tile("Inbox");
   await until(alpha, runtime, List, (s) => s.list.status === "Loaded" && s.pages === 1);
@@ -482,7 +493,7 @@ it("Send a draft I reviewed (spec/app/inbox/sending.md, \"Story: Send a draft I 
   await until(alpha, runtime, Writing, (s) => !s.open && s.shelf.shelved.length === 1);
   await close();
 
-  const again = await open(world);
+  const again = await open(world, inboxMounts);
   const restored = inbox.runtime(again.alpha);
   await until(again.alpha, restored, Writing, (s) => !s.open && s.shelf.shelved.length === 1);
   await menu("Drafts", "More folders");
@@ -502,9 +513,6 @@ it("shows the authorized first page of unread Inbox mail on Home", async () => {
   for (let id = 2; id <= 27; id++) world.inbox.mail.push(letter(id, `Read mail ${id}`, ["INBOX"], "", "Sender", Date.UTC(2026, 9, 31, 0, id)));
   const { alpha } = await open(world, only("home", "view:Inbox"));
   const inboxState = inbox.runtime(alpha);
-  async function homeIsReady(app: Alpha) {
-    await until(app, home.runtime(app), Home, (state) => state.tiles.load.status === "Loaded");
-  }
   await homeIsReady(alpha);
   await tile("Inbox");
   await until(alpha, inboxState, List, (state) => state.list.status === "Loaded" && state.pages === 1);
