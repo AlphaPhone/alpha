@@ -25,6 +25,8 @@ const blankLine = /^\s*$/;
 const escapable = /[!-/:-@[-`{-~]/;
 const bareLink = /https:\/\/[^\s<>()[\]]+(?:\([^\s<>()]*\)[^\s<>()[\]]*)*/y;
 
+const nestingLimit = 8;
+
 const indentOf = (line: string) => line.length - line.trimStart().length;
 const startsBlock = (line: string) => fenceLine.test(line) || headingLine.test(line) || quoteLine.test(line) || itemLine.test(line) || ruleLine.test(line);
 
@@ -73,8 +75,12 @@ function linkAt(text: string, at: number): { readonly label: string; readonly hr
   return { label: text.slice(at + 1, close), href: target[1] ?? target[2] ?? "", end: close + 1 + target[0].length };
 }
 
-/** A line's words with their marks read: code spans, links, bold and italics; anything left open reads as written. @throws {never} */
-export function replyInlines(text: string): ReplyInline[] {
+/**
+ * A line's words with their marks read: code spans, links, bold and italics, nested at most eight deep; a mark left open
+ * reads as written, except on a line still being `written`, where it is held back until it closes. @throws {never}
+ */
+export function replyInlines(text: string, written = false, depth = 0): ReplyInline[] {
+  if (depth >= nestingLimit) return text === "" ? [] : [{ kind: "text", text }];
   const runs: ReplyInline[] = [];
   let plain = "";
   const push = (run: ReplyInline) => {
@@ -97,7 +103,7 @@ export function replyInlines(text: string): ReplyInline[] {
         push({ kind: "code", text: /^ .*[^ ].* $/.test(inside) ? inside.slice(1, -1) : inside });
         at = end + run.length;
       } else {
-        plain += run;
+        if (!written) plain += run;
         at += run.length;
       }
       continue;
@@ -106,7 +112,7 @@ export function replyInlines(text: string): ReplyInline[] {
       const link = linkAt(text, at);
       if (link !== undefined) {
         const href = httpsHref(link.href);
-        const label = replyInlines(link.label);
+        const label = replyInlines(link.label, false, depth + 1);
         if (href === undefined) for (const run of label) push(run);
         else push({ kind: "link", href, children: label });
         at = link.end;
@@ -140,14 +146,14 @@ export function replyInlines(text: string): ReplyInline[] {
       const opens = width <= 3 && !/\s/.test(after) && (char === "*" || !/[\p{L}\p{N}]/u.test(text[at - 1] ?? " "));
       const close = opens ? delimiterClose(text, at + mark.length, mark) : -1;
       if (close > at + mark.length) {
-        const inside = replyInlines(text.slice(at + mark.length, close));
+        const inside = replyInlines(text.slice(at + mark.length, close), false, depth + 1);
         push(mark.length === 3
           ? { kind: "strong", children: [{ kind: "emphasis", children: inside }] }
           : { kind: mark.length === 2 ? "strong" : "emphasis", children: inside });
         at = close + mark.length;
         continue;
       }
-      plain += text.slice(at, at + width);
+      if (!(written && (opens || at + width === text.length))) plain += text.slice(at, at + width);
       at += width;
       continue;
     }
@@ -158,7 +164,7 @@ export function replyInlines(text: string): ReplyInline[] {
   return runs;
 }
 
-function listFrom(lines: readonly string[], start: number): { readonly list: ReplyBlock; readonly next: number } {
+function listFrom(lines: readonly string[], start: number, written: boolean, depth: number): { readonly list: ReplyBlock; readonly next: number } {
   const ordered = itemLine.exec(lines[start] ?? "")?.[2];
   const items: ReplyBlock[][] = [];
   let at = start;
@@ -180,7 +186,7 @@ function listFrom(lines: readonly string[], start: number): { readonly list: Rep
       else body.push(next);
       at++;
     }
-    items.push(replyMarkdown(body.join("\n")));
+    items.push(replyMarkdown(body.join("\n"), written && at === lines.length, depth + 1));
     let skip = at;
     while (skip < lines.length && blankLine.test(lines[skip] ?? "")) skip++;
     if (skip === at) continue;
@@ -193,10 +199,13 @@ function listFrom(lines: readonly string[], start: number): { readonly list: Rep
 
 /**
  * A reply laid out as the model's Markdown writes it: fenced code, headings, quotes, lists, rules and paragraphs whose
- * lines keep their breaks. HTML is never read: it stays text. @throws {never}
+ * lines keep their breaks, nested at most eight deep. HTML is never read: it stays text. While the reply is still being
+ * `written`, a mark its last line has not closed is held back. @throws {never}
  */
-export function replyMarkdown(text: string): ReplyBlock[] {
+export function replyMarkdown(text: string, written = false, depth = 0): ReplyBlock[] {
   const lines = text.split(/\r?\n/);
+  if (depth >= nestingLimit) return [{ kind: "paragraph", lines: lines.map((line) => replyInlines(line, false, depth)) }];
+  const last = (line: number) => written && line === lines.length - 1;
   const blocks: ReplyBlock[] = [];
   for (let at = 0; at < lines.length;) {
     const line = lines[at] ?? "";
@@ -211,20 +220,21 @@ export function replyMarkdown(text: string): ReplyBlock[] {
       blocks.push({ kind: "rule" });
       at++;
     } else if (headingLine.test(line)) {
-      blocks.push({ kind: "heading", words: replyInlines(headingLine.exec(line)?.[1] ?? "") });
+      blocks.push({ kind: "heading", words: replyInlines(headingLine.exec(line)?.[1] ?? "", last(at), depth) });
       at++;
     } else if (quoteLine.test(line)) {
       const inner: string[] = [];
       for (; at < lines.length && quoteLine.test(lines[at] ?? ""); at++) inner.push(quoteLine.exec(lines[at] ?? "")?.[1] ?? "");
-      blocks.push({ kind: "quote", blocks: replyMarkdown(inner.join("\n")) });
+      blocks.push({ kind: "quote", blocks: replyMarkdown(inner.join("\n"), written && at === lines.length, depth + 1) });
     } else if (itemLine.test(line)) {
-      const { list, next } = listFrom(lines, at);
+      const { list, next } = listFrom(lines, at, written, depth);
       blocks.push(list);
       at = next;
     } else {
+      const first = at;
       const paragraph: string[] = [];
       for (; at < lines.length && !blankLine.test(lines[at] ?? "") && (paragraph.length === 0 || !startsBlock(lines[at] ?? "")); at++) paragraph.push((lines[at] ?? "").trim());
-      blocks.push({ kind: "paragraph", lines: paragraph.map(replyInlines) });
+      blocks.push({ kind: "paragraph", lines: paragraph.map((words, index) => replyInlines(words, last(first + index), depth)) });
     }
   }
   return blocks;
