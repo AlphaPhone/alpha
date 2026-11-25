@@ -123,7 +123,9 @@ async function turn(browser: Browser, origin: string, one: Case, spoken: boolean
   let ended: number | undefined;
   let shownId: string | undefined;
   let view: string | undefined;
+  let streamFailed: string | undefined;
   page.on("requestfinished", (request) => { if (request.url().includes("/messages/stream")) ended = Date.now(); });
+  page.on("requestfailed", (request) => { if (request.url().includes("/messages/stream")) streamFailed = `${request.failure()?.errorText ?? "failed"} after ${Date.now() - sent} ms`; });
   page.on("request", (request) => {
     if (!request.url().includes("/views/interact-result")) return;
     const told = request.postDataJSON() as { success?: boolean; result?: { switched?: boolean; shown?: { noteId?: string } } };
@@ -135,6 +137,19 @@ async function turn(browser: Browser, origin: string, one: Case, spoken: boolean
     await page.waitForFunction(() => (globalThis as unknown as { alphaPhone: { voice: { activeMicSession?: string } } }).alphaPhone.voice.activeMicSession !== undefined);
   } else await typed(page, one.words);
   const sent = Date.now();
+  if (spoken && process.env.ALPHA_NOTES_TRACE === "1") await page.evaluate(() => {
+    const { voice } = (globalThis as unknown as { alphaPhone: { voice: Record<string, unknown> & { spoken: unknown[] } } }).alphaPhone;
+    const log: string[] = [];
+    const t0 = Date.now();
+    let last = "";
+    const keys = ["hushCalls", "startCloudSpeechCalls", "stopCloudSpeechCalls", "activeMicSession", "speakerMuted"];
+    setInterval(() => {
+      const now = `${keys.map((key) => `${key}=${String(voice[key])}`).join(" ")} spoken=${voice.spoken.length}`;
+      if (now !== last) log.push(`${Date.now() - t0} ${now}`);
+      last = now;
+    }, 5);
+    Object.assign(globalThis, { voiceTrace: log });
+  });
   if (spoken) await heard(page, one.words);
   else await page.getByRole("button", { name: "Send", exact: true }).click();
   let shown: number | undefined;
@@ -151,11 +166,17 @@ async function turn(browser: Browser, origin: string, one: Case, spoken: boolean
     : one.title === undefined ? newest : kept.find((note) => note.title === one.title);
   if (shots !== undefined) await page.screenshot({ path: path.join(shots, `${spoken ? "spoken" : "typed"}-${one.id}.png`) });
   const made = calls(sent, ended ?? Date.now());
+  const voiced = spoken ? await page.evaluate(() => {
+    const { voice } = (globalThis as unknown as { alphaPhone: { voice: { spoken: { text: string }[]; hushCalls: number; startCloudSpeechCalls: number; stopCloudSpeechCalls: number } } }).alphaPhone;
+    return { said: voice.spoken.map((line) => line.text), hushes: voice.hushCalls, micStarts: voice.startCloudSpeechCalls, micStops: voice.stopCloudSpeechCalls, trace: (globalThis as unknown as { voiceTrace?: string[] }).voiceTrace };
+  }) : undefined;
   await page.context().close();
   return {
     how: spoken ? "spoken" : "typed", id: one.id, title, opened: shown !== undefined && shownId === meant?.id, created: one.items === undefined ? undefined : meant !== undefined,
     replyMs: ended === undefined ? undefined : ended - sent, openMs: shown === undefined ? undefined : shown - sent,
     view: view ?? "no view handed back",
+    ...(streamFailed === undefined ? {} : { streamFailed }),
+    ...(voiced === undefined ? {} : { voiced }),
     modelCalls: made.length, modelMs: made.reduce((sum, call) => sum + call.ms, 0),
     steps: made.map((call) => `${call.called.join("+") || "reply"} ${call.ms}`).join(", "),
   };
