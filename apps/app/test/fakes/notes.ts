@@ -61,13 +61,13 @@ export function notesScene(now = Date.now()): NotesScene {
         data: {
           audio: { durationMs: 408_000 },
           lines: [
-            { s: "maya", t: "Okay, lock screen first. Notifications stay as icons until you unlock.", at: 0 },
+            { s: "Maya Chen", t: "Okay, lock screen first. Notifications stay as icons until you unlock.", at: 0 },
             { s: "me", t: "Agreed. Voice still works locked, but the answers stay vague.", at: 42 },
-            { s: "sam", t: "What about the chat over other apps?", at: 90 },
-            { s: "maya", t: "Four heights. Pill, input, half, full. You drag between them.", at: 125 },
+            { s: "Sam Okafor", t: "What about the chat over other apps?", at: 90 },
+            { s: "Maya Chen", t: "Four heights. Pill, input, half, full. You drag between them.", at: 125 },
             { s: "me", t: "Let's cut the mark button from the recorder. Nobody used it.", at: 190 },
-            { s: "sam", t: "I'll wire the new recorder into Notes by Thursday.", at: 242 },
-            { s: "maya", t: "I'll send the prototype to the team tonight.", at: 315 },
+            { s: "Sam Okafor", t: "I'll wire the new recorder into Notes by Thursday.", at: 242 },
+            { s: "Maya Chen", t: "I'll send the prototype to the team tonight.", at: 315 },
             { s: "me", t: "And I'll book a review with Jordan for next week.", at: 390 },
           ],
           summary: ["Notifications stay as icons until unlock", "Voice works while locked; answers stay vague", "Chat has four heights: pill, input, half, full", "The recorder drops the mark button"],

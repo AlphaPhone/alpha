@@ -20,14 +20,14 @@ import { type Failure, ask } from "../platform/remote.vibe"
 import { SystemSettings } from "../platform/systemSettings.vibe"
 import { type Job, answer, contained, due, following, hearing, reacting, run, started, together, untimed } from "../runtime/reactor.vibe"
 import { Time } from "../runtime/time.vibe"
-import { type Person, type Read, shown } from "./shown.ts"
+import { type Person, type Read, repeatText, shown } from "./shown.ts"
 import { civilDay, dayStart, feedParams, localDate, openLink, plainHttps, readWindow } from "./time.ts"
 
 /** An event of the phone's calendars as the screen shows it. */
 function phoneRow(event: AndroidCalendarEvent): Read {
   return {
     key: event.id, calendarId: event.calendarId, title: event.title ?? "", place: event.location ?? "", notes: event.body ?? "",
-    begin: event.begin, end: event.end, allDay: event.allDay, recurring: event.recurring, link: "", video: "",
+    begin: event.begin, end: event.end, allDay: event.allDay, recurring: event.recurring, repeat: repeatText([], event.recurring), link: "", video: "",
     people: [], answer: "NotInvited", answerable: false, managed: false, series: "", editable: true, cancel: "OrganizerCancel", version: "",
   }
 }
@@ -56,6 +56,7 @@ schema FeedEvent {
   readonly provider: string
   readonly attendees: ReadonlyArray<FeedAttendee>
   readonly recurringEventId?: string | null
+  readonly recurrence?: ReadonlyArray<string> | null
   readonly updatedAt: string
   readonly metadata: { readonly etag?: string; readonly managed?: boolean }
   readonly organizer: { readonly self?: boolean } | null
@@ -94,7 +95,7 @@ function googleRow(event: FeedEvent): Read {
   }))
   return {
     key: event.id, calendarId: event.calendarId, title: event.title, place: event.location, notes: event.description,
-    begin, end, allDay: event.isAllDay, recurring,
+    begin, end, allDay: event.isAllDay, recurring, repeat: repeatText(event.recurrence ?? [], recurring),
     link: pageOffered(event.provider === "google", plainHttps(page), false) ? page : "", video: event.conferenceLink ?? "",
     people, answer, answerable: answersOffered(mode, answer, true, managed(event), recurring), managed: managed(event), series: event.recurringEventId ?? "",
     editable: mutability(providers[event.provider] ?? "IcsProvider", versionOf(event) !== "") === "Editable", cancel: mode,
