@@ -184,11 +184,14 @@ effect function visited(tab: number, load: number): void!!(Pages | TabHost | Tab
 effect function went(tab: number, load: number, way: Address.Way): PageEvent!!(TabHost | Pages | Tabs.Machine) {
   const failed: PageEvent = { type: "failed", load }
   return effect {
+    const host = try TabHost
+    if (!(try host.observing())) return failed
     const s = try (try Tabs.Machine).get()
+    const p = try pageOf(tab)
+    if (!s.open.includes(tab) || p.phase !== "Loading" || p.load !== load) return failed
     if (!s.native.includes(tab)) try tellTabs({ type: "load", tab })
     try made(tab, Tabs.kindOf(s, tab))
     const id = idOf(tab)
-    const host = try TabHost
     if (way === "Address" || way === "Query") {
       const aimed = try (try Pages).aimed(tab)
       if (Option.isNone(aimed)) return failed
