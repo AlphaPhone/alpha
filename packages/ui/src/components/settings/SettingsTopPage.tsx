@@ -57,6 +57,7 @@ export function SettingsTopPage({ developer = false, onPhone = true, actions, ac
       ) : null}
       <SettingsNavRow
         title="Account"
+        data-settings-row="account"
         detail={accountDetail}
         icon={<UserRound />}
         className="min-h-16.5 rounded-group bg-secondary py-3 text-secondary-foreground [&>span>span]:leading-normal"

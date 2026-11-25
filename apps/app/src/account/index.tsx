@@ -163,7 +163,7 @@ function BrowserAccount({ open, reading, retry, close }: { open: boolean; readin
   const openerRef = useRef<Element | null>(null);
   const panelRef = useRef<HTMLDivElement>(null);
   const connect = useCallback((node: HTMLDivElement | null) => {
-    if (node) openerRef.current = node.ownerDocument.querySelector('[data-alpha-shell-page] button[aria-label="Account"]');
+    if (node) openerRef.current = node.ownerDocument.querySelector('[data-alpha-shell-page] button[data-settings-row="account"]');
     setHost(node);
   }, []);
   return (

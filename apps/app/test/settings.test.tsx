@@ -34,8 +34,8 @@ vi.stubGlobal("fetch", fetchWithNotices);
 
 const open = (world: Scene) => openAlpha(world, only("home", "view:Settings", "settings/phone", "settings/activity", "settings/notification-collection", "overlay"));
 
-/** The row, switch or choice whose title is `title`, as a person reads it: a row's title, never its value beside it. */
-const titled = (title: string) => [...document.querySelectorAll<HTMLElement>("button, label")].find((found) => found.querySelector("span > span")?.textContent === title);
+/** The row, switch or choice whose title is `title`, as a person reads it: a row's title, never its decorative icon or its value beside it. */
+const titled = (title: string) => [...document.querySelectorAll<HTMLElement>("button, label")].find((found) => found.querySelector("span:not([aria-hidden]) > span")?.textContent === title);
 
 /** Press the row titled `title`; a switch's or a choice's row presses its control, as a tap on the row does. */
 const tap = (title: string) => drawn(() => {
@@ -62,8 +62,8 @@ describe("Settings", () => {
   it("Recovers an unavailable browser account only after Try again", async () => {
     const world = { ...scene(), signedIn: false };
     const { alpha } = await settingsOpen(world);
-    await vi.waitFor(() => expect(button("Account")?.textContent).toContain("Signed out"));
-    await press("Account");
+    await vi.waitFor(() => expect(titled("Account")?.textContent).toContain("Signed out"));
+    await tap("Account");
     await vi.waitFor(() => expect(document.querySelector('[role="dialog"]')?.textContent).toContain("Unavailable"));
 
     world.signedIn = true;
@@ -75,12 +75,12 @@ describe("Settings", () => {
     expect(await page(alpha)).toBe("Top");
 
     world.signedIn = false;
-    await drawn(() => button("Account")?.focus());
-    await press("Account");
+    await drawn(() => titled("Account")?.focus());
+    await tap("Account");
     await vi.waitFor(() => expect(document.querySelector('[role="dialog"]')?.textContent).toContain("Unavailable"));
     await press("Back");
     await until(alpha, alpha.runtime, Layers.Machine, (state) => !Layers.listed(state, "account"));
-    await vi.waitFor(() => expect(document.activeElement).toBe(button("Account")));
+    await vi.waitFor(() => expect(document.activeElement).toBe(titled("Account")));
     expect(await page(alpha)).toBe("Top");
   });
 
@@ -266,12 +266,13 @@ describe("Settings", () => {
       expect(Boolean(button("Refresh"))).toBe(phone);
       await press("General");
       expect(Boolean(button("Refresh"))).toBe(phone);
+      // spec/app/settings/android.md, "Each Android page is offered on the Settings page it belongs to": only on a phone does General offer Wi-Fi.
+      if (!phone) return void expect(titled("Wi-Fi")).toBeUndefined();
       // spec/app/settings/android.md, "Android says whether it opened that page, a nearby one, or none"
       await tap("Wi-Fi");
       await until(alpha, machines, Android.Machine, (s) => s.start.read.status !== "Loading");
       const exactly = await machines.runPromise(Android.Machine.use((android) => android.get()));
-      expect(exactly.told).toBe(phone ? "Silent" : "SaidUnavailable");
-      if (!phone) return;
+      expect(exactly.told).toBe("Silent");
       await tap("Mobile data");
       await until(alpha, machines, Android.Machine, (s) => s.told === "SaidNearby");
       // spec/app/settings/android.md, "Alpha's alert, permission and photo pages open for Alpha itself, never for another app, and a channel's page names its channel"
