@@ -11,16 +11,20 @@ import * as Prefs from "../gen/app__settings__preferences.effect.vibe";
 import * as Reset from "../gen/app__settings__reset.effect.vibe";
 import * as Pages from "../gen/app__settings.effect.vibe";
 import { Machine as Shell } from "../gen/app__shell.effect.vibe";
+import * as Layers from "../gen/app__shell__layers.effect.vibe";
 import settings from "../src/settings/index.tsx";
-import { button, closeAll, fill, hardware, later, open, press, seen, underAct, until } from "./alpha.tsx";
+import { button, closeAll, fill, hardware, later, only, open as openAlpha, press, seen, underAct, until } from "./alpha.tsx";
+import { account } from "./fakes/cloud.ts";
 import { notices } from "./fakes/settings.ts";
-import { scene } from "./fakes/scene.ts";
+import { type Scene, scene } from "./fakes/scene.ts";
 
 underAct();
 afterEach(closeAll);
 
 const shipped = vi.fn(() => Promise.resolve(Response.json(notices)));
 vi.stubGlobal("fetch", ((input: RequestInfo | URL, init?: RequestInit) => (String(input).endsWith("licenses/third-party-notices.json") ? shipped() : fetch(input, init))) as typeof fetch);
+
+const open = (world: Scene) => openAlpha(world, only("home", "view:Settings", "settings/phone", "overlay"));
 
 /** The row, switch or choice whose title is `title`, as a person reads it: a row's title, never its value beside it. */
 const titled = (title: string) => [...document.querySelectorAll<HTMLElement>("button, label")].find((found) => found.querySelector("span > span")?.textContent === title);
@@ -66,6 +70,23 @@ describe("Settings", () => {
     await hardware("back");
     expect(await page(alpha)).toBe("General");
     await hardware("back");
+    // spec/app/settings/index.md, "Each page links to what another area owns there": the Account sheet reads the signed-in account and Back returns to Settings.
+    await press("Account");
+    await until(alpha, alpha.runtime, Layers.Machine, (state) => Layers.listed(state, "account"));
+    await vi.waitFor(() => expect(document.querySelector('[role="dialog"]')?.textContent).toContain(account.email));
+    await hardware("back");
+    await until(alpha, alpha.runtime, Layers.Machine, (state) => !Layers.listed(state, "account"));
+    expect(await page(alpha)).toBe("Top");
+
+    world.signedIn = false;
+    await press("Account");
+    await until(alpha, alpha.runtime, Layers.Machine, (state) => Layers.listed(state, "account"));
+    await vi.waitFor(() => expect(document.querySelector('[role="dialog"]')?.textContent).toContain("Sign-in required"));
+    expect(document.querySelector('[role="dialog"]')?.textContent).not.toContain(account.email);
+    await press("Close Account");
+    await until(alpha, alpha.runtime, Layers.Machine, (state) => !Layers.listed(state, "account"));
+    world.signedIn = true;
+
     // spec/app/settings/index.md, "Each page links to what another area owns there": Agent activity offers the conversations, which the shell opens over the app.
     await press("About");
     await press("Agent activity");
@@ -87,6 +108,7 @@ describe("Settings", () => {
     // spec/app/settings/facts.md, "A read not answered within ten seconds is abandoned, and every fact is then unavailable"
     let answer = () => {};
     world.settings.gate = new Promise<void>((done) => { answer = done; });
+    await press("General");
     await press("Refresh");
     await until(alpha, machines, Facts.Machine, (s) => s.read.read.status === "Loading");
     await later(alpha, 10_000);
