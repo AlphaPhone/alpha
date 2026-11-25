@@ -625,15 +625,22 @@ export const files = Layer.provideMerge(together(browsing, onScreen, access, cha
 
 // spec/app/files/index.md, "Another area opens Files at Downloads: the Download folder of the main volume where the phone has one, else the Downloads category; the owner's own move to the top, a volume or a category ends that walk"
 /** Show Files at Downloads for another area, such as the Browser's Show in Files: Back from there returns to that area. */
-export const showDownloads: void!!(Files | Handles | Browser.Machine | Shell) = effect {
+export const showDownloads = downloadsAt(false)
+
+export const showBrowserDownloads = downloadsAt(true)
+
+effect function downloadsAt(fromBrowser: boolean): void!!(Files | Handles | Browser.Machine | Shell) {
+  const shell = try Shell
+  if (fromBrowser && !showing(try shell.get(), "Browser")) return
   const numbered = try Handles
   const state = called("storageState", (plugin) => plugin.storageState()) catch () => undefined
   const main = (state?.volumes ?? []).find((volume) => volume.primary)?.id ?? primary
   const root = called("storageList", (plugin) => plugin.storageList({ volume: main, path: "" })) catch () => undefined
   const folder = root?.status === "ready" ? (root.entries ?? []).find((entry) => entry.directory && entry.path === "Download") : undefined
   const trail = folder === undefined ? [] : [try numbered.of({ volume: main, path: "" }), try numbered.of({ volume: main, path: folder.path })]
+  if (fromBrowser && !showing(try shell.get(), "Browser")) return
   try ignore((try Browser.Machine).send({ type: "showDownloads", trail }, "Phone"))
-  try ignore((try Shell).send({ type: "openView", view: "Files" }))
+  try ignore(shell.send({ type: "openView", view: "Files" }))
 }
 
 // spec/app/shell/index.md, "Back closes one layer: Ask Alpha by a step, then the app on top"; spec/app/files/index.md, "Back closes one layer inside Files: the Move to sheet, the share sheet, the name clash, the delete confirmation, the details, the Trash, the selection and the filter, then goes up the path a step; at the top, or back where another area's walk began, it leaves Files"

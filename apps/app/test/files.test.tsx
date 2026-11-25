@@ -1,6 +1,7 @@
 // @vitest-environment happy-dom
 import { Effect } from "effect";
 import { afterEach, describe, expect, it } from "vitest";
+import { Machine as Tabs } from "../gen/app__browser.effect.vibe";
 import { Machine as Browser } from "../gen/app__files.effect.vibe";
 import { Machine as Shown } from "../gen/app__files__preview.effect.vibe";
 import { Machine as Recent } from "../gen/app__files__recent.effect.vibe";
@@ -10,7 +11,7 @@ import { Machine as Inbox } from "../gen/app__inbox.effect.vibe";
 import { Machine as Drafts } from "../gen/app__inbox__drafts.effect.vibe";
 import { Letters } from "../src/inbox/composer.vibe";
 import { agentFilter, agentOpen, agentRead, approved, fileAction, offer, shownAt } from "../src/files/agent.vibe";
-import { showDownloads } from "../src/files/files.vibe";
+import browser from "../src/browser/index.tsx";
 import files from "../src/files/index.tsx";
 import { called } from "../src/platform/files.vibe";
 import { button, closeAll, drawn, fill, hardware, later, open, press, pressOnTop, seen, underAct, until } from "./alpha.tsx";
@@ -120,8 +121,8 @@ describe("Files on a phone", () => {
     expect([world.files.watching, Boolean(button("Internal storage"))]).toEqual([undefined, true]);
   });
 
-  it("Browse my storage from the Browser's Show in Files, and go back (spec/app/files/index.md, \"Story: Browse my storage\")", async () => {
-    const { alpha, runtime, world } = await onFiles();
+  it("Browse my storage from the Browser's Show in Files, and go back (spec/app/files/index.md, \"Story: Browse my storage\"; spec/app/browser/downloads.md, \"Story: Download a file\")", async () => {
+    const { alpha, runtime, world } = await onFiles({ ...scene(), phone: true, image: true });
     await until(alpha, runtime, Browser, (s) => s.storage.status === "Loaded");
     await press("Internal storage");
     await press("Download");
@@ -150,14 +151,26 @@ describe("Files on a phone", () => {
 
     // spec/app/files/index.md, "Another area opens Files at Downloads: the Download folder of the main volume where the phone has one, else the Downloads category; the owner's own move to the top, a volume or a category ends that walk"
     await hardware("home");
-    await runtime.runPromise(showDownloads);
+    await openFromHome("Browser");
+    await until(alpha, browser.runtime(alpha), Tabs, (s) => s.hydrated);
+    const showInFiles = async () => {
+      await press("Menu");
+      await press("Downloads");
+      await drawn(() => {
+        const choose = world.browser.showInFiles;
+        if (choose === undefined) throw new Error("the phone did not open Browser Downloads");
+        choose();
+      });
+    };
+    await showInFiles();
     await until(alpha, runtime, Browser, (s) => s.open && s.handed && s.trail.length === 2 && s.listing.status === "Loaded");
     expect(listed().sort()).toEqual(["beach.jpg", "lease.pdf"]);
     await hardware("back");
     await until(alpha, runtime, Browser, (s) => !s.open);
+    expect(alpha.runtime.runSync(Shell.use((m) => m.get())).trail.at(-1)).toBe("Browser");
 
     world.files.stored.splice(world.files.stored.findIndex((one) => one.path === "Download"), 1);
-    await runtime.runPromise(showDownloads);
+    await showInFiles();
     await until(alpha, runtime, Browser, (s) => s.open && s.handed && s.inCategory && s.category === "Download" && s.listing.status === "Loaded");
   });
 
