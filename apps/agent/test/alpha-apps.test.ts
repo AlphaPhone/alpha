@@ -558,4 +558,17 @@ describe("Alpha product plugin: Reminders actions, provider, recurrence, and rou
     expect(undo.body.item).toMatchObject({ id: selected.id, dueDate: input.dueDate });
     expect((undo.body.item as ReminderItemRecord).history).toBeUndefined();
   });
+
+  it("skips elapsed repeat dates while keeping the completed Saturday occurrence", async () => {
+    const now = Date.UTC(2027, 2, 15, 10, 30);
+    const store = new AlphaAppsStore({ now: () => now });
+    const routes = createAlphaAppsPlugin({ store, timeZone: "UTC" }).plugin.routes!;
+    const input = { title: "Bring a notebook", dueDate: "2027-03-13", dueMinute: 570, alertMinutes: 0, recurrence: "daily" };
+    const created = await callRoute(routes, "POST", "/api/alpha/reminders/items", { body: input });
+    const selected = created.body.item as ReminderItemRecord;
+    const completed = await callRoute(routes, "POST", "/api/alpha/reminders/items/{id}/complete", { params: { id: selected.id } });
+    expect(completed.body.item).toMatchObject({ id: selected.id, completed: false, dueDate: "2027-03-16", history: [
+      { revision: selected.revision, dueAtMs: Date.UTC(2027, 2, 13, 9, 30), completedAtMs: now, skippedDates: 2 },
+    ] });
+  });
 });
