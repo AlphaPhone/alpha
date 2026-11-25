@@ -45,12 +45,12 @@ const unkeyed = { tag: "Unkeyed" } as const;
 type TaskStep = "MakeTask" | "DismissTask" | "CompleteTask" | "ReopenTask" | "MoveTask";
 
 // spec/agent/index.md, "A reminder with a due time keeps one scheduled task, and the task follows what the owner does to the reminder"
-function taskSteps(kept: boolean, dated: boolean, completed: boolean, wasCompleted: boolean, moved: boolean, hasTask: boolean): readonly TaskStep[] {
+function taskSteps(kept: boolean, dated: boolean, completed: boolean, wasCompleted: boolean, retimed: boolean, hasTask: boolean): readonly TaskStep[] {
   if (!hasTask) return kept && dated && !completed ? ["MakeTask"] : [];
   if (!kept || !dated) return ["DismissTask"];
   if (completed) return wasCompleted ? [] : ["CompleteTask"];
-  if (wasCompleted) return moved ? ["ReopenTask", "MoveTask"] : ["ReopenTask"];
-  return moved ? ["MoveTask"] : [];
+  if (wasCompleted) return retimed ? ["ReopenTask", "MoveTask"] : ["ReopenTask"];
+  return retimed ? ["MoveTask"] : [];
 }
 
 /** Whether a reminder's change took effect: its task now follows it, so the next reconcile keeps what was done. */

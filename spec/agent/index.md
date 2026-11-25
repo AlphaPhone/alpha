@@ -142,20 +142,20 @@ is told it worked, and a reminder whose task stays is not deleted.
 
 ```quint
 type TaskStep = MakeTask | DismissTask | CompleteTask | ReopenTask | MoveTask
-pure def taskSteps(kept: bool, dated: bool, completed: bool, wasCompleted: bool, moved: bool, hasTask: bool): List[TaskStep] =
+pure def taskSteps(kept: bool, dated: bool, completed: bool, wasCompleted: bool, retimed: bool, hasTask: bool): List[TaskStep] =
   if (not(hasTask)) (if (kept and dated and not(completed)) List(MakeTask) else List())
   else if (not(kept) or not(dated)) List(DismissTask)
   else if (completed) (if (wasCompleted) List() else List(CompleteTask))
-  else if (wasCompleted) (if (moved) List(ReopenTask, MoveTask) else List(ReopenTask))
-  else if (moved) List(MoveTask)
+  else if (wasCompleted) (if (retimed) List(ReopenTask, MoveTask) else List(ReopenTask))
+  else if (retimed) List(MoveTask)
   else List()
-pure def lawADeletedReminderLeavesNoTask(dated: bool, completed: bool, wasCompleted: bool, moved: bool): bool =
-  taskSteps(false, dated, completed, wasCompleted, moved, true) == List(DismissTask)
+pure def lawADeletedReminderLeavesNoTask(dated: bool, completed: bool, wasCompleted: bool, retimed: bool): bool =
+  taskSteps(false, dated, completed, wasCompleted, retimed, true) == List(DismissTask)
 pure def lawAMovedOpenReminderFiresOnlyAtItsNewTime(wasCompleted: bool): bool =
   taskSteps(true, true, false, wasCompleted, true, true).includes(MoveTask)
     and not(taskSteps(true, true, false, wasCompleted, true, true).includes(MakeTask))
-pure def lawCompletingCompletesTheTask(moved: bool): bool =
-  taskSteps(true, true, true, false, moved, true) == List(CompleteTask)
+pure def lawCompletingCompletesTheTask(retimed: bool): bool =
+  taskSteps(true, true, true, false, retimed, true) == List(CompleteTask)
 ```
 
 ### A proposed device step goes through eliza's device-action module, and the phone says which steps it takes
