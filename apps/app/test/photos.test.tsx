@@ -168,3 +168,15 @@ it("Resume an already-sent photo edit from an older viewer record (spec/app/phot
   expect(localStorage.getItem("alpha/photos/edit/4")).toBe(operationId);
   expect(localStorage.getItem(kept + ".unreadable")).toBeNull();
 });
+
+it("heads the Library by day as v121 did, then by month (spec/app/photos/index.md, \"What Photos shows\")", async () => {
+  const { headingOf } = await import("../src/photos/Grid.tsx");
+  // Local noon, so the days counted back are the owner's whatever zone the run is in
+  const now = new Date(2026, 10, 24, 12).getTime();
+  const back = (days: number) => new Date(2026, 10, 24 - days, 9).getTime();
+  expect([0, 1, 3, 29, 30].map((days) => headingOf(back(days), now))).toEqual(["Today", "Yesterday", "Sat, Nov 21", "Mon, Oct 26", "October 2026"]);
+  expect(headingOf(new Date(2026, 11, 28, 9).getTime(), new Date(2027, 0, 10, 12).getTime())).toBe("Mon, Dec 28, 2026");
+  expect(headingOf(new Date(2025, 9, 20, 9).getTime(), now)).toBe("October 2025");
+  // The Viewer names the exact day of an older item, with its year, where the Library groups it by month
+  expect(headingOf(new Date(2026, 9, 15, 9).getTime(), now, true)).toBe("Thu, Oct 15, 2026");
+});
