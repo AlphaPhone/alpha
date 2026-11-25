@@ -410,10 +410,12 @@ function About({ runtime, alpha, common }: PageProps) {
 // spec/app/settings/developer.md, "Export diagnostics shares the log and Alpha's diagnostics, one export at a time, with ten seconds to start"
 function Developer({ runtime, common }: PageProps) {
   const { state, can, send } = useTimed(runtime, useDeveloper);
+  const facts = useFacts(runtime).state;
   const startExport = { type: "startExport", at: untimed } as const;
   return (
     <SettingsDeveloperPage
       {...common}
+      version={reading(facts, "Versions")}
       exporting={state !== undefined && loading(state.exporting)}
       onExport={can(startExport) ? () => void send(startExport) : undefined}
     />

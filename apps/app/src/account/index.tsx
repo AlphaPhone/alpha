@@ -106,7 +106,7 @@ export function AccountStatus({ alpha }: { alpha: Alpha }) {
   const label = current.tag === "Read" ? current.contact || "Signed in"
     : current.tag === "SignInRequired" ? "Signed out" : "Account unavailable";
   return <StatusDot status={current.tag === "Read" ? "ok" : "off"} label={label} showLabel
-    className={cn("gap-1.5 text-caption leading-normal text-muted-foreground [&_circle]:fill-current [&_svg]:size-2.5", current.tag === "Read" && "[&_svg]:text-status-ok")} />;
+    className={cn("flex gap-1.5 text-caption leading-normal text-muted-foreground [&_circle]:fill-current [&_svg]:size-2.5", current.tag === "Read" && "[&_svg]:text-status-ok")} />;
 }
 
 /** The account sheet above Settings, drawing only the details the authenticated account read returned. */
