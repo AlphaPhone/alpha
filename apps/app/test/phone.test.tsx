@@ -16,7 +16,7 @@ import home from "../src/home/index.tsx";
 import { phoneAction } from "../src/phone/agent.vibe";
 import { phoneContactChoices, pickPhoneContact } from "../src/phone/named-review.vibe";
 import type { Alpha } from "../src/runtime/area.tsx";
-import { button, closeAll, drawn, fill, hardware, only, open, press, underAct, until } from "./alpha.tsx";
+import { button, closeAll, drawn, fill, filledPhoneKeypad, hardware, only, open, press, underAct, until } from "./alpha.tsx";
 import { scene } from "./fakes/scene.ts";
 import { textReview } from "./fakes/text-review.ts";
 
@@ -209,7 +209,7 @@ describe("Phone on an Alpha image", () => {
         kind: "applied", result: { kind: "phone-keypad", status: "opened" },
       });
     });
-    await until(alpha, alpha.runtime, Phone, (s) => s.front && s.tab === "Keypad" && s.digits === 12);
+    await filledPhoneKeypad(alpha, 12);
     expect([world.telephony.placed, world.telephony.dialed]).toEqual([[], []]);
   });
 

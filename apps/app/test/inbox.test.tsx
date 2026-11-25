@@ -46,12 +46,6 @@ const menu = (item: string, label = "More actions") => drawn(() => {
   if (!(found instanceof HTMLElement)) throw new Error(`no ${item} in the menu`);
   found.click();
 }));
-const write = (name: string, text: string) => drawn(() => {
-  const found = [...document.querySelectorAll("textarea, input")].find((field) => field.getAttribute("aria-label") === name);
-  if (!(found instanceof HTMLTextAreaElement || found instanceof HTMLInputElement)) throw new Error(`no field ${name}`);
-  Object.getOwnPropertyDescriptor(Object.getPrototypeOf(found) as object, "value")?.set?.call(found, text);
-  found.dispatchEvent(new Event("input", { bubbles: true }));
-});
 const told = () => document.body.textContent ?? "";
 const title = () => document.querySelector("main[aria-label]:not([aria-label=Inbox]), main[aria-label=Inbox]")?.getAttribute("aria-label");
 const step = (name: string) => process.stderr.write(`STEP ${name}\n`);
@@ -335,7 +329,7 @@ it("Send a draft I reviewed (spec/app/inbox/sending.md, \"Story: Send a draft I 
   await until(alpha, runtime, Writing, (s) => s.open && s.letter.kind === "Reply" && s.letter.recipients === 1);
 
   // spec/app/inbox/drafts.md, "Every change to the text, recipients or attachments is an edit, counted at once"; spec/app/inbox/drafts.md, "Edits are written to the phone once typing pauses, and no later than the longest wait after a burst began, one write at a time under its own ticket"
-  await write("Message", "Thanks, it is all in order.");
+  await fill("Message", "Thanks, it is all in order.");
   await later(alpha, 10);
   await until(alpha, runtime, Writing, (s) => s.stored && !s.pending && s.write.status === "Loaded" && s.letter.revision >= 2);
 
@@ -413,7 +407,7 @@ it("Send a draft I reviewed (spec/app/inbox/sending.md, \"Story: Send a draft I 
   await press("Compose");
   await until(alpha, runtime, Writing, (s) => s.open);
   await fill("To", "unfinished@");
-  await write("Message", "Keep these words.");
+  await fill("Message", "Keep these words.");
   await hardware("back");
   await until(alpha, runtime, Writing, (s) => !s.open && s.shelf.shelved.length === 1);
   await close();
