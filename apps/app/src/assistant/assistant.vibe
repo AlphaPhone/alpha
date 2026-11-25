@@ -41,6 +41,7 @@ import { VoiceWords } from "../voice/voice.vibe"
 import type { FileSelection } from "../files/preview.vibe"
 import { FileContext, asksAboutOpenFile, documentObservation } from "./file-context.vibe"
 import { MediaReview, mediaReview, requestedFilesOperation } from "./media-review.vibe"
+import { agentWarmUp } from "./warm-up.vibe"
 import { type Board, type Line, Talk, talk } from "./talk.vibe"
 import { Views, carried, carriedAloud, delivery, handoffs, preparedIn } from "./views.vibe"
 import { attachmentAuthority, dropFiles, readFiles, rememberFiles, retireTranscript, sameBinding, stageFiles } from "./attachments.vibe"
@@ -1216,7 +1217,7 @@ export const assisting = Layer.provideMerge(
     reacting(Dock, { carry: carryDock }),
     Attachments.machine(),
     reacting(Locator, { carry: carryLocator }),
-    reached, looked, opening, saving, bound, requested, submitted, allowing, forgetting, rested, keyboardRest, steppingBack, carried, carriedAloud,
+    reached, looked, opening, saving, bound, requested, submitted, allowing, forgetting, rested, keyboardRest, steppingBack, carried, carriedAloud, agentWarmUp,
   ),
   Layer.mergeAll(Layer.fresh(turns), talk, handoffs),
 )
