@@ -256,6 +256,7 @@ export function workflowRoutes(world: WorkflowsScene): Route[] {
         return readJsonBody(request).then(async (body) => {
           const spec = body.spec as { name?: unknown; description?: unknown } | undefined;
           if (typeof body.mutationId !== "string" || typeof spec?.name !== "string" || body.compilerRevision !== catalog.compilerRevision) return Response.json({}, { status: 400 });
+          const specDigest = await digest(body.spec);
           const existing = world.saves.get(body.mutationId);
           if (existing !== undefined) return Response.json({ receipt: existing });
           const id = `saved-${world.created.length + 1}`;
@@ -263,7 +264,7 @@ export function workflowRoutes(world: WorkflowsScene): Route[] {
           world.created.push({ ...record, id, versionId, name: spec.name, description: typeof spec.description === "string" ? spec.description : "", active: false, removed: false });
           const receipt = {
             mutationId: body.mutationId, workflowId: id, operation: "create", previousVersionId: null, versionId,
-            specDigest: await digest(body.spec), compilerRevision: catalog.compilerRevision, appliedAt: "2026-11-24T09:00:00.000Z",
+            specDigest, compilerRevision: catalog.compilerRevision, appliedAt: "2026-11-24T09:00:00.000Z",
           };
           world.saves.set(body.mutationId, receipt);
           return Response.json({ receipt });
