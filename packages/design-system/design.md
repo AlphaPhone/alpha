@@ -51,7 +51,7 @@ do next.
   `rounded-drawer-icon` rounds an installed app icon; `rounded-option` is a row of a floating menu and
   `rounded-box` the box of a list row's selection check; `rounded-chip` is a choice chip and an invitation
   row, `rounded-action` a labelled action button; `rounded-segment` is a segmented control and
-  `rounded-segment-option` the option chosen in it; `rounded-camera-stop` is Camera's stop square and focus target. `rounded-tile` is an app tile, a menu and a dialog;
+  `rounded-segment-option` the option chosen in it; `rounded-camera-stop` is Camera's stop square and focus target; `rounded-list-icon` the icon box at the start of a list row. `rounded-tile` is an app tile, a menu and a dialog;
   `rounded-sheet` the top of a bottom sheet, `rounded-chat` the top of the Ask Alpha sheet; `rounded-full` a
   button and a chip, `rounded-dock` the Ask Alpha bar and `rounded-dock-compact` its compact controls; `rounded-bar` is the foot bar of Maps guidance.
   Everything pressed is at least 44px in both directions.
@@ -156,6 +156,7 @@ this prose into tokens. To change the design, describe it, and have the change w
 | `rounded.segment-option` | 0.6875rem |
 | `rounded.camera-stop` | 0.5rem |
 | `rounded.bar` | 2rem |
+| `rounded.list-icon` | 0.875rem |
 | `font.sans` | "Public Sans", system-ui, -apple-system, "Segoe UI", sans-serif |
 | `font.display` | Denton, Fraunces, Georgia, serif |
 | `font.mono` | ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas, monospace |
