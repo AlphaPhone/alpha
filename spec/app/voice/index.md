@@ -322,9 +322,13 @@ pure def micFailed(v: Voice, session: int): Change =
 ### What the owner says is shown as it is heard
 
 In the open conversation, the listening microphone can show the current
-capture's interim words as “Heard so far, not sent”. The preview stays
-out of drafts and history. It clears when the capture, owner, chat or
-screen context changes, the microphone is muted, or Talk leaves Listening.
+capture's interim words as “Heard so far, not sent”. The words come from
+that capture's admitted relay or resident stream. On-device previews are
+displayed only for the current utterance and follow its event sequence.
+The final reported by the microphone still controls sending. The preview
+stays out of drafts and history. It clears when the capture, owner, chat
+or screen context changes, the microphone is muted, or Talk leaves
+Listening.
 
 ```quint
 pure def canSpeechHeard(v: Voice, session: int): bool = v.phase == Listening and v.mic == On and session == v.session

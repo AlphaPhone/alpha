@@ -25,6 +25,7 @@ import { dictate } from "../src/assistant/dictation.vibe";
 import assistant from "../src/assistant/index.tsx";
 import files from "../src/files/index.tsx";
 import { button, closeAll, drawn, fill, later, open, press, seen, underAct, until as drawnUntil } from "./alpha.tsx";
+import { publish } from "./fakes/platform.ts";
 import { scene, type Scene } from "./fakes/scene.ts";
 import { prepared } from "./fakes/notes.ts";
 import { textReview } from "./fakes/text-review.ts";
@@ -743,8 +744,25 @@ describe("Talk from Ask Alpha's composer (spec/app/voice/index.md, \"Story: Hold
 
     await press("Talk");
     await drawnUntil(alpha, area, Voice.Machine, (s) => s.phase === "Listening" && s.mic === "On");
+    await drawn(() => vi.waitFor(() => expect([...world.platform.listening].some(({ topic }) => topic === "voice")).toBe(true)));
+    const seenInterim = () => document.querySelector("[data-alpha-voice-interim]")?.textContent;
+    const capture = world.voice.activeMicSession;
+    const say = (sessionId: string | undefined, phase: string, extra = {}) => publish(world.platform, "voice", {
+      type: "agent_event", stream: "voice-transcript",
+      payload: { type: "voice-transcript", sessionId, turnId: "spoken-now", phase, ...extra },
+    });
+    const previousPosts = world.ask.said.length;
+    await drawn(() => {
+      say(capture, "speech-start");
+      say(capture, "partial", { seq: 1, text: "And then" });
+      say(capture, "partial", { seq: 1, text: "Duplicate partial" });
+      say("an-earlier-capture", "partial", { seq: 2, text: "Outside the capture" });
+    });
+    await drawn(() => vi.waitFor(() => expect(seenInterim()).toBe("And then")));
+    expect(world.ask.said).toHaveLength(previousPosts);
     speakUtterance(world, "And now?");
     await drawnUntil(alpha, area, Voice.Machine, (s) => s.sent === 1 && s.phase === "Listening");
+    expect(seenInterim()).toBeUndefined();
     expect([world.ask.said.at(-1), world.ask.metadata.length, world.ask.metadata.at(-1)]).toEqual(["And now?", 3, typed]);
     // spec/app/voice/index.md, "Talk keeps what it sends in the selected Ask Alpha conversation"
     expect(world.ask.opened).toBe(1);
