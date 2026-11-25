@@ -116,7 +116,7 @@ export function printer({ types, inferred, importedConstantType, ref, helper, bi
   const lookups: { map: string; key: string; of: string; stored: string }[] = [];
   /** Names that stand for something else while a `match` arm is printed: the arm's binder is the matched value. */
   const renamed = new Map<string, string>();
-  const matchedAs = new Map<string, string>(); // binder -> the variant its arm matched
+  const matchedAs = new Map<string, { tag: string; owner: Json }>(); // binder -> the variant and sum type its arm matched
   let locals = new Map<string, string>();
   let localId = 0;
   let nesting = 0;
@@ -280,7 +280,11 @@ export function printer({ types, inferred, importedConstantType, ref, helper, bi
         const empty = proof ? `(new Map<${tsType(keyOf(t))}, ${tsType(t.res)}>() as unknown as ${map})` : `({} as ${map})`;
         return [at("none", () => a.reduce((m, pair) => put(m, typeOf(e.id), mapKey(e, pair.args[0]), ex(pair.args[1], TERNARY)), empty)), ATOM];
       }
-      case "put": case "set": return [put(recv(), typeOf(a[0].id), ...at("none", () => [mapKey(a[0], a[1]), ex(a[2], TERNARY)] as const)), ATOM];
+      case "put": return [put(recv(), typeOf(a[0].id), ...at("none", () => [mapKey(a[0], a[1]), ex(a[2], TERNARY)] as const)), ATOM];
+      case "set": {
+        const [key, val] = at("none", () => [mapKey(a[0], a[1]), ex(a[2], TERNARY)] as const);
+        return proof ? [put(recv(), typeOf(a[0].id), key, val), ATOM] : [`(${helper("set")}(${(helpers.add("set"), recv())}, ${key}, ${val}) as ${tsType(typeOf(a[0].id))})`, ATOM];
+      }
       case "get": return partial("get", recv(), at("none", () => mapKey(a[0], a[1])));
       case "keys": return fail("a map cannot be listed or iterated, only asked about one key: write `m.keys().contains(k)`, and keep a list of keys beside the map if you need to go through them");
       case "not": return [`!${ex(a[0], ATOM)}`, UNARY];
@@ -328,7 +332,8 @@ export function printer({ types, inferred, importedConstantType, ref, helper, bi
       const owner = ownerOf(op);
       // Updating the matched value in place: Packed({ ...x, labels: … }) inside the Packed arm keeps the tag it has.
       const { base, updates } = unroll(a[0]);
-      if (base.kind === "name" && matchedAs.get(base.name) === op.split("::").pop())
+      const matched = base.kind === "name" ? matchedAs.get(base.name) : undefined;
+      if (matched && matched.tag === op.split("::").pop() && matched.owner === owner)
         return [updates.length ? `({ ...${renamed.get(base.name)}, ${updates.join(", ")} } as ${typeName(owner)})` : renamed.get(base.name)!, ATOM];
       if (a[0].kind !== "app" || a[0].opcode !== "Rec") fail(`${op}(…): give the record field by field, or update the value matched in the ${op} arm`);
       return variant(`({ ${[`tag: ${tag(op)}`, ...at("typed", () => pairs(a[0].args))].join(", ")} } as ${typeName(owner)})`, owner);
@@ -337,16 +342,22 @@ export function printer({ types, inferred, importedConstantType, ref, helper, bi
       // match o { | Draft(d) => … | _ => … } becomes a chain of tests on the tag, with d standing for o itself.
       if (a[0].kind !== "name") fail("`match` must be on a name; bind the value with `val` first");
       const subject = ex(a[0], ATOM);
-      const isTagged = tagged(resolve(typeOf(a[0].id)));
+      const subjectType = resolve(typeOf(a[0].id));
+      const isTagged = tagged(subjectType);
+      const subjectOwner = named(typeOf(a[0].id), "sum");
       const arms: { test?: string; result: string }[] = [];
       for (let i = 1; i < a.length; i += 2) {
         const binder = a[i + 1].params[0]?.name;
         // Inside the arm the binder stands for the matched value; an outer arm's binder of the same name comes back after.
         const bound = binder && binder !== "_";
-        const outer = bound ? [renamed.get(binder), matchedAs.get(binder)] : [];
-        if (bound) { renamed.set(binder, subject); matchedAs.set(binder, a[i].value); }
+        const outer = bound ? [renamed.get(binder), matchedAs.get(binder)] as const : undefined;
+        if (bound) {
+          renamed.set(binder, subject);
+          if (subjectOwner) matchedAs.set(binder, { tag: a[i].value, owner: subjectOwner });
+          else matchedAs.delete(binder);
+        }
         const result = ex(a[i + 1].expr, OR);
-        if (bound) { restore(renamed, binder, outer[0]); restore(matchedAs, binder, outer[1]); }
+        if (bound && outer) { restore(renamed, binder, outer[0]); restore(matchedAs, binder, outer[1]); }
         arms.push({ test: a[i].value === "_" ? undefined : `${subject}${isTagged ? ".tag" : ""} === ${JSON.stringify(a[i].value)}`, result });
       }
       const last = arms.pop()!;

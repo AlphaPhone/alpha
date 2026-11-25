@@ -30,7 +30,7 @@ const AGENTS: Record<string, Agent> = {
   claude: {
     label: "Claude Code",
     command: ({ check }) => ["claude", ["-p", "--output-format", "stream-json", "--verbose", "--permission-mode", "acceptEdits",
-      "--allowedTools", "Read", "Edit", "Write", "Glob", "Grep", `Bash(${check}:*)`, "Bash(pnpm check:*)", "Bash(pnpm exec quint:*)",
+      "--allowedTools", "Read", "Edit", "Write", "Glob", "Grep", ...(/[():*\r\n]/.test(check) ? [] : [`Bash(${check}:*)`]), "Bash(pnpm check:*)", "Bash(pnpm exec quint:*)",
       "--disallowedTools", "Bash(pnpm accept:*)", "Bash(pnpm run accept:*)", "Bash(npm run accept:*)", "Bash(spec accept:*)"]],
     link: ({ root, prompt }) => `claude-cli://open?cwd=${encodeURIComponent(root)}&q=${encodeURIComponent(prompt)}`,
   },
@@ -115,6 +115,44 @@ effect function handleReadOnlyPost(root: string, route: string, body: any) {
   return undefined
 }
 
+/** Put back any ledger or `.studio` files a sync agent touched or corrupted, without following symlinks. */
+effect function restoreOwned(files: FileSystem.FileSystem, path: Path.Path, root: string, owned: Record<string, string>, job: Job, onError: (job: Job, e: unknown) => void) {
+  let corrupted: unknown
+  const now = effect { return ownedFiles(root) } catch (e) => {
+    corrupted = e
+    return {} as Record<string, string>
+  }
+  const changedFiles = corrupted
+    ? Object.keys(owned)
+    : [...new Set([...Object.keys(owned), ...Object.keys(now)])].filter((f) => owned[f] !== now[f])
+  if (corrupted) {
+    onError(job, corrupted)
+    files.remove(path.join(root, ".studio"), { recursive: true, force: true }) catch () => undefined
+  }
+  for (const f of changedFiles) {
+    const target = path.join(root, f)
+    if (!(f in owned)) try files.remove(target, { force: true })
+    else {
+      files.remove(target, { force: true }) catch () => undefined
+      try files.makeDirectory(path.dirname(target), { recursive: true })
+      try files.writeFileString(target, owned[f])
+    }
+  }
+  if (changedFiles.length) { job.status = "failed"; job.log.push(`✗ the agent changed, and Studio put back, ${changedFiles.join(", ")}: not marked synced`) }
+}
+
+/** Write published spec files (and delete removed specs + proofs) to disk. */
+effect function writePublished(files: FileSystem.FileSystem, path: Path.Path, root: string, body: Publish, disk: Record<string, string>) {
+  for (const f of body.files) {
+    const target = path.join(root, f.file)
+    if (f.text === null) for (const ext of [".md", ".proof.dfy"]) try files.remove(target.replace(/\.md$/, ext), { force: true })
+    else if (disk[f.file] !== f.text) {
+      try files.makeDirectory(path.dirname(target), { recursive: true })
+      try files.writeFileString(target, f.text)
+    }
+  }
+}
+
 /** One project's studio: its session, its jobs, and the HTTP handler its page talks to. Lives as long as the scope. */
 effect function studio(project: Project, agents: Record<string, Agent>, tree: ProjectTree) {
   const { root } = project
@@ -131,11 +169,12 @@ effect function studio(project: Project, agents: Record<string, Agent>, tree: Pr
   let check: Check | undefined
   let lastHeard = specStamp(root)
   /** A job's progress, for the pages; the session's changes reach them by `session.changes`. */
-  const ticks = try PubSub.unbounded<void>()
+  const ticks = try PubSub.sliding<void>(64)
   /** The specs changed on disk: the pages read them again. */
-  const touched = try PubSub.unbounded<void>()
+  const touched = try PubSub.sliding<void>(64)
   /** One request that acts at a time, so what it checked still holds when it steps the session. */
   const lock = try Semaphore.make(1)
+  const pendingInterrupts: Fiber.Fiber<void>[] = []
   const changed = PubSub.publish(ticks, undefined)
   const running = () => Object.values(jobs).find((j) => j.status === "running")
   const failed = (job: Job, e: unknown) => { job.status = "failed"; job.log.push(`✗ ${messageOf(e)}`) }
@@ -165,9 +204,12 @@ effect function studio(project: Project, agents: Record<string, Agent>, tree: Pr
         job.log.push(`✗ ${messageOf(e)}`)
         return -1
       }
-      job.finished = Date.now()
-      job.status = code === 0 ? "passed" : "failed"
-      lock.withPermits(1)(done(job, out.join("\n"))) catch (e) => failed(job, e)
+      lock.withPermits(1)(effect {
+        if (jobs[kind] !== job || job.status === "stopped") return
+        job.finished = Date.now()
+        job.status = code === 0 ? "passed" : "failed"
+        try done(job, out.join("\n"))
+      }) catch (e) => failed(job, e)
       try changed
     }, scope)
     try changed
@@ -178,26 +220,37 @@ effect function studio(project: Project, agents: Record<string, Agent>, tree: Pr
    * runs; this holds its process, what it printed, and where it serves.
    */
   const app: { url?: string; log: string[]; fiber?: Fiber.Fiber<void> } = { log: [] }
+  let appRun = 0
   effect function startApp() {
     const script = appScript(root)
     if (!script) throw new Refused({ status: 404, message: "the project has no app to run: give its package.json a start or dev script" })
     try act({ type: "preview" })
+    const id = ++appRun
     app.url = undefined
     app.log = []
     app.fiber = try Effect.forkIn(effect {
       spawned(["pnpm", ["run", script]], (line) => effect {
+        if (id !== appRun) return
         app.url ??= servedAt(line)
         if (line.trim()) app.log = [...app.log.slice(-199), line]
         try changed
-      }, { env: { BROWSER: "none" } }) catch (e) => { app.log = [...app.log, `✗ ${messageOf(e)}`] }
+      }, { env: { BROWSER: "none" } }) catch (e) => { if (id === appRun) app.log = [...app.log, `✗ ${messageOf(e)}`] }
       // An app that stops by itself is no longer running.
-      act({ type: "endPreview" }) catch () => undefined
+      try lock.withPermits(1)(effect {
+        if (id !== appRun) return
+        app.url = undefined
+        act({ type: "endPreview" }) catch () => undefined
+      })
       try changed
     }, scope)
   }
   effect function stopApp() {
     try act({ type: "endPreview" })
-    if (app.fiber) try Fiber.interrupt(app.fiber)
+    appRun++
+    app.url = undefined
+    const fiber = app.fiber
+    app.fiber = undefined
+    if (fiber) pendingInterrupts.push(fiber)
     try changed
   }
 
@@ -255,14 +308,7 @@ effect function studio(project: Project, agents: Record<string, Agent>, tree: Pr
     const plan = planPublish(root, body)
     if (plan.status !== 200) throw new Refused({ status: plan.status, message: plan.body.error, conflicts: plan.body.conflicts })
     if (!enabled({ ...(try session.get()), unpublished: true }, { type: "publish", changes: 0 })) throw notNow("publish")
-    for (const f of body.files) {
-      const target = path.join(root, f.file)
-      if (f.text === null) for (const ext of [".md", ".proof.dfy"]) try files.remove(target.replace(/\.md$/, ext), { force: true })
-      else if (plan.disk[f.file] !== f.text) {
-        try files.makeDirectory(path.dirname(target), { recursive: true })
-        try files.writeFileString(target, f.text)
-      }
-    }
+    try writePublished(files, path, root, body, plan.disk)
     const { manifest } = plan
     if (!manifest.changes.length) try clearManifest
     else {
@@ -288,16 +334,7 @@ effect function studio(project: Project, agents: Record<string, Agent>, tree: Pr
       // The review ledgers and Studio's state are the tools' to write: what a sync did to them is undone, and it is not trusted.
       // Whatever happens here, the sync ends (spec/index.md, "A sync that ends well leaves nothing waiting and checks again").
       effect {
-        const now = ownedFiles(root)
-        const changedFiles = [...new Set([...Object.keys(owned), ...Object.keys(now)])].filter((f) => owned[f] !== now[f])
-        for (const f of changedFiles) {
-          if (!(f in owned)) try files.remove(path.join(root, f))
-          else {
-            try files.makeDirectory(path.dirname(path.join(root, f)), { recursive: true })
-            try files.writeFileString(path.join(root, f), owned[f])
-          }
-        }
-        if (changedFiles.length) { job.status = "failed"; job.log.push(`✗ the agent changed, and Studio put back, ${changedFiles.join(", ")}: not marked synced`) }
+        try restoreOwned(files, path, root, owned, job, failed)
         if (job.status === "passed") try clearManifest
       } catch (e) => failed(job, e)
       const ok = job.status === "passed"
@@ -342,7 +379,7 @@ effect function studio(project: Project, agents: Record<string, Agent>, tree: Pr
           // A stopped job's end was already stepped (spec/index.md, "A running job can be stopped, and then nothing is known of its result").
           job.status = "stopped"
           job.finished = Date.now()
-          if (job.fiber) try Fiber.interrupt(job.fiber)
+          if (job.fiber) pendingInterrupts.push(job.fiber)
           try changed
         }
         return {}
@@ -359,15 +396,17 @@ effect function studio(project: Project, agents: Record<string, Agent>, tree: Pr
   // Changes to the specs reach every page, whoever made them, once they stop for a moment; when no job runs they are
   // checked (spec/index.md, "A change to the specs on disk is checked when no job runs and nothing is unpublished").
   if (try files.exists(path.join(root, "spec"))) try Effect.forkIn(effect {
-    return Stream.runForEach(Stream.debounce(Stream.retry(files.watch(path.join(root, "spec"), { recursive: true }), Schedule.spaced("1 second")), "300 millis"), () => lock.withPermits(1)(effect {
-      const stamp = specStamp(root)
-      if (stamp !== lastHeard) {
-        lastHeard = stamp
-        const was = (try session.get()).job
-        if ((try act({ type: "touch" })).job !== was) try runCheck()
-      }
-      try PubSub.publish(touched, undefined)
-    })) catch () => undefined
+    return Stream.runForEach(Stream.debounce(Stream.retry(files.watch(path.join(root, "spec"), { recursive: true }), Schedule.spaced("1 second")), "300 millis"), effect () => {
+      lock.withPermits(1)(effect {
+        const stamp = specStamp(root)
+        if (stamp !== lastHeard) {
+          lastHeard = stamp
+          const was = (try session.get()).job
+          if ((try act({ type: "touch" })).job !== was) try runCheck()
+        }
+        try PubSub.publish(touched, undefined)
+      }) catch () => undefined
+    }) catch () => undefined
   }, scope)
 
   const frame = (event: string, data: unknown) => `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`
@@ -385,7 +424,7 @@ effect function studio(project: Project, agents: Record<string, Agent>, tree: Pr
     snapshot,
     /** A request for this project, past the guards every request meets. */
     handle: effect (method: string, route: string, request: HttpServerRequest.HttpServerRequest) => {
-      if (route === "/api/events") return HttpServerResponse.stream(events, { contentType: "text/event-stream", headers: { "cache-control": "no-store", connection: "keep-alive" } })
+      if (method === "GET" && route === "/api/events") return HttpServerResponse.stream(events, { contentType: "text/event-stream", headers: { "cache-control": "no-store", connection: "keep-alive" } })
       if (method === "GET" && route === "/api/project") return json(200, try snapshot())
       // The Components view (./page/Components.tsx): absent when the project has no catalog.
       if (method === "GET" && route === "/api/components") {
@@ -400,7 +439,9 @@ effect function studio(project: Project, agents: Record<string, Agent>, tree: Pr
       const body = try parseJsonBody(request)
       const direct = try handleReadOnlyPost(root, route, body)
       if (direct) return direct
-      return json(200, try lock.withPermits(1)(post(route, body)))
+      const result = try lock.withPermits(1)(post(route, body))
+      for (const fiber of pendingInterrupts.splice(0)) try Fiber.interrupt(fiber)
+      return json(200, result)
     },
   }
 }
@@ -423,6 +464,8 @@ export effect function startStudio({ projects, open = projects[0].id, port = 432
   const at = "port" in server.address ? server.address.port : port
   const hosts = [`localhost:${at}`, `127.0.0.1:${at}`]
 
+  const publicRoot = files.realPath(PUBLIC) catch () => path.resolve(PUBLIC)
+
   const app = effect {
     const request = try HttpServerRequest.HttpServerRequest
     const response = effect {
@@ -430,15 +473,18 @@ export effect function startStudio({ projects, open = projects[0].id, port = 432
       if (!host || !hosts.includes(host)) throw new Refused({ status: 403, message: "use the local studio address" })
       const origin = request.headers.origin
       if (origin !== undefined && origin !== `http://${host}`) throw new Refused({ status: 403, message: "cross-origin requests are not allowed" })
-      if (request.headers["sec-fetch-site"] === "cross-site") throw new Refused({ status: 403, message: "cross-site requests are not allowed" })
+      const fetchSite = request.headers["sec-fetch-site"]
+      if (fetchSite === "cross-site" || (request.method === "POST" && origin === undefined && fetchSite === "same-site")) throw new Refused({ status: 403, message: "cross-site requests are not allowed" })
       const url = new URL(request.url, `http://${host}`)
       if (request.method === "GET" && !url.pathname.startsWith("/api/")) {
-        const file = path.join(PUBLIC, url.pathname === "/" ? "index.html" : path.normalize(url.pathname).replace(/^([/\\])+/, ""))
-        const kind = files.stat(file) catch () => undefined
-        if (!file.startsWith(PUBLIC) || kind?.type !== "File") throw new Refused({ status: 404, message: "not found" })
-        return HttpServerResponse.uint8Array(try files.readFile(file), { contentType: TYPES[path.extname(file)] ?? "application/octet-stream", headers: { "cache-control": "no-store" } })
+        const rel = url.pathname === "/" ? "index.html" : path.normalize(url.pathname).replace(/^([/\\])+/, "")
+        const file = path.resolve(publicRoot, rel)
+        const real = files.realPath(file) catch () => undefined
+        const kind = real ? (files.stat(real) catch () => undefined) : undefined
+        if (!real || !(real.startsWith(publicRoot + path.sep) || real === publicRoot) || kind?.type !== "File") throw new Refused({ status: 404, message: "not found" })
+        return HttpServerResponse.uint8Array(try files.readFile(real), { contentType: TYPES[path.extname(real)] ?? "application/octet-stream", headers: { "cache-control": "no-store" } })
       }
-      if (url.pathname === "/api/projects") return json(200, { projects: projects.map(({ id, name }) => ({ id, name })), open })
+      if (request.method === "GET" && url.pathname === "/api/projects") return json(200, { projects: projects.map(({ id, name }) => ({ id, name })), open })
       const live = lives.get(url.searchParams.get("project") ?? open)
       if (!live) throw new Refused({ status: 404, message: "no such project" })
       return try live.handle(request.method, url.pathname, request)

@@ -19,6 +19,7 @@ import vibelang from "vibelang/knip"
 export default {
   compilers: { vibe: vibelang, vibex: vibelang },
   "ignore": [
+    ".eliza/**",
     "legacy/**",
     "vibestack/examples/**",
     "**/test/fixtures/**"

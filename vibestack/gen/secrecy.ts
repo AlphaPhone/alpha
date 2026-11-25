@@ -24,6 +24,21 @@ export function checkSecrets({ funs, vals, sig, inferred, where, variants }: Flo
   /** A type that is secret itself, directly or as an alias of one, or a list, set or map of such: what is read from it is secret. */
   const secret = (t: Json | undefined): boolean => (t?.kind === "const" ? SECRET.test(t.name.split("::").pop()) || SECRET.test(typedef(t.name).base ?? "") || secret(typedef(t.name).type)
     : t?.kind === "list" || t?.kind === "set" ? secret(t.elem) : t?.kind === "fun" && secret(t.res));
+  /** A type that is secret or embeds a secret inside any record field, variant payload, collection, or map value. */
+  const containsSecret = (t: Json | undefined, seen = new Set<string>()): boolean => {
+    if (!t) return false;
+    if (secret(t)) return true;
+    if (t.kind === "const") {
+      if (seen.has(t.name)) return false;
+      seen.add(t.name);
+      return containsSecret(typedef(t.name).type, seen);
+    }
+    if (t.kind === "list" || t.kind === "set") return containsSecret(t.elem, seen);
+    if (t.kind === "fun") return containsSecret(t.arg, seen) || containsSecret(t.res, seen);
+    if (t.kind === "rec") return fields(t).some((f: Json) => containsSecret(f.fieldType, seen));
+    if (t.kind === "sum") return fields(t).some((f: Json) => containsSecret(payload(f), seen));
+    return false;
+  };
   const name = (t: Json) => (t.kind === "const" ? t.name : t.kind);
   const byName = new Map(funs.map((d) => [d.name as string, d]));
   const valsByName = new Map(vals.map((d) => [d.name as string, d]));
@@ -85,6 +100,21 @@ export function checkSecrets({ funs, vals, sig, inferred, where, variants }: Flo
     if (op === "append") return [into(a[1], elem(slot ?? inferred(e.id)), "an element of a list"), carries(a[0], env, at, slot)].some(Boolean);
     if (op === "put" || op === "set") return [into(a[2], elem(slot ?? inferred(e.id)), "a value in a map"), carries(a[0], env, at, slot), carries(a[1], env, at)].some(Boolean);
     if (op === "field") return own || secret(field(inferred(a[0].id), a[1].value)) || carries(a[0], env, at);
+    // Structural equality and membership compare record fields and variant payloads, so comparing values that hold a secret depends on that secret (except against a bare tag constructor, which tests only the public tag).
+    const holdsSecret = (x: Json): boolean => {
+      if (containsSecret(inferred(x.id)) || containsSecret(declared(x, undefined))) return true;
+      if (x.kind === "app") {
+        if (variants.has(x.opcode)) return x.args.some((arg: Json) => carries(arg, env, at) || holdsSecret(arg));
+        if (x.opcode === "Rec") {
+          for (let i = 0; i < x.args.length; i += 2) if (carries(x.args[i + 1], env, at) || holdsSecret(x.args[i + 1])) return true;
+        }
+        if (x.opcode === "with") return holdsSecret(x.args[0]) || carries(x.args[2], env, at) || holdsSecret(x.args[2]);
+      }
+      return false;
+    };
+    const bareVariant = (x: Json) => x.kind === "name" && variants.has(x.name);
+    if ((op === "eq" || op === "neq") && !a.some(bareVariant)) return own || all(a) || a.some(holdsSecret);
+    if (op === "contains" || op === "in" || op === "subseteq") return own || all(a) || a.some(holdsSecret);
     return own || all(a);
   };
 

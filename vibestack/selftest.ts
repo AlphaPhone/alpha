@@ -4833,6 +4833,8 @@ test("the lint refuses, in a project's own code, a comment that is neither a cit
   const specFile = spec?.file ?? "spec/app/index.md";
   const storyHeading = spec?.stories.find((story) => !story.title.includes('"'))?.title ?? "Story: Say hello";
   const ruleHeading = spec ? heading(spec.rules.find((rule) => !heading(rule).includes('"'))!) : "The number of greetings is never negative";
+  const { default: config } = await import(path.join(project, "eslint.config.js"));
+  const commentsRule = config.find((block: { rules?: Record<string, unknown> }) => block.rules?.["code/comments"]).rules["code/comments"][1] as { jsdoc?: boolean; left: Record<string, number> };
   assert.deepEqual(await found("apps/app/src/probe.vibe", [
     `// ${specFile}, "${storyHeading}"; ${specFile}, "${ruleHeading}"`,
     `/* ${specFile}, "${storyHeading}" */`,
@@ -4850,7 +4852,7 @@ test("the lint refuses, in a project's own code, a comment that is neither a cit
     "const later = React.useLayoutEffect;",
     `globalThis["queueMicrotask"](later);`,
     "// eslint-disable-next-line no-undef -- a global the page defines",
-  ]), ["6 code/comments", "7 code/comments", "8 code/comments", "9 code/comments", "10 code/effects", "11 code/effects", "12 code/effects", "13 no-console", "14 code/effects", "15 code/effects"]);
+  ]), ["6 code/comments", ...(commentsRule.jsdoc ? [] : ["7 code/comments", "8 code/comments"]), "9 code/comments", "10 code/effects", "11 code/effects", "12 code/effects", "13 no-console", "14 code/effects", "15 code/effects"]);
   assert.deepEqual([...new Set(await found("apps/app/src/probe.vibe", [
     "const clock = { setTimeout: () => undefined }",
     "const capture = { setTimeout: globalThis.setTimeout }",
@@ -4874,12 +4876,11 @@ test("the lint refuses, in a project's own code, a comment that is neither a cit
     "  /** @throws { } */",
     "  export function readWhitespace() {}",
     "}",
-  ]), ["6 code/comments", "8 code/comments", "11 code/comments", "13 code/comments"]);
+  ]), commentsRule.jsdoc ? [] : ["6 code/comments", "8 code/comments", "11 code/comments", "13 code/comments"]);
   const hiding = [["useEffect(() => {}, []); // eslint-disable-line"], ["/* eslint-disable */", "// a note"], ["/* eslint-disable code/comments, code/effects -- it must */", "setTimeout(() => {}, 1);"], ["/* eslint code/comments: off, no-console: off */", `console.log("seen");`], ["// eslint-disable-next-line no-console -- it must", `console.log("seen");`]];
   assert.deepEqual(await Promise.all(hiding.map((lines) => found("apps/app/src/probe.vibe", lines))), hiding.map(() => ["1 inline config"]));
   assert.deepEqual(await found("packages/ui/src/components/probe.vibe", ["/** What a component takes, which the stories generator reads. */", "export function Probe() {", "  /** inside it */", "  return 1;", "}", "// a note"]), ["3 code/comments", "6 code/comments"]);
-  const { default: config } = await import(path.join(project, "eslint.config.js"));
-  const [file, left] = Object.entries(config.find((block: { rules?: Record<string, unknown> }) => block.rules?.["code/comments"]).rules["code/comments"][1].left as Record<string, number>).find(([file]) => file.endsWith(".vibe"))!;
+  const [file, left] = Object.entries(commentsRule.left).find(([file]) => file.endsWith(".vibe"))!;
   const notes = (n: number) => Array.from({ length: n }, () => "// a note");
   assert.deepEqual([(await found(file, notes(left))).length, (await found(file, notes(left + 1))).length], [0, left + 1]);
 });

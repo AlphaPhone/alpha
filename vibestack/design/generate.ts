@@ -21,7 +21,7 @@ const fixed = (tokens: Tokens, duration: string) => [
 
 /** Plain custom properties, usable without Tailwind. */
 export const tokensCss = (tokens: Tokens) =>
-  block(":root", [...scheme(tokens, "light"), `--radius: ${tokens.radius};`, ...fixed(tokens, "duration-"), ...vars("gradient-", tokens.gradient)]) +
+  block(":root", [...scheme(tokens, "light"), `--radius: ${tokens.radius};`, ...fixed(tokens, "duration-"), ...vars("gradient-", tokens.gradient), ...vars("", tokens.custom)]) +
   block(".light", scheme(tokens, "light")) +
   block(".dark", scheme(tokens, "dark")) +
   `@media (prefers-color-scheme: dark) {\n${block(":root:not(.light)", scheme(tokens, "dark"), "  ")}}\n`
@@ -48,7 +48,14 @@ export const themeCss = (tokens: Tokens) =>
   Object.keys(tokens.gradient).map((name) => block(`@utility bg-gradient-${name}`, [`background-image: var(--gradient-${name});`])).join("") +
   `@layer base {\n${block("*", ["border-color: var(--border);"], "  ")}${
     block("body", ["background: var(--background);", "color: var(--foreground);", "font-family: var(--font-sans);"], "  ")}${
-    block(":focus-visible", [`outline: ${focus(tokens).width} solid var(--ring);`, `outline-offset: ${focus(tokens).offset};`], "  ")}}\n`
+    block(":focus-visible", [`outline: ${focus(tokens).width} solid var(--ring);`, `outline-offset: ${focus(tokens).offset};`], "  ")}}\n` +
+  `@media (prefers-reduced-motion: reduce) {\n${
+    block("*, *::before, *::after", [
+      "animation-duration: 0.01ms !important;",
+      "animation-iteration-count: 1 !important;",
+      "transition-duration: 0.01ms !important;",
+      "scroll-behavior: auto !important;",
+    ], "  ")}}\n`
 
 const [start, end] = ["<!-- tokens:start -->", "<!-- tokens:end -->"]
 const table = (head: string[], rows: string[][]) =>

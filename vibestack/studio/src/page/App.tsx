@@ -19,13 +19,13 @@ export function App() {
   const openPublish = () => { if (!S.publishing && can({ type: "publish", changes: 0 })) setPublishing(true); };
 
   useEffect(() => {
-    connect();
+    const disconnect = connect();
     const keys = (e: KeyboardEvent) => {
       const typing = /^(INPUT|TEXTAREA|SELECT)$/.test(document.activeElement?.tagName ?? "");
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "s") { e.preventDefault(); openPublish(); }
       else if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") { e.preventDefault(); setCmdOpen(!S.cmdOpen); }
       else if ((e.metaKey || e.ctrlKey) && e.key === "\\") { e.preventDefault(); toggleRail(); }
-      else if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "z" && !typing && S.history.length) { e.preventDefault(); undo(); }
+      else if ((e.metaKey || e.ctrlKey) && !e.shiftKey && e.key.toLowerCase() === "z" && !typing && S.history.length) { e.preventDefault(); undo(); }
       else if (e.key === "Escape" && !document.querySelector("[role=dialog]")) {
         if (typing && S.editing.size) {
           const id = document.activeElement?.closest<HTMLElement>("[data-uid]")?.dataset.uid;
@@ -39,7 +39,7 @@ export function App() {
     const leaving = (e: BeforeUnloadEvent) => { if (dirtySpecs().length) e.preventDefault(); };
     document.addEventListener("keydown", keys);
     window.addEventListener("beforeunload", leaving);
-    return () => { document.removeEventListener("keydown", keys); window.removeEventListener("beforeunload", leaving); };
+    return () => { disconnect(); document.removeEventListener("keydown", keys); window.removeEventListener("beforeunload", leaving); };
   }, []);
 
   const spec = current();
@@ -80,7 +80,7 @@ export function App() {
       <PublishDialog open={publishing} onOpenChange={setPublishing} />
       <Ask open={S.overwrite.length > 0} onOpenChange={() => { S.overwrite = []; redraw(); }} title={`${S.overwrite.join(", ")} changed on disk`} action="Overwrite" onConfirm={() => void publish(true)} />
       <div role="status" aria-live="polite"
-        className={cn("fixed bottom-6 left-1/2 z-40 flex max-w-[80vw] -translate-x-1/2 items-center gap-3 rounded-lg bg-foreground px-3.5 py-2 text-background transition-all duration-base",
+        className={cn("fixed bottom-6 left-1/2 z-toast flex max-w-[80vw] -translate-x-1/2 items-center gap-3 rounded-lg bg-foreground px-3.5 py-2 text-background transition-all duration-base",
           S.toast ? "opacity-100" : "pointer-events-none translate-y-5 opacity-0")}>
         <span>{S.toast?.text}</span>
         {S.toast?.action && <button type="button" className="font-semibold underline" onClick={() => { S.toast!.action!.run(); }}>{S.toast.action.label}</button>}

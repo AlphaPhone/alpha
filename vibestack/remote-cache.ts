@@ -19,6 +19,7 @@ export interface CacheEnvironment {
   CACHE_BUCKET: CacheBucket;
   CACHE_READ_TOKEN: string;
   CACHE_WRITE_TOKEN: string;
+  CACHE_PREFIX?: string;
 }
 
 declare const FixedLengthStream: {
@@ -27,7 +28,8 @@ declare const FixedLengthStream: {
 
 const MAX_ARTIFACT_BYTES = 64 * 1024 * 1024;
 const MAX_JSON_BYTES = 64 * 1024;
-const PREFIX = "lalalune/vibestack/";
+const DEFAULT_PREFIX = "lalalune/vibestack/";
+const SAFE_PREFIX = /^[A-Za-z0-9._-]+(?:\/[A-Za-z0-9._-]+)*\/?$/;
 const HASH = /^[a-fA-F0-9]{1,128}$/;
 const TOKEN = /^[!-~]{32,512}$/;
 const METADATA = ["x-artifact-duration", "x-artifact-tag", "x-artifact-sha", "x-artifact-dirty-hash"] as const;
@@ -38,9 +40,15 @@ class RequestError extends Error {
 }
 
 const json = (value: unknown, status = 200) => Response.json(value, { status, headers: { "Cache-Control": "no-store" } });
-const keyOf = (hash: string) => {
+const prefixOf = (env: CacheEnvironment) => {
+  const configured = env.CACHE_PREFIX?.trim();
+  if (!configured) return DEFAULT_PREFIX;
+  if (!SAFE_PREFIX.test(configured) || configured.includes("..")) throw new RequestError(503, "Cache prefix is invalid");
+  return configured.endsWith("/") ? configured : `${configured}/`;
+};
+const keyOf = (env: CacheEnvironment, hash: string) => {
   if (!HASH.test(hash)) throw new RequestError(400, "Invalid artifact hash");
-  return PREFIX + hash.toLowerCase();
+  return prefixOf(env) + hash.toLowerCase();
 };
 const equal = (left: ArrayBuffer, right: ArrayBuffer) => {
   const a = new Uint8Array(left), b = new Uint8Array(right);
@@ -157,7 +165,7 @@ async function handle(request: Request, env: CacheEnvironment): Promise<Response
     // Bounded batches keep one reader from issuing a hundred storage operations at once.
     for (let start = 0; start < hashes.length; start += 10) {
       await Promise.all(hashes.slice(start, start + 10).map(async (hash: string) => {
-        const artifact = await env.CACHE_BUCKET.head(keyOf(hash));
+        const artifact = await env.CACHE_BUCKET.head(keyOf(env, hash));
         result[hash] = artifact ? { size: artifact.size, taskDurationMs: Number(artifact.customMetadata?.["x-artifact-duration"] ?? 0),
           ...artifact.customMetadata?.["x-artifact-tag"] !== undefined ? { tag: artifact.customMetadata["x-artifact-tag"] } : {} } : null;
       }));
@@ -166,7 +174,7 @@ async function handle(request: Request, env: CacheEnvironment): Promise<Response
   }
   const artifact = path.match(/^\/artifacts\/([^/]+)$/)?.[1];
   if (artifact === undefined) throw new RequestError(404, "Not found");
-  const key = keyOf(artifact);
+  const key = keyOf(env, artifact);
   if (request.method === "PUT") {
     if (role !== "write") throw new RequestError(403, "Forbidden");
     return upload(request, env, key);

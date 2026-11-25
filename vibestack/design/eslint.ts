@@ -10,8 +10,13 @@ const anywhere = new RegExp(`^${hex}$|(?<![\\w&[/-])${functional}`, "i")
 // A style object's property that holds a color, wherever the object is declared.
 const colored = /color$|^(?:background|border|outline|boxShadow|textShadow|textDecoration|columnRule|fill|stroke)/i
 
-export interface DesignNode { type: string; parent?: DesignNode; name?: { name?: string }; key?: { name?: string } }
+export interface DesignNode { type: string; parent?: DesignNode; name?: { name?: string }; key?: { name?: string; value?: unknown } }
 const attribute = (node: DesignNode | undefined): string | undefined => node && (node.type === "JSXAttribute" ? node.name?.name : attribute(node.parent))
+const propertyOf = (node: DesignNode | undefined): DesignNode | undefined => {
+  let cur = node?.parent
+  while (cur && (cur.type === "TemplateLiteral" || cur.type === "ConditionalExpression" || cur.type === "LogicalExpression")) cur = cur.parent
+  return cur
+}
 // An anchor or an id may spell a hex: "#feed".
 const names = /^(?:href|id|htmlFor|to)$/
 
@@ -30,8 +35,9 @@ const noLiteralColors = {
   },
   create(context: DesignContext) {
     const report = (node: DesignNode, value: unknown) => {
-      const within = attribute(node), holder = node.parent?.type === "TemplateLiteral" ? node.parent.parent : node.parent
-      const style = within === "style" || holder?.type === "Property" && colored.test(holder.key?.name ?? "")
+      const within = attribute(node), holder = propertyOf(node)
+      const keyName = holder?.type === "Property" ? String(holder.key?.name ?? holder.key?.value ?? "") : ""
+      const style = within === "style" || colored.test(within ?? "") || (holder?.type === "Property" && colored.test(keyName))
       if (typeof value === "string" && !names.test(within ?? "") && (style ? inStyle : anywhere).test(value.trim())) context.report({ node, messageId: "literal", data: { value } })
     }
     return {
@@ -69,7 +75,9 @@ export function designSystem<Plugin>({ tailwind, tokens, entryPoint }: { tailwin
   const besides = (tokens: string[]) => sizes.filter((size) => !tokens.includes(size)).join("|")
   const colors = `Use a color token: ${names(tokens.color.light)}.`
   const radii = [...derived, ...Object.keys(tokens.rounded)]
-  const radius = `Use a radius token:${radii.map((size) => `rounded-${size}`).join(", ")}.`
+  const radius = `Use a radius token: ${radii.map((size) => `rounded-${size}`).join(", ")}.`
+  const extraRadii = besides(radii)
+  const extraShadows = besides(Object.keys(tokens.shadow))
   // A declared name is never refused, even where it matches a built-in pattern (`z-10`, `leading-6`).
   const declared = Object.entries(scales).flatMap(([group, { utility, what, builtIn }]) => {
     const own = Object.keys(tokens[group as keyof typeof scales])
@@ -81,14 +89,15 @@ export function designSystem<Plugin>({ tailwind, tokens, entryPoint }: { tailwin
     ]
   })
   const shadow = `Use a shadow token: ${names(tokens.shadow, "shadow-")}.`
+  const colorProps = "(?:color|background(?:-color)?|border(?:-(?:top|right|bottom|left|inline|block|start|end))?-color|outline-color|fill|stroke|caret-color|accent-color|text-decoration-color)"
   // Tailwind's default palette stays in the theme for third-party markup but is not ours to use.
   const restrict = [
     { pattern: `${variants}[a-z-]+-(?:(?:${palette})-\\d{2,3}|white|black)${opacity}`, message: `"$0" is a palette color. ${colors}` },
-    { pattern: `${variants}[a-z-]+-\\[(?:[^\\]]*(?:#[\\da-fA-F]{3,8}|${functional})[^\\]]*|(?:color:)?${named})\\]${opacity}`, message: `"$0" is an arbitrary color. ${colors}` },
-    { pattern: `${variants}rounded(?:-[a-z]{1,2})?-\\[.+\\]!?$`, message: `"$0" is an arbitrary radius. ${radius}` },
-    { pattern: `${variants}rounded(?:-[a-z]{1,2})?-(?:${besides(radii)})!?$`, message: `"$0" is a radius the tokens do not define. ${radius}` },
-    { pattern: `${variants}shadow-\\[.+\\]!?$`, message: `"$0" is an arbitrary shadow. ${shadow}` },
-    { pattern: `${variants}shadow-(?:${besides(Object.keys(tokens.shadow))})!?$`, message: `"$0" is a shadow the tokens do not define. ${shadow}` },
+    { pattern: `${variants}(?:[a-z-]+-)?\\[(?:${colorProps}:)?(?:[^\\]]*(?:#[\\da-fA-F]{3,8}|(?i:${functional}))[^\\]]*|(?:color:)?(?i:${named}))\\]${opacity}`, message: `"$0" is an arbitrary color. ${colors}` },
+    { pattern: `${variants}rounded(?:-[a-z]{1,2})?-[[()].+[\\])]!?$`, message: `"$0" is an arbitrary radius. ${radius}` },
+    ...(extraRadii ? [{ pattern: `${variants}rounded(?:-[a-z]{1,2})?-(?:${extraRadii})!?$`, message: `"$0" is a radius the tokens do not define. ${radius}` }] : []),
+    { pattern: `${variants}shadow-[[()].+[\\])]!?$`, message: `"$0" is an arbitrary shadow. ${shadow}` },
+    ...(extraShadows ? [{ pattern: `${variants}shadow-(?:${extraShadows})!?$`, message: `"$0" is a shadow the tokens do not define. ${shadow}` }] : []),
     { pattern: `${variants}font-serif!?$`, message: `"$0" is a font the tokens do not define. Use a font token: ${names(tokens.font, "font-")}.` },
     { pattern: `${variants}(?:drop-shadow-\\[.+\\]|\\[(?:box-shadow|filter):.+\\])$`, message: `"$0" is an arbitrary shadow or filter. Use a token: ${names(tokens.shadow, "shadow-")}, ${names(tokens.dropShadow, "drop-shadow-")}.` },
     ...declared,
