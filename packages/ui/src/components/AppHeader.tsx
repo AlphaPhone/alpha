@@ -22,10 +22,10 @@ export type AppHeaderProps = Omit<ComponentProps<"header">, "title"> & {
  * launcher (`data-alpha-launcher`, the phone's Home) the title is the serif display title, as Alpha's earlier build drew
  * it on the phone: `3xl` on an app's first page and `home-display` on a screen inside it. Above 150% text
  * (`data-alpha-title-row`) the title, on the launcher or not, takes a row of its own under the buttons and wraps there,
- * never cut, set in by a further 8px off the launcher, as Alpha's earlier build drew it; on the launcher a first page's title is drawn no larger than lets a 4.4em word fit that row, so one word is
- * never split. Android's text zoom multiplies that size, so
- * the room is divided by the measured scale (`--alpha-text-scale`) and multiplied back by Alpha's own text size
- * (`--alpha-own-text-scale`), which root-relative sizes already carry.
+ * never cut; off the launcher it is set in a further 8px with 6px under it, as Alpha's earlier build drew it. On the
+ * launcher a first page's title is drawn no larger than lets a 4.4em word fit that row, so one word is never split.
+ * Android's text zoom multiplies that size, so the room is divided by the measured scale (`--alpha-text-scale`) and
+ * multiplied back by Alpha's own text size (`--alpha-own-text-scale`), which root-relative sizes already carry.
  */
 export function AppHeader({ title, leading, titleControl, detail = false, className, children, ...props }: AppHeaderProps) {
   return (

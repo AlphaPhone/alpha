@@ -101,7 +101,7 @@ function Threads({ runtime, messages: { state, can, send }, onBack }: MessagesPr
   return (
     <>
       {searching ? (
-        <header className={header} data-alpha-messages-search-header>
+        <header className={header} data-host-chrome="" data-alpha-messages-search-header>
           <Button variant="ghost" size="icon" aria-label="Back to messages" onClick={() => { search(""); setSearching(false); }}><ChevronLeft /></Button>
           <div role="search" aria-label="Search messages" className="min-w-0 flex-1 pr-2">
             <SearchField autoFocus aria-label="Search conversations" placeholder="Search conversations" value={sought} onValueChange={search} clearLabel="Clear search" />
