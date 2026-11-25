@@ -1,6 +1,7 @@
 // spec/app/browser/index.md, "The Browser holds its open tabs, which are private, the one shown, their native tabs, the saved session and its writer, and what covers the page"
 import type { BrowserTabHostPlugin, BrowserTabHostListener, BrowserTabSession } from "@elizaos/os-bridges"
 import { registered } from "./device.vibe"
+import { WebFrames, type FrameRequest } from "./browserWeb.vibe"
 
 module held {
   import type { BrowserTabHostPlugin } from "@elizaos/os-bridges"
@@ -28,6 +29,7 @@ export type Told =
   | { readonly kind: "closed"; readonly raw: unknown }
   | { readonly kind: "found"; readonly raw: unknown }
   | { readonly kind: "showDownloads"; readonly raw: unknown }
+  | { readonly kind: "framed"; readonly request: FrameRequest }
 
 /**
  * The phone's web pages in native tabs: eliza's client of Alpha's `AlphaBrowser` tab host and the session that holds
@@ -38,6 +40,7 @@ export service TabHost {
   readonly plugin: Option.Option<BrowserTabHostPlugin>
   readonly session: BrowserTabSession
   readonly told: Stream.Stream<Told>
+  readonly web?: WebFrames
   /** Wait until the native state listener that will report the load is installed. */
   observing(): boolean!!
 }
@@ -64,7 +67,7 @@ export const phoneTabHost = Layer.effect(TabHost, effect {
   const plugin = client(name)
   const ready = try Deferred.make<boolean>()
   let listening = false
-  const heard = (event: "stateChanged" | "tabOpened" | "tabClosed" | "findResult" | "showDownloads", kind: Told["kind"]) => Stream.callback<Told>((queue) => effect {
+  const heard = (event: "stateChanged" | "tabOpened" | "tabClosed" | "findResult" | "showDownloads", kind: Exclude<Told["kind"], "framed">) => Stream.callback<Told>((queue) => effect {
     const acquire = tryPromise(async (signal: AbortSignal): Promise<BrowserTabHostListener> => {
       const handle = await plugin.addListener(event as "stateChanged", (raw: unknown) => { Queue.offerUnsafe(queue, { kind, raw }) })
       if (signal.aborted) await handle.remove()
@@ -91,5 +94,9 @@ export const phoneTabHost = Layer.effect(TabHost, effect {
   }
 })
 
-/** A browser: no native tabs, which the Browser says rather than drawing pages itself. */
-export const browserTabHost = Layer.sync(TabHost, () => ({ plugin: Option.none(), session: session(), told: Stream.empty, observing: () => succeed(false) }))
+/** The enclosing browser owns opaque frames and says when a requested frame has loaded. */
+export const browserTabHost = Layer.effect(TabHost, effect {
+  const events = try Queue.unbounded<Told>()
+  const web = try sync(() => new WebFrames((request) => { Queue.offerUnsafe(events, { kind: "framed", request }) }))
+  return { plugin: Option.none(), session: session(), told: Stream.fromQueue(events), web, observing: () => succeed(true) }
+})

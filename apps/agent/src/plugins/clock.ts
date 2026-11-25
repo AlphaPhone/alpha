@@ -320,7 +320,7 @@ function makeClockAction(
     description,
     parameters,
     validate: () => Promise.resolve(true),
-    handler: async (_runtime, _message, _state, options) => run(asRecord(asRecord(options).parameters ?? asRecord(options))),
+    handler: (_runtime, _message, _state, options) => Promise.resolve(run(asRecord(asRecord(options).parameters ?? asRecord(options)))),
   };
   showsApp(action, "clock");
   return action;

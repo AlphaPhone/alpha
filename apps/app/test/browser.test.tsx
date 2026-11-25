@@ -24,7 +24,7 @@ async function onBrowser(world = { ...scene(), phone: true, image: true }) {
 }
 
 const go = (text: string) => drawn(async () => {
-  await press(button("Search or type address") ? "Search or type address" : "Edit address");
+  await press(button("Search or type address") ? "Search or type address" : /^Edit address/);
   await fill("Address", text);
   const form = document.querySelector<HTMLFormElement>("form[role=search]");
   if (!form) throw new Error("no address field");
@@ -149,20 +149,20 @@ describe("The Browser on a phone", () => {
     await until(alpha, runtime, Tabs, (s) => s.native.length === 2);
     expect([...world.browser.tabs.values()].map((one) => one.private)).toEqual([false, true]);
     // spec/app/browser/index.md, "Picking another open tab shows it and uncovers the page"
-    await press("Tabs");
+    await press(/^Tabs\b/);
     await until(alpha, runtime, Tabs, (s) => s.layer === "Switcher");
     const selected = document.querySelector<HTMLButtonElement>("button[aria-current=true]");
     if (!selected) throw new Error("no active tab card");
     await drawn(() => selected.click());
     await until(alpha, runtime, Tabs, (s) => s.layer === "Uncovered" && s.privates.includes(s.selected));
-    await press("Tabs");
+    await press(/^Tabs\b/);
     await until(alpha, runtime, Tabs, (s) => s.layer === "Switcher");
     const original = [...document.querySelectorAll("button")].find((control) => control.textContent?.startsWith("The case for on-device agents"));
     if (!original) throw new Error("no original tab card");
     await drawn(() => original.click());
     await until(alpha, runtime, Tabs, (s) => s.layer === "Uncovered" && s.selected === s.open[0]);
     // spec/app/browser/index.md, "Closing a tab closes its native tab, shows another open tab if it was the one shown, and leaves one new tab when it was the last"
-    await press("Tabs");
+    await press(/^Tabs\b/);
     await press("Close The case for on-device agents");
     await until(alpha, runtime, Tabs, (s) => s.open.length === 1 && s.selected === s.privates[0]);
     expect(world.browser.tabs.size).toBe(1);

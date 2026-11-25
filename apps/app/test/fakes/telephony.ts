@@ -7,7 +7,7 @@ import type { PhoneNativePlugin, TelephonySubscription } from "@elizaos/os-bridg
 import { mmsBinding, smsBindingHash } from "@elizaos/os-bridges";
 import { type Faked, plugin, rejection } from "./phone.ts";
 import type { Route } from "./routes.ts";
-import { type TextReviewScene, textReviewEnrollment, textReviewRoute } from "./text-review.ts";
+import { type TextReviewScene, textReviewEnrollment } from "./text-review.ts";
 
 /** A call in the phone's log. */
 export interface LoggedCall { id: number; number: string; name: string | null; date: number; type: "incoming" | "outgoing" | "missed"; seconds?: number }
@@ -137,7 +137,6 @@ export function telephonyScene(): TelephonyScene {
 /** The resident agent's reply drafter, over `world`: it answers one draft for the open conversation, and sends nothing. */
 export function telephonyRoutes(world: TelephonyScene): Route[] {
   return [
-    ...(world.textReview === undefined ? [] : [textReviewRoute(world.textReview)]),
     (request, url) => {
       if (request.method !== "POST" || url.pathname !== "/api/messages/reply-draft") return undefined;
       return request.json().then((thread: unknown) => {

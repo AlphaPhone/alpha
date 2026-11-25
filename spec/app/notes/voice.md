@@ -235,6 +235,10 @@ pure def askAlpha(v: VoiceNote, by: Actor): Moved =
 
 ### Only the transcript the owner added leaves the note, and only what was shown is written to it
 
+Copy text writes the open note's saved transcript to the clipboard after
+the owner's tap, when the same saved version is still showing. The phone
+says whether it could copy.
+
 ```quint
 pure def stepOnlyTheAddedTranscriptLeaves(before: VoiceNote, via: str, after: VoiceNote, out: List[Effect]): bool =
   out.every(e => match e {
@@ -306,7 +310,9 @@ pure def sometimesAWriteUnknown(v: VoiceNote): bool = v.writing.outcome == A::Un
 
 ### A voice note plays from the start, or from a line of the transcript, and only within the audio written; only the answer to the current playing counts
 
-Played through, the player rests; one that cannot be played says so.
+The player rests when playback ends and reports a playback failure. The
+screen offers playback controls when the note has retained audio the phone
+can play.
 
 ```quint
 pure def canPlay(v: VoiceNote, from: int, by: Actor): bool =

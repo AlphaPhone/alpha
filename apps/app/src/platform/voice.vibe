@@ -214,7 +214,7 @@ export effect function transcribeVoicemail(id: string): string!VoiceBridgeFailed
 const CLOUD_STREAM_PLUGIN = "ElizaCloudSpeech"
 const SIGN_IN_PLUGIN = "ElizaSignIn"
 /** The cloud the phone signs in to, whose account the relay speaks for. */
-const CLOUD_ENVIRONMENT = "production" as EnvironmentName
+export const CLOUD_ENVIRONMENT = "production" as EnvironmentName
 /** How long a background call to the relay, a warm-up or its timing records, may run before it is dropped. */
 const RELAY_WARMUP_BOUND = "5 seconds"
 
