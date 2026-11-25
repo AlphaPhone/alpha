@@ -1,29 +1,101 @@
 // spec/app/digests/index.md, "Home shows the newest kept result of the owner that ran, finished or failed, through a restart; a result that did not run never replaces it, and a page of another owner never reaches it"
-import { digestInbox, latestRetainedBrief } from "@elizaos/plugin-workflow-client"
+import * as KeyValueStore from "effect/persistence/KeyValueStore"
+import { type DigestResult, type HostedDigestProtocol, digestInbox, latestRetainedBrief } from "@elizaos/plugin-workflow-client"
 import { Machine as Shell } from "../../gen/app__shell.effect.vibe"
 import { Machine as WorkflowList } from "../../gen/app__workflows__list.effect.vibe"
 import { fromAreas, type ToldBrief } from "../home/cards.vibe"
 import { Agent } from "../platform/agent.vibe"
 import { Device } from "../platform/device.vibe"
-import { ownerAt } from "../platform/owner.vibe"
+import { enableNativeDigestNotices, nativeDigestChanges, nativeDigestsAvailable, type NativeDigestSnapshot, readNativeDigests, syncNativeDigests, writeNativeDigestPreference } from "../platform/hosted-digests.vibe"
+import { type ResidentOwner, launchOwnerAt, residentOwnerKey, sameResidentOwner } from "../platform/owner.vibe"
 import { started, together } from "../runtime/reactor.vibe"
 import { Rows } from "./list.vibe"
 
-export function digestScope(owner: string): string {
-  return `alpha/workflows/digests/${encodeURIComponent(owner)}`
+/** Old agent-only keys carry no verified owner. Leave their results and consent sealed. */
+export function digestScope(owner: ResidentOwner): string {
+  return `alpha/workflows/digests-v2/${encodeURIComponent(residentOwnerKey(owner))}`
 }
 
-/** A notice within Alpha to re-read durable results after the digest inbox has settled a round. */
+interface DigestRead {
+  readonly rows: readonly DigestResult[] | undefined
+  readonly current: boolean
+}
+
+/** Workflows and Home share one selected inbox. The registered Android host is its own writer. */
 export service DigestHistory {
   readonly changes: Stream.Stream<void>
-  changed(): void!!
+  readonly native: boolean
+  read(owner: ResidentOwner): (readonly DigestResult[] | undefined)!!
+  sync(owner: ResidentOwner, protocol: HostedDigestProtocol): DigestRead!!
+  nativeSnapshot(owner: ResidentOwner): (NativeDigestSnapshot | undefined)!!
+  nativeBackground(owner: ResidentOwner, enabled: boolean, lease: string): boolean!!
+  nativeEnableNotifications(owner: ResidentOwner, lease: string): boolean!!
 }
 
 const history = Layer.effect(DigestHistory, effect {
   const changed = try PubSub.sliding<void>(1)
+  const round = (try Semaphore.make(1)).withPermits(1)
+  const store = try KeyValueStore.KeyValueStore
+  const agent = try Agent
+  const deviceInbox = nativeDigestsAvailable()
+  const invalidated = sync(() => { PubSub.publishUnsafe(changed, undefined) })
+  if (deviceInbox) try fork.scoped Stream.runForEach(nativeDigestChanges(), () => invalidated)
+
+  const inboxFor = (owner: ResidentOwner) => Effect.provideService(digestInbox(digestScope(owner)), KeyValueStore.KeyValueStore, store)
+  const nativeEpoch = effect (owner: ResidentOwner): (number | undefined)!! => {
+    const current = Effect.provideService(launchOwnerAt(), Agent, agent) catch () => undefined
+    if (!sameResidentOwner(owner, current)) return undefined
+    const status = agent.life.status() catch () => undefined
+    return status?.available && status.state === "running" ? status.epoch : undefined
+  }
+  const snapshot = effect (owner: ResidentOwner): (NativeDigestSnapshot | undefined)!! => {
+    if (!deviceInbox) return undefined
+    const epoch = try nativeEpoch(owner)
+    if (epoch === undefined) return undefined
+    const saved = try readNativeDigests()
+    return (try nativeEpoch(owner)) === epoch ? saved : undefined
+  }
+
+  let generation = 0
   return {
     changes: Stream.fromPubSub(changed),
-    changed: () => sync(() => { PubSub.publishUnsafe(changed, undefined) }),
+    native: deviceInbox,
+    read: (owner: ResidentOwner) => round(effect {
+      if (deviceInbox) return (try snapshot(owner))?.rows
+      const inbox = try inboxFor(owner)
+      return inbox.history() catch () => undefined
+    }),
+    sync: (owner: ResidentOwner, protocol: HostedDigestProtocol) => round(effect {
+      if (deviceInbox) {
+        const before = try snapshot(owner)
+        if (before === undefined) return { rows: undefined, current: false }
+        const synced = try syncNativeDigests(before.lease)
+        const saved = try snapshot(owner)
+        try invalidated
+        return saved?.lease === before.lease ? { rows: saved.rows, current: synced } : { rows: undefined, current: false }
+      }
+      const inbox = try inboxFor(owner)
+      const fresh = inbox.sync(protocol, ++generation) catch () => undefined
+      const rows = fresh ?? (inbox.history() catch () => undefined)
+      try invalidated
+      return { rows, current: fresh !== undefined }
+    }),
+    nativeSnapshot: (owner: ResidentOwner) => round(snapshot(owner)),
+    nativeBackground: (owner: ResidentOwner, enabled: boolean, lease: string) => round(effect {
+      const before = try snapshot(owner)
+      if (before?.support !== "nativeScheduled" || before.lease !== lease) return false
+      const saved = try writeNativeDigestPreference(enabled, lease)
+      const after = try snapshot(owner)
+      try invalidated
+      return saved && after?.support === "nativeScheduled" && after.lease === lease && after.backgroundEnabled === enabled
+    }),
+    nativeEnableNotifications: (owner: ResidentOwner, lease: string) => effect {
+      const before = try round(snapshot(owner))
+      if (before?.lease !== lease || before.noticesAllowed) return false
+      const requested = try enableNativeDigestNotices(lease)
+      try invalidated
+      return requested
+    },
   }
 })
 
@@ -45,16 +117,21 @@ const brief = started(effect {
 
   const read = effect (available: boolean | void) => {
     const owner = (try list.get()).owner
-    const identity = available !== false && owner > 0 ? (ownerAt() catch () => "") : ""
-    const scope = identity !== "" && (try rows.sameOwner(identity, owner)) ? digestScope(identity) : undefined
+    const identity = available !== false && owner > 0 ? (launchOwnerAt() catch () => undefined) : undefined
+    const scope = identity !== undefined && (try rows.sameDigestOwner(identity, owner)) ? digestScope(identity) : undefined
     if (scope !== bound) {
       bound = scope
       fromAreas.brief(undefined)
     }
-    if (scope === undefined) return
-    const inbox = try digestInbox(scope)
-    const saved = inbox.history() catch () => undefined
-    if (saved === undefined || (ownerAt() catch () => "") !== identity || (try list.get()).owner !== owner) return
+    if (identity === undefined || scope === undefined) return
+    const saved = try history.read(identity)
+    const confirmed = launchOwnerAt() catch () => undefined
+    if (!sameResidentOwner(identity, confirmed) || (try list.get()).owner !== owner || !(try rows.sameDigestOwner(identity, owner))) {
+      bound = undefined
+      fromAreas.brief(undefined)
+      return
+    }
+    if (saved === undefined && !history.native) return
     const latest = latestRetainedBrief(saved)
     const current: ToldBrief | undefined = latest === undefined ? undefined
       : latest.status === "failed" || latest.status === "cancelled"

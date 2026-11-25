@@ -2,6 +2,7 @@
 import type { ConversationRecord } from "@elizaos/agent"
 import * as KeyValueStore from "effect/persistence/KeyValueStore"
 import type { Binding } from "../../gen/app__assistant__composer.effect.vibe"
+import { sameArchiveAuthority, type ArchiveAuthority } from "../../gen/app__assistant__attachments.effect.vibe"
 import type { MediaCard } from "./media-review.vibe"
 import type { Failure, Fix } from "../../gen/app__assistant__reply.ts"
 import type { MailQuestion } from "../inbox/mail-context.vibe"
@@ -24,6 +25,7 @@ export interface StagedFiles {
   readonly binding: Binding
   readonly key?: string
   readonly files: readonly Attached[]
+  readonly authority?: ArchiveAuthority
   readonly mail?: MailQuestion
   readonly transcript?: TranscriptAttachment
 }
@@ -78,6 +80,7 @@ export interface Seen {
   readonly typed: string
   readonly files: readonly Attached[]
   readonly filesBinding: Binding | undefined
+  readonly filesAuthority: ArchiveAuthority | undefined
   readonly transcript: TranscriptAttachment | undefined
   readonly attachmentNotice: string
   readonly preview: { readonly ticket: number; readonly file: Attached } | undefined
@@ -95,7 +98,11 @@ export interface Seen {
  * The words around the assistant's machines, and the agent's names for what they number: the store a screen reads
  * with `useSyncExternalStore`, and the shell writes. It holds no rule; each machine decides what counts.
  */
+export interface DraftSeat { readonly number: number; readonly authority: ArchiveAuthority }
+
 export interface Board {
+  draftSeat: DraftSeat | undefined
+  phoneDrafts: { kind: "encrypted" } | { kind: "temporary"; values: Map<string, string> } | undefined
   snapshot(this: void): Seen
   subscribe(this: void, listener: () => void): () => void
   /** The owner typed `text` in the composer's box. */
@@ -115,6 +122,7 @@ export interface Board {
   staged: StagedFiles | undefined
   lastTranscriptOffer: number
   previewFile(file: Attached): number
+  bindArchiveAuthority(authority: ArchiveAuthority | undefined): boolean
   /** Keep `sighting` under the `ticket` the locator accepted. */
   rememberPosition(ticket: number, sighting: Sighting): void
   /** Forget any remembered position once the locator has none. */
@@ -136,6 +144,8 @@ export interface Board {
   page(ticket: number): ReadonlyArray<Line>
   line(conversation: number, message: number): Line | undefined
   putPage(ticket: number, conversation: number, lines: ReadonlyArray<Line>): void
+  /** Take confirmed rows and retire loaded copies of any now-redacted attachment, returning its open preview ticket. */
+  takeHistory(ticket: number, conversation: number, lines: readonly Line[], redacted: ReadonlySet<string>): number | undefined
   append(ticket: number, conversation: number, line: Line): void
   rename(ticket: number, line: Line, id: string): void
   drop(ticket: number, line: Line): void
@@ -144,10 +154,18 @@ export interface Board {
 export service Talk {
   readonly board: Board
   readonly attachmentLock: Semaphore.Semaphore
+  /** Seal the previous seat, or open the verified conversation catalogue and say if it was selected before. */
+  seat(next: DraftSeat | undefined): boolean!!
+  /** Record which verified catalogue the settled numeric Chat state belongs to. */
+  markSeat(open: boolean): boolean!!
 }
 
-/** Where the agent's conversations are kept by number, so that the conversation showing is found again after a restart. */
-const key = "alpha/assistant/conversations@1"
+/** The selected catalogue is paired with the numerical Chat state. Old anonymous catalogues stay sealed. */
+const selectedCatalogue = "alpha/assistant/selected-catalogue@2"
+
+function catalogueKey(authority: ArchiveAuthority): string {
+  return `alpha/assistant/conversations-v2/${encodeURIComponent(JSON.stringify([authority.owner, authority.agent]))}`
+}
 
 module pure {
   /** What was kept under `key`, or nothing. @throws {never} */
@@ -167,18 +185,24 @@ import { unkept } from pure
 /** The board, with the conversations numbered before kept from the store, and each new one kept there. */
 export const talk = Layer.effect(Talk, effect {
   const store = try KeyValueStore.KeyValueStore
-  const remembered = unkept(store.get(key) catch () => undefined)
-  const records: Known[] = remembered.map((one) => ({ record: { id: one.id, roomId: one.roomId } as ConversationRecord, title: one.title }))
+  let archiveAuthority: ArchiveAuthority | undefined
+  let catalogue: string | undefined
+  let records: Known[] = []
   const messages: string[] = []
   const numbers = new Map<string, number>()
   const listeners = new Set<() => void>()
   let position: { readonly ticket: number; readonly sighting: Sighting } | undefined
   let seen: Seen = {
-    pages: new Map(), reply: "", label: "", failure: undefined, typed: "", files: [], filesBinding: undefined, transcript: undefined, attachmentNotice: "", preview: undefined, media: [], mediaNote: undefined, saved: "", hits: [],
-    titles: new Map(records.map((one, at) => [at + 1, one.title])),
+    pages: new Map(), reply: "", label: "", failure: undefined, typed: "", files: [], filesBinding: undefined, filesAuthority: undefined, transcript: undefined, attachmentNotice: "", preview: undefined, media: [], mediaNote: undefined, saved: "", hits: [],
+    titles: new Map(),
   }
-  const keep = () => runFork(ignore(store.set(key, JSON.stringify({ conversations: records.map((one) => ({ id: one.record.id, roomId: one.record.roomId, title: one.title })) }))))
+  const keep = () => {
+    const key = catalogue
+    if (key !== undefined) runFork(ignore(store.set(key, JSON.stringify({ conversations: records.map((one) => ({ id: one.record.id, roomId: one.record.roomId, title: one.title })) }))))
+  }
   const board: Board = {
+    draftSeat: undefined,
+    phoneDrafts: undefined,
     snapshot: () => seen,
     subscribe: (listener) => {
       listeners.add(listener)
@@ -233,6 +257,21 @@ export const talk = Layer.effect(Talk, effect {
     },
     numbered: (id) => numbers.get(id) ?? 0,
     messageId: (message) => messages[message - 1],
+    bindArchiveAuthority: (authority) => {
+      const previous = archiveAuthority
+      if (previous !== undefined && authority !== undefined && sameArchiveAuthority(previous, authority)) return false
+      archiveAuthority = authority
+      if (previous === undefined) return false
+      const pages = new Map(seen.pages)
+      let changed = false
+      for (const [ticket, page] of pages) {
+        if (!page.lines.some((line) => line.attachments !== undefined)) continue
+        pages.set(ticket, { ...page, lines: page.lines.map((line) => line.attachments === undefined ? line : { ...line, attachments: undefined }) })
+        changed = true
+      }
+      if (changed || seen.preview !== undefined) board.change({ pages, preview: undefined })
+      return true
+    },
     page: (ticket) => seen.pages.get(ticket)?.lines ?? [],
     line: (conversation, message) => {
       const id = board.messageId(message)
@@ -246,6 +285,32 @@ export const talk = Layer.effect(Talk, effect {
     },
     putPage: (ticket, conversation, lines) => {
       board.change({ pages: new Map([...seen.pages, [ticket, { conversation, lines }]]) })
+    },
+    takeHistory: (ticket, conversation, lines, redacted) => {
+      const incoming = new Map(lines.map((line) => [line.id, line]))
+      const merged = [...lines, ...board.page(ticket).filter((line) => !incoming.has(line.id))]
+      if (redacted.size === 0) {
+        board.putPage(ticket, conversation, merged)
+        return undefined
+      }
+      const pages = new Map(seen.pages)
+      const preview = seen.preview
+      let closed: number | undefined
+      for (const [previous, page] of seen.pages) {
+        if (page.conversation !== conversation) continue
+        let updated = false
+        const kept = page.lines.map((line) => {
+          const replacement = redacted.has(line.id) ? incoming.get(line.id) : undefined
+          if (replacement === undefined) return line
+          if (preview !== undefined && line.attachments?.includes(preview.file)) closed = preview.ticket
+          updated = true
+          return replacement
+        })
+        if (previous !== ticket && updated) pages.set(previous, { conversation, lines: kept })
+      }
+      pages.set(ticket, { conversation, lines: merged })
+      board.change(closed === undefined ? { pages } : { pages, preview: undefined })
+      return closed
     },
     append: (ticket, conversation, line) => {
       const current = board.page(ticket)
@@ -262,5 +327,39 @@ export const talk = Layer.effect(Talk, effect {
       if (page !== undefined) board.putPage(ticket, page.conversation, page.lines.filter((one) => one !== line))
     },
   }
-  return { board, attachmentLock: try Semaphore.make(1) }
+  const seat = effect (next: DraftSeat | undefined): boolean!! => {
+    const key = next === undefined ? undefined : catalogueKey(next.authority)
+    const preceding = key === undefined ? undefined : (store.get(selectedCatalogue) catch () => undefined)
+    const remembered = key === undefined ? [] : unkept(store.get(key) catch () => undefined)
+    catalogue = key
+    records = remembered.map((one) => ({ record: { id: one.id, roomId: one.roomId } as ConversationRecord, title: one.title }))
+    messages.length = 0
+    numbers.clear()
+    position = undefined
+    board.draftSeat = next
+    board.phoneDrafts = undefined
+    board.outgoing = ""
+    board.lastSent = ""
+    board.lastSentWire = ""
+    board.lastSentId = ""
+    board.sendWhenMade = false
+    board.waitingRequest = undefined
+    board.postingRequest = undefined
+    board.change({
+      pages: new Map(), reply: "", label: "", failure: undefined, typed: "", saved: "",
+      files: [], filesBinding: undefined, filesAuthority: undefined, transcript: undefined, attachmentNotice: "", preview: undefined,
+      hits: [], media: [], mediaNote: undefined, titles: new Map(records.map((one, at) => [at + 1, one.title])),
+    })
+    return key !== undefined && preceding === key && remembered.length > 0
+  }
+  const markSeat = effect (open: boolean): boolean!! => {
+    const key = catalogue
+    if (open && key === undefined) return false
+    return effect {
+      if (open && key !== undefined) try store.set(selectedCatalogue, key)
+      else try store.remove(selectedCatalogue)
+      return true
+    } catch () => false
+  }
+  return { board, attachmentLock: try Semaphore.make(1), seat, markSeat }
 })

@@ -227,10 +227,12 @@ export function elizaFiles(scene: FilesScene): Faked {
       },
       storageOpen({ path }) {
         called("open");
+        if (scene.refusing.includes("storageOpen")) return Promise.resolve({ status: "unsupported" });
         scene.opened.push(path);
         return Promise.resolve({ status: "opened", count: 1 });
       },
       storageSelect({ volume, path }) {
+        called("storageSelect");
         if (denied()) return Promise.resolve(refused());
         const found = find(on(volume), path);
         return Promise.resolve(found && !found.directory ? {
@@ -302,6 +304,7 @@ export function selectedDocuments(scene: FilesScene): Faked {
         return Promise.resolve(found?.mimeType === "application/pdf" ? { status: "rendered", message: "", page, pageCount: 3, imageUri: `page://${found.path}/${page}` } : { status: "unsupported", message: "" });
       },
       readSelected({ selectionId }) {
+        if (scene.refusing.includes("readSelected")) return Promise.resolve({ status: "failed", message: "" });
         const found = held(selectionId);
         return Promise.resolve(found ? { status: "read", message: "", text: scene.texts[found.path] ?? `The words of ${leaf(found.path)}`, mimeType: found.mimeType, bytes: found.size } : { status: "unavailable", message: "" });
       },
