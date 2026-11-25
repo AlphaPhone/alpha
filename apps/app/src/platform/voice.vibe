@@ -10,7 +10,6 @@ export type VoiceGrant = "granted" | "denied" | "prompt"
 export type VoiceEvent =
   | { readonly kind: "speechStart"; readonly session: number }
   | { readonly kind: "speechEnd"; readonly session: number; readonly text: string }
-  | { readonly kind: "transcript"; readonly session: number; readonly text: string; readonly final: boolean }
   | { readonly kind: "bargeIn"; readonly session: number; readonly echo: boolean }
   | { readonly kind: "ended"; readonly session: number; readonly reason: string }
   | { readonly kind: "recordingStopped"; readonly ticket: number; readonly recorded: boolean }
@@ -167,6 +166,13 @@ export type DictationAnswer =
   | { readonly kind: "obscured" | "failed"; readonly durationMs: number | undefined }
   | { readonly kind: "lost" }
 
+/** A preview outlet owned by one admitted microphone capture. */
+export interface VoicePreview {
+  show(text: string): void
+  clear(): void
+  retire(): void
+}
+
 export service VoiceBridge {
   available(): boolean!!
   checkPermission(): VoiceGrant!!
@@ -179,7 +185,7 @@ export service VoiceBridge {
   forgetAccount(): void!!
   holdEngine(): boolean!!
   releaseEngineHold(): void!!
-  openMic(session: number, network: boolean): boolean!VoiceBridgeFailed
+  openMic(session: number, network: boolean, preview?: VoicePreview): boolean!VoiceBridgeFailed
   closeMic(session: number): void!VoiceBridgeFailed
   awaitSpeechOutputWarmup(session: number): void!!
   playSentence(session: number, turn: number, text: string, append: boolean): void!VoiceBridgeFailed
@@ -332,6 +338,7 @@ export const phoneVoiceBridge = Layer.effect(VoiceBridge, effect {
   let cloudKey: CredentialId | undefined
   let accountEpoch = 0
   let cloudCapture: { close(): Promise<void>; cancel(): Promise<void> } | undefined
+  let cloudPreview: { readonly session: number; readonly outlet: VoicePreview | undefined } | undefined
   let cloudSpeechAbort: AbortController | undefined
   let activePlaybackRequest: string | undefined
   const speakerLock = try Semaphore.make(1)
@@ -427,7 +434,14 @@ export const phoneVoiceBridge = Layer.effect(VoiceBridge, effect {
     }))
   }
 
-  effect function openMic(session: number, network: boolean): boolean!VoiceBridgeFailed {
+  function clearCloudPreview(session: number): void {
+    if (cloudPreview?.session !== session) return
+    const closing = cloudPreview
+    cloudPreview = undefined
+    closing.outlet?.retire()
+  }
+
+  effect function openMic(session: number, network: boolean, preview?: VoicePreview): boolean!VoiceBridgeFailed {
     const reopen = activeSession === session
     activeSession = session
     if (network && registered(CLOUD_STREAM_PLUGIN)) {
@@ -436,10 +450,18 @@ export const phoneVoiceBridge = Layer.effect(VoiceBridge, effect {
         environment: CLOUD_ENVIRONMENT,
         credentialId: cloudKey ?? (try signedInKey(signInAccounts())),
         assertCurrent: makeSessionGuard(() => activeSession, currentSession),
-        onInterim: (text) => publish({ kind: "transcript", session: currentSession, text, final: false }),
+        // The SDK invokes this only for the active speech generation of its current capture.
+        onInterim: (text) => {
+          const current = cloudPreview
+          if (activeSession !== currentSession || current?.session !== currentSession) return
+          current.outlet?.show(text)
+        },
       }, relayPlugin())
       if (activeSession !== currentSession) throw new VoiceBridgeFailed({ method: "startCloudSpeech", cause: "session-changed" })
       cloudStream = stream
+      clearCloudPreview(currentSession)
+      const previewOwner = { session: currentSession, outlet: preview }
+      cloudPreview = previewOwner
       const abort = makeAbort()
       const capture = tryPromise({
         try: () => stream.listen({
@@ -447,12 +469,17 @@ export const phoneVoiceBridge = Layer.effect(VoiceBridge, effect {
           onSpeechStart: () => publish({ kind: "speechStart", session: currentSession }),
           onSpeechEnd: () => undefined,
           onSegment: (text) => {
+            if (cloudPreview === previewOwner) preview?.clear()
             if (text !== null && text !== "") publish({ kind: "speechEnd", session: currentSession, text })
           },
-          onEnd: (cause) => publish({ kind: "ended", session: currentSession, reason: cause === undefined ? "ended" : interruptedByCall(cause) ? "call-active" : "error" }),
+          onEnd: (cause) => {
+            if (cloudPreview === previewOwner) clearCloudPreview(currentSession)
+            publish({ kind: "ended", session: currentSession, reason: cause === undefined ? "ended" : interruptedByCall(cause) ? "call-active" : "error" })
+          },
         }),
         catch: (cause) => new VoiceBridgeFailed({ method: "startCloudSpeech", cause }),
       }) catch effect (failure) => {
+        if (cloudPreview === previewOwner) clearCloudPreview(currentSession)
         cloudStream = undefined
         cloudKey = undefined
         throw failure
@@ -505,6 +532,7 @@ export const phoneVoiceBridge = Layer.effect(VoiceBridge, effect {
   }
 
   effect function closeMic(session: number): void!VoiceBridgeFailed {
+    clearCloudPreview(session)
     if (cloudCapture !== undefined) {
       const cap = cloudCapture
       cloudCapture = undefined
@@ -640,6 +668,7 @@ export const phoneVoiceBridge = Layer.effect(VoiceBridge, effect {
   }
 
   effect function shut(session: number): boolean!! {
+    clearCloudPreview(session)
     if (activeSession === session) activeSession = 0
     cloudSpeechAbort?.abort()
     cloudSpeechAbort = undefined
@@ -682,7 +711,12 @@ export const phoneVoiceBridge = Layer.effect(VoiceBridge, effect {
       cachedStatus = undefined
       cloudKey = undefined
     }),
-    forgetAccount: () => sync(() => { accountEpoch += 1; cloudKey = undefined; if (activeSession === 0) cloudStream = undefined }),
+    forgetAccount: () => sync(() => {
+      clearCloudPreview(activeSession)
+      accountEpoch += 1
+      cloudKey = undefined
+      if (activeSession === 0) cloudStream = undefined
+    }),
     holdEngine: () => registered(LOCAL_PLUGIN)
       ? Effect.orElseSucceed(Effect.map(tryPromise(() => localPlugin().holdSpeechEngine({})), (res) => res.held === true), () => false)
       : succeed(false),

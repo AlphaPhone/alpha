@@ -671,6 +671,9 @@ describe("Talk from Ask Alpha's composer (spec/app/voice/index.md, \"Story: Hold
     };
     await drawnUntil(alpha, area, Voice.Machine, (s) => s.route.account === "CloudAccount" && s.route.consent && s.warmed);
     await settled(() => world.voice.relayWarmups.length === 1);
+    await drawnUntil(alpha, area, Conversation, (s) => s.ready && s.observing);
+    await drawnUntil(alpha, area, Composer, (state) => state.slot === "Open");
+    await drawn(() => alpha.runtime.runPromise(Effect.flatMap(Shell.Machine, (machine) => machine.send({ type: "raise", detent: "Sheet" }))));
 
     await press("Talk");
     await drawnUntil(alpha, area, Voice.Machine, (s) => s.phase === "Listening" && s.mic === "On" && s.network);
@@ -678,6 +681,24 @@ describe("Talk from Ask Alpha's composer (spec/app/voice/index.md, \"Story: Hold
     expect([world.voice.cloudStarts, world.voice.activeMicSession !== undefined, button("Talk")]).toEqual([
       [{ environment: "production", credentialId: "cred-owner-9" }], true, undefined,
     ]);
+
+    // spec/app/voice/index.md, "What the owner says is shown as it is heard"
+    const preview = () => document.querySelector('[aria-label="Heard so far, not sent"]')?.textContent;
+    const sessionId = world.voice.activeMicSession;
+    await drawn(() => {
+      world.voice.emitCloud?.({ type: "speech-start", sessionId });
+      world.voice.emitCloud?.({ type: "transcript", sessionId, text: "Looking up my calendar", final: false });
+    });
+    await settled(() => preview() === "Looking up my calendar");
+    expect(world.ask.said).toEqual([]);
+    await press("Mute microphone");
+    await settled(() => preview() === undefined);
+    await drawn(() => {
+      world.voice.emitCloud?.({ type: "transcript", sessionId, text: "A retired capture", final: false });
+      world.voice.emitCloud?.({ type: "speech-end", sessionId, text: "" });
+    });
+    await drawnUntil(alpha, area, Voice.Machine, (state) => state.muted && state.mic === "Off");
+    expect(preview()).toBeUndefined();
 
     await press("Stop voice conversation");
     await drawnUntil(alpha, area, Voice.Machine, (s) => s.phase === "Idle" && s.mic === "Off");
