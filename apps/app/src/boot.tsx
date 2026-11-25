@@ -22,6 +22,10 @@ export function boot(platform: Layer.Layer<Platform>, mounts: readonly Mount[] =
     }).pipe(Effect.catchCause(() => Effect.succeed(false))),
   });
   const executors = Layer.succeed(MediaExecutors, {
+    reviewFiles: (operation) => Effect.tryPromise(async () => {
+      const [{ default: files }, { reviewFileAction }] = await Promise.all([import("./files/index.tsx"), import("./files/agent.vibe")]);
+      return files.runtime(alpha).runPromise(reviewFileAction(operation));
+    }).pipe(Effect.orElseSucceed(() => undefined)),
     execute: (operation, call, authority) => Effect.tryPromise(() => executeMedia(alpha, operation, call, authority)).pipe(Effect.orElseSucceed(() => undefined)),
   });
   const downloads = Layer.succeed(BrowserDownloadsHandoff, {

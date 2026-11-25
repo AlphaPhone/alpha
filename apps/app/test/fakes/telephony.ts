@@ -46,6 +46,8 @@ export interface TelephonyScene {
   contacts: boolean;
   /** Whether the phone lets Alpha write contacts, beside reading them. */
   editable: boolean;
+  /** While this waits, Android has queued the contact deletion and still holds the contact. */
+  holdContactDeletion: Promise<void> | undefined;
   /** The phone's own contact editor, each time it was opened: on a new contact, or on the contact named. */
   editors: string[];
   people: Person[];
@@ -95,6 +97,7 @@ export function telephonyScene(): TelephonyScene {
     sms: "granted",
     texts: [{ id: 1, thread: 1, address: "+14155550100", box: "inbox", date: 1_700_000_050_000, body: "See you at five", read: false }],
     holdMessageDeletion: false,
+    holdContactDeletion: undefined,
     smsNotice: undefined,
     sent: [],
     journal: new Map(),
@@ -296,7 +299,7 @@ function telephony(world: TelephonyScene): Faked {
 }
 
 /** `ElizaContacts`: the address book, over `world`. */
-function contacts(world: TelephonyScene): Faked {
+function contacts(world: TelephonyScene, now: () => number): Faked {
   return plugin<AddressBookNativePlugin>(() => {
     const status = () => ({ available: true, readable: world.contacts, writable: world.contacts && world.editable });
     const find = (id: string) => world.people.find((one) => one.id === id);
@@ -361,9 +364,19 @@ function contacts(world: TelephonyScene): Faked {
         if (one === undefined) return { status: "not-found" };
         const revision = one.revision;
         if (await versionOf(id, revision) !== version || find(id) !== one || one.revision !== revision) return { status: "stale" };
-        world.people = world.people.filter((person) => person !== one);
-        const staged = { id: `staged-${world.staged.length + 1}`, kind: "contact", target: { id, version }, phase: "queued", deadline: { expiresAt: 1_800_000_000_000 } };
+        const staged = { id: `staged-${world.staged.length + 1}`, kind: "contact", target: { id, version }, phase: "queued", deadline: { expiresAt: now() + 200 } };
         world.staged.push(staged);
+        const settle = () => {
+          if (staged.phase !== "queued") return;
+          if (find(id) !== one || one.revision !== revision) {
+            staged.phase = "conflict";
+            return;
+          }
+          world.people = world.people.filter((person) => person !== one);
+          staged.phase = "deleted";
+        };
+        if (world.holdContactDeletion === undefined) settle();
+        else void world.holdContactDeletion.then(settle);
         return { status: "queued", deletion: staged };
       },
       resolveNames: ({ numbers }) => Promise.resolve({ names: numbers.map((number) => ({ number, name: world.people.find((one) => one.phoneNumbers.some((phone) => phone.number === number))?.displayName ?? null, photo: null })) }),
@@ -433,10 +446,10 @@ function callState(world: TelephonyScene): Faked {
 }
 
 /** The telephony plugins an Alpha image's host registers. */
-export function telephonyPlugins(world: TelephonyScene): Record<string, Faked> {
+export function telephonyPlugins(world: TelephonyScene, now: () => number): Record<string, Faked> {
   return {
     ElizaTelephony: telephony(world),
-    ElizaContacts: contacts(world),
+    ElizaContacts: contacts(world, now),
     ElizaActionJournal: journal(world),
     AlphaOngoingCall: ongoing(world),
     AlphaCallState: callState(world),

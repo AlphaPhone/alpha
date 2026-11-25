@@ -1,7 +1,7 @@
 // spec/app/photos/index.md, "Story: Browse the library"; spec/app/photos/index.md, "Story: Select photos"; spec/app/photos/index.md, "Story: Change albums from what I am looking at"
 import { Effect } from "effect";
 import { Album, ChevronLeft, ChevronRight, Ellipsis, Heart, Image, Images, ListChecks, Plus, ScanText, Search, Share2, Trash2, Undo2, X } from "lucide-react";
-import { useRef, useState, type ReactNode } from "react";
+import { useCallback, useRef, useState, type ReactNode } from "react";
 import { Alert, AppHeader, Button, Chip, ConfirmDialog, EmptyState, Input, ListRow, Menu, MenuContent, MenuItem, MenuTrigger, Sheet, SheetContent, Spinner, cn } from "@repo/ui";
 import { useMachine as useLibrary } from "../../gen/app__photos.react.ts";
 import { useMachine as useTrash } from "../../gen/app__photos__trash.react.ts";
@@ -15,7 +15,7 @@ import { Catalog } from "./catalog.vibe";
 import { MediaGrid } from "./Grid.tsx";
 import { MediaViewer } from "./Viewer.tsx";
 import type { agentPhotos } from "./agent.vibe";
-import type { library } from "./photos.vibe";
+import { PhotoChooser, type library } from "./photos.vibe";
 import type { trash } from "./trash.vibe";
 import type { viewer } from "./viewer.vibe";
 import type { Layer } from "effect";
@@ -49,6 +49,13 @@ export function Photos({ runtime, alpha }: PhotosProps) {
   const agent = useAgent(runtime);
   const scan = useScan(runtime);
   const scanInput = useRef<HTMLInputElement>(null);
+  const scanPicker = useCallback((node: HTMLInputElement | null) => {
+    scanInput.current = node;
+    if (!node) return;
+    const cancel = () => { runtime.runSync(Effect.flatMap(PhotoChooser, (picker) => picker.finish())); };
+    node.addEventListener("cancel", cancel);
+    return () => node.removeEventListener("cancel", cancel);
+  }, [runtime]);
   const [searching, setSearching] = useState(false);
   const [query, setQuery] = useState("");
   const [name, setName] = useState("");
@@ -134,7 +141,9 @@ export function Photos({ runtime, alpha }: PhotosProps) {
     if (album?.owned) add("Delete album", { type: "deleteAlbum" }, <Trash2 />, menu);
   }
   if (!selection && !inTrash && opened === 0 && state.visible && !secure && scan.state && scan.can({ type: "startImage", frame: scan.state.images + 1 }, "Phone")) {
-    menu.push({ label: "Scan image text", icon: <ScanText />, run: () => scanInput.current?.click() });
+    menu.push({ label: "Scan image text", icon: <ScanText />, run: () => {
+      if (scanInput.current && runtime.runSync(Effect.flatMap(PhotoChooser, (picker) => picker.begin()))) scanInput.current.click();
+    } });
   }
   const status = inTrash ? bin.read.status : state.library.status;
   const dialog = state.shelf.dialog;
@@ -157,10 +166,11 @@ export function Photos({ runtime, alpha }: PhotosProps) {
   </AppHeader>;
   return (
     <section aria-label="Photos" className="relative flex min-h-0 flex-1 flex-col bg-background">
-      <input ref={scanInput} type="file" accept="image/jpeg,image/png,image/webp" hidden onChange={(event) => {
+      <input ref={scanPicker} type="file" accept="image/jpeg,image/png,image/webp" hidden onChange={(event) => {
         const source = event.currentTarget.files?.[0];
         event.currentTarget.value = "";
         if (source) void runtime.runPromiseExit(scanSelectedImage(source));
+        else runtime.runSync(Effect.flatMap(PhotoChooser, (picker) => picker.finish()));
       }} />
       <Scan runtime={runtime} alpha={alpha} />
       <div inert={opened !== 0} aria-hidden={opened !== 0 || undefined} className="flex min-h-0 flex-1 flex-col" data-alpha-subview="photos-list">

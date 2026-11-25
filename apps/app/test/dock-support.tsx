@@ -41,7 +41,7 @@ export async function mountDock({ view = "Browser", withToast = false, flush }: 
   const platform = Layer.mergeAll(
     pagePlatform(Layer.provide(agentAt("http://agent.test"), client), Layer.provide(cloudAt("http://cloud.test"), client)),
     Layer.succeed(MediaHandoff, { attach: () => Effect.succeed(false) }),
-    Layer.succeed(MediaExecutors, { execute: () => Effect.succeed(undefined) }),
+    Layer.succeed(MediaExecutors, { reviewFiles: () => Effect.succeed(undefined), execute: () => Effect.succeed(undefined) }),
   );
   const runtime = ManagedRuntime.make(Layer.provideMerge(whole(together(assisting, voiceArea, aloud)), Layer.provideMerge(resident, platform)));
   const host = document.body.appendChild(document.createElement("div"));

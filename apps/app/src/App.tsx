@@ -1,5 +1,5 @@
 // spec/app/shell/index.md, "Story: Move between Home and the apps"; spec/app/shell/index.md, "On Phone, Messages and Contacts the app's own bar stands in for Ask Alpha at rest, until Ask Alpha rises"; spec/app/shell/gestures.md, "A swipe travels at least 46 points; a sideways one from within 30 points of a side edge, towards the middle, is Back"; spec/app/shell/gestures.md, "On the launcher a pull down that Home allows opens Android's shade, and a swipe up from the bottom bar goes Home; nothing else is a swipe"; spec/app/shell/layers.md, "The page under a layer or a hold takes no touch, and a covering layer or a hold takes none for Ask Alpha either"; spec/app/update/page.md, "A page that was not mounted mounts its editors only once no update is pending"
-import { Alert, AppHeader, cn } from "@repo/ui";
+import { Alert, AppHeader, StartupFailureScreen, StartupMark, cn } from "@repo/ui";
 import { type PointerEvent, useCallback, useRef, useSyncExternalStore } from "react";
 import { useMachine } from "../gen/app__shell.react.ts";
 import { askAlphaDrawn } from "../gen/app__shell.ts";
@@ -8,12 +8,14 @@ import { useMachine as useLayers } from "../gen/app__shell__layers.react.ts";
 import { assistantInert, pageInert, takesBack } from "../gen/app__shell__layers.ts";
 import { barHeight, edge, swipe } from "../gen/app__shell__gestures.ts";
 import { useMachine as usePage } from "../gen/app__update__page.react.ts";
-import { editorsMounted } from "../gen/app__update__page.ts";
+import { dialogShown, editorsMounted } from "../gen/app__update__page.ts";
+import { native } from "./platform/device.vibe";
 import type { Alpha } from "./runtime/area.tsx";
 import { AppBack } from "./shell/AppBack.tsx";
 import { measureChrome, watchChrome } from "./shell/chrome.vibe";
 import { home } from "./shell/shell.vibe";
 import { isCommsView, viewHasHeader, views } from "./shell/views.tsx";
+import { reloadBeforeMount } from "./startup/recovery.vibe";
 
 export interface AppProps {
   /** Alpha as boot.tsx opened it: the root runtime, and every screen at its place. */
@@ -57,12 +59,18 @@ export function App({ alpha }: AppProps) {
   const frame = useCallback((node: HTMLElement | null) => {
     if (node) return watchChrome(node, (event) => { void alpha.runtime.runPromise(measureChrome(event)); });
   }, [alpha]);
-  if (cause) return <Alert variant="destructive" className="m-6">Alpha could not read where you were</Alert>;
-  if (!state) return null;
+  const updating = page !== undefined && dialogShown(page);
+  if (!state) {
+    if (updating) return <>{alpha.slot("overlay")}</>;
+    return cause
+      ? <StartupFailureScreen kind="FailedToStart" platform={native() ? "android" : "web"} version="Unavailable" onReload={reloadBeforeMount} />
+      : <StartupMark className="min-h-dvh" />;
+  }
+  const shellFailed = cause !== undefined;
   const showing = state.trail.at(-1);
   const owner = `${showing ?? "home"}:${state.assistant}:${launcher}`;
   const beginSwipe = (event: PointerEvent<HTMLElement>) => {
-    if (!event.isPrimary || event.button !== 0 || event.defaultPrevented) return;
+    if (shellFailed || !event.isPrimary || event.button !== 0 || event.defaultPrevented) return;
     startedRef.current = undefined;
     const target = event.target;
     if (target instanceof Element && target.closest("input, textarea, select, [contenteditable]:not([contenteditable=false]), [data-alpha-own-gesture]")) return;
@@ -80,7 +88,7 @@ export function App({ alpha }: AppProps) {
     }
   };
   const swiped = (event: PointerEvent<HTMLElement>) => {
-    if (!event.isPrimary) return;
+    if (shellFailed || !event.isPrimary) return;
     const from = startedRef.current;
     if (from?.id !== event.pointerId) return;
     startedRef.current = undefined;
@@ -99,13 +107,13 @@ export function App({ alpha }: AppProps) {
       void alpha.runtime.runPromise(home());
     }
   };
-  const inert = layers !== undefined && pageInert(layers);
+  const inert = shellFailed || (layers !== undefined && pageInert(layers));
   const comms = isCommsView(showing);
   const side = showing === undefined && canvas?.landscape === true && coarsePointer;
   const fullScreen = state.assistant === "Full" && !side;
   const strip = comms && fullScreen;
-  const back = can({ type: "goBack" });
-  const canGoBack = String(back || (layers !== undefined && takesBack(layers)));
+  const back = !shellFailed && can({ type: "goBack" });
+  const canGoBack = String(!shellFailed && (back || (layers !== undefined && takesBack(layers))));
   return (
     <main
       data-alpha-launcher={launcher ? "" : undefined}
@@ -152,12 +160,13 @@ export function App({ alpha }: AppProps) {
             "[&>[data-alpha-detent=full]]:inset-0",
           ],
         )}
-        inert={layers !== undefined && assistantInert(layers)}
+        inert={shellFailed || (layers !== undefined && assistantInert(layers))}
       >
         {alpha.slot("assistant")}
       </div>
       {alpha.slot("overlay")}
       {alpha.slot("notice")}
+      {shellFailed && !updating && <Alert variant="destructive" className="absolute inset-x-4 top-3 z-dialog">Alpha could not read where you were</Alert>}
     </main>
   );
 }

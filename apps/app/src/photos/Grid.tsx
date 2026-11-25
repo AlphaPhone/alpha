@@ -1,7 +1,7 @@
 // spec/app/photos/index.md, "While Photos is open, the owner can pinch the grid between three, four and five columns"
 import type { Effect, ManagedRuntime } from "effect";
 import { Check, Heart, Image, Play } from "lucide-react";
-import { memo, useCallback, useMemo, useRef, useState, type MouseEvent, type TouchEvent, type UIEvent } from "react";
+import { memo, useCallback, useMemo, useRef, useState, type MouseEvent, type ReactNode, type TouchEvent, type UIEvent } from "react";
 import { cn } from "@repo/ui";
 import type { Density } from "../../gen/app__photos.ts";
 import { taken, type Row } from "./catalog.vibe";

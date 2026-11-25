@@ -545,7 +545,12 @@ pure def chooseReplace(s: Viewer, replace: bool, by: Actor): Viewer = { ...s, re
 
 ### Saving writes exactly the edit previewed, of the revision previewed, once, and an untouched edit has nothing to save
 
-The save is recorded before it is written, and is kept through a restart.
+The save is recorded before it is written, and is kept through a restart. In a
+browser the reviewed edit and its outcome are written to the browser's photo
+library together, and choosing Replace requires a capture owned by that
+library. Images carried over from the earlier browser library can be copied. A browser video
+copy is encoded locally, including the saved clip's audio and the trim,
+rotation and crop the owner applied.
 
 ```quint
 pure def canSave(s: Viewer, by: Actor): bool =

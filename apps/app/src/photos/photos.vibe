@@ -15,6 +15,30 @@ import { PhotosPort } from "../platform/photos.vibe"
 import { answer, following, reacting, run, started, together, type Job } from "../runtime/reactor.vibe"
 import { Catalog, catalog, reviewed, taken, type ListedAlbum, type Row } from "./catalog.vibe"
 
+/** One explicit image chooser belongs to the Photos entry that opened it. */
+export service PhotoChooser {
+  pending(): boolean!!
+  begin(): boolean!!
+  finish(): boolean!!
+}
+
+const chooser = Layer.sync(PhotoChooser, () => {
+  let waiting = false
+  return {
+    pending: () => sync(() => waiting),
+    begin: () => sync(() => {
+      if (waiting) return false
+      waiting = true
+      return true
+    }),
+    finish: () => sync(() => {
+      const accepted = waiting
+      waiting = false
+      return accepted
+    }),
+  }
+})
+
 const pageLimit = 120
 export const thumbnailBatch = 24
 
@@ -277,10 +301,13 @@ const lifecycle = started(effect {
   const device = try Device
   const photos = try Library.Machine
   const { phone, hasHandoff } = try PhotosPort
+  const picker = try PhotoChooser
   const visibility = Stream.concat(Stream.fromEffect(device.showing()), device.visible)
-  try Stream.runForEach(Stream.changes(Stream.zipLatestWith(Stream.map(shell.changes, (state) => showing(state, "Photos")), visibility, (open, visible) => open && visible)), effect (open) => {
+  try Stream.runForEach(Stream.changesWith(Stream.zipLatestWith(Stream.map(shell.changes, (state) => showing(state, "Photos")), visibility, (front, visible) => ({ front, visible })), (a, b) => a.front === b.front && a.visible === b.visible), effect ({ front, visible }) => {
     const state = try photos.get()
-    if (!open) {
+    if (front && (try picker.pending())) return
+    if (!front || !visible) {
+      if (!front) try picker.finish()
       if (state.visible) try ignore(photos.send({ type: "hideView" }, "Phone"))
       try revoke()
       if (Option.isSome(phone)) try ignore(tryPromise(() => phone.value.watchLibrary(false)))
@@ -363,4 +390,4 @@ const notices = started(effect {
   })))
 }, "Photos change notices")
 
-export const library = together(catalog, reacting(Library, { carry }), lifecycle, libraryChanges, batches, handoff, notices)
+export const library = together(chooser, catalog, reacting(Library, { carry }), lifecycle, libraryChanges, batches, handoff, notices)

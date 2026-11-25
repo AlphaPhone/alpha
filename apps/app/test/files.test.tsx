@@ -1,5 +1,6 @@
 // @vitest-environment happy-dom
 import { Effect } from "effect";
+import type { DeviceOperation } from "@elizaos/agent/operations";
 import { afterEach, describe, expect, it } from "vitest";
 import { Machine as Tabs } from "../gen/app__browser.effect.vibe";
 import { Machine as Browser } from "../gen/app__files.effect.vibe";
@@ -11,7 +12,7 @@ import { Machine as Shell } from "../gen/app__shell.effect.vibe";
 import { Machine as Inbox } from "../gen/app__inbox.effect.vibe";
 import { Machine as Drafts } from "../gen/app__inbox__drafts.effect.vibe";
 import { Letters } from "../src/inbox/composer.vibe";
-import { agentFilter, agentOpen, agentRead, approved, fileAction, offer, shownAt } from "../src/files/agent.vibe";
+import { agentFilter, agentOpen, agentRead, approved, fileAction, offer, reviewFileAction, shownAt } from "../src/files/agent.vibe";
 import type { Place } from "../src/areas.ts";
 import browser from "../src/browser/index.tsx";
 import files from "../src/files/index.tsx";
@@ -520,6 +521,61 @@ describe("Files on a phone", () => {
     if (!after.reviewed) throw new Error("the changed lease cannot be reviewed");
     expect(await runtime.runPromise(fileAction({ type: "files_trash", paths: [path], reviewed: after.reviewed }, { ...call, proposalId: "delete-reviewed-lease", operationId: "delete-reviewed-lease" }))).toEqual({ kind: "applied" });
     expect(world.files.trash.map((one) => one.was.path)).toEqual([path]);
+
+    const ask = async (operation: DeviceOperation, proposalId: string) => {
+      const review = await runtime.runPromise(reviewFileAction(operation));
+      if (review === undefined) throw new Error(`Files could not review ${operation.type}`);
+      return { review, call: { attemptId: 1, operationId: proposalId, proposalId } };
+    };
+
+    // spec/app/files/index.md, "A reviewed exact path opens its file or folder; a shown position is bound to the same path at review"
+    const elsewhere = { type: "files_open", path: "Documents/notes.txt" } as const;
+    const openedFile = await ask(elsewhere, "open-another-folder-file");
+    expect(await runtime.runPromise(fileAction(elsewhere, openedFile.call, openedFile.review))).toEqual({ kind: "applied" });
+    await until(alpha, runtime, Shown, (state) => state.content.status === "Loaded" && state.kind === "Text");
+    expect([document.querySelector("pre")?.textContent, now().trail.at(-1)]).toEqual(["The words of notes.txt", folder]);
+    await press("Close");
+    await until(alpha, runtime, Shown, (state) => state.viewer === 0);
+
+    const documentFolder = { type: "files_open", path: "Documents" } as const;
+    const openedFolder = await ask(documentFolder, "open-documents-folder");
+    expect(await runtime.runPromise(fileAction(documentFolder, openedFolder.call, openedFolder.review))).toEqual({ kind: "applied" });
+    await until(alpha, runtime, Browser, (state) => state.listing.status === "Loaded" && state.items.some((item) => item.name === "notes.txt"));
+    const folders = await runtime.runPromise(agentFilter(12, { ...everything, kind: "Folder", anyKind: false }, false));
+    expect(folders.items.map((row) => row.name)).toEqual(["Old"]);
+    const position = { type: "files_open", shown: 1 } as const;
+    const openedPosition = await ask(position, "open-shown-folder");
+    expect(await runtime.runPromise(fileAction(position, openedPosition.call, openedPosition.review))).toEqual({ kind: "applied" });
+    await until(alpha, runtime, Browser, (state) => state.trail.length === 3 && state.listing.status === "Loaded");
+    expect(document.querySelector("nav[aria-label='Folder path']")?.textContent).toContain("Old");
+    await press("Clear the filter");
+    await press("Files");
+    await press("Internal storage");
+    await press("Download");
+    await until(alpha, runtime, Browser, (state) => state.trail.at(-1) === folder && state.listing.status === "Loaded");
+
+    // spec/app/files/index.md, "A reviewed batch runs once for the paths shown in the review, as one move, Trash job or Android share"
+    const pdfs = { ...everything, kind: "Pdf", anyKind: false } as const;
+    await runtime.runPromise(agentFilter(15, pdfs, false));
+    const sharing = { type: "files_share", shown: [1, 2] } as const;
+    const share = await ask(sharing, "share-two");
+    await runtime.runPromise(agentFilter(16, { ...pdfs, text: "earlier" }, false));
+    expect(await runtime.runPromise(fileAction(sharing, share.call, share.review))).toEqual({ kind: "applied" });
+    expect(world.files.shared).toEqual([["Download/during.pdf", "Download/earlier.pdf"]]);
+
+    const moving = { type: "files_move", paths: ["Download/during.pdf", "Documents/notes.txt"], dest: "Documents/Old" } as const;
+    const move = await ask(moving, "move-two");
+    const changed = world.files.stored.find((item) => item.path === "Download/during.pdf");
+    if (changed === undefined) throw new Error("the reviewed file is missing from the phone");
+    changed.modified += 1;
+    expect(await runtime.runPromise(fileAction(moving, move.call, move.review))).toEqual({ kind: "applied" });
+    expect([paths(world).includes("primary:Download/during.pdf"), paths(world).includes("primary:Documents/Old/notes.txt"), world.files.calls.filter((method) => method === "move").length]).toEqual([true, true, 1]);
+
+    const deleting = { type: "files_trash", paths: ["Download/during.pdf", "Download/earlier.pdf"] } as const;
+    const deletion = await ask(deleting, "trash-two");
+    expect(await runtime.runPromise(fileAction(deleting, deletion.call, deletion.review))).toEqual({ kind: "applied" });
+    expect(world.files.trash.map((one) => one.was.path).sort()).toEqual([path, "Download/during.pdf", "Download/earlier.pdf"].sort());
+
     await hardware("home");
     expect(await runtime.runPromise(approved({ ticket: 10, act: "Deleting", file: beach, folder, name: "", dest: nowhere }, false))).toEqual({ ran: false, outcome: "Refused" });
   });
