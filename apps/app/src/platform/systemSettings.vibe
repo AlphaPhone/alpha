@@ -1,5 +1,5 @@
 // spec/app/settings/facts.md, "Story: See what the phone says"; spec/app/settings/android.md, "Story: Change what only Android can change"
-import type { AndroidRoleStatus, DeviceSettingsStatus, FilesAccess, LibraryScopeKind, LocationPermissionStatus, MirrorStatus, NativeCrashEntry, SettingsHandoff, StorageVolume, SystemFacts, SystemSettingsPage } from "@elizaos/os-bridges"
+import type { AndroidRoleStatus, DeviceSettingsStatus, FilesAccess, LibraryScopeKind, LocationPermissionStatus, MirrorStatus, NativeCrashEntry, PasswordsClient, SettingsHandoff, StorageVolume, SystemFacts, SystemSettingsPage } from "@elizaos/os-bridges"
 import type { Opened, Target } from "../../gen/app__settings__android.ts"
 import type { Access, AccessGrant, Alert, Holder, Reading } from "../../gen/app__settings__facts.ts"
 import type { Grant } from "../../gen/kit__permission.ts"
@@ -87,6 +87,7 @@ export interface PhoneReport {
 
 /** The phone's own settings, as Android reports them: its facts, its roles, its settings pages and the problem log it keeps. */
 export service SystemSettings {
+  readonly passwordVault: () => Pick<PasswordsClient, "status" | "unlock" | "lock" | "list" | "openEditor"> | undefined
   /** What the phone reports now; what it could not read is left out, never guessed. */
   report(include?: { readonly autofill: boolean }): PhoneReport!!
   boot(): number!!
@@ -334,6 +335,7 @@ effect function opening(target: Target, channel: string): Opened!! {
 
 /** The phone, through eliza's clients of its plugins. */
 export const phoneSystemSettings = Layer.succeed(SystemSettings, {
+  passwordVault: () => registered("ElizaPasswords") ? passwordsOf() : undefined,
   report: phoneReport,
   boot: () => Effect.map(hostFacts(), (facts) => Option.map(facts, (found) => found.bootCount === undefined ? 0 : found.bootCount + 1).pipe(Option.getOrElse(() => 0))),
   access: phoneAccess,
@@ -345,6 +347,7 @@ export const phoneSystemSettings = Layer.succeed(SystemSettings, {
 
 /** A browser: none of the phone's facts, roles, pages or log. */
 export const browserSystemSettings = Layer.succeed(SystemSettings, {
+  passwordVault: () => undefined,
   report: browserReport,
   boot: () => succeed(0),
   access: browserAccess,

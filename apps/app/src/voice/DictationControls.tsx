@@ -16,6 +16,14 @@ import type { DictationKeyboard } from "./useTalkKeyboard.ts";
 
 const recordingMarks = Array.from({ length: 44 }, (_, index) => index);
 
+function KeyboardIcon({ className }: { className?: string }) {
+  return (
+    <svg aria-hidden="true" className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M3 7h18v10H3zM7 11h.01M11 11h.01M15 11h.01M8 14h8" />
+    </svg>
+  );
+}
+
 /** The controls and confirmed time of the current composer recording, including transcript review. */
 export function DictationControls({ runtime, onKeyboard, playback }: {
   runtime: ManagedRuntime.ManagedRuntime<Voice | VoiceWords | DictationClock | VoiceBridge | Speaker, unknown>;
@@ -26,14 +34,15 @@ export function DictationControls({ runtime, onKeyboard, playback }: {
   const clock = runtime.runSync(DictationClock);
   const elapsed = useSyncExternalStore(clock.subscribe, clock.snapshot, clock.snapshot);
   const [leaving, setLeaving] = useState<number>();
-  if (!state || state.recorder.field !== "ComposerField" || state.recorder.stage === "Closed") return null;
+  if (!state) return null;
   const { recorder } = state;
+  if (recorder.field !== "ComposerField" || recorder.stage === "Closed") return null;
   const pending = leaving === recorder.ticket;
-  if (recorder.stage === "Closed") return null;
   const { dictatedText, dictatedDurationMs } = runtime.runSync(VoiceWords).memory;
   const start = { type: "startRecording" } as const;
   const stop = { type: "stopRecording", now: untimed } as const;
   const retry = { type: "transcribeAgain", now: untimed } as const;
+  const type = { type: "typeTranscript", ticket: recorder.ticket } as const;
   const another = { type: "recordAgain" } as const;
   const use = { type: "fill" } as const;
   const close = { type: "closeRecorder" } as const;
@@ -49,7 +58,7 @@ export function DictationControls({ runtime, onKeyboard, playback }: {
     Starting: { label: "Starting microphone", icon: Mic, event: start, enabled: false },
     Recording: { label: "Stop recording", icon: VoiceStopIcon, event: stop, enabled: can(stop) },
     Transcribing: { label: "Cancel transcription", icon: VoiceStopIcon, event: close, enabled: can(close) },
-    Recorded: { label: "Try transcription again", icon: Mic, event: retry, enabled: can(retry) },
+    Recorded: { label: "Transcribe on this phone", icon: Mic, event: retry, enabled: can(retry) },
     Review: { label: "Use in draft", icon: Check, event: use, enabled: can(use) },
   }[recorder.stage];
   const PrimaryIcon = primary.icon;
@@ -73,26 +82,27 @@ export function DictationControls({ runtime, onKeyboard, playback }: {
             const closed = runtime.runSyncExit(dictationReturnedToKeyboard(ticket));
             return closed._tag === "Success" && closed.value;
           });
-        }}>
-          <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <path d="M3 7h18v10H3zM7 11h.01M11 11h.01M15 11h.01M8 14h8" />
-          </svg>
-        </Button>
+        }}><KeyboardIcon /></Button>
         {can(close) && <Button variant="ghost" size="icon" aria-label="Discard transcription" disabled={pending} onClick={() => void send(close)}><X /></Button>}
       </div>
       {review ? <Textarea aria-label="Review transcript" value={dictatedText} disabled={pending} onChange={(event) => void runtime.runPromise(editDictation(event.target.value))}
         className="min-h-28 resize-y rounded-lg border-0 bg-secondary p-3 text-base leading-transcript" /> : (
-        <div className="min-h-0 flex-1">
+        <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto">
           {recording && <div role="img" aria-label="Recording activity" className="flex min-h-10 shrink-0 items-center gap-0.75">
             {recordingMarks.map((mark) => <span key={mark} aria-hidden className="h-1 flex-1 rounded-full bg-primary" />)}
           </div>}
+          {recorder.stage === "Recorded" && <p role="status" className="text-sm leading-transcript text-muted-foreground">Voice stopped</p>}
+          {can(type) && <Button variant="secondary" aria-label="Type transcript instead" disabled={pending}
+            className="h-11 justify-start gap-1.5 rounded-dictation-type px-3 font-normal" onClick={() => void send(type)}>
+            <KeyboardIcon className="size-4.5" />Type
+          </Button>}
         </div>
       )}
       {playback?.failed && <p role="status" className="text-sm leading-voice-status text-muted-foreground">Playback failed</p>}
       <Button className="min-h-14 gap-2.5 rounded-sheet px-4" disabled={pending || !primary.enabled} onClick={() => void send(primary.event)}>
         <PrimaryIcon aria-hidden="true" className="size-6" />{primary.label}
       </Button>
-      {(playback || can(another)) && <Button variant="secondary" className="h-11 px-4 font-normal"
+      {review && (playback || can(another)) && <Button variant="secondary" className={cn("h-11 px-4 font-normal", playback && dictatedText.trim() === "" && !pending && "disabled:opacity-100")}
         disabled={pending || (playback !== undefined && dictatedText.trim() === "")}
         onClick={() => playback ? playback.toggle(recorder.ticket) : void send(another)}>
         {playback?.playing ? <><VoiceStopIcon className="size-5" />Stop audio</> : playback ? <>

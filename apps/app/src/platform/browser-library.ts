@@ -1,5 +1,6 @@
 // spec/app/files/recent.md, "Story: Pick a file with the system picker"; spec/app/files/preview.md, "Open elsewhere hands the file over to read only"
 import type { DocumentHandoff, PdfPage } from "@elizaos/os-bridges";
+import type { PdfRaster } from "./browser-pdf.ts";
 
 /** The file the owner selected, or nothing when the browser chooser closed. */
 export function selectedFile(signal: AbortSignal): Promise<File | undefined> {
@@ -63,12 +64,20 @@ export function releasePreview(url: string): void {
 }
 
 
-/** Render a selected page with the PDF worker, loaded only when Files previews a PDF. @throws {never} */
-export async function pdfPage(blob: Blob, page: number): Promise<PdfPage> {
+/** Load the PDF worker only when a reviewed page needs rendering. @throws {never} */
+export async function pdfRaster(blob: Blob, page: number, signal?: AbortSignal): Promise<PdfRaster> {
   try {
     const { drawPdf } = await import("./browser-pdf.ts");
-    return await drawPdf(blob, page);
+    return await drawPdf(blob, page, signal);
   } catch {
     return { status: "failed", message: "This PDF could not be read." };
   }
+}
+
+/** Give the Files viewer a browser address for the rendered page. @throws {never} */
+export async function pdfPage(blob: Blob, page: number): Promise<PdfPage> {
+  const raster = await pdfRaster(blob, page);
+  return raster.status === "rendered"
+    ? { status: "rendered", message: "", page: raster.page, pageCount: raster.pageCount, imageUri: previewOf(raster.image) }
+    : raster;
 }

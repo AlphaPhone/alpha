@@ -33,6 +33,13 @@ higher one. A browser's library consists of captures and images saved in
 that browser and needs no phone permission. It has the same Favorites,
 custom albums, selection and Recently deleted controls.
 
+As in the existing app, the Library is headed by the day each item was
+taken, counted back from Alpha's time in the owner's zone: "Today",
+"Yesterday", then the short weekday and date ("Sat, Oct 31", with the year
+when it is not this year) for the rest of the last 30 days, and the month
+and year ("October 2026") before that. An album and Recently deleted are not
+headed.
+
 ```quint
 import permission as P from "../../kit/permission"
 import read as R from "../../kit/read"
