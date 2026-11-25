@@ -311,8 +311,8 @@ describe("The Browser on a phone", () => {
     const tabs = async () => [...world.browser.tabs.values()].map((one) => one.history[one.at]);
     const kept = await tabs();
     await asked("open https://owner:secret@example.org", "https://owner:secret@example.org/");
-    if (button("Open") !== undefined) await press("Open");
     await later(alpha, 500);
+    expect(button("Open")).toBeUndefined();
     await drawn(() => vi.waitFor(async () => expect(await front()).toBe("https://en.wikipedia.org/wiki/Eiffel_Tower")));
     expect(await tabs()).toEqual(kept);
   });
