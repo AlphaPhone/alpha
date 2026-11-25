@@ -22,7 +22,7 @@ export type LinkNoteViewProps = Omit<ComponentProps<"section">, "title"> & {
 export function LinkNoteView({ title, domain, clips = [], menu, feedback, onVisit, onBack, className, ...props }: LinkNoteViewProps) {
   return (
     <section aria-label={title} className={cn("absolute inset-0 z-10 flex flex-col bg-background", className)} {...props}>
-      <div className="flex h-14 shrink-0 items-center gap-0.5 px-2">
+      <div className="flex h-13 shrink-0 items-center gap-0.5 px-2">
         <button type="button" aria-label="Back to notes" onClick={onBack} className={cn(focusRing, "flex size-13 shrink-0 items-center justify-center rounded-full active:bg-accent")}><ChevronLeft aria-hidden className="size-5.5" /></button>
         <div className="grow" />
         {menu}
@@ -37,7 +37,7 @@ export function LinkNoteView({ title, domain, clips = [], menu, feedback, onVisi
         <div className="mt-7 flex flex-col gap-5">
           {clips.map((clip) => (
             <div key={clip} className="flex gap-3.5">
-              <span className="w-0.75 shrink-0 rounded-full bg-primary" />
+              <span className="w-0.75 shrink-0 rounded-clip bg-alpha" />
               <div className="font-display text-quote font-light">{clip}</div>
             </div>
           ))}
