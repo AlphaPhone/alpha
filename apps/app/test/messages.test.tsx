@@ -101,7 +101,7 @@ async function composeAction(name: string) {
 describe("Messages on an Alpha image", () => {
   it("Requires a new choice when a SIM is replaced and keeps that choice when rows reorder (spec/app/messages/composer.md, \"Story: Send a message\")", async () => {
     const world = image();
-    const first = world.telephony.subscriptions[0]!;
+    const first = world.telephony.subscriptions[0];
     const second = { id: 2, slot: 1, displayName: "Travel", carrierName: "Travel", defaultSms: false, defaultVoice: false };
     world.telephony.subscriptions = [first, second];
     const { alpha } = await openImage(world);
@@ -123,7 +123,7 @@ describe("Messages on an Alpha image", () => {
     await press("Send");
     await ready(alpha.runtime, Composer, "Replacement SIM sent", (state) => state.outgoing.op.outcome === "Confirmed");
     expect(world.telephony.sent).toHaveLength(1);
-    expect(world.telephony.journal.get(world.telephony.sent[0]!.operationId)).toMatchObject({ subscriptionId: 9, status: "sent" });
+    expect(world.telephony.journal.get(world.telephony.sent[0].operationId)).toMatchObject({ subscriptionId: 9, status: "sent" });
   });
 
   it("See my conversations, read one, and send a message once (spec/app/messages/index.md, \"Story: See my conversations\"; spec/app/messages/composer.md, \"Story: Let Alpha suggest a draft\"; spec/app/messages/index.md, \"Story: Read a conversation\"; spec/app/messages/composer.md, \"Story: Send a message\"; spec/app/messages/sending.md, \"Story: Send a message once\"; spec/app/messages/sending.md, \"Story: Know whether it arrived\")", async () => {
@@ -137,7 +137,7 @@ describe("Messages on an Alpha image", () => {
     // spec/app/messages/index.md, "Only the newest read of the open conversation is shown, and it marks the shown messages read only where Alpha is the phone's SMS app"
     await press("Maya Chen");
     await ready(alpha.runtime, Messages, "Messages state", (s) => s.pane === "Conversation" && s.page.status === "Loaded" && s.shown.rows === 1);
-    await ready(alpha.runtime, Messages, "Messages state", () => world.telephony.texts[0]!.read);
+    await ready(alpha.runtime, Messages, "Messages state", () => world.telephony.texts[0].read);
 
     // spec/app/messages/composer.md, "Typing changes the draft and makes it the owner's; emptying it leaves no draft"
     await ready(alpha.runtime, Composer, "Composer state", (s) => s.thread > 0 && s.recipients === 1);
@@ -191,7 +191,7 @@ describe("Messages on an Alpha image", () => {
     expect([...document.querySelectorAll("[role=status]")].map((one) => one.textContent)).toContain("Sent to Maya Chen");
 
     // spec/app/messages/sending.md, "A delivery report counts only for a part reported sent"; spec/app/messages/sending.md, "A finished record is retired by a tombstone"
-    world.telephony.deliver(world.telephony.sent[0]!.operationId);
+    world.telephony.deliver(world.telephony.sent[0].operationId);
     await ready(alpha.runtime, Composer, "Composer state", (s) => s.outgoing.reported === 1 && s.outgoing.retired === s.outgoing.op.id);
 
     // spec/app/messages/index.md, "Confirming removes the message under a new number, never during a call that may be an emergency call"
@@ -233,12 +233,12 @@ describe("Messages on an Alpha image", () => {
     // spec/app/messages/index.md, "Only the newest read of the open conversation is shown, and it marks the shown messages read only where Alpha is the phone's SMS app"
     await press("Ben Ortiz");
     await ready(alpha.runtime, Messages, "Messages state", (s) => s.pane === "Conversation" && s.page.status === "Loaded");
-    await ready(alpha.runtime, Messages, "Messages state", () => world.telephony.texts[1]!.read);
+    await ready(alpha.runtime, Messages, "Messages state", () => world.telephony.texts[1].read);
     await hardware("home");
     await ready(alpha.runtime, Messages, "Messages state", (s) => s.unread === 1);
     await openUnreadCard();
     await ready(alpha.runtime, Messages, "Messages state", (s) => s.front && s.pane === "Conversation" && s.page.status === "Loaded" && s.shown.rows === 1);
-    await ready(alpha.runtime, Messages, "Messages state", () => world.telephony.texts[0]!.read);
+    await ready(alpha.runtime, Messages, "Messages state", () => world.telephony.texts[0].read);
   });
 
   it("Start a new message to a number I type (spec/app/messages/index.md, \"Story: Start a new message\")", async () => {
@@ -393,7 +393,7 @@ describe("Messages on an Alpha image", () => {
     await press("Approve");
     try {
       await vi.waitFor(() => expect(review.confirmations).toHaveLength(1));
-      const confirmation = review.confirmations[0]!;
+      const confirmation = review.confirmations[0];
       expect(confirmation).toMatchObject({ operationId: review.proposal.id, recipients: sms.recipients, body: sms.body, subscriptionId: sms.subscriptionId });
       expect([review.decisions, review.claims, world.telephony.sent]).toEqual([[review.proposal.id], [review.proposal.id], []]);
       await drawn(() => confirmation.confirm());
@@ -406,7 +406,7 @@ describe("Messages on an Alpha image", () => {
 
   it("Reviews a Messages text only with the exact SIM the owner had selected (spec/app/messages/composer.md, \"The phone says how many SIMs it has, and with more than one the owner picks one, which needs SIM access\")", async () => {
     const world = image();
-    const first = world.telephony.subscriptions[0]!;
+    const first = world.telephony.subscriptions[0];
     const second = { ...first, id: 8, slot: 1, defaultSms: false, displayName: "Personal line", carrierName: "Personal carrier" };
     world.telephony.subscriptions = [first, second];
     world.ask.metadata = [];
@@ -447,10 +447,11 @@ describe("Messages on an Alpha image", () => {
       await press(label);
     };
 
+    const opaqueRevision: unknown = expect.stringMatching(/^[a-f0-9-]{36}$/u);
     expect(await ask()).toBeUndefined();
     expect(button("Approve")).toBeUndefined();
     await choose("SIM 1");
-    expect(await ask()).toEqual({ kind: "sms-subscription", id: String(first.id), revision: expect.stringMatching(/^[a-f0-9-]{36}$/u) });
+    expect(await ask()).toEqual({ kind: "sms-subscription", id: String(first.id), revision: opaqueRevision });
     expect(button("Approve")).toBeUndefined();
     await giveBack();
     await press("Back");
@@ -460,7 +461,7 @@ describe("Messages on an Alpha image", () => {
     expect(await ask()).toBeUndefined();
     expect(button("Approve")).toBeUndefined();
     await choose("SIM 2");
-    expect(await ask()).toEqual({ kind: "sms-subscription", id: String(second.id), revision: expect.stringMatching(/^[a-f0-9-]{36}$/u) });
+    expect(await ask()).toEqual({ kind: "sms-subscription", id: String(second.id), revision: opaqueRevision });
     await vi.waitFor(() => expect(button("Approve")).toBeDefined());
 
     world.telephony.subscriptions = [first, { ...second, carrierName: "Replacement carrier" }];
