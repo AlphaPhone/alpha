@@ -1,6 +1,7 @@
 export { checkout, link, prepare, prepared, required } from "./checkout.ts";
 export { owned } from "./owned.ts";
 export { packCheckout, packPrepared } from "./pack.ts";
+export { NotBuilt, PackNotPrepared, pinnedCheckout, pinnedPack } from "./pinned.vibe";
 export {
   type FaultRule,
   type ProviderOptions,
@@ -33,11 +34,10 @@ export {
   type DeviceKey,
   type Reply,
   characterOf,
-  modules,
   said,
   scratch,
   startAgent,
   startCloud,
   startEliza,
 } from "./services.ts";
-export { type Owned } from "./setup.ts";
+export { default, type Owned } from "./setup.ts";

@@ -68,21 +68,17 @@ pure def applied(asks: List[Effect], s: S::Shell): S::Shell =
 pure def moves(e: Effect): bool = match e { | Tap => false | _ => true }
 ```
 
-### What the shell is asked brings Ask Alpha exactly where the gesture landed, from any shell with the drawer closed
-
-The drawer is open only over Ask Alpha on the bar, and no drag starts
-under it.
+### What the shell is asked brings Ask Alpha exactly where the gesture landed
 
 ```quint
-pure val phoneValues = Set({ trail: List(), drawer: false, assistant: S::Bar, image: false, contacts: false })
-  .union(Set({ trail: List(S::Notes), drawer: false, assistant: S::Sheet, image: false, contacts: false }))
-  .union(Set({ trail: List(S::Calendar, S::Notes), drawer: false, assistant: S::Full, image: true, contacts: false }))
-  .union(Set({ trail: List(), drawer: false, assistant: S::Typing, image: false, contacts: true }))
+pure val phoneValues = Set({ trail: List(), assistant: S::Bar, image: false, contacts: false })
+  .union(Set({ trail: List(S::Notes), assistant: S::Sheet, image: false, contacts: false }))
+  .union(Set({ trail: List(S::Calendar, S::Notes), assistant: S::Full, image: true, contacts: false }))
+  .union(Set({ trail: List(), assistant: S::Typing, image: false, contacts: true }))
 
 pure def lawTheShellSettlesWhereTheGestureLands(phone: S::Shell, direction: Direction, flick: bool, height: int, floor: int, full: int): bool =
-  not(phone.drawer) implies
-    applied(asked(phone.assistant, landing(phone.assistant, direction, flick, height, floor, full).detent), phone).assistant
-      == landing(phone.assistant, direction, flick, height, floor, full).detent
+  applied(asked(phone.assistant, landing(phone.assistant, direction, flick, height, floor, full).detent), phone).assistant
+    == landing(phone.assistant, direction, flick, height, floor, full).detent
 ```
 
 ### A flick of an open sheet goes by its direction alone
@@ -277,8 +273,7 @@ open sheet or full screen where it is.
 pure def focused(detent: S::Detent): List[Effect] = if (not(isOpen(detent))) List(Raise({ detent: S::Sheet })) else List()
 
 pure def lawFocusingTheBarOpensSheet(phone: S::Shell): bool =
-  not(phone.drawer) implies
-    applied(focused(phone.assistant), phone).assistant == (if (not(isOpen(phone.assistant))) S::Sheet else phone.assistant)
+  applied(focused(phone.assistant), phone).assistant == (if (not(isOpen(phone.assistant))) S::Sheet else phone.assistant)
 ```
 
 ### A keyboard closed while typing puts Ask Alpha back on the bar
@@ -287,5 +282,5 @@ pure def lawFocusingTheBarOpensSheet(phone: S::Shell): bool =
 pure def keyboardClosed(detent: S::Detent): List[Effect] = if (detent == S::Typing) List(Lower({ steps: 1 })) else List()
 
 pure def lawAClosedKeyboardLeavesTypingForTheBar(phone: S::Shell): bool =
-  not(phone.drawer) implies applied(keyboardClosed(phone.assistant), phone).assistant == (if (phone.assistant == S::Typing) S::Bar else phone.assistant)
+  applied(keyboardClosed(phone.assistant), phone).assistant == (if (phone.assistant == S::Typing) S::Bar else phone.assistant)
 ```

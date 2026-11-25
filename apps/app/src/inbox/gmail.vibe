@@ -452,15 +452,21 @@ export effect function operate(id: number, account: number, proposal: Proposal, 
   const grantId = ledger.grant(account)
   if (grantId === undefined || !ledger.canOperate(account, proposal.kind)) return refusedBefore
   const generation = ledger.generation(account)
-  const prepared = asked((signal) => client.gmailPrepare({ grantId, requestId, proposal }, { signal })) catch (failed) => failed
-  if (prepared instanceof Asked) return { ...refusedBefore, expired: expiredBy(prepared) }
-  if (ledger.generation(account) !== generation || !ledger.canOperate(account, proposal.kind) || prepared.receipt.requestId !== requestId || prepared.receipt.kind !== proposal.kind) return refusedBefore
-  if (prepared.receipt.state !== "prepared") return endedAs(prepared)
-  const reviewDigest = prepared.receipt.reviewDigest
-  const dispatched = asked((signal) => client.gmailDispatch({ grantId, requestId, reviewDigest, proposal }, { signal })) catch (failed) => failed
-  if (dispatched instanceof Asked) return { done: false, known: false, expired: expiredBy(dispatched) }
-  return dispatched.receipt.requestId === requestId && dispatched.receipt.kind === proposal.kind && dispatched.receipt.reviewDigest === reviewDigest
-    ? endedAs(dispatched) : { done: false, known: false, expired: false }
+  const prepared = effect {
+    return { operation: try asked((signal) => client.gmailPrepare({ grantId, requestId, proposal }, { signal })) }
+  } catch (failed) => ({ expired: expiredBy(failed) })
+  if ("expired" in prepared) return { ...refusedBefore, expired: prepared.expired }
+  const receipt = prepared.operation.receipt
+  if (ledger.generation(account) !== generation || !ledger.canOperate(account, proposal.kind) || receipt.requestId !== requestId || receipt.kind !== proposal.kind) return refusedBefore
+  if (receipt.state !== "prepared") return endedAs(prepared.operation)
+  const reviewDigest = receipt.reviewDigest
+  const dispatched = effect {
+    return { operation: try asked((signal) => client.gmailDispatch({ grantId, requestId, reviewDigest, proposal }, { signal })) }
+  } catch (failed) => ({ expired: expiredBy(failed) })
+  if ("expired" in dispatched) return { done: false, known: false, expired: dispatched.expired }
+  const ended = dispatched.operation.receipt
+  return ended.requestId === requestId && ended.kind === proposal.kind && ended.reviewDigest === reviewDigest
+    ? endedAs(dispatched.operation) : { done: false, known: false, expired: false }
 }
 
 /** Change one message's labels in Gmail, once, as `operate` does, at the history revision the list read it at. */

@@ -1,12 +1,15 @@
 // spec/app/files/index.md, "Story: Let the agent read my files"
+import type { ExecutorCall } from "@elizaos/agent/client"
+import type { DeviceOperation } from "@elizaos/agent/operations"
 import * as Browser from "../../gen/app__files.effect.vibe"
 import type { Action, Event, Offer } from "../../gen/app__files.effect.vibe"
-import type { Place } from "../../gen/app__files__change.effect.vibe"
+import { type Place, nowhere } from "../../gen/app__files__change.effect.vibe"
 import * as Shown from "../../gen/app__files__preview.effect.vibe"
 import type { Filter } from "../../gen/app__files__search.effect.vibe"
-import type { Item } from "../../gen/app__files__shared.effect.vibe"
+import type { Item, Kind } from "../../gen/app__files__shared.effect.vibe"
 import type { Outcome } from "../../gen/kit__attempt.effect.vibe"
-import { Files } from "../platform/files.vibe"
+import { Files, called } from "../platform/files.vibe"
+import { Device } from "../platform/device.vibe"
 import { Handles, type Spot } from "./handles.vibe"
 
 /** What Files told the agent of one of its requests: whether it was done, and the files it found or opened. */
@@ -25,7 +28,16 @@ export interface Receipt {
  * The agent's requests and the approvals waiting on what Files answers, each by its number: an answer is handed to
  * the one waiting for it, and one nobody waits for, such as a request a restart cut off, is dropped.
  */
+export interface ReviewedItem {
+  readonly path: string
+  readonly token: string
+}
+
 export service Answers {
+  next(): number!!
+  bind(ticket: number, reviewed: ReviewedItem): void!!
+  reviewed(ticket: number): (ReviewedItem | undefined)!!
+  clear(ticket: number): void!!
   expect(request: number): Deferred.Deferred<Told>!!
   tell(request: number, told: Told): void!!
   expectReceipt(ticket: number): Deferred.Deferred<Receipt>!!
@@ -51,7 +63,15 @@ function waitingFor<A>() {
 export const answers = Layer.sync(Answers, () => {
   const told = waitingFor<Told>()
   const receipts = waitingFor<Receipt>()
-  return { expect: told.expect, tell: told.settle, expectReceipt: receipts.expect, receipt: receipts.settle }
+  let id = 0
+  const reviews = new Map<number, ReviewedItem>()
+  return {
+    next: () => sync(() => ++id), expect: told.expect, tell: told.settle,
+    expectReceipt: receipts.expect, receipt: receipts.settle,
+    bind: (ticket, reviewed) => sync(() => { reviews.set(ticket, reviewed) }),
+    reviewed: (ticket) => sync(() => reviews.get(ticket)),
+    clear: (ticket) => sync(() => { reviews.delete(ticket) }),
+  }
 })
 
 /** Send `event` as `by` and wait for what Files tells the agent of `request`; an event the rules refuse outright failed. */
@@ -86,7 +106,7 @@ export effect function agentFilter(request: number, wanted: Filter, guarded: boo
   return try asked(request, { type: "agentFilter", request, wanted, guarded }, "Agent")
 }
 
-// spec/app/files/index.md, "The agent opens a file the owner is shown, as listed now, when no file is open over Files; otherwise it is told it failed"
+// spec/app/files/index.md, "The agent opens a file the owner is shown, as listed or found now, when no file is open over Files; otherwise it is told it failed"
 export effect function agentOpen(request: number, file: Item, guarded: boolean): Told!!(Answers | Browser.Machine | Shown.Machine) {
   const previewing = Shown.showing(try (try Shown.Machine).get())
   return try asked(request, { type: "agentOpen", request, file, previewing, guarded }, "Agent")
@@ -110,4 +130,106 @@ export effect function approved(request: Approved, guarded: boolean): Receipt!!(
   const sent = try exit((try Browser.Machine).send({ type: "approve", ...request, guarded, mail: false }, "Phone"))
   if (Exit.isFailure(sent)) try answers.receipt(request.ticket, { ran: false, outcome: "Refused" })
   return try Deferred.await(waiting)
+}
+
+
+// spec/app/files/index.md, "Story: Let the agent read my files"; spec/app/files/index.md, "An approved request runs only in Files on screen, in the folder the owner approved, on a screen that is not protected, and on the item as it was shown; otherwise the agent is told it did not run"
+type FileActionResult = { readonly kind: "applied" } | { readonly kind: "refused"; readonly code: string }
+
+const applied: FileActionResult = { kind: "applied" }
+const notShown: FileActionResult = { kind: "refused", code: "FILES_NOT_SHOWN" }
+const unsupported: FileActionResult = { kind: "refused", code: "FILES_UNSUPPORTED" }
+const unchanged: FileActionResult = { kind: "refused", code: "FILES_UNCHANGED" }
+const kinds: Readonly<Partial<Record<string, Kind>>> = {
+  image: "Image", video: "Video", audio: "Audio", document: "Document", folder: "Folder",
+}
+
+effect function primaryAt(id: number, path: string): boolean!!Handles {
+  const spot = try (try Handles).spot(id)
+  return Option.isSome(spot) && spot.value.volume === "primary" && spot.value.path === path
+}
+
+effect function matching(items: ReadonlyArray<Item>, path: string): (Item | undefined)!!Handles {
+  for (const item of items) {
+    if (try primaryAt(item.id, path)) return item
+  }
+  return undefined
+}
+
+effect function destination(path: string): (Place | undefined)!!(Files | Handles) {
+  const volume = "primary"
+  const listing = called("storageList", (plugin) => plugin.storageList({ volume, path })) catch () => undefined
+  if (listing?.status !== "ready") return undefined
+  const segments = path === "" ? [] : path.split("/")
+  const handles = try (try Handles).many(Array.from({ length: segments.length + 1 }, (_, depth) => ({
+    volume, path: segments.slice(0, depth).join("/"),
+  })))
+  const folder = handles.at(-1)
+  if (folder === undefined) return undefined
+  return { folder, path: handles.slice(0, -1), names: (listing.entries ?? []).map((item) => item.name) }
+}
+
+function result(receipt: Receipt): FileActionResult | undefined {
+  return receipt.outcome === "Confirmed" ? applied : receipt.outcome === "Unknown" ? undefined : unchanged
+}
+
+/** Carry out a typed Files action the phone's proposal coordinator has admitted. */
+export effect function fileAction(operation: DeviceOperation, call: ExecutorCall): (FileActionResult | undefined)!!(Answers | Browser.Machine | Shown.Machine | Handles | Device | Files) {
+  const shown = try (try Browser.Machine).get()
+  if (call.attemptId <= 0 || call.operationId === "" || !(try (try Device).showing()) || !shown.open || shown.trash || !Browser.allowed(shown)) return notShown
+  const folder = Browser.here(shown)
+  const answers = try Answers
+  const request = try answers.next()
+  switch (operation.type) {
+    case "files_filter": {
+      const { kind, text, from, to, folder: path } = operation
+      const wanted = kind === undefined ? undefined : kinds[kind]
+      if (from !== undefined || to !== undefined || (kind !== undefined && wanted === undefined)) return unsupported
+      if (path !== undefined && !(folder === 0 && path === "" && !shown.inCategory) && !(try primaryAt(folder, path))) return notShown
+      const filtered = try agentFilter(request, { text: text ?? "", kind: wanted ?? "Other", anyKind: wanted === undefined }, false)
+      return filtered.ok ? applied : notShown
+    }
+    case "files_open": {
+      const items = shown.search.searching ? shown.search.hits : shown.items
+      const file = "path" in operation ? try matching(items, operation.path) : shown.search.hits[operation.shown - 1]
+      if (file === undefined || file.kind === "Folder") return notShown
+      const viewer = try Shown.Machine
+      const before = try viewer.get()
+      const admitted = try agentOpen(request, file, false)
+      if (!admitted.ok) return notShown
+      const observed = Stream.filter(viewer.changes, (next) => next.viewer !== before.viewer && next.viewer !== 0)
+      const opened = try Effect.timeoutOption(Stream.runHead(observed), "10 seconds")
+      if (Option.isNone(opened)) return undefined
+      return Option.isSome(opened.value) && opened.value.value.item === file.id ? applied : undefined
+    }
+    case "files_folder_create": {
+      if (!(try primaryAt(folder, operation.parent))) return notShown
+      const file: Item = { id: 0, name: "", kind: "Other", volume: 0, bytes: 0, revision: 0 }
+      const receipt = try approved({ ticket: request, act: "Making", file, folder, name: operation.name, dest: nowhere }, false)
+      return result(receipt)
+    }
+    case "files_share": {
+      if (shown.change.panel !== 0 || !("paths" in operation) || operation.paths.length !== 1) return unsupported
+      const file = try matching(shown.items, operation.paths[0] ?? "")
+      if (file === undefined || file.kind === "Folder") return notShown
+      const receipt = try approved({ ticket: request, act: "Sharing", file, folder, name: "", dest: nowhere }, false)
+      return result(receipt)
+    }
+    case "files_move":
+    case "files_trash": {
+      if (!("paths" in operation) || operation.paths.length !== 1 || operation.reviewed?.length !== 1) return unsupported
+      const [path] = operation.paths
+      const [token] = operation.reviewed
+      if (!path || !token) return unsupported
+      const file = try matching(shown.items, path)
+      if (file === undefined) return notShown
+      const move = operation.type === "files_move"
+      const dest = move ? try destination(operation.dest) : nowhere
+      if (dest === undefined || !(try (try Device).showing())) return notShown
+      try answers.bind(request, { path, token })
+      const receipt = try ensuring(approved({ ticket: request, act: move ? "Moving" : "Deleting", file, folder, name: "", dest }, false), answers.clear(request))
+      return result(receipt)
+    }
+    default: return unsupported
+  }
 }

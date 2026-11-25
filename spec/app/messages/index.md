@@ -482,7 +482,10 @@ pure def confirmDelete(s: Messages, clear: bool): Moved =
 
 ### The phone's answer ends the removal it names, and the conversation is read again unless it was refused
 
-When Alpha stops waiting for the answer, the outcome is unknown.
+Android can queue the exact message for deletion. Alpha offers Undo for
+that receipt while the Android window is open. The same receipt confirms
+deletion or that the message was kept. When Alpha cannot read a settled
+outcome, the outcome stays unknown.
 
 ```quint
 pure def canRemoved(s: Messages, id: int): bool = A::canConclude(s.removal, id)

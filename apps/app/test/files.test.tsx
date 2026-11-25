@@ -5,9 +5,14 @@ import { Machine as Browser } from "../gen/app__files.effect.vibe";
 import { Machine as Shown } from "../gen/app__files__preview.effect.vibe";
 import { Machine as Recent } from "../gen/app__files__recent.effect.vibe";
 import { Machine as Bin } from "../gen/app__files__trash.effect.vibe";
-import { agentFilter, agentOpen, agentRead, approved, offer, shownAt } from "../src/files/agent.vibe";
+import { Machine as Shell } from "../gen/app__shell.effect.vibe";
+import { Machine as Inbox } from "../gen/app__inbox.effect.vibe";
+import { Machine as Drafts } from "../gen/app__inbox__drafts.effect.vibe";
+import { Letters } from "../src/inbox/composer.vibe";
+import { agentFilter, agentOpen, agentRead, approved, fileAction, offer, shownAt } from "../src/files/agent.vibe";
 import { showDownloads } from "../src/files/files.vibe";
 import files from "../src/files/index.tsx";
+import { called } from "../src/platform/files.vibe";
 import { button, closeAll, drawn, fill, hardware, later, open, press, pressOnTop, seen, underAct, until } from "./alpha.tsx";
 import { scene } from "./fakes/scene.ts";
 
@@ -203,6 +208,16 @@ describe("Files on a phone", () => {
     world.files.stored.push({ volume: "primary", path: "Download/new.txt", directory: false, mimeType: "text/plain", size: 1, modified: 9 });
     await seen(true);
     await until(alpha, runtime, Browser, (s) => s.listing.status === "Loaded" && s.items.length === 3);
+
+    world.files.stored.push({ volume: "primary", path: "song.txt", directory: false, mimeType: "text/plain", size: 3, modified: 10 });
+    await press("Files");
+    await press("SD card");
+    await choose("Filter files");
+    await fill("Filter", "song");
+    await press("Any kind");
+    await press("Filter");
+    await until(alpha, runtime, Browser, (s) => s.search.query.status === "Loaded" && s.search.hits.length === 1);
+    expect(runtime.runSync(Browser.use((m) => m.get())).search.hits.map((hit) => hit.name)).toEqual(["song.mp3"]);
   });
 
   it("Change my files (spec/app/files/index.md, \"Story: Change my files\"; spec/app/files/change.md, \"Story: Change my files\"; spec/app/files/destination.md, \"Story: Choose a destination\"; spec/app/files/change.md, \"Story: Share what I selected\")", async () => {
@@ -301,7 +316,7 @@ describe("Files on a phone", () => {
     expect(paths(world).includes("primary:Download/dunes.jpg")).toBe(true);
   });
 
-  it("Look at a file, and find what I opened lately (spec/app/files/preview.md, \"Story: Look at a file\"; spec/app/files/recent.md, \"Story: Find what I opened lately\")", async () => {
+  it("Look at a file, and find what I opened lately (spec/app/files/preview.md, \"Story: Look at a file\"; spec/app/files/recent.md, \"Story: Find what I opened lately\"; spec/app/files/recent.md, \"Story: Pick a file with the system picker\"; spec/app/files/preview.md, \"Story: Act on the file I am looking at\")", async () => {
     const { alpha, runtime, world } = await onFiles();
     await until(alpha, runtime, Browser, (s) => s.storage.status === "Loaded");
     await press("Internal storage");
@@ -312,9 +327,18 @@ describe("Files on a phone", () => {
     await press("notes.txt");
     await until(alpha, runtime, Shown, (s) => s.content.status === "Loaded" && s.kind === "Text");
     expect(document.querySelector("pre")?.textContent).toBe("The words of notes.txt");
-    await openMenu("File actions");
-    expect(Boolean(menuItem("Ask Alpha"))).toBe(true);
-    await drawn(() => menuItem("Ask Alpha")?.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true })));
+    const updated = world.files.stored.find((file) => file.path === "Documents/notes.txt");
+    if (updated) updated.modified = 11;
+    world.files.texts["Documents/notes.txt"] = "These are the revised notes";
+    world.files.changed();
+    await until(alpha, runtime, Shown, (s) => s.revision === 11 && s.content.status === "Loaded");
+    expect(document.querySelector("pre")?.textContent).toBe("These are the revised notes");
+
+    await choose("Ask Alpha", "File actions");
+    await until(alpha, alpha.runtime, Shell, (s) => s.assistant === "Sheet");
+    await press("Remove notes.txt");
+    await hardware("back");
+    await until(alpha, alpha.runtime, Shell, (s) => s.assistant === "Bar");
     // spec/app/files/preview.md, "The owner closes the viewer, and so does leaving the screen or the phone locking"
     await press("Close");
     await until(alpha, runtime, Shown, (s) => s.viewer === 0);
@@ -359,6 +383,46 @@ describe("Files on a phone", () => {
     await press("notes.txt");
     await until(alpha, runtime, Recent, (s) => s.reaching.status === "Failed" && s.rows.filter((row) => row.grant === 0).length === 1);
     expect(button("notes.txt")).toBeUndefined();
+
+    world.files.stored.push({ volume: "primary", path: "Download/restored.txt", directory: false, mimeType: "text/plain", size: 12, modified: 10 });
+    world.files.selectedByPicker = "Download/restored.txt";
+    await press("Select again: notes.txt");
+    await until(alpha, runtime, Shown, (s) => s.content.status === "Loaded" && s.kind === "Text");
+    expect(document.querySelector("pre")?.textContent).toBe("The words of restored.txt");
+    await hardware("back");
+    await until(alpha, runtime, Shown, (s) => s.viewer === 0);
+    expect(runtime.runSync(Recent.use((m) => m.get())).rows.map((row) => row.origin)).toEqual(["Picked"]);
+
+  });
+
+  it("Offer the file I am looking at to Inbox (spec/app/files/preview.md, \"Story: Act on the file I am looking at\"; spec/app/inbox/adding.md, \"Story: Add files and people to my draft\")", async () => {
+    const { alpha, runtime, world } = await onFiles();
+    const content = "A reviewed attachment";
+    world.files.stored.push({ volume: "primary", path: "Download/attach.txt", directory: false, mimeType: "text/plain", size: content.length, modified: 12 });
+    world.files.texts["Download/attach.txt"] = content;
+    await hardware("home");
+    await press("Inbox");
+    await until(alpha, alpha.runtime, Inbox, (state) => state.signedIn && state.selected.account !== 0 && state.accounts.status === "Loaded");
+    await hardware("home");
+    await press("Files");
+    await until(alpha, runtime, Browser, (state) => state.open && state.storage.status === "Loaded");
+    await press("Internal storage");
+    await press("Download");
+    await until(alpha, runtime, Browser, (state) => state.listing.status === "Loaded" && state.items.some((item) => item.name === "attach.txt"));
+    await press("attach.txt");
+    await until(alpha, runtime, Shown, (state) => state.content.status === "Loaded");
+
+    await choose("Use in email", "File actions");
+    await until(alpha, alpha.runtime, Shell, (state) => state.trail.at(-1) === "Inbox");
+    await until(alpha, runtime, Shown, (state) => state.attempt.outcome === "Confirmed");
+    expect(alpha.runtime.runSync(Drafts.use((model) => model.get())).open).toBe(false);
+    await pressOnTop("New email");
+
+    await until(alpha, alpha.runtime, Drafts, (state) => state.open && state.letter.attachments === 1);
+    const draft = alpha.runtime.runSync(Drafts.use((model) => model.get())).letter.id;
+    const words = alpha.runtime.runSync(Letters.use((letters) => Effect.sync(() => letters.words(draft))));
+    expect(words.files).toEqual([{ name: "attach.txt", mimeType: "text/plain", size: content.length, data: btoa(content) }]);
+    expect(world.inbox.changes.some((change) => change.startsWith("send "))).toBe(false);
   });
 
   it("Let the agent read my files (spec/app/files/index.md, \"Story: Let the agent read my files\")", async () => {
@@ -385,7 +449,7 @@ describe("Files on a phone", () => {
     const [first] = await runtime.runPromise(shownAt([1]));
     expect([first?.name, (await runtime.runPromise(shownAt([2]))).length]).toEqual(["beach.jpg", 0]);
 
-    // spec/app/files/index.md, "The agent opens a file the owner is shown, as listed now, when no file is open over Files; otherwise it is told it failed"
+    // spec/app/files/index.md, "The agent opens a file the owner is shown, as listed or found now, when no file is open over Files; otherwise it is told it failed"
     const beach = now().items.find((item) => item.name === "beach.jpg");
     if (!beach) throw new Error("beach.jpg is not listed");
     expect((await runtime.runPromise(agentOpen(4, beach, false))).ok).toBe(true);
@@ -406,10 +470,22 @@ describe("Files on a phone", () => {
     expect(await runtime.runPromise(approved({ ticket: 8, act: "Naming", file: lease, folder, name: "lease 2026.pdf", dest: nowhere }, false))).toEqual({ ran: true, outcome: "Confirmed" });
     expect(paths(world).includes("primary:Download/lease 2026.pdf")).toBe(true);
     await until(alpha, runtime, Browser, (s) => s.listing.status === "Loaded" && s.items.some((item) => item.name === "lease 2026.pdf"));
-    const renamed = now().items.find((item) => item.name === "lease 2026.pdf");
+    const path = "Download/lease 2026.pdf";
+    const reviewed = () => runtime.runPromise(called("storageReviewedIdentities", (plugin) => plugin.storageReviewedIdentities({ volume: "primary", paths: [path] })));
+    const before = await reviewed();
+    if (!before.reviewed) throw new Error("the renamed lease cannot be reviewed");
+    const renamed = world.files.stored.find((one) => one.path === path);
     if (!renamed) throw new Error("the renamed lease is not listed");
-    expect(await runtime.runPromise(approved({ ticket: 9, act: "Deleting", file: renamed, folder, name: "", dest: nowhere }, false))).toEqual({ ran: true, outcome: "Confirmed" });
-    expect(world.files.trash.map((one) => one.was.path)).toEqual(["Download/lease 2026.pdf"]);
+    renamed.modified = 77;
+    world.files.changed();
+    await until(alpha, runtime, Browser, (s) => s.items.some((item) => item.name === "lease 2026.pdf" && item.revision === 77));
+    const call = { attemptId: 1, proposalId: "delete-lease", operationId: "delete-lease" };
+    expect(await runtime.runPromise(fileAction({ type: "files_trash", paths: [path], reviewed: before.reviewed }, call))).toEqual({ kind: "refused", code: "FILES_UNCHANGED" });
+    expect(paths(world).includes(`primary:${path}`)).toBe(true);
+    const after = await reviewed();
+    if (!after.reviewed) throw new Error("the changed lease cannot be reviewed");
+    expect(await runtime.runPromise(fileAction({ type: "files_trash", paths: [path], reviewed: after.reviewed }, { ...call, proposalId: "delete-reviewed-lease", operationId: "delete-reviewed-lease" }))).toEqual({ kind: "applied" });
+    expect(world.files.trash.map((one) => one.was.path)).toEqual([path]);
     await hardware("home");
     expect(await runtime.runPromise(approved({ ticket: 10, act: "Deleting", file: beach, folder, name: "", dest: nowhere }, false))).toEqual({ ran: false, outcome: "Refused" });
   });

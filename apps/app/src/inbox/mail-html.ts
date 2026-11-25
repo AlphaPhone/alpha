@@ -5,6 +5,9 @@ import { type Link, linkOf, linksOf } from "./links.ts";
 
 const purifier = createDOMPurify();
 const maxHtmlBytes = 512 * 1024;
+const sourceAttribute = "data-alpha-source";
+const removedTags = ["form", "input", "button", "textarea", "select", "iframe", "object", "embed", "video", "audio", "source", "link", "meta", "base", "template"];
+const removedAttributes = ["src", "srcset", "srcdoc", "href", "action", "formaction", "background", "ping", "target", "autofocus", "tabindex"];
 const imageSource = (url: string) => /^data:image\/(?:png|jpeg|gif|webp);base64,[a-z0-9+/=]+$/iu.test(url)
   ? url
   : linkOf(url, "").secure ? URL.parse(url)?.href : undefined;
@@ -14,38 +17,43 @@ type Prepared = { formatted?: Formatted; links: Link[] };
 const prepared = new WeakMap<MailMessage, Prepared>();
 
 function format(html: string, links: Link[]): Formatted | undefined {
-  if (new TextEncoder().encode(html).length > maxHtmlBytes) return undefined;
+  if (!purifier.isSupported || new TextEncoder().encode(html).length > maxHtmlBytes) return undefined;
   const template = document.createElement("template");
   template.innerHTML = html;
-  const content = template.content.ownerDocument.createElement("div");
-  content.append(template.content);
-  template.content.append(content);
-  const sources = new Map<HTMLImageElement, string>();
-  for (const node of content.querySelectorAll<HTMLImageElement>("img[src]")) {
+  const originals: (Link | string)[] = [];
+  for (const node of template.content.querySelectorAll(`[${sourceAttribute}]`)) node.removeAttribute(sourceAttribute);
+  for (const node of template.content.querySelectorAll("img[src]")) {
     const src = imageSource(node.getAttribute("src") ?? "");
-    if (src) sources.set(node, src);
+    if (src) node.setAttribute(sourceAttribute, String(originals.push(src)));
   }
-  const destinations = new Map<HTMLAnchorElement, Link>();
-  for (const node of content.querySelectorAll<HTMLAnchorElement>("a[href]")) {
+  for (const node of template.content.querySelectorAll("a[href]")) {
     const link = linkOf(node.getAttribute("href") ?? "", node.textContent ?? "");
-    if (link.secure) destinations.set(node, link);
+    if (link.secure) node.setAttribute(sourceAttribute, String(originals.push(link)));
   }
-  purifier.sanitize(content, {
-    IN_PLACE: true,
+  for (const node of template.content.querySelectorAll(removedTags.join(","))) node.remove();
+  for (const node of template.content.querySelectorAll(removedAttributes.map((name) => `[${name}]`).join(","))) {
+    for (const name of removedAttributes) node.removeAttribute(name);
+  }
+  const content = purifier.sanitize(template.innerHTML, {
+    RETURN_DOM_FRAGMENT: true,
     USE_PROFILES: { html: true },
     ALLOW_DATA_ATTR: false,
-    FORBID_TAGS: ["form", "input", "button", "textarea", "select", "iframe", "object", "embed", "video", "audio", "source", "link", "meta", "base"],
-    FORBID_ATTR: ["src", "srcset", "href", "action", "formaction", "background", "ping", "target", "autofocus", "tabindex"],
+    ADD_ATTR: [sourceAttribute],
+    FORBID_TAGS: removedTags,
+    FORBID_ATTR: removedAttributes,
   });
   let remoteImages = 0;
-  for (const [node, src] of sources) {
-    if (!template.content.contains(node)) continue;
-    node.setAttribute("data-alpha-image", src);
-    if (src.startsWith("https:")) remoteImages++;
-  }
   const inline = new Set<string>();
-  for (const [node, link] of destinations) {
-    if (!template.content.contains(node)) continue;
+  for (const node of content.querySelectorAll(`[${sourceAttribute}]`)) {
+    const link = originals[Number(node.getAttribute(sourceAttribute)) - 1];
+    node.removeAttribute(sourceAttribute);
+    if (typeof link === "string") {
+      if (node.localName !== "img") continue;
+      node.setAttribute("data-alpha-image", link);
+      if (link.startsWith("https:")) remoteImages++;
+      continue;
+    }
+    if (!link || node.localName !== "a") continue;
     const previous = links.findIndex(({ url, label }) => url === link.url && label === link.label);
     if (previous < 0 && links.length >= 100) continue;
     const index = previous < 0 ? links.push(link) : previous + 1;
@@ -54,8 +62,7 @@ function format(html: string, links: Link[]): Formatted | undefined {
     node.setAttribute("tabindex", "0");
     inline.add(link.url);
   }
-  while (content.firstChild) template.content.insertBefore(content.firstChild, content);
-  content.remove();
+  template.content.replaceChildren(content);
   return { template, remoteImages, inline };
 }
 

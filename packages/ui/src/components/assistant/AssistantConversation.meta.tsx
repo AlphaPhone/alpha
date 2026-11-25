@@ -4,7 +4,7 @@ import { AssistantCard } from "./AssistantCard.tsx";
 import { AssistantGrabber } from "./AssistantGrabber.tsx";
 import type { AssistantConversationProps } from "./AssistantConversation.tsx";
 
-const header = { title: "Friday plans", context: { view: "Calendar", day: "Thu 10 Jul" }, grabber: <AssistantGrabber />, onHistory: fn(), onSearch: fn(), onNew: fn(), onClose: fn() };
+const header = { title: "Friday plans", context: { view: "Calendar", day: "Thu 10 Jul" }, grabber: <AssistantGrabber />, onHome: fn(), onResize: fn(), onClose: fn() };
 const transcript = {
   messages: [
     { id: "1", author: "owner" as const, text: "What is on my calendar on Friday?" },
@@ -19,7 +19,7 @@ const transcript = {
     },
   ],
 };
-const composer = { value: "", onValueChange: fn(), onAttach: fn(), onTalk: fn() };
+const composer = { value: "", onValueChange: fn(), onAttach: fn(), onSearch: fn(), onNew: fn(), onHistory: fn(), onTalk: fn() };
 
 export const meta: ComponentMeta<AssistantConversationProps> = {
   args: { header, transcript, composer },
@@ -28,6 +28,8 @@ export const meta: ComponentMeta<AssistantConversationProps> = {
     Replying: { header, transcript: { ...transcript, turn: { status: "replying" } }, composer: { ...composer, value: "", onStop: fn() } },
     "Typing with a draft": { header, transcript, composer: { ...composer, value: "Move the dentist to Tuesday", onSend: fn() } },
     "Sensitive screen": { header: { ...header, context: { view: "Passwords", sensitive: true } }, transcript, composer: { ...composer, value: "Show my passwords", unavailable: "sensitive" } },
+    Bar: { header, transcript, composer: { ...composer, onOpen: fn() }, detent: "bar" },
+    Full: { header, transcript, composer, detent: "full" },
     Empty: { header: { ...header, title: "New chat" }, transcript: { messages: [] }, composer },
     "Loading": { header, transcript: { messages: [], status: "loading" }, composer },
     "Offline": { header, transcript, composer: { ...composer, value: "Hello", unavailable: "away" } },

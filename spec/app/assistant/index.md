@@ -17,12 +17,12 @@ for its reply. The rest of the area:
 - [Email card](./email.md): an email the agent drafted, sent from the chat once per version
 - [Kit extensions](./extend.md): what the area needs of the kit that it lacks
 
-Alpha writes no status or notice words on, above or under the composer.
-Where the last turn stands shows as a shape at the foot of the
-conversation whose word is only its accessible name; the agent's own label
-is shown, and so is Check for reply where the owner must act. Why nothing
+Alpha shows the turn's status as pulsing dots or a shape at the foot of the
+conversation, with the status as its accessible name. The agent's own label
+stays visible, as does Check for reply where the owner must act. Why nothing
 can be sent, a draft too long to send and a draft still opening are said
-to a screen reader only, with Send disabled or the field closed.
+to a screen reader only, with Send disabled or the field closed. Attachment
+errors and draft notices that ask the owner to act remain visible.
 
 Speaking a turn and reading a reply aloud belong to the voice area, the
 approval a proposal card asks for to the approvals area, and the height
