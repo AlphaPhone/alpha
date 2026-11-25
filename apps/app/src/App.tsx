@@ -116,6 +116,7 @@ export function App({ alpha }: AppProps) {
   const canGoBack = String(!shellFailed && (back || (layers !== undefined && takesBack(layers))));
   return (
     <main
+      data-alpha-native={native() ? "" : undefined}
       data-alpha-launcher={launcher ? "" : undefined}
       ref={frame}
       onPointerDown={beginSwipe}
