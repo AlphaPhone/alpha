@@ -11,6 +11,7 @@ module web {
     readonly attemptId: number
     readonly digest: string
     readonly expiresAt: number
+    readonly contact?: { readonly id: string; readonly lookup: string; readonly version: string }
   }
 
   function notStarted(): Error {

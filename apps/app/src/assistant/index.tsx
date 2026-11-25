@@ -17,6 +17,8 @@ import { area, type Resident, type Shown } from "../runtime/area.tsx";
 import { applying, following, together, untimed } from "../runtime/reactor.vibe";
 import { keyboardVoice } from "../shell/canvas.vibe";
 import { TalkControls } from "../voice/TalkControls.tsx";
+import { VoiceInterim } from "../voice/VoiceInterim.tsx";
+import { interimLiveness } from "../voice/voice.vibe";
 import { DictationControls } from "../voice/DictationControls.tsx";
 import { Assistant } from "./Assistant.tsx";
 import { assistantBack, assisting, spokenScreen } from "./assistant.vibe";
@@ -28,7 +30,7 @@ import { beginTalk, commsVoicePanel, spokenReviewNotice, talkFromComms } from ".
 const voiceOwnsComposer = (state: VoiceState) => !quiet(state) || state.recorder.stage !== "Closed";
 
 const screens = together(
-  assisting, voiceArea, aloud, talkFromComms, commsVoicePanel, spokenScreen, spokenReviewNotice,
+  assisting, voiceArea, aloud, talkFromComms, commsVoicePanel, spokenScreen, spokenReviewNotice, interimLiveness,
   following(Voice, voiceOwnsComposer, Dock, (on) => ({ type: "voicing", on, now: untimed } as const)),
   applying(Voice, voiceOwnsComposer, keyboardVoice),
 );
@@ -70,6 +72,7 @@ function LiveAssistant({ runtime, alpha }: Shown<Layer.Success<typeof screens> |
       },
       showUnavailableTalk: !available,
       voicePanel: recorderPanel,
+      interim: <VoiceInterim runtime={runtime} />,
       onTalk: canTalk ? () => void runtime.runPromise(beginTalk()) : undefined,
       onDictate: canDictate ? () => void runtime.runPromise(dictate()) : undefined,
       voice: ({ compactDock, atBar, onKeyboard }) => dictating

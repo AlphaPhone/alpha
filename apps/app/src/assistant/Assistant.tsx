@@ -34,7 +34,7 @@ import { untimed } from "../runtime/reactor.vibe";
 import { MailQuestions } from "../inbox/mail-context.vibe";
 import { home } from "../shell/shell.vibe";
 import { isCommsView } from "../shell/views.tsx";
-import { type MediaCard, MediaReview, namedReviewQuery } from "./media-review.vibe";
+import { type MediaCard, MediaReview, namedReviewQuery, spokenText } from "./media-review.vibe";
 import type { Agent } from "../platform/agent.vibe";
 import { Documents } from "../platform/documents.vibe";
 import { AttachmentSources } from "./AttachmentSources.tsx";
@@ -56,6 +56,7 @@ export interface AssistantProps {
   messageActions?: MessageActions;
   speech?: Pick<AssistantComposerProps, "onTalk" | "onDictate" | "showUnavailableTalk" | "voiceNotice"> & {
     voicePanel?: ReactNode;
+    interim?: ReactNode;
     keyboard?: TalkStopReceipt;
     voice?: (presentation: { compactDock: boolean; atBar: boolean; onKeyboard: VoiceKeyboard }) => ReactNode;
   };
@@ -112,6 +113,12 @@ function DeviceReview({ runtime, card }: { runtime: AssistantProps["runtime"]; c
   const decide = (approve: boolean, confirmation?: "Tap") => void runtime.runPromise(Effect.flatMap(MediaReview, (review) => review.decide(card, approve, confirmation)));
   const deciding = card.decision === "Deciding";
   const unavailable = card.decision === "Unconfirmed";
+  const text = card.operation.type === "sms_send" ? { body: card.operation.body, recipients: card.operation.recipients }
+    : card.operation.type === "sms_compose" && card.composeLine !== undefined
+      ? { body: card.operation.body, recipients: card.phone?.tag === "Exact" ? [card.phone.selected.number]
+        : "target" in card.operation && card.operation.target.kind === "number" ? [card.operation.target.number] : [] }
+      : undefined;
+  const line = card.sms?.subscription ?? card.composeLine?.subscription;
   return (
     <div className="grid gap-2" aria-busy={deciding}>
       {card.phone?.tag === "Choices" ? (
@@ -129,13 +136,13 @@ function DeviceReview({ runtime, card }: { runtime: AssistantProps["runtime"]; c
         <Alert role="status">{card.phone.reason}</Alert>
       ) : card.notice !== undefined ? (
         <Alert role="status">{`${card.title}: ${card.detail}. ${card.notice}`}</Alert>
-      ) : card.operation.type === "sms_send" ? (
+      ) : text !== undefined ? (
         <AssistantCardFrame icon={<ClipboardCheck />} title={card.title} data-alpha-review={card.id}
-          detail={card.sms === undefined ? undefined : `SIM ${card.sms.subscription.slot + 1} · ${card.sms.subscription.displayName}`}
+          detail={line === undefined ? undefined : `SIM ${line.slot + 1} · ${line.displayName}`}
           actions={<Button data-alpha-review-send="" disabled={deciding || unavailable} onClick={(event) => decide(true, event.nativeEvent.isTrusted ? "Tap" : undefined)}>Approve</Button>}>
-          <p className="font-semibold wrap-anywhere">{card.operation.recipients.map(displayNumber).join(", ")}</p>
-          <p className="whitespace-pre-wrap wrap-anywhere">{card.operation.body}</p>
-          {card.spokenSms !== undefined && card.decision === undefined && <p className="text-meta text-muted-foreground">Say “Send this text”</p>}
+          <p className="font-semibold wrap-anywhere">{card.phone?.tag === "Exact" ? `${card.phone.selected.name} · ` : ""}{text.recipients.map(displayNumber).join(", ")}</p>
+          <p className="whitespace-pre-wrap wrap-anywhere">{text.body}</p>
+          {spokenText(card) !== undefined && <p className="text-meta text-muted-foreground">Say “Send this text”</p>}
         </AssistantCardFrame>
       ) : (
         <AssistantCard card={{ kind: "decision", variant: "proposal", title: card.title, detail: card.detail, waiting: deciding, action: card.operation.type === "sms_compose" ? "Open draft" : card.operation.type === "browser_navigate" ? "Open" : "Approve" }}
@@ -288,7 +295,7 @@ export function Assistant({ runtime, messageActions, speech, canReadAloud = fals
   const reviewed = useSyncExternalStore(mailStore.subscribe, mailStore.snapshot);
   const composerRef = useRef<HTMLTextAreaElement>(null);
   const focusOnRevealRef = useRef(false);
-  const { voice: renderVoice, voicePanel, keyboard, ...speechProps } = speech ?? {};
+  const { voice: renderVoice, voicePanel, interim, keyboard, ...speechProps } = speech ?? {};
   const keyboardOwner = useCallback(() => keyboardScope(runtime), [runtime]);
   const { onKeyboard, takeFocus } = useTalkKeyboard(composerRef, keyboardOwner, keyboard);
   const currentView = shell.state?.trail.at(-1);
@@ -472,6 +479,7 @@ export function Assistant({ runtime, messageActions, speech, canReadAloud = fals
         transcript={{
           messages,
           liveMessages: [...(brief === "" ? [] : [{ id: `briefing:${subject}`, author: "alpha" as const, text: brief, onOpenLink }]), ...writingReply, ...failed, ...mediaCards, ...mediaNote],
+          interim: open && shown.around === 0 && !talking.context.sensitive ? interim : undefined,
           position: { page: `${shown.chosen}/${shown.page.ticket}`, around: board.messageId(shown.around) },
           visible: open,
           status: shown.page.status === "Loading" ? "loading" : shown.page.status === "Failed" ? "failed" : "loaded",
