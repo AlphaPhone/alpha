@@ -626,9 +626,9 @@ pure def canCopyRead(s: Composer, ticket: int, found: bool, held: int, gmail: in
 
 pure def copyRead(s: Composer, ticket: int, ok: bool, found: bool, held: int, gmail: int): Written =
   val told = { ...s, lookup: R::answer(s.lookup, ok) }
+  val settled = L::notFound(s.letter)
   if (not(ok) or s.letter.sending != 0) { state: told, out: List() }
   else if (s.letter.unsure and s.letter.use == L::ToDelete) {
-    val settled = L::notFound(s.letter)
     if (found) touched(settled, { ...told, notice: CopyNotDeleted })
     else touched(L::readCopy(settled, false, 0), { ...told, notice: CopyDeleted })
   }
