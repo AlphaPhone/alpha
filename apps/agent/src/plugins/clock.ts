@@ -4,6 +4,9 @@ import {
   type AlphaAppsStore, isValidTimeZone, normalizeSound,
 } from "./store.ts";
 import {
+  alarmFields, alarmOperations, timerFields, timerOperations, worldFields, worldOperations,
+} from "../../gen/agent.ts";
+import {
   type AgentAction, type AgentProvider, type AgentRoute, type ClockAlarmRecord, type ClockTimerRecord,
   type WorldCityRecord, asRecord, readBoolean, readNumber, readRawString, readString,
 } from "./types.ts";
@@ -365,19 +368,42 @@ function handleClockWorld(store: AlphaAppsStore, params: Record<string, unknown>
 }
 
 type ClockActionResult = NonNullable<Awaited<ReturnType<AgentAction["handler"]>>>;
+type ClockParameter = NonNullable<AgentAction["parameters"]>[number];
+type ClockFieldSchema = Omit<ClockParameter, "name">;
 
-type ClockParameters = NonNullable<AgentAction["parameters"]>;
+const dayNames = ["sunday", "monday", "tuesday", "wednesday", "thursday", "friday", "saturday"];
 
-const idParameter = (thing: string): ClockParameters[number] =>
-  ({ name: "id", description: `The ${thing}'s id, as the Clock context lists it, to act on one ${thing}.`, required: false, schema: { type: "string" } });
-const labelParameter = (thing: string): ClockParameters[number] =>
-  ({ name: "label", description: `The ${thing}'s name, only when the owner gave one.`, required: false, schema: { type: "string" } });
+const operationField = (operations: readonly string[], what: string): ClockFieldSchema => ({
+  description: `Which operation on ${what}. Leave out to have it read from the owner's words.`,
+  schema: { type: "string", enum: [...operations] },
+});
+
+const clockFieldSchemas: Readonly<Partial<Record<string, ClockFieldSchema>>> = {
+  id: { description: "The id of the alarm, timer or pinned city, as CLOCK_CONTEXT or a list names it.", schema: { type: "string" } },
+  hour: { description: "The alarm's hour, 0 to 23, in the phone's time zone.", schema: { type: "number", minimum: 0, maximum: 23 } },
+  minute: { description: "The alarm's minute, 0 to 59.", schema: { type: "number", minimum: 0, maximum: 59 } },
+  days: { description: "The days the alarm repeats on. Leave out for an alarm that rings once.", schema: { type: "array", items: { type: "string", enum: dayNames } } },
+  label: { description: "A short label, such as \"Standup\" or \"pasta\".", schema: { type: "string" } },
+  enabled: { description: "Whether the alarm is on.", schema: { type: "boolean" } },
+  snoozeMinutes: { description: "How many minutes a snooze lasts.", schema: { type: "number", minimum: 1 } },
+  sound: { description: "The alarm's sound.", schema: { type: "string", enum: ["radar", "chime", "pulse", "gentle", "classic"] } },
+  vibrate: { description: "Whether the alarm vibrates.", schema: { type: "boolean" } },
+  durationSeconds: { description: "The timer's length in seconds; for add_time, the seconds to add.", schema: { type: "number", minimum: 1 } },
+  city: { description: "A city or IANA time zone, such as \"Tokyo\" or \"Europe/Paris\".", schema: { type: "string" } },
+};
+
+function clockParameters(fields: readonly string[], operations: readonly string[], what: string): ClockParameter[] {
+  return fields.flatMap((name) => {
+    const field = name === "action" ? operationField(operations, what) : clockFieldSchemas[name];
+    return field === undefined ? [] : [{ name, required: false, ...field }];
+  });
+}
 
 function makeClockAction(
   name: string,
   similes: string[],
   description: string,
-  parameters: ClockParameters,
+  parameters: ClockParameter[],
   run: (params: Record<string, unknown>, text: string) => ClockActionResult,
 ): AgentAction {
   const action: AgentAction = {
@@ -386,10 +412,12 @@ function makeClockAction(
     description,
     parameters,
     validate: () => Promise.resolve(true),
-    handler: (_runtime, message, _state, options) => {
+    handler: async (_runtime, message, _state, options, callback) => {
       const params = asRecord(asRecord(options).parameters ?? asRecord(options));
       const text = readRawString(asRecord(message.content), "text") ?? "";
-      return Promise.resolve(run(params, text));
+      const result = run(params, text);
+      if (callback !== undefined && result.text !== undefined) await callback({ text: result.text });
+      return result;
     },
   };
   showsApp(action, "clock");
@@ -403,40 +431,21 @@ export function clockActions(store: AlphaAppsStore, timeZone: string): AgentActi
       "CLOCK_ALARM",
       ["SET_ALARM", "MANAGE_ALARM", "SNOOZE_ALARM", "DISMISS_ALARM"],
       "Create, update, toggle, delete, list, snooze, or dismiss alarms in Alpha Clock.",
-      [
-        { name: "action", description: "What to do with an alarm.", required: true, schema: { type: "string", enum: ["set", "update", "toggle", "snooze", "dismiss", "delete", "list"] } },
-        { name: "hour", description: "The alarm's hour on a 24-hour clock, 0 to 23, to set or move it.", required: false, schema: { type: "integer", minimum: 0, maximum: 23 } },
-        { name: "minute", description: "The alarm's minute, 0 to 59.", required: false, schema: { type: "integer", minimum: 0, maximum: 59 } },
-        { name: "days", description: "The days it repeats on; leave it out for an alarm that rings once.", required: false, schema: { type: "array", items: { type: "string", enum: ["sunday", "monday", "tuesday", "wednesday", "thursday", "friday", "saturday"] } } },
-        labelParameter("alarm"),
-        { name: "enabled", description: "Whether the alarm is on, to turn it on or off.", required: false, schema: { type: "boolean" } },
-        { name: "snoozeMinutes", description: "Minutes to snooze for.", required: false, schema: { type: "integer", minimum: 1 } },
-        idParameter("alarm"),
-      ],
+      clockParameters(alarmFields, alarmOperations, "an alarm"),
       (params, text) => handleClockAlarm(store, timeZone, params, text),
     ),
     makeClockAction(
       "CLOCK_TIMER",
       ["START_TIMER", "SET_TIMER", "PAUSE_TIMER", "CANCEL_TIMER"],
       "Start, pause, resume, extend (+time), reset, cancel, dismiss, or list countdown timers in Alpha Clock.",
-      [
-        { name: "action", description: "What to do with a timer.", required: true, schema: { type: "string", enum: ["start", "pause", "resume", "add_time", "reset", "cancel", "dismiss", "list"] } },
-        { name: "durationSeconds", description: "The timer's length in seconds to start one, or the time to add in seconds for add_time.", required: false, schema: { type: "integer", minimum: 1 } },
-        labelParameter("timer"),
-        idParameter("timer"),
-      ],
+      clockParameters(timerFields, timerOperations, "a timer"),
       (params, text) => handleClockTimer(store, params, text),
     ),
     makeClockAction(
       "CLOCK_WORLD",
       ["WORLD_CLOCK", "TIME_IN_CITY"],
       "Check current time in a city or manage pinned World Clock cities in Alpha Clock.",
-      [
-        { name: "action", description: "Tell the time in a city, pin or unpin a city, or list the pinned cities.", required: true, schema: { type: "string", enum: ["time_in", "add_city", "remove_city", "list"] } },
-        { name: "city", description: "The city's name.", required: false, schema: { type: "string" } },
-        { name: "timeZone", description: "An IANA time zone such as Europe/London, when no city names it.", required: false, schema: { type: "string" } },
-        idParameter("pinned city"),
-      ],
+      clockParameters(worldFields, worldOperations, "World Clock"),
       (params, text) => handleClockWorld(store, params, text),
     ),
   ];
