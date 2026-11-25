@@ -74,18 +74,23 @@ pure val agentModules: List[str] = List("@elizaos/agent/device-actions", "@eliza
 pure val loadList: List[str] = packedPlugins.concat(agentModules)
 ```
 
-### The agent may run the actions the old phone's agent ran, and every other action the bundle registers is listed as refused with its reason
+### The agent may run the actions the old phone's agent ran plus Alpha's Clock and Reminders actions, and every other action the bundle registers is listed as refused with its reason
 
 The old agent had no allowlist: every action its plugins registered could
 run. The pack's plugins register those same actions under the pinned
-eliza's names, and the policy allows each by name, so an action a later pin
-adds is refused until it is reviewed here. Core's `REPLY`, `IGNORE` and
-`NONE` are always allowed. Every other registered action is named in the
-policy's refused list with the reason the old phone did not run it:
-`CALCULATE` because the old agent had no calculator.
+eliza's names, and Alpha's `alpha-apps` product plugin registers
+`CLOCK_ALARM`, `CLOCK_TIMER`, `CLOCK_WORLD` and `REMINDERS_MANAGE`. The
+policy names `alpha-apps` as its product plugin and allows each action by
+name, so an action a later pin adds is refused until it is reviewed here.
+Core's `REPLY`, `IGNORE` and `NONE` are always allowed. Every other
+registered action is named in the policy's refused list with the reason the
+old phone did not run it: `CALCULATE` because the old agent had no
+calculator.
 
 ```quint
+pure val productPluginName: str = "alpha-apps"
 pure val coreActions: List[str] = List("REPLY", "IGNORE", "NONE")
+pure val alphaAppActions: List[str] = List("CLOCK_ALARM", "CLOCK_TIMER", "CLOCK_WORLD", "REMINDERS_MANAGE")
 pure val allowedActions: List[str] = coreActions.concat(List(
   "PROPOSE_DEVICE_ACTION", "VIEWS",
   "OWNER_REMINDERS", "OWNER_GOALS", "TODO", "OWNER_ROUTINES", "BRIEF",
@@ -96,12 +101,12 @@ pure val allowedActions: List[str] = coreActions.concat(List(
   "MAPS_PLACE", "MAPS_ROUTE", "MAPS_NAVIGATION_START", "MAPS_NAVIGATION_REROUTE", "MAPS_NAVIGATION_STOP",
   "MAPS_SELECT", "MAPS_SAVE", "MAPS_SAVED", "MAPS_SHARE", "MAPS_WHERE_AM_I", "MAPS_COVERAGE",
   "BROWSER", "BROWSER_BACK", "BROWSER_FORWARD", "BROWSER_RELOAD"
-))
+)).concat(alphaAppActions)
 pure def sameNames(a: List[str], b: List[str]): bool =
   a.length() == b.length() and a.every(x => b.includes(x)) and b.every(x => a.includes(x))
 pure def refusedActions(registered: List[str]): List[str] = registered.select(a => not(allowedActions.includes(a)))
-pure def policyAdmitted(allowed: List[str], refused: List[str], loaded: List[str], registered: List[str]): bool =
-  sameNames(allowed, allowedActions) and sameNames(refused, refusedActions(registered)) and loaded == loadList
+pure def policyAdmitted(allowed: List[str], refused: List[str], loaded: List[str], product: str, registered: List[str]): bool =
+  sameNames(allowed, allowedActions) and sameNames(refused, refusedActions(registered)) and loaded == loadList and product == productPluginName
 ```
 
 ### A proposed device step goes through eliza's device-action module, and the phone says which steps it takes
@@ -172,11 +177,36 @@ pure val pageRoutes: List[Route] = List(
   { method: Patch, path: "/api/lifeops/calendar/events/{eventId}", stream: false },
   { method: Delete, path: "/api/lifeops/calendar/events/{eventId}", stream: false },
   { method: Post, path: "/api/lifeops/calendar/events/{eventId}/response", stream: false },
+  { method: Get, path: "/api/notifications", stream: false },
+  { method: Post, path: "/api/notifications/{id}/read", stream: false },
+  { method: Get, path: "/api/scheduled-tasks", stream: false },
+  { method: Get, path: "/api/alpha/clock", stream: false },
+  { method: Put, path: "/api/alpha/clock", stream: false },
+  { method: Post, path: "/api/alpha/clock/alarms", stream: false },
+  { method: Patch, path: "/api/alpha/clock/alarms/{id}", stream: false },
+  { method: Delete, path: "/api/alpha/clock/alarms/{id}", stream: false },
+  { method: Post, path: "/api/alpha/clock/alarms/{id}/snooze", stream: false },
+  { method: Post, path: "/api/alpha/clock/alarms/{id}/dismiss", stream: false },
+  { method: Post, path: "/api/alpha/clock/timers", stream: false },
+  { method: Patch, path: "/api/alpha/clock/timers/{id}", stream: false },
+  { method: Delete, path: "/api/alpha/clock/timers/{id}", stream: false },
+  { method: Post, path: "/api/alpha/clock/world", stream: false },
+  { method: Delete, path: "/api/alpha/clock/world/{id}", stream: false },
+  { method: Get, path: "/api/alpha/reminders", stream: false },
+  { method: Post, path: "/api/alpha/reminders/lists", stream: false },
+  { method: Patch, path: "/api/alpha/reminders/lists/{id}", stream: false },
+  { method: Delete, path: "/api/alpha/reminders/lists/{id}", stream: false },
+  { method: Post, path: "/api/alpha/reminders/items", stream: false },
+  { method: Patch, path: "/api/alpha/reminders/items/{id}", stream: false },
+  { method: Delete, path: "/api/alpha/reminders/items/{id}", stream: false },
+  { method: Post, path: "/api/alpha/reminders/items/{id}/complete", stream: false },
+  { method: Post, path: "/api/alpha/reminders/items/{id}/reopen", stream: false },
+  { method: Post, path: "/api/alpha/reminders/items/{id}/snooze", stream: false },
+  { method: Post, path: "/api/alpha/reminders/items/{id}/restore", stream: false },
   { method: Get, path: "/api/auth/me", stream: false },
   { method: Get, path: "/api/workflow/workflows", stream: false },
   { method: Get, path: "/api/workflow/removed-workflows", stream: false },
   { method: Get, path: "/api/triggers", stream: false },
-  { method: Get, path: "/api/scheduled-tasks", stream: false },
   { method: Get, path: "/api/triggers/{id}/runs", stream: false },
 )
 pure def admitted(listed: List[Route], r: Route): bool = listed.includes(r)
@@ -248,7 +278,7 @@ pure def packedFor(e: Environment): bool = e != Local
 > inference, carrying the workflow worker it pins and every action Alpha
 > allows, so that what ships is what was reviewed.
 
-### A pack is admitted only when its manifest names the pinned commit, Node 26, no local inference, the plugins it carries, a pinned workflow worker and every allowed action
+### A pack is admitted only when its manifest names the pinned commit, Node 26, no local inference, the plugins it carries, the Alpha product plugin, a pinned workflow worker and every allowed action
 
 The manifest is the one `readBundleManifest` reads back for the bundle's own
 bytes (eliza's "A manifest is read only for its own bundle bytes and only when
@@ -257,24 +287,25 @@ harness reads it. eliza pins the workflow worker's digest exactly when the
 bundle carries the workflow plugin.
 
 ```quint
-type Manifest = { sourceCommit: str, node: str, localInference: bool, plugins: List[str], workerPinned: bool, actions: List[str] }
+type Manifest = { sourceCommit: str, node: str, localInference: bool, plugins: List[str], productPlugin: str, workerPinned: bool, actions: List[str] }
 pure def packAdmitted(m: Manifest, pin: str): bool =
   m.sourceCommit == pin and m.node == "26" and not(m.localInference) and sameNames(m.plugins, packedPlugins)
-    and m.workerPinned and allowedActions.every(a => m.actions.includes(a))
+    and m.productPlugin == productPluginName and m.workerPinned and allowedActions.every(a => m.actions.includes(a))
 ```
 
-### Every package the bundle carries is the pinned eliza's, except the pack's one entry
+### Every package the bundle carries is the pinned eliza's, except the pack's entry and Alpha's product plugin
 
 The bundle is built from a private clone of the pinned commit, never from
-Alpha's own tree: the only package of Alpha's in it is the entry the build
-writes inside that clone, which starts eliza's agent with the plugins above
-and builds the notes module. Every other package is the pinned eliza's own
-or one its lockfile installs.
+Alpha's own tree: the only packages of Alpha's in it are the entry the build
+writes inside that clone (which starts eliza's agent with the plugins above
+and builds the notes and product modules) and Alpha's `alpha-apps` product
+plugin staged inside that entry. Every other package is the pinned eliza's
+own or one its lockfile installs.
 
 ```quint
 pure val packEntry: str = "@repo/agent-pack-entry"
-pure def inputAdmitted(name: str, alphaOwned: bool): bool = not(alphaOwned) or name == packEntry
-pure def entryCarried(packages: List[str]): bool = packages.includes(packEntry)
+pure def inputAdmitted(name: str, alphaOwned: bool): bool = not(alphaOwned) or name == packEntry or name == productPluginName
+pure def entryCarried(packages: List[str]): bool = packages.includes(packEntry) and packages.includes(productPluginName)
 ```
 
 ### The launch names the pack's pinned workflow worker, and the agent refuses any other with its configuration code

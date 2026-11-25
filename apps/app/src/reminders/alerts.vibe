@@ -1,0 +1,197 @@
+// spec/app/reminders/alerts.md, "Story: Alert on due reminders and act from the banner"
+import * as Alerts from "../../gen/app__reminders__alerts.effect.vibe"
+import type { AlertEffect as Out, Event } from "../../gen/app__reminders__alerts.effect.vibe"
+import { Agent } from "../platform/agent.vibe"
+import { PhoneReminders } from "../platform/reminders.vibe"
+import { attemptedWith } from "../platform/remote.vibe"
+import type { Attempts } from "../runtime/attempts.vibe"
+import { type Job, answer, contained, due, reacting, run, together, untimed } from "../runtime/reactor.vibe"
+import { Time } from "../runtime/time.vibe"
+import { alertInstantMs } from "./recurrence.ts"
+import { type ReminderItemRecord, type RemindersSnapshot, remindersStore } from "./store.ts"
+
+/** Optional native Android reminder alarm bridge wired by the integrator without coupling Reminders to platform internals. */
+export interface NativeRemindersPort {
+  schedule(input: { readonly id: string; readonly title: string; readonly body: string; readonly at: number; readonly dueAt: number }): Promise<unknown>
+  cancel(id: string): Promise<unknown>
+  list(): Promise<unknown>
+  pendingTap(): Promise<{ readonly token?: string; readonly id?: string }>
+  consumeTap(token: string): Promise<unknown>
+}
+
+let nativePort: NativeRemindersPort | undefined
+
+/** Register an optional native Android reminders adapter for hardware alarm scheduling. */
+export function setNativeRemindersPort(port: NativeRemindersPort | undefined): void {
+  nativePort = port
+}
+
+/** Banner snapshot observed synchronously by the global AlertBanner overlay. */
+export interface RingingBannerState {
+  readonly specId: number
+  readonly revision: number
+  readonly item: ReminderItemRecord
+}
+
+let bannerState: RingingBannerState | undefined
+const bannerListeners = new Set<() => void>()
+
+function emitBanner(next: RingingBannerState | undefined): void {
+  bannerState = next
+  for (const listener of [...bannerListeners]) listener()
+}
+
+/** External store for the currently ringing due-reminder notification banner. */
+export const alertBannerStore = {
+  snapshot: (): RingingBannerState | undefined => bannerState,
+  subscribe(listener: () => void): () => void {
+    bannerListeners.add(listener)
+    return () => { bannerListeners.delete(listener) }
+  },
+  reset(): void {
+    emitBanner(undefined)
+  },
+}
+
+effect function syncBannerFromMachine(): void!!Alerts.Machine {
+  const state = try (try Alerts.Machine).get()
+  if (state.bannerId === 0) {
+    emitBanner(undefined)
+    return
+  }
+  const entry = Alerts.entryOf(state.entries, state.bannerId)
+  const item = remindersStore.findItemBySpecId(state.bannerId)
+  if (entry.phase === "Ringing" && item !== undefined && !item.completed) {
+    emitBanner({ specId: state.bannerId, revision: entry.revision, item })
+  } else {
+    emitBanner(undefined)
+  }
+}
+
+effect function armNative(id: number, at: number): void!!PhoneReminders {
+  const item = remindersStore.findItemBySpecId(id)
+  if (item === undefined) return
+  const port = nativePort
+  if (port !== undefined) {
+    try ignore(tryPromise(() => port.schedule({ id: item.id, title: item.title, body: item.notes, at, dueAt: at })))
+    return
+  }
+  const phone = try PhoneReminders
+  if (phone.present) {
+    try ignore(phone.schedule({ id: item.id, title: item.title, body: item.notes, at, dueAt: at, alertMinutes: item.alertMinutes }))
+  }
+}
+
+effect function cancelNative(item: ReminderItemRecord): void!!PhoneReminders {
+  const port = nativePort
+  if (port !== undefined) {
+    try ignore(tryPromise(() => port.cancel(item.id)))
+    return
+  }
+  const phone = try PhoneReminders
+  if (phone.present) {
+    const occurrenceId = `${item.id}:${item.updatedAtMs}`
+    const target = { sourceId: item.id, sourceRevision: String(item.revision), reminderId: item.id, occurrenceId, revision: String(item.revision) }
+    try ignore(phone.cancel({ id: item.id, target, operationId: `cancel-${item.id}-${item.revision}`, bindingHash: `${item.id}:${item.revision}` }))
+  }
+}
+
+effect function syncBannerAction(
+  id: number,
+  attemptId: number,
+  mutate: (row: ReminderItemRecord, now: number) => ReminderItemRecord,
+  build: (item: ReminderItemRecord, now: number, key: string) => HttpClientRequest.HttpClientRequest,
+): Event!!(Agent | Time | Attempts) {
+  const item = remindersStore.findItemBySpecId(id)
+  if (item === undefined) return { type: "syncAnswered", id, attemptId, confirmed: false, known: true }
+  const now = try (try Time).now()
+  const snap = remindersStore.snapshot().snapshot
+  const updated = snap.items.map((row) => (row.id === item.id ? mutate(row, now) : row))
+  remindersStore.replace({ ...snap, updatedAtMs: now, items: updated })
+  const outcome = try attemptedWith(Agent, (key) => build(item, now, key), attemptId)
+  return { type: "syncAnswered", id, attemptId, confirmed: outcome.confirmed, known: outcome.known }
+}
+
+effect function syncComplete(id: number, attemptId: number): Event!!(Agent | Time | Attempts) {
+  return try syncBannerAction(
+    id,
+    attemptId,
+    (row, now) => ({ ...row, completed: true, completedAtMs: now, snoozedUntilMs: null, revision: row.revision + 1, updatedAtMs: now }),
+    (item, _now, key) => HttpClientRequest.bodyJsonUnsafe(HttpClientRequest.post(`/api/alpha/reminders/items/${encodeURIComponent(item.id)}/complete`), { idempotencyKey: key }),
+  )
+}
+
+effect function syncSnooze(id: number, until: number, attemptId: number): Event!!(Agent | Time | Attempts) {
+  return try syncBannerAction(
+    id,
+    attemptId,
+    (row, now) => ({ ...row, snoozedUntilMs: until, revision: row.revision + 1, updatedAtMs: now }),
+    (item, _now, key) => HttpClientRequest.bodyJsonUnsafe(HttpClientRequest.post(`/api/alpha/reminders/items/${encodeURIComponent(item.id)}/snooze`), { snoozedUntilMs: until, idempotencyKey: key }),
+  )
+}
+
+effect function syncDismiss(id: number, attemptId: number): Event!!(Agent | Time | Attempts) {
+  return try syncBannerAction(
+    id,
+    attemptId,
+    (row, now) => ({ ...row, notifiedAtMs: now, updatedAtMs: now }),
+    (item, now, key) => HttpClientRequest.bodyJsonUnsafe(HttpClientRequest.patch(`/api/alpha/reminders/items/${encodeURIComponent(item.id)}`), { notifiedAtMs: now, idempotencyKey: key }),
+  )
+}
+
+function carry(fx: Out): Job<Event, Agent | Time | Attempts | Alerts.Machine | PhoneReminders, []> {
+  return match (fx) {
+    when { tag: "RingBanner" }: run("ring", syncBannerFromMachine());
+    when { tag: "ClearBanner" }: run("clear", syncBannerFromMachine());
+    when { tag: "Arm", let id, let at }: run(`arm ${id}`, armNative(id, at));
+    when { tag: "SyncComplete", let id, let attemptId }: answer(`complete ${attemptId}`, syncComplete(id, attemptId), { type: "syncAnswered", id, attemptId, confirmed: false, known: false });
+    when { tag: "SyncSnooze", let id, let until, let attemptId }: answer(`snooze ${attemptId}`, syncSnooze(id, until, attemptId), { type: "syncAnswered", id, attemptId, confirmed: false, known: false });
+    when { tag: "SyncDismiss", let id, let attemptId }: answer(`dismiss ${attemptId}`, syncDismiss(id, attemptId), { type: "syncAnswered", id, attemptId, confirmed: false, known: false });
+  }
+}
+
+function timers(state: Alerts.Alerts) {
+  return state.entries
+    .filter((entry) => Alerts.isWaiting(entry))
+    .map((entry) => due<Event, []>(`alert:${entry.id}`, entry.dueAt, { type: "fire", id: entry.id, now: untimed }))
+}
+
+/** Reconcile the resident alerts machine with the latest reminders snapshot at `nowMs`. */
+export effect function syncAlertsWithSnapshot(snapshot: RemindersSnapshot, nowMs: number): void!!(Alerts.Machine | PhoneReminders) {
+  const alerts = try Alerts.Machine
+  const activeSpecIds = new Set<number>()
+  for (const item of snapshot.items) {
+    const specId = remindersStore.specIdForItem(item.id)
+    if (specId <= 0) continue
+    const triggerAt = item.completed ? null : alertInstantMs(item.dueDate, item.dueMinute, item.alertMinutes, item.snoozedUntilMs)
+    if (triggerAt === null) {
+      const state = try alerts.get()
+      if (Alerts.canCancelAlert(state, specId)) try contained(alerts.send({ type: "cancelAlert", id: specId }), "cancelling alert")
+      try cancelNative(item)
+      continue
+    }
+    activeSpecIds.add(specId)
+    const state = try alerts.get()
+    const existing = Alerts.hasEntry(state.entries, specId) ? Alerts.entryOf(state.entries, specId) : undefined
+    if (existing !== undefined && existing.phase === "Ringing") continue
+    if (existing !== undefined && existing.dueAt === triggerAt && Alerts.isWaiting(existing)) continue
+    const nextRevision = existing === undefined ? Math.max(1, item.revision) : Math.max(existing.revision + 1, item.revision)
+    if (triggerAt > nowMs) {
+      if (Alerts.canSchedule(state, specId, triggerAt, nextRevision, nowMs)) {
+        try contained(alerts.send({ type: "schedule", id: specId, dueAt: triggerAt, revision: nextRevision, now: nowMs }), "scheduling alert")
+      }
+    }
+  }
+  const latest = try alerts.get()
+  for (const entry of latest.entries) {
+    if (!activeSpecIds.has(entry.id) && Alerts.canCancelAlert(latest, entry.id)) {
+      try contained(alerts.send({ type: "cancelAlert", id: entry.id }), "removing stale alert")
+    }
+  }
+  try syncBannerFromMachine()
+}
+
+/** Resident due-time alerting layer, kept across restarts and armed via `Time.until`. */
+export const reminderAlerts = together(
+  reacting(Alerts, { keep: 1, open: [{ type: "reopen" }], carry, timers }),
+)

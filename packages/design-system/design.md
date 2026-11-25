@@ -35,10 +35,11 @@ do next.
 - **Shape.** `radius` is a card; `rounded-group` a group of rows; `rounded-panel` a notice or a search bar; `rounded-home-card` is a Home overview card;
   `rounded-drawer-icon` rounds an installed app icon; `rounded-option` is a row of a floating menu and
   `rounded-box` the box of a list row's selection check. `rounded-tile` is an app tile, a menu and a dialog;
-  `rounded-sheet` the top of a bottom sheet; `rounded-full` a button, a chip and the Ask Alpha bar.
+  `rounded-sheet` the top of a bottom sheet, `rounded-chat` the top of the Ask Alpha sheet; `rounded-full` a
+  button and a chip, `rounded-dock` the Ask Alpha bar.
   Everything pressed is at least 44px in both directions.
-- **Elevation.** `shadow-sm` lifts a control, `shadow-menu` a menu, `shadow-md` a dialog or a notice, `shadow-lg` the Ask Alpha
-  bar, `shadow-sheet` a bottom sheet.
+- **Elevation.** `shadow-sm` lifts a control, `shadow-menu` a menu, `shadow-md` a dialog or a notice, `shadow-lg` a raised card,
+  `shadow-dock` the floating Ask Alpha bar (`shadow-dock-dark` on black), `shadow-sheet` a bottom sheet.
 - **Layers.** `z-dock` is the Ask Alpha bar, `z-sheet` the conversation and bottom sheets, `z-dialog` a
   dialog, `z-toast` a notice, `z-voice` the voice overlay. `z-10`, `z-20` and `z-50` order things inside one view.
 - **Motion.** `fast` for press, `base` for most changes, `slow` for entering and leaving, on
@@ -74,7 +75,7 @@ this prose into tokens. To change the design, describe it, and have the change w
 | `foreground` | oklch(0 0 0) | oklch(1 0 0) |
 | `card` | oklch(0.98510365 0 0) | oklch(0.14957712 0 0) |
 | `card-foreground` | oklch(0 0 0) | oklch(1 0 0) |
-| `popover` | oklch(1 0 0) | oklch(0.19573496 0 0) |
+| `popover` | oklch(1 0 0) | oklch(0 0 0) |
 | `popover-foreground` | oklch(0 0 0) | oklch(1 0 0) |
 | `primary` | oklch(0.45201372 0.31321437 264.05202064) | oklch(0.70366126 0.15682550 277.95756294) |
 | `primary-foreground` | oklch(1 0 0) | oklch(0 0 0) |
@@ -110,6 +111,8 @@ this prose into tokens. To change the design, describe it, and have the change w
 | `rounded.box` | 0.375rem |
 | `rounded.group` | 1.625rem |
 | `rounded.panel` | 1.5rem |
+| `rounded.dock` | 1.9375rem |
+| `rounded.chat` | 1.875rem |
 | `font.sans` | "Public Sans", system-ui, -apple-system, "Segoe UI", sans-serif |
 | `font.display` | Denton, Fraunces, Georgia, serif |
 | `font.mono` | ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas, monospace |
@@ -182,6 +185,8 @@ this prose into tokens. To change the design, describe it, and have the change w
 | `leading.row` | 1.3 |
 | `leading.normal` | 1.4 |
 | `leading.relaxed` | 1.6 |
+| `leading.field` | 1.375 |
+| `leading.chat` | 1.5 |
 | `tracking.tight` | -0.01em |
 | `tracking.caps` | 0.14em |
 | `z.10` | 10 |
@@ -199,6 +204,8 @@ this prose into tokens. To change the design, describe it, and have the change w
 | `shadow.lg` | 0 12px 34px oklch(0 0 0 / 0.16) |
 | `shadow.sheet` | 0 -10px 40px oklch(0 0 0 / 0.12) |
 | `shadow.menu` | 0 4px 20px oklch(0 0 0 / 0.12) |
+| `shadow.dock` | 0 14px 40px oklch(0 0 0 / 0.12) |
+| `shadow.dock-dark` | 0 14px 40px oklch(0 0 0 / 0.45) |
 | `keyframes.rise` | from{opacity:0;transform:translateY(1.75rem)}to{opacity:1;transform:none} |
 | `keyframes.drop` | from{opacity:0;transform:translateY(-2.25rem)}to{opacity:1;transform:none} |
 | `keyframes.fade` | from{opacity:0}to{opacity:1} |
