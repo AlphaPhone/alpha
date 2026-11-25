@@ -1,6 +1,6 @@
 // spec/app/assistant/attachments.md, "Each file is checked against its limits: an image is made to fit, audio and video never go, and the message's files fit together"; spec/app/assistant/composer.md, "Files chosen are added up to the upload limit of four"; spec/app/assistant/index.md, "Stored attachments are posted with their message, and a message whose attachments could not be stored never left"
 import * as Picker from "../../gen/app__assistant__attachments.effect.vibe"
-import type { SelectionId } from "@elizaos/os/bridges/definitions/media"
+import type { SelectionId } from "@elizaos/os-bridges"
 import { Documents } from "../platform/documents.vibe"
 import { batchFits, fileBase64Cap, fits, imageBase64Cap, nameLimit, reencoded } from "../../gen/app__assistant__attachments.effect.vibe"
 import * as Composer from "../../gen/app__assistant__composer.effect.vibe"
