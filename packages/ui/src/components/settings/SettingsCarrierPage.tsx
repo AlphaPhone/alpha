@@ -1,10 +1,12 @@
-import { AppWindow, Copy, Info, RadioTower, Settings2, Signal } from "lucide-react";
+import { Copy, SlidersHorizontal } from "lucide-react";
 import { Banner } from "../Banner.tsx";
 import { Button } from "../Button.tsx";
 import { ListGroup } from "../ListGroup.tsx";
 import { ListRow } from "../ListRow.tsx";
 import { Spinner } from "../Spinner.tsx";
 import { SettingsAndroidRow } from "./SettingsAndroidRow.tsx";
+import { SettingsFactRow } from "./SettingsFactRow.tsx";
+import { SettingsNavRow } from "./SettingsNavRow.tsx";
 import { SettingsPage } from "./SettingsPage.tsx";
 import type { AndroidTold, SettingsAndroidProps } from "./vocabulary.ts";
 
@@ -66,15 +68,13 @@ export function SettingsCarrierPage({ fields, reading = false, failed = false, s
   }
   return (
     <SettingsPage title="Carrier & SIM setup" told={told} onBack={onBack} backLabel="Back to General">
-      {failed ? <Banner variant="warn">The identifiers could not be read</Banner> : null}
-      <div role="status" aria-live="polite">{copied ? <Banner variant={copied === "copied" ? "info" : "warn"}>{copied === "copied" ? "Copied" : "Could not copy"}</Banner> : null}</div>
-      {reading ? <ListRow title="Reading identifiers" trailing={<Spinner size="sm" label="Reading" />} /> : null}
-      {onShow || onReadEid ? (
-        <div className="flex flex-wrap gap-2">
-          {onShow ? <Button onClick={onShow}>{fields.length ? "Refresh identifiers" : "Show identifiers"}</Button> : null}
-          {onReadEid ? <Button variant="outline" onClick={onReadEid}>Read EID</Button> : null}
-        </div>
-      ) : null}
+      <div role="status" aria-live="polite" className="empty:-mt-3">{copied ? <Banner variant={copied === "copied" ? "info" : "warn"}>{copied === "copied" ? "Copied" : "Could not copy"}</Banner> : null}</div>
+      <ListGroup>
+        {reading ? <ListRow title="Reading identifiers…" leading={<SlidersHorizontal />} trailing={<Spinner size="sm" label="Reading" />} /> : null}
+        {!reading && onShow ? <SettingsNavRow title={fields.length ? "Refresh identifiers" : "Show identifiers"} icon={<SlidersHorizontal />} onOpen={onShow} /> : null}
+        <SettingsFactRow title="Private device information" description="Read only when you tap above. Values clear when you leave this page. Copy uses the Android clipboard." />
+        {failed ? <SettingsFactRow title="Read unavailable" description="Keep Alpha in front and the phone unlocked, then try again. You can also use Android device identifiers below." /> : null}
+      </ListGroup>
       {[...groups].map(([heading, rows]) => (
         <ListGroup key={heading ?? "identifiers"} heading={heading}>
           {rows.map(({ name, value, identifier, missing: why }) => (
@@ -87,12 +87,23 @@ export function SettingsCarrierPage({ fields, reading = false, failed = false, s
           ))}
         </ListGroup>
       ))}
+      {onReadEid ? (
+        <ListGroup>
+          <SettingsNavRow title="Read EID" icon={<SlidersHorizontal />} onOpen={onReadEid} />
+        </ListGroup>
+      ) : null}
       <ListGroup>
-        <SettingsAndroidRow target="sim-cards" title="SIMs" icon={<RadioTower />} {...android} />
-        <SettingsAndroidRow target="mobile-networks" title="Mobile networks" icon={<Signal />} {...android} />
-        <SettingsAndroidRow target="access-point-names" title="Access point names" icon={<Settings2 />} {...android} />
-        {smsChoice ? <SettingsAndroidRow target="default-apps" title="Default SMS app" icon={<AppWindow />} {...android} /> : null}
-        <SettingsAndroidRow target="about-phone" title="About phone" icon={<Info />} {...android} />
+        <SettingsFactRow title="Activate a physical SIM" description="For T-Mobile Connect with a new number, choose Bring your own phone, a physical SIM and a new number with the carrier. Check compatibility using the actual IMEI before ordering." />
+        <SettingsFactRow title="Before inserting a SIM" description="IMEI identifies the phone and can be read before a SIM is installed. ICCID identifies the SIM and may be printed on its card. EID is for eSIM and is optional for a physical SIM." />
+      </ListGroup>
+      <ListGroup>
+        <SettingsAndroidRow target="about-phone" title="Android device identifiers / About phone" icon={<SlidersHorizontal />} {...android} />
+        <SettingsFactRow title="If IMEI access is denied" description="In Android About phone, open IMEI or device identifiers. You can also check the original phone box. On a supported system Phone dial pad, *#06# may show identifiers; Alpha does not simulate this code." />
+        <SettingsAndroidRow target="sim-cards" title="Android SIM settings" icon={<SlidersHorizontal />} {...android} />
+        <SettingsAndroidRow target="mobile-networks" title="Android mobile network settings" icon={<SlidersHorizontal />} {...android} />
+        <SettingsAndroidRow target="access-point-names" title="Android access point names (APN)" icon={<SlidersHorizontal />} {...android} />
+        {smsChoice ? <SettingsAndroidRow target="default-apps" title="Choose default SMS app in Android" icon={<SlidersHorizontal />} {...android} /> : null}
+        <SettingsFactRow title="After activation" description="Refresh identifiers and confirm the SIM and network state. Test calls, SMS and mobile data with Wi-Fi off. Use APN values supplied by T-Mobile; this page does not change your plan, SIM, network or APN." />
       </ListGroup>
     </SettingsPage>
   );

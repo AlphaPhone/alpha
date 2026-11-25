@@ -51,8 +51,9 @@ export type SettingsGeneralPageProps = SettingsAndroidProps &
 const themes = { system: "System", light: "Light", dark: "Dark" } as const;
 
 /**
- * General: its pages, the network as the phone reports it with the way into Android's settings for it, the screen lock
- * and default apps, and Erase all data at the foot. Rows are numbered by slot, as on the first page.
+ * General: Carrier & SIM setup on its own, its pages, the network as the phone reports it with the way into Android's
+ * settings for it, the screen lock and default apps, Erase all data, and the Phone page last, on an Alpha image.
+ * Rows are numbered by slot, as on the first page.
  * @model spec/app/settings/index.md
  */
 export function SettingsGeneralPage({ wifi, bluetooth, mobileData, theme, alerts, image = false, told, onBack, onOpen, onPhone = false, reviewing, onErase, requestingHome, onRequestHome, said, updates, starting, onAndroid, place, onPlace, actions }: SettingsGeneralPageProps) {
@@ -64,7 +65,6 @@ export function SettingsGeneralPage({ wifi, bluetooth, mobileData, theme, alerts
       {onPhone ? (
         <ListGroup>
           <SettingsNavRow title="Carrier & SIM setup" detail="IMEI, SIM status and activation" icon={<Smartphone />} onOpen={onOpen && (() => onOpen("carrier"))} {...at(13)} />
-          <SettingsNavRow title="Network" icon={<WifiCog />} onOpen={onOpen && (() => onOpen("network"))} {...at(12)} />
         </ListGroup>
       ) : null}
       <ListGroup>
@@ -72,9 +72,9 @@ export function SettingsGeneralPage({ wifi, bluetooth, mobileData, theme, alerts
         <SettingsNavRow title="Notifications" icon={<Bell />} detail={alerts ? <SettingsReading reading={alerts} /> : undefined} onOpen={onOpen && (() => onOpen("notifications"))} {...at(2)} />
         <SettingsNavRow title="Sound" icon={<Volume2 />} onOpen={onOpen && (() => onOpen("sound"))} {...at(1)} />
         <SettingsNavRow title="Battery" icon={<Battery />} onOpen={onOpen && (() => onOpen("battery"))} {...at(3)} />
-        {image ? <SettingsNavRow title="Phone" icon={<Phone />} onOpen={onOpen && (() => onOpen("phone"))} {...at(4)} /> : null}
       </ListGroup>
       <ListGroup>
+        {onPhone ? <SettingsNavRow title="Network" icon={<WifiCog />} onOpen={onOpen && (() => onOpen("network"))} {...at(12)} /> : null}
         <SettingsAndroidRow target="wifi-networks" title="Wi-Fi" icon={<Wifi />} reading={wifi} {...android} {...at(5)} />
         <SettingsAndroidRow target="bluetooth-devices" title="Bluetooth" icon={<Bluetooth />} reading={bluetooth} {...android} {...at(6)} />
         <SettingsAndroidRow target="mobile-networks" title="Mobile data" icon={<Signal />} reading={mobileData} {...android} {...at(7)} />
@@ -89,6 +89,11 @@ export function SettingsGeneralPage({ wifi, bluetooth, mobileData, theme, alerts
       {onPhone ? (
         <ListGroup>
           <SettingsResetRow reviewing={reviewing} onErase={onErase} {...at(11)} />
+        </ListGroup>
+      ) : null}
+      {image ? (
+        <ListGroup>
+          <SettingsNavRow title="Phone" icon={<Phone />} onOpen={onOpen && (() => onOpen("phone"))} {...at(4)} />
         </ListGroup>
       ) : null}
     </SettingsPage>
