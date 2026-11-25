@@ -33,6 +33,7 @@
  <queries>
   <package android:name="com.android.systemui" />
   <package android:name="ai.alphacompute.alphaphone.sense" />
+  <package android:name="proton.android.pass" />
   <intent><action android:name="android.intent.action.VIEW" /><data android:scheme="https" /></intent>
   <intent><action android:name="android.intent.action.VIEW" /><data android:scheme="geo" /></intent>
   <intent><action android:name="android.intent.action.MAIN" /><category android:name="android.intent.category.LAUNCHER" /></intent>

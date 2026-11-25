@@ -11,9 +11,13 @@ module held {
   import { registerPlugin } from "@capacitor/core"
   import { type SystemClient, createPasswordsClient, filesClient, locationClient, noticesClient, permittedPhotosClient, wifiClient } from "@elizaos/os-bridges"
 
+  export type PasswordProviderAction = "settings" | "install" | "open"
+
   interface SettingsHost {
     settingsFacts(): Promise<unknown>
     openSettings(input: { page: "screen-lock" | "all-files" }): Promise<{ status: "opened"; specific: boolean }>
+    passwordProviderStatus(): Promise<unknown>
+    openPasswordProvider(input: { action: PasswordProviderAction }): Promise<unknown>
   }
 
   let system: Promise<SystemClient> | undefined
@@ -60,7 +64,8 @@ module held {
     return (host ??= registerPlugin<SettingsHost>("AlphaDevice"))
   }
 }
-import { filesOf, hostOf, locationOf, noticesOf, passwordsOf, photosOf, systemOf, wifiOf } from held
+import { type PasswordProviderAction, filesOf, hostOf, locationOf, noticesOf, passwordsOf, photosOf, systemOf, wifiOf } from held
+export type { PasswordProviderAction }
 
 module web {
   /** The browser's own answer for `name`, or none where it has no such permission. */
@@ -85,9 +90,24 @@ export interface PhoneReport {
   readonly launcher: boolean
 }
 
+schema ProviderStatus {
+  installation: "installed" | "disabled" | "absent" | "unrecognized-publisher" | "unknown"
+  selection: "proton" | "other" | "none" | "unknown"
+  support: "available" | "unavailable" | "unknown"
+}
+schema ProviderHandoff {
+  status: "opened"
+  destination: "provider-picker" | "system-settings" | "external"
+}
+export type PasswordProvider = typeof ProviderStatus.Type
+
 /** The phone's own settings, as Android reports them: its facts, its roles, its settings pages and the problem log it keeps. */
 export service SystemSettings {
   readonly passwordVault: () => Pick<PasswordsClient, "status" | "unlock" | "lock" | "list" | "openEditor" | "reveal" | "copy" | "remove"> | undefined
+  /** Facts from Android about Proton Pass and its autofill service. */
+  passwordProvider(): Option.Option<PasswordProvider>!!
+  /** Acknowledges the Android handoff, after an owner action. */
+  openPasswordProvider(action: PasswordProviderAction): boolean!!
   /** What the phone reports now; what it could not read is left out, never guessed. */
   report(include?: { readonly autofill: boolean }): PhoneReport!!
   boot(): number!!
@@ -336,6 +356,12 @@ effect function opening(target: Target, channel: string): Opened!! {
 /** The phone, through eliza's clients of its plugins. */
 export const phoneSystemSettings = Layer.succeed(SystemSettings, {
   passwordVault: () => registered("ElizaPasswords") ? passwordsOf() : undefined,
+  passwordProvider: () => Effect.option(Effect.flatMap(
+    tryPromise(() => hostOf().passwordProviderStatus()), Schema.decodeUnknownEffect(ProviderStatus),
+  )),
+  openPasswordProvider: (action) => Effect.map(Effect.option(Effect.flatMap(
+    tryPromise(() => hostOf().openPasswordProvider({ action })), Schema.decodeUnknownEffect(ProviderHandoff),
+  )), Option.isSome),
   report: phoneReport,
   boot: () => Effect.map(hostFacts(), (facts) => Option.map(facts, (found) => found.bootCount === undefined ? 0 : found.bootCount + 1).pipe(Option.getOrElse(() => 0))),
   access: phoneAccess,
@@ -348,6 +374,8 @@ export const phoneSystemSettings = Layer.succeed(SystemSettings, {
 /** A browser: none of the phone's facts, roles, pages or log. */
 export const browserSystemSettings = Layer.succeed(SystemSettings, {
   passwordVault: () => undefined,
+  passwordProvider: () => succeed(Option.none<PasswordProvider>()),
+  openPasswordProvider: () => succeed(false),
   report: browserReport,
   boot: () => succeed(0),
   access: browserAccess,

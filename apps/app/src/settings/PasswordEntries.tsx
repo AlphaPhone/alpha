@@ -33,12 +33,12 @@ export function PasswordEntries({ runtime }: { runtime: SettingsRuntime }) {
 
   return (
     <>
-      <ListGroup heading="Saved passwords">
+      <ListGroup>
         {can(unlock) ? <ListRow title="Unlock" leading={<UnlockKeyhole />} onClick={() => void send(unlock)} /> : null}
         {can(lock) ? <ListRow title="Lock" leading={<LockKeyhole />} onClick={() => void send(lock)} /> : null}
-        {vault.phase === "VaultNeedsLock" ? <ListRow title="Needs screen lock" /> : null}
-        {vault.phase === "VaultUnavailable" ? <ListRow title="Unavailable" /> : null}
-        {vault.phase === "VaultAway" || vault.phase === "VaultChecking" ? <ListRow title="Checking…" /> : null}
+        {vault.phase === "VaultNeedsLock" ? <ListRow className="min-h-16.25" title="Saved passwords" detail="Needs screen lock" /> : null}
+        {vault.phase === "VaultUnavailable" ? <ListRow className="min-h-16.25" title="Saved passwords" detail="Saved passwords are unavailable." /> : null}
+        {vault.phase === "VaultAway" || vault.phase === "VaultChecking" ? <ListRow className="min-h-16.25" title="Saved passwords" detail="Checking…" /> : null}
         {vault.phase === "VaultUnlocking" ? <ListRow title="Unlocking…" leading={<LockKeyhole />} /> : null}
         {vault.phase === "VaultLocking" ? <ListRow title="Locking…" leading={<LockKeyhole />} /> : null}
         {vault.phase === "VaultEditing" ? <ListRow title="Password editor" /> : null}

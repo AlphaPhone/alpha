@@ -1,5 +1,6 @@
 // spec/app/settings/index.md, "Story: Find a setting and come back"
 import type { DataResetPlugin, AndroidRoleStatus, ElizaPasswordsPlugin, ListenerStatus, PasswordEditorInput, PasswordEntrySummary, PasswordsStatus, LaunchTarget, LauncherAppsChange, NativeCrashEntry, SystemFacts, SystemHostPlugin, SystemPlugin, SystemSettingsPage, ApprovedJoinResult, ConnectOptions, ConnectivityResult, WiFiNetwork, WiFiPlugin } from "@elizaos/os-bridges";
+import type { PasswordProvider, PasswordProviderAction } from "../../src/platform/systemSettings.vibe";
 import type { LauncherScene } from "./launcher.ts";
 import { type Faked, plugin, rejection } from "./phone.ts";
 
@@ -42,6 +43,7 @@ export interface SettingsScene {
   readonly passwordRowActions: Array<{ choice: "copy" | "reveal" | "remove"; id: string; revision: number }>;
   autofill: PasswordsStatus["autofill"];
   autofillDestination: Awaited<ReturnType<ElizaPasswordsPlugin["openAutofillSettings"]>>["destination"];
+  passwordProvider?: PasswordProvider;
   crashes: NativeCrashEntry[];
   reset: { status: string; message: string };
   readonly reviews: number[];
@@ -291,6 +293,11 @@ export function elizaPasswords(scene: SettingsScene): Faked {
 export function settingsHost(scene: SettingsScene) {
   return {
     settingsFacts: () => Promise.resolve(scene.hostFacts),
+    passwordProviderStatus: () => Promise.resolve(scene.passwordProvider),
+    openPasswordProvider: async ({ action }: { action: PasswordProviderAction }) => {
+      await page(scene, `password-provider ${action}`);
+      return { status: "opened", destination: action === "settings" ? "provider-picker" : "external" };
+    },
     textAsk: () => Promise.resolve({ ticket: scene.textAsk?.ticket ?? 0 }),
     closeTextAsk: ({ ticket }: { ticket: number }) => {
       const visit = scene.textAsk;

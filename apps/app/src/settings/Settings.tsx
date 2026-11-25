@@ -69,6 +69,8 @@ import { useMachine as useLayers } from "../../gen/app__shell__layers.react.ts";
 import type { Machine as LayersMachine } from "../../gen/app__shell__layers.effect.vibe";
 import { pageInert } from "../../gen/app__shell__layers.ts";
 import type { Alpha } from "../runtime/area.tsx";
+import type { Device } from "../platform/device.vibe";
+import type { SystemSettings } from "../platform/systemSettings.vibe";
 import { useTimed } from "../runtime/react.ts";
 import { untimed } from "../runtime/reactor.vibe";
 import type { Time } from "../runtime/time.vibe";
@@ -81,9 +83,10 @@ import { AppBack } from "../shell/AppBack.tsx";
 import { AccountStatus } from "../account/index.tsx";
 import { CalendarAccount, type CalendarConnection } from "./calendar.vibe";
 import { PasswordEntries } from "./PasswordEntries.tsx";
+import { ProtonPass } from "./ProtonPass.tsx";
 
 /** What every Settings page reads: where the owner is, the phone's facts, the hand-overs to Android, the preferences, the reset and the developer tools. */
-export type SettingsRuntime = ManagedRuntime.ManagedRuntime<PagesMachine | CalendarAccount | FactsMachine | AccessReviewMachine | ActivityMachine | RecordsMachine | AndroidMachine | PrefsMachine | ResetMachine | DeveloperMachine | ListenerMachine | ShellMachine | LayersMachine | Time, unknown>;
+export type SettingsRuntime = ManagedRuntime.ManagedRuntime<PagesMachine | CalendarAccount | FactsMachine | AccessReviewMachine | ActivityMachine | RecordsMachine | AndroidMachine | PrefsMachine | ResetMachine | DeveloperMachine | ListenerMachine | ShellMachine | LayersMachine | Time | Device | SystemSettings, unknown>;
 
 /** What the frame gives each page: the runtime, Alpha's places, and the props every page shares. */
 export interface PageProps {
@@ -334,7 +337,7 @@ function Phone({ alpha, common }: PageProps) {
 }
 
 // spec/app/settings/android.md, "Each Android page is offered on the Settings page it belongs to"
-function Passwords({ runtime, common }: PageProps) {
+function Passwords({ runtime, common, alpha }: PageProps) {
   const service = reading(useFacts(runtime).state, "AutofillService");
   const settings = usePages(runtime).state;
   const canChoose = service.word === "reported" && (service.value === "None" || service.value === "Other");
@@ -343,10 +346,11 @@ function Passwords({ runtime, common }: PageProps) {
       {settings?.phone ? (
         <>
           <PasswordEntries runtime={runtime} />
-          <ListGroup heading="Autofill">
+          {service.word === "reported" ? <ListGroup heading="Autofill">
             <SettingsFactRow title="Autofill service" reading={service} />
             {canChoose ? <SettingsAndroidRow title="Use for autofill" target="password-autofill" starting={common.starting} onAndroid={common.onAndroid} /> : null}
-          </ListGroup>
+          </ListGroup> : null}
+          <ProtonPass runtime={runtime} alpha={alpha} />
         </>
       ) : (
         <ListGroup heading="Other">

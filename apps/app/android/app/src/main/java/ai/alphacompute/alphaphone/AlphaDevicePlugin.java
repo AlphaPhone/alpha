@@ -134,16 +134,29 @@ public final class AlphaDevicePlugin extends Plugin {
  }
  /** As HOME, an outside screen gets its own task, as stock launchers do, so HOME does not clear it. Never for a result start. */
  private static Intent handOff(Intent intent){return intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);}
+ @PluginMethod public void passwordProviderStatus(PluginCall call) {
+  call.resolve(PasswordProviderSupport.status(getContext()));
+ }
+
  @PluginMethod public void openPasswordProvider(PluginCall call) {
-  String action=call.getString("action","");
-  getActivity().runOnUiThread(()->{
+  String action = call.getString("action", "");
+  android.app.Activity activity = getActivity();
+  if (activity == null) {
+    call.reject("Open and unlock Alpha before choosing a password provider.");
+    return;
+  }
+  activity.runOnUiThread(() -> {
+    if (!shareForeground(activity)) {
+      call.reject("Open and unlock Alpha before choosing a password provider.");
+      return;
+    }
    try {
     Intent target=PasswordProviderSupport.intent(getContext(),action);
     String destination=Settings.ACTION_REQUEST_SET_AUTOFILL_SERVICE.equals(target.getAction())?"provider-picker":"external";
-    try { getActivity().startActivity(handOff(target)); }
+    try { activity.startActivity(handOff(target)); }
     catch(android.content.ActivityNotFoundException missing) {
      if(!"settings".equals(action)||!Settings.ACTION_REQUEST_SET_AUTOFILL_SERVICE.equals(target.getAction()))throw missing;
-     getActivity().startActivity(handOff(new Intent(Settings.ACTION_SETTINGS)));destination="system-settings";
+     activity.startActivity(handOff(new Intent(Settings.ACTION_SETTINGS)));destination="system-settings";
     }
     if(Settings.ACTION_SETTINGS.equals(target.getAction()))destination="system-settings";
     JSObject out=new JSObject();out.put("status","opened");out.put("destination",destination);call.resolve(out);

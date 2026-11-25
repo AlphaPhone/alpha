@@ -167,6 +167,7 @@ export * from "./components/settings/SettingsPreferencesNotice.tsx";
 export * from "./components/settings/SettingsPrivacyPage.tsx";
 export * from "./components/settings/SettingsProblemLogPage.tsx";
 export * from "./components/settings/SettingsReading.tsx";
+export * from "./components/settings/SettingsProtonPass.tsx";
 export * from "./components/settings/SettingsRecoverRow.tsx";
 export * from "./components/settings/SettingsResetNotice.tsx";
 export * from "./components/settings/SettingsResetProgress.tsx";

@@ -349,6 +349,36 @@ describe("Settings", () => {
     expect(await page(alpha)).toBe("Apps");
   });
 
+  it("Shows and opens Proton Pass only from the owner's native Password manager (spec/app/settings/facts.md, \"Story: Manage my saved passwords\")", async () => {
+    const sceneWithProton = { ...scene(), phone: true };
+    sceneWithProton.settings.passwordProvider = { installation: "absent", selection: "none", support: "available" };
+    const { world } = await settingsOpen(sceneWithProton);
+    await press("Apps");
+    await press("Passwords");
+    await vi.waitFor(() => expect(button("Proton Pass")?.textContent).toContain("Not installed"));
+    expect(world.settings.opened).toEqual([]);
+    expect(button("Get Proton Pass")).toBeUndefined();
+    await press("Proton Pass");
+    expect(button("Proton Pass")?.getAttribute("aria-expanded")).toBe("true");
+    expect(button("Open Proton Pass")).toBeUndefined();
+    await press("Get Proton Pass");
+    await vi.waitFor(() => expect(world.settings.opened).toEqual(["password-provider install"]));
+
+    world.settings.passwordProvider = { installation: "installed", selection: "proton", support: "available" };
+    await vi.waitFor(() => expect(button("Refresh password provider status")?.disabled).toBe(false));
+    await press("Refresh password provider status");
+    await vi.waitFor(() => expect(button("Proton Pass")?.textContent).toContain("Verified"));
+    expect(button("Get Proton Pass")).toBeUndefined();
+    expect(document.body.textContent).toContain("Selected");
+    await press("Open Proton Pass");
+    await vi.waitFor(() => expect(world.settings.opened).toEqual(["password-provider install", "password-provider open"]));
+    await vi.waitFor(() => expect(button("Choose provider")?.disabled).toBe(false));
+    await press("Choose provider");
+    await vi.waitFor(() => expect(world.settings.opened).toEqual(["password-provider install", "password-provider open", "password-provider settings"]));
+    await hardware("back");
+    await vi.waitFor(() => expect(button("Proton Pass")).toBeUndefined());
+  });
+
   it("See and control the listener (spec/app/voice/listener.md, \"Story: See and control the listener\")", async () => {
     const pause = Promise.withResolvers<unknown>();
     const listener: ListenerScene = {
