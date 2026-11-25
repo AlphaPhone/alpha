@@ -529,6 +529,24 @@ describe.each([["a browser", false], ["a phone", true]])("in %s", (_where, phone
     write("");
     await third.close();
 
+    // spec/app/assistant/chats.md, "Older or newer messages are read around a message of the conversation showing"
+    world.ask.kept.set("c8", { roomId: "r8", title: "Dinner", messages: Array.from({ length: 205 }, (_, at) => ({
+      id: `history-${at + 1}`, role: "user", text: `History ${at + 1}`,
+    })) });
+    const long = await open(world, mounts);
+    runtime = assistant.runtime(long.alpha);
+    await until(long.alpha, runtime, Chats, (s) => s.page.status === "Loaded");
+    await press("Open conversation");
+    await until(long.alpha, runtime, Shell, (s) => s.assistant === "Sheet");
+    expect([lines().length, lines()[0], lines().at(-1), button("Later")]).toEqual([200, "History 6", "History 205", undefined]);
+    await press("Earlier");
+    await until(long.alpha, runtime, Chats, (s) => s.around > 0 && s.page.status === "Loaded");
+    expect([lines()[0], lines().at(-1), button("Earlier")]).toEqual(["History 1", "History 106", undefined]);
+    await press("Later");
+    await until(long.alpha, runtime, Chats, (s) => s.page.status === "Loaded" && s.around > 1);
+    expect([lines()[0], lines().at(-1), Boolean(button("Earlier")), button("Later")]).toEqual(["History 6", "History 205", true, undefined]);
+    await long.close();
+
     world.ask.kept.clear();
     const fourth = await open(world, mounts);
     runtime = assistant.runtime(fourth.alpha);

@@ -49,9 +49,16 @@ export interface Line {
   readonly attachments?: readonly Attached[]
 }
 
+/** The exact visible server rows which have older or newer history past them. */
+export interface HistoryBounds {
+  readonly earlier?: string
+  readonly later?: string
+}
+
 interface MessagePage {
   readonly conversation: number
   readonly lines: ReadonlyArray<Line>
+  readonly bounds?: HistoryBounds
 }
 
 /** A search hit: the conversation it is in, by its number, the message, by its number, and what it says. */
@@ -147,7 +154,7 @@ export interface Board {
   line(conversation: number, message: number): Line | undefined
   putPage(ticket: number, conversation: number, lines: ReadonlyArray<Line>): void
   /** Take confirmed rows and retire loaded copies of any now-redacted attachment, returning its open preview ticket. */
-  takeHistory(ticket: number, conversation: number, lines: readonly Line[], redacted: ReadonlySet<string>): number | undefined
+  takeHistory(ticket: number, conversation: number, lines: readonly Line[], redacted: ReadonlySet<string>, bounds: HistoryBounds): number | undefined
   append(ticket: number, conversation: number, line: Line): void
   rename(ticket: number, line: Line, id: string): void
   drop(ticket: number, line: Line): void
@@ -289,16 +296,16 @@ export const talk = Layer.effect(Talk, effect {
       return undefined
     },
     putPage: (ticket, conversation, lines) => {
-      board.change({ pages: new Map([...seen.pages, [ticket, { conversation, lines }]]) })
+      const previous = seen.pages.get(ticket)
+      const taken = previous?.conversation === conversation ? { ...previous, lines } : { conversation, lines }
+      board.change({ pages: new Map([...seen.pages, [ticket, taken]]) })
     },
-    takeHistory: (ticket, conversation, lines, redacted) => {
+    takeHistory: (ticket, conversation, lines, redacted, bounds) => {
       const incoming = new Map(lines.map((line) => [line.id, line]))
       const merged = [...lines, ...board.page(ticket).filter((line) => !incoming.has(line.id))]
-      if (redacted.size === 0) {
-        board.putPage(ticket, conversation, merged)
-        return undefined
-      }
       const pages = new Map(seen.pages)
+      pages.set(ticket, { conversation, lines: merged, bounds })
+      if (redacted.size === 0) { board.change({ pages }); return undefined }
       const preview = seen.preview
       let closed: number | undefined
       for (const [previous, page] of seen.pages) {
@@ -311,9 +318,8 @@ export const talk = Layer.effect(Talk, effect {
           updated = true
           return replacement
         })
-        if (previous !== ticket && updated) pages.set(previous, { conversation, lines: kept })
+        if (previous !== ticket && updated) pages.set(previous, { ...page, lines: kept })
       }
-      pages.set(ticket, { conversation, lines: merged })
       board.change(closed === undefined ? { pages } : { pages, preview: undefined })
       return closed
     },
