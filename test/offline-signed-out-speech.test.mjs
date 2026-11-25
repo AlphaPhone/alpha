@@ -48,7 +48,7 @@ function playbackSource(f, network, turn) {
     Capacitor: {isNativePlatform: () => true},
     registerPlugin: name => { assert.equal(name, 'AlphaVoiceCloud'); return f.plugin; },
     planLocalSpeech: text => text.split(/(?<=\.)\s+/).filter(Boolean),
-    nativeVoiceTurnId: () => turn,
+    afterLocalSpeechWarm: async () => {}, nativeVoiceTurnId: () => turn,
   };
   vm.runInNewContext(strip('apps/app/src/local-speech-playback.ts', 'speakLocalText'), box);
   return box.api;

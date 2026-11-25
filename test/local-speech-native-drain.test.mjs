@@ -19,7 +19,7 @@ function fixture({native:onDevice=true}={}){
   cancel:async()=>{f.unwind?.();},
   stopPlayback:async()=>{},
  };
- const box={AbortController,DOMException,crypto,console,setTimeout,clearTimeout,Capacitor:{isNativePlatform:()=>onDevice},registerPlugin:()=>native,planLocalSpeech:text=>[text],nativeVoiceTurnId:()=>undefined};
+ const box={AbortController,DOMException,crypto,console,setTimeout,clearTimeout,Capacitor:{isNativePlatform:()=>onDevice},registerPlugin:()=>native,planLocalSpeech:text=>[text],afterLocalSpeechWarm:async()=>{},nativeVoiceTurnId:()=>undefined};
  let src=readFileSync('apps/app/src/local-speech-playback.ts','utf8').replace(/^import .*;\n/gm,'').replace(/^export /gm,'');src=stripTypeScriptTypes(src,{mode:'strip'});
  vm.runInNewContext('{'+src+';Object.assign(globalThis,{speakLocalText});}',box);
  return {f,speak:box.speakLocalText};

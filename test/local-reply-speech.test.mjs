@@ -18,7 +18,7 @@ function fixture(){
   holdSpeechEngine:async()=>{calls.push(['hold']);},releaseSpeechEngineHold:async()=>{calls.push(['release']);},
  };
  let ids=0;const requests=[];
- const box={registerPlugin:()=>bridge,planLocalSpeech:text=>text?[text]:[],nativeVoiceTurnId:()=>undefined,crypto:{randomUUID:()=>{const id=`r${++ids}`;requests.push(id);return id;}},setTimeout,clearTimeout,Date,Math,Number,Promise,Error,Object,Map,DOMException,AbortController};
+ const box={registerPlugin:()=>bridge,planLocalSpeech:text=>text?[text]:[],afterLocalSpeechWarm:async()=>{},nativeVoiceTurnId:()=>undefined,crypto:{randomUUID:()=>{const id=`r${++ids}`;requests.push(id);return id;}},setTimeout,clearTimeout,Date,Math,Number,Promise,Error,Object,Map,DOMException,AbortController};
  vm.runInNewContext(source+'\nglobalThis.speaker=createLocalReplySpeaker();',box);
  return {speaker:box.speaker,calls,emit,requests,bridge,listenerCount:()=>Object.values(listeners).reduce((count,values)=>count+values.length,0),end:()=>{active=undefined;emit('playbackEnded',{playbackId:'p1'});}};
 }
