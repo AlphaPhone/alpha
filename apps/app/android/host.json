@@ -46,7 +46,6 @@
     { "module": "wifi" },
     { "module": "voice-io" },
     { "module": "local-inference" },
-    { "module": "cloud-speech" },
     { "module": "browser-surface" }
   ],
   "modules": [
