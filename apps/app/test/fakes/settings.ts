@@ -153,7 +153,6 @@ export function elizaWiFi(scene: SettingsScene): Faked {
   }));
 }
 
-/** Alpha's own `AlphaCarrierSetup` plugin, which reads only when asked. */
 /** `AlphaDevicePlugin.setAgentGoogleConsent`, which hands the consent to `AlphaAgentService` for the agent's next launch. */
 export function alphaAgentConsent(scene: SettingsScene) {
   return {
@@ -164,6 +163,7 @@ export function alphaAgentConsent(scene: SettingsScene) {
   };
 }
 
+/** Alpha's own `AlphaCarrierSetup` plugin, which reads only when asked. */
 export function alphaCarrierSetup(scene: SettingsScene): Faked {
   return () => ({
     read: () => Promise.resolve({
