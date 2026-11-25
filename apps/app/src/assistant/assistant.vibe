@@ -23,7 +23,7 @@ import { Machine as Layers } from "../../gen/app__shell__layers.effect.vibe"
 import { syncClockNow } from "../clock/sync.vibe"
 import { type NotesSelection, type RendererNote, noteSubjects, notesSelection } from "../notes/selection.vibe"
 import { syncRemindersNow } from "../reminders/reminders.vibe"
-import { Agent } from "../platform/agent.vibe"
+import { Agent, isCloudFundsRefusal } from "../platform/agent.vibe"
 import { Device } from "../platform/device.vibe"
 import { Location } from "../platform/location.vibe"
 import type { VoiceBridge } from "../platform/voice.vibe"
@@ -91,11 +91,6 @@ const failures: Readonly<Record<string, Reply.Failure>> = {
   credential_invalid: "CredentialInvalid", insufficient_credits: "InsufficientCredits", limit_reached: "LimitReached",
   rate_limited: "LimitReached", provider_issue: "ProviderIssue", timeout: "TimedOut", missing_capability: "MissingCapability",
   no_provider: "NoProvider", billing_refused: "PlanLimit", subscription_required: "PlanLimit", allowance_exhausted: "PlanLimit",
-}
-
-/** Whether the resident's failed turn carries Cloud's own code for spent allowance and credits. */
-export function isCloudFundsRefusal(result: TurnResult | undefined): boolean {
-  return result?.kind === "AgentFailed" && result.reply?.cloudCode !== undefined
 }
 
 // spec/app/assistant/reply.md, "The settled reply is the whole final answer, shown and spoken, never the acknowledgment"; spec/app/assistant/reply.md, "A failure refused before any output replaces the streamed text; any other failure is added after it"

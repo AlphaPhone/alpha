@@ -69,6 +69,8 @@ module capacitor {
     stopRecording(options: Record<string, never>): Promise<{ recordingId?: string }>
     cancelRecording(options: Record<string, never>): Promise<unknown>
     transcribeLocalRecording(options: { requestId: string; recordingId: string }): Promise<{ text?: string }>
+    transcribeVoicemail(options: { requestId: string; id: string }): Promise<unknown>
+    cancelVoicemailTranscription(options: { requestId: string }): Promise<void>
     addListener(event: string, listener: (data: unknown) => void): Promise<ListenerHandle>
   }
 
@@ -76,6 +78,20 @@ module capacitor {
   /** @throws {never} */
   export function localPlugin(): LocalVoicePlugin {
     return (made ??= registerPlugin<LocalVoicePlugin>("AlphaVoiceCloud"))
+  }
+
+  export async function readVoicemail(id: string, requestId: string, signal: AbortSignal): Promise<string> {
+    if (signal.aborted) return ""
+    const plugin = localPlugin()
+    const cancel = () => { void plugin.cancelVoicemailTranscription({ requestId }).catch(() => {}) }
+    signal.addEventListener("abort", cancel, { once: true })
+    try {
+      const reply = await plugin.transcribeVoicemail({ id, requestId })
+      return !signal.aborted && typeof reply === "object" && reply !== null && "text" in reply
+        && typeof reply.text === "string" && reply.text.length <= 8_000 ? reply.text : ""
+    } finally {
+      signal.removeEventListener("abort", cancel)
+    }
   }
 
   /** eliza's Cloud speech relay with the methods its TypeScript definition does not list yet: the warm-up and the timing records. */
@@ -108,7 +124,7 @@ module capacitor {
     }
   }
 }
-import { localPlugin, makeAbort, makeSessionGuard, relayPlugin, signInAccounts } from capacitor
+import { localPlugin, makeAbort, makeSessionGuard, readVoicemail, relayPlugin, signInAccounts } from capacitor
 
 export error VoiceBridgeFailed { method: string; cause: unknown }
 
@@ -142,6 +158,20 @@ export service VoiceBridge {
 }
 
 const LOCAL_PLUGIN = "AlphaVoiceCloud"
+
+/** The installed phone has Alpha's on-device speech bridge. */
+export function recognizesVoicemail(): boolean {
+  return registered(LOCAL_PLUGIN)
+}
+
+/** The selected provider row is decoded and recognized on the phone, without sending it audio. */
+export effect function transcribeVoicemail(id: string): string!VoiceBridgeFailed {
+  const requestId = `voicemail-${fresh()}`
+  return try tryPromise({
+    try: (signal) => readVoicemail(id, requestId, signal),
+    catch: (cause) => new VoiceBridgeFailed({ method: "transcribeVoicemail", cause }),
+  })
+}
 const CLOUD_STREAM_PLUGIN = "ElizaCloudSpeech"
 const SIGN_IN_PLUGIN = "ElizaSignIn"
 /** The cloud the phone signs in to, whose account the relay speaks for. */

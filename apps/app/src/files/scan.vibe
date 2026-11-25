@@ -1,4 +1,5 @@
 // spec/app/files/scan.md, "Story: Arrange the pages"; spec/app/files/scan.md, "Story: Keep the scan as I work"; spec/app/files/scan.md, "Story: Make the PDF, and keep the photo"; spec/app/files/scan.md, "Story: Leave the scan and come back"
+import * as KeyValueStore from "effect/persistence/KeyValueStore"
 import { correctScanPage, detectScanEdges, fullPageCorners, scanCornersAdmitted, type ScanCorners } from "@elizaos/plugin-files/documents/scan-correction"
 import { blobOf } from "@elizaos/plugin-files/documents/images"
 import { recognizeLocalText } from "@elizaos/plugin-files/documents/local-ocr"
@@ -19,6 +20,7 @@ import { Attempts } from "../runtime/attempts.vibe"
 import { Documents } from "../platform/documents.vibe"
 import { Device, native } from "../platform/device.vibe"
 import { PhotosPort, saveBrowserCapture } from "../platform/photos.vibe"
+import { PhotoChooser } from "../photos/photos.vibe"
 import { say } from "../notices/toasts.vibe"
 import { answer, applying, contained, reacting, run, started, together, type Job } from "../runtime/reactor.vibe"
 import { Opened } from "./preview.vibe"
@@ -162,7 +164,7 @@ export effect function scanSelectedImage(blob: Blob) {
   const photos = try PhotoLibrary.Machine
   const device = try Device
   const origin = try photos.get()
-  if (!origin.visible || origin.secure || !showing(try shell.get(), "Photos")) return
+  if (!(try (try PhotoChooser).finish()) || !origin.visible || origin.secure || !showing(try shell.get(), "Photos")) return
   const accepted = tryPromise(() => scanImage(blob)) catch () => undefined
   if (accepted === undefined) {
     try say("Choose a JPEG, PNG or WebP image under 16 MB.", true)
@@ -263,7 +265,7 @@ effect function write(ticket: number): Scan.Event!!ScanAssets {
   return { ...refused, confirmed: wrote.confirmed, known: wrote.known }
 }
 
-effect function keep(ticket: number, image: number): Scan.Event!!(ScanAssets | PhotosPort) {
+effect function keep(ticket: number, image: number): Scan.Event!!(ScanAssets | PhotosPort | Attempts) {
   const selected = try (try ScanAssets).read(image)
   const refused = { type: "kept", ticket, confirmed: false, known: true } as const
   if (selected === undefined) return refused
@@ -277,7 +279,7 @@ effect function keep(ticket: number, image: number): Scan.Event!!(ScanAssets | P
   const data = tryPromise(() => photoData(selected.blob)) catch () => undefined
   if (data === undefined) return refused
   const phone = photos.phone.value
-  const operationId = `scan-${ticket}-${image}`
+  const operationId = try (try Attempts).key(ticket)
   const result = tryPromise(() => phone.keepCapture({ operationId, dataBase64: data })) catch () => undefined
   return { ...refused, confirmed: result?.status === "saved", known: result !== undefined }
 }
@@ -585,4 +587,31 @@ const photosVisible = started(effect {
 }, "Photos scan foreground")
 
 export const imageScan = together(reacting(Scan, { carry }), Layer.fresh(common), photosVisible)
-export const scan = together(reacting(Scan, { carry, keep: 1, open: [{ type: "restart" }, "Phone"] }), common, visible)
+module compatible {
+  /** Add the default origin to an earlier kept Files scan. @throws {never} */
+  export function priorScan(raw: string): unknown {
+    try {
+      const state: unknown = JSON.parse(raw)
+      if (typeof state === "object" && state !== null && !("origin" in state)) return { ...state, origin: "Document" }
+      return undefined
+    } catch {
+      return undefined
+    }
+  }
+}
+import { priorScan } from compatible
+
+function stored(key: string, start?: Scan.Scan) {
+  return Layer.unwrap(effect {
+    const store = try KeyValueStore.KeyValueStore
+    const raw = store.get(key) catch () => undefined
+    const earlier = raw === undefined ? undefined : priorScan(raw)
+    if (earlier !== undefined) {
+      const decoded = Scan.decodeState(earlier) catch () => undefined
+      if (decoded !== undefined) try ignore(store.set(key, JSON.stringify(decoded)))
+    }
+    return Scan.stored(key, start)
+  })
+}
+
+export const scan = together(reacting({ ...Scan, stored }, { carry, keep: 1, open: [{ type: "restart" }, "Phone"] }), common, visible)
