@@ -92,9 +92,18 @@ it('Ask and stop a reply from Home through the real resident and cloud (spec/app
   const rooms = async () => roomList(await mine.agentSays<unknown>("/api/conversations")).conversations;
   const balance = async () => (await alpha.runtime.runPromise(Effect.flatMap(Cloud, (cloud) => Effect.promise(() => cloud.client.snapshot())))).balance.usdMicros;
   const rendered = () => Array.from(document.querySelectorAll("[role=log] [data-alpha-message-text]"), (row) => row.textContent);
+  const waitForScreen = (assertScreen: () => void) => vi.waitFor(async () => {
+    await drawn(() => undefined);
+    assertScreen();
+  }, { timeout: 20_000 });
+  const send = async (text: string) => {
+    await until(alpha, runtime, Composer, (state) => state.slot === "Open" && state.away === "Free" && !state.marked && !state.unsettled);
+    await fill("Message Alpha", text);
+    await waitForScreen(() => expect(button("Send")?.disabled).toBe(false));
+    await press("Send");
+  };
   const before = await rooms();
   const beforeBalance = await balance();
-  const askedBefore = (await mine.asked()).length;
 
   await until(alpha, runtime, Conversation, (state) => state.ready);
   await press("Open conversation");
@@ -118,30 +127,41 @@ it('Ask and stop a reply from Home through the real resident and cloud (spec/app
   expect(added).toHaveLength(1);
   const [record] = added;
   if (!record) throw new Error("The agent did not return the new conversation");
-  const transcript = () => mine.agentSays<unknown>(`/api/conversations/${encodeURIComponent(record.id)}/messages`);
+  const messagePage = Schema.decodeUnknownSync(Schema.Struct({
+    messages: Schema.Array(Schema.Struct({ role: Schema.Literals(["user", "assistant"]), text: Schema.String })),
+  }));
+  const transcript = async () => messagePage(await mine.agentSays<unknown>(`/api/conversations/${encodeURIComponent(record.id)}/messages`)).messages;
 
   const prompt = "What time did we set for the review?";
   const answer = "The review is at nine.";
-  await mine.script({ kind: "text", parts: ["[answer] The review ", "is at nine."] });
-  await fill("Message Alpha", prompt);
-  await press("Send");
+  await mine.script({ kind: "text", parts: ["[answer] The review ", "is at nine."] }, prompt);
+  await send(prompt);
   await until(alpha, runtime, Conversation, (state) => state.turn.reply === "Complete");
-  await drawn(() => vi.waitFor(() => expect(rendered()).toEqual([prompt, answer])));
-  expect(await transcript()).toMatchObject({ messages: [{ role: "user", text: prompt }, { role: "assistant", text: answer }] });
+  await waitForScreen(() => expect(rendered()).toEqual([prompt, answer]));
+  expect(await transcript()).toEqual([{ role: "user", text: prompt }, { role: "assistant", text: answer }]);
   expect(await balance()).toBeLessThan(beforeBalance);
 
   const next = "Read the schedule before you answer.";
   const partial = "I am reading the schedule.";
-  await mine.script({ kind: "stall", first: `[answer] ${partial}` });
-  await fill("Message Alpha", next);
-  await press("Send");
+  await mine.script({ kind: "stall", first: `[answer] ${partial}` }, next);
+  await send(next);
   await until(alpha, runtime, Conversation, (state) => state.turn.reply === "Streaming");
-  await drawn(() => vi.waitFor(() => expect(rendered()).toContain(partial)));
+  await waitForScreen(() => {
+    expect(document.querySelector('[data-alpha-message-id="reply"] [data-alpha-message-text]')?.textContent).toBe(partial);
+    expect(button("Stop reply")?.disabled).toBe(false);
+  });
   expect(button("Send")).toBeUndefined();
   await press("Stop reply");
   await until(alpha, runtime, Conversation, (state) => state.turn.reply === "Stopped" && state.check !== "Aborting" && state.recheck.status !== "Loading");
-  expect(rendered()).toEqual(expect.arrayContaining([prompt, answer, next]));
+  await waitForScreen(() => {
+    expect(button("Stop reply")).toBeUndefined();
+    expect(rendered()).toEqual(expect.arrayContaining([prompt, answer, next]));
+  });
+  const saved = await transcript();
+  expect(saved.filter(({ role }) => role === "user").map(({ text }) => text)).toEqual([prompt, next]);
+  expect(saved.filter(({ role, text }) => role === "assistant" && text === answer)).toHaveLength(1);
   expect((await rooms()).map(({ id }) => id).sort()).toEqual(opened.map(({ id }) => id).sort());
-  const sent = (await mine.asked()).slice(askedBefore).map((request) => request.findLast((message) => message.role === "user")?.content);
-  expect(sent).toEqual([expect.stringMatching(/^What time did we set for the review\?(\n|$)/), expect.stringMatching(/^Read the schedule before you answer\.(\n|$)/)]);
+  const sent = (await mine.asked()).map((request) => request.findLast((message) => message.role === "user")?.content);
+  const matching = sent.filter((text): text is string => typeof text === "string" && [prompt, next].some((one) => text === one || text.startsWith(`${one}\n\nNote from the agent host, not the person:\n`)));
+  expect(matching.map((text) => text.split("\n", 1)[0])).toEqual([prompt, next]);
 }, 300_000);

@@ -71,7 +71,8 @@ const scriptedModel = "alpha-chat";
  * and repeating only the person's own words, since the agent appends its notes, each starting "Note from the agent
  * host", and delivers no reply that repeats one.
  */
-const repeated = (said: string) => `[answer] You said: ${said.split(/(?:^|\n+)Note from the agent host\b/u, 1)[0].trimEnd()}`;
+const ownerWords = (text: string) => text.split(/(?:^|\n+)Note from the agent host\b/u, 1)[0].trimEnd();
+const repeated = (said: string) => `[answer] You said: ${ownerWords(said)}`;
 /** Alpha as the cloud's staging registry knows it: the client a device signs in as. */
 const client = { clientId: "ai.alphacompute.alphaphone", displayName: "Alpha", androidPackage: "ai.alphacompute.alphaphone", certFingerprints: [Array.from({ length: 32 }, () => "AA").join(":")] };
 
@@ -271,7 +272,7 @@ function catalogued(route: string, authorization: string | undefined): [number, 
  * sends, so journeys share one cloud.
  */
 async function startProvider(key: string, real: RealModel | undefined) {
-  const replies = new Map<string, Reply[]>();
+  const replies = new Map<string, { readonly prompt?: string; readonly reply: Reply }[]>();
   const asked = new Map<string, Message[][]>();
   const listed = <A>(lists: Map<string, A[]>, system: string) => lists.get(system) ?? lists.set(system, []).get(system)!;
   const scripted = (system: string) => [...replies.keys()].filter((character) => system.startsWith(character)).sort((a, b) => b.length - a.length)[0] ?? system;
@@ -291,7 +292,11 @@ async function startProvider(key: string, real: RealModel | undefined) {
     listed(asked, system).push(messages);
     if (real !== undefined) return forwarded(real, input, outgoing);
     const last = messages.findLast((message) => message.role === "user")?.content;
-    const reply = listed(replies, scripted(system)).shift() ?? { kind: "text", parts: [typeof last === "string" ? repeated(last) : `You said: ${JSON.stringify(last)}`] };
+    const pending = listed(replies, scripted(system));
+    const prompt = typeof last === "string" ? ownerWords(last) : undefined;
+    const choice = pending.findIndex((entry) => entry.prompt === undefined || entry.prompt === prompt);
+    const queued = choice < 0 ? undefined : pending.splice(choice, 1)[0]?.reply;
+    const reply = queued ?? { kind: "text", parts: [typeof last === "string" ? repeated(last) : `You said: ${JSON.stringify(last)}`] };
     const text = reply.kind === "text" ? reply.parts.join("") : reply.first;
     const named = { id: "chatcmpl-local", created: 1_790_000_000, model: input.model };
     if (input.stream !== true) {
@@ -310,7 +315,8 @@ async function startProvider(key: string, real: RealModel | undefined) {
     const url = new URL(incoming.url ?? "/", "http://provider");
     if (url.pathname === "/operator/model") {
       const body = await read(incoming);
-      return json(outgoing, 200, { scripted: listed(replies, String(body.system)).push(body.reply as Reply) });
+      const prompt = typeof body.prompt === "string" ? body.prompt : undefined;
+      return json(outgoing, 200, { scripted: listed(replies, String(body.system)).push({ prompt, reply: body.reply as Reply }) });
     }
     if (url.pathname === "/operator/asked") return json(outgoing, 200, heard(url.searchParams.get("system") ?? ""));
     if (url.pathname.startsWith("/stripe/")) return json(outgoing, ...catalogued(url.pathname.slice("/stripe".length), incoming.headers.authorization));
