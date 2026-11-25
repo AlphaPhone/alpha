@@ -305,7 +305,7 @@ export function Files({ runtime, alpha }: FilesProps) {
               {groupedCategory && folderGroups.length > 0 && (
                 <div role="group" aria-label="Folders" className={grid ? "grid grid-cols-3 gap-2" : undefined}>
                   {folderGroups.map((group) => {
-                    const open = { type: "openCategoryGroup", groupTrail: [...group.trail], ticket: state.listing.ticket } as const;
+                    const open = { type: "openCategoryGroup", groupTrail: [...group.trail], ticket: state.listing.ticket } satisfies FilesEvent;
                     return <FilesRow key={group.folder} layout={grid ? "tile" : "row"} name={group.name} detail={group.folder || "Internal storage"} count={String(group.count)} icon={<CategoryIcon />} aria-label={`Open ${group.name}`} disabled={!owner(open)} onClick={() => tell(open)} />;
                   })}
                 </div>
