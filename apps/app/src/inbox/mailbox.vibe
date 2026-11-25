@@ -11,9 +11,9 @@ import { waiting } from "../home/waiting.vibe"
 import { civilDay } from "../calendar/time.ts"
 import { fromAreas } from "../home/cards.vibe"
 import { Device } from "../platform/device.vibe"
-import { leaseRefusalReason } from "../../gen/app__platform.effect.vibe"
-import { Cloud } from "../platform/cloud.vibe"
-import { type Job, answer, contained, reacting, started, stream, together, untimed } from "../runtime/reactor.vibe"
+import { afterMailSignIn, leaseRefusalReason } from "../../gen/app__platform.effect.vibe"
+import { Cloud, mailSignIn } from "../platform/cloud.vibe"
+import { type Job, Whole, answer, contained, reacting, started, stream, together, untimed } from "../runtime/reactor.vibe"
 import { Mail, asked, connections, failureOf, mail, page } from "./gmail.vibe"
 
 const owner = "alpha/inbox/owner"
@@ -100,6 +100,25 @@ effect function recheck(): void!!(Cloud | Mail | Inbox.Machine | KeyValueStore.K
   try contained(machine.send({ type: "sessionChanged", signedIn: who !== "" }), "the cloud session")
 }
 
+// spec/app/platform/index.md, "The owner's tap on a mail sign-in control starts the phone's one more sign-in for mail where the phone wants it, then reads again once"
+/** The owner's tap on Connect Eliza Cloud or Reconnect: the phone's sign-in for mail where it wants one, then one more check; `usual` where it wants none. */
+effect function signInForMail(usual: () => void): void!!(Cloud | Mail | Inbox.Machine | KeyValueStore.KeyValueStore) {
+  const next = afterMailSignIn(try mailSignIn())
+  if (next === "ReadAgain") try recheck()
+  else if (next === "AsAlways") usual()
+}
+
+/** Inbox's sign-in for mail, for the list's own controls to ask. */
+export service MailSignIn {
+  /** The owner tapped Connect Eliza Cloud or Reconnect, whose action is otherwise `usual`. */
+  signIn(usual: () => void): void!!
+}
+
+const signIns = Layer.effect(MailSignIn, effect {
+  const whole = try Whole
+  return { signIn: (usual: () => void) => flatMap(whole.context, (context) => Effect.provideContext(signInForMail(usual), context as Context.Context<Cloud | Mail | Inbox.Machine | KeyValueStore.KeyValueStore>)) }
+})
+
 // spec/app/inbox/index.md, "Opening Inbox, and every change to Google access, checks the accounts again, even while a check is out"
 const session = started(effect {
   const shell = try Shell
@@ -143,4 +162,4 @@ const home = started(effect {
 }, "telling Home")
 
 /** Gmail's list, from launch: kept across restarts, read through the owner's cloud, and checked again each time Inbox opens. */
-export const mailbox = together(Layer.provideMerge(kept, mail), session, home)
+export const mailbox = together(Layer.provideMerge(kept, mail), session, home, signIns)
