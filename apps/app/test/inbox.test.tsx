@@ -999,10 +999,28 @@ async function flushDraft(alpha: Alpha, runtime: ReturnType<typeof inbox.runtime
   await until(alpha, runtime, Writing, (s) => s.stored && !s.pending && s.write.status === "Loaded");
 }
 
-async function openSaveReview(alpha: Alpha, runtime: ReturnType<typeof inbox.runtime>) {
+async function openSaveReview(alpha: Alpha, runtime: ReturnType<typeof inbox.runtime>, kind: "SaveDraft" | "ReplaceDraft" = "SaveDraft") {
   await flushDraft(alpha, runtime);
   await menu("Save to Gmail", "Draft actions");
-  await until(alpha, runtime, Changes, (s) => s.review.showing && s.kind === "SaveDraft");
+  await until(alpha, runtime, Changes, (s) => s.review.showing && s.kind === kind);
+}
+
+async function loseNextSave(alpha: Alpha, world: ReturnType<typeof scene>, runtime: ReturnType<typeof inbox.runtime>, kind: "SaveDraft" | "ReplaceDraft", buttonName: "Save" | "Replace") {
+  await openSaveReview(alpha, runtime, kind);
+  const cloud = await runtime.runPromise(Cloud);
+  const dispatch = cloud.client.gmailDispatch.bind(cloud.client);
+  const dropOnce = vi.spyOn(cloud.client, "gmailDispatch").mockImplementationOnce((args, opts) => {
+    world.inbox.offline = true;
+    return dispatch(args, opts);
+  });
+  try {
+    await confirm(buttonName);
+    await until(alpha, runtime, Changes, (s) => s.kind === kind && s.attempt.outcome === "Unknown");
+    await until(alpha, runtime, Writing, (s) => s.letter.unsure);
+  } finally {
+    dropOnce.mockRestore();
+    world.inbox.offline = false;
+  }
 }
 
 async function saveReplyDraft(alpha: Alpha, runtime: ReturnType<typeof inbox.runtime>, body: string) {
@@ -1075,25 +1093,27 @@ it("Recovers from an externally deleted 404 Gmail draft copy and an unsure draft
   const afterGone = await runtime.runPromise(Writing.use((m) => m.get()));
   expect([afterGone.lookup.status, afterGone.letter.gmail]).toEqual(["Loaded", 0]);
 
-  await openSaveReview(alpha, runtime);
-  const cloud = await runtime.runPromise(Cloud);
-  const dispatch = cloud.client.gmailDispatch.bind(cloud.client);
-  const dropOnce = vi.spyOn(cloud.client, "gmailDispatch").mockImplementationOnce((args, opts) => {
-    world.inbox.offline = true;
-    return dispatch(args, opts);
-  });
-  try {
-    await confirm("Save");
-    await until(alpha, runtime, Changes, (s) => s.kind === "SaveDraft" && s.attempt.outcome === "Unknown");
-    await until(alpha, runtime, Writing, (s) => s.letter.unsure);
-  } finally {
-    dropOnce.mockRestore();
-    world.inbox.offline = false;
-  }
+  await loseNextSave(alpha, world, runtime, "SaveDraft", "Save");
   await flushDraft(alpha, runtime);
   await menu("Check Gmail copy", "Draft actions");
   await until(alpha, runtime, Writing, (s) => !s.letter.unsure && s.lookup.status === "Loaded");
   expect(told()).toContain("Your save did not reach Gmail");
+});
+
+it("Reports SaveNotFound when an unsure ReplaceDraft did not change Gmail's copy (spec/app/inbox/drafts.md, \"What the read finds settles an unsure draft, and the owner is told whether the lost save was found; it lets a draft be saved over a copy unchanged since it was made, or stops it at a clash; nothing is saved over either until the owner chooses\")", async () => {
+  const { alpha, world, runtime } = await openInboxWorld();
+  await saveReplyDraft(alpha, runtime, "Original Gmail copy");
+  await write("Message", "Updated copy whose replace is lost");
+  await flushDraft(alpha, runtime);
+  await menu("Check Gmail copy", "Draft actions");
+  await until(alpha, runtime, Writing, (s) => s.lookup.status === "Loaded" && s.letter.verified === s.letter.revision);
+  await loseNextSave(alpha, world, runtime, "ReplaceDraft", "Replace");
+  await flushDraft(alpha, runtime);
+  await menu("Check Gmail copy", "Draft actions");
+  await until(alpha, runtime, Writing, (s) => !s.letter.unsure && s.lookup.status === "Loaded");
+  const settled = await runtime.runPromise(Writing.use((m) => m.get()));
+  expect([settled.notice, settled.letter.draft.sync, settled.letter.gmail !== 0, told().includes("Your save did not reach Gmail")])
+    .toEqual(["SaveNotFound", "Edited", true, true]);
 });
 
 it("Sends a draft saved in Gmail with its draftId (spec/app/inbox/sending.md, \"A draft's operation is reviewed as the draft is, on its From account, once it is wholly kept on the phone, while nothing else is under way and no unknown outcome is unseen\")", async () => {
