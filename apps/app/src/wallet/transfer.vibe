@@ -8,7 +8,7 @@ import { ask, attemptedWith } from "../platform/remote.vibe"
 import type { Attempts } from "../runtime/attempts.vibe"
 import { type Job, answer, due, following, reacting, together, untimed } from "../runtime/reactor.vibe"
 import { familyNames, familyOf, whole } from "./wallet.vibe"
-import { type WalletAsk, WalletDecided, type WalletDecision, WalletRequestRow, WalletReview, walletPaths } from "./wire.vibe"
+import { type WalletAsk, WalletDecided, type WalletDecision, WalletRequestRow, WalletReview, walletPaths } from "@elizaos/plugin-wallet-client"
 
 const posted = (path: string, body: object) => HttpClientRequest.post(path) |> HttpClientRequest.bodyJsonUnsafe(%, body)
 

@@ -13,7 +13,7 @@ import type { Ledger, Transferring } from "./machines.ts";
 import { Receive } from "./Receive.tsx";
 import { Review } from "./Review.tsx";
 import { Send } from "./Send.tsx";
-import { shownUnits } from "./units.ts";
+import { shownUnits } from "@elizaos/plugin-wallet-client";
 
 export interface WalletProps {
   /** Provides the wallet and the transfer under way, `wallet` and `transfer` of this area, and Alpha's time, at which `can` is asked. */

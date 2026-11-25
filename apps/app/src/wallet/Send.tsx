@@ -2,7 +2,7 @@
 import { Alert, Button, Input, ListGroup, ListRow, Sheet, SheetContent, WalletAmount } from "@repo/ui";
 import { useState } from "react";
 import type { Ledger, Transferring } from "./machines.ts";
-import { atomicOf, shownUnits } from "./units.ts";
+import { atomicOf, shownUnits } from "@elizaos/plugin-wallet-client";
 
 /** Whether `amount` is more than nothing, written exactly in an asset of `decimals` places. */
 const exact = (amount: string, decimals: number) => /[1-9]/.test(atomicOf(amount, decimals) ?? "");

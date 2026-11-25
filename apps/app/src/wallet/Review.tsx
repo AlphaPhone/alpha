@@ -2,7 +2,7 @@
 import { Alert, Button, ListGroup, ListRow, Sheet, SheetContent, Spinner, WalletAmount } from "@repo/ui";
 import { untimed } from "../runtime/reactor.vibe";
 import type { Transferring } from "./machines.ts";
-import { shownUnits } from "./units.ts";
+import { shownUnits } from "@elizaos/plugin-wallet-client";
 
 const clock = new Intl.DateTimeFormat(undefined, { hour: "numeric", minute: "2-digit", second: "2-digit" });
 
