@@ -355,6 +355,12 @@ pure def moveItem(s: Reminders, itemId: int, targetListId: int): Moved =
 
 ### Completing a reminder holds a five-second Undo snapshot and advances a repeating reminder to its next due day
 
+An occurrence with a due time keeps the instant it was due and the instant it
+was completed, even when the reminder repeats or reopens. Calendar shows the
+last 32 actual completions for the selected reminder, oldest first. Undo
+restores the preceding reminder and its history together. Older reminders
+only show the completion information still present in their saved record.
+
 Completing an uncompleted repeating reminder keeps it active on the next due day
 while recording the prior due day in the Undo snapshot; completing a one-off
 reminder marks it completed; toggling a completed reminder reopens it.

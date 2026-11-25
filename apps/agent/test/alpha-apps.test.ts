@@ -540,4 +540,22 @@ describe("Alpha product plugin: Reminders actions, provider, recurrence, and rou
     expect(tasks.find((task) => task.taskId === record.agentTaskId)).toMatchObject({ status: "Scheduled", trigger: { atIso: "2026-11-24T19:00:00.000Z" } });
     expect(store.getReminders().items.find((item) => item.id === other.id)).toEqual(other);
   });
+
+  it("retains the real previous occurrence when a daily reminder advances", async () => {
+    const now = Date.UTC(2026, 10, 24, 8);
+    const store = new AlphaAppsStore({ now: () => now });
+    const routes = createAlphaAppsPlugin({ store, timeZone: "UTC" }).plugin.routes!;
+    const input = { title: "Bring a notebook", dueDate: "2026-11-24", dueMinute: 570, alertMinutes: 0, recurrence: "daily" };
+    const created = await callRoute(routes, "POST", "/api/alpha/reminders/items", { body: input });
+    const selected = created.body.item as ReminderItemRecord;
+    const params = { id: selected.id };
+    const completed = await callRoute(routes, "POST", "/api/alpha/reminders/items/{id}/complete", { params });
+    const expected = [{ revision: selected.revision, dueAtMs: Date.UTC(2026, 10, 24, 9, 30), completedAtMs: now }];
+    expect(completed.body.item).toMatchObject({ id: selected.id, completed: false, dueDate: "2026-11-25", history: expected });
+    const readback = await callRoute(routes, "GET", "/api/alpha/reminders");
+    expect(readback.body.items).toEqual([expect.objectContaining({ id: selected.id, history: expected })]);
+    const undo = await callRoute(routes, "POST", "/api/alpha/reminders/items/{id}/restore", { params });
+    expect(undo.body.item).toMatchObject({ id: selected.id, dueDate: input.dueDate });
+    expect((undo.body.item as ReminderItemRecord).history).toBeUndefined();
+  });
 });

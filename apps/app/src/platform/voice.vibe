@@ -241,6 +241,13 @@ function parseGrant(raw: string | undefined): VoiceGrant {
   return raw === "granted" ? "granted" : raw === "denied" ? "denied" : "prompt"
 }
 
+/** The local speech plug-in's microphone state, with no assumed grant when it cannot answer. */
+export effect function microphoneAccess(request: boolean): (string | undefined)!! {
+  if (!registered(LOCAL_PLUGIN)) return undefined
+  const read = try Effect.option(tryPromise(() => request ? localPlugin().requestPermissions() : localPlugin().checkPermissions()))
+  return Option.getOrUndefined(read)?.microphone
+}
+
 function asRecord(value: unknown): Record<string, unknown> | undefined {
   return typeof value === "object" && value !== null ? (value as Record<string, unknown>) : undefined
 }

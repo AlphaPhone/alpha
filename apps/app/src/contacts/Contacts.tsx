@@ -1,5 +1,5 @@
 // spec/app/contacts/index.md, "Story: Browse my contacts"; spec/app/contacts/index.md, "Story: Give Alpha access to my contacts"; spec/app/contacts/index.md, "Story: Look at one contact"; spec/app/contacts/index.md, "Story: Add or change a contact"; spec/app/contacts/index.md, "Story: Delete a contact"; spec/app/contacts/index.md, "Story: Know what happened to my change"
-import { Alert, AppHeader, Avatar, Banner, Button, Chip, Input, ListGroup, ListRow, SearchField, Tabs, TabsContent, Textarea, cn } from "@repo/ui";
+import { Alert, AppHeader, AssistantChatActions, Avatar, Banner, Button, Chip, Input, ListGroup, ListRow, SearchField, Tabs, TabsContent, Textarea, cn } from "@repo/ui";
 import { Effect, type ManagedRuntime } from "effect";
 import { CONTACT_MAX_ADDRESS, CONTACT_MAX_NAME, CONTACT_MAX_NOTES, CONTACT_MAX_NUMBER, type ContactDetail } from "@elizaos/os-bridges";
 import { Check, ChevronDown, ChevronLeft, MessageSquare, Minus, Pencil, Plus, Search, Trash2, X, createLucideIcon } from "lucide-react";
@@ -13,6 +13,7 @@ import { useMachine as usePhone } from "../../gen/app__phone.react.ts";
 import type { Machine as VoicemailMachine } from "../../gen/app__phone__voicemail.effect.vibe";
 import { useMachine as useVoicemail } from "../../gen/app__phone__voicemail.react.ts";
 import { useMachine as useShell } from "../../gen/app__shell.react.ts";
+import { contactChatActionsId, searchFromContact } from "../assistant/contact-search.ts";
 import { returnPhoneTab } from "../phone/back.vibe";
 import { PhoneTabs } from "../phone/PhoneTabs.tsx";
 import { callerInitials, displayNumber } from "../phone/words.ts";
@@ -105,6 +106,7 @@ export function Contacts({ runtime, alpha }: ContactsProps & { alpha: Alpha }) {
     <AppHeader title="Contacts" className={cn("mt-0.5 shrink-0", filtered && "[&>h1]:flex-none")} leading={<AppBack alpha={alpha} />}>{chip}{actions}</AppHeader>
   );
   const allow = "my-6 min-h-13 rounded-full bg-foreground px-7 text-lg font-semibold text-background hover:bg-foreground/90 active:bg-foreground/80";
+  const route = shell.state?.route;
   const content = (
     <section aria-label="Contacts" className="flex flex-1 flex-col">
       {!state.opened && !phoneTabs && header}
@@ -147,6 +149,7 @@ export function Contacts({ runtime, alpha }: ContactsProps & { alpha: Alpha }) {
       )}
       <CommsBar runtime={runtime}
         person={state.opened && held.card !== undefined ? { label: held.card.displayName, initials: callerInitials(held.card.displayName) } : undefined}
+        actions={state.opened && shown(state) && route !== undefined ? <AssistantChatActions placement="contact" triggerId={contactChatActionsId(route, state.contact)} onSearch={() => searchFromContact(alpha, route, state.contact)} /> : undefined}
         filter={!state.opened && can({ type: "search", typed: true }) ? { value: filtered ? "" : query, onChange: (typed) => (typed !== "" || !filtered) && search(typed), maxLength: 128 } : undefined} />
     </section>
   );

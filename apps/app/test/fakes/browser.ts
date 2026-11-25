@@ -35,6 +35,7 @@ export interface BrowserScene {
   beforeSave?: (saved: BrowserSavedState) => Promise<void>;
   reviewQuestion?: (page: BrowserPageGuard) => Promise<{ text: string }>;
   reviewReading?: BrowserTabHostPlugin["reviewReading"];
+  readingAvailable: boolean;
   pageTitle?: (url: string) => string | undefined;
   bookmarks: { url: string; title?: string }[];
   readonly tabs: Map<string, Held>;
@@ -162,6 +163,7 @@ export function browserScene(): BrowserScene {
     saved: { history: [news, enclave, book], tabs: [{ id: "tab1", url: news, title: sites[news]?.title ?? "" }, { id: "tab2", url: enclave, title: sites[enclave]?.title ?? "" }], cur: "tab1" },
     bookmarks: [{ url: enclave, title: sites[enclave]?.title ?? "" }],
     tabs: new Map(),
+    readingAvailable: true,
     shown: undefined,
     calls: [],
     failing: new Map(),
@@ -348,7 +350,7 @@ export function alphaBrowser(world: BrowserScene): Faked {
         world.calls.push("clearSiteData");
         return Promise.resolve({ site: new URL(options.url).host });
       },
-      readingSupport: () => Promise.resolve({ available: world.reviewReading !== undefined }),
+      readingSupport: () => Promise.resolve({ available: world.readingAvailable }),
       reviewQuestion: (page) => {
         const tab = stateOf(held(page));
         if (world.shown?.id !== page.id || !tab.committed || tab.loading || tab.url !== page.url || tab.navigation !== page.navigation) {

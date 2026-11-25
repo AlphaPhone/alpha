@@ -12,13 +12,19 @@ import android.content.pm.PackageManager;
 import android.os.Build;
 import android.provider.Settings;
 import com.getcapacitor.JSObject;
+import com.getcapacitor.PermissionState;
 import com.getcapacitor.Plugin;
 import com.getcapacitor.PluginCall;
 import com.getcapacitor.PluginMethod;
 import com.getcapacitor.annotation.CapacitorPlugin;
+import com.getcapacitor.annotation.Permission;
+import com.getcapacitor.annotation.PermissionCallback;
 
 /** Device facts, allowlisted settings, explicit bounded text handoffs and verified app self-updates. */
-@CapacitorPlugin(name="AlphaDevice")
+@CapacitorPlugin(name = "AlphaDevice", permissions = {
+ @Permission(alias = "camera", strings = {Manifest.permission.CAMERA}),
+ @Permission(alias = "notifications", strings = {Manifest.permission.POST_NOTIFICATIONS})
+})
 public final class AlphaDevicePlugin extends Plugin {
  @PluginMethod public void takeBillingReturn(PluginCall call) {
   String session = BillingReturn.take();
@@ -105,6 +111,7 @@ public final class AlphaDevicePlugin extends Plugin {
  @PluginMethod public void settingsFacts(PluginCall call) {
   JSObject out=new JSObject();
   out.put("androidRelease",Build.VERSION.RELEASE);
+  out.put("startupPermissionDefaults", AlphaImageCapabilities.startupPermissionDefaults(getContext()));
   try {
    int boot=Settings.Global.getInt(getContext().getContentResolver(),Settings.Global.BOOT_COUNT,-1);
    if(boot>=0)out.put("bootCount",boot);
@@ -112,6 +119,58 @@ public final class AlphaDevicePlugin extends Plugin {
   putSettingsGrants(getContext(),out);
   call.resolve(out);
  }
+
+ /** Reads or requests exactly one permission from the Access walkthrough. */
+ private static String accessPermission(PluginCall call) {
+  String permission = call.getString("permission", "");
+  return "camera".equals(permission) || "notifications".equals(permission) ? permission : null;
+ }
+
+ private PermissionState accessPermissionState(String permission) {
+  if ("notifications".equals(permission) && Build.VERSION.SDK_INT < 33) return PermissionState.GRANTED;
+  return getPermissionState(permission);
+ }
+
+ @PluginMethod public void accessPermissionStatus(PluginCall call) {
+  String permission = accessPermission(call);
+  if (permission == null) {
+   call.reject("Unknown access permission");
+   return;
+  }
+  PermissionState state = accessPermissionState(permission);
+  if (state == null) call.reject("Android permission is unavailable");
+  else call.resolve(new JSObject().put("state", state.toString()));
+ }
+
+ @PluginMethod public void requestAccessPermission(PluginCall call) {
+  String permission = accessPermission(call);
+  android.app.Activity activity = getActivity();
+  if (permission == null || activity == null) {
+   call.reject("Android permission is unavailable");
+   return;
+  }
+  activity.runOnUiThread(() -> {
+   if (!shareForeground(activity)) {
+    call.reject("Open and unlock Alpha before asking for access");
+    return;
+   }
+   PermissionState state = accessPermissionState(permission);
+   if (state != PermissionState.PROMPT && state != PermissionState.PROMPT_WITH_RATIONALE) {
+    accessPermissionStatus(call);
+    return;
+   }
+   LateLaunch.ask(call, () -> requestPermissionForAlias(permission, call, "accessPermissionAnswered"));
+  });
+ }
+
+ @Override @PluginMethod public void requestPermissions(PluginCall call) {
+  requestAccessPermission(call);
+ }
+
+ @PermissionCallback private void accessPermissionAnswered(PluginCall call) {
+  accessPermissionStatus(call);
+ }
+
  private static void putSettingsGrants(Context context,JSObject out) {
   JSObject grants=new JSObject();
   boolean fine=context.checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION)==PackageManager.PERMISSION_GRANTED;

@@ -623,13 +623,17 @@ describe("Messages on an Alpha image", () => {
     expect([review.confirmations, world.telephony.sent]).toEqual([[], []]);
   });
 
-  it.each(["draft", "send"] as const)("Reviews the exact number for a named text and handles its %s (spec/app/contacts/agent.md, \"The owner picks the exact number or the one contact, and that one is shown\"; spec/app/messages/composer.md, \"The agent's draft goes into the open conversation's draft only while it is empty, and never sends\"; spec/app/messages/composer.md, \"An addressed send names the exact number, text and SIM before it can send\")", async (mode) => {
+  it.each(["draft", "send", "send with a lost answer"] as const)("Reviews the exact number for a named text and handles its %s (spec/app/contacts/agent.md, \"The owner picks the exact number or the one contact, and that one is shown\"; spec/app/messages/composer.md, \"The agent's draft goes into the open conversation's draft only while it is empty, and never sends\"; spec/app/messages/composer.md, \"An addressed send names the exact number, text and SIM before it can send\")", async (mode) => {
     const world = image();
     const body = "Meet at the front door";
     const compose = mode === "draft" ? { type: "sms_compose", target: { kind: "contact", query: "Maya" }, draft: true, body } as const
       : { type: "sms_compose", query: "Maya", body } as const;
     const review = textReview(world.notes.owner, "draft-for-maya", compose);
-    const { alpha, runtime } = await openTextReview(world, review);
+    world.telephony.textReview = review;
+    const lostAnswer = mode === "send with a lost answer";
+    world.telephony.loseSmsReply = lostAnswer;
+    const { alpha } = await open(world, lostAnswer ? [...mounts, ...only("view:Settings", "settings/activity")] : mounts);
+    const runtime = assistant.runtime(alpha);
     await ready(alpha.runtime, Shell, "Alpha image admitted", (state) => state.image);
     await openHomeConversation(alpha, runtime);
 
@@ -651,15 +655,28 @@ describe("Messages on an Alpha image", () => {
     await vi.waitFor(() => expect(button(action)).toBeDefined());
     expect(review.decisions).toEqual([]);
     await press(action);
-    if (mode === "send") {
+    if (mode !== "draft") {
       try {
-        await vi.waitFor(() => expect(review.confirmations).toHaveLength(1));
-        const confirmation = review.confirmations[0];
-        expect(confirmation).toMatchObject({ operationId: review.proposal.id, recipients: ["+14155550100"], body, subscriptionId: 1 });
+        const confirmation = await exactSmsConfirmation(review, { recipients: ["+14155550100"], body, subscriptionId: 1 });
         expect(world.telephony.sent).toEqual([]);
         await drawn(() => confirmation.confirm());
-        await vi.waitFor(() => expect(review.receipts.at(-1)).toMatchObject({ outcome: "applied", operationId: review.proposal.id,
-          result: { kind: "sms-compose", status: "sent" } }));
+        if (lostAnswer) {
+          await vi.waitFor(() => expect(review.proposal.state).toBe("reconciliation_required"), { timeout: 12_000 });
+          await drawn(() => alpha.runtime.runPromise(Shell.use((machine) => machine.send({ type: "openView", view: "Settings" }))));
+          await vi.waitFor(() => expect(button("About")).toBeDefined(), { timeout: 12_000 });
+          await press("About");
+          const activity = await vi.waitFor(() => {
+            const row = [...document.querySelectorAll<HTMLButtonElement>("button")].find((one) => one.textContent?.includes("Agent activity"));
+            if (row === undefined) throw new Error("Agent activity was not drawn");
+            return row;
+          }, { timeout: 12_000 });
+          await drawn(() => activity.click());
+          await vi.waitFor(() => expect(document.body.textContent).toContain("Phone could not confirm the send"), { timeout: 12_000 });
+          expect([button("Happened"), button("Didn’t")]).toEqual([undefined, undefined]);
+        } else {
+          await vi.waitFor(() => expect(review.receipts.at(-1)).toMatchObject({ outcome: "applied", operationId: review.proposal.id,
+            result: { kind: "sms-compose", status: "sent" } }));
+        }
         expect(world.telephony.sent).toEqual([{ operationId: review.proposal.id, recipients: ["+14155550100"], body }]);
       } finally {
         for (const confirmation of review.confirmations) confirmation.confirm();

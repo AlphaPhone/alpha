@@ -2,6 +2,8 @@
 import type {
   AndroidReminderBoundOperation, AndroidReminderCancelInput, AndroidReminderRecord, AndroidReminderScheduleInput,
 } from "@elizaos/os-bridges";
+import { dueInstantMs } from "../../src/reminders/recurrence.ts";
+import type { ReminderCompletion } from "../../src/reminders/store.ts";
 import type { Faked } from "./phone.ts";
 import { type Route, readJsonBody } from "./routes.ts";
 
@@ -39,6 +41,7 @@ export interface FakeReminderItem {
   subtasks: FakeReminderSubtask[];
   completed: boolean;
   completedAtMs: number | null;
+  history?: readonly ReminderCompletion[];
   snoozedUntilMs: number | null;
   notifiedAtMs: number | null;
   agentTaskId: string | null;
@@ -285,10 +288,15 @@ export function remindersRoutes(scene: RemindersScene, now: () => number): Route
       if (request.method === "POST" && sub === "complete") {
         const ts = now();
         scene.deleted.set(id, existing);
+        const dueAtMs = dueInstantMs(existing.dueDate, existing.dueMinute);
+        const history = dueAtMs === null ? {} : { history: [
+          ...(existing.history ?? []), { revision: existing.revision, dueAtMs, completedAtMs: ts },
+        ].slice(-32) };
         const nextDate = existing.dueDate !== null ? advanceDate(existing.dueDate, existing.recurrence) : null;
         if (nextDate !== null) {
           const advanced: FakeReminderItem = {
             ...existing,
+            ...history,
             dueDate: nextDate,
             subtasks: existing.subtasks.map((s) => ({ ...s, done: false })),
             completed: false,
@@ -303,7 +311,7 @@ export function remindersRoutes(scene: RemindersScene, now: () => number): Route
           scene.updatedAtMs = ts;
           return Response.json({ item: advanced, nextItem: advanced, snapshot: snapshotOf(scene) });
         }
-        const completed: FakeReminderItem = { ...existing, completed: true, completedAtMs: ts, snoozedUntilMs: null, revision: existing.revision + 1, updatedAtMs: ts };
+        const completed: FakeReminderItem = { ...existing, ...history, completed: true, completedAtMs: ts, snoozedUntilMs: null, revision: existing.revision + 1, updatedAtMs: ts };
         scene.items[index] = completed;
         scene.version += 1;
         scene.updatedAtMs = ts;

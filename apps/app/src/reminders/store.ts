@@ -5,6 +5,14 @@ import type { Repeat } from "../../gen/app__reminders__recurrence.ts";
 import { externalStore } from "../runtime/store.ts";
 import { civilDayFromString, civilDayNumber, dueInstantMs } from "./recurrence.ts";
 
+/** Keep the actual completed due instant, including when a repeat immediately moves on. @throws {never} */
+export function withReminderCompletion(item: ReminderItemRecord, completedAtMs: number): ReminderItemRecord {
+  const dueAtMs = dueInstantMs(item.dueDate, item.dueMinute);
+  if (dueAtMs === null) return item;
+  const record = { revision: item.revision, dueAtMs, completedAtMs };
+  return { ...item, history: [...(item.history ?? []), record].slice(-32) };
+}
+
 /** Filter parameters applied to a reminder list view. */
 export interface ReminderFilterState {
   readonly showCompleted: boolean;

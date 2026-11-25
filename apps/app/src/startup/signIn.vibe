@@ -21,6 +21,7 @@ export type ConnectionWarning = "Offline" | "Unvalidated" | "WithoutWifi" | "Unv
 
 export interface FirstRun {
   readonly stage: Stage
+  readonly accountConfirmed: boolean
   readonly email: boolean
   readonly google: boolean
   readonly phone: boolean
@@ -30,6 +31,7 @@ export interface FirstRun {
 export service StartupSignIn {
   readonly changes: Stream.Stream<FirstRun>
   active(): boolean!!
+  confirmedAccount(): boolean!!
   check(): void!!
   touch(): void!!
   openNetwork(): boolean!!
@@ -40,7 +42,7 @@ export service StartupSignIn {
   back(): boolean!!
 }
 
-const empty: FirstRun = { stage: "Disabled", email: false, google: false, phone: false }
+const empty: FirstRun = { stage: "Disabled", accountConfirmed: false, email: false, google: false, phone: false }
 
 module numbers {
   /** @throws {never} */
@@ -80,6 +82,7 @@ export function startupSignIn(enabled: boolean) {
       Layer.succeed(StartupSignIn, {
         changes: Stream.succeed(empty),
         active: () => succeed(false),
+        confirmedAccount: () => succeed(false),
         check: () => Effect.void,
         touch: () => Effect.void,
         openNetwork: () => succeed(false),
@@ -114,6 +117,7 @@ export function startupSignIn(enabled: boolean) {
 
       const current = () => SubscriptionRef.get(reports)
       const active = () => Effect.map(current(), (state) => state.stage !== "Disabled" && state.stage !== "Admitted")
+      const confirmedAccount = () => Effect.map(current(), (state) => state.accountConfirmed)
       const set = (reported: FirstRun) => SubscriptionRef.set(reports, reported)
       const seconds = effect {
         return Math.floor((try time.now()) / 1000)
@@ -121,8 +125,8 @@ export function startupSignIn(enabled: boolean) {
       const foreground = effect {
         return (try device.showing()) && Page.editorsMounted(try page.get()) && !Page.dialogShown(try page.get())
       }
-      const admitted = effect {
-        try set({ ...empty, stage: "Admitted" })
+      const admitted = (accountConfirmed: boolean) => effect {
+        try set({ ...empty, stage: "Admitted", accountConfirmed })
         try engaged.report("startup/sign-in", { card: "NoCard", connecting: false })
       }
       const networkWarning = effect {
@@ -146,7 +150,7 @@ export function startupSignIn(enabled: boolean) {
         }
         const { account, readiness } = reply
         if (account.kind === "signedIn" && (signedInBy === undefined || account.credentialId === signedInBy)) {
-          try admitted
+          try admitted(true)
           return
         }
         if (signedInBy !== undefined) {
@@ -167,6 +171,7 @@ export function startupSignIn(enabled: boolean) {
         })
         try set({
           stage: "Required",
+          accountConfirmed: false,
           connection,
           email: readiness.methodsKnown && readiness.email,
           phone: readiness.methodsKnown && readiness.sms,
@@ -190,7 +195,7 @@ export function startupSignIn(enabled: boolean) {
         try ensuring(
           effect {
             if (!registered("ElizaSignIn") || (try launcher.presentation()).assistant) {
-              try admitted
+              try admitted(false)
               return
             }
             try reported(try status(before.stage !== "Checking"))
@@ -260,7 +265,7 @@ export function startupSignIn(enabled: boolean) {
             ? { type: "returned", tab: ticket, verdict, account, factor, free: true, now: stamp }
             : { type: "verified", ticket, verdict, account, factor, free: true, now: stamp },
         )
-        if (Option.isSome(stepped) && stepped.value.state.ended === "HandedOver") try admitted
+        if (Option.isSome(stepped) && stepped.value.state.ended === "HandedOver") try admitted(true)
         return Option.isSome(stepped)
       }
 
@@ -339,6 +344,7 @@ export function startupSignIn(enabled: boolean) {
       return {
         changes: SubscriptionRef.changes(reports),
         active,
+        confirmedAccount,
         check,
         touch: ownerTouch,
         openNetwork,

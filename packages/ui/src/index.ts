@@ -48,6 +48,7 @@ export * from "./components/assistant/AssistantChatHistorySheet.tsx";
 export * from "./components/assistant/AssistantChatHistory.tsx";
 export * from "./components/assistant/AssistantChoicesCard.tsx";
 export * from "./components/assistant/AssistantComposer.tsx";
+export * from "./components/assistant/AssistantChatActions.tsx";
 export * from "./components/assistant/AssistantContextChip.tsx";
 export * from "./components/assistant/AssistantConversation.tsx";
 export * from "./components/assistant/AssistantDecisionCard.tsx";

@@ -200,7 +200,13 @@ function carry(fx: Camera.Effect): CameraJob {
     case "OpenSettings": return run("camera settings", effect { try (try SystemSettings).open("AppPermissions", "") }, "Phone")
     case "StartPreview": return run(`bind preview ${fx.ticket}`, startPreview(fx.ticket, fx.lens), "Phone")
     case "StopPreview": return run(`release preview ${fx.ticket}`, effect { try (try CameraPort).stop(fx.ticket) }, "Phone")
-    case "SetFlash": return run("flash", effect { try (try CameraPort).flash(fx.auto ? "auto" : fx.on ? (fx.video ? "torch" : "on") : "off") }, "Phone")
+    case "SetFlash": return run("flash", effect {
+      try (try CameraPort).light({ kind: "flash", mode: fx.auto ? "auto" : fx.on ? (fx.video ? "torch" : "on") : "off" })
+    }, "Phone")
+    case "SetTorch": return answer("camera light", effect {
+      const applied = try (try CameraPort).light({ kind: "torch", ticket: fx.ticket, lit: fx.lit })
+      return { type: "torchWritten", ticket: fx.ticket, write: fx.write, applied } as const
+    }, { type: "torchWritten", ticket: fx.ticket, write: fx.write, applied: false }, "Phone")
     case "SetZoom": return run("zoom", effect { try (try CameraPort).zoom(fx.level) }, "Phone")
     case "FocusAt": return answer(`focus ${fx.tap}`, effect {
       const point = try (try CameraAssets).point(fx.tap)

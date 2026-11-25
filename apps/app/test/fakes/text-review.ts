@@ -87,7 +87,8 @@ export function textReviewRoute(review: TextReviewScene, subjectUserId: string):
       review.pendingReads += 1;
       if (review.workflow !== undefined && !review.workflow.offered()) return Response.json({ proposals: [] });
       const payload = { ...proposal.payload, ...(review.workflow === undefined ? {} : { workflow: review.workflow.binding }) };
-      return Response.json({ proposals: [{ ...proposal, payload, ...(review.readOrigin === undefined ? {} : { readReplyOrigin: review.readOrigin }) }] });
+      const execution = ["executing", "reconciliation_required", "done"].includes(proposal.state) ? { attemptId } : undefined;
+      return Response.json({ proposals: [{ ...proposal, payload, execution, ...(review.readOrigin === undefined ? {} : { readReplyOrigin: review.readOrigin }) }] });
     }
     if (request.method !== "POST" || !resource.startsWith(`proposals/${proposal.id}/`)) return reject(404);
     const step = resource.split("/").at(-1);
@@ -111,7 +112,8 @@ export function textReviewRoute(review: TextReviewScene, subjectUserId: string):
       }
       if (step === "receipt" && proposal.state === "executing" && body.attemptId === attemptId) {
         review.receipts.push(body.receipt);
-        proposal.state = "done";
+        proposal.state = typeof body.receipt === "object" && body.receipt !== null && "outcome" in body.receipt && body.receipt.outcome === "unknown"
+          ? "reconciliation_required" : "done";
         review.workflow?.answered?.();
         return Response.json({ digest: proposal.digest, proposal });
       }

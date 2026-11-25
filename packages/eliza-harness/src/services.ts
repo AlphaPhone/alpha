@@ -12,7 +12,10 @@ import { prepared } from "./checkout.ts";
 import { builtPack } from "./pack.ts";
 
 /** What the model answers next: the pieces of a reply, or one piece and then nothing until the caller gives up. */
-export type Reply = { readonly kind: "text"; readonly parts: readonly string[] } | { readonly kind: "stall"; readonly first: string };
+export type Reply =
+  | { readonly kind: "text"; readonly parts: readonly string[] }
+  | { readonly kind: "stall"; readonly first: string }
+  | { readonly kind: "tool"; readonly name: string; readonly input: unknown };
 
 /** The key a signed-in device holds: what the phone's native code keeps, hands the agent at launch, and adds to each request the page makes of the cloud. */
 export interface DeviceKey {
@@ -297,17 +300,23 @@ async function startProvider(key: string, real: RealModel | undefined) {
     const choice = pending.findIndex((entry) => entry.prompt === undefined || entry.prompt === prompt);
     const queued = choice < 0 ? undefined : pending.splice(choice, 1)[0]?.reply;
     const reply = queued ?? { kind: "text", parts: [typeof last === "string" ? repeated(last) : `You said: ${JSON.stringify(last)}`] };
-    const text = reply.kind === "text" ? reply.parts.join("") : reply.first;
+    const parts = reply.kind === "text" ? reply.parts : reply.kind === "stall" ? [reply.first] : [];
+    const text = parts.join("");
+    const tool = reply.kind === "tool"
+      ? { id: "call-local", type: "function", function: { name: reply.name, arguments: JSON.stringify(reply.input) } }
+      : undefined;
+    const reason = tool === undefined ? "stop" : "tool_calls";
     const named = { id: "chatcmpl-local", created: 1_790_000_000, model: input.model };
     if (input.stream !== true) {
-      return json(outgoing, 200, { ...named, object: "chat.completion", choices: [{ index: 0, message: { role: "assistant", content: text }, finish_reason: "stop" }], usage: usage(messages, text) });
+      return json(outgoing, 200, { ...named, object: "chat.completion", choices: [{ index: 0, message: { role: "assistant", content: tool === undefined ? text : null, ...(tool === undefined ? {} : { tool_calls: [tool] }) }, finish_reason: reason }], usage: usage(messages, text) });
     }
     const piece = (delta: object, finish: string | null) => frame({ ...named, object: "chat.completion.chunk", choices: [{ index: 0, delta, finish_reason: finish }] });
     outgoing.writeHead(200, { "content-type": "text/event-stream", "cache-control": "no-store" }).flushHeaders();
     outgoing.write(piece({ role: "assistant", content: "" }, null));
-    for (const part of reply.kind === "text" ? reply.parts : [reply.first]) outgoing.write(piece({ content: part }, null));
+    for (const part of parts) outgoing.write(piece({ content: part }, null));
     if (reply.kind === "stall") return;
-    outgoing.write(piece({}, "stop"));
+    if (tool !== undefined) outgoing.write(piece({ tool_calls: [{ index: 0, ...tool }] }, null));
+    outgoing.write(piece({}, reason));
     outgoing.write(frame({ ...named, object: "chat.completion.chunk", choices: [], usage: usage(messages, text) }));
     outgoing.end(frame("[DONE]"));
   }

@@ -1,5 +1,5 @@
 // spec/app/browser/reading.md, "Story: Review an excerpt to ask about"; spec/app/browser/reading.md, "Cancel, Back, Alpha going to the background and the page loading something else all end the reading, and sending nothing"
-import { type BrowserPageBinding, type BrowserReadingBinding, pageQuestionReading, readPublicPageSource, sensitiveReadingText, sensitiveReadingUrl, SENSITIVE_READING_MESSAGE, SENSITIVE_PAGE } from "@elizaos/os-bridges"
+import { type BrowserPageBinding, type BrowserReadingBinding, type ReadingSupport, createReadingSupport, pageQuestionReading, readPublicPageSource, sensitiveReadingText, sensitiveReadingUrl, READING_UNSUPPORTED_MESSAGE, SENSITIVE_READING_MESSAGE, SENSITIVE_PAGE } from "@elizaos/os-bridges"
 import * as Reader from "../../gen/app__browser__reading.effect.vibe"
 import { Machine as Address } from "../../gen/app__browser__address.effect.vibe"
 import { Machine as Tabs } from "../../gen/app__browser.effect.vibe"
@@ -33,13 +33,37 @@ type Review = Question | Aloud | OnPhone
 
 export service PageReading {
   readonly review: { held?: Review }
+  readonly support: {
+    readonly snapshot: () => ReadingSupport
+    readonly subscribe: (listener: () => void) => () => void
+    readonly check: () => Promise<ReadingSupport>
+  }
 }
 
 type Surface = Tabs | Pages | Shell | TabHost | Device
 type Inputs = Surface | Reader.Machine | PageReading | MediaHandoff | Agent | VoiceBridge | Time
 
 const proposed = "Summarize this excerpt."
-const pageReading = Layer.sync(PageReading, () => ({ review: {} }))
+const pageReading = Layer.effect(PageReading, effect {
+  const plugin = Option.getOrUndefined((try TabHost).plugin)
+  return try sync(() => {
+    const listeners = new Set<() => void>()
+    const probe = createReadingSupport(() => plugin?.readingSupport() ?? Promise.resolve(undefined), () => {
+      for (const listener of listeners) listener()
+    })
+    return {
+      review: {},
+      support: {
+        snapshot: () => probe.state,
+        subscribe(listener: () => void) {
+          listeners.add(listener)
+          return () => { listeners.delete(listener) }
+        },
+        check: () => probe.check(),
+      },
+    }
+  })
+})
 const nativeToken = Schema.decodeUnknownOption(Schema.Struct({ readingToken: Schema.NonEmptyString }))
 
 function eligible(address: string): boolean {
@@ -75,12 +99,14 @@ export effect function reviewPage(tab: number, purpose: Reader.Purpose): void!!I
   const state = try tabs.get()
   if (state.layer !== "Menu" || state.selected !== tab || Reader.busy(try reader.get())) return
   const page = try selected(tab)
+  const { review: held, support } = try PageReading
+  const supported = (try TabHost).web !== undefined || (try promise(() => support.check())) !== "unavailable"
+  if (!showing(try (try Shell).get(), "Browser")) return
   const closeMenu = () => contained(tabs.send({ type: "uncover" }, (s) => s.layer === "Menu" && s.selected === tab), "showing the page to review")
-  const held = (try PageReading).review
-  if (page === undefined || !eligible(page.url)) {
+  if (!supported || page === undefined || !eligible(page.url)) {
     if (!(try closeMenu())) return
     held.held = undefined
-    try contained(reader.send({ type: "request", purpose, secure: false, supported: true }), "refusing a page that cannot be read")
+    try contained(reader.send({ type: "request", purpose, secure: false, supported }), "refusing a page that cannot be read")
     return
   }
   const draft = purpose === "Ask" ? try (try MediaHandoff).reviewedDraft() : undefined
@@ -168,8 +194,6 @@ effect function nativeExcerpt(review: OnPhone, page: BrowserPageBinding, ticket:
   const host = try TabHost
   if (owner === undefined || Option.isNone(host.plugin) || !(try (try VoiceBridge).canRead())) return outcome(ticket, "Failed")
   const plugin = host.plugin.value
-  const capability = Option.getOrUndefined(try Effect.option(tryPromise(() => plugin.readingSupport())))
-  if (capability?.available !== true) return outcome(ticket, "Failed")
   const clock = try Time
   const binding: Extract<BrowserReadingBinding, { execution: "device" }> = {
     execution: "device", ownerId: owner.identityId, sessionId: host.session.session, expiresAt: Math.trunc(try clock.now()) + 120000,
@@ -344,7 +368,16 @@ const phoneApproval = started(effect {
   })
 }, "following the phone's page approval")
 
-/** Owns the single reviewed excerpt and its accepted text. */
-export const reading = Layer.provideMerge(together(reacting(Reader, { carry }), retired, phoneApproval), pageReading)
+// spec/app/browser/reading.md, "An explicit reading starts from the current committed HTTPS page"
+const supportInView = started(effect {
+  if (Option.isNone((try TabHost).plugin)) return
+  const shell = try Shell
+  const support = (try PageReading).support
+  const visible = Stream.changes(Stream.map(shell.changes, (state) => showing(state, "Browser")))
+  try Stream.runForEach(Stream.filter(visible, (shown) => shown), () => ignore(promise(() => support.check())))
+}, "checking Android page reading support")
 
-export { sensitiveReadingText, SENSITIVE_READING_MESSAGE }
+/** Owns the single reviewed excerpt and its accepted text. */
+export const reading = Layer.provideMerge(together(reacting(Reader, { carry }), retired, phoneApproval, supportInView), pageReading)
+
+export { sensitiveReadingText, SENSITIVE_READING_MESSAGE, READING_UNSUPPORTED_MESSAGE }
