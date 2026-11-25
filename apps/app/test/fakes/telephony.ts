@@ -165,7 +165,7 @@ function telephony(world: TelephonyScene): Faked {
     };
     const status = () => ({
       version: 2, voiceCapable: true, smsCapable: true,
-      permissions: { contacts: "granted", phoneState: "granted", sms: world.sms, sendSms: "granted", callLog: world.callLog },
+      permissions: { contacts: world.contacts ? "granted" : "prompt", phoneState: "granted", sms: world.sms, sendSms: "granted", callLog: world.callLog },
       sendMode: "direct", mmsSend: true,
       roles: { dialer: { available: true, held: world.dialer, eligible: true }, sms: { available: true, held: true, eligible: true } },
       defaultDialer: world.dialer ? "ai.alphacompute.alphaphone" : "com.android.dialer", defaultSms: "ai.alphacompute.alphaphone",
@@ -192,6 +192,7 @@ function telephony(world: TelephonyScene): Faked {
       imageCapability: () => Promise.resolve({ version: 1, image: true, feature: "android.hardware.telephony" }),
       status: () => Promise.resolve(status()),
       requestAccess: ({ access }: { access: string }) => {
+        if (access === "contacts") world.contacts = true;
         if (access === "callLog") world.callLog = "granted";
         if (access === "sms") world.sms = "granted";
         return Promise.resolve(status());
