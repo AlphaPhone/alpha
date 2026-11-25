@@ -7,7 +7,7 @@ import {
 } from "@repo/ui";
 import type { ManagedRuntime } from "effect";
 import {
-  Calendar as CalendarIcon, CalendarDays, ChevronRight, MapPin, Plus, Repeat, RotateCcw, Search, Settings, TextAlignStart, UserRound, Video, X,
+  Calendar as CalendarIcon, CalendarDays, ChevronRight, MapPin, Plus, Repeat, Search, Settings, TextAlignStart, Undo2, UserRound, Video, X,
 } from "lucide-react";
 import { type ReactNode, useState, useSyncExternalStore } from "react";
 import * as View from "../../gen/app__calendar.ts";
@@ -284,7 +284,7 @@ export function Calendar({ runtime, alpha }: CalendarProps) {
         {s.phoneLimited ? <CalendarNotice tone="caution">Android gave only part of this day. Some events may be missing.</CalendarNotice> : null}
         {cut ? <CalendarNotice tone="caution">Google gave only part of your agent's calendar. Some events may be missing.</CalendarNotice> : null}
         {s.phone.status === "Failed" || s.google.status === "Failed" ? (
-          <CalendarNotice tone="caution" actions={view.can({ type: "refresh" }) ? <CalendarNoticeAction aria-label="Retry" onClick={send({ type: "refresh" })}><RotateCcw aria-hidden />Retry</CalendarNoticeAction> : null}>
+          <CalendarNotice tone="caution" actions={view.can({ type: "refresh" }) ? <CalendarNoticeAction aria-label="Retry" onClick={send({ type: "refresh" })}><Undo2 aria-hidden />Retry</CalendarNoticeAction> : null}>
             Calendar couldn't read this day.
           </CalendarNotice>
         ) : null}
@@ -687,7 +687,7 @@ function Form({ runtime, day, today, connected }: CalendarProps & { day: number;
         </div>
       ) : null}
       <p role="status" aria-label="Calendar form draft status" className="mx-6 my-1 text-meta text-muted-foreground">{off_}</p>
-      {e.banner === "Failed" ? <CalendarNotice tone="caution" className="mx-6" actions={<CalendarNoticeAction onClick={() => void editor.send({ type: "retryKeeping" })}><RotateCcw aria-hidden />Retry</CalendarNoticeAction>}>Not saved on this phone</CalendarNotice> : null}
+      {e.banner === "Failed" ? <CalendarNotice tone="caution" className="mx-6" actions={<CalendarNoticeAction onClick={() => void editor.send({ type: "retryKeeping" })}><Undo2 aria-hidden />Retry</CalendarNoticeAction>}>Not saved on this phone</CalendarNotice> : null}
       {e.banner === "Conflict" ? (
         <CalendarNotice className="mx-6" actions={<>
           <CalendarNoticeAction onClick={() => void editor.send({ type: "keepMyDraft" })}>Keep mine</CalendarNoticeAction>
@@ -703,13 +703,13 @@ function Form({ runtime, day, today, connected }: CalendarProps & { day: number;
         </>}>This event changed since you started editing it.</CalendarNotice>
       ) : null}
       {e.form === "NewEvent" && e.receipts.status === "Failed" ? (
-        <CalendarNotice tone="caution" className="mx-6" actions={editor.can({ type: "checkReceipts" }) ? <CalendarNoticeAction onClick={() => void editor.send({ type: "checkReceipts" })}><RotateCcw aria-hidden />Check</CalendarNoticeAction> : null}>
+        <CalendarNotice tone="caution" className="mx-6" actions={editor.can({ type: "checkReceipts" }) ? <CalendarNoticeAction onClick={() => void editor.send({ type: "checkReceipts" })}><Undo2 aria-hidden />Check</CalendarNoticeAction> : null}>
           Alpha couldn't check for events it may already have made, so it won't create this one yet.
         </CalendarNotice>
       ) : null}
       {e.unknownCreate && e.form === "NewEvent" ? (
         <CalendarNotice tone="caution" className="mx-6" actions={<>
-          {editor.can({ type: "checkReceipts" }) ? <CalendarNoticeAction aria-label="Check if events were saved" onClick={() => void editor.send({ type: "checkReceipts" })}><RotateCcw aria-hidden />Check</CalendarNoticeAction> : null}
+          {editor.can({ type: "checkReceipts" }) ? <CalendarNoticeAction aria-label="Check if events were saved" onClick={() => void editor.send({ type: "checkReceipts" })}><Undo2 aria-hidden />Check</CalendarNoticeAction> : null}
           {editor.can({ type: "createSeparately" }) ? <CalendarNoticeAction aria-label="Create a separate event" onClick={() => void editor.send({ type: "createSeparately" })}>Create new</CalendarNoticeAction> : null}
           {editor.can({ type: "letDoubtGo" }) ? <CalendarNoticeAction onClick={() => void editor.send({ type: "letDoubtGo" })}>Stop checking</CalendarNoticeAction> : null}
         </>}>Alpha can't tell whether your last new event was saved.</CalendarNotice>
