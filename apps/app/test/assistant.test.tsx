@@ -48,13 +48,18 @@ async function onMessage(text: string, item: string) {
   });
 }
 
-/** Open the list of conversations, from the conversation's name. */
-async function chatsList() {
+/** Choose `item` from the composer's `+` menu, Chat actions, as the owner does with the keyboard. */
+async function chatAction(item: string) {
   const { act } = await import("react");
   await act(async () => {
-    const found = [...document.querySelectorAll("button")].find((one) => one.getAttribute("aria-label")?.startsWith("Chats, "));
-    if (!(found instanceof HTMLButtonElement)) throw new Error("no chats control");
-    found.click();
+    const found = [...document.querySelectorAll("button")].find((one) => one.getAttribute("aria-label") === "Chat actions");
+    if (!(found instanceof HTMLButtonElement)) throw new Error("no Chat actions");
+    found.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+  });
+  await act(async () => {
+    const chosen = [...document.querySelectorAll("[role=menuitem]")].find((one) => one.textContent === item);
+    if (!(chosen instanceof HTMLElement)) throw new Error(`no ${item} in Chat actions`);
+    chosen.click();
   });
 }
 
@@ -122,7 +127,7 @@ describe.each([["a browser", false], ["a phone", true]])("in %s", (_where, phone
     expect(lines()).toEqual(["Hello", "You said: Hello", "Again", "You said: Again"]);
 
     // spec/app/assistant/chats.md, "The newest list says which conversations there are, and a conversation no longer listed stops showing"
-    await chatsList();
+    await chatAction("Chat history");
     await until(alpha, runtime, Chats, (s) => s.list.status === "Loaded");
     expect(rows("Chats")).toBe(2);
 
@@ -178,7 +183,7 @@ describe.each([["a browser", false], ["a phone", true]])("in %s", (_where, phone
     await until(alpha, runtime, Composer, (s) => s.slot === "Open");
 
     // spec/app/assistant/search.md, "Words are searched from the first hit, and empty words are not searched"
-    await press("Search chats");
+    await chatAction("Search chat");
     await fill("Search chats", "friday");
     await until(alpha, runtime, Search, (s) => s.hits.status === "Loaded" && s.words === "friday");
     expect(rows("Results")).toBe(2);
@@ -191,7 +196,7 @@ describe.each([["a browser", false], ["a phone", true]])("in %s", (_where, phone
 
     // spec/app/assistant/search.md, "Only the newest asking's hits are shown, a page at a time, after those already shown": a search that fails says so.
     world.ask.searchDown = true;
-    await press("Search chats");
+    await chatAction("Search chat");
     await fill("Search chats", "noon");
     await until(alpha, runtime, Search, (s) => s.hits.status === "Failed");
     expect(document.body.textContent).toContain("Search did not finish");
@@ -209,7 +214,7 @@ describe.each([["a browser", false], ["a phone", true]])("in %s", (_where, phone
     const runtime = assistant.runtime(alpha);
     await until(alpha, runtime, Composer, (s) => s.slot === "Open");
     await until(alpha, runtime, Conversation, (s) => s.ready);
-    await chatsList();
+    await chatAction("Chat history");
     await until(alpha, runtime, Chats, (s) => s.list.status === "Loaded");
     await row("Chats", "Ask Alpha");
     await until(alpha, runtime, Composer, (s) => s.binding.conversation === 1 && s.slot === "Open");

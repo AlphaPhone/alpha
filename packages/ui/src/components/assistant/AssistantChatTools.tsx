@@ -25,7 +25,7 @@ export function AssistantChatTools({ onAttach, onSearch, onNew, onHistory }: Ass
       <MenuTrigger asChild>
         <Button variant="ghost" size="icon" aria-label="Chat actions" disabled={!offered}><Plus className="size-6" /></Button>
       </MenuTrigger>
-      <MenuContent side="top" align="start" sideOffset={12} className="min-w-55 border-0 p-2 shadow-lg">
+      <MenuContent side="top" align="start" sideOffset={12} className="min-w-55 border-0 p-2 shadow-menu">
         {onAttach ? <MenuItem onSelect={onAttach}><Paperclip aria-hidden />Attach media</MenuItem> : null}
         {onSearch ? <MenuItem onSelect={onSearch}><Search aria-hidden />Search chat</MenuItem> : null}
         {onNew ? <MenuItem onSelect={onNew}><Plus aria-hidden />New chat</MenuItem> : null}
