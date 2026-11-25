@@ -1,0 +1,9 @@
+// spec/app/clock/stopwatch.md, "Story: Time laps with the stopwatch"
+import * as Stopwatch from "../../gen/app__clock__stopwatch.effect.vibe"
+import { reacting, untimed } from "../runtime/reactor.vibe"
+
+/** Persistent stopwatch machine, mounted with the Clock area. */
+export const stopwatch = reacting(Stopwatch, {
+  keep: 1,
+  open: [{ type: "reopen", now: untimed }],
+})

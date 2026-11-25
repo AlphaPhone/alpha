@@ -1,10 +1,15 @@
 // @vitest-environment happy-dom
+import { Effect } from "effect";
 import { act } from "react";
 import { afterEach, describe, expect, it } from "vitest";
 import { Machine as Shell } from "../gen/app__shell.effect.vibe";
 import { Machine as Messages } from "../gen/app__messages.effect.vibe";
 import { Machine as Composer } from "../gen/app__messages__composer.effect.vibe";
 import { Machine as Toasts } from "../gen/app__notices__toasts.effect.vibe";
+import { Machine as Tabs } from "../gen/app__browser.effect.vibe";
+import { Machine as Page } from "../gen/app__browser__address.effect.vibe";
+import { Pages } from "../src/browser/browser.vibe";
+import browser from "../src/browser/index.tsx";
 import { closeAll, hardware, open, press, underAct, until } from "./alpha.tsx";
 import { scene } from "./fakes/scene.ts";
 
@@ -68,6 +73,17 @@ describe("Messages on an Alpha image", () => {
     await write("Message", "On my way");
     await until(alpha, alpha.runtime, Composer, (s) => s.slot.author === "OwnerWrote");
     expect(world.telephony.sent).toEqual([]);
+
+    // spec/app/phone/comms.md, "Story: Address the person or Alpha from one bar"
+    expect(document.querySelectorAll("[data-alpha-composer]")).toHaveLength(1);
+    await press("Open Alpha");
+    await until(alpha, alpha.runtime, Shell, (s) => s.assistant === "Sheet");
+    expect(document.querySelectorAll("[data-alpha-composer]")).toHaveLength(1);
+    await write("Ask Alpha", "What did I miss?");
+    await press("Back to texting Maya Chen");
+    await until(alpha, alpha.runtime, Shell, (s) => s.assistant === "Bar");
+    expect([document.querySelectorAll("[data-alpha-composer]").length, document.querySelector<HTMLTextAreaElement>('textarea[aria-label="Message"]')?.value, world.telephony.sent])
+      .toEqual([1, "On my way", []]);
 
     // spec/app/messages/composer.md, "Only the owner's Send sends: a draft or a picture, with send access, a SIM where there is a choice, and never during a call that may be an emergency call"
     await press("Send");
@@ -158,12 +174,24 @@ describe("Messages on an Alpha image", () => {
     ]);
   });
 
-  it("Opens the exact conversation from a cold-start notification (spec/app/messages/index.md, \"A message notification opens its exact conversation once access is available\")", async () => {
+  it("Opens the exact notified conversation and follows an owner's safe link tap (spec/app/messages/index.md, \"A message notification opens its exact conversation once access is available\"; spec/app/messages/index.md, \"Story: Read a conversation\")", async () => {
     const world = image();
-    world.telephony.texts.push({ id: 2, thread: 23, address: "+14155550122", box: "inbox", date: 1_700_000_060_000, body: "Lunch?", read: false });
+    world.telephony.texts.push({ id: 2, thread: 23, address: "+14155550122", box: "inbox", date: 1_700_000_060_000, body: "Lunch? http://news.example/lunch or https://example-user@private.example/lunch", read: false });
     world.telephony.smsNotice = { threadId: "thread:23", token: "1" };
     const { alpha } = await open(world);
     await until(alpha, alpha.runtime, Messages, (state) => state.pane === "Conversation" && state.page.status === "Loaded" && world.telephony.smsNotice === undefined && world.telephony.texts[1]?.read === true);
     expect([world.telephony.texts.map((text) => text.read), world.telephony.sent]).toEqual([[false, true], []]);
+
+    const links = [...document.querySelectorAll<HTMLAnchorElement>("[data-alpha-message-body] a")];
+    expect([links.map((one) => one.href), world.browser.tabs.size]).toEqual([["http://news.example/lunch"], 0]);
+    await act(async () => links[0]?.click());
+    await until(alpha, alpha.runtime, Shell, (state) => state.trail.at(-1) === "Browser");
+    const runtime = browser.runtime(alpha);
+    await until(alpha, runtime, Tabs, (state) => state.selected > 1);
+    const tab = runtime.runSync(Effect.map(Tabs.use((machine) => machine.get()), (state) => state.selected));
+    const page = runtime.runSync(Effect.flatMap(Pages, (pages) => pages.of(tab)));
+    await until(alpha, page, Page, (state) => state.phase === "Shown");
+    expect([...world.browser.tabs.values()].map((one) => ({ private: one.private, history: one.history })))
+      .toEqual([{ private: false, history: ["http://news.example/lunch"] }]);
   });
 });

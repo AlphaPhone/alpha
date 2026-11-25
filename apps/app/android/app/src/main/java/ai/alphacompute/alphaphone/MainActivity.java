@@ -11,7 +11,10 @@ import android.webkit.WebSettings;
 import android.webkit.WebView;
 import androidx.activity.OnBackPressedCallback;
 import androidx.core.splashscreen.SplashScreen;
+import androidx.core.view.ViewCompat;
+import androidx.core.view.WindowInsetsCompat;
 import com.getcapacitor.BridgeActivity;
+import com.getcapacitor.WebViewListener;
 import java.lang.ref.WeakReference;
 import java.util.UUID;
 
@@ -28,6 +31,18 @@ public class MainActivity extends BridgeActivity {
  private static int unansweredFrontStarts;
  private boolean homeTask;
  private boolean handingOff;
+ private InsetsState insets;
+
+ private record InsetsState(int top, int bottom, boolean keyboard) {
+  void publish(WebView page) {
+   page.evaluateJavascript("(() => { const root = document.documentElement; if (!root) return;"
+     + " const detail = { top:" + top + ", bottom:" + bottom + ", keyboard:" + keyboard + " };"
+     + " root.style.setProperty('--alpha-native-inset-top', detail.top + 'px');"
+     + " root.style.setProperty('--alpha-native-inset-bottom', detail.bottom + 'px');"
+     + " root.dataset.alphaNativeKeyboard = String(detail.keyboard);"
+     + " window.dispatchEvent(new CustomEvent('alpha-insets', { detail })); })()", null);
+  }
+ }
 
  @Override public void onCreate(Bundle state) {
   SplashScreen.installSplashScreen(this);
@@ -53,6 +68,8 @@ public class MainActivity extends BridgeActivity {
   registerPlugin(ai.eliza.plugins.camera.CameraPlugin.class);
   registerPlugin(AlphaPhotosPlugin.class);
   registerPlugin(AlphaPhotoLibraryPlugin.class);
+  registerPlugin(AlphaMediaEnrollmentPlugin.class);
+  registerPlugin(AlphaScanPlugin.class);
   registerPlugin(ai.eliza.plugins.location.LocationPlugin.class);
   registerPlugin(ai.eliza.plugins.wifi.WiFiPlugin.class);
   registerPlugin(ai.eliza.plugins.passwords.PasswordsPlugin.class);
@@ -63,6 +80,7 @@ public class MainActivity extends BridgeActivity {
   registerPlugin(AlphaDevicePlugin.class);
   registerPlugin(AlphaCarrierSetupPlugin.class);
   registerPlugin(AlphaCallStatePlugin.class);
+  registerPlugin(AlphaLocalSpeechPlugin.class);
   registerPlugin(AlphaCloudSpeechPlugin.class);
   boolean image = AlphaImageCapability.verified(this);
   if (image) registerPlugin(AlphaTelephonyPlugin.class);
@@ -74,6 +92,7 @@ public class MainActivity extends BridgeActivity {
   WebView.setWebContentsDebuggingEnabled(BuildConfig.DEBUG);
   getBridge().getWebView().getSettings().setMixedContentMode(WebSettings.MIXED_CONTENT_NEVER_ALLOW);
   android.webkit.CookieManager.getInstance().setAcceptThirdPartyCookies(getBridge().getWebView(), false);
+  followWindowInsets();
   getOnBackPressedDispatcher().addCallback(this, new OnBackPressedCallback(true) {
    @Override public void handleOnBackPressed() {
     boolean staysHome = holdsHomeRole();
@@ -84,6 +103,27 @@ public class MainActivity extends BridgeActivity {
     });
    }
   });
+ }
+
+ private void followWindowInsets() {
+  getBridge().addWebViewListener(new WebViewListener() {
+   @Override public void onPageLoaded(WebView page) {
+    if (insets != null) insets.publish(page);
+   }
+  });
+  var decor = getWindow().getDecorView();
+  ViewCompat.setOnApplyWindowInsetsListener(decor, (view, incoming) -> {
+   var bars = incoming.getInsets(WindowInsetsCompat.Type.systemBars() | WindowInsetsCompat.Type.displayCutout());
+   float density = getResources().getDisplayMetrics().density;
+   var measured = new InsetsState(Math.round(bars.top / density), Math.round(bars.bottom / density),
+     incoming.isVisible(WindowInsetsCompat.Type.ime()));
+   if (!measured.equals(insets)) {
+    insets = measured;
+    measured.publish(getBridge().getWebView());
+   }
+   return ViewCompat.onApplyWindowInsets(view, incoming);
+  });
+  ViewCompat.requestApplyInsets(decor);
  }
 
  @Override protected void load() {

@@ -5,10 +5,10 @@ import * as Layers from "../../gen/app__shell__layers.effect.vibe"
 import * as Shell from "../../gen/app__shell.effect.vibe"
 import type { Shell as Shown } from "../../gen/app__shell.effect.vibe"
 import { Device } from "../platform/device.vibe"
-import { applying, contained, following, reacting, started, together } from "../runtime/reactor.vibe"
+import { applying, following, reacting, started, together } from "../runtime/reactor.vibe"
 
 module page {
-  import type { Target } from "../../gen/app__shell__focus.effect.vibe"
+  import type { Target } from "../../gen/app__shell__focus.ts"
   const focusable = "a[href], button, input, select, textarea, [tabindex], [contenteditable=true]"
   const layered = "[role=dialog], [role=alertdialog], [role=menu]"
 
@@ -29,14 +29,21 @@ module page {
   export const layeredNow = (): boolean => document.activeElement?.closest(layered) != null
   /** Whether a control with `key` is on the page. @throws {never} */
   export const shown = (key: string): boolean => key !== "" && find(key) !== undefined
-  /** Focus the control with `key`. @throws {never} */
+  /** Focus the control with `key`, waiting for an inert wrapper to clear if the layer just closed before React painted. @throws {never} */
   export function give(key: string): void {
-    const target = find(key)
-    if (target === undefined) return
-    target.focus()
-    if (document.activeElement !== target) queueMicrotask(() => {
-      if (active() === "") find(key)?.focus()
+    const element = find(key)
+    if (element === undefined) return
+    const blocked = element.closest<HTMLElement>("[inert]")
+    if (blocked === null) {
+      element.focus()
+      return
+    }
+    const waiting = new MutationObserver(() => {
+      if (element.closest("[inert]") !== null) return
+      waiting.disconnect()
+      if (active() === "") element.focus()
     })
+    waiting.observe(blocked, { attributes: true, attributeFilter: ["inert"] })
   }
   function targetOf(target: Target): HTMLElement | undefined {
     const main = document.querySelector("main")
@@ -90,9 +97,9 @@ const frame = Effect.sleep("16 millis")
 /** The control the owner last focused outside a sheet, menu or dialog: the opener of the next layer. */
 let outside = ""
 
-/** What the screen showing gives focus to: the drawer's search, Home's first control, or the app's title. */
+/** What the screen showing gives focus to: Home's first control, or the app's title. */
 function targetFor(s: Shown): Target {
-  return s.trail.length > 0 ? "Title" : s.drawer ? "Search" : "HomeStart"
+  return s.trail.length > 0 ? "Title" : "HomeStart"
 }
 
 effect function tell(event: Event): (Focus.Focus | undefined)!!Focus.Machine {
@@ -124,7 +131,7 @@ const framed = started(effect {
   })
 }, "focus")
 
-// spec/app/shell/focus.md, "Home's tiles and the drawer's apps show a focus ring only while the owner moves by keyboard; every other control, a field above all, shows its ring whenever it has focus"
+// spec/app/shell/focus.md, "Home's tiles show a focus ring only while the owner moves by keyboard; every other control, a field above all, shows its ring whenever it has focus"
 const watching = started(effect {
   if (!paged()) return
   const focus = try Focus.Machine
@@ -165,6 +172,7 @@ const layering = started(effect {
   let open: ReadonlyArray<string> = []
   try Stream.runForEach(layers.changes, effect (l) => {
     const now = l.open.map((layer) => layer.id)
+    if (now.some((id) => !open.includes(id))) try heardFocus()
     for (const id of now) if (!open.includes(id)) try tell({ type: "layerOpened", layer: id, opener: outside })
     for (const id of open) if (!now.includes(id)) try closed(id)
     open = now
@@ -174,7 +182,7 @@ const layering = started(effect {
 /** Focus, in memory: given to each new screen, back to a layer's opener, told as it moves, and marked on the page while the owner moves by keyboard. */
 export const focus = together(
   reacting(Focus, {}),
-  following(Shell.Machine, (s) => ({ screen: s.trail.at(-1) ?? (s.drawer ? "drawer" : "home"), target: targetFor(s) }), Focus.Machine, ({ target }) => ({ type: "screenChanged", target } as const)),
+  following(Shell.Machine, (s) => ({ screen: s.trail.at(-1) ?? "home", target: targetFor(s) }), Focus.Machine, ({ target }) => ({ type: "screenChanged", target } as const)),
   framed,
   watching,
   layering,

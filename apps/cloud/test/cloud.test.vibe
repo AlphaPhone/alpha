@@ -3,11 +3,10 @@ import * as NodeServices from "@effect/platform-node/NodeServices"
 import { assert, describe, it } from "@effect/vitest"
 import { createCloudClient } from "@elizaos/cloud/client"
 import { deployment } from "@repo/deployment"
-import { prepared } from "@repo/eliza-harness/checkout"
-import { said } from "@repo/eliza-harness/services"
+import { prepared, said } from "@repo/eliza-harness"
 import { ChildProcess } from "effect/process"
 import { ChildProcessSpawner } from "effect/process/ChildProcessSpawner"
-import { alphaName, alphaPackage, assetLinksNameAlpha, profileFits, releaseSigner, returnAnswer, returnsOffApi } from "../gen/cloud.effect.vibe"
+import { alphaName, alphaPackage, assetLinksNameAlpha, profileFits, releaseSigner, returnAnswer, returnPageSealed, returnsOffApi } from "../gen/cloud.effect.vibe"
 import { Machine, type Gate, gateAt, gates, machine } from "../gen/cloud__local.effect.vibe"
 import { Machine as Rollout, machine as rollout } from "../gen/cloud__rollout.effect.vibe"
 import { assetLinks, entryOf, loopbackOnly, profileNamed, registrationAt, stagingSeed, statementsIn } from "../src/alpha.vibe"
@@ -15,14 +14,14 @@ import { candidateProblems, candidates } from "../src/candidate.vibe"
 import { reconcileResources } from "../src/cloudflare.vibe"
 import { operate } from "../src/commands.vibe"
 import { sha256Hex } from "../src/digest.ts"
-import { edgeRouteOf, edgeWorker, type EdgeEnv } from "../src/edge.vibe"
+import edgeWorker, { edgeRouteOf, type EdgeEnv } from "../src/edge.vibe"
 import { EdgeHeaders, EdgeRequest, EdgeResponse, forwardedHeaders } from "../src/edge-platform.ts"
 import { entitlementPublicKey } from "../src/keys.ts"
 import { generated, profiled, readSecrets, recordResources, registrationOn, secretProblems, settledSecrets, workerSecrets } from "../src/operator.vibe"
 import { PROFILE_ASSET, readProfileAsset } from "../src/profile-asset.ts"
 import { elizaCloudRoutes, tableProblems } from "../src/routes.vibe"
 import { smoke } from "../src/smoke.vibe"
-import { alphaCloudWorker } from "../src/worker.vibe"
+import alphaCloudWorker from "../src/worker.vibe"
 import { leakedElizaHost, problemsRendering, renderEnvironment } from "../src/wrangler.vibe"
 import { startCloudflare } from "./fakes/cloudflare.ts"
 import { hosting } from "./hosts.ts"
@@ -459,9 +458,11 @@ describe(`Alpha's app is registered with each cloud it talks to (spec/cloud/inde
         [registration.clientId, registration.androidPackage, registration.displayName, registration.certFingerprints[0], registration.signInReturn, registration.billingReturn],
         [alphaPackage, alphaPackage, alphaName, releaseSigner, { origin: `https://${row.appLinkHost}`, path: "/alphaphone/auth/callback" }, { origin: `https://${row.appLinkHost}`, path: "/alphaphone/billing/return" }]))
       try holds(() => assert.ok(returnsOffApi(registration, settings.api)))
-      try holds(() => assert.ok(assetLinksNameAlpha(try assetLinks(registration, settings.api), environment)))
+      const links = try assetLinks(registration, settings.api)
+      try holds(() => assert.ok(assetLinksNameAlpha(links, environment)))
       const debugSigned = { ...registration, certFingerprints: [...registration.certFingerprints, "00:".repeat(31) + "00"] }
-      try holds(() => assert.ok(!assetLinksNameAlpha(try assetLinks(debugSigned, settings.api), environment), `${name}: a signer the environment does not trust is refused`))
+      const debugLinks = try assetLinks(debugSigned, settings.api)
+      try holds(() => assert.ok(!assetLinksNameAlpha(debugLinks, environment), `${name}: a signer the environment does not trust is refused`))
       if (environment === "Staging") try holds(() => assert.deepStrictEqual(stagingSeed.clients, [entryOf(registration)]))
     }
   } |> Effect.provide(%, NodeServices.layer))
@@ -476,6 +477,12 @@ describe(`Alpha's return page hands an authorization back to the app (spec/cloud
     try holds(() => assert.deepStrictEqual(
       [parts.policy["script-src"], parts.policy["default-src"], parts.policy["base-uri"], parts.policy["form-action"], parts.noReferrer, parts.loads],
       [parts.hashes, ["'none'"], ["'none'"], ["'none'"], true, 0]))
+    try holds(() => assert.ok(returnPageSealed({
+      scripts: parts.scripts.length,
+      onlyItsHash: parts.scripts[0]?.attributes === "" && JSON.stringify(parts.policy["script-src"]) === JSON.stringify(parts.hashes),
+      sendsReferrer: !parts.noReferrer,
+      loads: parts.loads,
+    })))
   } |> Effect.provide(%, NodeServices.layer))
 
   it.effect(`clears its address and offers Alpha's link only for a well-formed return with one result (spec/cloud/index.md, "The return page clears the query from its address, and hands back only a well-formed return with exactly one result")`, () => effect {

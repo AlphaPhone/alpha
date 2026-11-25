@@ -1,8 +1,8 @@
-import { Calendar, Camera, Globe, Folder, Image, KeyRound, Mail, MapPin, StickyNote, Workflow } from "lucide-react";
+import type { ReactNode } from "react";
+import { CalendarDays, Camera, Folder, Globe, Images, LockKeyhole, Mail, MapPin, NotebookText, Workflow } from "lucide-react";
 import { ListGroup } from "../ListGroup.tsx";
 import { SettingsNavRow } from "./SettingsNavRow.tsx";
 import { SettingsPage } from "./SettingsPage.tsx";
-import { type SettingsPageLink, SettingsPageLinks } from "./SettingsPageLinks.tsx";
 import { type Neighbour, placed, type SettingsPageName, type SettingsPlaceProps } from "./vocabulary.ts";
 
 export type SettingsAppsPageProps = SettingsPlaceProps & {
@@ -16,14 +16,20 @@ export type SettingsAppsPageProps = SettingsPlaceProps & {
   onHandOver?: (neighbour: Neighbour) => void;
 };
 
-const links: SettingsPageLink[] = [
-  { page: "inbox", title: "Inbox", icon: <Mail /> },
-  { page: "workflows", title: "Workflows", icon: <Workflow /> },
-  { page: "calendar", title: "Calendar", icon: <Calendar /> },
-  { page: "camera", title: "Camera", icon: <Camera /> },
-  { page: "photos", title: "Photos", icon: <Image /> },
-  { page: "maps", title: "Maps", icon: <MapPin /> },
-  { page: "notes", title: "Notes", icon: <StickyNote /> },
+type AppRow = { title: string; icon: ReactNode; slot: number } & ({ page: SettingsPageName } | { app: "browser" | "files" } | { passwords: true });
+
+/** Every app, in alphabetical order; each keeps its own slot, so Back returns to it. */
+const rows: AppRow[] = [
+  { title: "Browser", icon: <Globe />, slot: 8, app: "browser" },
+  { title: "Calendar", icon: <CalendarDays />, slot: 2, page: "calendar" },
+  { title: "Camera", icon: <Camera />, slot: 3, page: "camera" },
+  { title: "Files", icon: <Folder />, slot: 9, app: "files" },
+  { title: "Inbox", icon: <Mail />, slot: 0, page: "inbox" },
+  { title: "Maps", icon: <MapPin />, slot: 5, page: "maps" },
+  { title: "Notes", icon: <NotebookText />, slot: 6, page: "notes" },
+  { title: "Passwords", icon: <LockKeyhole />, slot: 7, passwords: true },
+  { title: "Photos", icon: <Images />, slot: 4, page: "photos" },
+  { title: "Workflows", icon: <Workflow />, slot: 1, page: "workflows" },
 ];
 
 /**
@@ -32,16 +38,14 @@ const links: SettingsPageLink[] = [
  * @model spec/app/settings/index.md
  */
 export function SettingsAppsPage({ onBack, onOpen, onOpenApp, onHandOver, place, onPlace }: SettingsAppsPageProps) {
-  const at = (row: number) => placed({ place, onPlace }, row);
+  const opens = (row: AppRow) =>
+    "page" in row ? onOpen && (() => onOpen(row.page))
+      : "app" in row ? onOpenApp && (() => onOpenApp(row.app))
+        : onHandOver && (() => onHandOver("password-manager"));
   return (
     <SettingsPage title="Apps" onBack={onBack}>
       <ListGroup>
-        <SettingsPageLinks links={links} onOpen={onOpen} place={place} onPlace={onPlace} />
-        <SettingsNavRow title="Password manager" icon={<KeyRound />} onOpen={onHandOver && (() => onHandOver("password-manager"))} {...at(7)} />
-      </ListGroup>
-      <ListGroup>
-        <SettingsNavRow title="Browser" icon={<Globe />} onOpen={onOpenApp && (() => onOpenApp("browser"))} {...at(8)} />
-        <SettingsNavRow title="Files" icon={<Folder />} onOpen={onOpenApp && (() => onOpenApp("files"))} {...at(9)} />
+        {rows.map((row) => <SettingsNavRow key={row.title} title={row.title} icon={row.icon} onOpen={opens(row)} {...placed({ place, onPlace }, row.slot)} />)}
       </ListGroup>
     </SettingsPage>
   );

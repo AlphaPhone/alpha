@@ -441,8 +441,9 @@ pure def sometimesRemindersAmongEvents(s: Calendar): bool = s.reminders > 0 and 
 
 It is either on the phone or in the agent's calendar; a Google event names
 its page only where that is a plain HTTPS address without credentials. The
-event shows its people, the organizer named as such and each other's reply
-in Alpha's words.
+event shows its people other than the owner, whose own answer it offers
+instead, the organizer named as such and each other's reply in Alpha's
+words.
 
 ```quint
 pure def canOpenEvent(s: Calendar, id: int, local: bool, web: bool): bool =

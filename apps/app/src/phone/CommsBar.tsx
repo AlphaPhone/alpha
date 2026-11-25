@@ -32,7 +32,7 @@ export interface CommsBarProps {
 export function useCommsDock(runtime: ManagedRuntime.ManagedRuntime<ShellMachine, unknown>) {
   const { state, can, send } = useShell(runtime);
   return {
-    open: state !== undefined && state.assistant !== "Bar",
+    open: state?.assistant === "Sheet" || state?.assistant === "Full",
     close: () => {
       if (state?.assistant === "Full") void send({ type: "goBack" });
       if (state?.assistant !== "Bar" && can({ type: "goBack" })) void send({ type: "goBack" });
@@ -48,7 +48,7 @@ export function CommsBar({ runtime, closed, person }: CommsBarProps) {
   const comms = useComms(runtime);
   const bar = useBar(runtime);
   const shell = useShell(runtime);
-  if (!shell.state || shell.state.assistant !== "Bar") return null;
+  if (!shell.state || shell.state.assistant === "Sheet" || shell.state.assistant === "Full") return null;
   const raise = { type: "raise", detent: "Sheet" } as const;
   const end = { type: "endAsked", callId: bar.state ? shownCall(bar.state.calls).id : "" } as const;
   const ending = comms.state && endPlace(comms.state) === "EndBesideBar" && bar.can(end);
@@ -64,8 +64,8 @@ export function CommsBar({ runtime, closed, person }: CommsBarProps) {
   const phone = shell.state.trail.at(-1) === "Phone";
   const placeholder = ending ? "Ask during call" : phone ? "Call or ask" : person ? `Ask about ${person.label.split(" ")[0]}` : "Search or ask";
   return (
-    <div data-alpha-comms-dock="" data-host-chrome="" className="sticky bottom-0 z-dock mt-auto flex shrink-0 items-end gap-2 bg-background px-3 py-2">
-      <Button size="icon" aria-label="Open Alpha" className="size-11 shrink-0 bg-alpha text-alpha-foreground hover:bg-alpha/90" disabled={!opening} onClick={() => void open()}><Mark aria-hidden /></Button>
+    <div data-alpha-comms-dock="" data-host-chrome="" className="sticky bottom-0 z-dock mx-[3.9%] mt-auto mb-[max(clamp(1.5rem,6.8vw,1.75rem),calc(env(safe-area-inset-bottom)_+_0.75rem))] flex min-h-[clamp(4rem,18vw,4.625rem)] shrink-0 items-center gap-1 rounded-full bg-secondary px-2 py-1.5 shadow-lg">
+      <Button size="icon" aria-label="Open Alpha" className="size-11 shrink-0 overflow-hidden bg-alpha text-alpha-foreground hover:bg-alpha/90" disabled={!opening} onClick={() => void open()}><Mark className="size-[118%]" aria-hidden /></Button>
       {typeof closed === "function" ? closed((query) => void open(query)) : closed ?? <CommsQuery runtime={runtime} phone={phone && !ending} placeholder={placeholder} onAsk={(query) => void open(query)} />}
       {ending && <Button variant="destructive" size="icon" className="size-11 shrink-0" aria-label="End call" onClick={() => void bar.send(end)}><PhoneOff /></Button>}
     </div>
@@ -74,15 +74,16 @@ export function CommsBar({ runtime, closed, person }: CommsBarProps) {
 
 function CommsQuery({ runtime, phone, placeholder, onAsk }: { runtime: DockRuntime; phone: boolean; placeholder: string; onAsk: (query: string) => void }) {
   const machine = usePhone(runtime);
-  const query = phone ? runtime.runSync(Dialer.use((dialer) => dialer.get())).sought : undefined;
+  const filtering = phone && machine.can({ type: "search", typed: true });
+  const query = filtering ? runtime.runSync(Dialer.use((dialer) => dialer.get())).sought : undefined;
   return (
-    <form className="flex min-w-0 flex-1 items-center gap-1 rounded-full border border-border bg-muted px-1" onSubmit={(event) => {
+    <form className="flex min-w-0 flex-1 items-center gap-1 px-1" onSubmit={(event) => {
       event.preventDefault();
       const value = new FormData(event.currentTarget).get("query");
       if (typeof value === "string") onAsk(value.trim());
     }}>
-      <Input name="query" data-alpha-composer="" aria-label={placeholder} placeholder={placeholder} value={query}
-        onChange={phone ? (event) => {
+      <Input key={filtering ? "search" : "ask"} name="query" data-alpha-composer="" aria-label={placeholder} placeholder={placeholder} value={query}
+        onChange={filtering ? (event) => {
           const sought = event.target.value;
           runtime.runSync(Dialer.use((dialer) => dialer.set({ sought, filterLabel: "" })));
           const search = { type: "search", typed: sought.trim() !== "" } as const;
