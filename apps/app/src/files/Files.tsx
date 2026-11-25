@@ -1,7 +1,7 @@
 // spec/app/files/index.md, "Story: Browse my storage"; spec/app/files/index.md, "Story: Arrange and filter what I see"; spec/app/files/index.md, "Story: Change my files"; spec/app/files/index.md, "Folders come before files in every sort: by name in the phone's order of names, by date the newest first, by size the largest first; choosing the sort again turns the order within the folders and within the files"; spec/app/files/index.md, "The owner sees a listed item's details: what it is, how big it is, when it last changed and where it is; they close when the owner closes them or moves, or when the item is no longer listed"
 import { Alert, AppHeader, Button, Checkbox, Chip, Dialog, DialogContent, DialogTitle, EmptyState, FilesRow, FilesSelectionBar, Input, ListGroup, ListRow, Menu, MenuContent, MenuItem, MenuTrigger, Progress, SearchField, Sheet, SheetContent, Spinner } from "@repo/ui";
 import { Effect, Option, type Layer, type ManagedRuntime } from "effect";
-import { ArrowDown, ArrowDownWideNarrow, ArrowUp, AudioLines, ScanLine, Download, Ellipsis, File, FileArchive, FileText, Folder, FolderInput, FolderOpen, HardDrive, Image, Info, LayoutGrid, List, Pencil, Plus, RefreshCw, Search, Share2, Trash2, Video, X, type LucideIcon } from "lucide-react";
+import { ArrowDown, ArrowDownWideNarrow, ArrowUp, AudioLines, ScanLine, Copy, Download, Ellipsis, File, FileArchive, FileText, Folder, FolderInput, FolderOpen, HardDrive, Image, Info, LayoutGrid, List, Pencil, Plus, RefreshCw, Search, Share2, Trash2, Video, X, type LucideIcon } from "lucide-react";
 import { Fragment, useMemo, useState, type MouseEvent } from "react";
 import type { Event as FilesEvent, Files as FilesState, Machine, Order } from "../../gen/app__files.effect.vibe";
 import { ahead, browse, chosen, detailed, grouped, empty, filled } from "../../gen/app__files.ts";
@@ -100,6 +100,8 @@ export function Files({ runtime, alpha }: FilesProps) {
   const [naming, setNaming] = useState<Naming | undefined>(undefined);
   const [kind, setKind] = useState<Kind | undefined>(undefined);
   const [filtering, setFiltering] = useState(false);
+  /** Which of v121's two selection actions opened the destination sheet: Move or Copy. */
+  const [placing, setPlacing] = useState<"MoveTo" | "CopyTo" | undefined>(undefined);
   const items = state?.items;
   const order = state?.order;
   const reversed = state?.reversed;
@@ -310,13 +312,14 @@ export function Files({ runtime, alpha }: FilesProps) {
         {selecting && (
           <FilesSelectionBar actions={[
             { label: "Share", icon: <Share2 />, onPress: owner({ type: "openShare", mail: false }) ? () => tell({ type: "openShare", mail: false }) : undefined },
-            { label: "Move or copy", icon: <FolderInput />, onPress: owner({ type: "openMoveTo" }) ? () => tell({ type: "openMoveTo" }) : undefined },
+            { label: "Move", icon: <FolderInput />, onPress: owner({ type: "openMoveTo" }) ? () => { setPlacing("MoveTo"); tell({ type: "openMoveTo" }); } : undefined },
+            { label: "Copy", icon: <Copy />, onPress: owner({ type: "openMoveTo" }) ? () => { setPlacing("CopyTo"); tell({ type: "openMoveTo" }); } : undefined },
             { label: "Rename", icon: <Pencil />, onPress: owner({ type: "begin", work: "Rename", name: unnamed }) ? () => setNaming({ work: "Rename", name: firstPicked?.name ?? "" }) : undefined },
             { label: "Delete", icon: <Trash2 />, onPress: owner({ type: "askToDelete" }) ? () => tell({ type: "askToDelete" }) : undefined },
           ]} />
         )}
       </div>
-      <FileLayers state={state} picked={picked} naming={naming} setNaming={setNaming} owner={owner} tell={tell} label={label} location={location} />
+      <FileLayers state={state} picked={picked} naming={naming} setNaming={setNaming} placing={placing} owner={owner} tell={tell} label={label} location={location} />
       <Preview runtime={runtime} />
       {scanner}
       <Sheet open={change.panel !== 0} onOpenChange={(open) => { if (!open && owner({ type: "closeShare" })) tell({ type: "closeShare" }); }}>
@@ -373,13 +376,15 @@ type FileLayersProps = {
   readonly picked: readonly Item[];
   readonly naming: Naming | undefined;
   readonly setNaming: (draft: Naming | undefined) => void;
+  /** The one placing the owner chose, Move or Copy; either when the sheet opened some other way. */
+  readonly placing: "MoveTo" | "CopyTo" | undefined;
   readonly owner: (event: FilesEvent) => boolean;
   readonly tell: (event: FilesEvent) => void;
   readonly label: (handle: number) => string;
   readonly location: (item: Item) => string;
 };
 
-function FileLayers({ state, picked, naming, setNaming, owner, tell, label, location }: FileLayersProps) {
+function FileLayers({ state, picked, naming, setNaming, placing, owner, tell, label, location }: FileLayersProps) {
   const [details] = detailed(state);
   const { change } = state;
   const namingEvent = naming === undefined ? undefined : naming.destinationRead === undefined
@@ -437,12 +442,12 @@ function FileLayers({ state, picked, naming, setNaming, owner, tell, label, loca
       </Dialog>
       <Sheet open={state.sheet.open} onOpenChange={(open) => { if (!open && owner({ type: "closeMoveTo" })) tell({ type: "closeMoveTo" }); }}>
         <SheetContent
-          title="Move or copy to"
+          title={placing === "MoveTo" ? "Move to" : placing === "CopyTo" ? "Copy to" : "Move or copy to"}
           actions={(
             <>
               {owner(newDestination) && <Button variant="ghost" onClick={() => setNaming({ work: "NewFolder", name: "", destinationRead: newDestination.destinationTicket })}><Plus />New folder</Button>}
-              {owner({ type: "begin", work: "CopyTo", name: "" }) && <Button variant="outline" onClick={() => tell({ type: "begin", work: "CopyTo", name: "" })}>Copy here</Button>}
-              {owner({ type: "begin", work: "MoveTo", name: "" }) && <Button onClick={() => tell({ type: "begin", work: "MoveTo", name: "" })}>Move here</Button>}
+              {placing !== "MoveTo" && owner({ type: "begin", work: "CopyTo", name: "" }) && <Button variant={placing === "CopyTo" ? "primary" : "outline"} onClick={() => tell({ type: "begin", work: "CopyTo", name: "" })}>Copy here</Button>}
+              {placing !== "CopyTo" && owner({ type: "begin", work: "MoveTo", name: "" }) && <Button onClick={() => tell({ type: "begin", work: "MoveTo", name: "" })}>Move here</Button>}
             </>
           )}
         >

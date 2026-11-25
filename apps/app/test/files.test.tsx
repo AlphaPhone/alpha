@@ -261,7 +261,7 @@ describe("Files on a phone", () => {
 
     // spec/app/files/index.md, "A change starts from the selection, of the folder showing, into a destination only as the Move to sheet last read it, as Changes allows it"
     await select("lease.pdf");
-    await press("Move or copy");
+    await press("Move");
     // spec/app/files/index.md, "The owner opens the Move to sheet for the selection, at the folder showing, and goes through the volumes and folders in it"
     await pressOnTop("Storage");
     await until(alpha, runtime, Browser, (s) => s.sheet.trail.length === 0);
@@ -285,7 +285,7 @@ describe("Files on a phone", () => {
 
     // spec/app/files/change.md, "A change starts when none is under way and nothing of it is still unknown; when names clash in the destination the owner is asked first, and an approved request keeps both"
     await select("beach.jpg");
-    await press("Move or copy");
+    await press("Copy");
     await pressOnTop("Internal storage");
     await until(alpha, runtime, Browser, (s) => s.sheet.reading.status === "Loaded");
     await pressOnTop("Download");
@@ -299,7 +299,7 @@ describe("Files on a phone", () => {
     // spec/app/files/change.md, "A file of the same name is replaced only when the owner chose to replace it, never for the agent"
     for (let round = 0; round < 2; round += 1) {
       await select("beach.jpg");
-      await press("Move or copy");
+      await press("Copy");
       await pressOnTop("Internal storage");
       await until(alpha, runtime, Browser, (s) => s.sheet.reading.status === "Loaded");
       await pressOnTop("Documents");
@@ -333,7 +333,7 @@ describe("Files on a phone", () => {
     expect(world.files.shared).toEqual([["Download/dunes.jpg"]]);
     // spec/app/files/change.md, "Each sheet sends once, by email when an account can take it, through the phone's chooser, as copied text or saved through the system picker, and then goes away; sharing by text message is not offered"
     await press("Share");
-    await press("Copy");
+    await pressOnTop("Copy");
     await until(alpha, runtime, Browser, (s) => s.change.sending.outcome === "Confirmed" && s.change.sentTo === "Copy");
     expect(await navigator.clipboard.readText()).toBe("Internal storage/Download/dunes.jpg");
     // spec/app/files/change.md, "The sheet goes away when the owner closes it or Files is hidden, and when the selection changes the owner is told it sent nothing; a sheet never opens again"
@@ -348,7 +348,7 @@ describe("Files on a phone", () => {
     await select("dunes.jpg");
     const dunes = world.files.stored.find((one) => one.path === "Download/dunes.jpg");
     if (dunes) dunes.modified = 99;
-    await press("Move or copy");
+    await press("Move");
     await pressOnTop("Taxes");
     await until(alpha, runtime, Browser, (s) => s.sheet.reading.status === "Loaded" && s.sheet.trail.length === 3);
     await pressOnTop("Move here");
