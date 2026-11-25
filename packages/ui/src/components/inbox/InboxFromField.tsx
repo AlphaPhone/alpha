@@ -19,7 +19,7 @@ export type InboxFromFieldProps = {
 export function InboxFromField({ accounts, value, onChange }: InboxFromFieldProps) {
   const chosen = accounts.find((account) => account.id === value);
   if (accounts.length <= 1) {
-    return <div className="flex min-h-11 items-center border-b border-border text-sm break-all text-muted-foreground">{chosen?.email ?? ""}</div>;
+    return <div className="flex min-h-11 items-center border-b border-border text-sm break-all text-muted-foreground">{chosen ? `From ${chosen.email}` : ""}</div>;
   }
   return (
     <label className="flex min-h-12 flex-wrap items-center gap-2 border-b border-border text-muted-foreground">

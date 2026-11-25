@@ -223,6 +223,7 @@ function Opened({ runtime, list, onRefresh, onBegin }: { runtime: Runtime; list:
         to={card?.to.join(", ") ?? ""}
         cc={card?.cc.join(", ") || undefined}
         date={card ? new Date(card.receivedAt).toLocaleString() : ""}
+        when={card ? arrived(card.receivedAt, runtime.runSync(Time.use((time) => time.latest()))) : undefined}
         place={state.position + 1}
         count={Math.max(state.thread, 1)}
         onOlder={can(earlier) ? () => void send(earlier) : undefined}

@@ -13,8 +13,10 @@ export type InboxMessageHeaderProps = {
   cc?: string;
   /** Where replies are asked to go, when that is not the sender; shown so a reply is never a surprise. */
   replyTo?: string;
-  /** When it was sent, already worded. */
+  /** When it was sent, already worded in full for the details. */
   date: string;
+  /** When it was sent as the list words it, a time today and a date before, beside the recipients; the full date without it. */
+  when?: string;
 };
 
 /**
@@ -22,7 +24,7 @@ export type InboxMessageHeaderProps = {
  *
  * @model spec/app/inbox/message.md
  */
-export function InboxMessageHeader({ sender, address, to, cc, replyTo, date }: InboxMessageHeaderProps) {
+export function InboxMessageHeader({ sender, address, to, cc, replyTo, date, when = date }: InboxMessageHeaderProps) {
   return (
     <div className="flex items-start gap-3">
       <Avatar name={sender} className="size-11 shrink-0" />
@@ -32,7 +34,7 @@ export function InboxMessageHeader({ sender, address, to, cc, replyTo, date }: I
             <span className="truncate">{sender || "Unknown sender"}</span>
             <ChevronDown aria-hidden className="size-3.5 shrink-0 text-muted-foreground group-open:rotate-180" />
           </span>
-          <span className="mt-0.5 truncate text-meta text-muted-foreground">{to ? `To ${to}` : "Undisclosed recipients"}{date ? ` · ${date}` : ""}</span>
+          <span className="mt-0.5 truncate text-meta text-muted-foreground">{to ? `To ${to}` : "Undisclosed recipients"}{when ? ` · ${when}` : ""}</span>
         </summary>
         <dl className="mt-3 grid grid-cols-[auto_minmax(0,1fr)] gap-x-3 gap-y-2 text-meta leading-snug [overflow-wrap:anywhere]">
           <dt className="text-muted-foreground">From</dt>

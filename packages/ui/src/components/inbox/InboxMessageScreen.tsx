@@ -46,7 +46,7 @@ export type InboxMessageScreenProps = InboxMessageHeaderProps &
  * @model spec/app/inbox/message.md
  */
 export function InboxMessageScreen({
-  subject, onClose, sender, address, to, cc, replyTo, date, place, count, onOlder, onNewer, reading = false, fault, onFaultAction, fromPhone = false,
+  subject, onClose, sender, address, to, cc, replyTo, date, when, place, count, onOlder, onNewer, reading = false, fault, onFaultAction, fromPhone = false,
   imagesHidden = false, onShowImages, notice, onNoticeAction, attachments = [], children, ...actions
 }: InboxMessageScreenProps) {
   const body = reading ? (
@@ -77,7 +77,7 @@ export function InboxMessageScreen({
       {fromPhone ? <p role="status" className="-mt-1 px-2 pb-2 text-xs text-muted-foreground">Saved copy · Links and attachments are off</p> : null}
       <div className="flex flex-col px-2">
         {count > 1 ? <InboxThreadNav place={place} count={count} onOlder={onOlder} onNewer={onNewer} /> : null}
-        <InboxMessageHeader sender={sender} address={address} to={to} cc={cc} replyTo={replyTo} date={date} />
+        <InboxMessageHeader sender={sender} address={address} to={to} cc={cc} replyTo={replyTo} date={date} when={when} />
         <p aria-hidden="true" className="mt-5 font-display text-3xl font-light [overflow-wrap:anywhere]">{subject}</p>
         {notice ? <div className="mt-4"><InboxNotice kind={notice} onAction={onNoticeAction} /></div> : null}
         {body}
