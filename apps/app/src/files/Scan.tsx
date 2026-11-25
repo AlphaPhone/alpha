@@ -122,8 +122,8 @@ export function Scan({ runtime }: Shown<Runtime>) {
                 const suggestion = event !== undefined && state.text.found ? runtime.runSync(Effect.flatMap(ScanAssets, (assets) => assets.event(event.ticket))) : undefined;
                 const replace = can({ type: "add", frame: state.images + 1, replacing: image, camera: true }, "Phone");
                 const number = at + 1;
-                const earlier = { type: "swapPages", at: at - 1, earlier: state.pages[at - 1]?.image ?? 0, later: image } as const;
-                const later = { type: "swapPages", at, earlier: image, later: state.pages[at + 1]?.image ?? 0 } as const;
+                const earlier = { type: "swapPages", slot: at - 1, earlier: state.pages[at - 1]?.image ?? 0, later: image } as const;
+                const later = { type: "swapPages", slot: at, earlier: image, later: state.pages[at + 1]?.image ?? 0 } as const;
                 const reviewed = !blank && words !== undefined && (
                   <details open={selectedImage || undefined}>
                     <summary className="font-semibold">{selectedImage ? "Scanned text" : "Review page text"}</summary>
