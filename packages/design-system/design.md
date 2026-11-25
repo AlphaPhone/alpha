@@ -22,7 +22,8 @@ do next.
   Fraunces behind it, at weight `light`: a screen's display title on the launcher, the date on Home, a large figure. The sizes
   are in rem, so Android's text size scales them: `base` is body text, `md` a row title or a field,
   `caption` and `sm` the quieter line beside it, `xl` a shared app header title in the browser, `3xl` a screen title
-  (also the shared app header title in `font-display` on the launcher), and `4xl` the Home date. Text up to `lg` is set at Public Sans's own line height (1.175), as develop sets it; copy that
+  (also the shared app header title in `font-display` on the launcher; under an app's first screen, a folder, an album or a
+  selection, that title is `text-home-display` with `tracking-tight` on one line, cut with an ellipsis), and `4xl` the Home date. Text up to `lg` is set at Public Sans's own line height (1.175), as develop sets it; copy that
   is read at length takes `leading-normal`. `tracking-caps` with `text-xs` is a small uppercase label; `text-label` names an app tile on
   Home and in the drawer. A list row reads `text-base`,
   `text-subject` and `text-snippet` line by line; `text-meta` is a status line under a header, and `text-body`

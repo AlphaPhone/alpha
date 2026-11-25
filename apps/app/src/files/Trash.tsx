@@ -32,7 +32,7 @@ export function Trash({ runtime, onBack }: TrashProps) {
   const left = (days: number) => (days === 1 ? "1 day left" : `${days} days left`);
   return (
     <section aria-label="Trash" className="flex min-h-0 flex-1 flex-col">
-      <AppHeader title="Trash" leading={onBack && <Button variant="ghost" size="icon" aria-label="Files" onClick={onBack}><ChevronLeft /></Button>}>
+      <AppHeader title="Trash" detail leading={onBack && <Button variant="ghost" size="icon" aria-label="Files" onClick={onBack}><ChevronLeft /></Button>}>
         {owner({ type: "refresh" }) && <Button variant="ghost" size="sm" onClick={() => tell({ type: "refresh" })}>Refresh</Button>}
         {owner({ type: "restoreAll", now: untimed }) && <Button variant="outline" size="sm" onClick={() => tell({ type: "restoreAll", now: untimed })}>Restore all</Button>}
         {owner({ type: "askToEmpty" }) && <Button variant="outline" size="sm" onClick={() => tell({ type: "askToEmpty" })}>Empty the Trash</Button>}
