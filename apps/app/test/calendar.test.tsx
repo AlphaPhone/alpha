@@ -348,6 +348,31 @@ describe("Calendar without a connected account", () => {
     expect(world.reminders.items.find((item) => item.id === selected.id)).toMatchObject({ completed: false, dueMinute: 615, alertMinutes: 0 });
     expect(world.reminders.items.find((item) => item.id === other.id)).toMatchObject({ completed: false, dueMinute: 570, revision: other.revision });
   });
+
+  it("Shows the completed occurrence below the next daily reminder (spec/app/reminders/index.md, \"Completing a reminder holds a five-second Undo snapshot and advances a repeating reminder to its next due day\")", async () => {
+    const world = morning(false);
+    const { alpha } = await open(world, only("view:Calendar"));
+    const runtime = calendar.runtime(alpha);
+    await openCalendar(alpha);
+    await until(alpha, alpha.runtime, Reminders, (state) => state.sync.status === "Loaded");
+    const saved = await alpha.runtime.runPromise(createReminderItem({
+      listId: DEFAULT_LIST_ID, title: "Bring a notebook", dueDate: "2026-11-24", dueMinute: 570, alertMinutes: 0, recurrence: "daily",
+    }));
+    if (saved === undefined) throw new Error("Expected the daily reminder");
+    await until(alpha, alpha.runtime, Reminders, (state) => state.write.outcome === "Confirmed");
+    await until(alpha, runtime, View, (state) => state.front && state.reminders === 1);
+    await press(/^Bring a notebook,/);
+    await press("Complete reminder occurrence");
+    await until(alpha, alpha.runtime, Reminders, (state) => state.write.outcome === "Confirmed");
+    const detail = document.querySelector('[data-alpha-subview="calendar-detail"]');
+    expect(detail?.textContent).toContain("Wednesday, Nov 25");
+    expect(detail?.textContent).toContain(`Completed ${new Date(world.now).toLocaleString()} · due ${new Date(world.at(0, 9.5)).toLocaleString()}`);
+    expect(detail?.textContent).toContain("Next occurrence is scheduled after Done.");
+    expect(button("Complete reminder occurrence")).toBeDefined();
+    expect(world.reminders.items.find((item) => item.id === saved.id)).toMatchObject({ completed: false, dueDate: "2026-11-25", history: [
+      { revision: saved.revision, dueAtMs: world.at(0, 9.5), completedAtMs: world.now },
+    ] });
+  });
 });
 
 it("Shows the newly verified Google grant when Calendar Settings reopens (spec/app/settings/index.md, \"Each page links to what another area owns there\")", async () => {

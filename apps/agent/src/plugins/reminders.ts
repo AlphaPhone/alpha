@@ -335,7 +335,7 @@ async function handleRemindersManage(
   const target = findReminderTarget(store, params);
   if (target === undefined) return { success: false, text: "No matching reminder found." };
   if (op === "complete") {
-    const completed = store.completeItem(target.id);
+    const completed = store.completeItem(target.id, timeZone);
     if (completed === undefined) return { success: false, text: "Reminder not found." };
     const { item = completed.item, followed } = await followTask(store, runtime, target, completed.item, timeZone);
     if (!followed) return { success: false, text: `"${target.title}" kept its scheduled task, so it will not stay completed.`, data: { op, item } };
@@ -668,8 +668,9 @@ export function remindersRoutes(store: AlphaAppsStore, runtime: AgentRuntimeLike
       method: "POST",
       path: "/api/alpha/reminders/items/{id}/complete",
       handler: async (input) => {
-        const before = itemNamed(store, input.parameters.get("id"));
-        const result = store.completeItem(input.parameters.get("id") ?? "");
+        const id = input.parameters.get("id") ?? "";
+        const before = itemNamed(store, id);
+        const result = store.completeItem(id, timeZone);
         if (result === undefined) return { status: 404, body: { error: "reminder_not_found" } };
         const followed = await followTask(store, runtime, before, result.item, timeZone);
         if (!followed.followed) return taskAnswer(store, followed);

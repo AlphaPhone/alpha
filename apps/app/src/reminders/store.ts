@@ -34,6 +34,13 @@ export interface ReminderSubtaskRecord {
   readonly done: boolean;
 }
 
+/** A dated occurrence already completed on the device or in the resident agent. */
+export interface ReminderCompletion {
+  readonly revision: number;
+  readonly dueAtMs: number;
+  readonly completedAtMs: number;
+}
+
 /** One rich reminder item record matching the shared agent wire contract. */
 export interface ReminderItemRecord {
   readonly id: string;
@@ -49,12 +56,21 @@ export interface ReminderItemRecord {
   readonly subtasks: readonly ReminderSubtaskRecord[];
   readonly completed: boolean;
   readonly completedAtMs: number | null;
+  readonly history?: readonly ReminderCompletion[];
   readonly snoozedUntilMs: number | null;
   readonly notifiedAtMs: number | null;
   readonly agentTaskId: string | null;
   readonly revision: number;
   readonly createdAtMs: number;
   readonly updatedAtMs: number;
+}
+
+/** Keep the actual completed due instant, including when a repeat immediately moves on. @throws {never} */
+export function withReminderCompletion(item: ReminderItemRecord, completedAtMs: number): ReminderItemRecord {
+  const dueAtMs = dueInstantMs(item.dueDate, item.dueMinute);
+  if (dueAtMs === null) return item;
+  const record = { revision: item.revision, dueAtMs, completedAtMs };
+  return { ...item, history: [...(item.history ?? []), record].slice(-32) };
 }
 
 /** Full reminders snapshot synced with the resident agent and cached locally. */

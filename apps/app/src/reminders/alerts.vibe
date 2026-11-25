@@ -14,7 +14,7 @@ import { externalStore } from "../runtime/store.ts"
 import { Time } from "../runtime/time.vibe"
 import { advanceDueDate, alertInstantMs, dueInstantMs, snoozeTargetMs } from "./recurrence.ts"
 import { persistReminderSnapshot } from "./snapshot.vibe"
-import { type ReminderItemRecord, type RemindersSnapshot, remindersStore } from "./store.ts"
+import { type ReminderItemRecord, type RemindersSnapshot, remindersStore, withReminderCompletion } from "./store.ts"
 
 /** Optional native Android reminder alarm bridge wired by the integrator without coupling Reminders to platform internals. */
 export interface NativeRemindersPort {
@@ -142,9 +142,10 @@ effect function syncComplete(id: number, attemptId: number): Event!!(Agent | Tim
     id,
     attemptId,
     (row, now) => {
+      const retained = withReminderCompletion(row, now)
       if (row.recurrence !== "none" && row.dueDate !== null) {
         return {
-          ...row,
+          ...retained,
           dueDate: advanceDueDate(row.dueDate, row.recurrence),
           subtasks: row.subtasks.map((sub) => ({ ...sub, done: false })),
           completed: false,
@@ -155,7 +156,7 @@ effect function syncComplete(id: number, attemptId: number): Event!!(Agent | Tim
           updatedAtMs: now,
         }
       }
-      return { ...row, completed: true, completedAtMs: now, snoozedUntilMs: null, revision: row.revision + 1, updatedAtMs: now }
+      return { ...retained, completed: true, completedAtMs: now, snoozedUntilMs: null, revision: row.revision + 1, updatedAtMs: now }
     },
     (item, _now, key) => HttpClientRequest.bodyJsonUnsafe(HttpClientRequest.post(`/api/alpha/reminders/items/${encodeURIComponent(item.id)}/complete`), { idempotencyKey: key }),
   )

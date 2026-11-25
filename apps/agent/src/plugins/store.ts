@@ -718,10 +718,15 @@ export class AlphaAppsStore {
     return updated;
   }
 
-  completeItem(id: string): { readonly item: ReminderItemRecord; readonly nextItem: ReminderItemRecord | null } | undefined {
+  completeItem(id: string, timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone): { readonly item: ReminderItemRecord; readonly nextItem: ReminderItemRecord | null } | undefined {
+    const held = this.reminders.items.find((item) => item.id === id);
+    if (held?.completed) return { item: held, nextItem: null };
     const stashed = this.stashReminder(id);
     if (stashed === undefined) return undefined;
     const { existing, nowMs } = stashed;
+    const dueAtMs = existing.dueDate === null ? null : civilToEpochMs(existing.dueDate, existing.dueMinute, timeZone);
+    const history = dueAtMs === null ? {} : { history: [...(existing.history ?? []),
+      { revision: existing.revision, dueAtMs, completedAtMs: nowMs }].slice(-32) };
     const nextDate = existing.dueDate !== null ? advanceDueDate(existing.dueDate, existing.recurrence) : null;
     if (nextDate !== null) {
       const advanced: ReminderItemRecord = {
@@ -730,6 +735,7 @@ export class AlphaAppsStore {
         subtasks: existing.subtasks.map((sub) => ({ ...sub, done: false })),
         completed: false,
         completedAtMs: null,
+        ...history,
         snoozedUntilMs: null,
         notifiedAtMs: null,
         revision: existing.revision + 1,
@@ -740,7 +746,7 @@ export class AlphaAppsStore {
       return { item: advanced, nextItem: advanced };
     }
     const completed: ReminderItemRecord = {
-      ...existing, completed: true, completedAtMs: nowMs, snoozedUntilMs: null,
+      ...existing, ...history, completed: true, completedAtMs: nowMs, snoozedUntilMs: null,
       revision: existing.revision + 1, updatedAtMs: nowMs,
     };
     const items = this.reminders.items.map((entry) => (entry.id === id ? completed : entry));

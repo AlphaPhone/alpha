@@ -94,6 +94,13 @@ export interface ReminderSubtaskRecord {
   readonly done: boolean;
 }
 
+/** A dated occurrence the owner completed before the reminder moved on. */
+export interface ReminderCompletion {
+  readonly revision: number;
+  readonly dueAtMs: number;
+  readonly completedAtMs: number;
+}
+
 /** One persisted reminder item exchanged between the Reminders app and the resident agent. */
 export interface ReminderItemRecord {
   readonly id: string;
@@ -109,6 +116,7 @@ export interface ReminderItemRecord {
   readonly subtasks: readonly ReminderSubtaskRecord[];
   readonly completed: boolean;
   readonly completedAtMs: number | null;
+  readonly history?: readonly ReminderCompletion[];
   readonly snoozedUntilMs: number | null;
   readonly notifiedAtMs: number | null;
   readonly agentTaskId: string | null;

@@ -41,6 +41,7 @@ import {
   priorityToSpec,
   recurrenceToSpec,
   remindersStore,
+  withReminderCompletion,
 } from "./store.ts"
 
 const ListColorSchema = Schema.Literals(["accent", "blue", "green", "amber", "rose", "violet"])
@@ -79,6 +80,7 @@ const ItemSchema = Schema.Struct({
   subtasks: Schema.Array(SubtaskSchema),
   completed: Schema.Boolean,
   completedAtMs: Schema.NullOr(Schema.Number),
+  history: Schema.optionalKey(Schema.Array(Schema.Struct({ revision: Schema.Number, dueAtMs: Schema.Number, completedAtMs: Schema.Number }))),
   snoozedUntilMs: Schema.NullOr(Schema.Number),
   notifiedAtMs: Schema.NullOr(Schema.Number),
   agentTaskId: Schema.NullOr(Schema.String),
@@ -232,13 +234,15 @@ effect function flushWrite(attemptId: number): Event!!(Agent | Attempts | KeyVal
   pendingWrites.delete(attemptId)
   if (pending === undefined) return { type: "writeAnswered", attemptId, confirmed: true, known: true }
   const outcome = try attemptedWith(Agent, (key) => buildWriteRequest(pending, key), attemptId)
-  if (outcome.confirmed && (pending.kind === "createItem" || pending.kind === "updateItem")) {
+  if (outcome.confirmed && (pending.kind === "createItem" || pending.kind === "updateItem" || pending.kind === "completeItem")) {
     const decoded = Schema.decodeUnknownOption(ItemReplySchema)(outcome.body)
     const item = Option.isSome(decoded) ? decoded.value.item : undefined
     const now = try (try Time).now()
     const view = remindersStore.snapshot()
     const local = view.snapshot.items.find(({ id }) => id === pending.item.id)
-    if (item?.id === pending.item.id && local?.revision === pending.item.revision && item.revision > local.revision && !view.hiddenIds.has(item.id)) {
+    const keepHistory = pending.kind === "completeItem" && item?.history !== undefined
+    if (item?.id === pending.item.id && local?.revision === pending.item.revision
+      && (item.revision > local.revision || (keepHistory && item.revision === local.revision)) && !view.hiddenIds.has(item.id)) {
       try persistAndBroadcast(replaceItemInSnapshot(view.snapshot, item, now), now)
     }
   }
@@ -661,9 +665,10 @@ export effect function toggleReminderComplete(id: string, expectedRevision?: num
   const nextDueDate = recurring && existing.dueDate !== null ? advanceDueDate(existing.dueDate, existing.recurrence) : existing.dueDate
   const nextDueDay = civilDayFromString(nextDueDate) ?? (civilDayFromString(existing.dueDate) ?? civilDayNumber(now)) + 1
   if (!Reminders.canToggleComplete(try (try Reminders.Machine).get(), remindersStore.specIdForItem(id), nextDueDay)) return
+  const retained = completing ? withReminderCompletion(existing, now) : existing
   const updated: ReminderItemRecord = recurring
-    ? { ...existing, dueDate: nextDueDate, subtasks: existing.subtasks.map((sub) => ({ ...sub, done: false })), snoozedUntilMs: null, notifiedAtMs: null, revision: existing.revision + 1, updatedAtMs: now }
-    : { ...existing, completed: completing, completedAtMs: completing ? now : null, snoozedUntilMs: null, revision: existing.revision + 1, updatedAtMs: now }
+    ? { ...retained, dueDate: nextDueDate, subtasks: existing.subtasks.map((sub) => ({ ...sub, done: false })), snoozedUntilMs: null, notifiedAtMs: null, revision: existing.revision + 1, updatedAtMs: now }
+    : { ...retained, completed: completing, completedAtMs: completing ? now : null, snoozedUntilMs: null, revision: existing.revision + 1, updatedAtMs: now }
   const { machine, itemSpecId } = try commitItemWrite(current, updated, now, completing ? { kind: "completeItem", id, item: updated } : { kind: "reopenItem", id })
   try contained(machine.send({ type: "toggleComplete", itemId: itemSpecId, nextDueDay, at: now }), "completing reminder")
   if (completing) {
