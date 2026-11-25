@@ -113,7 +113,7 @@ pure def isOwner(owner: int): bool = owner > 0
 > As the owner, I want Notes to show one note, dialog or question at a time,
 > so that Back always closes the one thing I am looking at.
 
-### Only the owner opens a note, a dialog or a question in Notes, and only when nothing else of Notes is open
+### Only the owner opens a dialog or a question in Notes; a note is opened by the owner, or by the agent for the one the owner just named; and nothing opens while anything else of Notes is open
 
 The shell tells each part of Notes whether another part already has a note,
 a dialog, the actions menu, a question or the notes from before open: it is
@@ -122,10 +122,39 @@ sends Back to the one part of Notes that has something open, and only when
 none has does Back close Notes ([Shell](../shell/index.md), "Back closes
 one layer: Ask Alpha by a step, then the app on top").
 
+The agent may open one saved note: the one the model named in answer to
+the owner's request now, once for that request, typed or spoken. The request
+is bound to the owner's request that is current, and to no earlier one. No
+note was opened for it yet. The screen it was asked from is not sensitive,
+and no draft waits unsaved: a draft left unsaved is offered first, and
+nothing else opens until it is saved or discarded. The phone opens only the
+note named in the agent's own reply to that request, never one an older
+reply, another screen or a page names; whether text the agent read steered
+the model is for the model and the agent's own rules to judge. A dialog and
+a question stay the owner's alone to open.
+
 ```quint
+type Request = { turn: int, current: int, opened: int, sensitive: bool, unsaved: bool }
+
+pure val noRequest: Request = { turn: 0, current: 0, opened: 0, sensitive: false, unsaved: false }
+
+pure val reqValues = Set(
+  noRequest, { ...noRequest, turn: 1, current: 1 }, { ...noRequest, turn: 1, current: 2 }, { ...noRequest, turn: 2, current: 2, opened: 1 },
+  { ...noRequest, turn: 1, current: 1, sensitive: true }, { ...noRequest, turn: 1, current: 1, unsaved: true },
+)
+
 pure def mayOpen(covered: bool, by: Actor): bool = by == Owner and not(covered)
 
-pure def lawNothingOpensOverAnother(by: Actor): bool = not(mayOpen(true, by)) and not(mayOpen(false, Agent))
+pure def currentTurn(req: Request): bool = req.turn > 0 and req.turn == req.current and req.opened < req.turn
+
+pure def mayOpenNote(covered: bool, by: Actor, req: Request): bool =
+  mayOpen(covered, by) or (by == Agent and not(covered) and currentTurn(req) and not(req.sensitive) and not(req.unsaved))
+
+pure def lawNothingOpensOverAnother(by: Actor, req: Request): bool =
+  not(mayOpen(true, by)) and not(mayOpen(false, Agent)) and not(mayOpenNote(true, by, req))
+    and not(mayOpenNote(false, Phone, req))
+    and not(mayOpenNote(false, Agent, { ...req, opened: req.turn }))
+    and not(mayOpenNote(false, Agent, { ...req, current: req.turn + 1 }))
 ```
 
 ## Story: Stay honest when cut off

@@ -1,0 +1,382 @@
+// spec/app/browser/address.md, "A browser frame can be shown for the latest request, with no secure mark"; spec/app/browser/index.md, "Story: Open, pick and close tabs"
+// spec/app/browser/index.md, "A launch reads the saved session, and may ask again after a failed read"; spec/app/browser/index.md, "A stale session is written once it has been read, one write at a time, and never while browsing data is being cleared"
+import type { BrowserBookmarkList, BrowserSavedState } from "@elizaos/os-bridges"
+
+module frames {
+  import { isWebAddress } from "@elizaos/os-bridges"
+  import type { Way } from "../../gen/app__browser__address.ts"
+
+  export type FrameRequest = {
+    readonly id: string
+    readonly load: number
+    readonly url: string
+    readonly privateTab: boolean
+  }
+
+  export type FramePlacement = {
+    readonly id: string
+    readonly x: number
+    readonly y: number
+    readonly width: number
+    readonly height: number
+  }
+
+  export type FrameEvent = { readonly kind: "framed" | "frameBlocked"; readonly request: FrameRequest }
+
+  type FrameStatus = "Blocked" | "Stopped"
+  type FrameSurface = { readonly request: FrameRequest; readonly status?: FrameStatus }
+
+  export type FrameView = {
+    readonly frames: readonly FrameSurface[]
+    readonly placement: FramePlacement | null
+  }
+
+  type WebTab = {
+    readonly privateTab: boolean
+    readonly restoredTitle?: { readonly url: string; readonly title: string }
+    addresses: string[]
+    position: number
+    frame: FrameSurface | null
+  }
+
+  export type WebMove = Exclude<Way, "Address" | "Query">
+  export const emptyFrames: FrameView = { frames: [], placement: null }
+
+  /** Frames are browser resources. The Browser machine still owns each tab, and the Address machine owns each request. */
+  export class WebFrames {
+    private readonly tabs = new Map<string, WebTab>()
+    private readonly listeners = new Set<() => void>()
+    private readonly delivered = new WeakSet<FrameRequest>()
+    private placement: FramePlacement | null = null
+    private view: FrameView = emptyFrames
+    private readonly ready: (receipt: FrameEvent) => void
+
+    constructor(ready: (receipt: FrameEvent) => void) {
+      this.ready = ready
+    }
+
+    snapshot = (): FrameView => this.view
+
+    subscribe = (wake: () => void): (() => void) => {
+      this.listeners.add(wake)
+      return () => { this.listeners.delete(wake) }
+    }
+
+    private publish(): void {
+      const frames = Array.from(this.tabs.values()).flatMap((tab) => tab.frame === null ? [] : [tab.frame])
+      this.view = { frames, placement: this.placement }
+      for (const wake of this.listeners) wake()
+    }
+
+    create(id: string, privateTab: boolean): void {
+      if (!this.tabs.has(id)) this.tabs.set(id, { privateTab, addresses: [], position: -1, frame: null })
+    }
+
+    restore(id: string, url: string, title: string): void {
+      if (this.tabs.has(id) || !isWebAddress(url)) return
+      this.tabs.set(id, { privateTab: false, restoredTitle: { url, title }, addresses: [url], position: 0, frame: null })
+    }
+
+    private request(tab: WebTab, id: string, load: number, position: number): boolean {
+      const url = tab.addresses[position]
+      if (url === undefined) return false
+      tab.position = position
+      tab.frame = { request: { id, load, url, privateTab: tab.privateTab } }
+      this.publish()
+      return true
+    }
+
+    navigate(id: string, load: number, url: string): boolean {
+      const tab = this.tabs.get(id)
+      if (tab === undefined || !isWebAddress(url)) return false
+      const destination = new URL(url).href
+      if (tab.frame === null && tab.addresses[tab.position] === destination) return this.request(tab, id, load, tab.position)
+      tab.addresses = [...tab.addresses.slice(0, tab.position + 1), destination]
+      return this.request(tab, id, load, tab.addresses.length - 1)
+    }
+
+    move(id: string, load: number, way: WebMove): boolean {
+      const tab = this.tabs.get(id)
+      if (tab === undefined) return false
+      const offset = way === "Backward" ? -1 : way === "Onward" ? 1 : 0
+      return this.request(tab, id, load, tab.position + offset)
+    }
+
+    address(id: string): string | undefined {
+      const tab = this.tabs.get(id)
+      return tab?.addresses[tab.position]
+    }
+
+    info(id: string): { readonly url: string; readonly title?: string } | undefined {
+      const tab = this.tabs.get(id)
+      const url = tab?.addresses[tab.position]
+      if (url === undefined) return undefined
+      const saved = tab?.restoredTitle
+      return saved?.url === url ? saved : { url }
+    }
+
+    current(id: string, load: number): FrameRequest | undefined {
+      const frame = this.tabs.get(id)?.frame
+      return frame?.request.load === load && frame.status !== "Stopped" ? frame.request : undefined
+    }
+
+    loaded(id: string, load: number): void {
+      const request = this.current(id, load)
+      if (request === undefined || this.tabs.get(id)?.frame?.status === "Blocked") return
+      const kind = this.delivered.has(request) ? "frameBlocked" : "framed"
+      this.delivered.add(request)
+      this.ready({ kind, request })
+    }
+
+    blocked(request: FrameRequest): void {
+      const tab = this.tabs.get(request.id)
+      if (tab?.frame?.request !== request || tab.frame.status !== undefined) return
+      tab.frame = { request, status: "Blocked" }
+      this.publish()
+    }
+
+    stop(id: string, load: number): void {
+      const tab = this.tabs.get(id)
+      if (tab?.frame?.request.load !== load) return
+      tab.frame = { request: tab.frame.request, status: "Stopped" }
+      this.publish()
+    }
+
+    present(placement: FramePlacement | null): void {
+      const previous = this.placement
+      if (previous === placement || (previous !== null && placement !== null
+        && previous.id === placement.id && previous.x === placement.x && previous.y === placement.y
+        && previous.width === placement.width && previous.height === placement.height)) return
+      this.placement = placement
+      this.publish()
+    }
+
+    close(id: string): void {
+      if (!this.tabs.delete(id)) return
+      if (this.placement?.id === id) this.placement = null
+      this.publish()
+    }
+
+    clear(): void {
+      for (const [id, tab] of this.tabs) if (!tab.privateTab) this.tabs.delete(id)
+      if (this.placement !== null && !this.tabs.has(this.placement.id)) this.placement = null
+      this.publish()
+    }
+  }
+}
+
+import { WebFrames, emptyFrames, type FrameEvent, type FramePlacement, type FrameRequest, type WebMove } from frames
+export { WebFrames, emptyFrames, type FrameEvent, type FramePlacement, type FrameRequest, type WebMove }
+
+module documents {
+  import { bookmarkBrowserUrl, normalizeBrowsing, type BrowserBookmarkList, type BrowserSavedState } from "@elizaos/os-bridges"
+
+  const database = "alpha.browser.documents.v1"
+  const records = "documents"
+  const sessionKey = "alpha.browser.session.v1"
+  const bookmarkKey = "alpha.browser.bookmarks.v1"
+  const titlesKey = "alpha.browser.bookmark-titles.v1"
+  const bookmarkKeys = [bookmarkKey, titlesKey] as const
+  type Entry = NonNullable<BrowserBookmarkList["entries"]>[number]
+  export type BookmarkEdit = Entry & {
+    readonly saved: boolean
+    readonly before: readonly string[]
+    readonly limit: number
+  }
+  type Envelope = { readonly version: 1; readonly legacy: string | null; readonly value: string | null }
+  const blank: Envelope = { version: 1, legacy: null, value: null }
+
+  function readEnvelope(record: unknown): Envelope {
+    if (record === undefined) return blank
+    if (typeof record !== "object" || record === null || !("raw" in record)) throw new Error("Browser storage needs recovery")
+    if (typeof record.raw !== "string") throw new Error("Browser storage needs recovery")
+    const parsed: unknown = JSON.parse(record.raw)
+    if (typeof parsed !== "object" || parsed === null || !("version" in parsed) || parsed.version !== 1
+      || !("legacy" in parsed) || (parsed.legacy !== null && typeof parsed.legacy !== "string")
+      || !("value" in parsed) || (parsed.value !== null && typeof parsed.value !== "string")) throw new Error("Browser storage needs recovery")
+    return { version: 1, legacy: parsed.legacy, value: parsed.value }
+  }
+
+  function connection(): Promise<IDBDatabase> {
+    return new Promise((resolve, reject) => {
+      const request = indexedDB.open(database, 1)
+      let blocked = false
+      request.onupgradeneeded = () => {
+        if (blocked) request.transaction?.abort()
+        else request.result.createObjectStore(records)
+      }
+      request.onblocked = () => {
+        blocked = true
+        reject(new Error("Close older tabs before opening browser storage"))
+      }
+      request.onerror = () => reject(request.error)
+      request.onsuccess = () => {
+        if (blocked) { request.result.close(); return }
+        request.result.onversionchange = () => request.result.close()
+        resolve(request.result)
+      }
+    })
+  }
+
+  async function transaction<A>(mode: IDBTransactionMode, keys: readonly [string, ...string[]], change: (store: IDBObjectStore, rows: readonly unknown[]) => A): Promise<A> {
+    const opened = await connection()
+    try {
+      return await new Promise((resolve, reject) => {
+        const work = opened.transaction(records, mode)
+        const store = work.objectStore(records)
+        const reads = keys.map((key) => store.get(key))
+        let waiting = reads.length
+        let result: { value: A } | undefined
+        let failed: unknown
+        for (const read of reads) read.onsuccess = () => {
+          waiting -= 1
+          if (waiting > 0) return
+          try { result = { value: change(store, reads.map((one) => one.result)) } }
+          catch (cause) {
+            failed = cause
+            work.abort()
+          }
+        }
+        work.onabort = () => reject(failed ?? work.error)
+        work.oncomplete = () => result === undefined ? reject(new Error("Browser storage returned no record")) : resolve(result.value)
+      })
+    } finally { opened.close() }
+  }
+
+  function content(envelope: Envelope): unknown {
+    return envelope.value === null ? undefined : JSON.parse(envelope.value)
+  }
+
+  function put(store: IDBObjectStore, key: string, before: Envelope, value: unknown): void {
+    const envelope: Envelope = { ...before, value: JSON.stringify(value) }
+    store.put({ revision: crypto.randomUUID(), raw: JSON.stringify(envelope) }, key)
+  }
+
+  export function readSession(): Promise<BrowserSavedState> {
+    return transaction("readonly", [sessionKey], (_store, [row]) => normalizeBrowsing(content(readEnvelope(row))))
+  }
+
+  export function writeSession(saved: unknown): Promise<void> {
+    return transaction("readwrite", [sessionKey], (store, [row]) => {
+      const before = readEnvelope(row)
+      const prior = normalizeBrowsing(content(before))
+      const next = normalizeBrowsing(saved)
+      put(store, sessionKey, before, normalizeBrowsing({ ...next, visitTimes: { ...prior.visitTimes, ...next.visitTimes } }))
+    })
+  }
+
+  function tidyTitle(value: unknown): string {
+    if (typeof value !== "string") return ""
+    const clean = Array.from(value, (letter) => {
+      const code = letter.charCodeAt(0)
+      return code < 32 || code === 127 ? " " : letter
+    }).join("").trim()
+    if (clean.length <= 300) return clean
+    const last = clean.charCodeAt(299)
+    return clean.slice(0, last >= 0xd800 && last <= 0xdbff ? 299 : 300).trim()
+  }
+
+  function savedTitle(value: unknown): value is string {
+    return typeof value === "string" && value !== "" && value === tidyTitle(value)
+  }
+
+  function identical(actual: readonly unknown[], expected: readonly string[]): boolean {
+    return actual.length === expected.length && actual.every((url, index) => url === expected[index])
+  }
+
+  function addresses(value: unknown): Entry[] {
+    if (value === undefined) return []
+    if (!Array.isArray(value)) throw new Error("Saved bookmarks need recovery")
+    return value.map((row: unknown) => {
+      if (bookmarkBrowserUrl(row)) return { url: row }
+      if (typeof row === "object" && row !== null && "url" in row && bookmarkBrowserUrl(row.url)) {
+        return "title" in row && savedTitle(row.title) ? { url: row.url, title: row.title } : { url: row.url }
+      }
+      throw new Error("Saved bookmarks need recovery")
+    })
+  }
+
+  function withTitles(list: Entry[], sidecar: unknown): Entry[] {
+    try {
+      const saved = content(readEnvelope(sidecar))
+      if (typeof saved !== "object" || saved === null || !("addresses" in saved) || !("titles" in saved)) return list
+      const { addresses, titles } = saved
+      if (!Array.isArray(addresses) || !identical(addresses, list.map((entry) => entry.url)) || !Array.isArray(titles) ||
+        titles.length !== list.length || titles.some((title: unknown) => title !== null && !savedTitle(title))) return list
+      return list.map((entry, index) => {
+        const title: unknown = titles[index]
+        return savedTitle(title) ? { url: entry.url, title } : { url: entry.url }
+      })
+    } catch {
+      return list
+    }
+  }
+
+  function distinct(list: Entry[]): Entry[] {
+    const seen = new Set<string>()
+    return list.filter(({ url }) => {
+      if (seen.has(url)) return false
+      seen.add(url)
+      return true
+    })
+  }
+
+  function readList(row: unknown, sidecar: unknown): Entry[] {
+    return distinct(withTitles(addresses(content(readEnvelope(row))), sidecar))
+  }
+
+  function receipt(entries: Entry[]): BrowserBookmarkList {
+    return { urls: entries.map(({ url }) => url), entries }
+  }
+
+  export function readBookmarks(): Promise<BrowserBookmarkList> {
+    return transaction("readonly", bookmarkKeys, (_store, [row, sidecar]) => receipt(readList(row, sidecar)))
+  }
+
+  export function writeBookmark(intent: BookmarkEdit): Promise<BrowserBookmarkList> {
+    const write = () => transaction("readwrite", bookmarkKeys, (store, [row, sidecar]) => {
+      const before = readEnvelope(row)
+      const entries = readList(row, sidecar)
+      const known = entries.find(({ url }) => url === intent.url)
+      if (!bookmarkBrowserUrl(intent.url) || !identical(entries.map(({ url }) => url), intent.before) ||
+        Boolean(known) === intent.saved || (intent.saved && entries.length >= intent.limit)) {
+        throw new Error("Saved bookmarks changed. Read them again before editing.")
+      }
+      const next = entries.filter(({ url }) => url !== intent.url)
+      if (intent.saved) {
+        const title = tidyTitle(intent.title)
+        next.unshift(title === "" ? { url: intent.url } : { url: intent.url, title })
+      }
+      const result = receipt(next)
+      const titles = next.map(({ title }) => title ?? null)
+      const titled = titles.some((title) => title !== null)
+      put(store, bookmarkKey, before, result.urls)
+      put(store, titlesKey, blank, { addresses: titled ? result.urls : [], titles: titled ? titles : [] })
+      return result
+    })
+    return navigator.locks?.request("alpha.browser.bookmark-save", write) ?? write()
+  }
+}
+import { readBookmarks, readSession, writeBookmark, writeSession, type BookmarkEdit } from documents
+export { type BookmarkEdit }
+
+/** Web storage refused a Browser session operation. */
+export error WebBrowsingStoreFailed { operation: string; cause: unknown }
+
+export effect function readWebBrowsing(): BrowserSavedState!WebBrowsingStoreFailed {
+  return try tryPromise({ try: readSession, catch: (cause) => new WebBrowsingStoreFailed({ operation: "read", cause }) })
+}
+
+export effect function saveWebBrowsing(saved: unknown): void!WebBrowsingStoreFailed {
+  return try tryPromise({ try: () => writeSession(saved), catch: (cause) => new WebBrowsingStoreFailed({ operation: "write", cause }) })
+}
+
+/** Web Library uses the installed bookmark and optional title records shared with previous builds. */
+export effect function readWebBookmarks(): BrowserBookmarkList!WebBrowsingStoreFailed {
+  return try tryPromise({ try: readBookmarks, catch: (cause) => new WebBrowsingStoreFailed({ operation: "read bookmarks", cause }) })
+}
+
+/** Write an exact reviewed bookmark after checking that the persisted list still matches its read. */
+export effect function writeWebBookmark(intent: BookmarkEdit): BrowserBookmarkList!WebBrowsingStoreFailed {
+  return try tryPromise({ try: () => writeBookmark(intent), catch: (cause) => new WebBrowsingStoreFailed({ operation: "write bookmark", cause }) })
+}

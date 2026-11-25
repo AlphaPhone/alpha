@@ -51,7 +51,7 @@ describe("Maps on a phone", () => {
     // spec/app/maps/connection.md, "Retry draws a broken map again on a new surface": this page has no WebGL, so MapLibre cannot draw
     await until(alpha, runtime, Screen, (s) => s.link.surface === "Broken");
     expect(document.querySelector("[role=application]")).not.toBeNull();
-    await press("Retry");
+    await press("Retry map");
     await until(alpha, runtime, Screen, (s) => s.link.plane > 2 && s.link.surface === "Broken");
 
     // spec/app/maps/index.md, "Only the newest search's answer is shown: results, none, or a failure"
@@ -104,7 +104,7 @@ describe("Maps on a phone", () => {
     await until(alpha, runtime, Screen, (s) => s.place === 0 && s.searching && s.trip.route === 0);
     await hardware("back");
     await until(alpha, runtime, Screen, (s) => !s.searching && s.query === "" && s.recent[0] === "harbour");
-    await hardware("back");
+    await press("Back");
     await until(alpha, alpha.runtime, Shell, (s) => s.trail.length === 0);
   });
 

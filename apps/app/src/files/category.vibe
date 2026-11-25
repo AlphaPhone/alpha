@@ -1,0 +1,44 @@
+// spec/app/files/index.md, "Images and Videos show the phone's folder groups with their counts and open the folder chosen"
+import type { CategoryFolder, StorageEntry } from "@elizaos/os-bridges"
+import { groupByFolder, validPath } from "@elizaos/plugin-files-client"
+import { Handles } from "./handles.vibe"
+
+export interface CategoryGroup {
+  readonly folder: string
+  readonly name: string
+  readonly count: number
+  readonly trail: ReadonlyArray<number>
+}
+
+/** Folder counts from one native listing, available only for the ticket that renders them. */
+export service CategoryGroups {
+  read(ticket: number): ReadonlyArray<CategoryGroup>!!
+  hold(ticket: number, groups: ReadonlyArray<CategoryGroup>): void!!
+}
+
+export const categoryGroups = Layer.sync(CategoryGroups, () => {
+  let seen = 0
+  let rows: ReadonlyArray<CategoryGroup> = []
+  return {
+    read: (ticket: number) => sync(() => ticket === seen ? rows : []),
+    hold: (ticket: number, groups: ReadonlyArray<CategoryGroup>) => sync(() => {
+      if (ticket >= seen) { seen = ticket; rows = groups }
+    }),
+  }
+})
+
+/** Keep the phone's complete group counts even where it could return only some individual entries. */
+export effect function groupsFor(ticket: number, entries: ReadonlyArray<StorageEntry>, folders: ReadonlyArray<CategoryFolder> | undefined): void!!(CategoryGroups | Handles) {
+  const groups = groupByFolder([...entries], folders === undefined ? undefined : [...folders])
+    .filter((group) => validPath(group.folder, true) === group.folder && Number.isSafeInteger(group.count) && group.count > 0)
+  const rows = groups.map((group) => {
+    const segments = group.folder === "" ? [] : group.folder.split("/")
+    return { group, paths: Array.from({ length: segments.length + 1 }, (_, depth) => segments.slice(0, depth).join("/")) }
+  })
+  const paths = [...new Set(rows.flatMap((row) => row.paths))]
+  const numbers = try (try Handles).many(paths.map((path) => ({ volume: "primary", path })))
+  const ids = new Map(paths.map((path, at) => [path, numbers[at] ?? 0]))
+  try (try CategoryGroups).hold(ticket, rows.map(({ group, paths }) => ({
+    folder: group.folder, name: group.name, count: group.count, trail: paths.map((path) => ids.get(path) ?? 0),
+  })))
+}

@@ -14,7 +14,7 @@ import { Machine as Shell } from "../gen/app__shell.effect.vibe";
 import type { Mount } from "../src/areas.ts";
 import assistant from "../src/assistant/index.tsx";
 import { untimed } from "../src/runtime/reactor.vibe";
-import { button, closeAll, fill, hardware, later, open, press, underAct, until } from "./alpha.tsx";
+import { button, closeAll, drawn, fill, hardware, later, open, press, pressOnTop, underAct, until } from "./alpha.tsx";
 import { scene } from "./fakes/scene.ts";
 
 underAct();
@@ -100,6 +100,8 @@ describe.each([["a browser", false], ["a phone", true]])("in %s", (_where, phone
 
     // spec/app/assistant/composer.md, "A message written before its conversation existed moves into the new one, then its old slot is cleared on the exact revision read"
     world.ask.metadata = [];
+    const draftSlot = (conversation: string | null, room: string | null) =>
+      `alpha/assistant/slot-v2/${encodeURIComponent(JSON.stringify([world.notes.ownerIdentity, world.notes.owner, conversation, room]))}`;
     write("Hello ");
     await press("Send");
     // spec/app/assistant/index.md, "A reply completes, streamed or all at once, even after the owner asked to stop it"
@@ -113,13 +115,13 @@ describe.each([["a browser", false], ["a phone", true]])("in %s", (_where, phone
     if (phone) await until(alpha, runtime, Locator, (s) => s.gpsAt >= 0);
     await until(alpha, runtime, Composer, (s) => s.away === "Free" && s.clear.outcome === "Confirmed" && s.draft.sync === "Kept");
     expect([lines(), world.ask.said, world.ask.opened]).toEqual([["Hello", "You said: Hello"], ["Hello"], 1]);
-    expect(localStorage.getItem("alpha/assistant/slot/0/0@1")).toBe(null);
-    expect(JSON.parse(localStorage.getItem("alpha/assistant/slot/0/1@1") ?? "{}")).toMatchObject({ text: "", sending: false });
+    expect(localStorage.getItem(draftSlot(null, null))).toBe(null);
+    expect(JSON.parse(localStorage.getItem(draftSlot("c1", "r1")) ?? "{}")).toMatchObject({ text: "", sending: false });
 
     // spec/app/assistant/composer.md, "Story: Keep what I am writing": a draft is kept in its conversation's slot.
     write("Not yet");
     await until(alpha, runtime, Composer, (s) => s.draft.sync === "Kept" && s.editor.text);
-    expect(JSON.parse(localStorage.getItem("alpha/assistant/slot/0/1@1") ?? "{}")).toMatchObject({ text: "Not yet", sending: false });
+    expect(JSON.parse(localStorage.getItem(draftSlot("c1", "r1")) ?? "{}")).toMatchObject({ text: "Not yet", sending: false });
     // spec/app/assistant/composer.md, "A message longer than a message may hold is kept as a draft and never sent"
     write("x".repeat(64_001));
     await until(alpha, runtime, Composer, (s) => s.long);
@@ -149,6 +151,7 @@ describe.each([["a browser", false], ["a phone", true]])("in %s", (_where, phone
     chatsList();
     await until(alpha, runtime, Chats, (s) => s.list.status === "Loaded");
     expect(rows("Chats")).toBe(2);
+    await drawn(() => document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true })));
 
     // spec/app/assistant/index.md, "A sensitive screen is never sent, and no reply is awaited over one": Settings showing carrier identifiers is a sensitive screen (on a phone).
     if (phone) {
@@ -156,14 +159,18 @@ describe.each([["a browser", false], ["a phone", true]])("in %s", (_where, phone
       await alpha.runtime.runPromise(Effect.flatMap(Pages.Machine, (pages) => pages.send({ type: "open", page: "General" })));
       await alpha.runtime.runPromise(Effect.flatMap(Pages.Machine, (pages) => pages.send({ type: "open", page: "CarrierPage" })));
       await until(alpha, runtime, Conversation, (s) => s.context.sensitive && s.context.showing.tag === "App");
-      write("my password is hunter2");
+      await press("Type");
+      await until(alpha, alpha.runtime, Shell, (s) => s.assistant === "Typing");
+      await fill("Message Alpha", "my password is hunter2");
       expect([button("Send")?.disabled, world.ask.said.length]).toEqual([true, 2]);
       // spec/app/assistant/index.md, "A sensitive screen says only that it is sensitive: no selection and no day"
       await alpha.runtime.runPromise(Effect.flatMap(Pages.Machine, (pages) => pages.send({ type: "goBack" })));
       await until(alpha, runtime, Conversation, (s) => !s.context.sensitive);
       expect(button("Send")?.disabled).toBe(false);
-      await alpha.runtime.runPromise(Effect.flatMap(Shell, (shell) => shell.send({ type: "goBack" })));
+      await hardware("home");
       await until(alpha, runtime, Conversation, (s) => s.context.showing.tag === "Home");
+      await press("Open conversation");
+      await until(alpha, alpha.runtime, Shell, (s) => s.assistant === "Sheet");
     }
 
     // spec/app/assistant/reply.md, "Out of funds is refused before any output, is never spoken, and offers only Manage plan"
@@ -219,9 +226,29 @@ describe.each([["a browser", false], ["a phone", true]])("in %s", (_where, phone
   });
 
   // spec/app/assistant/search.md, "Story: Search my conversations"; spec/app/assistant/chats.md, "Story: Open a message that search found"
+  it("Hear a brief acknowledgment and still get the whole answer: the acknowledgment stays the label while tools run (spec/app/assistant/reply.md, \"Story: Hear a brief acknowledgment and still get the whole answer\")", async () => {
+    const world = { ...scene(), phone };
+    const { alpha, runtime } = await openAssistant(world);
+    await until(alpha, alpha.runtime, Prefs.Machine, (s) => s.document.read.status === "Loaded");
+    // spec/app/assistant/reply.md, "The planning label shows until the first text, and provisional text is shown but never spoken": once taken, the acknowledgment stays the label through a later tool label and status, until text arrives.
+    world.ask.acknowledgment = "Let me look";
+    world.ask.holdAfterTools = true;
+    write("What's on today?");
+    await until(alpha, runtime, Composer, (s) => s.draft.sync === "Kept");
+    await press("Send");
+    await vi.waitFor(() => expect(world.ask.turns.size).toBe(1));
+    await vi.waitFor(() => expect(document.body.textContent).toContain("Let me look"));
+    expect([document.body.textContent?.includes("Using Calendar"), document.body.textContent?.includes("Working")]).toEqual([false, false]);
+    await act(async () => { for (const release of [...world.ask.turns.values()]) release(); });
+    await until(alpha, runtime, Reply, (s) => s.status === "Settled" && s.final === "You said: What's on today?".length);
+    const said = await runtime.runPromise(Effect.flatMap(Reply, (machine) => machine.get()));
+    expect([said.acks, lines()]).toEqual([1, ["What's on today?", "You said: What's on today?"]]);
+    expect(document.body.textContent?.includes("Let me look")).toBe(false);
+  });
+
   it("Search my conversations, and open a hit where it was said (spec/app/assistant/search.md, \"Story: Search my conversations\")", async () => {
     const world = { ...scene(), phone };
-    world.ask.kept.set("c7", { roomId: "r7", title: "Lunch", messages: [{ id: "m1", role: "user", text: "Lunch on Friday?" }, { id: "m2", role: "assistant", text: "Friday at noon works." }, Object.assign({ id: "m3", role: "assistant" as const, text: "" }, { failureKind: "limit_reached" })] });
+    world.ask.kept.set("c7", { roomId: "r7", title: "Lunch", messages: [{ id: "m1", role: "user", text: "Lunch on Friday?" }, { id: "m2", role: "assistant", text: "Friday at noon works." }, Object.assign({ id: "m3", role: "assistant" as const, text: "" }, { failureKind: "limit_reached" }), Object.assign({ id: "m4", role: "assistant" as const, text: "" }, { failureKind: "insufficient_credits", cloudCode: "allowance_exhausted" })] });
     const { alpha, runtime } = await openAssistant(world, false);
 
     // spec/app/assistant/search.md, "Words are searched from the first hit, and empty words are not searched"
@@ -235,6 +262,9 @@ describe.each([["a browser", false], ["a phone", true]])("in %s", (_where, phone
     expect([lines().slice(0, 2), document.querySelector("section[aria-label='Results']")]).toEqual([["Lunch on Friday?", "Friday at noon works."], null]);
     // spec/app/assistant/reply.md, "A failed reply offers the fix the agent named, and a limit reached shows its live wait, never sending the message again": a reply read again from history says why it did not finish, and to wait a moment.
     expect(document.querySelector("[role=log]")?.textContent).toContain("Too many requests. Wait a moment, then try again");
+    // spec/app/assistant/reply.md, "A failure refused before any output replaces the streamed text; any other failure is added after it": a reply kept with Cloud's funds code, read again, shows the one out-of-funds line, never spent credits.
+    const reread = document.querySelector("[role=log]")?.textContent ?? "";
+    expect([reread.includes("You’re out of plan allowance and credits, so I couldn’t reply."), reread.includes("Out of credits")]).toEqual([true, false]);
 
     // spec/app/assistant/search.md, "Only the newest asking's hits are shown, a page at a time, after those already shown": a search that fails says so.
     world.ask.searchDown = true;
@@ -323,6 +353,20 @@ describe.each([["a browser", false], ["a phone", true]])("in %s", (_where, phone
     await until(fifth.alpha, runtime, Chats, (s) => s.chosen === 0 && s.list.status === "Loaded" && s.page.status === "Idle");
     expect([document.querySelector("[role=log] [aria-busy]"), document.body.textContent?.includes("Messages did not load")]).toEqual([null, false]);
     for (const release of world.ask.heldLists.splice(0)) release();
+
+    // spec/app/assistant/chats.md, "A list asked before a conversation was made is left behind, so its answer never takes that conversation away": the list read asked before New chat answers after the conversation was made.
+    world.ask.holdLists = true;
+    chatsList();
+    await vi.waitFor(() => expect(world.ask.heldLists.length).toBe(1));
+    await pressOnTop("New chat");
+    await until(fifth.alpha, runtime, Chats, (s) => s.chosen > 0 && s.make.outcome === "Confirmed" && s.page.status === "Loaded");
+    const chats = () => runtime.runPromise(Effect.flatMap(Chats, (machine) => machine.get()));
+    const made = (await chats()).chosen;
+    world.ask.holdLists = false;
+    for (const release of world.ask.heldLists.splice(0)) release();
+    await until(fifth.alpha, runtime, Chats, (s) => s.list.status === "Loaded");
+    const after = await chats();
+    expect([after.chosen, after.ids.includes(made)]).toEqual([made, true]);
   });
 
   // spec/app/assistant/index.md, "Story: Stop a reply"

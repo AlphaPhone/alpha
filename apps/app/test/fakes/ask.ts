@@ -1,5 +1,5 @@
 // spec/app/ask/index.md, "Story: Talk to my agent"
-import type { TurnReply } from "@elizaos/agent/client";
+import type { TurnReply } from "@elizaos/agent";
 import type { Route } from "./routes.ts";
 
 export interface AskScene {
@@ -21,11 +21,16 @@ export interface AskScene {
   holdLists: boolean;
   readonly heldLists: (() => void)[];
   acknowledgment?: string;
+  /** The next reply holds after its acknowledgment and tool frames, before any text, until the test runs its entry in `turns`. */
+  holdAfterTools?: boolean;
   metadata?: unknown[];
+  spokenFiles?: { readonly channel: unknown; readonly images: readonly unknown[] | undefined }[];
   /** The failure fields of the resident's terminal reply. */
   refusal?: Pick<TurnReply, "cloudCode" | "planAction"> & { readonly failureKind: NonNullable<TurnReply["failureKind"]> };
   nextReplyChunks?: readonly string[];
   nextReplyProvisional?: boolean;
+  /** The actions the next reply says it ran, made from the turn's metadata, as eliza's agent lists them on its done frame. */
+  nextActions?: (metadata: unknown) => readonly unknown[];
   cloudWarmCalls: number;
 }
 
@@ -44,11 +49,13 @@ const frame = (data: unknown) => encoder.encode(`data: ${JSON.stringify(data)}\n
 /** What ends a turn, as eliza's agent names its messages (`.eliza/packages/agent/src/client/reply-frame.schema.vibe`, `DoneFrame`). */
 const named = (turn: number) => ({ messageId: `m${turn}a`, userMessageId: `m${turn}u`, agentName: "Alpha", actionResults: [] });
 
-function reply(scene: AskScene, room: string, text: string, keep: (said: string) => void): Response {
+function reply(scene: AskScene, room: string, text: string, keep: (said: string) => void, metadata: unknown): Response {
   const custom = scene.nextReplyChunks;
   const provisional = scene.nextReplyProvisional;
+  const actions = scene.nextActions?.(metadata) ?? [];
   scene.nextReplyChunks = undefined;
   scene.nextReplyProvisional = undefined;
+  scene.nextActions = undefined;
   const body = new ReadableStream<Uint8Array>({
     start(controller) {
       controller.enqueue(frame({ type: "status", activity: "thinking" }));
@@ -64,19 +71,31 @@ function reply(scene: AskScene, room: string, text: string, keep: (said: string)
         scene.turns.set(room, () => controller.close());
         return;
       }
-      if (custom !== undefined && custom.length > 0) {
-        for (const piece of custom) controller.enqueue(frame({ type: "token", text: piece, ...(provisional ? { provisional } : {}) }));
-        const full = custom.join("");
-        keep(full);
-        controller.enqueue(frame({ type: "done", fullText: full, ...named(scene.said.length) }));
+      const answer = () => {
+        if (custom !== undefined && custom.length > 0) {
+          for (const piece of custom) controller.enqueue(frame({ type: "token", text: piece, ...(provisional ? { provisional } : {}) }));
+          const full = custom.join("");
+          keep(full);
+          controller.enqueue(frame({ type: "done", fullText: full, ...named(scene.said.length), actionResults: actions }));
+          controller.close();
+          return;
+        }
+        controller.enqueue(frame({ type: "token", text: "You said: " }));
+        controller.enqueue(frame({ type: "token", text }));
+        keep(`You said: ${text}`);
+        controller.enqueue(frame({ type: "done", fullText: `You said: ${text}`, ...named(scene.said.length) }));
         controller.close();
+      };
+      if (scene.holdAfterTools) {
+        scene.holdAfterTools = false;
+        controller.enqueue(frame({ type: "status", activity: "Working" }));
+        scene.turns.set(room, () => {
+          scene.turns.delete(room);
+          answer();
+        });
         return;
       }
-      controller.enqueue(frame({ type: "token", text: "You said: " }));
-      controller.enqueue(frame({ type: "token", text }));
-      keep(`You said: ${text}`);
-      controller.enqueue(frame({ type: "done", fullText: `You said: ${text}`, ...named(scene.said.length) }));
-      controller.close();
+      answer();
     },
     cancel: () => void scene.turns.delete(room),
   });
@@ -95,8 +114,8 @@ export function askRoutes(scene: AskScene): Route[] {
     (request, url) => {
       if (request.method !== "GET" || url.pathname !== "/api/conversations") return;
       scene.listReads += 1;
-      const listing = () => Response.json({ conversations: [...scene.kept].map(([id, one]) => ({ id, roomId: one.roomId, title: one.title, createdAt: 0, updatedAt: 0 })) });
-      return scene.holdLists ? new Promise<Response>((resolve) => void scene.heldLists.push(() => resolve(listing()))) : listing();
+      const listing = Response.json({ conversations: [...scene.kept].map(([id, one]) => ({ id, roomId: one.roomId, title: one.title, createdAt: 0, updatedAt: 0 })) });
+      return scene.holdLists ? new Promise<Response>((resolve) => void scene.heldLists.push(() => resolve(listing))) : listing;
     },
     (request, url) => {
       const id = /^\/api\/conversations\/([^/]+)\/messages$/.exec(url.pathname)?.[1];
@@ -135,14 +154,15 @@ export function askRoutes(scene: AskScene): Route[] {
       if (request.method !== "POST" || !found) return;
       const messages = scene.kept.get(`c${found[1]}`)?.messages ?? [];
       const keep = (role: "user" | "assistant", text: string) => void messages.push({ id: `m${scene.said.length}${role === "user" ? "u" : "a"}`, role, text });
-      return request.json().then((body: { text: string; metadata?: unknown }) => {
+      return request.json().then((body: { text: string; metadata?: unknown; channelType?: unknown; images?: readonly unknown[] }) => {
         scene.metadata?.push(body.metadata);
+        scene.spokenFiles?.push({ channel: body.channelType, images: body.images });
         if (body.text !== body.text.trim()) return Response.json({ error: "invalid_message" }, { status: 400 });
         if (found[2] === undefined) return Response.json({ text: `You said: ${body.text}`, ...named(scene.said.length) });
         scene.said.push(body.text);
         keep("user", body.text);
         Object.assign(messages.at(-1) ?? {}, { clientMessageId: (body as { clientMessageId?: string }).clientMessageId });
-        return reply(scene, `r${found[1]}`, body.text, (said) => keep("assistant", said));
+        return reply(scene, `r${found[1]}`, body.text, (said) => keep("assistant", said), body.metadata);
       });
     },
     (request, url) => {

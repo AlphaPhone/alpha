@@ -1,6 +1,5 @@
 // spec/app/inbox/index.md, "Story: See my mail"; spec/app/inbox/message.md, "Story: Read a message"
-import { managedGmailClient, type ManagedGmailClient, type ManagedGmailTransport } from "@elizaos/plugin-inbox/client"
-import { AttachmentRefused, MailProtocolFailed, MailUnreachable, reviewOpaqueAttachment, type MailAttachmentReviewer } from "@elizaos/plugin-inbox/mailbox"
+import { managedGmailClient, type ManagedGmailClient, type ManagedGmailTransport, AttachmentRefused, MailProtocolFailed, MailUnreachable, reviewOpaqueAttachment, type MailAttachmentReviewer } from "@elizaos/plugin-inbox-client"
 import type { Account } from "../platform/cloud.vibe"
 import { Garbled, Refused } from "../platform/remote.vibe"
 
@@ -37,7 +36,7 @@ export function provider(cloud: Account): ManagedGmailClient {
         ? HttpClientRequest.get(route, { urlParams: params })
         : HttpClientRequest.bodyJsonUnsafe(HttpClientRequest.post(route, { urlParams: params }), options.body)
       return cloud.call(request) catch effect (cause) => match (cause) {
-        when Refused: throw new MailProtocolFailed({ code: "http", status: cause.status, reason: "" });
+        when Refused: throw new MailProtocolFailed({ code: "http", status: cause.status, reason: cause.reason ?? "" });
         when Garbled: throw new MailProtocolFailed({ code: "invalid-response", status: 0, reason: "" });
         default: throw new MailUnreachable({ cause });
       }

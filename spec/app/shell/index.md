@@ -16,7 +16,7 @@ inside the shell and moves through it.
 > As the phone's owner, I want to open an app from Home, go back the way I
 > came and return Home in one step, so that I never lose my place.
 
-### The shell holds the apps opened on the way here, how far Ask Alpha is raised, and what this phone admits
+### The shell holds the apps opened on the way here, the Apps drawer, how far Ask Alpha is raised, and what this phone admits
 
 Home is the empty trail; the app showing is the last one on it. Ask Alpha
 rests as a bar, takes typing, opens as a sheet, or fills the screen.
@@ -24,9 +24,9 @@ rests as a bar, takes typing, opens as a sheet, or fills the screen.
 ```quint
 type View = Phone | Messages | Inbox | Calendar | Clock | Reminders | Browser | Camera | Photos | Maps | Notes | Contacts | Files | Workflows | Wallet | Settings
 type Detent = Bar | Typing | Sheet | Full
-type Shell = { trail: List[View], assistant: Detent, image: bool, contacts: bool }
+type Shell = { trail: List[View], drawer: bool, assistant: Detent, image: bool, contacts: bool }
 
-pure val initial: Shell = { trail: List(), assistant: Bar, image: false, contacts: false }
+pure val initial: Shell = { trail: List(), drawer: false, assistant: Bar, image: false, contacts: false }
 pure val maxTrail = 6
 ```
 
@@ -60,7 +60,22 @@ pure def canOpenView(s: Shell, view: View): bool = available(s, view) and not(sh
 
 pure def openView(s: Shell, view: View): Shell =
   val grown = s.trail.append(view)
-  { ...s, trail: if (grown.length() > maxTrail) grown.tail() else grown, assistant: Bar }
+  { ...s, trail: if (grown.length() > maxTrail) grown.tail() else grown, drawer: false, assistant: Bar }
+```
+
+### The Apps drawer opens on phone Home with Ask Alpha at rest
+
+An app or the Home command closes the drawer. Ask Alpha can rise above it.
+
+```quint
+pure def canOpenDrawer(s: Shell, phone: bool): bool =
+  phone and s.trail.length() == 0 and not(s.drawer) and s.assistant == Bar
+
+pure def openDrawer(s: Shell, phone: bool): Shell = { ...s, drawer: true }
+
+pure def canCloseDrawer(s: Shell): bool = s.drawer
+
+pure def closeDrawer(s: Shell): Shell = { ...s, drawer: false }
 ```
 
 ### Ask Alpha rises to typing, a sheet or the full screen
@@ -93,20 +108,22 @@ pure def sometimesAnAppsBarStandsInForAskAlpha(s: Shell): bool = not(askAlphaDra
 
 ### Back closes one layer: Ask Alpha by a step, then the app on top
 
-The full screen lowers to the sheet, and typing or the sheet to the bar. On
+The full screen lowers to the sheet, and typing or the sheet to the bar.
+When Ask Alpha is at rest, Back closes the drawer before it leaves Home. On
 bare Home, Android Back keeps Alpha in front while Alpha holds the HOME
 role. Otherwise Android Back moves the task behind the previous one and
 keeps the page for the next visit.
 
 ```quint
 pure def layers(s: Shell): int =
-  s.trail.length() + (if (s.assistant == Bar) 0 else if (s.assistant == Full) 2 else 1)
+  s.trail.length() + (if (s.drawer) 1 else 0) + (if (s.assistant == Bar) 0 else if (s.assistant == Full) 2 else 1)
 
 pure def canGoBack(s: Shell): bool = layers(s) > 0
 
 pure def goBack(s: Shell): Shell =
   if (s.assistant == Full) { ...s, assistant: Sheet }
   else if (s.assistant != Bar) { ...s, assistant: Bar }
+  else if (s.drawer) closeDrawer(s)
   else { ...s, trail: s.trail.removeAt(s.trail.length() - 1) }
 ```
 
@@ -139,7 +156,7 @@ task.
 ```quint
 pure def canGoHome(s: Shell): bool = layers(s) > 0
 
-pure def goHome(s: Shell): Shell = { ...s, trail: List(), assistant: Bar }
+pure def goHome(s: Shell): Shell = { ...s, trail: List(), drawer: false, assistant: Bar }
 ```
 
 ### Agent navigation shows an admitted app or Home without lowering Ask Alpha
@@ -152,11 +169,11 @@ pure def canAgentOpenView(s: Shell, view: View): bool = available(s, view) and n
 
 pure def agentOpenView(s: Shell, view: View): Shell =
   val grown = s.trail.append(view)
-  { ...s, trail: if (grown.length() > maxTrail) grown.tail() else grown }
+  { ...s, trail: if (grown.length() > maxTrail) grown.tail() else grown, drawer: false }
 
-pure def canAgentGoHome(s: Shell): bool = s.trail.length() > 0
+pure def canAgentGoHome(s: Shell): bool = s.trail.length() > 0 or s.drawer
 
-pure def agentGoHome(s: Shell): Shell = { ...s, trail: List() }
+pure def agentGoHome(s: Shell): Shell = { ...s, trail: List(), drawer: false }
 
 pure def stepAgentNavigationKeepsAssistant(before: Shell, via: str, after: Shell): bool =
   (via == "agentOpenView" or via == "agentGoHome") implies (after.assistant == before.assistant)
@@ -167,7 +184,7 @@ pure def sometimesAgentNavigatesKeepingSheet(s: Shell): bool = s.assistant == Sh
 ### When Alpha opens again the trail is kept, and Ask Alpha is closed
 
 ```quint
-pure def reopen(s: Shell): Shell = { ...s, assistant: Bar }
+pure def reopen(s: Shell): Shell = { ...s, drawer: false, assistant: Bar }
 ```
 
 ### The trail never holds more than six apps
@@ -206,6 +223,12 @@ pure def sometimesAskAlphaOverAnApp(s: Shell): bool = s.assistant == Full and s.
 
 ```quint
 pure def sometimesTrailIsFull(s: Shell): bool = s.trail.length() == maxTrail
+```
+
+### The Apps drawer can be open
+
+```quint
+pure def sometimesDrawerOpen(s: Shell): bool = s.drawer
 ```
 
 ### Contacts can be showing
