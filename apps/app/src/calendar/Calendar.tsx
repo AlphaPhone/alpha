@@ -280,6 +280,8 @@ export function Calendar({ runtime, alpha }: CalendarProps) {
     && visible.length === 0 && dayReminders === 0;
   const searching = s.overlay === "Search";
   const listing = searching || s.layout === "Agenda";
+  const agendaFrom = dayStart(s.today);
+  const agendaUntil = dayStart(monthStart(s.anchor, 2));
   const largeAgenda = canvas?.agenda ?? false;
   const month = s.overlay === "MonthDialog" || s.overlay === "LayoutMenu";
   const anchorDate = dateOf(s.anchor);
@@ -416,8 +418,9 @@ export function Calendar({ runtime, alpha }: CalendarProps) {
           </>
         )}
         {s.layout === "Agenda" && !searching ? (
-          <CalendarList aria-label="Schedule" range={`Through ${monthDayYear.format(readWindow(s.anchor).end - 1)}`}>
-            <Days rows={schedule.filter((row) => row.end > dayStart(s.today) && (!("record" in row) || row.begin < readWindow(s.anchor).end))} today={s.today} from={dayStart(s.today)} open={openRow} empty="No upcoming events" />
+          <CalendarList aria-label="Schedule" range={`Through ${monthDayYear.format(agendaUntil - 1)}`}>
+            <Days rows={schedule.filter((row) => row.end > agendaFrom && row.begin < agendaUntil)} today={s.today} from={agendaFrom} open={openRow}
+              empty={disconnected ? "Not connected" : "No upcoming events"} />
           </CalendarList>
         ) : null}
       </div>

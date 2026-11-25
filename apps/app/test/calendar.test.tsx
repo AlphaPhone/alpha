@@ -127,6 +127,19 @@ describe("Calendar without a connected account", () => {
     expect(button("Open Calendar settings")).toBeUndefined();
   });
 
+  it("Shows the upcoming window and disconnection in standalone Schedule (spec/app/calendar/presentation.md, \"Schedule shows upcoming events and reminders through the end of next month\")", async () => {
+    const world = { ...morning(false), signedIn: false };
+    world.inbox.google = undefined;
+    const { alpha, runtime } = await onCalendar(world);
+    await until(alpha, runtime, View, (state) => state.front && state.owner === 0 && !state.connected);
+    await fromMonth("Schedule");
+    await until(alpha, runtime, View, (state) => state.layout === "Agenda" && state.overlay === "NoOverlay");
+    const schedule = document.querySelector('[aria-label="Schedule"][role="region"]');
+    expect(schedule?.textContent).toContain("Through Dec 31, 2026");
+    expect(schedule?.textContent).toContain("Not connected");
+    expect(schedule?.textContent).not.toContain("No upcoming events");
+  });
+
   it("Shows and completes the exact dated reminder in Calendar (spec/app/calendar/index.md, \"Story: See reminders among my events\")", async () => {
     const world = { ...morning(false), signedIn: false };
     const { alpha } = await open(world, only("view:Calendar"));
