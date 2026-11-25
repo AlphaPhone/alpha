@@ -1,7 +1,7 @@
 import { Album, ChevronLeft, ChevronRight, Crop, Ellipsis, Heart, Info, Mail, Pause, Pencil, Play, RotateCcw, Share2, Sparkles, Trash2, Undo2, X } from "lucide-react";
 import { Effect, type ManagedRuntime } from "effect";
 import { useCallback, useRef, type PointerEvent } from "react";
-import { Button, Menu, MenuContent, MenuItem, MenuTrigger, Sheet, SheetContent, Slider, cn } from "@repo/ui";
+import { Button, Menu, MenuContent, MenuItem, MenuTrigger, Sheet, SheetContent, Slider, cn, dockClearance } from "@repo/ui";
 import { useMachine } from "../../gen/app__photos__viewer.react.ts";
 import type { Event, Look } from "../../gen/app__photos__viewer.ts";
 import type { Machine } from "../../gen/app__photos__viewer.effect.vibe";
@@ -149,7 +149,7 @@ export function MediaViewer({ runtime, before, after, row, inTrash, onAddToAlbum
   if (state.cropping) return (
     <div aria-label="Crop photo" data-alpha-subview="photos-crop"
       // eslint-disable-next-line better-tailwindcss/no-unknown-classes -- design.md, "Dark": the crop tools follow the photo editor's fixed dark theme
-      className="dark absolute inset-0 z-50 flex min-h-0 flex-col bg-background text-foreground">
+      className={cn("dark absolute inset-0 z-50 flex min-h-0 flex-col bg-background text-foreground", dockClearance)}>
       <header data-host-chrome="" className="flex min-h-14 shrink-0 items-center gap-2 px-2">
         <Button variant="ghost" size="icon" aria-label="Cancel crop" onClick={close}><X /></Button>
         <h1 className="text-base font-semibold">Crop photo</h1>
@@ -163,7 +163,7 @@ export function MediaViewer({ runtime, before, after, row, inTrash, onAddToAlbum
   return (
     <div aria-label={name} data-alpha-subview={state.editing ? "photos-editor" : "photos-viewer"}
       // eslint-disable-next-line better-tailwindcss/no-unknown-classes -- design.md, "Dark": the photo viewer and its controls keep their dark tokens in either app theme
-      className="dark absolute inset-0 z-50 flex min-h-0 flex-col bg-background text-foreground">
+      className={cn("dark absolute inset-0 z-50 flex min-h-0 flex-col bg-background text-foreground", dockClearance)}>
       <header data-host-chrome="" className="flex min-h-14 shrink-0 items-center gap-2 px-2">
         <Button variant="ghost" size="icon" aria-label={state.editing ? "Cancel edit" : "Back to photos"} onClick={close}>{state.editing ? <X /> : <ChevronLeft />}</Button>
         {state.editing ? <div className="flex-1"><h1 className="sr-only">{state.kind === "Clip" ? "Edit video" : "Edit photo"}</h1></div> : <div className="min-w-0 flex-1">
@@ -231,7 +231,7 @@ export function MediaViewer({ runtime, before, after, row, inTrash, onAddToAlbum
             onValueChange={(end) => editAction({ type: "trim", start: state.edit.start, end })} />
         </>}
       </div>}
-      {!state.editing && showing && <div role="toolbar" aria-label="Photo controls" className="relative flex shrink-0 justify-around gap-0.5 px-4 pt-2 pb-8">
+      {!state.editing && showing && <div role="toolbar" aria-label="Photo controls" className="relative flex shrink-0 justify-around gap-0.5 px-4 pt-2 pb-5">
         {before !== undefined && <Button className="sr-only focus:not-sr-only" variant="ghost" size="icon" aria-label="Previous photo" onClick={() => action({ type: "swipe", neighbour: before })}><ChevronLeft /></Button>}
         {!inTrash && control(state.favourite ? "Remove from favorites" : "Favorite", { type: "toggleFavourite" }, <Heart className={state.favourite ? "fill-current" : undefined} />)}
         {!inTrash && allows({ type: "startEdit" }) && <Button variant="ghost" size="icon" aria-label="Edit" onClick={() => editAction({ type: "startEdit" })}><Pencil /></Button>}

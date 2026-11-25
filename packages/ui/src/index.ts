@@ -1,4 +1,5 @@
 export * from "./lib/cn.ts";
+export { dockClearance } from "./lib/styles.ts";
 export * from "./components/Alert.tsx";
 export * from "./components/AppHeader.tsx";
 export * from "./components/AppTile.tsx";

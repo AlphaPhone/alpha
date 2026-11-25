@@ -146,7 +146,9 @@ const Tile = memo(function Tile({ number, row, image, selected, interactive }: T
       disabled={!interactive}
       className="relative grid aspect-square min-w-0 touch-pan-y place-items-center overflow-hidden bg-secondary focus-visible:outline-focus focus-visible:outline-offset-focus">
       {image ? <img src={image} loading="lazy" decoding="async" alt="" className="absolute inset-0 size-full object-cover" /> : <Image aria-hidden className="size-6 text-muted-foreground" />}
-      {starred && <span className="absolute bottom-1 left-1 grid size-6 place-items-center rounded-full bg-background/80" aria-label="Favorite"><Heart aria-hidden className="size-3.5 fill-current" /></span>}
+      {starred && <span aria-label="Favorite"
+        // eslint-disable-next-line better-tailwindcss/no-unknown-classes -- design.md, "Dark": favorites on an image keep the dark contrast surface in either theme
+        className="dark absolute bottom-1.5 left-1.5 grid size-4.5 place-items-center rounded-full bg-background/75 text-foreground"><Heart aria-hidden className="size-3 fill-current" /></span>}
       {video && <span className="absolute right-1 bottom-1 flex items-center gap-1 rounded-full bg-background/80 px-1.5 py-0.5 text-xs"><Play aria-hidden className="size-3 fill-current" />{timing(row.item.duration ?? 0)}</span>}
       {selected !== undefined && <span aria-hidden className={cn("absolute top-1.5 right-1.5 grid size-6 place-items-center rounded-full border border-background", selected ? "bg-primary text-primary-foreground" : "bg-background/65")}>{selected && <Check className="size-4" />}</span>}
     </button>

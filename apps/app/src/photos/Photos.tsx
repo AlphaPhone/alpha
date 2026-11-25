@@ -1,8 +1,8 @@
 // spec/app/photos/index.md, "Story: Browse the library"; spec/app/photos/index.md, "Story: Select photos"; spec/app/photos/index.md, "Story: Change albums from what I am looking at"
 import { Effect } from "effect";
-import { Album, ChevronLeft, ChevronRight, Ellipsis, Heart, Image, Images, ListChecks, Plus, ScanText, Search, Share2, Trash2, Undo2, X } from "lucide-react";
+import { Album, ChevronLeft, ChevronRight, Ellipsis, Folder, Heart, Image, Images, ListChecks, Plus, ScanText, Search, Share2, Trash2, Undo2, X } from "lucide-react";
 import { useCallback, useRef, useState, type ReactNode } from "react";
-import { Alert, AppHeader, Button, Chip, ConfirmDialog, Dialog, DialogContent, DialogTitle, EmptyState, Input, ListRow, Menu, MenuContent, MenuItem, MenuTrigger, Sheet, SheetContent, Spinner, cn } from "@repo/ui";
+import { Alert, AppHeader, Button, Chip, ConfirmDialog, Dialog, DialogContent, DialogTitle, EmptyState, Input, ListRow, Menu, MenuContent, MenuItem, MenuTrigger, Sheet, SheetContent, Spinner, cn, dockClearance } from "@repo/ui";
 import { useMachine as useLibrary } from "../../gen/app__photos.react.ts";
 import { useMachine as useTrash } from "../../gen/app__photos__trash.react.ts";
 import { useMachine as useAgent } from "../../gen/app__photos__agent.react.ts";
@@ -35,7 +35,7 @@ interface Tool {
 
 function ToolBar({ tools }: { tools: readonly Tool[] }) {
   return (
-    <div role="toolbar" aria-label="Selection actions" className="flex shrink-0 justify-around gap-1 border-t border-border bg-background px-2 py-2">
+    <div role="toolbar" aria-label="Selection actions" className={cn("flex shrink-0 justify-around gap-1 border-t border-border bg-background px-2 pt-2", dockClearance)}>
       {tools.map(({ icon, label, run }) => <Button key={label} variant="ghost" className="h-auto min-h-12 flex-col gap-1 px-2 py-1 text-xs" onClick={run}>{icon}{label}</Button>)}
     </div>
   );
@@ -273,8 +273,8 @@ export function Photos({ runtime, alpha }: PhotosProps) {
       <div inert={opened !== 0} aria-hidden={opened !== 0 || undefined} className="flex min-h-0 flex-1 flex-col" data-alpha-subview="photos-list">
         {header}
         {!selection && !inTrash && !album && (owner({ type: "showTab", tab: "Library" }) || owner({ type: "showTab", tab: "Albums" })) &&
-          <div role="group" aria-label="Photos sections" className="mx-4 mb-3 grid shrink-0 grid-cols-2 gap-1 rounded-xl bg-secondary p-1">
-            {([{ tab: "Library", icon: <Images /> }, { tab: "Albums", icon: <Album /> }] as const).map(({ tab, icon }) => <Button key={tab}
+          <div role="group" aria-label="Photos sections" className={cn("mx-4 grid shrink-0 grid-cols-2 gap-1 rounded-xl bg-secondary p-1", state.tab === "Library" && allow === undefined ? "mb-7" : "mb-3")}>
+            {([{ tab: "Library", icon: <Images /> }, { tab: "Albums", icon: <Folder /> }] as const).map(({ tab, icon }) => <Button key={tab}
               variant="ghost" className={cn("h-11 rounded-lg", state.tab === tab && "bg-foreground text-background hover:bg-foreground/90")} aria-pressed={state.tab === tab}
               onClick={() => { setSearching(false); talk({ type: "showTab", tab }); }}>{icon}{tab}</Button>)}
           </div>}
