@@ -36,7 +36,7 @@ export const meta: ComponentMeta<AssistantConversationProps> = {
     "Offline": { header, transcript, composer: { ...composer, value: "Hello", unavailable: "away" } },
   },
   play: {
-    "Attachment refused": async ({ canvasElement }) => {
+    "Attachment refused": async ({ canvasElement }: { canvasElement: HTMLElement }) => {
       await expect(within(canvasElement).getByRole("alert")).toHaveTextContent("Could not attach example.zip");
     },
   },

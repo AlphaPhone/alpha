@@ -15,11 +15,12 @@ export const meta: ComponentMeta<AssistantTurnNoteProps> = {
     Acknowledged: { status: "replying", label: "Checking your calendar" },
   },
   play: {
-    Unknown: async (context) => {
-      await expect([within(context.canvasElement).getByRole("img", { name: "May not have arrived" }) !== null, context.canvasElement.textContent]).toEqual([true, "Check for reply"]);
+    Unknown: async (context: { canvasElement: HTMLElement }) => {
+      await expect(within(context.canvasElement).getByRole("img", { name: "May not have arrived" })).toBeInTheDocument();
+      await expect(context.canvasElement).toHaveTextContent(/^Check for reply$/);
       await presses("Check for reply", onCheck)(context);
     },
-    Acknowledged: async ({ canvasElement }) => {
+    Acknowledged: async ({ canvasElement }: { canvasElement: HTMLElement }) => {
       await expect(canvasElement.textContent).toBe("Checking your calendar");
     },
   },
