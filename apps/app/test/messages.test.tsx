@@ -97,6 +97,33 @@ async function composeAction(name: string) {
 }
 
 describe("Messages on an Alpha image", () => {
+  it("Requires a new choice when a SIM is replaced and keeps that choice when rows reorder (spec/app/messages/composer.md, \"Story: Send a message\")", async () => {
+    const world = image();
+    const first = world.telephony.subscriptions[0]!;
+    const second = { id: 2, slot: 1, displayName: "Travel", carrierName: "Travel", defaultSms: false, defaultVoice: false };
+    world.telephony.subscriptions = [first, second];
+    const { alpha } = await openImage(world);
+    await openMessages(alpha);
+    await ready(alpha.runtime, Messages, "Messages read", (state) => state.list.status === "Loaded" && state.threads === 1);
+    await press("Maya Chen");
+    await ready(alpha.runtime, Composer, "Two SIMs loaded", (state) => state.thread > 0 && state.sims === 2 && state.simInfo.grant === "Granted");
+    await write("Message", "Use the reviewed line");
+    await press("SIM 2");
+
+    const replacement = { ...second, id: 9 };
+    world.telephony.subscriptions = [replacement, first];
+    await press("Send");
+    await ready(alpha.runtime, Composer, "Old SIM refused", (state) => state.outgoing.denied && state.slot.author === "OwnerWrote");
+    expect(world.telephony.sent).toEqual([]);
+
+    await press("SIM 2");
+    world.telephony.subscriptions = [first, replacement];
+    await press("Send");
+    await ready(alpha.runtime, Composer, "Replacement SIM sent", (state) => state.outgoing.op.outcome === "Confirmed");
+    expect(world.telephony.sent).toHaveLength(1);
+    expect(world.telephony.journal.get(world.telephony.sent[0]!.operationId)).toMatchObject({ subscriptionId: 9, status: "sent" });
+  });
+
   it("See my conversations, read one, and send a message once (spec/app/messages/index.md, \"Story: See my conversations\"; spec/app/messages/composer.md, \"Story: Let Alpha suggest a draft\"; spec/app/messages/index.md, \"Story: Read a conversation\"; spec/app/messages/composer.md, \"Story: Send a message\"; spec/app/messages/sending.md, \"Story: Send a message once\"; spec/app/messages/sending.md, \"Story: Know whether it arrived\")", async () => {
     const world = image();
     world.telephony.live = [];
