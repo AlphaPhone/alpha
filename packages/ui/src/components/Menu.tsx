@@ -33,18 +33,18 @@ export function MenuContent({ align = "end", sideOffset = 0, collisionPadding = 
  * the tap that opened the menu lands its click on whichever item opened under the finger, and is not a choice.
  */
 export function MenuItem({ destructive = false, className, onPointerDown, onClick, ...props }: MenuItemProps) {
-  const pressed = useRef(false);
+  const pressedRef = useRef(false);
   return (
     <MenuPrimitive.Item
       className={cn(floatingRow, "[&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-5.5", destructive && "text-destructive", className)}
       onPointerDown={(event) => {
-        pressed.current = true;
+        pressedRef.current = true;
         onPointerDown?.(event);
       }}
       onClick={(event) => {
         const touched = "pointerType" in event.nativeEvent && (event.nativeEvent.pointerType === "touch" || event.nativeEvent.pointerType === "pen");
-        const began = pressed.current;
-        pressed.current = false;
+        const began = pressedRef.current;
+        pressedRef.current = false;
         if (touched && !began) event.preventDefault();
         else onClick?.(event);
       }}
