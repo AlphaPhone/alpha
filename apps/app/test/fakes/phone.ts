@@ -162,24 +162,24 @@ export function elizaCloud(cloud: Answering, signedIn: () => boolean): Faked {
 
 /**
  * `SecureStorePlugin.kt`, the `ElizaSecureStore` plugin: every call resolves, and says in `ok`, `error` and `outcome`
- * how it went. The host's policy opens `open` to the page and denies every other slot.
+ * how it went. The fake grants the slots the host's policy opens to the page.
  */
-export function elizaSecureStore(secrets: Map<string, string>, open: ReadonlySet<string>): Faked {
+export function elizaSecureStore(secrets: Map<string, string>, permits: (key: string) => boolean): Faked {
   const denied: ElizaSecureStoreResult = { ok: false, error: "denied", outcome: "Refused" };
   return plugin<ElizaSecureStorePlugin>(() => ({
-    get: ({ key }) => Promise.resolve(!open.has(key) ? { ok: false, error: "denied" } : secrets.has(key) ? { ok: true, value: secrets.get(key)! } : { ok: false, error: "not_found" }),
+    get: ({ key }) => Promise.resolve(!permits(key) ? { ok: false, error: "denied" } : secrets.has(key) ? { ok: true, value: secrets.get(key)! } : { ok: false, error: "not_found" }),
     set({ key, value }) {
-      if (!open.has(key)) return Promise.resolve(denied);
+      if (!permits(key)) return Promise.resolve(denied);
       secrets.set(key, value);
       return Promise.resolve({ ok: true, outcome: "Written" });
     },
     remove({ key }) {
-      if (!open.has(key)) return Promise.resolve(denied);
+      if (!permits(key)) return Promise.resolve(denied);
       secrets.delete(key);
       return Promise.resolve({ ok: true, outcome: "Removed" });
     },
     compareAndExchange({ key, expected, value }) {
-      if (!open.has(key)) return Promise.resolve(denied);
+      if (!permits(key)) return Promise.resolve(denied);
       if ((secrets.get(key) ?? null) !== expected) return Promise.resolve({ ok: false, error: "conflict", outcome: "Conflict" });
       if (value === null) secrets.delete(key);
       else secrets.set(key, value);
