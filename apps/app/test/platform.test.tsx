@@ -7,14 +7,19 @@ import { Machine as Shell } from "../gen/app__shell.effect.vibe";
 import { at } from "../src/areas.ts";
 import { adopt, earlierSlot, keptAt, vaulted } from "../src/platform/adoption.vibe";
 import { Agent, type Reached } from "../src/platform/agent.vibe";
+import { CameraPort, browserCamera } from "../src/platform/camera.vibe";
 import { Cloud } from "../src/platform/cloud.vibe";
 import { testMocks } from "../src/platform/device.vibe";
 import { pageSpeechBase } from "../src/platform/pageSpeech.ts";
-import { Telegram } from "../src/platform/telegram.vibe";
+import { Telegram, telegramAt } from "../src/platform/telegram.vibe";
+import { VoiceBridge } from "../src/platform/voice.vibe";
 import { type Slot, Vault } from "../src/platform/vault.vibe";
+import * as HttpClient from "effect/http/HttpClient";
+import * as HttpClientResponse from "effect/http/HttpClientResponse";
+import { listenerCount } from "./fakes/phone.ts";
 import type { Platform } from "../src/platform/platform.vibe";
 import { area } from "../src/runtime/area.tsx";
-import { button, closeAll, hardware, only, open, press, underAct, until } from "./alpha.tsx";
+import { button, closeAll, hardware, later, only, open, press, underAct, until } from "./alpha.tsx";
 import { account } from "./fakes/cloud.ts";
 import { publish } from "./fakes/platform.ts";
 import { scene } from "./fakes/scene.ts";
@@ -283,4 +288,102 @@ it("Ship only what this build allows: test mocks are admitted only when ELIZA_DE
   vi.stubEnv("ELIZA_DEV_ALLOW_TEST_MOCKS", "1");
   expect(testMocks()).toBe(true);
   vi.unstubAllEnvs();
+});
+
+it("Removes agent stream listeners even when abort fails (spec/app/platform/index.md, \"A request or stream Alpha stops waiting for is withdrawn from the phone, and may still have reached the agent\")", async () => {
+  const world = { ...scene(), phone: true };
+  world.platform.abortFails = true;
+  const { alpha } = await open(world, only("home"));
+  const first = await alpha.runtime.runPromise(Effect.flatMap(Agent, (agent) => Stream.runCollect(Stream.take(agent.events(HttpClientRequest.post("/api/platform/drip")), 1))));
+  expect(first).toEqual(["first"]);
+  await vi.waitFor(() => expect([listenerCount("ElizaAgent", "streamData"), listenerCount("ElizaAgent", "streamEnd")]).toEqual([0, 0]));
+});
+
+it("Voice probe recovers after interruption and cloud openMic cancels capture after shut (spec/app/voice/index.md, \"Story: Hold a spoken conversation\"; spec/app/voice/index.md, \"Story: Mute, interrupt and stop\")", async () => {
+  const world = { ...scene(), phone: true };
+  let releaseProbe = () => {};
+  world.voice.probeGate = () => new Promise<void>((resolve) => { releaseProbe = resolve; });
+  const { alpha } = await open(world, only("home"));
+  const firstProbe = alpha.runtime.runFork(Effect.flatMap(VoiceBridge, (voice) => voice.probeStatus(false)));
+  await vi.waitFor(() => expect(world.voice.localSpeechStatusCalls).toBeGreaterThan(0));
+  await alpha.runtime.runPromise(Fiber.interrupt(firstProbe));
+  world.voice.probeGate = undefined;
+  releaseProbe();
+  const secondProbe = alpha.runtime.runPromise(Effect.timeoutOption(Effect.flatMap(VoiceBridge, (voice) => voice.probeStatus(false)), "2 seconds"));
+  await later(alpha, 2_000);
+  expect(Option.isSome(await secondProbe)).toBe(true);
+
+  let releaseCloud = () => {};
+  world.voice.cloudStartGate = () => new Promise<void>((resolve) => { releaseCloud = resolve; });
+  const opening = alpha.runtime.runPromiseExit(Effect.flatMap(VoiceBridge, (voice) => voice.openMic(10, true)));
+  await vi.waitFor(() => expect(world.voice.cloudStarts.length).toBeGreaterThan(0));
+  await alpha.runtime.runPromise(Effect.flatMap(VoiceBridge, (voice) => voice.shut(10)));
+  releaseCloud();
+  const opened = await opening;
+  expect(Exit.isFailure(opened)).toBe(true);
+  expect(world.voice.activeMicSession).toBeUndefined();
+});
+
+it("Browser camera releases audio track on recorder error and clears film on interrupted finish (spec/app/camera/index.md, \"Story: Take photos and videos\")", async () => {
+  const stoppedTracks: string[] = [];
+  const fakeStream = (label: string) => Object.assign(new MediaStream(), {
+    getTracks: () => [{ stop: () => { stoppedTracks.push(label); } } as unknown as MediaStreamTrack],
+  });
+  const originalMediaDevices = navigator.mediaDevices;
+  const originalMediaRecorder = globalThis.MediaRecorder;
+  let lastRecorder: { state: string; mimeType: string; ondataavailable?: () => void; onerror?: () => void; onstop?: () => void; start: () => void; stop: () => void } | undefined;
+  let autoStop = false;
+  function FakeMediaRecorder() {
+    const instance = {
+      state: "inactive",
+      mimeType: "video/webm",
+      ondataavailable: undefined as (() => void) | undefined,
+      onerror: undefined as (() => void) | undefined,
+      onstop: undefined as (() => void) | undefined,
+      start() { instance.state = "recording"; lastRecorder = instance; },
+      stop() { instance.state = "inactive"; if (autoStop) instance.onstop?.(); },
+    };
+    return instance;
+  }
+  Object.defineProperty(navigator, "mediaDevices", {
+    configurable: true,
+    value: {
+      getUserMedia: (constraints: MediaStreamConstraints) => Promise.resolve(fakeStream(constraints.audio ? "audio" : "video")),
+      enumerateDevices: () => Promise.resolve([]),
+    },
+  });
+  Object.defineProperty(globalThis, "MediaRecorder", { configurable: true, value: FakeMediaRecorder });
+  try {
+    const result = await Effect.runPromise(Effect.scoped(Effect.flatMap(CameraPort, (camera) => Effect.gen(function* () {
+      const video = document.createElement("video");
+      yield* camera.bind(video);
+      yield* camera.start(1, "Back", "4:3");
+      const started1 = yield* camera.record(true);
+      lastRecorder?.onerror?.();
+      const tracksAfterError = [...stoppedTracks];
+      yield* camera.finish();
+
+      const started2 = yield* camera.record(false);
+      const finishing = yield* Effect.forkChild(camera.finish());
+      yield* Effect.yieldNow;
+      yield* Fiber.interrupt(finishing);
+      autoStop = true;
+      const started3 = yield* camera.record(false);
+      return { started1, tracksAfterError, started2, started3 };
+    }))).pipe(Effect.provide(browserCamera)));
+    expect(result).toEqual({ started1: true, tracksAfterError: ["audio"], started2: true, started3: true });
+  } finally {
+    Object.defineProperty(navigator, "mediaDevices", { configurable: true, value: originalMediaDevices });
+    Object.defineProperty(globalThis, "MediaRecorder", { configurable: true, value: originalMediaRecorder });
+  }
+});
+
+it("Telegram signIn handles 200 SESSION_PASSWORD_NEEDED responses (spec/app/platform/index.md, \"Story: Talk to the resident agent\")", async () => {
+  const client = Layer.succeed(HttpClient.HttpClient, HttpClient.make((request) =>
+    Effect.succeed(HttpClientResponse.fromWeb(request, Response.json({
+      ok: false, error_code: 401, error_message: "SESSION_PASSWORD_NEEDED", hint: "pet", pending_auth_id: "pa-1",
+    }, { status: 200 })))));
+  const result = await Effect.runPromise(Effect.flatMap(Telegram, (telegram) => telegram.signIn("+15551234567", "hash-1", "12345"))
+    .pipe(Effect.provide(Layer.provide(telegramAt("http://telegram.test"), client))));
+  expect(result).toEqual({ kind: "PasswordRequired", hint: "pet", pendingAuthId: "pa-1" });
 });

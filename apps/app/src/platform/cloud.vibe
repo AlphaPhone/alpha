@@ -52,6 +52,7 @@ module web {
     url: URL; method: string; headers: Record<string, string>; signal: AbortSignal | undefined
     body: { text: string } | { bytes: Uint8Array } | { form: FormData } | undefined | false
   } {
+    const request = typeof input === "string" || input instanceof URL ? undefined : input
     const url = new URL(typeof input === "string" || input instanceof URL ? input : input.url)
     const sent = init?.body
     const body = sent === undefined || sent === null ? undefined
@@ -59,10 +60,21 @@ module web {
       : sent instanceof Uint8Array ? { bytes: sent }
       : sent instanceof FormData ? { form: sent }
       : false
-    return { url, method: init?.method ?? "GET", headers: Object.fromEntries(new Headers(init?.headers)), body, signal: init?.signal ?? undefined }
+    return {
+      url,
+      method: init?.method ?? request?.method ?? "GET",
+      headers: Object.fromEntries(new Headers(init?.headers ?? request?.headers)),
+      body,
+      signal: init?.signal ?? request?.signal ?? undefined,
+    }
+  }
+  /** Parse a JSON string body for the cloud plugin, treating empty text as no body. @throws {never} */
+  export function jsonBody(text: string): { readonly ok: true; readonly value: unknown } | { readonly ok: false } {
+    if (text === "") return { ok: true, value: undefined }
+    try { return { ok: true, value: JSON.parse(text) as unknown } } catch { return { ok: false } }
   }
 }
-import { answer, asked, unauthorized } from web
+import { answer, asked, jsonBody, unauthorized } from web
 
 /** eliza's client takes an origin and a fetch: this origin is never reached, since each platform's fetch below sends by its own way. */
 const placeholder = "https://cloud.invalid"
@@ -179,10 +191,11 @@ function plugged(relay: Relay, wifi: WiFi.Shape): Omit<Account, "client" | "clie
 function relaying(relay: Relay, wifi: WiFi.Shape, expectedCredentialId?: CredentialId): typeof globalThis.fetch {
   return async (input, init) => {
     const { url, method, headers, body, signal } = asked(input, init)
-    const sent = body === undefined ? relayed(method, url.pathname, Object.fromEntries(url.searchParams), headers, undefined)
-      : body !== false && "text" in body ? relayed(method, url.pathname, Object.fromEntries(url.searchParams), headers, JSON.parse(body.text) as unknown)
-      : body !== false && "bytes" in body ? relayed(method, url.pathname, Object.fromEntries(url.searchParams), headers, JSON.parse(new TextDecoder().decode(body.bytes)) as unknown)
-      : undefined
+    const decoded = body === undefined ? { ok: true as const, value: undefined }
+      : body !== false && "text" in body ? jsonBody(body.text)
+      : body !== false && "bytes" in body ? jsonBody(new TextDecoder().decode(body.bytes))
+      : { ok: false as const }
+    const sent = decoded.ok ? relayed(method, url.pathname, Object.fromEntries(url.searchParams), headers, decoded.value) : undefined
     if (sent === undefined) throw new TypeError("the phone relays only JSON to the cloud")
     if (await runPromise(offline(wifi))) throw new TypeError("the phone has no network")
     try {

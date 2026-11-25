@@ -11,7 +11,7 @@ import { Agent } from "../platform/agent.vibe"
 import { Device, native, registered } from "../platform/device.vibe"
 import { ask } from "../platform/remote.vibe"
 import { civilDay, dayStart, localDate } from "../calendar/time.ts"
-import { type Job, answer, contained, due, following, hearing, reacting, run, untimed, together } from "../runtime/reactor.vibe"
+import { type Job, answer, contained, due, following, hearing, reacting, run, started, untimed, together } from "../runtime/reactor.vibe"
 import { Time } from "../runtime/time.vibe"
 import { homeInput } from "./home.vibe"
 
@@ -48,10 +48,14 @@ export const named = {
   title: (origin: Origin, id: number): string => titles.get(`${origin}:${id}`) ?? "",
 }
 
-function titled(origin: Origin, rows: ReadonlyArray<{ readonly title: string }>) {
-  rows.forEach((row, at) => titles.set(`${origin}:${at + 1}`, row.title))
+function bump() {
   version += 1
   for (const listener of [...listeners]) listener()
+}
+
+function titled(origin: Origin, rows: ReadonlyArray<{ readonly title: string }>) {
+  rows.forEach((row, at) => titles.set(`${origin}:${at + 1}`, row.title))
+  bump()
 }
 
 /** A reminder saved on the phone, as the area that keeps it tells the agenda: when it is due, whether it is overdue or done, and its title. */
@@ -139,18 +143,20 @@ function ownersMidnight(at: number): number {
 }
 
 // spec/app/home/cards.md, "An answer replaces what the calendar had; one whose access is off or has no account leaves nothing behind, and one that failed, could not reach it or ran out keeps what was read before, as not up to date"
-effect function readPhone(ticket: number, day: number): Event!! {
+effect function readPhone(ticket: number, day: number): Event!!Cards.Machine {
   const calendar = phoneCalendar()
   if (calendar === undefined) return { type: "calendarRead", ticket, source: "Unavailable", items: [] }
   const listed: AndroidCalendarList | undefined = tryPromise(() => calendar.list(span(day))) catch () => undefined
   if (listed === undefined) return { type: "calendarRead", ticket, source: "Broken", items: [] }
   if (listed.status === "permission-required") return { type: "calendarRead", ticket, source: "Denied", items: [] }
-  titled("PhoneCalendar", listed.events.map((event) => ({ title: event.title ?? "" })))
   const items: Item[] = listed.events.map((event, at) => ({
     id: at + 1, origin: "PhoneCalendar", calendar: Number.parseInt(event.calendarId, 10) || 0,
     begin: event.allDay ? ownersMidnight(event.begin) : event.begin, end: event.allDay ? ownersMidnight(event.end) : event.end,
     allDay: event.allDay, overdue: false, done: false,
   }))
+  if (Cards.canCalendarRead(try (try Cards.Machine).get(), ticket, "Ready", items)) {
+    titled("PhoneCalendar", listed.events.map((event) => ({ title: event.title ?? "" })))
+  }
   return { type: "calendarRead", ticket, source: "Ready", items }
 }
 
@@ -159,7 +165,7 @@ schema FeedEvent { readonly title: string; readonly startAt: string; readonly en
 schema Feed { readonly state: "complete" | "partial" | "unavailable"; readonly events: FeedEvent[] }
 
 // spec/app/home/cards.md, "An answer replaces what the calendar had; one whose access is off or has no account leaves nothing behind, and one that failed, could not reach it or ran out keeps what was read before, as not up to date"
-effect function readAgent(ticket: number, day: number): Event!!Agent {
+effect function readAgent(ticket: number, day: number): Event!!(Agent | Cards.Machine) {
   const { begin, end } = span(day)
   const request = HttpClientRequest.get("/api/lifeops/calendar/feed", { urlParams: { timeMin: new Date(begin).toISOString(), timeMax: new Date(end).toISOString() } })
   const feed = ask(Agent, request, Feed) catch () => undefined
@@ -170,11 +176,12 @@ effect function readAgent(ticket: number, day: number): Event!!Agent {
     const to = event.isAllDay ? localDate(event.endAt) : Date.parse(event.endAt)
     return Number.isFinite(from) && Number.isFinite(to) ? [{ title: event.title, begin: from, end: to, allDay: event.isAllDay }] : []
   })
-  titled("AgentCalendar", events)
-  return {
-    type: "agentRead", ticket, source: feed.state === "complete" ? "Ready" : "Unavailable",
-    events: events.map((event, at) => ({ id: at + 1, origin: "AgentCalendar", calendar: 0, begin: event.begin, end: event.end, allDay: event.allDay, overdue: false, done: false })),
+  const source: Cards.Source = feed.state === "complete" ? "Ready" : "Unavailable"
+  const mapped: Item[] = events.map((event, at) => ({ id: at + 1, origin: "AgentCalendar", calendar: 0, begin: event.begin, end: event.end, allDay: event.allDay, overdue: false, done: false }))
+  if (source === "Ready" && Cards.canAgentRead(try (try Cards.Machine).get(), ticket, source, mapped)) {
+    titled("AgentCalendar", events)
   }
+  return { type: "agentRead", ticket, source, events: mapped }
 }
 
 /** The Inbox area prepares the previous reader and search for the next exact Inbox visit. */
@@ -244,6 +251,33 @@ effect function restarted(): Event!!Time {
   return { type: "restart", day: civilDay(try (try Time).now()) }
 }
 
+// spec/app/home/cards.md, "An item stays on the card until it ends; an all-day item stays all day, and a reminder stays until it is done"
+const advancing = started(Effect.scoped(effect {
+  const device = try Device
+  const shell = try Shell.Machine
+  const cards = try Cards.Machine
+  const time = try Time
+  const wake = Stream.merge(
+    Stream.filter(device.visible, (shown) => shown),
+    Stream.changes(Stream.map(shell.changes, (state) => state.trail.length === 0)),
+  )
+  try fork.scoped Stream.runForEach(wake, effect () => {
+    try time.now()
+    bump()
+  })
+  try Stream.runDrain(Stream.switchMap(cards.changes, (state) => Stream.fromEffect(effect {
+    for (;;) {
+      const now = try time.now()
+      const ends = [...state.calendar.items, ...state.agent.items]
+        .filter((item) => !item.allDay && item.end > now)
+        .map((item) => item.end)
+      if (ends.length === 0) return
+      try time.until(Math.min(...ends))
+      bump()
+    }
+  })))
+}), "advancing the agenda card as events end")
+
 /** The cards, kept across restarts for their tickets: looked at when Home shows and when Alpha comes back to the front, and read again at each of the owner's midnights. */
 export const cards = together(
   reacting(Cards, {
@@ -258,4 +292,5 @@ export const cards = together(
   }),
   following(Shell.Machine, (shell) => shell.trail.length === 0, Cards.Machine, (bare) => (bare ? { type: "look", now: untimed } as const : undefined)),
   hearing(Stream.unwrap(effect { return Stream.filter((try Device).visible, (shown) => shown) }), Cards.Machine, () => ({ type: "look", now: untimed } as const)),
+  advancing,
 )

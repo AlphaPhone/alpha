@@ -14,6 +14,7 @@ import { Machine as Shell } from "../gen/app__shell.effect.vibe";
 import * as Layers from "../gen/app__shell__layers.effect.vibe";
 import home from "../src/home/index.tsx";
 import settings from "../src/settings/index.tsx";
+import { Found } from "../src/settings/phone.vibe";
 import { button, closeAll, drawn, fill, hardware, later, only, open as openAlpha, press, seen, underAct, until } from "./alpha.tsx";
 import { account, checkoutSession, checkoutUrl, type CheckoutScene, type RedemptionScene } from "./fakes/cloud.ts";
 import { type ListenerScene, notices } from "./fakes/settings.ts";
@@ -901,6 +902,16 @@ describe("Settings", () => {
     // spec/app/settings/network.md, "Leaving the page retires what it asked and forgets what it found; a join in flight is Android's and goes on"
     await hardware("back");
     await until(alpha, machines, Network.Machine, (s) => s.found === 0 && s.scan === "NotScanned");
+
+    let finishScan = () => {};
+    world.settings.wifiScanGate = new Promise<void>((done) => { finishScan = done; });
+    await press("Network");
+    await until(alpha, machines, Network.Machine, (s) => s.scanning.read.status === "Loading");
+    await hardware("back");
+    await until(alpha, machines, Network.Machine, (s) => s.scanning.read.status === "Idle" && s.found === 0);
+    finishScan();
+    await later(alpha, 50);
+    expect(await machines.runPromise(Found.use((found) => found.get()))).toEqual([]);
   });
 
   it("Read what my carrier needs to activate a SIM (spec/app/settings/carrier.md, \"Story: Read what my carrier needs to activate a SIM\")", async () => {

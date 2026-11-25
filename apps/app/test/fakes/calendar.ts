@@ -44,6 +44,8 @@ export interface FakeEvent {
 export interface CalendarScene {
   /** The agent's Calendar. */
   events: FakeEvent[];
+  /** What `/api/lifeops/calendar/feed` reports as its `state` (defaults to `"complete"`). */
+  feedState?: "complete" | "partial" | "unavailable";
   /** Every write the agent took, as `<method> <id>`, and the idempotency keys it took them under. */
   readonly writes: string[];
   readonly keys: Map<string, FakeEvent>;
@@ -132,7 +134,7 @@ export function agentEvent(title: string, begin: number, end: number, more: Part
   };
 }
 
-const etag = (event: FakeEvent) => String(event.metadata["etag"] ?? "");
+const etag = (event: FakeEvent) => (typeof event.metadata["etag"] === "string" ? event.metadata["etag"] : "");
 const bump = (event: FakeEvent) => { event.metadata = { ...event.metadata, etag: String(Number(etag(event)) + 1) }; };
 const never = () => new Promise<Response>(() => {});
 const base = "/api/lifeops/calendar";
@@ -190,7 +192,7 @@ export function calendarRoutes(scene: CalendarScene): Route[] {
       const [timeMin, timeMax] = [url.searchParams.get("timeMin") ?? "", url.searchParams.get("timeMax") ?? ""];
       const [from, to] = [Date.parse(timeMin), Date.parse(timeMax)];
       const events = scene.events.filter((event) => Date.parse(event.startAt) < to && Date.parse(event.endAt) > from);
-      return Response.json({ calendarId: "all", events, source: "synced", state: "complete", sources: [], timeMin, timeMax, syncedAt: timeMax });
+      return Response.json({ calendarId: "all", events, source: "synced", state: scene.feedState ?? "complete", sources: [], timeMin, timeMax, syncedAt: timeMax });
     },
     (request, url) => {
       if (request.method !== "GET" || url.pathname !== `${base}/calendars`) return;
