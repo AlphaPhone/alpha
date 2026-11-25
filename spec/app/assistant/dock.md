@@ -299,6 +299,11 @@ pure def lawOpeningFromTheBarOpensSheet(phone: S::Shell): bool =
 
 ### A keyboard closed while typing puts Ask Alpha back on the bar
 
+Leaving the field for anything outside Ask Alpha closes the keyboard too, as
+a tap beside the raised bar did in Alpha before VibeStack: a hardware
+keyboard or a browser never reports a keyboard going. Only one of the two
+lowers it, since the second finds Ask Alpha already on the bar.
+
 ```quint
 pure def keyboardClosed(detent: S::Detent): List[Effect] = if (detent == S::Typing) List(Lower({ steps: 1 })) else List()
 

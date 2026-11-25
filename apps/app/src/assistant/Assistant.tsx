@@ -36,7 +36,7 @@ import { isCommsView } from "../shell/views.tsx";
 import { type MediaCard, MediaReview, namedReviewQuery } from "./media-review.vibe";
 import { Documents } from "../platform/documents.vibe";
 import { AttachmentSources } from "./AttachmentSources.tsx";
-import { askComms, freedom } from "./assistant.vibe";
+import { askComms, freedom, restTyping } from "./assistant.vibe";
 import { acceptedFiles, acceptedPhotos, attachmentAuthority, chooseDocument, type FileTarget, insertFiles, previewFile, readChosenDocument, removeFile, retireTranscript, sameBinding } from "./attachments.vibe";
 import { chip, type MessageActions, useHistorySheets, useMessageRows } from "./history.tsx";
 import { ReplyFailure } from "./ReplyFailure.tsx";
@@ -533,6 +533,11 @@ export function Assistant({ runtime, messageActions, speech, canReadAloud = fals
             });
           } : undefined,
           onFocusField: () => carry(dockFocused(assistantDetent)),
+          onBlur: assistantDetent === "Typing" && !onComms ? (event) => {
+            const next = event.relatedTarget;
+            if (next instanceof Element && (event.currentTarget.contains(next) || next.closest("[role='menu']"))) return;
+            void runtime.runPromise(restTyping);
+          } : undefined,
           onHistory: () => void runtime.runPromiseExit(chatHistory),
           onSearch: history.search,
           onNew: chats.can(start) ? () => void chats.send(start) : undefined,

@@ -5,8 +5,9 @@ const toolCall = /<tool_call>[\s\S]*?(?:<\/tool_call>|$)|<function=[\s\S]*?(?:<\
 
 /**
  * Alpha's reply as the owner reads it: a tool call the model wrote out as text, from `<tool_call>` or `<function=` to
- * its closing tag or to the end of a reply that never closes it, is hidden outside a fence; inside a fence every line
- * stays as written. A reply with no such markup is returned unchanged.
+ * its closing tag or to the end of a reply that never closes it, is hidden outside a fence, and the prose around it
+ * loses the blank space it leaves; inside a fence every line stays exactly as written. A reply with no such markup is
+ * returned unchanged.
  */
 export function shownReply(text: string): string {
   if (!text.includes("<tool_call>") && !text.includes("<function=") && !text.includes("</tool_call>") && !text.includes("</function>")) return text;
@@ -14,7 +15,10 @@ export function shownReply(text: string): string {
   let prose: string[] = [];
   let fenced = false;
   const flush = () => {
-    if (prose.length) pieces.push(prose.join("\n").replace(toolCall, ""));
+    if (prose.length) {
+      const kept = prose.join("\n").replace(toolCall, "").replace(/[ \t]+$/gm, "").replace(/\n{3,}/g, "\n\n").trim();
+      if (kept !== "") pieces.push(kept);
+    }
     prose = [];
   };
   for (const line of text.split("\n")) {
@@ -25,5 +29,5 @@ export function shownReply(text: string): string {
     } else prose.push(line);
   }
   flush();
-  return pieces.join("\n").replace(/[ \t]+$/gm, "").replace(/\n{3,}/g, "\n\n").trim();
+  return pieces.join("\n");
 }
