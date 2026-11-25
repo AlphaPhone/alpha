@@ -194,5 +194,20 @@ describe("Workflows", () => {
     await later(alpha, 4_000);
     await until(alpha, area, Sheet, (state) => state.output.status === "Loaded" && state.status === "Done");
     expect(document.querySelector('[aria-label="Run details"]')?.textContent).toContain("Your statement is ready.");
+    await drawn(() => {
+      const details = document.querySelector<HTMLDetailsElement>('details[aria-label="Workflow execution details"]');
+      const reveal = details?.querySelector("summary");
+      if (!details || !reveal) throw new Error("No execution details");
+      reveal.click();
+      expect({
+        open: details.open,
+        activity: [...details.querySelectorAll("time")].map((time) => ({
+          at: time.dateTime, node: time.parentElement?.querySelector("span")?.textContent,
+        })),
+      }).toEqual({
+        open: true,
+        activity: [{ at: "2026-11-24T07:02:00.000Z", node: undefined }, { at: "2026-11-24T07:01:00.000Z", node: "preview" }],
+      });
+    });
   });
 });

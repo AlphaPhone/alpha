@@ -67,20 +67,27 @@ export effect function notesSelection(): (RendererNote | undefined)!!NotesSelect
   return { kind: "canonical-note-source", id: "notes", revision: String(snapshot.version - 1) }
 }
 
-/** Read the saved words only while their exact voice note remains selected. */
-export effect function savedTranscriptRecord(transcript: TranscriptSource): (StickyNote | undefined)!!(NotesSelection | NoteStore) {
+/** Read the exact saved voice note while the same owner and opening remain in front. */
+export effect function savedVoiceRecord(transcript: TranscriptSource): (StickyNote | undefined)!!(NotesSelection | NoteStore) {
   if (!showing(try (try Shell).get(), "Notes") || !(try (try Device).showing()) ||
     pageInert(try (try Layers).get())) return undefined
   const saved = (try NoteStore).read() catch () => undefined
   if (saved === undefined || String(saved.revision) !== transcript.record.revision) return undefined
   const note = saved.notes.find((item) => item.id === transcript.record.id)
-  if (note === undefined || (savedVoice(note)?.lines.length ?? 0) === 0) return undefined
+  if (note === undefined || note.format?.kind !== "voice") return undefined
   const selected = try notesSelection()
   const voice = try (try Voice).get()
   const matches = selected?.kind === "canonical-note" && selected.id === transcript.record.id && selected.revision === transcript.record.revision &&
     voice.showing && voice.owner === transcript.owner && voice.note === transcript.number && voice.opened === transcript.opened &&
-    String(voice.revision - 1) === transcript.record.revision && voice.added > 0
+    String(voice.revision - 1) === transcript.record.revision
   return matches ? note : undefined
+}
+
+/** Only a transcript kept on the note can be copied or attached. */
+export effect function savedTranscriptRecord(source: TranscriptSource): (StickyNote | undefined)!!(NotesSelection | NoteStore) {
+  const note = try savedVoiceRecord(source)
+  const voice = try (try Voice).get()
+  return note !== undefined && voice.added > 0 && (savedVoice(note)?.lines.length ?? 0) > 0 ? note : undefined
 }
 
 export effect function transcriptCurrent(transcript: TranscriptSource): boolean!!(NotesSelection | NoteStore) {
