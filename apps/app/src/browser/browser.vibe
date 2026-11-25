@@ -8,7 +8,7 @@ import type { Effect as PageOut, Event as PageEvent, Page } from "../../gen/app_
 import { Machine as Shell, showing } from "../../gen/app__shell.effect.vibe"
 import { TabHost, hosted } from "../platform/browser.vibe"
 import type { Install } from "../runtime/attempts.vibe"
-import { type Job, Whole, answer, due, reacting, run, started, stream, together, untimed, whole } from "../runtime/reactor.vibe"
+import { type Job, Whole, answer, contained, due, reacting, run, started, stream, together, untimed, whole } from "../runtime/reactor.vibe"
 import type { Time } from "../runtime/time.vibe"
 
 module page {
@@ -51,8 +51,13 @@ module page {
     if (search) return `https://www.google.com/search?q=${encodeURIComponent(text)}`
     return /^https?:\/\//i.test(text) ? text : `https://${text}`
   }
+  /** A URL the owner tapped in Messages, with an ordinary web scheme and no credentials. @throws {never} */
+  export function messageHref(value: string): string | undefined {
+    const address = URL.parse(value)
+    return address && address.hostname && (address.protocol === "http:" || address.protocol === "https:") && !address.username && !address.password ? address.href : undefined
+  }
 }
-import { addressOf, inputOf, placeOfPage, secure } from page
+import { addressOf, inputOf, messageHref, placeOfPage, secure } from page
 export { addressOf, inputOf }
 
 /** The native tab of a tab number: numbers are never used twice, so neither is an id. */
@@ -268,6 +273,29 @@ export const placed: void!!(Tabs.Machine | Shell | TabHost) = effect {
 
 /** The Browser's tabs, kept across restarts, and each tab's page, carried out through the phone's tab host. */
 export const browser = Layer.provideMerge(together(tabs, told, shown), pages)
+
+// spec/app/messages/index.md, "Only the newest read of the open conversation is shown, and it marks the shown messages read only where Alpha is the phone's SMS app"; spec/app/browser/index.md, "Story: Open, pick and close tabs"
+/** A link the owner tapped in Messages opens in one selected normal Browser tab through the address machine. */
+export effect function openMessageLink(href: string): boolean!!(Tabs.Machine | Pages | Shell | TabHost) {
+  const address = messageHref(href)
+  const shell = try Shell
+  if (address === undefined || Option.isNone((try TabHost).plugin) || !showing(try shell.get(), "Messages")) return false
+  const input = inputOf(address)
+  if (Address.verdict(input) !== "Open") return false
+  if (!(try contained(shell.send({ type: "openView", view: "Browser" }), "opening a Message link"))) return false
+  const tabs = try Tabs.Machine
+  const steady = try race(Stream.runHead(Stream.filter(tabs.changes, Tabs.steady)), Effect.as(sleep(2500), Option.none()))
+  if (Option.isNone(steady) || !showing(try shell.get(), "Browser")) return false
+  const before = try tabs.get()
+  if (!Tabs.canOpenTab(before, "Normal") || !(try tellTabs({ type: "openTab", kind: "Normal" }))) return false
+  const tab = before.issued + 1
+  if ((try tabs.get()).selected !== tab) return false
+  const page = try pageOf(tab)
+  if (!Address.canSubmit(page, input)) return false
+  try (try Pages).aim(tab, address)
+  if (!(try tellPage(tab, { type: "submit", i: input }))) return false
+  return try tellTabs({ type: "uncover" })
+}
 
 // spec/app/browser/index.md, "One layer at a time covers the page, and Back uncovers it"; spec/app/browser/address.md, "Back and forward move through the tab's own pages"
 /** Back inside the Browser: the layer over the page, then the tab's own page before. Whether it took one. */
