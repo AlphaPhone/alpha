@@ -1,0 +1,229 @@
+// spec/app/slack/notices.md, "Story: Hear about Slack DMs, mentions and thread replies per workspace"
+import * as Toasts from "../../gen/app__notices__toasts.effect.vibe"
+import { Said, say } from "../notices/toasts.vibe"
+import type { MessagingSessions } from "../platform/messaging.vibe"
+import { type SlackEventEnvelope, type SlackMessage, Slack } from "../platform/slack.vibe"
+import { type Job, answer, contained, reacting, run, stop } from "../runtime/reactor.vibe"
+import {
+  SlackLedger,
+  channelTitleOf,
+  convKindOf,
+  handleSlackFailure,
+  targetId,
+  tokenForWorkspace,
+  userNameOf,
+} from "./ledger.vibe"
+import * as Notices from "../../gen/app__slack__notices.effect.vibe"
+import type { Effect as Out, Event, Incoming, Target } from "../../gen/app__slack__notices.effect.vibe"
+import * as Auth from "../../gen/app__slack__auth.effect.vibe"
+import * as Composer from "../../gen/app__slack__composer.effect.vibe"
+import * as Conversation from "../../gen/app__slack__conversation.effect.vibe"
+import * as Workspaces from "../../gen/app__slack.effect.vibe"
+
+const emptyIncoming: Incoming = {
+  channel: 0,
+  threadTs: 0,
+  ts: 0,
+  kind: "PublicChannel",
+  isOwn: false,
+  mentioned: false,
+  inThread: false,
+}
+
+const pendingIncoming = new Map<number, Incoming[]>()
+
+function enqueueIncoming(workspace: number, incoming: Incoming) {
+  const list = pendingIncoming.get(workspace) ?? []
+  list.push(incoming)
+  pendingIncoming.set(workspace, list)
+}
+
+function dequeueIncoming(workspace: number): Incoming | undefined {
+  const list = pendingIncoming.get(workspace)
+  if (!list || list.length === 0) return undefined
+  const first = list.shift()
+  if (list.length === 0) pendingIncoming.delete(workspace)
+  return first
+}
+
+effect function waitAndPoll(workspace: number): void!!Notices.Machine {
+  const machine = try Notices.Machine
+  try Stream.runHead(Stream.filter(machine.changes, (s) => Notices.canPoll(s, workspace) || !Notices.watching(s, workspace)))
+  const current = try machine.get()
+  if (Notices.canPoll(current, workspace)) {
+    try contained(machine.send({ type: "poll", workspace }), "Slack notices poll")
+  }
+}
+
+effect function handleLiveEnvelope(
+  workspace: number,
+  envelope: SlackEventEnvelope,
+): void!!(Auth.Machine | Conversation.Machine | Notices.Machine | SlackLedger) {
+  const ledger = try SlackLedger
+  const meta = ledger.workspaceMeta(workspace)
+  if (!meta || envelope.team_id !== meta.teamId) return
+  const payload = envelope.event
+  if (payload.type === "tokens_revoked") {
+    try contained((try Auth.Machine).send({ type: "workspaceRevoked", workspace }), "Slack SSE tokens revoked")
+    return
+  }
+  if (payload.type === "channel_marked") {
+    const chNum = ledger.channelNum(workspace, payload.channel)
+    ledger.setChannelRead(workspace, chNum, payload.ts)
+    return
+  }
+  if (payload.type === "reaction_added" || payload.type === "reaction_removed") {
+    const chNum = ledger.channelNum(workspace, payload.item.channel)
+    ledger.applyReaction(workspace, chNum, payload.item.ts, payload.reaction, payload.user, payload.type === "reaction_added")
+    return
+  }
+  if (payload.type !== "message") return
+  if (payload.subtype === "message_changed" && payload.message) {
+    const chNum = ledger.channelNum(workspace, payload.channel)
+    ledger.updateMessageText(workspace, chNum, payload.message.ts, payload.message.text)
+    return
+  }
+  if (payload.subtype === "message_deleted" && payload.deleted_ts) {
+    const chNum = ledger.channelNum(workspace, payload.channel)
+    ledger.removeMessage(workspace, chNum, payload.deleted_ts)
+    return
+  }
+  if (payload.user === undefined || payload.text === undefined) return
+  const msg: SlackMessage = {
+    type: "message",
+    ts: payload.ts,
+    user: payload.user,
+    text: payload.text,
+    thread_ts: payload.thread_ts,
+    reply_broadcast: payload.reply_broadcast,
+  }
+  const convState = try (try Conversation.Machine).get()
+  const chNum = ledger.channelNum(workspace, payload.channel)
+  const isOwn = payload.user === meta.ownerUserId
+  const isFront = convState.front && convState.workspace === workspace && convState.channel === chNum
+  const saved = ledger.upsertMessage(workspace, payload.channel, msg, !isOwn && !isFront)
+  const channel = ledger.channelOf(workspace, saved.channel)
+  const kind = channel ? convKindOf(channel) : "PublicChannel"
+  const mentioned = payload.text.includes(`<@${meta.ownerUserId}>`)
+  const inThread = payload.thread_ts !== undefined && payload.thread_ts !== payload.ts &&
+    (ledger.hasParticipatedThread(workspace, payload.channel, payload.thread_ts) || mentioned)
+  enqueueIncoming(workspace, {
+    channel: saved.channel,
+    threadTs: saved.threadTs,
+    ts: saved.ts,
+    kind,
+    isOwn,
+    mentioned,
+    inThread,
+  })
+  try waitAndPoll(workspace)
+}
+
+effect function watchWorkspace(
+  workspace: number,
+): void!!(Slack | SlackLedger | MessagingSessions | Auth.Machine | Conversation.Machine | Notices.Machine) {
+  const slack = try Slack
+  const token = try tokenForWorkspace(workspace)
+  if (token === undefined) return
+  try waitAndPoll(workspace)
+  const stream = slack.eventsStream(token)
+  const ended = Stream.runForEach(stream, (envelope) => handleLiveEnvelope(workspace, envelope)) catch (failure) => failure
+  if (ended !== undefined) try handleSlackFailure(workspace, ended)
+}
+
+effect function pollWorkspace(ticket: number, workspace: number): Event!!SlackLedger {
+  const ledger = try SlackLedger
+  const point = ledger.nextWatermarkPoint(workspace)
+  const incoming = dequeueIncoming(workspace) ?? emptyIncoming
+  return { type: "polled", ticket, ok: true, point, incoming }
+}
+
+effect function postSlackNotice(target: Target, ts: number): void!!SlackLedger {
+  const ledger = try SlackLedger
+  const meta = ledger.workspaceMeta(target.workspace)
+  const channel = ledger.channelOf(target.workspace, target.channel)
+  const users = ledger.usersOf(target.workspace)
+  const tsStr = ledger.tsStr(target.workspace, target.channel, ts)
+  const list = target.threadTs > 0
+    ? ledger.threadMessagesOf(target.workspace, target.channel, target.threadTs)
+    : ledger.channelMessagesOf(target.workspace, target.channel)
+  const msg = tsStr ? list.find((m) => m.ts === tsStr) : list.at(-1)
+  const channelName = channel ? channelTitleOf(channel, users, meta?.ownerUserId ?? "") : `Channel ${target.channel}`
+  const title = meta ? `${meta.name} · ${channelName}` : channelName
+  const sender = msg ? userNameOf(users, msg.user) : "Slack"
+  const body = msg ? `${sender}: ${msg.text}` : "New Slack message"
+  ledger.putNotice({
+    key: targetId(target),
+    workspace: target.workspace,
+    channel: target.channel,
+    threadTs: target.threadTs,
+    ts,
+    title,
+    body,
+  })
+  const toastsOpt = try Effect.serviceOption(Toasts.Machine)
+  const saidOpt = try Effect.serviceOption(Said)
+  if (Option.isSome(toastsOpt) && Option.isSome(saidOpt)) {
+    try Effect.provideService(
+      Effect.provideService(say(`${title} — ${body}`), Toasts.Machine, toastsOpt.value),
+      Said,
+      saidOpt.value,
+    )
+  }
+}
+
+effect function openSlackTarget(target: Target): void!!(Workspaces.Machine | Conversation.Machine | Composer.Machine | SlackLedger) {
+  const ws = try Workspaces.Machine
+  const conv = try Conversation.Machine
+  const composer = try Composer.Machine
+  const ledger = try SlackLedger
+  const wsState = try ws.get()
+  if (Workspaces.canSwitchWorkspace(wsState, target.workspace)) {
+    try contained(ws.send({ type: "switchWorkspace", workspace: target.workspace }), "Slack notice switch workspace")
+  }
+  const ch = ledger.channelOf(target.workspace, target.channel)
+  const kind = ch ? convKindOf(ch) : "PublicChannel"
+  const convState = try conv.get()
+  if (Conversation.canOpenChannel(convState, target.workspace, target.channel, kind, true)) {
+    try contained(conv.send({ type: "openChannel", workspace: target.workspace, channel: target.channel, kind, front: true }), "Slack notice open channel")
+  }
+  if (target.threadTs > 0) {
+    const afterOpen = try conv.get()
+    if (Conversation.canOpenThread(afterOpen, target.threadTs)) {
+      try contained(conv.send({ type: "openThread", threadTs: target.threadTs }), "Slack notice open thread")
+    }
+  }
+  const compState = try composer.get()
+  if (Composer.canOpenTarget(compState, target.workspace, target.channel, target.threadTs, "Device")) {
+    try contained(composer.send({ type: "openTarget", workspace: target.workspace, channel: target.channel, threadTs: target.threadTs }, "Device"), "Slack notice open composer")
+  }
+}
+
+function carry(
+  fx: Out,
+): Job<Event, Slack | SlackLedger | MessagingSessions | Auth.Machine | Workspaces.Machine | Conversation.Machine | Composer.Machine | Notices.Machine, []> {
+  return match (fx) {
+    when { tag: "ScheduleWorkspace", let workspace }:
+      run(`slack-sse-${workspace}`, watchWorkspace(workspace));
+    when { tag: "UnscheduleWorkspace", let workspace }:
+      stop(`slack-sse-${workspace}`);
+    when { tag: "PollWorkspace", let ticket, let workspace }:
+      answer(`slack-poll-${ticket}`, pollWorkspace(ticket, workspace), { type: "polled", ticket, ok: false, point: 0, incoming: emptyIncoming });
+    when { tag: "PostNotice", let target, let ts }:
+      run(`slack-notice-${targetId(target)}`, postSlackNotice(target, ts));
+    when { tag: "WithdrawTarget", let target }:
+      run(`slack-withdraw-target-${targetId(target)}`, effect { (try SlackLedger).removeTargetNotice(target) });
+    when { tag: "WithdrawWorkspace", let workspace }:
+      run(`slack-withdraw-ws-${workspace}`, sync(() => { pendingIncoming.delete(workspace) }));
+    when { tag: "WithdrawAll" }:
+      run("slack-withdraw-all", effect { (try SlackLedger).clearAllNotices() });
+    when { tag: "OpenSlackTarget", let target }:
+      run(`slack-open-${targetId(target)}`, openSlackTarget(target));
+  }
+}
+
+/** Slack per-workspace SSE live-sync and notification machine layer. */
+export const slackNotices = reacting(Notices, {
+  open: [{ type: "notifyPermissionChanged", notifyAllowed: true }],
+  carry,
+})

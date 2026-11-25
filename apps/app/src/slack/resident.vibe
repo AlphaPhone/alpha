@@ -1,0 +1,152 @@
+// spec/app/slack/index.md, "Story: Switch workspaces and browse Slack conversations with strict isolation"; spec/app/slack/agent.md, "Story: Let Alpha help across my Slack workspaces safely"
+import { waiting } from "../home/waiting.vibe"
+import { contained, started, together } from "../runtime/reactor.vibe"
+import * as Notices from "../../gen/app__slack__notices.effect.vibe"
+import * as Conversation from "../../gen/app__slack__conversation.effect.vibe"
+import * as Composer from "../../gen/app__slack__composer.effect.vibe"
+import * as Auth from "../../gen/app__slack__auth.effect.vibe"
+import * as Workspaces from "../../gen/app__slack.effect.vibe"
+import * as Preferences from "../../gen/app__settings__preferences.effect.vibe"
+import {
+  type SlackAgentRequest,
+  type SlackAgentResult,
+  type SlackAmbientMessage,
+  type SlackAmbientSnapshot,
+  executeSlackAgentRequest,
+  slackAgent,
+  slackAmbientSnapshot,
+  syncSlackAgentScreen,
+} from "./agent.vibe"
+import { slackAuth } from "./auth.vibe"
+import { slackComposer } from "./composer.vibe"
+import { slackConversation } from "./conversation.vibe"
+import { SlackLedger, channelTitleOf, slackLedger } from "./ledger.vibe"
+import { slackNotices } from "./notices.vibe"
+import { slackWorkspaces } from "./workspaces.vibe"
+
+export type { SlackAgentRequest, SlackAgentResult, SlackAmbientMessage, SlackAmbientSnapshot }
+export { executeSlackAgentRequest, slackAmbientSnapshot }
+
+/** One preview row shown on the Home `SlackCard`. */
+export interface SlackHomeRow {
+  readonly title: string
+  readonly detail: string
+}
+
+/** Snapshot read by Home's `SlackCard` for the active Slack workspace. */
+export interface SlackHomeCard {
+  readonly standing: Workspaces.Standing
+  readonly unread: number
+  readonly mentions: number
+  readonly rows: ReadonlyArray<SlackHomeRow>
+}
+
+function waitingLabel(said: Workspaces.Attention): string | undefined {
+  if ((said.standing !== "Ready" && said.standing !== "Stale") || said.unread < 1) return undefined
+  if (said.mentions > 0) return `${said.mentions} mention${said.mentions === 1 ? "" : "s"}`
+  return `${said.unread} unread`
+}
+
+const homeBadge = started(effect {
+  const list = try Workspaces.Machine
+  try Stream.runForEach(list.changes, (state) => sync(() => {
+    waiting.tell("Slack", waitingLabel(Workspaces.attention(state)))
+  }))
+}, "telling Home about Slack")
+
+const frontSync = started(effect {
+  const conv = try Conversation.Machine
+  const notices = try Notices.Machine
+  try Stream.runForEach(conv.changes, effect (state) => {
+    const workspace = state.front && state.channel > 0 ? state.workspace : 0
+    const channel = state.front && state.channel > 0 ? state.channel : 0
+    const threadTs = state.front && state.channel > 0 ? state.threadTs : 0
+    const current = try notices.get()
+    if (Notices.canFrontChanged(current, workspace, channel, threadTs)) {
+      try contained(notices.send({ type: "frontChanged", workspace, channel, threadTs }), "Slack notices front sync")
+    }
+  })
+}, "syncing Slack front target to notices")
+
+const screenSync = started(effect {
+  const auth = try Auth.Machine
+  const ws = try Workspaces.Machine
+  const conv = try Conversation.Machine
+  const prefsOpt = try Effect.serviceOption(Preferences.Machine)
+  const shareStream = Option.isSome(prefsOpt)
+    ? Stream.map(prefsOpt.value.changes, (p) => Preferences.allows(p, "SlackContext"))
+    : Stream.succeed(true)
+  const combined = Stream.zipLatest(Stream.zipLatest(auth.changes, ws.changes), Stream.zipLatest(conv.changes, shareStream))
+  try Stream.runForEach(combined, ([, [, shareAllowed]]) => syncSlackAgentScreen(shareAllowed))
+}, "syncing Slack screen to agent")
+
+/** Read the current Home `SlackCard` snapshot from the active workspace's spec state and non-secret ledger. */
+export const slackHomeCard: SlackHomeCard!!(Workspaces.Machine | SlackLedger) = effect {
+  const state = try (try Workspaces.Machine).get()
+  const ledger = try SlackLedger
+  const said = Workspaces.attention(state)
+  const meta = state.selected.workspace > 0 ? ledger.workspaceMeta(state.selected.workspace) : undefined
+  const users = state.selected.workspace > 0 ? ledger.usersOf(state.selected.workspace) : new Map()
+  const channels = state.selected.workspace > 0 ? ledger.conversationsOf(state.selected.workspace) : []
+  const rows: SlackHomeRow[] = channels
+    .filter((ch) => (ch.unread_count_display ?? ch.unread_count ?? 0) > 0)
+    .slice(0, 3)
+    .map((ch) => ({
+      title: ch.is_im || ch.is_mpim ? channelTitleOf(ch, users, meta?.ownerUserId ?? "") : `#${ch.name}`,
+      detail: ch.latest?.text ?? "",
+    }))
+  return {
+    standing: said.standing,
+    unread: said.unread,
+    mentions: said.mentions,
+    rows,
+  }
+}
+
+/** Step back within the Slack area: Thread drawer -> Channel -> OAuth/Consent -> Shell. */
+export const slackBack: boolean!!(Auth.Machine | Conversation.Machine | Composer.Machine) = effect {
+  const conv = try Conversation.Machine
+  const comp = try Composer.Machine
+  const auth = try Auth.Machine
+  const cState = try conv.get()
+  if (Conversation.canCloseThread(cState)) {
+    try contained(conv.send({ type: "closeThread" }), "Slack back close thread")
+    const compState = try comp.get()
+    if (Composer.canOpenTarget(compState, cState.workspace, cState.channel, 0, "Owner")) {
+      try contained(comp.send({ type: "openTarget", workspace: cState.workspace, channel: cState.channel, threadTs: 0 }, "Owner"), "Slack back composer to channel")
+    }
+    return true
+  }
+  if (Conversation.canCloseChannel(cState)) {
+    try contained(conv.send({ type: "closeChannel" }), "Slack back close channel")
+    const compState = try comp.get()
+    if (Composer.canCloseTarget(compState, "Owner")) {
+      try contained(comp.send({ type: "closeTarget" }, "Owner"), "Slack back close composer")
+    }
+    return true
+  }
+  const aState = try auth.get()
+  if (Auth.canCancelOAuth(aState)) {
+    try contained(auth.send({ type: "cancelOAuth" }), "Slack back cancel OAuth")
+    return true
+  }
+  if (Auth.canDeclineConsent(aState)) {
+    try contained(auth.send({ type: "declineConsent" }), "Slack back decline consent")
+    return true
+  }
+  return false
+}
+
+/** Combined resident Layer providing all six Slack spec machines, ledger, SSE live sync, Home badge, and Ask Alpha integration. */
+export const slackResident = together(
+  slackLedger,
+  slackAuth,
+  slackWorkspaces,
+  slackConversation,
+  slackComposer,
+  slackAgent,
+  slackNotices,
+  homeBadge,
+  frontSync,
+  screenSync,
+)
