@@ -393,6 +393,30 @@ describe("Calendar without a connected account", () => {
       { revision: saved.revision, dueAtMs: world.at(0, 9.5), completedAtMs: world.now },
     ] });
   });
+
+  it("Shows the elapsed repeat date skipped by a late completion (spec/app/reminders/index.md, \"Completing a reminder holds a five-second Undo snapshot and advances a repeating reminder to its next due day\")", async () => {
+    const world = morning(false);
+    const { alpha } = await open(world, only("view:Calendar"));
+    const runtime = calendar.runtime(alpha);
+    await openCalendar(alpha);
+    await until(alpha, alpha.runtime, Reminders, (state) => state.sync.status === "Loaded");
+    const saved = await alpha.runtime.runPromise(createReminderItem({
+      listId: DEFAULT_LIST_ID, title: "Read the agenda", dueDate: "2026-11-23", dueMinute: 510, alertMinutes: 0, recurrence: "daily",
+    }));
+    if (saved === undefined) throw new Error("Expected the daily reminder");
+    await until(alpha, alpha.runtime, Reminders, (state) => state.write.outcome === "Confirmed");
+    await press(dayButton(world.today - 1));
+    await until(alpha, runtime, View, (state) => state.anchor === world.today - 1 && state.reminders === 1);
+    await press(/^Read the agenda,/);
+    await press("Complete reminder occurrence");
+    await until(alpha, alpha.runtime, Reminders, (state) => state.write.outcome === "Confirmed");
+    const detail = document.querySelector('[data-alpha-subview="calendar-detail"]');
+    expect(detail?.textContent).toContain("Wednesday, Nov 25");
+    expect(detail?.textContent).toContain("1 elapsed repeat dates skipped");
+    expect(world.reminders.items.find((item) => item.id === saved.id)).toMatchObject({ dueDate: "2026-11-25", history: [
+      { dueAtMs: world.at(-1, 8.5), completedAtMs: world.now, skippedDates: 1 },
+    ] });
+  });
 });
 
 it("Shows the newly verified Google grant when Calendar Settings reopens (spec/app/settings/index.md, \"Each page links to what another area owns there\")", async () => {
