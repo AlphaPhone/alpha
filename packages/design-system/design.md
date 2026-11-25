@@ -106,6 +106,9 @@ this prose into tokens. To change the design, describe it, and have the change w
 | `ring` | oklch(0.45201372 0.31321437 264.05202064) | oklch(0.704 0.157 278) |
 | `ok` | oklch(0.509 0.134 149.4) | oklch(0.727 0.208 148.3) |
 | `warn` | oklch(0.514 0.111 70.3) | oklch(0.761 0.159 77.7) |
+| `status-ok` | oklch(0.5685 0.1522 147.98) | oklch(0.5685 0.1522 147.98) |
+| `status-warn` | oklch(0.7605 0.1587 77.67) | oklch(0.7605 0.1587 77.67) |
+| `status-error` | oklch(0.5785 0.2063 29.01) | oklch(0.5785 0.2063 29.01) |
 | `info` | oklch(0.354 0.245 264.1) | oklch(0.704 0.157 278) |
 | `alpha` | oklch(0.45201372 0.31321437 264.05202064) | — |
 | `alpha-foreground` | oklch(1 0 0) | — |
