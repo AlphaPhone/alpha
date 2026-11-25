@@ -91,7 +91,7 @@ public final class AlphaActionJournalPlugin extends ActionJournalPlugin {
   deviceWork(call, () -> {
    String kind = call.getString("kind", "");
    String id = call.getString("id", "");
-   if (!("message".equals(kind) || "voicemail".equals(kind)) || id == null || !DELETION_ID.matcher(id).matches()) {
+   if (!("message".equals(kind) || "voicemail".equals(kind) || "contact".equals(kind)) || id == null || !DELETION_ID.matcher(id).matches()) {
     throw new IllegalArgumentException("Invalid telephony deletion identity");
    }
    DeferredDeletionCoordinator coordinator = deletions();
