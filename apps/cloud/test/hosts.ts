@@ -1,5 +1,5 @@
 // spec/cloud/rollout.md, "Story: Tell whether a deployed environment is ready"
-import { edgeWorker } from "../src/edge.vibe";
+import edgeWorker from "../src/edge.vibe";
 
 /**
  * A fetch that reaches an environment of Alpha's own cloud whose API Worker is the cloud command listening at `local`:

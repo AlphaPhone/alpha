@@ -28,7 +28,8 @@ does not import React, and a UI package holds no business rules. A shared type l
 |---|---|
 | `pnpm dev` | Studio, and every package's `dev` script beside it |
 | `pnpm quick` | the fast local check: types, tests, ESLint and Stylelint, in every package |
-| `pnpm verify` | what CI runs: build, types, tests, browser tests, every `check`, lint, `pnpm analyze` and `pnpm selftest`, which also installs and checks each example |
+| `pnpm no-bun` | scans tracked files in the active workspace for Bun usage and works before workspace dependencies are installed |
+| `pnpm verify` | what CI runs: `pnpm no-bun`, build, types, tests, browser tests, every `check`, lint, `pnpm analyze` and `pnpm selftest`, which also installs and checks each example |
 | `pnpm all <task>…` | one or more kinds of task in every package: `pnpm all build typecheck test` |
 | `pnpm test:browser` | the browser tests |
 | `pnpm test:models` | every workspace `check`: the root's, which is its owners' too, and Studio's |
@@ -57,8 +58,7 @@ The hosted VibeStack app build keys its `//#gen` dependency on `apps/app/gen/`.
 Its other inputs come from `apps/app/` and the declared workspace builds. Add any
 new reads outside those inputs to the build profile in `.github/workflows/ci.yml`.
 
-Pull requests go to `main`, the only long-lived branch; what CI runs on them is in
-[CI](#ci).
+See [CI](#ci) for the checks each branch runs on pull requests and pushes.
 
 ## Changing the tools
 
@@ -430,9 +430,10 @@ configured scopes are in `knip.config.js`, `.madgerc`, `.jscpd.json` and
 
 | When | Runs |
 |---|---|
-| Pull request or push to `main` | `verify` runs build, types, tests, browser tests, all checks, ESLint, Stylelint, Knip, Madge, jscpd and the docs and examples self-tests with up to four concurrent Turbo tasks on the four-core hosted runner and `--continue=dependencies-successful`. In parallel, `selftest-a`, `selftest-b` and `selftest-rest` run the three tool self-test tasks. |
+| Pull request or push to `vibestack-develop` | `pnpm no-bun` checks the active workspace without installing workspace dependencies. |
+| Pull request or push to `main` | `verify` runs `pnpm no-bun`, build, types, tests, browser tests, all checks, ESLint, Stylelint, Knip, Madge, jscpd and the docs and examples self-tests with up to four concurrent Turbo tasks on the four-core hosted runner and `--continue=dependencies-successful`. In parallel, `selftest-a`, `selftest-b` and `selftest-rest` run the three tool self-test tasks. |
 | Nightly | Every check fresh under the fixed nightly profile; saved counterexamples become a pull request into the branch the run checked, or the default branch for a tag run. Beside it, the three `selftest:tools` tasks without the selftest's shared tool runs |
-| A `v*` tag (`release.yml`) | Build, `pnpm pack`, the prerequisites and `pnpm selftest --only --concurrency=1` read from the shared cache, and the tarball attached to a GitHub release |
+| Push to `main` / dispatch (`release.yml`) | Builds an unsigned Alpha launcher candidate on `main`; manual dispatch in the protected `release` environment signs, delivers, qualifies and publishes it ([Releasing](#releasing)) |
 
 This repository runs its root specs in the ordinary check. Consumer
 workflows using the four simulation jobs assign modules by file hash. Each

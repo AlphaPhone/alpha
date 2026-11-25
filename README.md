@@ -39,15 +39,19 @@ pnpm install
 pnpm eliza    # once per pinned commit: clone, install and build eliza (a few minutes)
 pnpm dev      # Studio, and the app over eliza's agent and cloud, started for this run
 pnpm check    # models, proofs, types, tests, traces and each page explored
-pnpm verify   # everything CI runs
+pnpm verify   # includes the pnpm-only check
 ```
 
 `pnpm eliza` builds the commit `eliza.lock.json` pins outside the repository, in
 `~/.cache/alpha/eliza-vibestack/<commit>` (or the directory `ALPHA_ELIZA_DIR`
 names), and links it as `.eliza`; every worktree shares that build, and
-typecheck, test, build and dev say so where it is missing. `pnpm dev` starts
-eliza's cloud command and its agent as processes of that run, with a scripted
-model in place of a paid one, and stops them with it. `ALPHA_FAKES=1 pnpm dev`
+typecheck, test, build and dev say so where it is missing. `pnpm dev` builds
+the agent pack as `@repo/agent` does for the phone, then starts eliza's cloud
+command and that pack's agent, with every plugin and action the phone's pack
+allows, as processes of that run, with a scripted model in place of a paid
+one, and stops them with it; the journeys run the same pack.
+`ALPHA_DEV_MODEL=cerebras` asks Cerebras's own API on the owner's key
+instead, so the agent's real tools run on a real model. `ALPHA_FAKES=1 pnpm dev`
 serves the app over the journeys' fakes instead, and `ALPHA_FAKES=phone` over
 the fake phone's plugins.
 
@@ -293,14 +297,11 @@ definitions, then the system prompt, then the messages) for 10 to 20 minutes;
 one changed byte in a tool definition makes the rest a miss. The window is
 131,072 tokens and a call writes at most 40,960, reasoning included.
 
-The audit and its probe are develop's `scripts/agent-context-audit.ts` and
-`scripts/agent-cache-probe.ts` (Bun), not yet ported here, so the procedure
-is [develop's runbook](https://github.com/eliza-research/alpha/blob/bd70db55b2b3cab4c6f0ec2f4faa28edfa83979a/docs/runbooks/agent-context-audit.md):
-copy the agent's database off a phone you own, audit the copy outside the
-repository and delete it after (it holds the owner's conversations); run the
-probe again, alone on the key, when the provider or model changes. On this
+The current branch still needs its own model context audit and cache probe.
+The earlier [audit runbook](https://github.com/eliza-research/alpha/blob/bd70db55b2b3cab4c6f0ec2f4faa28edfa83979a/docs/runbooks/agent-context-audit.md)
+records the evidence collected before the runtime migration. On this
 tree's runtime the model calls are in the on-device store's `device_records`
-(collection `logs`), which a port of the audit must read. That runbook also
+(`logs` collection), which a port of the audit must read. That runbook also
 records what eliza's pin already settles: since elizaOS/eliza#40250 every
 request with tools carries `RESTORE_CONTEXT` in one form, so it no longer
 changes the cached prefix, and #40249 bounds the re-send on the direct
@@ -319,20 +320,15 @@ route. A change to what the agent sends shows:
 
 `pnpm --filter @repo/app aosp` stages, signs, records, verifies and enrolls
 Alpha's image from a launcher APK on eliza's image tools; it never flashes a
-phone or publishes an update. It does not run yet: `apps/app/scripts/aosp.ts`
-still reads a capabilities file that is not in the tree. Until that is fixed,
-and until this tree builds the launcher, images and APKs come from Alpha
-`develop`.
+phone or publishes an update.
 
-- **The launcher APK:** develop's `android:build:inputs` lists what is
-  missing, `android:build:local -- --release` builds the debug, release and
-  instrumentation APKs into `artifacts/`, and `android:verify` checks them
-  (JDK 21, Python 3, Android SDK platform and build-tools 36, `JAVA_HOME`
-  and `ANDROID_HOME`). A distributable release comes from the Release
-  workflow's signed candidate (below), never a local build.
-  `android:build:fast -- --install` is a developer rebuild only: over an
-  image's system app it refuses, because a debuggable update drops Phone and
-  Messages roles; `--allow-system-update` overrides that deliberately.
+- **The launcher APK:** `pnpm --filter @repo/app android inputs` checks the
+  build inputs. `pnpm --filter @repo/app android build --release` builds
+  the debug, unsigned release and instrumentation APKs in the app's
+  `artifacts/`. `pnpm --filter @repo/app android verify` checks both
+  launcher APKs and their packaged Node runtime. The build needs JDK 21
+  and Android SDK platform and build-tools 36. A distributable release
+  comes from the Release workflow's signed candidate.
 - **Staging:** `stage --target pixel10a|cuttlefish --apk <apk> --aosp-source <dir> --output <new dir>`
   (Pixel 10a with `--factory-image`) checks that the AOSP checkout carries
   eliza's `soong-app-native` patch and every patch named with `--patch`, and
@@ -434,16 +430,14 @@ phones: an unsigned candidate numbered by its run, above the retired
 channel's version 75 and every version published; mirrored privately,
 signed under a reviewed plan, qualified for voice, and published on
 `app-stable-alphacompute`, the APK first and its anonymous download verified
-before the manifest moves. This tree does not run that job yet
-(`.github/workflows/release.yml` releases the Vibestack tool), so Alpha's
-launcher is still released from Alpha `develop`, by the procedure in its
-[developer guide](https://github.com/eliza-research/alpha/blob/bd70db55b2b3cab4c6f0ec2f4faa28edfa83979a/docs/development.md#device-and-image-tooling):
-fetch the candidate artifact of a main run, mirror it to the private bucket
-with a generation-match of 0 and read it back, sign under a reviewed plan,
+before the manifest moves. The Release workflow builds a candidate on
+`main`. The owner dispatches signing and publication with the candidate run
+ID, the reviewed signing plan digest and the voice qualification evidence
+([release procedure](CONTRIBUTING.md#releasing)). For voice qualification,
 record the content-free Cartesia voice qualification of the exact signed
 APK (consent, session, acoustic input, blue bar, transcript, audible reply,
-mute, unmute, stop released), publish, and read the APK and manifest back
-anonymously. A phone reads
+mute, unmute, stop released). After publication, read the APK and manifest
+back anonymously. A phone reads
 `https://github.com/eliza-research/alpha/releases/download/app-stable-alphacompute/alpha-update-stable.json`;
 fetching it without credentials is the manual check (develop's
 `update-channel-status.ts` is not ported). Channel evidence is not device

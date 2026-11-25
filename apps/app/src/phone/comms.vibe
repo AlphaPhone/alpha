@@ -7,8 +7,29 @@ import { Machine as Messages } from "../../gen/app__messages.effect.vibe"
 import { Machine as Phone, clear, liveCall } from "../../gen/app__phone.effect.vibe"
 import { contained, following, reacting, started, together } from "../runtime/reactor.vibe"
 
+/** The actual shell app an entry in the communications stage can return to. */
+export function commsViewOf(app: Comms.CommsApp): "Phone" | "Messages" | "Contacts" {
+  return app === "PhoneApp" ? "Phone" : app === "MessagesApp" ? "Messages" : "Contacts"
+}
+
 // spec/app/phone/comms.md, "A proposal kept across a restart is shown, never approved, until Alpha proposes it again"
 const machine = reacting(Comms, { keep: 1, open: [{ type: "reopen" }, "Device"] })
+
+/** A request handed from owner-side search to the open Ask Alpha sheet. */
+export interface CommsPrompt {
+  readonly about: string
+  readonly text: string
+}
+
+export service CommsPrompts {
+  submit(prompt: CommsPrompt): void!!
+  readonly submissions: Stream.Stream<CommsPrompt>
+}
+
+const prompts = Layer.effect(CommsPrompts, effect {
+  const queue = try Queue.sliding<CommsPrompt>(1)
+  return { submit: (prompt: CommsPrompt) => asVoid(Queue.offer(queue, prompt)), submissions: Stream.fromQueue(queue) }
+})
 
 // spec/app/phone/comms.md, "End is beside the bar when closed, in the call card when open, in the strip when full, and on the voice panel during a voice turn"
 const calls = following(Phone, (phone) => ({ live: liveCall(phone), emergencyCall: liveCall(phone) && !clear(phone) }), Comms.Machine, (call): Event => ({ type: "callChanged", ...call }), "Device")
@@ -17,7 +38,20 @@ const calls = following(Phone, (phone) => ({ live: liveCall(phone), emergencyCal
 const rings = following(Strip, (strip) => (strip.calls.some((call) => call.phase === "Ringing") ? shownCall(strip.calls).id : ""), Comms.Machine, (ring): Event => (ring === "" ? { type: "ringEnded" } : { type: "ringStarted", ring }), "Device")
 
 // spec/app/phone/comms.md, "The bar addresses Alpha exactly while the conversation is open, and the left slot holds the other target"
-const lowered = following(Shell, (shell) => shell.assistant === "Bar", Comms.Machine, (resting): Event | undefined => (resting ? { type: "chatClosed" } : undefined), "Device")
+const detents = started(effect {
+  const shell = try Shell
+  const comms = try Comms.Machine
+  try Stream.runForEach(Stream.changes(Stream.map(shell.changes, (where) => where.assistant)), effect (detent) => {
+    const state = try comms.get()
+    if (detent === "Bar" || detent === "Typing") {
+      if (state.height !== "SheetClosed") try contained(comms.send({ type: "chatClosed" }, "Device"), "closing Ask Alpha")
+      return
+    }
+    if (state.height === "SheetClosed") try contained(comms.send({ type: "alphaOpened" }, "Owner"), "opening Ask Alpha")
+    const height = detent === "Full" ? "SheetFull" : "SheetOpen"
+    if ((try comms.get()).height !== height) try contained(comms.send({ type: "heightChanged", height }, "Device"), "moving the comms sheet")
+  })
+}, "comms sheet detents")
 
 // spec/app/phone/comms.md, "A view change while the conversation is open keeps the sheet's height and remembers the view it left"
 /** The subject on screen, of Phone or Messages in front; Contacts tells its own. */
@@ -43,4 +77,4 @@ const subjects = started(effect {
 }, "comms subjects")
 
 /** The stage of Phone, Messages and Contacts: kept across restarts, told of calls, rings, the subject on screen and Ask Alpha lowering. */
-export const comms = together(machine, calls, rings, lowered, subjects)
+export const comms = together(machine, prompts, calls, rings, detents, subjects)

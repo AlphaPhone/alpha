@@ -1,10 +1,10 @@
 // spec/app/messages/index.md, "Story: See my conversations"; spec/app/messages/index.md, "Story: Read a conversation"; spec/app/messages/index.md, "Story: Act on a message"; spec/app/messages/index.md, "Story: Start a new message"; spec/app/messages/composer.md, "Story: Keep my draft"; spec/app/messages/composer.md, "Story: Send a message"
-import { MMS_ATTACHMENT_TYPES } from "@elizaos/os/bridges/definitions/messages";
+import { MMS_ATTACHMENT_TYPES, MMS_MAX_BODY, MMS_MAX_RECIPIENTS } from "@elizaos/os/bridges/definitions/messages";
 import type { MessageRow, ThreadRow } from "@elizaos/os/bridges/messages";
-import { Alert, Banner, Button, Chip, ConfirmDialog, EmptyState, ListGroup, ListRow, SearchField, Spinner, Textarea } from "@repo/ui";
+import { Alert, Avatar, Banner, Button, Chip, ConfirmDialog, SearchField, Spinner, Textarea } from "@repo/ui";
 import type { ManagedRuntime } from "effect";
-import { ArrowLeft, ImagePlus, Phone as Call, Send, Sparkles, X } from "lucide-react";
-import { useState } from "react";
+import { Camera, ChevronDown, ChevronLeft, ChevronUp, CircleAlert, Copy, Image as PictureIcon, ImagePlus, Phone as Call, Plus, RefreshCw, Search, Send, Sparkles, SquarePen, Trash2 } from "lucide-react";
+import { memo, useCallback, useMemo, useRef, useState, type MouseEvent, type PointerEvent } from "react";
 import type { Machine as PhoneMachine } from "../../gen/app__phone.effect.vibe";
 import { clear } from "../../gen/app__phone.ts";
 import { useMachine as usePhone } from "../../gen/app__phone.react.ts";
@@ -14,245 +14,513 @@ import { useMachine as useMessages } from "../../gen/app__messages.react.ts";
 import type { Machine as ComposerMachine } from "../../gen/app__messages__composer.effect.vibe";
 import { delivered, sentAll, uncertain } from "../../gen/app__messages__sending.ts";
 import { useMachine as useComposer } from "../../gen/app__messages__composer.react.ts";
-import { when } from "../phone/words.ts";
+import { normalizePhoneNumber } from "@elizaos/os/bridges/definitions/phone";
+import { Time } from "../runtime/time.vibe";
+import { shortWhen } from "../phone/words.ts";
 import { Drafts, attachAll, prepare, supported } from "./composer.vibe";
 import { Conversations, Inbox, titleOf } from "./messages.vibe";
-import { CommsBar, type CommsServices } from "../phone/CommsBar.tsx";
+import { CommsBar, useCommsDock, type CommsServices } from "../phone/CommsBar.tsx";
 
 export interface MessagesProps {
   /** Provides Messages' and the composer's machines, both resident, Phone's, for whether a call may be an emergency call, and what they count. */
-  runtime: ManagedRuntime.ManagedRuntime<MessagesMachine | ComposerMachine | PhoneMachine | Inbox | Conversations | Drafts | CommsServices, unknown>;
+  runtime: ManagedRuntime.ManagedRuntime<MessagesMachine | ComposerMachine | PhoneMachine | Inbox | Conversations | Drafts | CommsServices | Time, unknown>;
+  onBack?: (() => void) | undefined;
+  onOpenLink?: ((href: string) => void) | undefined;
 }
 
 
+type MessagesUI = ReturnType<typeof useMessages>;
+
+const header = "flex min-h-12 shrink-0 items-center gap-1 px-2";
+const contactRow = "flex min-h-15 w-full items-center gap-3 px-5 py-1.5 text-left hover:bg-accent focus-visible:outline-2 focus-visible:outline-ring";
+const messageURL = /\bhttps?:\/\/[^\s<>"']+/giu;
+const noMessages: ReadonlyArray<MessageRow> = [];
+
+function firstName(title: string) {
+  return /^[+(\d]/.test(title) || title.includes(",") ? title : (title.split(/\s+/, 1)[0] ?? title);
+}
+
+function initials(title: string) {
+  const words = title.trim().split(/\s+/u);
+  return [words[0], words.length > 1 ? words.at(-1) : undefined].map((word) => Array.from(word ?? "")[0] ?? "").join("").toUpperCase();
+}
+
+/** A message's time as develop's bubbles say it: the time today, and the date before it on another day. */
+function stamp(at: number, now: number): string {
+  const date = new Date(at);
+  const time = date.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+  if (date.toDateString() === new Date(now).toDateString()) return time;
+  const day = date.toLocaleDateString([], { month: "short", day: "numeric", year: date.getFullYear() === new Date(now).getFullYear() ? undefined : "numeric" });
+  return `${day} · ${time}`;
+}
+
+function clearChoice(runtime: MessagesProps["runtime"]) {
+  runtime.runSync(Inbox.use((inbox) => inbox.set({ chosen: "" })));
+}
+
 /**
  * Messages: the conversation list, one conversation with its composer, and the picker that starts a new message.
- * Only the owner's Send sends; Alpha's draft is marked as Alpha's and never sends itself.
+ * Only the owner's Send sends. Alpha's draft is marked as Alpha's and never sends itself.
  * @model spec/app/messages/index.md
  */
-export function Messages({ runtime }: MessagesProps) {
+export function Messages({ runtime, onBack, onOpenLink }: MessagesProps) {
   const messages = useMessages(runtime);
-  const [query, setQuery] = useState("");
   if (messages.cause) return <Alert variant="destructive" className="m-4">Alpha could not open Messages</Alert>;
-  const { state, can, send } = messages;
+  const { state } = messages;
   if (!state) return null;
-  const held = runtime.runSync(Inbox.use((inbox) => inbox.get()));
-  const set = (change: Parameters<Inbox["set"]>[0]) => runtime.runSync(Inbox.use((inbox) => inbox.set(change)));
-  const search = (typed: string) => {
-    setQuery(typed);
-    set({ sought: typed });
-    const event = { type: "search", typed: typed.trim() !== "" } as const;
-    if (can(event)) void send(event);
-  };
-  const allow = smsNeeded(state) && (can({ type: "allow", need: "SmsAccess" }) || can({ type: "goToSettings", need: "SmsAccess" }));
   return (
-    <section aria-label="Messages" className="flex flex-col gap-3 p-4">
-      {allow && (
-        <Banner variant="warn" action={can({ type: "allow", need: "SmsAccess" }) ? <Button size="sm" onClick={() => void send({ type: "allow", need: "SmsAccess" })}>Allow</Button> : <Button size="sm" variant="outline" onClick={() => void send({ type: "goToSettings", need: "SmsAccess" })}>Open Settings</Button>}>
-          Messages needs access to your texts
-        </Banner>
-      )}
-      {state.pane === "Threads" && (
-        <>
-          <div className="flex items-center gap-2">
-            <SearchField className="flex-1" aria-label="Search or ask" placeholder="Search or ask" value={query} onValueChange={search} />
-            {can({ type: "newMessage" }) && <Button onClick={() => void send({ type: "newMessage" })}>New message</Button>}
-          </div>
-          {state.sought && <Chip onClear={() => search("")} clearLabel="Clear the search">{query}</Chip>}
-          <div className="flex gap-2" role="group" aria-label="Show">
-            <Button size="sm" variant={state.chip === "AllThreads" ? "primary" : "outline"} disabled={!can({ type: "pickChip", chip: "AllThreads" }) && state.chip !== "AllThreads"} onClick={() => void send({ type: "pickChip", chip: "AllThreads" })}>All</Button>
-            <Button size="sm" variant={state.chip === "UnreadThreads" ? "primary" : "outline"} disabled={!can({ type: "pickChip", chip: "UnreadThreads" }) && state.chip !== "UnreadThreads"} onClick={() => void send({ type: "pickChip", chip: "UnreadThreads" })}>Unread</Button>
-          </div>
-          {state.list.status === "Loading" && state.threads === 0 && <Spinner label="Reading conversations" />}
-          {threadsFailed(state) && <Banner variant="destructive" action={can({ type: "retryThreads" }) && <Button size="sm" variant="outline" onClick={() => void send({ type: "retryThreads" })}>Retry</Button>}>Conversations could not be read</Banner>}
-          {noThreads(state) && <EmptyState title="No conversations" />}
-          {noMatches(state) && <EmptyState title="No matching conversations" />}
-          {state.threads > 0 && (
-            <ListGroup aria-label="Conversations">
-              {held.threads.map((row) => (
-                <ListRow key={row.id} aria-label={"incomplete" in row ? "Conversation" : titleOf(row.addresses, held.names)} title={"incomplete" in row ? "Conversation" : titleOf(row.addresses, held.names)} detail={"incomplete" in row ? "Open in your messaging app" : row.snippet} trailing={!("incomplete" in row) && row.unread ? <span className="size-2 rounded-full bg-primary" aria-label="Unread" /> : when(row.date)}
-                  onClick={() => {
-                    const thread = runtime.runSync(Conversations.use((numbering) => numbering.of({ id: row.id, addresses: "incomplete" in row ? [] : row.addresses })));
-                    if (can({ type: "openThread", thread })) void send({ type: "openThread", thread });
-                  }} />
-              ))}
-            </ListGroup>
-          )}
-          {can({ type: "olderThreads" }) && <Button variant="outline" onClick={() => void send({ type: "olderThreads" })}>Older conversations</Button>}
-        </>
-      )}
-      {state.pane === "Conversation" && <Conversation runtime={runtime} />}
-      {state.pane === "Picker" && <Picker runtime={runtime} />}
-      <CommsBar runtime={runtime} />
+    <section data-alpha-messages aria-label="Messages" className="flex h-full min-h-0 flex-col overflow-hidden">
+      {state.pane === "Threads" && <Threads runtime={runtime} messages={messages} onBack={onBack} />}
+      {state.pane === "Conversation" && <Conversation key={state.thread} runtime={runtime} messages={messages} onOpenLink={onOpenLink} />}
+      {state.pane === "Picker" && <Picker runtime={runtime} messages={messages} />}
     </section>
   );
 }
 
-function Bubble({ row, onChoose, chosen }: { row: MessageRow; onChoose: () => void; chosen: boolean }) {
-  if ("incomplete" in row) return <ListRow title="A message Alpha cannot show" detail={when(row.date)} selected={chosen} onClick={onChoose} />;
-  const outgoing = row.direction === "outgoing";
-  const status = row.status === "failed" ? "Not sent" : row.status === "pending" ? "Sending" : outgoing && (row.status === "delivered" || row.deliveryReport === "complete") ? "Delivered" : outgoing ? "Sent" : "";
-  return (
-    <button type="button" onClick={onChoose} aria-pressed={chosen}
-      className={`max-w-[80%] rounded-2xl px-3 py-2 text-left ${outgoing ? "self-end bg-primary text-primary-foreground" : "self-start bg-muted"} ${row.status === "failed" ? "ring-2 ring-destructive" : ""}`}>
-      <p className="whitespace-pre-wrap break-words">{row.body}</p>
-      {row.attachments > 0 && <p className="text-xs opacity-80">{row.attachments === 1 ? "1 picture" : `${row.attachments} pictures`}</p>}
-      <p className="text-xs opacity-70">{[when(row.date), status].filter(Boolean).join(" · ")}</p>
-    </button>
-  );
-}
-
-/** One conversation: its messages, a chosen message's actions, and the composer. */
-function Conversation({ runtime }: MessagesProps) {
-  const { state, can, send } = useMessages(runtime);
-  const phone = usePhone(runtime).state;
-  const [, redraw] = useState(0);
-  if (!state || !phone) return null;
-  const held = runtime.runSync(Inbox.use((inbox) => inbox.get()));
-  const conversation = runtime.runSync(Conversations.use((numbering) => numbering.get(state.thread)));
-  const title = conversation._tag === "Some" ? titleOf(conversation.value.addresses, held.names) : "Conversation";
-  const choose = (id: string) => {
-    runtime.runSync(Inbox.use((inbox) => inbox.set({ chosen: id })));
-    redraw((n) => n + 1);
+function Threads({ runtime, messages: { state, can, send }, onBack }: MessagesProps & { messages: MessagesUI }) {
+  const [searching, setSearching] = useState(false);
+  if (!state) return null;
+  const { threads, sought, names } = runtime.runSync(Inbox.use((inbox) => inbox.get()));
+  const now = runtime.runSync(Time.use((time) => time.latest()));
+  const search = (typed: string) => {
+    const event = { type: "search", typed: typed.trim() !== "" } as const;
+    if (!can(event)) return;
+    runtime.runSync(Inbox.use((inbox) => inbox.set({ sought: typed })));
+    void send(event);
   };
-  const confirm = { type: "confirmDelete", clear: clear(phone) } as const;
+  const open = (row: ThreadRow) => {
+    clearChoice(runtime);
+    const thread = runtime.runSync(Conversations.use((numbering) => numbering.of({ id: row.id, addresses: "incomplete" in row ? [] : row.addresses })));
+    if (can({ type: "openThread", thread })) void send({ type: "openThread", thread });
+  };
+  const allow = { type: "allow", need: "SmsAccess" } as const;
+  const settings = { type: "goToSettings", need: "SmsAccess" } as const;
+  const unread = { type: "pickChip", chip: "UnreadThreads" } as const;
+  const all = { type: "pickChip", chip: "AllThreads" } as const;
   return (
-    <div className="flex flex-col gap-3">
-      <div className="flex items-center gap-2">
-        {can({ type: "back" }) && <Button variant="ghost" size="icon" aria-label="Back" onClick={() => void send({ type: "back" })}><ArrowLeft /></Button>}
-        <h2 className="flex-1 truncate font-semibold">{title}</h2>
-        {can({ type: "call" }) && <Button variant="ghost" size="icon" aria-label={`Call ${title}`} onClick={() => void send({ type: "call" })}><Call /></Button>}
-      </div>
-      {state.page.status === "Loading" && state.shown.rows === 0 && <Spinner label="Reading the conversation" />}
-      {state.page.status === "Failed" && <Banner variant="destructive">The conversation could not be read</Banner>}
-      {can({ type: "earlierMessages" }) && <Button variant="outline" onClick={() => void send({ type: "earlierMessages" })}>Earlier messages</Button>}
-      <div role="log" aria-label="Messages" className="flex flex-col gap-2">
-        {state.shown.rows > 0 && [...held.messages].reverse().map((row) => <Bubble key={row.id} row={row} chosen={held.chosen === row.id} onChoose={() => choose(row.id)} />)}
-      </div>
-      {held.chosen !== "" && content(state) && (
-        <div className="flex flex-wrap gap-2" role="group" aria-label="Message">
-          {can({ type: "copy" }) && <Button size="sm" variant="outline" onClick={() => void send({ type: "copy" })}>Copy</Button>}
-          {can({ type: "openElsewhere" }) && <Button size="sm" variant="outline" onClick={() => void send({ type: "openElsewhere" })}>Open in messaging app</Button>}
-          {can({ type: "askDelete" }) && <Button size="sm" variant="destructive" onClick={() => void send({ type: "askDelete" })}>Delete</Button>}
+    <>
+      {searching ? (
+        <header className={header} data-alpha-messages-search-header>
+          <Button variant="ghost" size="icon" aria-label="Back to messages" onClick={() => { search(""); setSearching(false); }}><ChevronLeft /></Button>
+          <div role="search" aria-label="Search messages" className="min-w-0 flex-1 pr-2">
+            <SearchField autoFocus aria-label="Search conversations" placeholder="Search conversations" value={sought} onValueChange={search} clearLabel="Clear search" />
+          </div>
+        </header>
+      ) : (
+        <header className="flex h-13 shrink-0 items-center gap-0.5 px-2 [&>button]:size-13" data-alpha-messages-header data-alpha-stage-header>
+          {onBack && <Button variant="ghost" size="icon" aria-label="Back to apps" onClick={onBack}><ChevronLeft /></Button>}
+          <h1 className="min-w-0 flex-1 truncate text-xl leading-tight font-semibold">Messages</h1>
+          {!smsNeeded(state) && <Button variant="ghost" size="icon" aria-label="Search messages" data-alpha-messages-search onClick={() => setSearching(true)}><Search /></Button>}
+          {can({ type: "newMessage" }) && <Button variant="ghost" size="icon" aria-label="New message" data-alpha-messages-new onClick={() => {
+            runtime.runSync(Inbox.use((inbox) => inbox.set({ typed: "" })));
+            void send({ type: "newMessage" });
+          }}><SquarePen /></Button>}
+        </header>
+      )}
+      {smsNeeded(state) && (can(allow) || can(settings)) && (
+        <div className="grid flex-1 place-items-center px-4">
+          {can(allow) ? <Button data-alpha-messages-allow onClick={() => void send(allow)}>Allow SMS read access</Button> : <Button variant="outline" onClick={() => void send(settings)}>Open Settings for SMS access</Button>}
         </div>
       )}
-      {state.removal.outcome === "Unknown" && <Banner variant="warn">Alpha cannot tell whether the message was deleted</Banner>}
-      {state.removal.outcome === "Refused" && <Banner variant="destructive">The message was not deleted</Banner>}
-      <ConfirmDialog open={state.confirming} title="Delete message?" confirmLabel="Delete" destructive
-        onConfirm={() => void (can(confirm) && send(confirm))} onCancel={() => void (can({ type: "keep" }) && send({ type: "keep" }))} />
-      <Compose runtime={runtime} />
-    </div>
+      {!smsNeeded(state) && (
+        <>
+          <div className="flex shrink-0 flex-wrap items-center gap-2 px-5" role="group" aria-label="Filter conversations">
+            {state.chip === "UnreadThreads"
+              ? <Chip onClear={can(all) ? () => void send(all) : undefined} clearLabel="Show all conversations">Unread</Chip>
+              : can(unread) && <Button size="sm" variant="ghost" onClick={() => void send(unread)}>Unread</Button>}
+            {!searching && state.sought && <Chip onClear={() => search("")} clearLabel="Clear the search">{sought}</Chip>}
+          </div>
+          <div data-alpha-messages-threads className="min-h-0 flex-1 touch-pan-y overflow-y-auto overscroll-contain py-1">
+            {state.list.status === "Loading" && state.threads === 0 && <div className="px-5 py-3"><Spinner label="Reading conversations" /></div>}
+            {threadsFailed(state) && <div className="p-4"><Banner variant="destructive" action={can({ type: "retryThreads" }) && <Button size="sm" variant="outline" onClick={() => void send({ type: "retryThreads" })}>Retry</Button>}>Conversations could not be read</Banner></div>}
+            {noThreads(state) && <p role="status" className="px-5 py-3 text-muted-foreground">No conversations</p>}
+            {noMatches(state) && <p role="status" className="px-5 py-3 text-muted-foreground">No matches</p>}
+            {state.threads > 0 && (
+              <ul aria-label="Conversations">
+                {threads.map((row) => {
+                  const complete = "incomplete" in row ? undefined : row;
+                  const title = complete ? titleOf(complete.addresses, names) || "Conversation" : "Conversation";
+                  return (
+                    <li key={row.id}>
+                      <button type="button" aria-label={title} aria-description={complete?.unread ? "Unread" : undefined} onClick={() => open(row)} className={`${contactRow} min-h-17 items-start py-2.5`}>
+                        <Avatar name={title} aria-hidden className="size-12 text-base" />
+                        <span className="min-w-0 flex-1">
+                          <span className="flex items-center gap-1.5">
+                            {complete?.unread && <span aria-hidden className="size-2 shrink-0 rounded-full bg-primary" />}
+                            <span className={`min-w-0 flex-1 truncate text-body leading-plain ${complete?.unread ? "font-bold" : "font-semibold"}`}>{title}</span>
+                            <span className="shrink-0 text-sm text-muted-foreground">{shortWhen(row.date, now)}</span>
+                          </span>
+                          <span className={`block truncate text-base ${complete?.unread ? "text-foreground" : "text-muted-foreground"}`}>{complete?.snippet ?? "Open in your messaging app"}</span>
+                        </span>
+                      </button>
+                    </li>
+                  );
+                })}
+              </ul>
+            )}
+            {can({ type: "olderThreads" }) && <div className="grid place-items-center py-2"><Button size="icon" variant="secondary" aria-label="Older conversations" onClick={() => void send({ type: "olderThreads" })}><ChevronDown /></Button></div>}
+          </div>
+        </>
+      )}
+      <CommsBar runtime={runtime} closed={smsNeeded(state) ? undefined : (ask) => (
+        <form className="min-w-0 flex-1" onSubmit={(event) => { event.preventDefault(); ask(sought.trim()); }}>
+          <SearchField data-alpha-composer aria-label="Search or ask" placeholder="Search or ask" value={sought} onValueChange={search} />
+        </form>
+      )} />
+    </>
   );
 }
 
-/** The open conversation's draft, Alpha's suggestion, the SIM, pictures and Send. */
-function Compose({ runtime }: MessagesProps) {
+/** Inline URL text, escaped by React. Whitespace and punctuation outside each URL are preserved. */
+function MessageText({ text, onOpenLink }: { text: string; onOpenLink?: MessagesProps["onOpenLink"] }) {
+  const parts = [];
+  let consumed = 0;
+  for (const matched of text.matchAll(messageURL)) {
+    const found = matched[0];
+    const offset = matched.index;
+    if (offset === undefined) continue;
+    const raw = found.replace(/[.,!?;:]+$/u, "").replace(/\)+$/u, (ending) => {
+      const excess = (found.match(/\)/gu)?.length ?? 0) - (found.match(/\(/gu)?.length ?? 0);
+      return ending.slice(0, Math.max(0, ending.length - Math.max(0, excess)));
+    });
+    const parsed = URL.parse(raw);
+    if (!parsed?.hostname || parsed.username || parsed.password) continue;
+    parts.push(text.slice(consumed, offset), (
+      <a className="underline underline-offset-2" href={parsed.href} target="_blank" rel="noopener noreferrer" key={offset} onClick={onOpenLink ? (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        onOpenLink(parsed.href);
+      } : undefined}>{raw}</a>
+    ));
+    consumed = offset + raw.length;
+  }
+  return <>{parts}{text.slice(consumed)}</>;
+}
+
+interface BubbleActions {
+  copy?: (() => void) | undefined;
+  remove?: (() => void) | undefined;
+}
+
+const Bubble = memo(function Bubble({ row, now, choose, actions, onOpenLink }: { row: MessageRow; now: number; choose: (id: string) => void; actions?: BubbleActions | undefined; onOpenLink?: MessagesProps["onOpenLink"] }) {
+  const trigger = useRef<HTMLDivElement>(null);
+  const pointer = useRef<{ x: number; y: number; at: number } | null>(null);
+  const complete = "incomplete" in row ? undefined : row;
+  const outgoing = complete?.direction === "outgoing";
+  const failed = complete?.status === "failed";
+  const status = failed ? "Not sent" : complete?.status === "pending" ? "Sending" : outgoing && (complete?.status === "delivered" || complete?.deliveryReport === "complete") ? "Delivered" : outgoing ? "Sent" : "";
+  const select = (event: MouseEvent) => {
+    if (event.target instanceof Element && event.target.closest("a")) return;
+    if (document.getSelection()?.isCollapsed === false) return;
+    choose(row.id);
+  };
+  const moved = (event: PointerEvent) => {
+    const started = pointer.current;
+    if (started && Math.hypot(event.clientX - started.x, event.clientY - started.y) > 12) pointer.current = null;
+  };
+  const label = complete ? complete.body || "Picture message" : "A message Alpha cannot show";
+  return (
+    <div className={`flex max-w-[min(17.5rem,100%)] flex-col ${outgoing ? "items-end self-end" : "items-start self-start"}`}>
+      <div ref={trigger} data-alpha-message-id={row.id} data-alpha-sms-outgoing={outgoing} role="button" tabIndex={0} aria-label={`Message actions: ${label}`} aria-haspopup="menu" aria-expanded={Boolean(actions)}
+        className={`flex max-w-full flex-col gap-0.5 rounded-tile focus-visible:outline-2 focus-visible:outline-ring ${outgoing ? "items-end" : "items-start"}`}
+        onClick={select}
+        onContextMenu={(event) => {
+          if (event.target instanceof Element && event.target.closest("a")) return;
+          event.preventDefault();
+          select(event);
+        }}
+        onPointerDown={(event) => { if (event.pointerType === "touch") pointer.current = { x: event.clientX, y: event.clientY, at: event.timeStamp }; }}
+        onPointerMove={moved}
+        onPointerCancel={() => { pointer.current = null; }}
+        onPointerUp={(event) => {
+          const started = pointer.current;
+          pointer.current = null;
+          if (started && event.timeStamp - started.at >= 500) choose(row.id);
+        }}
+        onKeyDown={(event) => {
+          if (event.target !== event.currentTarget) return;
+          if (event.key === "ContextMenu" || (event.shiftKey && event.key === "F10") || event.key === "Enter" || event.key === " ") {
+            event.preventDefault();
+            choose(row.id);
+          }
+        }}>
+        {!complete ? <p className="rounded-tile bg-muted px-4 py-2.5 text-base">{label}</p> : (
+          <>
+            {complete.attachments > 0 && <span className="flex items-center gap-1.5 text-sm text-muted-foreground"><PictureIcon className="size-4" aria-hidden />{complete.attachments === 1 ? "1 picture" : `${complete.attachments} pictures`}</span>}
+            {complete.body && <p data-alpha-message-body className={`rounded-tile px-4 py-2.75 text-body leading-field whitespace-pre-wrap wrap-anywhere ${outgoing ? "bg-foreground text-background" : "bg-secondary text-secondary-foreground"}`}><MessageText text={complete.body} onOpenLink={onOpenLink} /></p>}
+          </>
+        )}
+        <span data-alpha-message-meta title={new Date(row.date).toLocaleString()} className="px-1.5 text-2xs text-muted-foreground">{[stamp(row.date, now), status].filter(Boolean).join(" · ")}</span>
+        {failed && <CircleAlert className="size-4 text-destructive" role="img" aria-label="Message failed" />}
+      </div>
+      {actions && (
+        <div data-alpha-sms-actions role="menu" aria-label="Message actions" className="flex flex-wrap items-center gap-1 py-1" onKeyDown={(event) => {
+          if (event.key !== "Escape") return;
+          event.stopPropagation();
+          choose("");
+          trigger.current?.focus();
+        }}>
+          {actions.copy && <Button role="menuitem" autoFocus size="sm" variant="secondary" onClick={actions.copy}><Copy />Copy</Button>}
+          {actions.remove && <Button role="menuitem" autoFocus={!actions.copy} size="sm" variant="ghost" className="text-destructive" onClick={actions.remove}><Trash2 />Delete</Button>}
+        </div>
+      )}
+    </div>
+  );
+});
+
+/** One conversation: provider rows, their actions, and the draft belonging to this exact thread. */
+function Conversation({ runtime, messages: { state, can, send }, onOpenLink }: MessagesProps & { messages: MessagesUI }) {
+  const phone = usePhone(runtime).state;
+  const [selected, setSelected] = useState("");
+  const scroll = useRef<HTMLDivElement>(null);
+  const nearEnd = useRef(true);
+  const held = runtime.runSync(Inbox.use((inbox) => inbox.get()));
+  const now = runtime.runSync(Time.use((time) => time.latest()));
+  const rows = state?.shown.rows && held.messagesThread === state.thread ? held.messages : noMessages;
+  const chronological = useMemo(() => rows.toReversed(), [rows]);
+  const latest = rows[0]?.id;
+  const anchor = useCallback((element: HTMLDivElement | null) => {
+    if (element && latest && nearEnd.current && scroll.current) scroll.current.scrollTop = scroll.current.scrollHeight;
+  }, [latest]);
+  const viewport = useCallback((element: HTMLDivElement | null) => {
+    scroll.current = element;
+    if (!element || typeof ResizeObserver === "undefined") return;
+    const resize = new ResizeObserver(() => {
+      if (nearEnd.current) element.scrollTop = element.scrollHeight;
+    });
+    resize.observe(element);
+    return () => { resize.disconnect(); scroll.current = null; };
+  }, []);
+  const choose = useCallback((id: string) => {
+    runtime.runSync(Inbox.use((inbox) => inbox.set({ chosen: id })));
+    setSelected(id);
+  }, [runtime]);
+  if (!state || !phone) return null;
+  const conversation = runtime.runSync(Conversations.use((numbering) => numbering.get(state.thread)));
+  const addresses = conversation._tag === "Some" ? conversation.value.addresses : [];
+  const title = titleOf(addresses, held.names) || "Conversation";
+  const selectedRow = rows.find((row) => row.id === selected);
+  const confirm = { type: "confirmDelete", clear: clear(phone) } as const;
+  const actions = selectedRow && !("incomplete" in selectedRow) && !state.confirming && content(state) ? {
+    copy: selectedRow.body && can({ type: "copy" }) ? () => { void send({ type: "copy" }); } : undefined,
+    remove: state.smsApp && state.removal.outcome !== "Unknown" && can({ type: "askDelete" }) ? () => {
+      const { id, kind, threadId, date } = selectedRow;
+      runtime.runSync(Inbox.use((inbox) => inbox.set({ deleteTarget: { id, kind, threadId, date } })));
+      void send({ type: "askDelete" });
+    } : undefined,
+  } : undefined;
+  return (
+    <>
+      <header className={`${header} pb-2`} data-alpha-navigation-header data-alpha-stage-header>
+        {can({ type: "back" }) && <Button variant="ghost" size="icon" aria-label="Back" onClick={() => { clearChoice(runtime); void send({ type: "back" }); }}><ChevronLeft /></Button>}
+        <Avatar name={title} aria-hidden size="sm" data-alpha-stage-avatar />
+        <h1 data-alpha-messages-title className="min-w-0 flex-1 truncate pl-1.5 text-lg font-bold">{title}</h1>
+        {addresses.length === 1 && can({ type: "call" }) && <Button variant="ghost" size="icon" aria-label={`Call ${title}`} onClick={() => void send({ type: "call" })}><Call /></Button>}
+      </header>
+      <div ref={viewport} data-alpha-messages-thread className="min-h-0 flex-1 touch-pan-y overflow-y-auto overscroll-contain px-4 pb-3" onScroll={(event) => {
+        const viewport = event.currentTarget;
+        nearEnd.current = viewport.scrollHeight - viewport.scrollTop - viewport.clientHeight < 64;
+      }}>
+        <div className="flex min-h-full flex-col gap-1.5">
+          {state.page.status === "Loading" && state.shown.rows === 0 && <Spinner label="Reading the conversation" />}
+          {state.page.status === "Failed" && <Banner variant="destructive">The conversation could not be read</Banner>}
+          {can({ type: "earlierMessages" }) && <Button className="self-center" size="icon" variant="secondary" aria-label="Earlier messages" onClick={() => void send({ type: "earlierMessages" })}><ChevronUp /></Button>}
+          <div role="log" aria-label="Messages" className="mt-auto flex flex-col gap-1.5">
+            {chronological.map((row) => <Bubble key={row.id} row={row} now={now} choose={choose} actions={row.id === selected && (actions?.copy || actions?.remove) ? actions : undefined} onOpenLink={onOpenLink} />)}
+          </div>
+          {selectedRow && "incomplete" in selectedRow && can({ type: "openElsewhere" }) && <Button size="sm" variant="outline" className="self-start" onClick={() => void send({ type: "openElsewhere" })}>Open in messaging app</Button>}
+          <div ref={anchor} aria-hidden />
+        </div>
+      </div>
+      {state.removal.outcome === "Unknown" && <Banner variant="warn">Alpha cannot tell whether the message was deleted</Banner>}
+      {state.removal.outcome === "Refused" && held.deleteTarget && <Banner variant="destructive">The message was not deleted</Banner>}
+      <ConfirmDialog open={state.confirming} title="Delete message?" confirmLabel="Delete" destructive
+        onConfirm={() => void (selectedRow && !("incomplete" in selectedRow) && can(confirm) && send(confirm))} onCancel={() => void (can({ type: "keep" }) && send({ type: "keep" }))}>Delete this message from this phone?</ConfirmDialog>
+      <Compose runtime={runtime} title={title} addresses={addresses} thread={state.thread} />
+    </>
+  );
+}
+
+/** The thread's one person-target input, or its complete draft while the Alpha sheet is up. */
+function Compose({ runtime, title, addresses, thread }: MessagesProps & { title: string; addresses: ReadonlyArray<string>; thread: number }) {
   const composer = useComposer(runtime);
   const phone = usePhone(runtime).state;
+  const dock = useCommsDock(runtime);
+  const field = useRef<HTMLTextAreaElement>(null);
+  const focus = useRef(false);
   const { state, can, send } = composer;
-  if (!state || !phone || state.thread === 0) return null;
-  const text = runtime.runSync(Drafts.use((drafts) => drafts.text(state.thread)));
+  if (!state || !phone || state.thread !== thread || addresses.length === 0) return <CommsBar runtime={runtime} />;
+  const person = { label: title, initials: initials(title) };
+  const text = state.slot.author === "Nobody" ? "" : runtime.runSync(Drafts.use((drafts) => drafts.text(thread)));
   const pictures = runtime.runSync(Drafts.use((drafts) => drafts.pictures()));
   const write = (next: string) => {
-    const event = { type: "typeText", empty: next === "" } as const;
+    const event = { type: "typeText", empty: next.length === 0 } as const;
     if (!can(event)) return;
-    runtime.runSync(Drafts.use((drafts) => drafts.write(state.thread, next)));
+    runtime.runSync(Drafts.use((drafts) => drafts.write(thread, next)));
     void send(event);
   };
   const sendNow = { type: "send", supported: runtime.runSync(supported(state.recipients, pictures.length)), clear: clear(phone) } as const;
+  const sendable = (Boolean(text.trim()) || pictures.length > 0) && can(sendNow);
+  const submit = () => {
+    if (!sendable) return;
+    runtime.runSync(prepare(thread, state.sims > 1 ? state.sim : null));
+    void send(sendNow);
+  };
+  const edit = () => {
+    if (!can({ type: "typeText", empty: false })) return;
+    write(text);
+    if (!dock.open) { field.current?.focus(); return; }
+    focus.current = true;
+    dock.close();
+  };
   const outgoing = state.outgoing;
-  const here = outgoing.thread === state.thread;
-  return (
-    <form className="flex flex-col gap-2" onSubmit={(event) => {
-      event.preventDefault();
-      if (!can(sendNow)) return;
-      runtime.runSync(prepare(state.thread, state.sims > 1 ? state.sim : null));
-      void send(sendNow);
-    }}>
-      {state.slot.author === "AlphaWrote" && <p className="text-xs text-muted-foreground">Alpha's draft · not sent</p>}
-      {state.slot.draft.sync === "Conflicted" && (
-        <Banner variant="warn" action={<>
-          {can({ type: "keepMine" }) && <Button size="sm" onClick={() => void send({ type: "keepMine" })}>Keep mine</Button>}
-          {can({ type: "takeSaved" }) && <Button size="sm" variant="outline" onClick={() => void send({ type: "takeSaved" })}>Use the saved draft</Button>}
-        </>}>Another draft was saved for this conversation</Banner>
-      )}
-      {here && uncertain(outgoing) && <Banner variant="warn">Alpha cannot tell whether your message went. Send again checks before sending.</Banner>}
-      {here && outgoing.denied && <Banner variant="destructive">The phone did not send the message</Banner>}
-      {here && outgoing.op.outcome === "Refused" && !outgoing.denied && outgoing.failed > 0 && <Banner variant="destructive">The message did not reach everyone</Banner>}
-      {here && sentAll(outgoing) && <p className="text-xs text-muted-foreground">{delivered(outgoing) ? "Delivered" : "Sent"}</p>}
-      {pictures.length > 0 && (
-        <div className="flex flex-wrap gap-2">
-          {pictures.map((picture, at) => (
-            <Chip key={`${picture.name}-${at}`} onClear={can({ type: "detach" }) ? () => {
-              runtime.runSync(Drafts.use((drafts) => drafts.setPictures(pictures.filter((_, other) => other !== at))));
-              void send({ type: "detach" });
-            } : undefined} clearLabel={`Remove ${picture.name}`}>{picture.name}</Chip>
-          ))}
-        </div>
-      )}
-      {state.sims > 1 && (
-        <div className="flex gap-2" role="group" aria-label="SIM">
-          {Array.from({ length: state.sims }, (_, at) => at + 1).map((sim) => (
-            <Button key={sim} size="sm" variant={state.sim === sim ? "primary" : "outline"} disabled={!can({ type: "pickSim", sim })} onClick={() => void send({ type: "pickSim", sim })}>{`SIM ${sim}`}</Button>
-          ))}
-        </div>
-      )}
-      {can({ type: "allow", need: "SendAccess" }) && <Banner variant="warn" action={<Button size="sm" onClick={() => void send({ type: "allow", need: "SendAccess" })}>Allow</Button>}>Sending needs access to send texts</Banner>}
-      {can({ type: "goToSettings", need: "SendAccess" }) && <Banner variant="warn" action={<Button size="sm" variant="outline" onClick={() => void send({ type: "goToSettings", need: "SendAccess" })}>Open Settings</Button>}>Allow sending texts for Alpha in Android's settings</Banner>}
-      <div className="flex items-end gap-2">
-        <label className={`inline-flex size-10 items-center justify-center rounded-md ${can({ type: "attach", fits: true }) ? "cursor-pointer" : "pointer-events-none opacity-50"}`} aria-label="Attach a picture">
-          <ImagePlus />
-          <input type="file" multiple accept={MMS_ATTACHMENT_TYPES.join(",")} className="sr-only" onChange={(event) => {
-            const files = [...(event.target.files ?? [])];
-            event.target.value = "";
-            void runtime.runPromise(attachAll(files));
-          }} />
+  const here = outgoing.thread === thread;
+  const checking = here && uncertain(outgoing);
+  const sendLabel = checking ? "Check send status" : "Send";
+  const alpha = state.slot.author === "AlphaWrote";
+  const addressed = title === addresses.join(", ") ? title : `${title} · ${addresses.join(", ")}`;
+  const draft = text && (alpha || dock.open);
+  const editable = can({ type: "typeText", empty: text.length === 0 });
+  const attachment = { type: "attach", fits: true } as const;
+  const handoff = { type: "handOff", supported: sendNow.supported } as const;
+  const messageForm = (
+    <div data-alpha-composer data-alpha-messages-composer className="flex min-w-0 flex-1 items-end gap-1">
+      {([["Attach a picture", ImagePlus, false], ["Take a picture", Camera, true]] as const).map(([label, Icon, camera]) => (
+        <label key={label} className="relative flex size-11 shrink-0 items-center justify-center rounded-full text-muted-foreground focus-within:outline-2 focus-within:outline-ring has-disabled:opacity-50" aria-label={label}>
+          <Icon className="size-5" aria-hidden />
+          <input type="file" aria-label={label} multiple={!camera} capture={camera ? "environment" : undefined} accept={MMS_ATTACHMENT_TYPES.join(",")} disabled={!can(attachment)}
+            className="absolute inset-0 size-full cursor-pointer opacity-0 disabled:cursor-default" onChange={(event) => {
+              const files = [...(event.target.files ?? [])];
+              event.target.value = "";
+              if (files.length > 0) void runtime.runPromise(attachAll(files));
+            }} />
         </label>
-        <Textarea className="flex-1" aria-label="Message" placeholder="Text message" value={state.slot.author === "Nobody" ? "" : text} onChange={(event) => write(event.target.value)} />
-        {can({ type: "suggest" }) && <Button type="button" variant="ghost" size="icon" aria-label="Let Alpha suggest a reply" onClick={() => void send({ type: "suggest" })}><Sparkles /></Button>}
-        {can({ type: "undo" }) && <Button type="button" variant="ghost" size="icon" aria-label="Undo Alpha's draft" onClick={() => void send({ type: "undo" })}><X /></Button>}
-        {can({ type: "handOff", supported: sendNow.supported }) && <Button type="button" variant="outline" onClick={() => void send({ type: "handOff", supported: sendNow.supported })}>Open in messaging app</Button>}
-        <Button type="submit" size="icon" aria-label="Send" disabled={!can(sendNow)}><Send /></Button>
+      ))}
+      <Textarea className="max-h-[min(10.5rem,28dvh)] min-w-0 flex-1 overflow-y-auto" aria-label="Message" placeholder={`Text ${firstName(title)}`} value={text} maxLength={MMS_MAX_BODY} readOnly={!editable}
+        ref={(element) => {
+          field.current = element;
+          if (element && focus.current) { focus.current = false; element.focus(); }
+        }}
+        onChange={(event) => write(event.target.value)} />
+      {can({ type: "suggest" }) && <Button variant="ghost" size="icon" aria-label="Let Alpha suggest a reply" onClick={() => void send({ type: "suggest" })}><Sparkles /></Button>}
+      {sendable && <Button size="icon" aria-label={sendLabel} data-alpha-bar-send onClick={submit}>{checking ? <RefreshCw /> : <Send />}</Button>}
+    </div>
+  );
+  return (
+    <>
+      {draft && (
+        <div data-alpha-draft-bubble={alpha ? "alpha" : "owner"} role="group" aria-label={alpha ? `Message draft to ${addressed}` : "Your draft, not sent"}
+          className="mx-3 flex max-h-[55%] min-h-0 shrink flex-col rounded-tile border border-dashed border-input bg-secondary px-4 pt-2">
+          <div className="min-h-0 overflow-y-auto">
+            <p className="text-sm font-semibold text-muted-foreground">{alpha ? `Alpha's draft · To ${addressed}` : "Your draft"}</p>
+            <p className="text-base whitespace-pre-wrap wrap-anywhere">{text}</p>
+          </div>
+          <div className="flex shrink-0 flex-wrap justify-end gap-1 py-1">
+            {can({ type: "undo" }) && <Button size="sm" variant="ghost" onClick={() => void send({ type: "undo" })}>Don't send</Button>}
+            {editable && <Button size="sm" variant="outline" data-alpha-draft-edit onClick={edit}>Edit</Button>}
+            {dock.open && <Button size="sm" data-alpha-draft-send disabled={!sendable} onClick={submit}>{sendLabel}</Button>}
+          </div>
+        </div>
+      )}
+      <div data-alpha-messages-accessories className="flex max-h-[34%] shrink-0 flex-wrap gap-1.5 overflow-y-auto px-3 empty:hidden">
+        {state.slot.draft.sync === "Conflicted" && (
+          <Banner variant="warn" action={<>
+            {can({ type: "keepMine" }) && <Button size="sm" onClick={() => void send({ type: "keepMine" })}>Keep mine</Button>}
+            {can({ type: "takeSaved" }) && <Button size="sm" variant="outline" onClick={() => void send({ type: "takeSaved" })}>Use the saved draft</Button>}
+          </>}>Another draft was saved for this conversation</Banner>
+        )}
+        {checking && <Banner variant="warn">Alpha is still waiting for the send result</Banner>}
+        {here && outgoing.denied && <Banner variant="destructive">The phone did not send the message</Banner>}
+        {here && outgoing.op.outcome === "Refused" && !outgoing.denied && outgoing.failed > 0 && <Banner variant="destructive">The message did not reach everyone</Banner>}
+        {here && sentAll(outgoing) && <p role="status" className="basis-full text-xs text-muted-foreground">{`${delivered(outgoing) ? "Delivered" : "Sent"} to ${title}`}</p>}
+        {pictures.map((picture, at) => (
+          <Chip key={`${picture.name}-${at}`} onClear={can({ type: "detach" }) ? () => {
+            runtime.runSync(Drafts.use((drafts) => drafts.setPictures(pictures.filter((_, other) => other !== at))));
+            void send({ type: "detach" });
+          } : undefined} clearLabel={`Remove ${picture.name}`}>{picture.name}</Chip>
+        ))}
+        {state.sims > 1 && (
+          <div className="flex flex-wrap gap-1.5" role="group" aria-label="SIM">
+            {Array.from({ length: state.sims }, (_, at) => at + 1).map((sim) => (
+              <Button key={sim} size="sm" aria-pressed={state.sim === sim} variant={state.sim === sim ? "primary" : "secondary"} disabled={!can({ type: "pickSim", sim }) && state.sim !== sim}
+                onClick={() => { if (can({ type: "pickSim", sim })) void send({ type: "pickSim", sim }); }}>{`SIM ${sim}`}</Button>
+            ))}
+          </div>
+        )}
+        {(["SendAccess", "SimAccess"] as const).map((need) => {
+          const right = need === "SendAccess" ? "SMS send" : "SIM";
+          if (need === "SimAccess" && state.sims <= 1) return null;
+          const allow = { type: "allow", need } as const;
+          const settings = { type: "goToSettings", need } as const;
+          if (can(allow)) return <Button key={need} size="sm" variant="outline" onClick={() => void send(allow)}>{`Allow ${right} access`}</Button>;
+          if (can(settings)) return <Button key={need} size="sm" variant="outline" onClick={() => void send(settings)}>{`Open Settings for ${right} access`}</Button>;
+          return null;
+        })}
+        {can(handoff) && <Button size="sm" variant="outline" onClick={() => void send(handoff)}>{pictures.length > 0 ? "Review text in messaging app" : "Review in messaging app"}</Button>}
       </div>
-    </form>
+      <CommsBar runtime={runtime} person={person} closed={messageForm} />
+    </>
   );
 }
 
-/** The picker: a contact's number, or a number typed, opens that conversation. */
-function Picker({ runtime }: MessagesProps) {
-  const { state, can, send } = useMessages(runtime);
+/** A typed recipient list or a contact's number opens one exact conversation. */
+function Picker({ runtime, messages: { state, can, send } }: MessagesProps & { messages: MessagesUI }) {
   const [typed, setTyped] = useState("");
+  const [browsing, setBrowsing] = useState(false);
+  const input = useRef<HTMLInputElement>(null);
   if (!state) return null;
   const held = runtime.runSync(Inbox.use((inbox) => inbox.get()));
   const find = (text: string) => {
     setTyped(text);
-    runtime.runSync(Inbox.use((inbox) => inbox.set({ typed: text })));
+    runtime.runSync(Inbox.use((inbox) => inbox.set({ typed: text.split(",").at(-1)?.trim() ?? "" })));
     if (can({ type: "findChoices" })) void send({ type: "findChoices" });
   };
-  const open = (number: string, typedIn: boolean) => {
-    const thread = runtime.runSync(Conversations.use((numbering) => numbering.of({ id: "", addresses: [number] })));
+  const open = (addresses: ReadonlyArray<string>, typedIn: boolean) => {
+    clearChoice(runtime);
+    const thread = runtime.runSync(Conversations.use((numbering) => numbering.of({ id: "", addresses })));
     const event = { type: "choose", thread, typed: typedIn } as const;
     if (can(event)) void send(event);
   };
-  const number = typed.replace(/[^\d+]/g, "");
+  const to = typed.split(",").map((part) => part.trim());
+  const parsed = to.map((part) => /^\+?[\d\s().-]+$/u.test(part) && part.replace(/\D/gu, "").length >= 3 ? normalizePhoneNumber(part) : null);
+  const numbers = parsed.length <= MMS_MAX_RECIPIENTS && parsed.every((number) => number !== null) ? [...new Set(parsed)] : [];
+  const allow = { type: "allow", need: "ContactsAccess" } as const;
+  const settings = { type: "goToSettings", need: "ContactsAccess" } as const;
   return (
-    <div className="flex flex-col gap-3">
-      <div className="flex items-center gap-2">
-        {can({ type: "back" }) && <Button variant="ghost" size="icon" aria-label="Back" onClick={() => void send({ type: "back" })}><ArrowLeft /></Button>}
-        <SearchField className="flex-1" aria-label="To" placeholder="Name or number" value={typed} onValueChange={find} />
+    <>
+      <header data-alpha-navigation-header className={`${header} pr-4 pb-2`}>
+        {can({ type: "back" }) && <Button variant="ghost" size="icon" aria-label="Back" onClick={() => void send({ type: "back" })}><ChevronLeft /></Button>}
+        <form className="min-w-0 flex-1" onSubmit={(event) => { event.preventDefault(); if (numbers.length > 0) open(numbers, true); }}>
+          <SearchField ref={input} aria-label="To" placeholder="To" autoComplete="off" autoCapitalize="none" autoCorrect="off" spellCheck={false} maxLength={230}
+            data-alpha-messages-recipients value={typed} onValueChange={find} />
+        </form>
+        <Button variant="ghost" size="icon" aria-label="Choose a contact" aria-expanded={browsing} onClick={() => { setBrowsing(!browsing); input.current?.focus(); }}><Plus /></Button>
+      </header>
+      <div data-alpha-messages-picks className="min-h-0 flex-1 touch-pan-y overflow-y-auto overscroll-contain pb-2">
+        {numbers.length > 0 && <div className="px-5 py-1"><Button variant="outline" onClick={() => open(numbers, true)}>{numbers.length === 1 ? `Text ${numbers[0]}` : `Text ${numbers.length} recipients`}</Button></div>}
+        {can(allow) && <div className="px-5 py-2"><Button variant="outline" onClick={() => void send(allow)}>Allow Contacts access</Button></div>}
+        {can(settings) && <div className="px-5 py-2"><Button variant="outline" onClick={() => void send(settings)}>Open Settings for Contacts access</Button></div>}
+        {state.picker.status === "Loading" && <div className="px-5"><Spinner label="Checking Contacts" /></div>}
+        {state.picker.status === "Failed" && can({ type: "findChoices" }) && <div className="px-5"><Banner variant="destructive" action={<Button size="sm" variant="outline" onClick={() => void send({ type: "findChoices" })}>Retry</Button>}>Contacts could not be read</Banner></div>}
+        {state.choices > 0 && (
+          <ul aria-label="Contacts" data-alpha-messages-contact-picker={browsing || undefined}>
+            {held.choices.flatMap((contact) => contact.phones.map((phone) => (
+              <li key={`${contact.id}:${phone}`}>
+                <button type="button" className={contactRow} aria-label={contact.name} aria-description={phone} onClick={() => {
+                  if (to.length === 1) { open([phone], false); return; }
+                  find([...to.slice(0, -1), phone].join(", "));
+                }}>
+                  <Avatar name={contact.name} aria-hidden className="size-11 text-base" />
+                  <span className="min-w-0 flex-1 truncate text-base font-semibold">{contact.name}</span>
+                  <span className="shrink-0 text-sm text-muted-foreground tabular-nums">{phone}</span>
+                </button>
+              </li>
+            )))}
+          </ul>
+        )}
+        {can({ type: "loadMoreChoices" }) && <div className="px-5 py-2"><Button variant="outline" size="sm" onClick={() => void send({ type: "loadMoreChoices" })}>More contacts</Button></div>}
       </div>
-      {number.length >= 3 && <Button variant="outline" onClick={() => open(number, true)}>{`Text ${number}`}</Button>}
-      {can({ type: "allow", need: "ContactsAccess" }) && <Banner variant="warn" action={<Button size="sm" onClick={() => void send({ type: "allow", need: "ContactsAccess" })}>Allow</Button>}>Allow Alpha to read your contacts to pick a recipient</Banner>}
-      {can({ type: "goToSettings", need: "ContactsAccess" }) && <Banner variant="warn" action={<Button size="sm" variant="outline" onClick={() => void send({ type: "goToSettings", need: "ContactsAccess" })}>Open Settings</Button>}>Allow contacts for Alpha in Android's settings</Banner>}
-      {state.picker.status === "Loading" && <Spinner label="Reading contacts" />}
-      {state.choices > 0 && (
-        <ListGroup aria-label="Contacts">
-          {held.choices.flatMap((contact) => contact.phones.map((phone) => (
-            <ListRow key={`${contact.id}:${phone}`} aria-label={contact.name} title={contact.name} detail={phone} onClick={() => open(phone, false)} />
-          )))}
-        </ListGroup>
-      )}
-      {can({ type: "loadMoreChoices" }) && <Button variant="outline" onClick={() => void send({ type: "loadMoreChoices" })}>More contacts</Button>}
-    </div>
+      <CommsBar runtime={runtime} />
+    </>
   );
 }
