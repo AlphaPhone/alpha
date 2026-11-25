@@ -46,7 +46,7 @@ import { Documents } from "../platform/documents.vibe";
 import { AttachmentSources, type AttachmentSourceRow } from "./AttachmentSources.tsx";
 import { AttachmentPicker, choosePickerRow, clearPickerChoice, importPickerFiles, openAttachmentPicker, pickSystemDocument, upPickerFolder, usePickerVolume } from "./attachment-picker.vibe";
 import { askComms, freedom, openChatSearch, restTyping } from "./assistant.vibe";
-import { contactChatActionsId } from "./contact-search.ts";
+import { contactChatActionsId } from "./contact-chat-id.ts";
 import { acceptedFiles, acceptedPhotos, attachmentAuthority, previewFile, removeFile, retireTranscript, sameBinding } from "./attachments.vibe";
 import { chip, type MessageActions, useHistorySheets, useMessageRows } from "./history.tsx";
 import { barHeight, ChatScrim, useSheetFollow } from "./follow.tsx";
