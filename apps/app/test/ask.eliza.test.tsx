@@ -1,5 +1,5 @@
 // @vitest-environment happy-dom
-import { ConversationRecord } from "@elizaos/agent";
+import { ConversationRecord, type DeviceOperation } from "@elizaos/agent";
 import { Effect, Schema } from "effect";
 import * as HttpClientRequest from "effect/http/HttpClientRequest";
 import { afterEach, beforeAll, expect, it, vi } from "vitest";
@@ -9,6 +9,7 @@ import { Machine as Composer } from "../gen/app__assistant__composer.effect.vibe
 import { Machine as Ask } from "../gen/app__ask.effect.vibe";
 import { Machine as Mailbox } from "../gen/app__inbox.effect.vibe";
 import { Machine as Message } from "../gen/app__inbox__message.effect.vibe";
+import { Machine as Preferences } from "../gen/app__settings__preferences.effect.vibe";
 import { Machine as Shell } from "../gen/app__shell.effect.vibe";
 import ask from "../src/ask/index.tsx";
 import assistant from "../src/assistant/index.tsx";
@@ -278,4 +279,52 @@ it('Approve a photo requested by the resident agent (spec/app/camera/index.md, "
   });
   await press("Open last photo");
   await waitForScreen(() => expect(document.querySelector('[data-alpha-subview="photos-viewer"] img[alt="Agent capture.jpg"]')).not.toBeNull());
+}, 300_000);
+
+it('Filter Files from Home and open the named file with the resident agent (spec/app/files/index.md, "An exact Files request from another screen may open Files once after the typed reply finishes"); (spec/app/files/index.md, "An explicit request to open or filter Files may act directly on the same idle Files view")', async () => {
+  const world = { ...scene(), phone: true, image: true, now: Date.now() };
+  const path = "Documents/notes.txt";
+  const contents = "This exact file is open on the phone.";
+  world.files.texts[path] = contents;
+  const { alpha } = await openOver(fakeWorld(world, {
+    agent: forward(mine.agent.origin, mine.agent.token),
+    cloud: forward(mine.cloud.local, mine.key.token),
+  }), only("home", "assistant", "view:Files", "notice"));
+  const runtime = assistant.runtime(alpha);
+  const waitForScreen = (assertScreen: () => void) => vi.waitFor(async () => {
+    await drawn(() => undefined);
+    assertScreen();
+  }, { timeout: 30_000 });
+  const receipts = () => [...(world.telephony.enrollment?.journal.values() ?? [])].filter((entry) => entry.acknowledged);
+  const send = async (prompt: string, operation: DeviceOperation) => {
+    await until(alpha, runtime, Composer, (state) => state.binding.owner > 0 && state.slot === "Open" && state.away === "Free");
+    await mine.script({ kind: "tool", name: "PROPOSE_DEVICE_ACTION", input: { operation } }, prompt);
+    await mine.script({ kind: "text", parts: ["[answer] I’ll look in Files."] }, prompt);
+    await fill("Message Alpha", prompt);
+    await waitForScreen(() => expect(button("Send")?.disabled).toBe(false));
+    await press("Send");
+  };
+
+  await until(alpha, alpha.runtime, Preferences, (state) => state.document.read.status === "Loaded" && !state.askFirst);
+  await until(alpha, runtime, Conversation, (state) => state.ready);
+  await press("Open conversation");
+  await until(alpha, alpha.runtime, Shell, (state) => state.trail.length === 0 && state.assistant === "Sheet");
+
+  const filter = { type: "files_filter", kind: "pdf", folder: "Download" } as const;
+  await send("Show PDFs in Download", filter);
+  await waitForScreen(() => {
+    const found = document.querySelector('[role="group"][aria-label="Found"]');
+    expect(Array.from(found?.querySelectorAll("button") ?? [], (row) => row.getAttribute("aria-label"))).toEqual(["lease.pdf"]);
+    expect(document.body.textContent).toContain("Showing 1 item in Files.");
+    expect(button("Approve")).toBeUndefined();
+    expect(receipts().map(({ operation }) => JSON.parse(operation))).toEqual([filter]);
+  });
+
+  const open = { type: "files_open", path } as const;
+  await send("Open Documents/notes.txt", open);
+  await waitForScreen(() => {
+    expect(document.querySelector('[role="dialog"][aria-label="Preview"] pre')?.textContent).toBe(contents);
+    expect(receipts().map(({ operation }) => JSON.parse(operation))).toEqual([filter, open]);
+  });
+  expect(receipts().map(({ evidence }) => evidence.result)).toEqual([undefined, undefined]);
 }, 300_000);
