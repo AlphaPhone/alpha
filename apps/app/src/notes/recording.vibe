@@ -51,7 +51,7 @@ effect function currentTape(): (Tape | undefined)!!(NoteDevice | Agent) {
   const own = ownerAt() catch () => ""
   if (own === "") return undefined
   const fingerprint = try promise(() => ownerDigest(own))
-  const tape = device.status() catch () => undefined
+  const tape = device.status(fingerprint) catch () => undefined
   return tape?.binding?.ownerDigest === fingerprint ? tape : undefined
 }
 
@@ -262,7 +262,7 @@ export effect function ownerRecords(owner: number): void!!Scope {
   const mic = try Mic.Machine
   try ignore(mic.send({ type: "ownerChanged", owner }, phone))
   try ignore(recorder.send({ type: "ownerChanged", owner }, phone))
-  if (owner === 0) return
+  if (owner === 0) { try (try NoteDevice).retire(); return }
   try ignore(mic.send({ type: "reported", grant: try (try NoteDevice).permission() }, phone))
   const tape = try currentTape()
   const prior = try recorder.get()
