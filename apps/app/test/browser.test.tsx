@@ -62,7 +62,7 @@ async function ask(running: Awaited<ReturnType<typeof askingOnBrowser>>, text: s
   await vi.waitFor(() => expect(button("Send")?.disabled).toBe(false));
   await press("Send");
   await until(alpha, asking, Conversation, (c) => c.turn.reply === "Complete" && (world.ask.metadata?.length ?? 0) > 0);
-  return world.ask.metadata?.[0] as { observation?: { view?: string }; browserPage?: { url?: string; text?: string; tabId?: string } } | undefined;
+  return world.ask.metadata?.[0] as { observation?: { view?: string; selectedObject?: { kind?: string; id?: string; revision?: string } }; browserPage?: { url?: string; text?: string; tabId?: string; revision?: string } } | undefined;
 }
 
 async function committedAddress(runtime: ReturnType<typeof browser.runtime>, tabs: ReturnType<typeof scene>["browser"]["tabs"]) {
@@ -558,7 +558,11 @@ describe("The Browser on a phone", () => {
     // spec/app/assistant/context.md, "A turn carries the page Browser hands it for the tab in front, beside the observation, only to a peer that declares it"
     const shown = await ask(running, "Summarize this page");
     expect(shown?.observation?.view).toBe("browser");
-    expect(shown?.browserPage).toMatchObject({ url: "https://news.example/on-device-agents", tabId: `tab${tab}` });
+    // eliza binds the page to the tab the observation selects: the same session-qualified tab id and revision.
+    const selected = shown?.observation?.selectedObject;
+    expect(selected?.kind).toBe("browser-tab");
+    expect(selected?.id).toMatch(new RegExp(`:tab${tab}$`));
+    expect(shown?.browserPage).toMatchObject({ url: "https://news.example/on-device-agents", tabId: selected?.id, revision: selected?.revision });
     expect(shown?.browserPage?.text).toContain("agent");
 
     // spec/app/browser/reading.md, "A question asked while Browser is the open screen reads the tab in front once, only when it is a normal tab whose HTTPS page has committed and Browser page for Alpha is on"
