@@ -1,6 +1,6 @@
 // spec/app/voice/index.md, "Story: Hold a spoken conversation"; spec/app/voice/index.md, "The speech pipeline warms on startup, foreground return and account readiness without opening the microphone"
 import type { ElizaSignInPlugin, CloudStreamEvent, ElizaCloudSpeechPlugin } from "@elizaos/os-bridges";
-import { type Faked, plugin, rejection } from "./phone.ts";
+import { type Faked, type MailLeaseScene, plugin, rejection } from "./phone.ts";
 
 export interface SpokenSentence {
   readonly text: string;
@@ -264,10 +264,17 @@ export function elizaCloudSpeech(voice: VoiceScene): Faked {
 }
 
 /** `ElizaSignInPlugin.java`'s `status`, the registered cloud's readiness and the account its key belongs to, and its `signInSettled` receipt, as the wire carries it. */
-export function elizaSignIn(voice: VoiceScene, signedIn: () => boolean): Faked {
-  return plugin<Pick<ElizaSignInPlugin, "status">, { signInSettled: unknown }>((emit) => {
+export function elizaSignIn(voice: VoiceScene, signedIn: () => boolean, lease: MailLeaseScene): Faked {
+  return plugin<Pick<ElizaSignInPlugin, "status" | "upgradeMailLease">, { signInSettled: unknown }>((emit) => {
     voice.signedInHere = () => emit("signInSettled", { request: 1, attempt: 1, verdict: "signed-in-as", credentialId: voice.credentialId, google: "not-requested" });
     return {
+      upgradeMailLease() {
+        if (!signedIn() || lease.held) return Promise.reject(rejection("rejected"));
+        lease.asked += 1;
+        if (lease.answer === "Cancels") return Promise.resolve({ request: lease.asked, attempt: lease.asked, verdict: "ended", problem: "cancelled" });
+        lease.held = true;
+        return Promise.resolve({ request: lease.asked, attempt: lease.asked, verdict: "signed-in-as", credentialId: voice.credentialId, google: "not-requested" });
+      },
       status: ({ environment }) => Promise.resolve({
         environment, methodsKnown: true, email: true, sms: false, google: false, googleMode: "browser",
         account: signedIn()

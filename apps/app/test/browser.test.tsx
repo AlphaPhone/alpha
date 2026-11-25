@@ -4,6 +4,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { Machine as Tabs } from "../gen/app__browser.effect.vibe";
 import { Machine as Page } from "../gen/app__browser__address.effect.vibe";
 import { Machine as Library } from "../gen/app__browser__library.effect.vibe";
+import { Machine as Share } from "../gen/app__browser__share.effect.vibe";
 import { Machine as Home } from "../gen/app__home.effect.vibe";
 import { Pages } from "../src/browser/browser.vibe";
 import browser from "../src/browser/index.tsx";
@@ -24,7 +25,7 @@ async function onBrowser(world = { ...scene(), phone: true, image: true }) {
 }
 
 const go = (text: string) => drawn(async () => {
-  await press(button("Search or type address") ? "Search or type address" : "Edit address");
+  await press(button("Search or type address") ? "Search or type address" : /^Edit address/);
   await fill("Address", text);
   const form = document.querySelector<HTMLFormElement>("form[role=search]");
   if (!form) throw new Error("no address field");
@@ -89,7 +90,7 @@ describe("The Browser on a phone", () => {
     expect(world.browser.bookmarks).toEqual([]);
   });
 
-  it("Open a page and watch it load (spec/app/browser/address.md, \"Story: Go where I typed\"; spec/app/browser/address.md, \"Story: Watch a page load\"; spec/app/browser/address.md, \"Story: Find in page\")", async () => {
+  it("Open a page and watch it load (spec/app/browser/address.md, \"Story: Go where I typed\"; spec/app/browser/address.md, \"Story: Watch a page load\"; spec/app/browser/address.md, \"Story: Find in page\"; spec/app/browser/share.md, \"Story: Share the page\")", async () => {
     const { alpha, runtime, world } = await onBrowser();
     // spec/app/browser/index.md, "A launch reads the saved session, and may ask again after a failed read"
     await until(alpha, runtime, Tabs, (s) => s.hydrated);
@@ -108,6 +109,17 @@ describe("The Browser on a phone", () => {
     await until(alpha, page, Page, (p) => p.phase === "Shown" && p.secure);
     expect([...world.browser.tabs.values()].map((one) => one.history)).toEqual([["https://news.example/on-device-agents"]]);
     expect(Boolean(document.querySelector("[aria-label='Secure connection']"))).toBe(true);
+
+    await press("Menu");
+    await press("Share");
+    await until(alpha, runtime, Share, (s) => s.sent === 1 && s.delivery.tag === "NoDelivery");
+    expect(world.browser.shared.map(({ id, url, navigation }) => [id, url, navigation])).toEqual([
+      [`tab${tab}`, "https://news.example/on-device-agents", "1"],
+    ]);
+    await press("Menu");
+    await press("Copy link");
+    await until(alpha, runtime, Share, (s) => s.notice === "Copied");
+    expect(world.settings.copied).toEqual(["https://news.example/on-device-agents"]);
 
     // spec/app/browser/address.md, "Typing searches the page, and clearing the text clears the search"; spec/app/browser/address.md, "Only the answer to the latest search counts"
     await press("Menu");
@@ -149,20 +161,20 @@ describe("The Browser on a phone", () => {
     await until(alpha, runtime, Tabs, (s) => s.native.length === 2);
     expect([...world.browser.tabs.values()].map((one) => one.private)).toEqual([false, true]);
     // spec/app/browser/index.md, "Picking another open tab shows it and uncovers the page"
-    await press("Tabs");
+    await press(/^Tabs\b/);
     await until(alpha, runtime, Tabs, (s) => s.layer === "Switcher");
     const selected = document.querySelector<HTMLButtonElement>("button[aria-current=true]");
     if (!selected) throw new Error("no active tab card");
     await drawn(() => selected.click());
     await until(alpha, runtime, Tabs, (s) => s.layer === "Uncovered" && s.privates.includes(s.selected));
-    await press("Tabs");
+    await press(/^Tabs\b/);
     await until(alpha, runtime, Tabs, (s) => s.layer === "Switcher");
     const original = [...document.querySelectorAll("button")].find((control) => control.textContent?.startsWith("The case for on-device agents"));
     if (!original) throw new Error("no original tab card");
     await drawn(() => original.click());
     await until(alpha, runtime, Tabs, (s) => s.layer === "Uncovered" && s.selected === s.open[0]);
     // spec/app/browser/index.md, "Closing a tab closes its native tab, shows another open tab if it was the one shown, and leaves one new tab when it was the last"
-    await press("Tabs");
+    await press(/^Tabs\b/);
     await press("Close The case for on-device agents");
     await until(alpha, runtime, Tabs, (s) => s.open.length === 1 && s.selected === s.privates[0]);
     expect(world.browser.tabs.size).toBe(1);

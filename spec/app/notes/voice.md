@@ -26,7 +26,7 @@ import attempt as A from "../../kit/attempt"
 import review as V from "../../kit/review"
 import note.* from "./note"
 
-type Part = Transcript | Summary
+type Part = Transcript | Summary | Pin | Unpin
 type VoiceNote = {
   owner: int, note: int, revision: int, opened: int, segments: int, showing: bool,
   listen: R::Read, asked: int, heard: int, deaf: bool, quiet: bool, added: int, review: V::Review,
@@ -72,6 +72,7 @@ pure val segmentsValues = Set(1, 2, 3)
 pure val heardValues = Set(0, 1)
 pure val summaryValues = Set(0, 1)
 pure val ownerValues = Set(0, 1, 2)
+pure val pinnedValues = Set(false, true)
 pure val fromValues = Set(0, 1)
 pure val ticketValues = Set(1, 2, 3, 4, 5, 6, 7, 8, 9, 10)
 pure val weight_transcribed = 3
@@ -104,6 +105,7 @@ pure def openVoice(v: VoiceNote, note: int, revision: int, segments: int, heard:
 ```quint
 pure def canTranscribe(v: VoiceNote, by: Actor): bool =
   by == Phone and v.note > 0 and v.listen.status != R::Loading and v.heard < v.segments and not(v.deaf) and not(v.quiet)
+    and not(busy(v) and (v.part == Pin or v.part == Unpin))
 
 pure def transcribe(v: VoiceNote, by: Actor): Moved =
   val listen = R::ask(v.listen)
@@ -200,6 +202,20 @@ pure def summarised(v: VoiceNote, ticket: int, ok: bool, by: Actor): Moved =
   if (ok) write(Summary, v.upTo, answered) else { state: answered, out: List() }
 ```
 
+### Pinning writes the chosen flag over the revision shown
+
+The owner can pin or unpin while the saved note is in front and no voice
+work is changing it. The same write keeps its receipt, advances the note's
+revision when confirmed and leaves its words and audio alone.
+
+```quint
+pure def canSetPinned(v: VoiceNote, pinned: bool, by: Actor): bool =
+  by == Owner and v.showing and isOwner(v.owner) and not(busy(v)) and not(v.review.showing)
+    and v.listen.status != R::Loading and v.summarising.status != R::Loading
+
+pure def setPinned(v: VoiceNote, pinned: bool, by: Actor): Moved = write(if (pinned) Pin else Unpin, 0, v)
+```
+
 ### A write to the note ends as the store says: the note then holds it, the store refused it as overtaken, or the outcome is unknown and it is never written again
 
 ```quint
@@ -210,7 +226,8 @@ pure def written(v: VoiceNote, ticket: int, ok: bool, known: bool, latest: int, 
   val writing = A::conclude(v.writing, ok, known)
   if (writing.outcome != A::Confirmed) { ...v, writing: writing }
   else if (v.part == Transcript) { ...v, writing: writing, added: v.writeUpTo, revision: latest }
-  else { ...v, writing: writing, summary: v.writeUpTo, revision: latest }
+  else if (v.part == Summary) { ...v, writing: writing, summary: v.writeUpTo, revision: latest }
+  else { ...v, writing: writing, revision: latest }
 ```
 
 ### The transcript and summary shown are what the note holds: they change only when the store confirms a write, another note opens, or another owner takes the phone
@@ -235,6 +252,10 @@ pure def askAlpha(v: VoiceNote, by: Actor): Moved =
 
 ### Only the transcript the owner added leaves the note, and only what was shown is written to it
 
+Copy text writes the open note's saved transcript to the clipboard after
+the owner's tap, when the same saved version is still showing. The phone
+says whether it could copy.
+
 ```quint
 pure def stepOnlyTheAddedTranscriptLeaves(before: VoiceNote, via: str, after: VoiceNote, out: List[Effect]): bool =
   out.every(e => match e {
@@ -245,7 +266,8 @@ pure def stepOnlyTheAddedTranscriptLeaves(before: VoiceNote, via: str, after: Vo
     | Writes(w) => not(busy(before)) and w.base == before.revision and w.note == before.note and w.owner == before.owner
         and w.ticket == before.writing.id + 1 and isOwner(w.owner)
         and (if (w.part == Transcript) via == "addTranscript" and V::canConfirm(before.review) and w.upTo == before.heard
-          else via == "summarised" and w.upTo == before.upTo)
+          else if (w.part == Summary) via == "summarised" and w.upTo == before.upTo
+          else via == "setPinned" and before.showing and not(before.review.showing) and w.upTo == 0)
     | _ => true
   })
 ```
@@ -306,7 +328,9 @@ pure def sometimesAWriteUnknown(v: VoiceNote): bool = v.writing.outcome == A::Un
 
 ### A voice note plays from the start, or from a line of the transcript, and only within the audio written; only the answer to the current playing counts
 
-Played through, the player rests; one that cannot be played says so.
+The player rests when playback ends and reports a playback failure. The
+screen offers playback controls when the note has retained audio the phone
+can play.
 
 ```quint
 pure def canPlay(v: VoiceNote, from: int, by: Actor): bool =

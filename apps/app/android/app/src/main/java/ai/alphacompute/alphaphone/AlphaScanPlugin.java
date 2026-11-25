@@ -1,7 +1,9 @@
 package ai.alphacompute.alphaphone;
 
-import android.app.Activity;
 import ai.eliza.plugins.media.DocumentDestinations;
+import ai.eliza.plugins.media.DocumentExport;
+import android.app.Activity;
+import android.content.ContentResolver;
 import android.content.Intent;
 import android.net.Uri;
 import android.util.Base64;
@@ -16,7 +18,11 @@ import java.io.File;
 import java.io.FileInputStream;
 import java.io.FileOutputStream;
 import java.io.IOException;
+import java.io.InputStream;
 import java.io.OutputStream;
+import java.security.DigestInputStream;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.util.UUID;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -105,11 +111,8 @@ public final class AlphaScanPlugin extends Plugin {
                 return;
             }
             draft.picking = true;
-            Intent intent = new Intent(Intent.ACTION_CREATE_DOCUMENT)
-                    .addCategory(Intent.CATEGORY_OPENABLE)
-                    .setType("application/pdf")
-                    .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION | Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION)
-                    .putExtra(Intent.EXTRA_TITLE, "Scanned document.pdf");
+            Intent intent = DocumentDestinations.create("application/pdf", "Scanned document.pdf")
+                    .addFlags(Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION);
             getActivity().runOnUiThread(() -> {
                 try {
                     startActivityForResult(call, intent, "picked");
@@ -135,19 +138,14 @@ public final class AlphaScanPlugin extends Plugin {
                 call.resolve(status(false, true));
                 return;
             }
-            boolean saved = false;
-            try (FileInputStream in = new FileInputStream(draft.file);
-                 OutputStream out = getContext().getContentResolver().openOutputStream(uri, "wt")) {
-                if (out == null) throw new IOException("The document destination could not be opened");
-                in.transferTo(out);
-                out.flush();
-                saved = true;
-            } catch (IOException | SecurityException error) {
-                saved = false;
+            DocumentExport.Outcome outcome;
+            try {
+                outcome = write(draft, uri);
             } finally {
                 retire(draft);
             }
-            JSObject receipt = status(saved, saved);
+            boolean saved = outcome == DocumentExport.Outcome.EXPORTED;
+            JSObject receipt = status(saved, outcome != DocumentExport.Outcome.UNVERIFIED);
             if (saved) {
                 int flags = 0;
                 if ((data.getFlags() & Intent.FLAG_GRANT_READ_URI_PERMISSION) != 0) {
@@ -164,6 +162,46 @@ public final class AlphaScanPlugin extends Plugin {
             }
             call.resolve(receipt);
         });
+    }
+
+    private DocumentExport.Outcome write(Draft draft, Uri uri) {
+        boolean providerWriteAttempted = false;
+        try {
+            MessageDigest digest = MessageDigest.getInstance("SHA-256");
+            ContentResolver resolver = getContext().getContentResolver();
+            byte[] buffer = new byte[8192];
+            if (draft.file.length() != draft.length) return DocumentExport.Outcome.FAILED;
+            try (DigestInputStream source = new DigestInputStream(new FileInputStream(draft.file), digest)) {
+                providerWriteAttempted = true;
+                try (OutputStream destination = resolver.openOutputStream(uri, "wt")) {
+                    if (destination == null) return DocumentExport.Outcome.UNVERIFIED;
+                    long length = 0;
+                    for (int count; (count = source.read(buffer)) != -1; ) {
+                        if (count == 0 || length + count > draft.length) return DocumentExport.Outcome.UNVERIFIED;
+                        destination.write(buffer, 0, count);
+                        length += count;
+                    }
+                    if (length != draft.length) return DocumentExport.Outcome.UNVERIFIED;
+                    destination.flush();
+                }
+            }
+            byte[] written = digest.digest();
+            try (InputStream provider = resolver.openInputStream(uri)) {
+                if (provider == null) return DocumentExport.Outcome.UNVERIFIED;
+                DigestInputStream readback = new DigestInputStream(provider, digest);
+                for (long remaining = draft.length; remaining > 0; ) {
+                    int count = readback.read(buffer, 0, (int) Math.min(remaining, buffer.length));
+                    if (count <= 0) return DocumentExport.Outcome.UNVERIFIED;
+                    remaining -= count;
+                }
+                if (readback.read() != -1 || !MessageDigest.isEqual(written, digest.digest())) {
+                    return DocumentExport.Outcome.UNVERIFIED;
+                }
+            }
+            return DocumentExport.Outcome.EXPORTED;
+        } catch (IOException | NoSuchAlgorithmException | RuntimeException failure) {
+            return DocumentExport.failed(providerWriteAttempted);
+        }
     }
 
     @PluginMethod public void abandon(PluginCall call) {
