@@ -188,10 +188,10 @@ function VoiceSharePanel({ open, close, choose, canSave, restore }: {
 }) {
   return <Dialog open={open} onOpenChange={(shown) => { if (!shown) close(); }}>
     <DialogContent aria-describedby={undefined} overlayClassName="bg-foreground/35 dark:bg-background/35"
-      className="inset-x-3 top-auto bottom-[calc(max(6.75rem,var(--alpha-dock-overlap,0px),env(safe-area-inset-bottom))+--spacing(2))] mx-auto max-h-[80dvh] max-w-lg translate-y-0 gap-0 overflow-y-auto rounded-panel bg-background shadow-none"
+      className="inset-x-3 top-auto bottom-[calc(max(6.75rem,var(--alpha-dock-overlap,0px),env(safe-area-inset-bottom))+--spacing(2))] mx-auto max-h-[80dvh] max-w-lg translate-y-0 gap-0 overflow-y-auto rounded-panel bg-background p-5 shadow-none"
       onCloseAutoFocus={(event) => { event.preventDefault(); restore(); }}>
       <div className="mb-5 flex items-center justify-between gap-4">
-        <DialogTitle className="text-2xl font-bold">Share</DialogTitle>
+        <DialogTitle className="font-sans text-2xl font-bold">Share</DialogTitle>
         <DialogClose asChild><Button size="icon" variant="secondary" className="size-11 rounded-full" aria-label="Close share"><X className="size-5.5" /></Button></DialogClose>
       </div>
       <div className="flex flex-col gap-2">

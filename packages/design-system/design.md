@@ -57,9 +57,10 @@ do next.
   Everything pressed is at least 44px in both directions.
 - **Elevation.** `shadow-sm` lifts a control, `shadow-menu` a menu, `shadow-md` a dialog or a notice, `shadow-lg` a raised card,
   `shadow-dock` the floating Ask Alpha bar, `shadow-dock-compact` its compact controls, `shadow-bar` the ongoing-call bar over a view,
-  and `shadow-sheet` a bottom sheet. The dock and bar shadows have a `-dark` variant for black surfaces. Over the map, `shadow-float` lifts the search bar,
-  a round control and the directions card, `shadow-chip` a saved-place chip and `shadow-credit` the credit links,
-  each with a `-dark` variant, as is `shadow-sheet`; `shadow-banner` is Maps guidance's turn banner.
+  `shadow-sheet` a map's resting sheet and `shadow-lift` a modal sheet or card rising over the page. The menu, dialog, sheet, lift,
+  dock and bar shadows have a `-dark` variant for black surfaces, as develop deepens its shadow color in dark. Over the map,
+  `shadow-float` lifts the search bar, a round control and the directions card, `shadow-chip` a saved-place chip and
+  `shadow-credit` the credit links, each with a `-dark` variant; `shadow-banner` is Maps guidance's turn banner.
 - **Layers.** `z-dock` is the Ask Alpha bar, `z-sheet` the conversation and bottom sheets, `z-dialog` a
   dialog, `z-toast` a notice, `z-voice` the voice overlay. `z-10`, `z-20` and `z-50` order things inside one view.
 - **Motion.** `fast` for press, `base` for most changes, `slow` for entering and leaving, on
@@ -213,6 +214,8 @@ this prose into tokens. To change the design, describe it, and have the change w
 | `text.headline.tracking` | -0.01em |
 | `text.quote.size` | 1.3125rem |
 | `text.quote.leading` | 1.35 |
+| `text.surface.size` | 1.625rem |
+| `text.surface.leading` | 1.15 |
 | `text.home-display.size` | 1.625rem |
 | `text.home-display.leading` | 1.1 |
 | `text.title.size` | 1.75rem |
@@ -283,7 +286,11 @@ this prose into tokens. To change the design, describe it, and have the change w
 | `shadow.md` | 0 8px 24px oklch(0 0 0 / 0.12) |
 | `shadow.lg` | 0 12px 34px oklch(0 0 0 / 0.16) |
 | `shadow.sheet` | 0 -10px 40px oklch(0 0 0 / 0.12) |
+| `shadow.md-dark` | 0 8px 24px oklch(0 0 0 / 0.45) |
+| `shadow.lift` | 0 -20px 60px oklch(0 0 0 / 0.12) |
+| `shadow.lift-dark` | 0 -20px 60px oklch(0 0 0 / 0.45) |
 | `shadow.menu` | 0 4px 20px oklch(0 0 0 / 0.12) |
+| `shadow.menu-dark` | 0 4px 20px oklch(0 0 0 / 0.45) |
 | `shadow.dock` | 0 14px 40px oklch(0 0 0 / 0.12) |
 | `shadow.dock-dark` | 0 14px 40px oklch(0 0 0 / 0.45) |
 | `shadow.dock-compact` | 0 12px 34px oklch(0 0 0 / 0.12) |
