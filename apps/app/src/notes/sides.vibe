@@ -3,12 +3,14 @@ import * as Link from "../../gen/app__notes__linkNote.effect.vibe"
 import * as Voice from "../../gen/app__notes__voice.effect.vibe"
 import type { Actor } from "../../gen/app__notes__note.effect.vibe"
 import { Machine as Notes } from "../../gen/app__notes.effect.vibe"
+import { Machine as Shell, canRaise, showing } from "../../gen/app__shell.effect.vibe"
 import type { Agent } from "../platform/agent.vibe"
 import { NoteDevice } from "../platform/noteDevice.vibe"
 import { NoteStore } from "../platform/notes.vibe"
 import { ownerAt } from "../platform/owner.vibe"
 import { type Job, answer, reacting, run, together } from "../runtime/reactor.vibe"
-import { NoteContent, audioIdOf, formatChanged, numberOf } from "./content.vibe"
+import { NoteContent, audioIdOf, formatChanged, numberOf, savedVoice } from "./content.vibe"
+import { type NotesSelection, notesSelection } from "./selection.vibe"
 
 module web {
   /** A linked page must still be its original HTTP(S) address. @throws {never} */
@@ -81,16 +83,31 @@ effect function played(fx: Extract<Voice.Effect, { readonly tag: "Plays" }>): Vo
   return { ...failed, ok: try device.play(audioId, note.id, offset) }
 }
 
-function voiceOut(fx: Voice.Effect): Job<Voice.Event, Agent | NoteContent | NoteDevice, [Actor]> {
+// spec/app/notes/voice.md, "Ask Alpha about this transcript hands Ask Alpha the transcript the note holds"
+effect function askAbout(fx: Extract<Voice.Effect, { readonly tag: "AsksAlpha" }>): void!!NotesSelection {
+  const selected = try notesSelection()
+  if (selected?.kind !== "canonical-note") return
+  const voice = try (try Voice.Machine).get()
+  const collection = try (try NoteContent).collection()
+  const note = collection.noteByNumber.get(fx.note)
+  if (!Voice.canAskAlpha(voice, "Owner") || voice.note !== fx.note || voice.added !== fx.upTo ||
+    voice.revision !== collection.version || note?.id !== selected.id || selected.revision !== String(collection.version - 1) ||
+    (savedVoice(note)?.lines.length ?? 0) === 0) return
+  const shell = try Shell
+  const current = try shell.get()
+  if (showing(current, "Notes") && canRaise(current, "Sheet")) try ignore(shell.send({ type: "raise", detent: "Sheet" }))
+}
+
+function voiceOut(fx: Voice.Effect): Job<Voice.Event, NotesSelection | NoteDevice, [Actor]> {
   if (fx.tag === "Plays") return answer("play", played(fx), { type: "played", ticket: fx.ticket, ok: false }, phone)
   if (fx.tag === "Halts") return answer("stop", effect { return { type: "halted", ticket: fx.ticket, ok: try (try NoteDevice).halt() } satisfies Voice.Event }, { type: "halted", ticket: fx.ticket, ok: false }, phone)
-  const failed: Voice.Event | undefined = match (fx) {
+  if (fx.tag === "AsksAlpha") return run("ask about this transcript", askAbout(fx), phone)
+  const failed: Voice.Event = match (fx) {
     when { tag: "Transcribes" }: { type: "transcribed", ticket: fx.ticket, ok: false };
     when { tag: "Summarises" }: { type: "summarised", ticket: fx.ticket, ok: false };
     when { tag: "Writes" }: { type: "written", ticket: fx.ticket, ok: false, known: true, latest: 0 };
-    when { tag: "AsksAlpha" }: undefined;
   }
-  return failed === undefined ? run("ask", Effect.void, phone) : answer(fx.tag, succeed(failed), failed, phone)
+  return answer(fx.tag, succeed(failed), failed, phone)
 }
 
 export const sides = together(reacting(Link, { carry: linkOut }), reacting(Voice, { carry: voiceOut }))

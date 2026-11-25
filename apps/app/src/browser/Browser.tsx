@@ -1,5 +1,5 @@
 // spec/app/browser/index.md, "Story: Open, pick and close tabs"; spec/app/browser/address.md, "Story: Go where I typed"; spec/app/browser/address.md, "Story: Watch a page load"; spec/app/browser/address.md, "Story: Browse privately"
-import { Button, BrowserAddressBar, BrowserFindBar, BrowserBar, BrowserLibrary, type BrowserMenuItem, BrowserMenu, BrowserNewTab, BrowserTabs, ConfirmDialog, PrivateMark } from "@repo/ui";
+import { Button, BrowserAddressBar, type BrowserAddressChoice, BrowserAddressChoices, BrowserFindBar, BrowserBar, BrowserLibrary, type BrowserMenuItem, BrowserMenu, BrowserNewTab, BrowserTabs, ConfirmDialog, PrivateMark } from "@repo/ui";
 import { ChevronLeft, Download, History, Plus, RotateCw, Search, Square, Trash2 } from "lucide-react";
 import { Effect, Option } from "effect";
 import { useState } from "react";
@@ -54,6 +54,7 @@ function Tab({ runtime, alpha, tabs, page }: BrowserProps & { tabs: State; page:
   const browser = useMachine(runtime);
   const { state, can, send } = usePage(page);
   const [typed, setTyped] = useState("");
+  const [refusal, setRefusal] = useState<string>();
   const [finding, setFinding] = useState("");
   if (!state) return null;
   const tab = tabs.selected;
@@ -61,20 +62,35 @@ function Tab({ runtime, alpha, tabs, page }: BrowserProps & { tabs: State; page:
   const shown = tabHost.session.info(idOf(tab));
   const { host, path } = addressParts(shown?.url);
   const editing = tabs.layer === "Address";
+  const native = Option.isSome(tabHost.plugin);
+  const privateTab = state.kind === "Private";
+  const readSuggestions = () => native ? loadLibrary(runtime) : undefined;
   const cover = (layer: State["layer"]) => (browser.can({ type: "cover", layer }) ? () => void browser.send({ type: "cover", layer }) : undefined);
   const leading = <AppBack alpha={alpha} />;
   const submit = (text: string) => {
     const input = inputOf(text);
     if (!can({ type: "submit", i: input })) return;
-    void runtime.runPromise(Effect.flatMap(Pages, (pages) => pages.aim(tab, addressOf(text, verdict(input) === "Search"))))
+    const outcome = verdict(input);
+    if (outcome === "Refuse") {
+      setRefusal(input.tooLong ? "This address is too long." : input.userInfo ? "Remove the username or password from this address." : "Enter a complete web address.");
+      void send({ type: "submit", i: input });
+      return;
+    }
+    void runtime.runPromise(Effect.flatMap(Pages, (pages) => pages.aim(tab, addressOf(text, outcome === "Search"))))
       .then(() => send({ type: "submit", i: input }))
       .then(() => browser.send({ type: "uncover" }));
   };
   const tell = (event: Parameters<typeof browser.send>[0]) => (browser.can(event) ? () => void browser.send(event) : undefined);
   const openLibrary = () => void browser.send({ type: "cover", layer: "Library" }).then(() => loadLibrary(runtime));
+  const edit = () => {
+    setRefusal(undefined);
+    setTyped(shown?.url ?? "");
+    void browser.send({ type: "cover", layer: "Address" }).then(readSuggestions);
+  };
   const others = tabs.open.filter((one) => one !== tab);
-  const opening = (kind: "Normal" | "Private") => (canOpenTab(tabs, kind) ? () => { setTyped(""); void browser.send({ type: "openTab", kind }); } : undefined);
-  const native = Option.isSome(tabHost.plugin);
+  const opening = (kind: "Normal" | "Private") => (canOpenTab(tabs, kind) ? () => {
+    void browser.send({ type: "openTab", kind }).then(readSuggestions);
+  } : undefined);
   const offered: (BrowserMenuItem | false)[] = [
     can({ type: "reload" }) && { label: "Reload", name: "Reload page", icon: <RotateCw />, onSelect: () => { void browser.send({ type: "uncover" }).then(() => send({ type: "reload" })); } },
     can({ type: "stop" }) && { label: "Stop", name: "Stop loading", icon: <Square />, onSelect: () => { void browser.send({ type: "uncover" }).then(() => send({ type: "stop" })); } },
@@ -100,15 +116,15 @@ function Tab({ runtime, alpha, tabs, page }: BrowserProps & { tabs: State; page:
   return (
     <div className="relative flex min-h-0 flex-1 flex-col">
       {editing
-        ? <BrowserAddressBar leading={leading} value={typed} onValueChange={setTyped} onSubmit={() => submit(typed)} onCancel={() => void browser.send({ type: "uncover" })} />
+        ? <BrowserAddressBar leading={leading} value={typed} onValueChange={(value) => { setTyped(value); setRefusal(undefined); }} onSubmit={() => submit(typed)} onCancel={() => void browser.send({ type: "uncover" })} />
         : <BrowserBar
             leading={leading}
             host={host}
             path={path}
             secure={state.secure}
-            private={state.kind === "Private"}
+            private={privateTab}
             tabs={tabs.open.length}
-            onEdit={cover("Address") && (() => { setTyped(`${host}${path}`); void browser.send({ type: "cover", layer: "Address" }); })}
+            onEdit={cover("Address") && edit}
             onStop={can({ type: "stop" }) ? () => void send({ type: "stop" }) : undefined}
             onBack={can({ type: "goBack" }) ? () => void send({ type: "goBack" }) : undefined}
             onForward={can({ type: "goForward" }) ? () => void send({ type: "goForward" }) : undefined}
@@ -118,9 +134,10 @@ function Tab({ runtime, alpha, tabs, page }: BrowserProps & { tabs: State; page:
       {state.phase === "Loading" && <div role="progressbar" aria-label="Loading website" className="h-0.75 shrink-0 overflow-hidden bg-secondary"><div className="h-full w-1/3 bg-primary" /></div>}
       <div inert={tabs.layer !== "Uncovered"} className="relative flex min-h-0 flex-1 flex-col overflow-y-auto">
         {state.phase === "Blank"
-          ? <BrowserNewTab private={state.kind === "Private"} onSearch={cover("Address") && (() => { setTyped(""); void browser.send({ type: "cover", layer: "Address" }); })} />
+          ? <BrowserNewTab private={privateTab} onSearch={cover("Address") && edit} />
           : <div data-alpha-browser-page="" aria-hidden ref={(place) => { if (place) void runtime.runPromise(placed); }} className="absolute inset-0" />}
       </div>
+      {editing && <AddressChoices runtime={runtime} query={typed} privateTab={privateTab} refusal={state.refused ? refusal : undefined} onOpen={submit} />}
       {state.finding && tabs.layer === "Uncovered" && (
         <BrowserFindBar value={finding} onValueChange={seek} status={findStatus}
           onPrevious={can({ type: "findNext", forward: false }) ? () => void send({ type: "findNext", forward: false }) : undefined}
@@ -146,6 +163,26 @@ function Tab({ runtime, alpha, tabs, page }: BrowserProps & { tabs: State; page:
       </ConfirmDialog>
     </div>
   );
+}
+
+function AddressChoices({ runtime, query, privateTab, refusal, onOpen }: Pick<BrowserProps, "runtime"> & {
+  query: string;
+  privateTab: boolean;
+  refusal?: string;
+  onOpen: (url: string) => void;
+}) {
+  const { state } = useLibrary(runtime);
+  const bookmarks = state === undefined ? [] : runtime.runSync(Effect.flatMap(LibraryRows, (rows) => rows.bookmarks()));
+  const history = privateTab ? [] : runtime.runSync(Effect.flatMap(Pages, (pages) => pages.visits()));
+  const saved = new Set(bookmarks.map(({ url }) => url));
+  const seeking = query.trim().toLocaleLowerCase();
+  const choices = [...new Set([...saved, ...history])].filter((url) => url.toLocaleLowerCase().includes(seeking)).slice(0, 8)
+    .flatMap((url): BrowserAddressChoice[] => {
+      const address = URL.parse(url);
+      if (!address) return [];
+      return [{ url, kind: saved.has(url) ? "bookmark" : "history", title: address.hostname, detail: address.pathname + address.search + address.hash }];
+    });
+  return <BrowserAddressChoices choices={choices} privateTab={privateTab} refusal={refusal} onOpen={onOpen} />;
 }
 
 function Library({ runtime, onBack, onOpen }: Pick<BrowserProps, "runtime"> & { onBack: () => void; onOpen: (url: string) => void }) {

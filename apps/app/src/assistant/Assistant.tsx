@@ -4,7 +4,7 @@ import {
   type AssistantAttachment, type AssistantComposerProps, type AssistantDraftNoticeProps, type AssistantTurnNoteProps,
 } from "@repo/ui";
 import { Effect, type ManagedRuntime } from "effect";
-import { useCallback, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import { type ReactNode, useCallback, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import type { Conversation as Talking, Machine as ConversationMachine } from "../../gen/app__assistant.effect.vibe";
 import { askable, inFlight, pending } from "../../gen/app__assistant.ts";
 import { useMachine as useConversation } from "../../gen/app__assistant.react.ts";
@@ -14,7 +14,7 @@ import type { Machine as ChatsMachine } from "../../gen/app__assistant__chats.ef
 import { making, unsure } from "../../gen/app__assistant__chats.ts";
 import { useMachine as useChats } from "../../gen/app__assistant__chats.react.ts";
 import type { Composer as Writing, Machine as ComposerMachine } from "../../gen/app__assistant__composer.effect.vibe";
-import { content, textLimit } from "../../gen/app__assistant__composer.ts";
+import { attachments as attachmentCount, content, maxFiles, textLimit } from "../../gen/app__assistant__composer.ts";
 import { useMachine as useComposer } from "../../gen/app__assistant__composer.react.ts";
 import type { Machine as DockMachine } from "../../gen/app__assistant__dock.effect.vibe";
 import { focused as dockFocused, isOpen as dockOpen } from "../../gen/app__assistant__dock.ts";
@@ -33,18 +33,21 @@ import { MailQuestions } from "../inbox/mail-context.vibe";
 import { home } from "../shell/shell.vibe";
 import { isCommsView } from "../shell/views.tsx";
 import { MediaReview } from "./media-review.vibe";
+import { Documents } from "../platform/documents.vibe";
+import { AttachmentSources } from "./AttachmentSources.tsx";
 import { askComms, freedom } from "./assistant.vibe";
-import { acceptedFiles, insertFiles, previewFile, removeFile, sameBinding } from "./attachments.vibe";
+import { acceptedFiles, acceptedPhotos, chooseDocument, type FileTarget, insertFiles, previewFile, readChosenDocument, removeFile, sameBinding } from "./attachments.vibe";
 import { chip, type MessageActions, useMessageRows } from "./history.tsx";
 import { ReplyFailure } from "./ReplyFailure.tsx";
 import { type Attached, type Line, Talk } from "./talk.vibe";
 import { CommsTarget, type CommsTargetServices } from "../phone/CommsTarget.tsx";
 import { CommsBriefing } from "../phone/comms.vibe";
+import { displayNumber } from "../phone/words.ts";
 
 export interface AssistantProps {
-  runtime: ManagedRuntime.ManagedRuntime<ConversationMachine | AttachmentMachine | ChatsMachine | ComposerMachine | SearchMachine | ReplyMachine | DockMachine | ShellMachine | CommsMachine | CommsTargetServices | CommsBriefing | Talk | MailQuestions | LayersMachine | MediaReview, unknown>;
+  runtime: ManagedRuntime.ManagedRuntime<ConversationMachine | AttachmentMachine | ChatsMachine | ComposerMachine | SearchMachine | ReplyMachine | DockMachine | ShellMachine | CommsMachine | CommsTargetServices | CommsBriefing | Talk | MailQuestions | LayersMachine | MediaReview | Documents, unknown>;
   messageActions?: MessageActions;
-  speech?: Pick<AssistantComposerProps, "onTalk" | "onDictate" | "showUnavailableTalk" | "voice" | "voiceNotice">;
+  speech?: Pick<AssistantComposerProps, "onTalk" | "onDictate" | "showUnavailableTalk" | "voiceNotice"> & { voice?: (compact: boolean) => ReactNode };
   canReadAloud?: boolean;
 }
 
@@ -124,8 +127,7 @@ export function Assistant({ runtime, messageActions, speech, canReadAloud = fals
       if (assistantDetent === "Typing") element.focus();
     }
   }, [assistantDetent, compact]);
-  const fileInputRef = useRef<HTMLInputElement>(null);
-  const fileTargetRef = useRef<{ binding: Writing["binding"]; slot: number } | undefined>(undefined);
+  const fileTargetRef = useRef<FileTarget | undefined>(undefined);
   const [talking, shown, writing, finding] = [conversation.state, chats.state, composer.state, search.state];
   const free = talking && shown && writing ? freedom(talking, writing, shown.chosen) : { replying: true, holding: true };
   const lines = !shown || (shown.page.status === "Idle" && shown.chosen === 0) ? emptyLines : seen.pages.get(shown.page.ticket)?.lines ?? emptyLines;
@@ -202,8 +204,23 @@ export function Assistant({ runtime, messageActions, speech, canReadAloud = fals
   const mediaCards = seen.media.filter((card) => !talking.context.sensitive && card.conversation === shown.chosen && card.revision === talking.context.revision).map((card) => ({
     id: `media ${card.id}`, author: "alpha" as const, text: "", children: (
       <div className="grid gap-2">
-        <AssistantCard card={{ kind: "decision", variant: "proposal", title: card.title, detail: card.detail, action: "Approve" }}
-          onHandOn={() => void runtime.runPromise(Effect.flatMap(MediaReview, (review) => review.decide(card, true)))} />
+        {card.phone?.tag === "Choices" ? (
+          <div role="group" aria-label="Choose a phone number" className="grid gap-2 rounded-sheet bg-secondary p-3">
+            <p className="font-semibold">Choose a number for {card.detail}</p>
+            {card.phone.options.map((choice, index) => (
+              <Button key={`${choice.contact}\n${choice.number}`} variant="ghost" className="h-auto min-h-11 justify-start text-left whitespace-normal"
+                onClick={() => void runtime.runPromise(Effect.flatMap(MediaReview, (review) => review.choosePhone(card, index)))}>
+                {choice.name} · {displayNumber(choice.number)}
+              </Button>
+            ))}
+            {card.phone.more && <p className="text-sm text-muted-foreground">More contacts matched. Use a more specific name if needed.</p>}
+          </div>
+        ) : card.phone?.tag === "Unavailable" ? (
+          <Alert role="status">{card.phone.reason}</Alert>
+        ) : (
+          <AssistantCard card={{ kind: "decision", variant: "proposal", title: card.title, detail: card.detail, action: "Approve" }}
+            onHandOn={() => void runtime.runPromise(Effect.flatMap(MediaReview, (review) => review.decide(card, true)))} />
+        )}
         <Button className="justify-self-end" variant="ghost" onClick={() => void runtime.runPromise(Effect.flatMap(MediaReview, (review) => review.decide(card, false)))}>Decline</Button>
       </div>
     ),
@@ -259,13 +276,34 @@ export function Assistant({ runtime, messageActions, speech, canReadAloud = fals
         src={`data:${previewed.mimeType};base64,${previewed.data}`}
         onOpenChange={(open) => { if (!open && attachments.can({ type: "closePreview" })) void attachments.send({ type: "closePreview" }); }}
       />}
-      <input ref={fileInputRef} type="file" accept={acceptedFiles} multiple hidden onChange={(event) => {
-        const target = fileTargetRef.current;
-        fileTargetRef.current = undefined;
-        const files = Array.from(event.currentTarget.files ?? []);
-        event.currentTarget.value = "";
-        if (target && files.length > 0) void runtime.runPromise(insertFiles(target.binding, target.slot, files));
-      }} />
+      {attachments.state?.open && <AttachmentSources
+        tab={attachments.state.tab}
+        room={attachments.state.room}
+        accept={attachments.state.tab === "Photos" ? acceptedPhotos : acceptedFiles}
+        chooseDocument={runtime.runSync(Documents).client._tag === "Some" ? async () => {
+          const chosen = await runtime.runPromise(chooseDocument());
+          if (chosen) return { id: chosen.id, name: chosen.name, bytes: chosen.bytes, load: () => runtime.runPromise(readChosenDocument(chosen.id)) };
+        } : undefined}
+        onClose={() => {
+          fileTargetRef.current = undefined;
+          void attachments.send({ type: "cancel" });
+        }}
+        onReturnFocus={() => composerRef.current?.parentElement?.querySelector<HTMLButtonElement>('button[aria-label="Chat actions"]')?.focus()}
+        onTab={(tab) => void attachments.send({ type: "switchTab", tab })}
+        onAttach={async (selected) => {
+          const target = fileTargetRef.current;
+          if (!target) return false;
+          const files = await Promise.all(selected.map((file) => file.load()));
+          const current = () => fileTargetRef.current === target;
+          if (files.some((file) => file === undefined) || !current()) return false;
+          const accepted = await runtime.runPromise(insertFiles(target, files.filter((file) => file !== undefined), current));
+          if (accepted && current()) {
+            fileTargetRef.current = undefined;
+            await attachments.send({ type: "cancel" });
+          }
+          return accepted;
+        }}
+      />}
       {onComms && full && <CommsTarget runtime={runtime} placement="strip" />}
       {(!onComms || open) && <AssistantConversation
         detent={assistantDetent === "Full" ? "full" : assistantDetent === "Sheet" ? "sheet" : "bar"}
@@ -299,6 +337,7 @@ export function Assistant({ runtime, messageActions, speech, canReadAloud = fals
         }}
         composer={{
           ...speech,
+          voice: speech?.voice?.(compact),
           onDictate: onComms || inFlight(talking.turn) || !speech?.onDictate ? undefined : () => {
             openWithFocus(false);
             speech.onDictate?.();
@@ -340,9 +379,11 @@ export function Assistant({ runtime, messageActions, speech, canReadAloud = fals
           onStop: conversation.can({ type: "stop" }) ? () => void conversation.send({ type: "stop" }) : undefined,
           stopping: talking.turn.stopping,
           onAttach: !onComms && composer.can({ type: "attach", count: 1 }) ? () => {
-            fileTargetRef.current = { binding: writing.binding, slot: writing.read.ticket };
+            const request = { type: "openPicker", room: maxFiles - attachmentCount(writing.editor) } as const;
+            if (!attachments.can(request)) return;
+            fileTargetRef.current = { binding: writing.binding, slot: writing.read.ticket, revision: talking.context.revision };
             openWithFocus(false);
-            fileInputRef.current?.click();
+            void attachments.send(request);
           } : undefined,
           onFocusField: assistantDetent === "Typing" ? undefined : () => openWithFocus(false),
           onHistory: () => {

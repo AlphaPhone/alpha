@@ -6,7 +6,7 @@ import type { PhoneNumber, TelephonySubscription } from "@elizaos/os-bridges"
 import * as Composer from "../../gen/app__messages__composer.effect.vibe"
 import type { Effect as Out, Event } from "../../gen/app__messages__composer.effect.vibe"
 import type { Effect as SendOut } from "../../gen/app__messages__sending.effect.vibe"
-import { Machine as Messages, canNewPictureMessage } from "../../gen/app__messages.effect.vibe"
+import { Machine as Messages, canNewPictureMessage, type Messages as MessagesState } from "../../gen/app__messages.effect.vibe"
 import { Machine as Phone, clear } from "../../gen/app__phone.effect.vibe"
 import { Machine as Shell, showing } from "../../gen/app__shell.effect.vibe"
 import { type Machine as Toasts } from "../../gen/app__notices__toasts.effect.vibe"
@@ -14,7 +14,7 @@ import { type Said, say } from "../notices/toasts.vibe"
 import { Agent } from "../platform/agent.vibe"
 import { ask } from "../platform/remote.vibe"
 import { SystemSettings } from "../platform/systemSettings.vibe"
-import { Telephony, TelephonyAbsent, TelephonyRefused, telephony } from "../platform/telephony.vibe"
+import { Telephony, TelephonyAbsent, TelephonyRefused, sendFromComposer, telephony } from "../platform/telephony.vibe"
 import { Attempts } from "../runtime/attempts.vibe"
 import { type Job, answer, applying, contained, following, hearing, reacting, run, started, stream, together } from "../runtime/reactor.vibe"
 import { grantOf } from "../phone/phone.vibe"
@@ -40,6 +40,7 @@ export interface Outgoing {
   readonly body: string
   readonly sim: number | null
   readonly selectedSim?: TelephonySubscription | undefined
+  readonly trustedTap?: boolean | undefined
   readonly pictures: ReadonlyArray<Picture>
   readonly pictured: boolean
   readonly operation: OperationId | undefined
@@ -52,6 +53,19 @@ interface MmsReceiptBinding {
   readonly attachments: MmsBinding["attachments"]
 }
 
+/** The SIM the owner picked for this conversation, held only while Alpha is open. */
+export interface PickedSubscription {
+  readonly thread: number
+  readonly subscription: TelephonySubscription
+}
+
+interface SubscriptionChoice {
+  readonly get: () => PickedSubscription | undefined
+  readonly subscribe: (listener: () => void) => () => void
+  readonly pick: (thread: number, subscription: TelephonySubscription) => void
+  readonly leave: (thread: number) => void
+}
+
 /** The texts behind the composer: each conversation's draft, saved on the phone, the pictures of the open one, and the send in hand. */
 export service Drafts {
   text(thread: number): string!!
@@ -61,6 +75,7 @@ export service Drafts {
   setPictures(pictures: ReadonlyArray<Picture>): void!!
   subscriptions(): ReadonlyArray<TelephonySubscription>!!
   setSubscriptions(subscriptions: ReadonlyArray<TelephonySubscription>): void!!
+  readonly subscriptionChoice: SubscriptionChoice
   offeredPicture(): (PictureOffer | undefined)!!
   setOfferedPicture(offer: PictureOffer | undefined): void!!
   outgoing(): Option.Option<Outgoing>!!
@@ -141,6 +156,26 @@ const drafts = Layer.effect(Drafts, effect {
   const store = try KeyValueStore.KeyValueStore
   let pictures: ReadonlyArray<Picture> = []
   let subscriptions: ReadonlyArray<TelephonySubscription> = []
+  let picked: PickedSubscription | undefined
+  const simListeners = new Set<() => void>()
+  const showPick = () => { for (const listener of simListeners) listener() }
+  const subscriptionChoice: SubscriptionChoice = {
+    get: () => picked,
+    subscribe: (listener) => {
+      simListeners.add(listener)
+      return () => { simListeners.delete(listener) }
+    },
+    pick: (thread, subscription) => {
+      if (picked?.thread === thread && sameSubscription(picked.subscription, subscription)) return
+      picked = { thread, subscription }
+      showPick()
+    },
+    leave: (thread) => {
+      if (picked?.thread !== thread) return
+      picked = undefined
+      showPick()
+    },
+  }
   let offeredPicture: PictureOffer | undefined
   let sending = { direct: false, pictures: false }
   let outgoing: Option.Option<Outgoing> = Option.fromNullishOr(keptSend(store.get(outgoingKey) catch () => undefined))
@@ -154,6 +189,7 @@ const drafts = Layer.effect(Drafts, effect {
     setPictures: (next: ReadonlyArray<Picture>) => sync(() => { pictures = next }),
     subscriptions: () => sync(() => subscriptions),
     setSubscriptions: (next: ReadonlyArray<TelephonySubscription>) => sync(() => { subscriptions = next }),
+    subscriptionChoice,
     offeredPicture: () => sync(() => offeredPicture),
     setOfferedPicture: (offer: PictureOffer | undefined) => sync(() => { offeredPicture = offer }),
     outgoing: () => sync(() => outgoing),
@@ -229,27 +265,29 @@ effect function receiptOf(send: Outgoing, sim: number, operation: OperationId): 
 function refusedSend(failure: TelephonyAbsent | TelephonyRefused): (SmsSendStatus | undefined) {
   if (failure instanceof TelephonyAbsent) return "denied"
   if (failure.tag === "InvalidMessageRequest" || failure.tag === "SmsSendRefused" || failure.tag === "SmsSendNotAttempted"
-    || failure.code === "busy" || failure.code === "too-large") return "denied"
+    || failure.code === "busy" || failure.code === "too-large" || failure.code === "composer-not-started") return "denied"
   return undefined
 }
 
 // spec/app/messages/sending.md, "Send journals a new operation, or reads the journal back when the last outcome is unknown"; spec/app/messages/sending.md, "The journal entry lands, or the phone denies the send before any radio is used"
 /** The send under its operation's key: the phone journals it before it uses the radio, and the same key never sends twice. */
-function journaled(id: number, recipients: number): Stream.Stream<Event, never, Telephony | Drafts | Attempts | Composer.Machine | Phone> {
+function journaled(id: number, recipients: number): Stream.Stream<Event, never, Telephony | Drafts | Attempts | Composer.Machine | Phone | Messages> {
   return Stream.unwrap(effect {
     const store = try Drafts
     const phone = try Phone
     const composer = try Composer.Machine
+    const messages = try Messages
     const denied = Stream.succeed<Event>({ type: "journaled", id, allowed: false })
     const held = try store.outgoing()
     if (Option.isNone(held) || !canDigest()) return denied
     const send = held.value
+    const openThread = (state: MessagesState) => state.front && state.pane === "Conversation" && state.thread === send.thread
     const current = effect () => {
       const { outgoing } = try composer.get()
       return outgoing.op.id === id && outgoing.op.outcome === "Recorded" && outgoing.thread === send.thread
-        && outgoing.recipients === recipients && send.to.length === recipients && clear(try phone.get())
+        && outgoing.recipients === recipients && send.to.length === recipients && clear(try phone.get()) && openThread(try messages.get())
     }
-    if (!(try current) || send.operation !== undefined) return denied
+    if (!(try current()) || send.operation !== undefined) return denied
     const operation = (try (try Attempts).key(id)) as OperationId
     const sim = send.selectedSim?.id ?? (try simOf(undefined))
     if (sim === undefined) return denied
@@ -258,13 +296,17 @@ function journaled(id: number, recipients: number): Stream.Stream<Event, never, 
     if (review !== undefined && bound === undefined) return denied
     if (send.selectedSim !== undefined && (try simOf(send.selectedSim)) !== sim) return denied
     const still = try store.outgoing()
-    if (Option.isNone(still) || still.value !== send || !(try current)) return denied
-    const next: Outgoing = { ...send, sim, selectedSim: undefined, operation, mms: bound === undefined ? undefined : { hash: bound.hash, attachments: bound.binding.attachments } }
-    if (!(try store.bindOutgoing(next)) || !(try current)) return denied
+    if (Option.isNone(still) || still.value !== send || !(try current())) return denied
+    const next: Outgoing = { ...send, sim, selectedSim: undefined, trustedTap: undefined, operation, mms: bound === undefined ? undefined : { hash: bound.hash, attachments: bound.binding.attachments } }
+    if (!(try store.bindOutgoing(next)) || !(try current())) return denied
     const to = send.to as PhoneNumber[]
-    const status: SmsSendStatus | undefined = review !== undefined
-      ? Effect.map(telephony("sendMms", (c) => c.messages.sendMms(review, operation)), (result) => result.status) catch (failure) => refusedSend(failure)
-      : Effect.map(telephony("sendSms", (c) => c.messages.sendSms({ recipients: to, body: send.body, subscriptionId: sim } satisfies SmsReview & { subscriptionId: number }, operation)), (result) => result.status) catch (failure) => refusedSend(failure)
+    const wire = sendFromComposer(send.trustedTap === true, () => runPromise(current()), (client) => {
+      const sent = review !== undefined ? client.sendMms(review, operation)
+        : client.sendSms({ recipients: to, body: send.body, subscriptionId: sim } satisfies SmsReview & { subscriptionId: number }, operation)
+      return sent.then((receipt) => receipt.status)
+    }) catch (failure) => refusedSend(failure)
+    const left = Effect.as(Stream.runHead(Stream.filter(messages.changes, (state) => !openThread(state))), undefined)
+    const status = try race(wire, left)
     const latest = try store.outgoing()
     const resolved = Option.isSome(latest) && latest.value.operation === operation ? latest.value.status ?? status : status
     if (Option.isSome(latest) && latest.value.operation === operation) try store.setOutgoing({ ...latest.value, status: resolved })
@@ -296,7 +338,7 @@ effect function readBack(id: number): Event!!(Telephony | Drafts | Attempts | Co
   return { type: "readBack", id, wasSent: status !== undefined && sentStatuses.has(status), known: status !== undefined && status !== "unknown" && status !== "submitted" }
 }
 
-function sending(fx: SendOut): Job<Event, Telephony | Drafts | Attempts | Composer.Machine | Phone, []> {
+function sending(fx: SendOut): Job<Event, Telephony | Drafts | Attempts | Composer.Machine | Phone | Messages, []> {
   return match (fx) {
     when { tag: "Journal", let id, let recipients }: stream(`send ${id}`, journaled(id, recipients), { type: "lost" });
     when { tag: "Radio", let id, let recipient }: answer(`radio ${id} ${recipient}`, radioed(id), { type: "lost" });
@@ -444,7 +486,7 @@ export effect function supported(recipients: number, pictures: number): boolean!
 }
 
 /** What the owner's Send carries, put in hand just before it: the draft, the conversation's numbers, the SIM and the pictures; a send whose outcome is unknown keeps what it carried. */
-export effect function prepare(thread: number, selectedSim: TelephonySubscription | undefined): boolean!!(Drafts | Conversations | Composer.Machine) {
+export effect function prepare(thread: number, selectedSim: TelephonySubscription | undefined, trustedTap: boolean): boolean!!(Drafts | Conversations | Composer.Machine) {
   const state = try (try Composer.Machine).get()
   const store = try Drafts
   if (state.thread !== thread || Composer.bound(state) || state.outgoing.op.outcome === "Recorded" || state.outgoing.op.outcome === "Sent") return false
@@ -452,9 +494,29 @@ export effect function prepare(thread: number, selectedSim: TelephonySubscriptio
   if (Option.isNone(conversation) || conversation.value.addresses.length !== state.recipients || state.recipients === 0) return false
   const to = conversation.value.addresses
   const pictures = try store.pictures()
-  try store.setOutgoing({ thread, to, body: state.slot.author === "Nobody" ? "" : try store.text(thread), sim: null, selectedSim, pictures, pictured: pictures.length > 0, operation: undefined, mms: undefined, status: undefined })
+  try store.setOutgoing({ thread, to, body: state.slot.author === "Nobody" ? "" : try store.text(thread), sim: null, selectedSim, trustedTap, pictures, pictured: pictures.length > 0, operation: undefined, mms: undefined, status: undefined })
   return true
 }
+
+module pictureData {
+  /** @throws {never} */
+  export function pictureBytes(data: string, type: "image/png" | "image/jpeg" | "image/webp", size: number, max: number): Uint8Array | undefined {
+    if (data.length % 4 !== 0 || data.length > Math.ceil(max / 3) * 4) return undefined
+    try {
+      const decoded = atob(data)
+      if (decoded.length !== size) return undefined
+      const signature = type === "image/png" ? [137, 80, 78, 71, 13, 10, 26, 10] : [255, 216, 255]
+      const signatureMatches = type === "image/webp" ? decoded.startsWith("RIFF") && decoded.slice(8, 12) === "WEBP"
+        : signature.every((byte, at) => decoded.charCodeAt(at) === byte)
+      if (!signatureMatches) return undefined
+      return Uint8Array.from(decoded, (byte) => byte.charCodeAt(0))
+    } catch {
+      return undefined
+    }
+  }
+}
+import { pictureBytes } from pictureData
+export { pictureBytes }
 
 // spec/app/messages/index.md, "A picture from Files is offered in a new recipient picker and can join only its chosen empty draft"
 export effect function pictureMessagingReady(): boolean!!Telephony {
@@ -463,12 +525,12 @@ export effect function pictureMessagingReady(): boolean!!Telephony {
 }
 
 // spec/app/messages/index.md, "A picture from Files is offered in a new recipient picker and can join only its chosen empty draft"
-export effect function handOverPicture(picture: Picture): boolean!!(Drafts | Composer.Machine | Messages | Shell) {
+export effect function handOverPicture(picture: Picture, source: "Files" | "Photos"): boolean!!(Drafts | Composer.Machine | Messages | Shell) {
   const shell = try Shell
   const messages = try Messages
   const drafts = try Drafts
   const composer = try (try Composer.Machine).get()
-  if (!showing(try shell.get(), "Files") || Composer.bound(composer) || !Composer.settledDraft(composer) || composer.pictures > 0 ||
+  if (!showing(try shell.get(), source) || Composer.bound(composer) || !Composer.settledDraft(composer) || composer.pictures > 0 ||
     (try drafts.offeredPicture()) !== undefined || (try messages.get()).front) return false
   if (!(try contained(shell.send({ type: "openView", view: "Messages" }), "the picture handed to Messages"))) return false
   const front = try Effect.timeoutOption(Stream.runHead(Stream.filter(messages.changes, (s) => s.front)), "3 seconds")

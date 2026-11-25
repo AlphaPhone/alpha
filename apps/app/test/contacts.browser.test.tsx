@@ -1,4 +1,5 @@
 import { afterEach, expect, it } from "vitest";
+import { page } from "vitest/browser";
 import { Machine as Agent } from "../gen/app__contacts__agent.effect.vibe";
 import { Machine as Phone } from "../gen/app__phone.effect.vibe";
 import { propose, spokenSend } from "../src/contacts/requests.vibe";
@@ -8,12 +9,13 @@ import "../src/main.css";
 
 afterEach(closeAll);
 
-it("Approve what the agent asked by saying Send this text, only while its Send is on screen (spec/app/contacts/agent.md, \"Story: Approve what the agent asked\")", async () => {
+it("Approve a shown text by voice (spec/app/contacts/agent.md, \"Story: Approve what the agent asked\")", async () => {
   const world = { ...scene(), phone: true, image: true };
   const { alpha } = await open(world);
   await until(alpha, alpha.runtime, Phone, (s) => s.telecom === "NoCall");
   await alpha.runtime.runPromise(propose({ type: "sms_send", recipients: ["+14155550199"], body: "Running late", subscriptionId: 1 }, true));
   await until(alpha, alpha.runtime, Agent, (s) => s.stage === "Shown" && s.addressed);
+  await expect.element(page.getByRole("button", { name: "Send this text" })).toBeVisible();
 
   // spec/app/contacts/agent.md, "Only the owner approves, only what is shown as it is now, and only when the phone has ruled out an emergency call": a Send something covers is not on screen
   const cover = document.createElement("div");

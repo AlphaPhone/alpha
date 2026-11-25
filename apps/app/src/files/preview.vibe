@@ -1,9 +1,9 @@
 // spec/app/files/preview.md, "Story: Look at a file"; spec/app/files/preview.md, "Story: Act on the file I am looking at"; spec/app/files/preview.md, "Story: Get a file back when access was lost"; spec/app/files/recent.md, "Story: Find what I opened lately"
-import type { SelectedDocumentsClient, SelectionId } from "@elizaos/os-bridges"
+import type { SelectedDocument, SelectedDocumentsClient, SelectionId } from "@elizaos/os-bridges"
 import { MMS_MAX_TOTAL_BYTES } from "@elizaos/os-bridges"
 import { type Machine as TextMessages } from "../../gen/app__messages.effect.vibe"
 import { type Machine as MessageComposer } from "../../gen/app__messages__composer.effect.vibe"
-import { type Drafts as MessageDrafts, handOverPicture, pictureMessagingReady } from "../messages/composer.vibe"
+import { type Drafts as MessageDrafts, handOverPicture, pictureBytes, pictureMessagingReady } from "../messages/composer.vibe"
 import type { Telephony } from "../platform/telephony.vibe"
 import * as KeyValueStore from "effect/persistence/KeyValueStore"
 import * as Browser from "../../gen/app__files.effect.vibe"
@@ -35,6 +35,12 @@ export interface Grant {
   readonly bytes?: number
   readonly canRename?: boolean
   readonly storage?: { readonly volume: string; readonly path: string; readonly label: string }
+}
+
+/** Metadata the selected provider last reported for an exact picked grant. */
+function pickedFacts(grant: Pick<Grant, "selection" | "key" | "name" | "mimeType">, result: SelectedDocument): Grant {
+  return { selection: grant.selection, key: grant.key, name: result.name ?? grant.name, mimeType: result.mimeType ?? grant.mimeType,
+    revision: result.modified ?? 0, canRename: result.canRename === true, ...(result.size === undefined ? {} : { bytes: result.size }) }
 }
 
 /** What the viewer shows of its file: its text, the address of a picture or recording, and the PDF page drawn. */
@@ -88,20 +94,6 @@ module kept {
   }
 
   /** @throws {never} */
-  export function pictureBytes(data: string, type: "image/png" | "image/jpeg", size: number, max: number): Uint8Array | undefined {
-    if (data.length % 4 !== 0 || data.length > Math.ceil(max / 3) * 4) return undefined
-    try {
-      const decoded = atob(data)
-      if (decoded.length !== size) return undefined
-      const signature = type === "image/png" ? [137, 80, 78, 71, 13, 10, 26, 10] : [255, 216, 255]
-      if (!signature.every((byte, at) => decoded.charCodeAt(at) === byte)) return undefined
-      return Uint8Array.from(decoded, (byte) => byte.charCodeAt(0))
-    } catch {
-      return undefined
-    }
-  }
-
-  /** @throws {never} */
   export function textFromBase64(data: string): string | undefined {
     try {
       return new TextDecoder("utf-8", { fatal: true }).decode(Uint8Array.from(atob(data), (byte) => byte.charCodeAt(0)))
@@ -131,7 +123,7 @@ module kept {
     }
   }
 }
-import { earlierOf, grantsOf, namesOf, pictureBytes, textFromBase64, upgradePreview } from kept
+import { earlierOf, grantsOf, namesOf, textFromBase64, upgradePreview } from kept
 
 /**
  * The documents Recent holds access to, each by its grant's number, kept across restarts with what the owner calls
@@ -436,7 +428,7 @@ effect function offerPicture(viewer: number, item: number, revision: number): vo
     }
     if (!(try samePreview(viewer, item, revision, grant))) return false
     const wireName = contentType === "image/png" ? "picture-1.png" : "picture-1.jpg"
-    return try handOverPicture({ name: file.value.name, wireName, contentType, bytes })
+    return try handOverPicture({ name: file.value.name, wireName, contentType, bytes }, "Files")
   } catch () => false
   if (!offered) try say("Messages could not open this picture", true)
 }
@@ -483,8 +475,7 @@ effect function renamePicked(viewer: number, item: number, revision: number, nam
       return changed.status === "renamed-reselect"
     }
     if (changed.status !== "selected" || changed.selectionId !== selection.value || !changed.name) return false
-    const renamed = { ...file.value, name: changed.name, mimeType: changed.mimeType ?? file.value.mimeType,
-      revision: Math.max(0, Math.trunc(changed.modified ?? revision)), canRename: changed.canRename === true }
+    const renamed = pickedFacts(file.value, changed)
     try holder.give(grant.grant, renamed)
     if (try samePreview(viewer, item, revision, grant.grant)) {
       try ignore(machine.send({ type: "show", file: item, revision: renamed.revision, kind: kindOf(renamed.mimeType), siblings: [] }, "Phone"))
@@ -602,13 +593,26 @@ function carryShown(fx: Shown.Effect): Job<Shown.Event, PreviewWorkspace | Media
 effect function reached(ticket: number, key: number): Recent.Event!!(Documents | Opened | Recent.Machine) {
   const failed: Recent.Event = { type: "reached", ticket, ok: false, ended: false }
   return effect {
-    const asked = (try (try Recent.Machine).get()).asked
+    const recent = try Recent.Machine
+    const asked = (try recent.get()).asked
     const selection = try selectionOf(asked.key === key ? asked.grant : 0)
     if (Option.isNone(selection)) return { ...failed, ended: true }
     const docs = try documents()
     const described = try tryPromise(() => docs.describe(selection.value))
-    if (described.status === "selected") return { type: "reached", ticket, ok: true, ended: false }
-    return { ...failed, ended: described.status === "renamed-reselect" || described.status === "unavailable" }
+    const state = try recent.get()
+    if (!Recent.canReached(state, ticket, "Phone") || !state.rows.some((row) => row.key === key && row.grant === asked.grant)) return failed
+    const ended = described.status === "renamed-reselect" || described.status === "unavailable"
+    if (asked.origin === "Picked") {
+      const holder = try Opened
+      const held = try holder.grant(asked.grant)
+      if (Option.isSome(held)) {
+        if (ended) try holder.rememberName(key, held.value.name)
+        else if (described.status === "selected" && described.selectionId === selection.value) {
+          try holder.give(asked.grant, pickedFacts(held.value, described))
+        }
+      }
+    }
+    return { ...failed, ended, ok: described.status === "selected" && described.selectionId === selection.value }
   } catch () => failed
 }
 
@@ -635,7 +639,9 @@ effect function picked(ticket: number): Recent.Event!!(Documents | Opened | Rece
       return canceled
     }
     const issued = s.issued + 1
-    try (try Opened).give(issued, { selection: selected.value, key: issued, name: choice.name, mimeType: choice.mimeType ?? "application/octet-stream", revision: Math.max(0, Math.trunc(choice.modified ?? 0)), canRename: choice.canRename === true, ...(choice.size === undefined ? {} : { bytes: choice.size }) })
+    try (try Opened).give(issued, pickedFacts({
+      selection: selected.value, key: issued, name: choice.name, mimeType: "application/octet-stream",
+    }, choice))
     return { ...canceled, chose: true, keep: true }
   } catch () => canceled
 }

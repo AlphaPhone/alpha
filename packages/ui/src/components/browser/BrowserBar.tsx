@@ -42,7 +42,7 @@ export function BrowserBar({ leading, host, path = "", secure = false, private: 
         className="mx-0.5 flex h-11 min-w-0 flex-1 items-center rounded-full bg-secondary px-3.5 text-sm">
         {privateTab && <PrivateMark className="mr-2 size-4.5 shrink-0" />}
         {secure && <Lock role="img" aria-label="Secure connection" className="mr-1.5 size-3.25 shrink-0 text-muted-foreground" />}
-        <span className={cn("min-w-0 truncate", host === "" && "text-muted-foreground")}>{host === "" ? "New tab" : host}</span>
+        <span className={cn("min-w-0 truncate", host === "" && "text-muted-foreground")}>{host || (privateTab ? "New private tab" : "New tab")}</span>
         <span className="truncate text-muted-foreground">{path}</span>
       </button>
       <div role="group" aria-label="Page navigation" className="flex shrink-0">

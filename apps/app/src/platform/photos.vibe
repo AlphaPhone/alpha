@@ -1,17 +1,47 @@
 // spec/app/photos/index.md, "Story: Browse the library"; spec/app/photos/viewer.md, "Story: Look at a photo or video"
-import type { DeviceLibraryClient, PhotosClient } from "@elizaos/os-bridges"
+import type { DeviceLibraryClient, PhotosClient, Reviewed } from "@elizaos/os-bridges"
 import { registered } from "./device.vibe"
 
 module native {
-  import { deviceLibraryClient, deviceLibraryPlugin, photosClient, photosPlugin } from "@elizaos/os-bridges"
-  import type { DeviceLibraryClient, PhotosClient } from "@elizaos/os-bridges"
+  import { registerPlugin } from "@capacitor/core"
+  import { Schema } from "effect"
+  import { MMS_MAX_TOTAL_BYTES } from "@elizaos/os-bridges"
+  import { deviceLibraryClient, deviceLibraryPlugin, photosClient } from "@elizaos/os-bridges"
+  import type { DeviceLibraryClient, PhotosClient, PhotosPlugin, Reviewed } from "@elizaos/os-bridges"
+
+  export const photoEmailMaxBytes = 5 * 1024 * 1024
+  const OriginalPicture = Schema.Struct({
+    name: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(120)),
+    mimeType: Schema.Literals(["image/png", "image/jpeg", "image/webp"]),
+    size: Schema.Int.check(Schema.isGreaterThan(0), Schema.isLessThanOrEqualTo(photoEmailMaxBytes)),
+    dataBase64: Schema.String.check(Schema.isMaxLength(Math.ceil(photoEmailMaxBytes / 3) * 4)),
+  })
+  export type PhotoOriginalPicture = typeof OriginalPicture.Type
+  export type PhotoAttachmentUse = "email" | "message"
+  interface NativePictures {
+    readMessagePicture(input: Reviewed): Promise<unknown>
+    readEmailPicture(input: Reviewed): Promise<unknown>
+  }
+  let nativePictures: (PhotosPlugin & NativePictures) | undefined
+
+  function selectedPhotos(name: string): PhotosPlugin & NativePictures {
+    return (nativePictures ??= registerPlugin<PhotosPlugin & NativePictures>(name))
+  }
+
+  export async function readOriginalPicture(pluginName: string, picture: Reviewed, use: PhotoAttachmentUse): Promise<PhotoOriginalPicture> {
+    const bridge = selectedPhotos(pluginName)
+    const reply = Schema.decodeUnknownSync(OriginalPicture)(await (use === "email" ? bridge.readEmailPicture(picture) : bridge.readMessagePicture(picture)))
+    if (use === "message" && (reply.mimeType === "image/webp" || reply.size > MMS_MAX_TOTAL_BYTES || reply.dataBase64.length > Math.ceil(MMS_MAX_TOTAL_BYTES / 3) * 4))
+      throw new Error("The original does not fit in Messages")
+    return reply
+  }
 
   let library: PhotosClient | undefined
   let reviewed: DeviceLibraryClient | undefined
 
   /** @throws {never} */
   export function phoneLibrary(name: string): PhotosClient {
-    return (library ??= photosClient(photosPlugin(name), name))
+    return (library ??= photosClient(selectedPhotos(name), name))
   }
 
   /** @throws {never} */
@@ -19,7 +49,9 @@ module native {
     return (reviewed ??= deviceLibraryClient(deviceLibraryPlugin(name), name))
   }
 }
-import { phoneLibrary, reviewedLibrary } from native
+import { phoneLibrary, photoEmailMaxBytes, readOriginalPicture, reviewedLibrary, type PhotoAttachmentUse, type PhotoOriginalPicture } from native
+export { photoEmailMaxBytes }
+export type { PhotoAttachmentUse }
 
 module browser {
   import { browserPhotoThumbnail, type BrowserEditFrame } from "./photoCanvas.vibe"
@@ -709,6 +741,11 @@ import { type BrowserAlbum, type BrowserCapture, type BrowserEditReceipt, type B
 export { latestBrowserCapture, saveBrowserCapture, isBrowserEdit, canReplaceBrowserEdit }
 export type { BrowserAlbum, BrowserCapture, BrowserSource }
 
+export interface PhotoHandoff {
+  readonly libraryId: string | undefined
+  readonly ownedId: string | undefined
+}
+
 /** The phone's permitted library and its reviewed read surface, or the captures saved in this browser. */
 export service PhotosPort {
   readonly phone: Option.Option<PhotosClient>
@@ -716,21 +753,24 @@ export service PhotosPort {
   readonly changes: Stream.Stream<void>
   readonly browser: Option.Option<BrowserLibrary>
   original(id: string): (Blob | undefined)!PhotosFailed
+  attachmentPicture(picture: Reviewed, use: PhotoAttachmentUse): (PhotoOriginalPicture | undefined)!PhotosFailed
   capture(id: string): (BrowserSource | undefined)!PhotosFailed
   saveEdit(request: BrowserEditSave): BrowserEditReceipt!PhotosFailed
   editResult(operation: string): BrowserEditReceipt!PhotosFailed
-  handoff(id: string): void!!
+  handoff(capture: PhotoHandoff): void!!
   hasHandoff(): boolean!!
-  takeHandoff(): (string | undefined)!!
+  peekHandoff(): (PhotoHandoff | undefined)!!
+  takeHandoff(): (PhotoHandoff | undefined)!!
 }
 
 export error PhotosFailed { cause: unknown }
 
 function entry() {
-  let next: string | undefined
+  let next: PhotoHandoff | undefined
   return {
-    handoff: (id: string) => sync(() => { next = id }),
+    handoff: (capture: PhotoHandoff) => sync(() => { next = capture }),
     hasHandoff: () => sync(() => next !== undefined),
+    peekHandoff: () => sync(() => next),
     takeHandoff: () => sync(() => { const known = next; next = undefined; return known }),
   }
 }
@@ -745,7 +785,10 @@ export const phonePhotos = Layer.sync(PhotosPort, () => {
     Effect.orElseSucceed(tryPromise(() => phone.value.onLibraryChanged((): void => { Queue.offerUnsafe(queue, undefined) })), () => undefined),
     (handle) => handle === undefined ? Effect.void : ignore(tryPromise(() => handle.remove())),
   )))
-  return { phone, reviewed, changes, browser: Option.none<BrowserLibrary>(), original: () => succeed(undefined), capture: () => succeed(undefined),
+  return { phone, reviewed, changes, browser: Option.none<BrowserLibrary>(), original: () => succeed(undefined),
+    attachmentPicture: (picture: Reviewed, use: PhotoAttachmentUse) => Option.isNone(phone) ? succeed(undefined) : tryPromise({
+      try: () => readOriginalPicture(photosName, picture, use), catch: (cause) => new PhotosFailed({ cause }),
+    }), capture: () => succeed(undefined),
     saveEdit: () => succeed({ status: "not-started" } as const), editResult: () => succeed({ status: "not-started" } as const), ...entry() }
 })
 
@@ -755,6 +798,7 @@ export const browserPhotos = Layer.sync(PhotosPort, () => ({
   reviewed: Option.none(),
   changes: Stream.suspend(() => Stream.as(Stream.fromEventListener(page(), captureEvent()), undefined)),
   browser: Option.some(browserLibrary),
+  attachmentPicture: () => succeed(undefined),
   original: (id: string) => tryPromise({ try: () => browserOriginal(id), catch: (cause) => new PhotosFailed({ cause }) }),
   capture: (id: string) => tryPromise({ try: () => browserCapture(id), catch: (cause) => new PhotosFailed({ cause }) }),
   saveEdit: (request: BrowserEditSave) => tryPromise({ try: () => saveBrowserEdit(request), catch: (cause) => new PhotosFailed({ cause }) }),

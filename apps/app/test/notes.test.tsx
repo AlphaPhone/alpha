@@ -142,6 +142,33 @@ describe("Notes", () => {
     await until(alpha, runtime, List, (s) => s.read.status === "Loaded" && s.version === world.notes.revision + 1);
   });
 
+  it("Read and use the transcript (spec/app/notes/voice.md, \"Story: Read and use the transcript\")", async () => {
+    const world = scene();
+    world.ask.metadata = [];
+    const { alpha } = await open(world, only("assistant", "view:Notes"));
+    const runtime = assistant.runtime(alpha);
+    await drawn(() => runtime.runPromise(Effect.flatMap(Shell, (shell) => shell.send({ type: "openView", view: "Notes" }))));
+    await until(alpha, runtime, List, (state) => state.read.status === "Loaded");
+    await press("Open Design sync");
+    await until(alpha, runtime, Voice, (state) => state.showing && state.added > 0);
+    expect(document.body.textContent).toContain("Four heights. Pill, input, half, full.");
+    expect(document.body.textContent).toContain("Notifications stay as icons until unlock");
+
+    // spec/app/notes/voice.md, "Ask Alpha about this transcript hands Ask Alpha the transcript the note holds"
+    await press("Ask Alpha about this transcript");
+    await until(alpha, runtime, Shell, (state) => state.assistant === "Sheet");
+    expect(world.ask.said).toEqual([]);
+    await until(alpha, runtime, Composer, (state) => state.slot === "Open");
+    await until(alpha, runtime, Conversation, (state) => state.ready && state.context.selected);
+    const question = "What did we decide about notifications in this transcript?";
+    await fill("Message Alpha", question);
+    await press("Send");
+    await drawn(() => vi.waitFor(() => expect(world.ask.said).toEqual([question])));
+    expect(world.ask.metadata[0]).toMatchObject({
+      observation: { view: "notes", selectedObject: { kind: "canonical-note", id: "sync", revision: String(world.notes.revision) } },
+    });
+  });
+
   it("The agent opens the note I named, and only that, only for my request now (spec/app/notes/index.md, \"The agent opens the one note the owner named, as the list last read it, once for the owner's current request, and is told whether it opened\"; spec/app/notes/note.md, \"Only the owner opens a dialog or a question in Notes; a note is opened by the owner, or by the agent for the one the owner just named; and nothing opens while anything else of Notes is open\"; spec/app/assistant/index.md, \"Story: Let Alpha open what it is talking about\")", async () => {
     const world = scene();
     world.notes.notes.push(note("shopping", "shopping list", "", Date.now(), { kind: "list", data: { items: [{ t: "milk", done: false }] } }));

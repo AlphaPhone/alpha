@@ -142,6 +142,14 @@ function libraryId(path: string, kind: "i" | "v"): string | undefined {
     ? undefined : `m:${volume}:${kind}:${matched[3]}`
 }
 
+// spec/app/camera/index.md, "The last capture opens in Photos"
+export function ownedCaptureId(path: string, video: boolean): string | undefined {
+  const row = /^content:\/\/media\/external\/(images|video)\/media\/([1-9][0-9]*)$/.exec(path)
+  const id = row?.[2]
+  if (id === undefined || row?.[1] !== (video ? "video" : "images")) return undefined
+  return video ? "v:" + id : id
+}
+
 function frameDimensions(size: CameraPreviewResult["captureSize"]): { width?: number; height?: number } {
   if (size === undefined || !Number.isSafeInteger(size.width) || !Number.isSafeInteger(size.height) || size.width < 1 || size.height < 1) return {}
   const scale = Math.min(1, 2048 / Math.max(size.width, size.height))

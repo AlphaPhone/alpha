@@ -366,23 +366,30 @@ function handleClockWorld(store: AlphaAppsStore, params: Record<string, unknown>
 
 type ClockActionResult = NonNullable<Awaited<ReturnType<AgentAction["handler"]>>>;
 
+type ClockParameters = NonNullable<AgentAction["parameters"]>;
+
+const idParameter = (thing: string): ClockParameters[number] =>
+  ({ name: "id", description: `The ${thing}'s id, as the Clock context lists it, to act on one ${thing}.`, required: false, schema: { type: "string" } });
+const labelParameter = (thing: string): ClockParameters[number] =>
+  ({ name: "label", description: `The ${thing}'s name, only when the owner gave one.`, required: false, schema: { type: "string" } });
+
 function makeClockAction(
   name: string,
   similes: string[],
   description: string,
+  parameters: ClockParameters,
   run: (params: Record<string, unknown>, text: string) => ClockActionResult,
 ): AgentAction {
   const action: AgentAction = {
     name,
     similes,
     description,
+    parameters,
     validate: () => Promise.resolve(true),
-    handler: async (_runtime, message, _state, options, callback) => {
+    handler: async (_runtime, message, _state, options) => {
       const params = asRecord(asRecord(options).parameters ?? asRecord(options));
       const text = readRawString(asRecord(message.content), "text") ?? "";
-      const result = run(params, text);
-      if (callback !== undefined && result.text !== undefined) await callback({ text: result.text });
-      return result;
+      return run(params, text);
     },
   };
   showsApp(action, "clock");
@@ -396,18 +403,40 @@ export function clockActions(store: AlphaAppsStore, timeZone: string): AgentActi
       "CLOCK_ALARM",
       ["SET_ALARM", "MANAGE_ALARM", "SNOOZE_ALARM", "DISMISS_ALARM"],
       "Create, update, toggle, delete, list, snooze, or dismiss alarms in Alpha Clock.",
+      [
+        { name: "action", description: "What to do with an alarm.", required: true, schema: { type: "string", enum: ["set", "update", "toggle", "snooze", "dismiss", "delete", "list"] } },
+        { name: "hour", description: "The alarm's hour on a 24-hour clock, 0 to 23, to set or move it.", required: false, schema: { type: "integer", minimum: 0, maximum: 23 } },
+        { name: "minute", description: "The alarm's minute, 0 to 59.", required: false, schema: { type: "integer", minimum: 0, maximum: 59 } },
+        { name: "days", description: "The days it repeats on; leave it out for an alarm that rings once.", required: false, schema: { type: "array", items: { type: "string", enum: ["sunday", "monday", "tuesday", "wednesday", "thursday", "friday", "saturday"] } } },
+        labelParameter("alarm"),
+        { name: "enabled", description: "Whether the alarm is on, to turn it on or off.", required: false, schema: { type: "boolean" } },
+        { name: "snoozeMinutes", description: "Minutes to snooze for.", required: false, schema: { type: "integer", minimum: 1 } },
+        idParameter("alarm"),
+      ],
       (params, text) => handleClockAlarm(store, timeZone, params, text),
     ),
     makeClockAction(
       "CLOCK_TIMER",
       ["START_TIMER", "SET_TIMER", "PAUSE_TIMER", "CANCEL_TIMER"],
       "Start, pause, resume, extend (+time), reset, cancel, dismiss, or list countdown timers in Alpha Clock.",
+      [
+        { name: "action", description: "What to do with a timer.", required: true, schema: { type: "string", enum: ["start", "pause", "resume", "add_time", "reset", "cancel", "dismiss", "list"] } },
+        { name: "durationSeconds", description: "The timer's length in seconds to start one, or the time to add in seconds for add_time.", required: false, schema: { type: "integer", minimum: 1 } },
+        labelParameter("timer"),
+        idParameter("timer"),
+      ],
       (params, text) => handleClockTimer(store, params, text),
     ),
     makeClockAction(
       "CLOCK_WORLD",
       ["WORLD_CLOCK", "TIME_IN_CITY"],
       "Check current time in a city or manage pinned World Clock cities in Alpha Clock.",
+      [
+        { name: "action", description: "Tell the time in a city, pin or unpin a city, or list the pinned cities.", required: true, schema: { type: "string", enum: ["time_in", "add_city", "remove_city", "list"] } },
+        { name: "city", description: "The city's name.", required: false, schema: { type: "string" } },
+        { name: "timeZone", description: "An IANA time zone such as Europe/London, when no city names it.", required: false, schema: { type: "string" } },
+        idParameter("pinned city"),
+      ],
       (params, text) => handleClockWorld(store, params, text),
     ),
   ];

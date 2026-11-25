@@ -1,7 +1,7 @@
 // spec/app/files/index.md, "Story: Find and open my files"; spec/app/files/recent.md, "Story: Pick a file with the system picker"; spec/app/files/change.md, "Story: Change the files I select"
 import {
   FilesVolume, type FilesFilter, LibraryStore, type RowOutcome, type SelectedFile, type VolumeRefused,
-  importLibraryFile, importLibraryFolder, indexedLibrary, librarySelections, libraryVolume, validName,
+  importLibraryFile, importLibraryFolder, indexedLibrary, librarySelections, libraryVolume, parentOf, validName,
 } from "@elizaos/plugin-files-client"
 import type { ElizaFilesPlugin, FileOutcomeRow, FilesResult } from "@elizaos/os-bridges"
 import type { DocumentHandoff, PdfPage, SelectedDocument, SelectedDocumentsClient, SelectionId } from "@elizaos/os-bridges"
@@ -116,13 +116,15 @@ const webLibrary = Layer.effectContext(effect {
       bytes: listing.entries.reduce((sum, entry) => sum + entry.size, 0), truncated: !listing.complete,
       ...(listing.folders === undefined ? {} : { folders: listing.folders }),
     })),
-    storageQuery: (input) => answer(volume.query(filterOf(input)), (listing) => ({ entries: listing.entries })),
+    storageQuery: (input) => answer(volume.query(filterOf(input)), (listing) => ({ entries: listing.entries, truncated: !listing.complete })),
     storageReviewedIdentities: ({ paths }) => answer(volume.reviewedIdentities(paths), (reviewed) => ({ reviewed })),
     storageTransfer: (input) => announce(volume.transfer(input), outcomes),
     storageRename: ({ path, name }) => announce(volume.rename(path, name), (path) => ({ path })),
     storageCreateFolder: ({ parent, name }) => announce(volume.createFolder(parent, name), (path) => ({ path })),
     storageTrash: (input) => announce(volume.trash(input), outcomes),
-    storageTrashList: () => answer(volume.trashList(), (items) => ({ items: items.filter((item) => item.unreadable !== true) })),
+    storageTrashList: () => answer(volume.trashList(), (items) => ({ items: items.flatMap((item) =>
+      item.unreadable === true ? [] : [{ ...item, origin: parentOf(item.origin) }],
+    ) })),
     storageRestore: ({ ids }) => announce(volume.restore(ids), outcomes),
     storageEmptyTrash: ({ ids, confirmed }) => announce(volume.emptyTrash(ids, confirmed), (count) => ({ count })),
     storageShare: ({ paths }) => Effect.runPromise(Effect.match(volume.share(paths), { onFailure: storageFailure, onSuccess: (count) => ({ status: "opened", count } as const) })),

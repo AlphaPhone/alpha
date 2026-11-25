@@ -1,4 +1,5 @@
 export * from "./lib/cn.ts";
+export { dockClearance } from "./lib/styles.ts";
 export * from "./components/Alert.tsx";
 export * from "./components/AppHeader.tsx";
 export * from "./components/AppTile.tsx";
@@ -187,6 +188,7 @@ export * from "./components/notes/VoiceNoteView.tsx";
 export * from "./components/browser/BrowserBar.tsx";
 export * from "./components/browser/BrowserLibrary.tsx";
 export * from "./components/browser/BrowserAddressBar.tsx";
+export * from "./components/browser/BrowserAddressChoices.tsx";
 export * from "./components/browser/BrowserNewTab.tsx";
 export * from "./components/browser/PrivateMark.tsx";
 export * from "./components/browser/PrivateNotice.tsx";

@@ -2,11 +2,10 @@
 import { MMS_ATTACHMENT_TYPES, MMS_MAX_BODY, MMS_MAX_RECIPIENTS } from "@elizaos/os-bridges";
 import type { MessageRow, ThreadRow } from "@elizaos/os-bridges";
 import { normalizePhoneNumber } from "@elizaos/os-bridges";
-import type { TelephonySubscription } from "@elizaos/os-bridges";
 import { Alert, Avatar, Banner, Button, Chip, ConfirmDialog, Input, Menu, MenuContent, MenuItem, MenuTrigger, SearchField, Spinner, Textarea } from "@repo/ui";
-import type { Layer, ManagedRuntime } from "effect";
+import { Effect, type Layer, type ManagedRuntime } from "effect";
 import { ArrowUp, Camera, ChevronDown, ChevronLeft, ChevronUp, CircleAlert, Copy, Image as PictureIcon, ImagePlus, Mic, Pencil, Phone as Call, Plus, RefreshCw, Search, Send, Sparkles, Square, Trash2, X } from "lucide-react";
-import { memo, useCallback, useMemo, useRef, useState, type MouseEvent, type PointerEvent } from "react";
+import { memo, useCallback, useMemo, useRef, useState, useSyncExternalStore, type MouseEvent, type PointerEvent } from "react";
 import { clear } from "../../gen/app__phone.ts";
 import { useMachine as usePhone } from "../../gen/app__phone.react.ts";
 import { content, noMatches, noThreads, smsNeeded, threadsFailed } from "../../gen/app__messages.ts";
@@ -14,7 +13,7 @@ import { useMachine as useMessages } from "../../gen/app__messages.react.ts";
 import { delivered, sentAll, uncertain } from "../../gen/app__messages__sending.ts";
 import { useMachine as useComposer } from "../../gen/app__messages__composer.react.ts";
 import { Time } from "../runtime/time.vibe";
-import { shortWhen } from "../phone/words.ts";
+import { callerInitials, displayNumber, shortWhen } from "../phone/words.ts";
 import { Drafts, attachAll, prepare, sameSubscription, supported } from "./composer.vibe";
 import { Conversations, Inbox, titleOf } from "./messages.vibe";
 import { CommsBar, useCommsDock } from "../phone/CommsBar.tsx";
@@ -42,9 +41,8 @@ function firstName(title: string) {
   return /^[+(\d]/.test(title) || title.includes(",") ? title : (title.split(/\s+/, 1)[0] ?? title);
 }
 
-function initials(title: string) {
-  const words = title.trim().split(/\s+/u);
-  return [words[0], words.length > 1 ? words.at(-1) : undefined].map((word) => Array.from(word ?? "")[0] ?? "").join("").toUpperCase();
+function avatarName(title: string) {
+  return callerInitials(title) === "#" ? "#" : title;
 }
 
 /** A message's time as develop's bubbles say it: the time today, and the date before it on another day. */
@@ -146,7 +144,7 @@ function Threads({ runtime, messages: { state, can, send }, onBack }: MessagesPr
                   return (
                     <li key={row.id}>
                       <button type="button" aria-label={title} aria-description={complete?.unread ? "Unread" : undefined} onClick={() => open(row)} className={`${contactRow} min-h-17 items-start py-2.5`}>
-                        <Avatar name={title} aria-hidden className="size-12 text-base" />
+                        <Avatar name={avatarName(title)} aria-hidden className="size-12 text-base" />
                         <span className="min-w-0 flex-1">
                           <span className="flex items-center gap-1.5">
                             {complete?.unread && <span aria-hidden className="size-2 shrink-0 rounded-full bg-primary" />}
@@ -318,7 +316,7 @@ function Conversation({ runtime, messages: { state, can, send }, onOpenLink }: M
     <>
       <header className={`${header} pb-2`} data-alpha-navigation-header data-alpha-stage-header>
         {can({ type: "back" }) && <Button variant="ghost" size="icon" aria-label="Back" onClick={() => { clearChoice(runtime); void send({ type: "back" }); }}><ChevronLeft /></Button>}
-        <Avatar name={title} aria-hidden size="sm" data-alpha-stage-avatar className="group-data-[sheet=closed]/messages:size-9" />
+        <Avatar name={avatarName(title)} aria-hidden size="sm" data-alpha-stage-avatar className="group-data-[sheet=closed]/messages:size-9" />
         <h1 data-alpha-messages-title className="min-w-0 flex-1 truncate pl-1.5 text-lg font-bold">{title}</h1>
         {addresses.length === 1 && can({ type: "call" }) && <Button variant="ghost" size="icon" aria-label={`Call ${title}`} onClick={() => void send({ type: "call" })}><Call /></Button>}
       </header>
@@ -356,11 +354,15 @@ function Compose({ runtime, title, addresses, thread }: MessagesProps & { title:
   const picturesInput = useRef<HTMLInputElement>(null);
   const cameraInput = useRef<HTMLInputElement>(null);
   const focus = useRef(false);
-  const [simChoice, selectSim] = useState<{ thread: number; subscription: TelephonySubscription }>();
+  const subscriptionChoice = useMemo(() => runtime.runSync(Effect.map(Drafts, (drafts) => drafts.subscriptionChoice)), [runtime]);
+  const simChoice = useSyncExternalStore(subscriptionChoice.subscribe, subscriptionChoice.get, subscriptionChoice.get);
+  const simControls = useCallback((node: HTMLDivElement | null) => {
+    if (node) return () => subscriptionChoice.leave(thread);
+  }, [subscriptionChoice, thread]);
   const selectedSim = simChoice?.thread === thread ? simChoice.subscription : undefined;
   const { state, can, send } = composer;
   if (!state || !phone || state.thread !== thread || addresses.length === 0) return <CommsBar runtime={runtime} />;
-  const person = { label: title, initials: initials(title) };
+  const person = { label: title, initials: callerInitials(title) };
   const text = state.slot.author === "Nobody" ? "" : runtime.runSync(Drafts.use((drafts) => drafts.text(thread)));
   const pictures = runtime.runSync(Drafts.use((drafts) => drafts.pictures()));
   const subscriptions = runtime.runSync(Drafts.use((drafts) => drafts.subscriptions()));
@@ -376,9 +378,10 @@ function Compose({ runtime, title, addresses, thread }: MessagesProps & { title:
   const sendNow = { type: "send", supported: runtime.runSync(supported(state.recipients, pictures.length)), clear: clear(phone) } as const;
   const simReady = selectedSim === undefined ? state.sims <= 1 : subscriptions.some((sim) => sameSubscription(sim, selectedSim));
   const sendable = (checking || simReady && (Boolean(text.trim()) || pictures.length > 0)) && can(sendNow);
-  const submit = () => {
+  const submit = (event: MouseEvent<HTMLButtonElement>) => {
     if (!sendable) return;
-    if (!checking && !runtime.runSync(prepare(thread, selectedSim))) return;
+    const trustedTap = event.nativeEvent.isTrusted && event.currentTarget.matches("[data-alpha-bar-send],[data-alpha-draft-send]");
+    if (!checking && !runtime.runSync(prepare(thread, selectedSim, trustedTap))) return;
     void send(sendNow);
   };
   const edit = () => {
@@ -390,7 +393,8 @@ function Compose({ runtime, title, addresses, thread }: MessagesProps & { title:
   };
   const sendLabel = checking ? "Check send status" : "Send";
   const alpha = state.slot.author === "AlphaWrote";
-  const addressed = title === addresses.join(", ") ? title : `${title} · ${addresses.join(", ")}`;
+  const recipients = addresses.join(", ");
+  const addressed = title === addresses.map(displayNumber).join(", ") ? recipients : `${title} · ${recipients}`;
   const draft = text && (alpha || dock.open);
   const editable = can({ type: "typeText", empty: text.length === 0 });
   const attachment = { type: "attach", fits: true } as const;
@@ -454,7 +458,7 @@ function Compose({ runtime, title, addresses, thread }: MessagesProps & { title:
           </div>
         </div>
       )}
-      <div data-alpha-messages-accessories className="flex max-h-[34%] shrink-0 flex-wrap gap-1.5 overflow-y-auto px-3 empty:hidden">
+      <div ref={simControls} data-alpha-messages-accessories className="flex max-h-[34%] shrink-0 flex-wrap gap-1.5 overflow-y-auto px-3 empty:hidden">
         {state.slot.draft.sync === "Conflicted" && (
           <Banner variant="warn" action={<>
             {can({ type: "keepMine" }) && <Button size="sm" onClick={() => void send({ type: "keepMine" })}>Keep mine</Button>}
@@ -481,7 +485,7 @@ function Compose({ runtime, title, addresses, thread }: MessagesProps & { title:
               return <Button key={subscription.id} size="sm" aria-pressed={picked} variant={picked ? "primary" : "secondary"} disabled={!canPick && !samePosition}
                 onClick={() => {
                   if (!canPick && !samePosition) return;
-                  selectSim({ thread, subscription });
+                  subscriptionChoice.pick(thread, subscription);
                   if (canPick) void send(pick);
                 }}>{`SIM ${subscription.slot + 1}`}</Button>;
             })}

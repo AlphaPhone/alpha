@@ -594,8 +594,8 @@ pure def choose(s: Messages, thread: int, typed: bool): Moved = openConversation
 
 ### A picture from Files is offered in a new recipient picker and can join only its chosen empty draft
 
-The picker names the picture while the owner chooses. Only choosing a
-recipient from that picker can give it to the composer. Back, showing a
+Files and Photos can offer a picture. The picker names it while the owner
+chooses. Only choosing a recipient from that picker can give it to the composer. Back, showing a
 different conversation, or leaving clears the offer. The composer checks
 the chosen draft and the phone's picture messaging capability before it
 takes the attachment. Sending still needs the owner's ordinary Send.

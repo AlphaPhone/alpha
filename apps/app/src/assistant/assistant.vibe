@@ -1,5 +1,5 @@
 // spec/app/assistant/index.md, "Story: Ask Alpha something"; spec/app/assistant/index.md, "Story: Stop a reply"
-import { ConversationRecord, TurnController, encodeTurnContext, learnPeer, notLearned, sendsOptionalFields, statusRead, type LocationObservation, type TurnContext, type TurnReply, type TurnResult } from "@elizaos/agent"
+import { ConversationRecord, TurnController, encodeTurnContext, learnPeer, notLearned, sendsOptionalFields, statusRead, type LocationObservation, type TurnContext, type TurnReply, type TurnResult, type TurnTransport } from "@elizaos/agent"
 import * as KeyValueStore from "effect/persistence/KeyValueStore"
 import * as Conversation from "../../gen/app__assistant.effect.vibe"
 import * as Attachments from "../../gen/app__assistant__attachments.effect.vibe"
@@ -23,6 +23,8 @@ import { Machine as Canvas } from "../../gen/app__shell__keyboard.effect.vibe"
 import { Machine as Layers } from "../../gen/app__shell__layers.effect.vibe"
 import { syncClockNow } from "../clock/sync.vibe"
 import { type NotesSelection, type RendererNote, noteSubjects, notesSelection } from "../notes/selection.vibe"
+import { captureSmsSelection, type MessageSmsRequest, type SmsSelection, type SmsSelectionContext } from "../messages/agent-sim.vibe"
+import type { Telephony } from "../platform/telephony.vibe"
 import { syncRemindersNow } from "../reminders/reminders.vibe"
 import { Agent, isCloudFundsRefusal } from "../platform/agent.vibe"
 import { Device } from "../platform/device.vibe"
@@ -43,11 +45,29 @@ import { readMessage } from "./read-aloud.vibe"
 
 service Turns {
   readonly controller: TurnController
+  readonly streamed: (clientMessageId: string) => boolean
+}
+
+function clientMessageOf(body: unknown): string | undefined {
+  return typeof body === "object" && body !== null && "clientMessageId" in body && typeof body.clientMessageId === "string"
+    ? body.clientMessageId : undefined
 }
 
 const turns = Layer.effect(Turns, effect {
   const { runtime } = try Agent
-  return { controller: new TurnController(runtime) }
+  let streamed: string | undefined
+  const transport: TurnTransport = {
+    request: (path, body, headers) => {
+      // The SDK can recover a reply under the same message ID without a terminal stream frame.
+      if (clientMessageOf(body) === streamed) streamed = undefined
+      return runtime.request(path, body, headers)
+    },
+    stream: (path, body, signal, headers) => {
+      streamed = clientMessageOf(body)
+      return runtime.stream(path, body, signal, headers)
+    },
+  }
+  return { controller: new TurnController(transport), streamed: (id) => id === streamed }
 })
 
 const titled = Schema.Struct({ ...ConversationRecord.fields, title: Schema.String })
@@ -132,10 +152,10 @@ function viewOf(showing: Conversation.Showing): string {
 }
 
 // spec/app/assistant/index.md, "The agent is told the view, the time zone, the day only from Calendar, and whether something is selected"; spec/app/assistant/context.md, "The day and the location go only to a peer that takes them, and a sensitive screen sends no optional field"; spec/app/assistant/context.md, "The time zone told is the one the phone's interface shows, else the one the screen reported, else the one the agent was launched with, else the host's"
-function observed(told: boolean, context: Conversation.Context, location: LocationObservation | undefined, selectedNote?: RendererNote) {
+function observed(told: boolean, context: Conversation.Context, location: LocationObservation | undefined, selected?: RendererNote | SmsSelection["observation"]) {
   if (!told) return undefined
   const section = Pages.selectionOf(context.section)
-  const selectedObject = context.sensitive ? undefined : section === "" ? selectedNote : { kind: "settings", id: section }
+  const selectedObject = context.sensitive ? undefined : section === "" ? selected : { kind: "settings", id: section }
   return encodeTurnContext({
     observation: {
       view: viewOf(context.showing), revision: context.revision, sensitive: context.sensitive, timeZone: Locator.zoneOf(context.zone, "", "", zone()),
@@ -165,20 +185,32 @@ effect function whereabouts(sensitive: boolean, told: boolean): (LocationObserva
 }
 
 // spec/app/assistant/context.md, "A spoken turn carries what a typed turn sent at that moment would, the view claim included"
-/** What a turn sent now tells the agent of the screen: the observation with its location and the note selected, read when the turn is sent. */
-effect function screenTold(told: boolean, context: Conversation.Context): (TurnContext | undefined)!!(Locator.Machine | Prefs.Machine | Location | Time | Talk | NotesSelection) {
+type ScreenContext = Locator.Machine | Prefs.Machine | Location | Time | Talk | NotesSelection | SmsSelectionContext | Telephony
+
+interface ScreenTold {
+  readonly metadata: TurnContext | undefined
+  readonly sms: MessageSmsRequest | undefined
+}
+
+/** A review from Messages must use the same selected SIM that its outgoing observation names. */
+effect function screenTold(told: boolean, context: Conversation.Context): ScreenTold!!ScreenContext {
   const location = try whereabouts(context.sensitive, told)
-  const seen = told && !context.sensitive && viewOf(context.showing) === "notes" ? try notesSelection() : undefined
-  const selection = seen?.kind === "canonical-note" && !context.selected ? undefined : seen
-  return observed(told, context, location, selection)
+  const view = viewOf(context.showing)
+  const seeSelection = told && !context.sensitive
+  const seen = seeSelection && view === "notes" ? try notesSelection() : undefined
+  const note = seen?.kind === "canonical-note" && !context.selected ? undefined : seen
+  const selection = seeSelection && view === "messages" ? try captureSmsSelection() : undefined
+  const metadata = observed(told, context, location, note ?? selection?.observation)
+  const sms = view === "messages" ? { selection: metadata?.observation?.selectedObject?.kind === "sms-subscription" ? selection : undefined } : undefined
+  return { metadata, sms }
 }
 
 // spec/app/assistant/context.md, "A spoken turn carries what a typed turn sent at that moment would, the view claim included"
 /** Voice reads the observation of each spoken turn here, as a typed turn sent from that screen would read it. */
 export const spokenScreen = started(effect {
   const { memory } = try VoiceWords
-  const context = try Effect.context<Locator.Machine | Prefs.Machine | Location | Time | Talk | NotesSelection>()
-  memory.screen = (shown) => Effect.provideContext(screenTold(true, shown), context)
+  const context = try Effect.context<ScreenContext>()
+  memory.screen = (shown) => Effect.map(Effect.provideContext(screenTold(true, shown), context), (observed) => observed.metadata)
 }, "telling voice the screen")
 
 effect function syncAlphaApps(): void!!(Agent | KeyValueStore.KeyValueStore | Time) {
@@ -201,9 +233,9 @@ effect function syncAlphaApps(): void!!(Agent | KeyValueStore.KeyValueStore | Ti
 
 // spec/app/assistant/index.md, "Every message asked is posted exactly once, under a new ticket, whoever gave the text, with the screen showing and never a sensitive one"; spec/app/assistant/index.md, "The first word of a reply shows that the agent has the message, and a withdrawal that came too late stops it there"
 // spec/app/assistant/composer.md, "A quoted message goes with the next send, until the owner removes the quote"
-function posted(ticket: number, told: boolean, context: Conversation.Context): Stream.Stream<Conversation.Event, never, Views | Agent | KeyValueStore.KeyValueStore | Time | Turns | Talk | Chats.Machine | Conversation.Machine | Reply.Machine | Composer.Machine | Locator.Machine | Prefs.Machine | Location | Comms.Machine | MailQuestions | MediaReview | NotesSelection> {
-  return Stream.callback<Conversation.Event, never, Views | Agent | KeyValueStore.KeyValueStore | Time | Turns | Talk | Chats.Machine | Conversation.Machine | Reply.Machine | Composer.Machine | Locator.Machine | Prefs.Machine | Location | Comms.Machine | MailQuestions | MediaReview | NotesSelection>((queue) => effect {
-    const { controller } = try Turns
+function posted(ticket: number, told: boolean, context: Conversation.Context): Stream.Stream<Conversation.Event, never, Views | Agent | KeyValueStore.KeyValueStore | Turns | Chats.Machine | Conversation.Machine | Reply.Machine | Composer.Machine | Comms.Machine | MailQuestions | MediaReview | ScreenContext> {
+  return Stream.callback<Conversation.Event, never, Views | Agent | KeyValueStore.KeyValueStore | Turns | Chats.Machine | Conversation.Machine | Reply.Machine | Composer.Machine | Comms.Machine | MailQuestions | MediaReview | ScreenContext>((queue) => effect {
+    const { controller, streamed } = try Turns
     const { board } = try Talk
     const reply = try Reply.Machine
     let shown: Promise<unknown> | undefined
@@ -244,7 +276,7 @@ function posted(ticket: number, told: boolean, context: Conversation.Context): S
       Queue.endUnsafe(queue)
       return
     }
-    const screen = try screenTold(told, context)
+    const { metadata: screen, sms } = try screenTold(told, context)
     const current = try conversation.get()
     if (!Conversation.canFinish(current, ticket) || current.turn.stopping || current.context.revision !== context.revision || (try history.get()).chosen !== chats.chosen) {
       if (Conversation.canRefuse(current, ticket)) Queue.offerUnsafe(queue, { type: "refuse", ticket })
@@ -316,8 +348,10 @@ function posted(ticket: number, told: boolean, context: Conversation.Context): S
       board.append(pageTicket, chats.chosen, { id: result.reply.messageId, mine: false, text: result.reply.text })
       try syncAlphaApps()
       if (enrolled !== undefined && result.reply.userMessageId !== undefined) {
-        const media = try review.pending(enrolled, result.reply.userMessageId, chats.chosen, context.revision, messageTarget)
-        if ((try conversation.get()).context.revision === context.revision && (try history.get()).chosen === chats.chosen) board.change({ media })
+        const media = try review.pending(enrolled, result.reply.userMessageId, chats.chosen, context.revision, messageTarget,
+          { clientMessageId: result.clientMessageId, actionResults: streamed(result.clientMessageId) ? result.reply.actionResults : [], ...(sms === undefined ? {} : { sms }) })
+        if (board.lastSentId === result.clientMessageId && (try conversation.get()).context.revision === context.revision
+          && (try history.get()).chosen === chats.chosen) board.change({ media })
       }
     }
     if (event.type === "refuse") board.drop(pageTicket, mine)
@@ -403,7 +437,7 @@ function giveBack(board: Board) {
   board.outgoing = ""
 }
 
-function carryTurn(fx: Conversation.Effect): Job<Conversation.Event, Views | Agent | KeyValueStore.KeyValueStore | Time | Turns | Talk | Chats.Machine | Composer.Machine | Conversation.Machine | Reply.Machine | Comms.Machine | Shell | MailQuestions | MediaReview | Locator.Machine | Prefs.Machine | Location | NotesSelection, []> {
+function carryTurn(fx: Conversation.Effect): Job<Conversation.Event, Views | Agent | KeyValueStore.KeyValueStore | Turns | Chats.Machine | Composer.Machine | Conversation.Machine | Reply.Machine | Comms.Machine | MailQuestions | MediaReview | ScreenContext, []> {
   return match (fx) {
     when { tag: "CheckSupport", let support }: answer("support", supported(support), { type: "supported", ticket: support, ok: false, takes: false });
     when { tag: "Upload", let ticket, let attachments }: answer("upload", staged(ticket, attachments), { type: "uploaded", ticket, ok: false });
@@ -820,7 +854,7 @@ const steppingBack = started(effect {
   const composing = Stream.zipLatest(search.changes, composer.changes)
   const media = Stream.zipLatest(voice.changes, attachments.changes)
   try Stream.runForEach(Stream.zipLatest(composing, media), effect ([[finding, writing], [speech, picker]]) => {
-    const has = finding.open || writing.editor.quote > 0 || Voice.canCloseRecorder(speech) || Voice.canStop(speech, false) || Attachments.canClosePreview(picker)
+    const has = finding.open || writing.editor.quote > 0 || Voice.canCloseRecorder(speech) || Voice.canStop(speech, false) || Attachments.canClosePreview(picker) || Attachments.canCancel(picker)
     if (has === offered) return
     if (try contained(layers.send({ type: has ? "offerStep" : "withdrawStep", place: "assistant" }), "offering Back")) offered = has
   })
@@ -829,6 +863,7 @@ const steppingBack = started(effect {
 // spec/app/assistant/index.md, "Back closes a review, then search, then a quote or an edit, one at a time; with none of them open Back is the shell's"
 export const assistantBack = effect {
   const attachments = try Attachments.Machine
+  if (Attachments.canCancel(try attachments.get())) return try contained(attachments.send({ type: "cancel" }), "closing attachments")
   if (Attachments.canClosePreview(try attachments.get())) return try contained(attachments.send({ type: "closePreview" }), "closing the attachment preview")
   const voice = try Voice.Machine
   const speech = try voice.get()

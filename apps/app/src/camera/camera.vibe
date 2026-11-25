@@ -8,7 +8,7 @@ import { allows } from "../../gen/kit__permission.effect.vibe"
 import { Machine as Scan } from "../../gen/app__files__scan.effect.vibe"
 import { scanCameraImage } from "../files/scan.vibe"
 import { Device } from "../platform/device.vibe"
-import { CameraPort, playable, type CameraMedia, type LensFacts, type Point } from "../platform/camera.vibe"
+import { CameraPort, ownedCaptureId, playable, type CameraMedia, type LensFacts, type Point } from "../platform/camera.vibe"
 import { PhotosPort, latestBrowserCapture, saveBrowserCapture } from "../platform/photos.vibe"
 import { attachToAlpha } from "../assistant/attachments.vibe"
 import { SystemSettings } from "../platform/systemSettings.vibe"
@@ -326,7 +326,12 @@ const latest = applying(Camera.Machine, (s) => s.showing && !s.secure ? s.visit 
 
 effect function openLast(photo: number): void!!(CameraAssets | PhotosPort | Shell.Machine) {
   const media = try (try CameraAssets).read(photo)
-  if (media?.libraryId !== undefined) try (try PhotosPort).handoff(media.libraryId)
+  if (media !== undefined) {
+    const ownedId = ownedCaptureId(media.path, media.mime.startsWith("video/"))
+    if (media.libraryId !== undefined || ownedId !== undefined) {
+      try (try PhotosPort).handoff({ libraryId: media.libraryId, ownedId })
+    }
+  }
   try openView("Photos")
 }
 

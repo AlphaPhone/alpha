@@ -38,10 +38,18 @@ const libraryTab = (name: "History" | "Bookmarks") => drawn(() => {
 });
 
 describe("The Browser on a phone", () => {
-  it("Opens the saved Library (spec/app/browser/library.md, \"Story: Keep bookmarks\"; spec/app/browser/library.md, \"Story: Look back through history\")", async () => {
+  it("Opens the saved Library (spec/app/browser/library.md, \"Story: Keep bookmarks\"; spec/app/browser/library.md, \"Story: Look back through history\"; spec/app/browser/address.md, \"Story: Go where I typed\")", async () => {
     const world = { ...scene(), phone: true, image: true };
     const { alpha, runtime } = await onBrowser(world);
     await until(alpha, runtime, Tabs, (s) => s.hydrated);
+    await press("Search or type address");
+    await until(alpha, runtime, Library, (s) => s.read.status === "Loaded");
+    const suggestions = () => document.querySelector("[aria-label='Address suggestions']");
+    expect(suggestions()?.textContent).toContain("/on-device-agents");
+    await drawn(() => fill("Address", "keys"));
+    expect(suggestions()?.textContent).toContain("/keys-in-hardware");
+    expect(suggestions()?.textContent).not.toContain("/on-device-agents");
+    await press("Cancel editing");
     await press("Menu");
     await press("Library, bookmarks and history");
     await until(alpha, runtime, Library, (s) => s.read.status === "Loaded");
@@ -64,6 +72,11 @@ describe("The Browser on a phone", () => {
     expect([world.browser.calls.includes("browsingState"), Boolean(button("Search or type address"))]).toEqual([true, true]);
 
     // spec/app/browser/address.md, "Submitting text opens it, searches for it or says why not, and blank text is not submitted"
+    const history = [...world.browser.tabs.values()].map((one) => [...one.history]);
+    await go("https://owner:example@private.example");
+    expect(document.querySelector("[role='alert']")?.textContent).toContain("Remove the username or password from this address.");
+    expect([...world.browser.tabs.values()].map((one) => one.history)).toEqual(history);
+    await press("Cancel editing");
     await go("news.example/on-device-agents");
     const tab = runtime.runSync(Effect.map(Tabs.use((m) => m.get()), (s) => s.selected));
     const page = runtime.runSync(Effect.flatMap(Pages, (pages) => pages.of(tab)));
@@ -104,6 +117,7 @@ describe("The Browser on a phone", () => {
     await press("Menu");
     await press("New private tab");
     await until(alpha, runtime, Tabs, (s) => s.open.length === 2 && s.privates.length === 1 && s.layer === "Address");
+    expect(document.querySelector("[aria-label='Address suggestions']")?.textContent).not.toContain("/on-device-agents");
     await drawn(async () => {
       await fill("Address", "enclave.example/keys-in-hardware");
       document.querySelector<HTMLFormElement>("form[role=search]")?.requestSubmit();

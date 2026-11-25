@@ -6,6 +6,7 @@ import { normalizePhoneNumber } from "@elizaos/os-bridges"
 import { Machine as Phone, clear } from "../../gen/app__phone.effect.vibe"
 import { Device } from "../platform/device.vibe"
 import { Telephony, TelephonyAbsent, TelephonyRefused, telephony } from "../platform/telephony.vibe"
+import { activeSmsSelection, type SmsSelection } from "./agent-sim.vibe"
 
 type Sms = Extract<DeviceOperation, { type: "sms_send" }>
 const refused = { kind: "refused", code: NOT_DISPATCHED } as const
@@ -29,14 +30,16 @@ function resultOf(receipt: SmsSendResult | undefined) {
 }
 
 /** A reviewed agent request uses the exact native SMS confirmation, never a fallback composer or a fresh send ID. */
-export effect function reviewAgentSms(op: Sms, call: ExecutorCall, current: () => Promise<boolean>) {
+export effect function reviewAgentSms(op: Sms, call: ExecutorCall, current: () => Promise<boolean>, selection?: SmsSelection) {
   const wanted = binding(op, call)
   const device = try Device
   const phone = try Phone
   if (wanted === undefined || !(try device.capabilities()).image || !(try device.showing()) || !clear(try phone.get())) return refused
+  if (selection !== undefined && selection.subscription.id !== wanted.review.subscriptionId) return refused
   if (!(tryPromise(current) catch () => false)) return refused
   const status = telephony("reviewed SMS status", (client) => client.messages.status()) catch () => undefined
   if (status?.sendMode !== "direct" || status.permissions.sendSms !== "granted" || !status.subscriptions?.some((sim) => sim.id === wanted.review.subscriptionId)) return refused
+  if (selection !== undefined && (status.permissions.sms !== "granted" || status.permissions.phoneState !== "granted" || !activeSmsSelection(selection, status.subscriptions))) return refused
   if (!(tryPromise(current) catch () => false) || !(try device.showing()) || !clear(try phone.get())) return refused
   const receipt = telephony("sendSms", (client) => client.messages.sendSms(wanted.review, wanted.id)) catch (failure) => {
     if (failure instanceof TelephonyAbsent || (failure instanceof TelephonyRefused &&

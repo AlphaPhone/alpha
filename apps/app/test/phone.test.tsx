@@ -12,6 +12,7 @@ import { at } from "../src/areas.ts";
 import { propose } from "../src/contacts/requests.vibe";
 import home from "../src/home/index.tsx";
 import { phoneAction } from "../src/phone/agent.vibe";
+import { phoneContactChoices, pickPhoneContact } from "../src/phone/named-review.vibe";
 import type { Alpha } from "../src/runtime/area.tsx";
 import { button, closeAll, drawn, hardware, only, open, press, underAct, until } from "./alpha.tsx";
 import { scene } from "./fakes/scene.ts";
@@ -143,6 +144,40 @@ describe("Phone on an Alpha image", () => {
       expect(await alpha.runtime.runPromise(phoneAction(operation, () => Promise.resolve(false)))).toMatchObject({ kind: "refused" });
     });
     expect([world.telephony.placed, world.telephony.dialed]).toEqual([[], []]);
+  });
+
+  it(`Calls the chosen current contact number once (spec/app/contacts/agent.md, "The owner picks the exact number or the one contact, and that one is shown"; spec/app/contacts/agent.md, "Nothing is done but what the owner approved, as it was shown, once")`, async () => {
+    const world = image();
+    const { alpha } = await openPhoneWorld(world);
+    await until(alpha, alpha.runtime, Shell, (state) => state.image);
+    await until(alpha, alpha.runtime, Phone, (state) => state.telecom === "NoCall" && state.carrier === "CarrierReady");
+    const query = "Maya Chen";
+    const operation = { type: "phone_call", target: { kind: "contact", query } } as const;
+    const current = () => Promise.resolve(true);
+
+    const choices = await alpha.runtime.runPromise(phoneContactChoices(query));
+    if (choices.tag !== "Choices" || choices.options.length !== 1) throw new Error("expected one exact choice");
+    expect(choices.options[0]?.number).toBe("+14155550100");
+    expect(await alpha.runtime.runPromise(phoneAction(operation, current))).toMatchObject({ kind: "refused" });
+    const reviewed = await alpha.runtime.runPromise(pickPhoneContact(query, choices.options[0]!));
+    if (reviewed.tag !== "Exact") throw new Error("expected the chosen number's review");
+    expect([world.telephony.placed, world.telephony.dialed]).toEqual([[], []]);
+
+    const provider = world.telephony.people.find((person) => person.id === reviewed.selected.contact);
+    if (!provider) throw new Error("expected the native contact");
+    provider.phoneNumbers[0]!.number = "+14155550122";
+    provider.revision += 1;
+    expect(await alpha.runtime.runPromise(phoneAction(operation, current, reviewed.selected))).toMatchObject({ kind: "refused" });
+    expect([world.telephony.placed, world.telephony.dialed]).toEqual([[], []]);
+
+    const revised = await alpha.runtime.runPromise(phoneContactChoices(query));
+    if (revised.tag !== "Choices" || !revised.options[0]) throw new Error("expected the replacement number as a fresh choice");
+    const exact = await alpha.runtime.runPromise(pickPhoneContact(query, revised.options[0]));
+    if (exact.tag !== "Exact") throw new Error("expected a fresh number review");
+    expect(await alpha.runtime.runPromise(phoneAction(operation, current, exact.selected))).toEqual({
+      kind: "applied", result: { kind: "phone-call", status: "placed", contact: true },
+    });
+    expect([world.telephony.placed, world.telephony.dialed]).toEqual([["+14155550122"], []]);
   });
 
   it("Gates ordinary calls on Android's carrier and emergency readings (spec/app/phone/index.md, \"Story: Know when a call is live\")", async () => {

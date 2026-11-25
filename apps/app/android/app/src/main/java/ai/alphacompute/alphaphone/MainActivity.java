@@ -14,9 +14,11 @@ import androidx.core.splashscreen.SplashScreen;
 import androidx.core.view.ViewCompat;
 import androidx.core.view.WindowInsetsCompat;
 import com.getcapacitor.BridgeActivity;
+import com.getcapacitor.CapConfig;
 import com.getcapacitor.WebViewListener;
 import java.lang.ref.WeakReference;
 import java.util.UUID;
+import java.util.concurrent.atomic.AtomicLong;
 
 public class MainActivity extends BridgeActivity {
  private static final String BACK = "window.dispatchEvent(new Event('alpha-back'))";
@@ -31,6 +33,8 @@ public class MainActivity extends BridgeActivity {
  private static int unansweredFrontStarts;
  private boolean homeTask;
  private boolean handingOff;
+ private boolean telephonyAdmitted;
+ private final AtomicLong composerVisit = new AtomicLong();
  private InsetsState insets;
 
  private record InsetsState(int top, int bottom, boolean keyboard) {
@@ -88,6 +92,7 @@ public class MainActivity extends BridgeActivity {
   registerPlugin(AlphaLocalSpeechPlugin.class);
   registerPlugin(AlphaCloudSpeechPlugin.class);
   boolean image = AlphaImageCapability.verified(this);
+  telephonyAdmitted = image;
   if (image) {
    registerPlugin(AlphaTelephonyPlugin.class);
    registerPlugin(AlphaContactsPlugin.class);
@@ -114,6 +119,8 @@ public class MainActivity extends BridgeActivity {
 
  private void followWindowInsets() {
   getBridge().addWebViewListener(new WebViewListener() {
+   @Override public void onPageStarted(WebView page) { composerVisit.incrementAndGet(); }
+
    @Override public void onPageLoaded(WebView page) {
     if (insets != null) insets.publish(page);
    }
@@ -134,7 +141,16 @@ public class MainActivity extends BridgeActivity {
  }
 
  @Override protected void load() {
-  if (!handingOff) super.load();
+  if (handingOff) return;
+  if (telephonyAdmitted && !isAssistantSurface()) {
+   if (config == null) config = CapConfig.loadDefault(this);
+   WebView page = findViewById(com.getcapacitor.android.R.id.webview);
+   if (page != null && config.getServerUrl() == null) {
+    page.setFilterTouchesWhenObscured(true);
+    AlphaMessagesComposerPort.install(this, page);
+   }
+  }
+  super.load();
  }
 
  @Override public void onSaveInstanceState(Bundle state) {
@@ -143,16 +159,24 @@ public class MainActivity extends BridgeActivity {
  }
 
  @Override public void onResume() {
+  composerVisit.incrementAndGet();
   super.onResume();
   if (livePage.get() == this) unansweredFrontStarts = 0;
  }
 
+ @Override public void onPause() {
+  composerVisit.incrementAndGet();
+  super.onPause();
+ }
+
  @Override public void onDestroy() {
+  composerVisit.incrementAndGet();
   if (livePage.get() == this) livePage.clear();
   super.onDestroy();
  }
 
  @Override public void onWindowFocusChanged(boolean focused) {
+  composerVisit.incrementAndGet();
   super.onWindowFocusChanged(focused);
   if (focused && getBridge() != null) {
    getBridge().getWebView().evaluateJavascript("window.dispatchEvent(new Event('focus'))", null);
@@ -162,6 +186,7 @@ public class MainActivity extends BridgeActivity {
  private boolean volumeShutter;
 
  boolean isAssistantSurface() { return false; }
+ long composerVisit() { return composerVisit.get(); }
 
  void setVolumeShutter(boolean enabled) { volumeShutter = enabled; }
 
