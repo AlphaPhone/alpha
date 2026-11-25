@@ -1,24 +1,26 @@
 // spec/app/messages/composer.md, "Story: Keep my draft"; spec/app/messages/composer.md, "Story: Let Alpha suggest a draft"; spec/app/messages/composer.md, "Story: Send a message"; spec/app/messages/sending.md, "Story: Send a message once"; spec/app/messages/sending.md, "Story: Know whether it arrived"
 import * as KeyValueStore from "effect/persistence/KeyValueStore"
-import { MMS_ATTACHMENT_TYPES, MMS_MAX_ATTACHMENTS, MMS_MAX_BODY, MMS_MAX_RECIPIENTS, MMS_MAX_TOTAL_BYTES } from "@elizaos/os-bridges"
+import { MMS_ATTACHMENT_TYPES, MMS_MAX_ATTACHMENTS, MMS_MAX_BODY, MMS_MAX_RECIPIENTS, MMS_MAX_TOTAL_BYTES, SMS_DIRECT_MAX_RECIPIENTS } from "@elizaos/os-bridges"
 import { mmsBinding, normalizePhoneNumber, type MmsAttachmentType, type MmsBinding, type MmsReview, type OperationId, type SmsReview, type SmsSendResult, type SmsSendStatus } from "@elizaos/os-bridges"
 import type { PhoneNumber, TelephonySubscription } from "@elizaos/os-bridges"
 import * as Composer from "../../gen/app__messages__composer.effect.vibe"
 import type { Effect as Out, Event } from "../../gen/app__messages__composer.effect.vibe"
 import type { Effect as SendOut } from "../../gen/app__messages__sending.effect.vibe"
-import { Machine as Messages, canEditNewDraft, canFinishNewDraft, canNewPictureMessage, holdsNewDraft, type Messages as MessagesState } from "../../gen/app__messages.effect.vibe"
+import { Machine as Messages, canEditNewDraft, canFinishNewDraft, canNewMessage, canNewPictureMessage, canOpenAndroidDraft, holdsNewDraft, type Messages as MessagesState } from "../../gen/app__messages.effect.vibe"
 import { Machine as Phone, clear } from "../../gen/app__phone.effect.vibe"
 import { Machine as Shell, showing } from "../../gen/app__shell.effect.vibe"
+import { Machine as Layers, pageInert } from "../../gen/app__shell__layers.effect.vibe"
 import { busy, sentAll, uncertain } from "../../gen/app__messages__sending.effect.vibe"
 import { say } from "../notices/toasts.vibe"
 import { Agent } from "../platform/agent.vibe"
+import { Device, registered } from "../platform/device.vibe"
 import { ask } from "../platform/remote.vibe"
 import { SystemSettings } from "../platform/systemSettings.vibe"
 import { type Telephony, TelephonyAbsent, type TelephonyRefused, sendFromComposer, telephony, textingDefault } from "../platform/telephony.vibe"
 import { Attempts } from "../runtime/attempts.vibe"
 import { type Job, answer, applying, contained, following, hearing, reacting, run, started, stream, together } from "../runtime/reactor.vibe"
 import { grantOf } from "../phone/phone.vibe"
-import { Conversations, Inbox, elsewhere } from "./messages.vibe"
+import { Conversations, Inbox, elsewhere, noticeTransport } from "./messages.vibe"
 
 /** A picture the owner attached: what the phone says it is, and its bytes. */
 export interface Picture {
@@ -80,6 +82,7 @@ export service Drafts {
   write(thread: number, text: string): void!!
   drop(thread: number): void!!
   newDraft(): NewMessageDraft!!
+  newDraftReadable(): boolean!!
   saveNewDraft(draft: NewMessageDraft): boolean!!
   readonly newVisits: Semaphore.Semaphore
   pictures(): ReadonlyArray<Picture>!!
@@ -193,7 +196,10 @@ import { canDigest, keepSend, keptNewDraft, keptSend, matchesBinding, withNewSou
 const drafts = Layer.effect(Drafts, effect {
   const store = try KeyValueStore.KeyValueStore
   const newVisits = try Semaphore.make(1)
-  let fresh: NewMessageDraft = keptNewDraft(store.get(newDraftKey) catch () => undefined)
+  const loaded = try Effect.result(store.get(newDraftKey))
+  const previous = loaded._tag === "Success" ? loaded.success : undefined
+  let fresh: NewMessageDraft = keptNewDraft(previous)
+  let readableNew = loaded._tag === "Success" && (previous === undefined || fresh.revision > 0)
   let pictures: ReadonlyArray<Picture> = []
   let subscriptions: ReadonlyArray<TelephonySubscription> = []
   let picked: PickedSubscription | undefined
@@ -227,10 +233,13 @@ const drafts = Layer.effect(Drafts, effect {
     drop: (thread: number) => ignore(store.remove(draftKey(thread))),
     newVisits,
     newDraft: () => sync(() => fresh),
+    newDraftReadable: () => sync(() => readableNew),
     effect saveNewDraft(draft: NewMessageDraft): boolean!! {
       const { revision, recipients, body } = draft
-      if (!(try isSuccess(store.set(newDraftKey, JSON.stringify({ revision, recipients, body }))))) return false
+      const write = revision === 0 ? store.remove(newDraftKey) : store.set(newDraftKey, JSON.stringify({ revision, recipients, body }))
+      if (!(try isSuccess(write))) return false
       fresh = draft
+      readableNew = true
       return true
     },
     pictures: () => sync(() => pictures),
@@ -620,6 +629,97 @@ export effect function editNewMessage(visit: number, edit: NewDraftEdit, closePi
   })
 }
 
+const incomingSmsDraft = Schema.Struct({
+  token: Schema.NonEmptyString.check(Schema.isMaxLength(128)),
+  recipients: Schema.Array(Schema.NonEmptyString.check(Schema.isMaxLength(24))).check(Schema.isMinLength(1), Schema.isMaxLength(SMS_DIRECT_MAX_RECIPIENTS)),
+  body: Schema.String.check(Schema.isMaxLength(MMS_MAX_BODY)),
+})
+const androidDraft = Schema.decodeUnknownOption(incomingSmsDraft)
+type AndroidDraftPort = ReturnType<typeof noticeTransport>
+type IncomingSmsDraft = typeof incomingSmsDraft.Type
+
+effect function pendingDraft(port: AndroidDraftPort): (IncomingSmsDraft | undefined)!! {
+  const pending = try Effect.timeoutOption(Effect.option(tryPromise(() => port.smsDraftPending())), "2 seconds")
+  return Option.getOrUndefined(androidDraft(Option.getOrUndefined(Option.flatten(pending))))
+}
+
+function emptyNew(draft: NewMessageDraft): boolean {
+  return draft.recipients === "" && draft.body === "" && draft.pictures.length === 0
+}
+
+/** A native handoff writes the exact next New revision once its foreground and stored draft still match. */
+effect function openAndroidDraft(port: AndroidDraftPort, offer: IncomingSmsDraft): boolean!!(Messages | Shell | Drafts | Conversations | Composer.Machine | Device | Layers) {
+  const store = try Drafts
+  const messages = try Messages
+  const shell = try Shell
+  const layers = try Layers
+  const device = try Device
+  const composer = try Composer.Machine
+  const recipients = offer.recipients.join(", ")
+  const parsed = messageRecipients(recipients)
+  if (parsed.length !== offer.recipients.length || !parsed.every((number, index) => number === offer.recipients[index]) || offer.body.includes("\0")) return false
+  const starting = try shell.get()
+  const uncovered = effect {
+    const where = try shell.get()
+    return where.image && where.assistant === "Bar" && !where.drawer && !pageInert(try layers.get()) && (try device.showing())
+  }
+  if (!(try uncovered())) return false
+  const before = try store.newDraft()
+  if (!(try store.newDraftReadable()) || !emptyNew(before) || newDraftHeld(try composer.get(), before.revision)) return false
+  const already = showing(starting, "Messages")
+  const into = { type: "openView", view: "Messages" } as const
+  if (!already && !(try contained(shell.send(into, (where) => where.route === starting.route), "opening Messages for the Android text"))) return false
+  const route = already ? starting.route : starting.route + 1
+  const current = effect {
+    const where = try shell.get()
+    return where.route === route && showing(where, "Messages") && (try uncovered())
+  }
+  const shown = try Effect.timeoutOption(Stream.runHead(Stream.filter(messages.changes, (state) => state.front)), "3 seconds")
+  const accepted = Option.isSome(shown) && (try Semaphore.withPermit(store.newVisits, effect {
+    if (!(try current()) || (try store.newDraft()) !== before || !(try store.newDraftReadable())) return false
+    const latest = try pendingDraft(port)
+    if (latest?.token !== offer.token || !(try current()) || (try store.newDraft()) !== before) return false
+    const draft = { ...before, recipients, body: offer.body, revision: before.revision + 1 }
+    const thread = try numberForNew(draft)
+    const event = { type: "openAndroidDraft", current: true, empty: true, revision: draft.revision, thread } as const
+    const canOpen = effect {
+      return (try current()) && canOpenAndroidDraft(try messages.get(), true, true, draft.revision, thread)
+        && !newDraftHeld(try composer.get(), before.revision)
+    }
+    if (!(try canOpen()) || !(try store.saveNewDraft(draft))) return false
+    const stillOffered = (try pendingDraft(port))?.token === offer.token
+    if (stillOffered && (try canOpen()) &&
+      (try contained(messages.send(event, (state) => canNewMessage(state)), "filling the Android text draft"))) return true
+    if ((try store.newDraft()) === draft) try ignore(store.saveNewDraft(before))
+    return false
+  }))
+  if (!accepted && !already && (try current()) && canNewMessage(try messages.get())) {
+    try contained(shell.send({ type: "goBack" }, (where) => where.route === route), "closing the unused Android text opening")
+  }
+  return accepted
+}
+
+// spec/app/messages/index.md, "A current Android text request opens New only when its saved draft is empty"
+const androidDraftEntries = started(effect {
+  if (!registered("ElizaTelephony")) return
+  const port = noticeTransport()
+  let taken: string | undefined
+  const wakes = Stream.callback<void>((queue) => effect {
+    const listener = tryPromise(() => port.addListener("smsDraft", () => { Queue.offerUnsafe(queue, undefined) })) catch () => undefined
+    if (listener !== undefined) try addFinalizer(() => ignore(tryPromise(() => listener.remove())))
+    Queue.offerUnsafe(queue, undefined)
+  })
+  try Stream.runForEach(wakes, effect () => {
+    const offered = try pendingDraft(port)
+    if (offered === undefined) return
+    if (taken !== offered.token) {
+      if (!(try openAndroidDraft(port, offered))) return
+      taken = offered.token
+    }
+    try ignore(tryPromise(() => port.acknowledgeSmsDraft({ token: offered.token })))
+  })
+}, "reviewing Android text requests in Messages")
+
 /** A chooser result belongs to the New visit and revision that opened it. */
 export effect function attachNewPictures(visit: number, revision: number, files: ReadonlyArray<File>): void!!(Messages | Shell | Drafts | Conversations | Composer.Machine) {
   const store = try Drafts
@@ -793,4 +893,4 @@ const unpictured = applying(Composer.Machine, (state) => state.pictures === 0, e
 })
 
 /** The composer: kept across restarts, so a draft and a send under way survive them; nothing is sent when Alpha opens again. */
-export const composer = together(machine, drafts, opened, saving, retiring, unpictured, hearing(reports, Composer.Machine, (event: Event) => event))
+export const composer = together(machine, drafts, opened, saving, retiring, unpictured, androidDraftEntries, hearing(reports, Composer.Machine, (event: Event) => event))

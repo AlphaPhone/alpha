@@ -178,6 +178,34 @@ public final class AlphaTelephonyPlugin extends TelephonyPlugin {
   super.dial(call);
  }
 
+ private MainActivity smsDraftOwner() {
+  return getActivity() instanceof MainActivity activity && admitted() && unlockedForeground()
+   && !activity.isAssistantSurface() && AlphaDevicePlugin.shareForeground(activity) ? activity : null;
+ }
+
+ void wakeSmsDraft() {
+  MainActivity activity = smsDraftOwner();
+  if (activity != null && SmsDraftOpenRequest.current(activity) != null) notifyListeners("smsDraft", new JSObject(), true);
+ }
+
+ @PluginMethod public void smsDraftPending(PluginCall call) {
+  MainActivity activity = smsDraftOwner();
+  SmsDraftOpenRequest.Offer offer = activity == null ? null : SmsDraftOpenRequest.current(activity);
+  JSObject result = new JSObject();
+  if (offer != null) {
+   result.put("token", offer.token());
+   result.put("recipients", new JSONArray(offer.draft().recipients()));
+   result.put("body", offer.draft().body());
+  }
+  call.resolve(result);
+ }
+
+ @PluginMethod public void acknowledgeSmsDraft(PluginCall call) {
+  MainActivity activity = smsDraftOwner();
+  if (activity != null) SmsDraftOpenRequest.acknowledge(activity, call.getString("token"));
+  call.resolve();
+ }
+
  @PluginMethod public void smsNoticePending(PluginCall call) {
   if (refused(call)) return;
   SmsNoticeOpenRequest.Tap tap = SmsNoticeOpenRequest.current();

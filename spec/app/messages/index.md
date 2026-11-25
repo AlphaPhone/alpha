@@ -593,6 +593,30 @@ pure def startNewDraft(s: Messages, revision: int, thread: int): Moved =
 pure def holdsNewDraft(s: Messages, visit: int): bool = showingPane(s, New) and s.newDraft.visit == visit
 ```
 
+### A current Android text request opens New only when its saved draft is empty
+
+Opening Messages from Android can fill To and the text of the next New
+draft. It takes the request only while that request and the Messages list
+are still in front, the saved New draft was read and is empty, and the
+address names the prepared recipients. An earlier request or a draft
+already in use changes nothing. The filled draft opens in New, leaving
+Send to the owner.
+
+```quint
+pure def canOpenAndroidDraft(s: Messages, current: bool, empty: bool, revision: int, thread: int): bool =
+  current and empty and canStartNewDraft(s, revision, thread) and revision > s.newDraft.revision and thread > 0
+
+pure def openAndroidDraft(s: Messages, current: bool, empty: bool, revision: int, thread: int): Moved =
+  startNewDraft(s, revision, thread)
+
+pure def stepAndroidDraftOpensItsNewVisit(before: Messages, via: str, after: Messages): bool =
+  via == "openAndroidDraft" implies (before.front and before.pane == Threads and after.front and after.pane == New
+    and after.newDraft.visit == before.newDraft.visit + 1 and after.newDraft.revision > before.newDraft.revision
+    and after.newDraft.recipient > 0 and not(after.newDraft.picking))
+
+pure val eval_witness_canOpenAndroidDraft = ("show", ("openAndroidDraft", true, true, 1, 1))
+```
+
 ### The owner can write before choosing To, then adjust To without moving or losing the message
 
 The New draft's bytes and address are held together on the phone. The

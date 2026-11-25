@@ -332,6 +332,43 @@ describe("Messages on an Alpha image", () => {
     await press("New message");
     await ready(alpha.runtime, Messages, "A fresh New draft", (s) => s.pane === "New" && s.newDraft.recipient === 0);
     expect(message()?.value).toBe("");
+
+    // spec/app/messages/index.md, "A current Android text request opens New only when its saved draft is empty"
+    await press("Back");
+    await ready(alpha.runtime, Messages, "Messages list before the Android request", (s) => s.pane === "Threads");
+    const sent = [...world.telephony.sent];
+    const first = { token: "first-android-text", recipients: ["+14155550122"], body: "Draft from Android" };
+    const second = { token: "second-android-text", recipients: ["+14155550100"], body: "A different Android draft" };
+    const to = () => document.querySelector<HTMLInputElement>("[data-alpha-messages-recipients]")?.value;
+    // The first acknowledgment is in flight when Android publishes a newer request.
+    const acknowledgment = Promise.withResolvers<void>();
+    world.telephony.holdSmsDraftAcknowledgment = acknowledgment.promise;
+    try {
+      world.telephony.smsDraft = first;
+      await drawn(world.telephony.wakeSmsDraft);
+      await vi.waitFor(() => expect(world.telephony.smsDraftAcknowledgments).toEqual([first.token]));
+      await drawn(() => undefined);
+      expect([to(), message()?.value, world.telephony.sent]).toEqual([first.recipients[0], first.body, sent]);
+
+      const ownerEdit = "I am editing my own draft";
+      const label = message()?.getAttribute("aria-label");
+      if (!label) throw new Error("The Android text draft did not show an editor");
+      await fill(label, ownerEdit);
+      await vi.waitFor(() => expect(message()?.value).toBe(ownerEdit));
+      world.telephony.smsDraft = second;
+      await drawn(world.telephony.wakeSmsDraft);
+      acknowledgment.resolve();
+      const secondReads = () => world.telephony.smsDraftReads.filter((token) => token === second.token).length;
+      await vi.waitFor(() => expect(secondReads()).toBeGreaterThan(0));
+      const reads = secondReads();
+      await drawn(world.telephony.wakeSmsDraft);
+      await vi.waitFor(() => expect(secondReads()).toBeGreaterThan(reads));
+      await drawn(() => undefined);
+      expect([to(), message()?.value, world.telephony.sent]).toEqual([first.recipients[0], ownerEdit, sent]);
+      expect([world.telephony.smsDraft, world.telephony.smsDraftAcknowledgments]).toEqual([second, [first.token]]);
+    } finally {
+      acknowledgment.resolve();
+    }
   });
 
   it("Sends New without replacing a saved draft for the same recipient (spec/app/messages/composer.md, \"The owner's New message uses the same send and never takes another draft's place\")", async () => {

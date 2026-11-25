@@ -24,7 +24,9 @@ module nativeNotice {
   interface Transport {
     smsNoticePending(): Promise<{ threadId?: unknown; token?: unknown }>
     acknowledgeSmsNotice(input: { token: string }): Promise<void>
-    addListener(name: "smsNotice", wake: () => void): Promise<PluginListenerHandle>
+    smsDraftPending(): Promise<unknown>
+    acknowledgeSmsDraft(input: { token: string }): Promise<void>
+    addListener(name: "smsNotice" | "smsDraft", wake: () => void): Promise<PluginListenerHandle>
   }
 
   let made: Transport | undefined
@@ -34,6 +36,7 @@ module nativeNotice {
   }
 }
 import { noticeTransport } from nativeNotice
+export { noticeTransport }
 
 /** A conversation Messages has given a number: the phone's thread, where it has one, and the numbers it is with. */
 export interface Conversation {

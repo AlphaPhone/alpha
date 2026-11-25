@@ -50,6 +50,11 @@ export interface TelephonyScene {
   deletionReply: "complete" | "lost" | "malformed" | "refused";
   readonly deletionAttempts: string[];
   smsNotice: { threadId: string; token: string } | undefined;
+  smsDraft: { token: string; recipients: string[]; body: string } | undefined;
+  wakeSmsDraft: () => void;
+  holdSmsDraftAcknowledgment: Promise<void> | undefined;
+  readonly smsDraftReads: string[];
+  readonly smsDraftAcknowledgments: string[];
   /** Every text the radio was handed: the operation it was reviewed under, and to whom. */
   sent: { operationId: string; recipients: string[]; body: string }[];
   journal: Map<string, Record<string, unknown>>;
@@ -127,6 +132,11 @@ export function telephonyScene(): TelephonyScene {
     deletionAttempts: [],
     holdContactDeletion: undefined,
     smsNotice: undefined,
+    smsDraft: undefined,
+    wakeSmsDraft: () => {},
+    holdSmsDraftAcknowledgment: undefined,
+    smsDraftReads: [],
+    smsDraftAcknowledgments: [],
     sent: [],
     journal: new Map(),
     contacts: true,
@@ -176,8 +186,11 @@ function telephony(world: TelephonyScene): Faked {
     ownerDialScreen(input: { number: string }): Promise<unknown>;
     smsNoticePending(): Promise<unknown>;
     acknowledgeSmsNotice(input: { token: string }): Promise<void>;
+    smsDraftPending(): Promise<unknown>;
+    acknowledgeSmsDraft(input: { token: string }): Promise<void>;
   }, Record<string, unknown>>((emit) => {
     world.changed = () => emit("messagesChanged", {});
+    world.wakeSmsDraft = () => emit("smsDraft", {});
     const deletionResponse = (response: Record<string, unknown>) => {
       if (world.deletionReply === "lost") return Promise.reject(new Error("Deletion acknowledgment lost"));
       return Promise.resolve(world.deletionReply === "malformed" ? { ...response, deletion: {} } : response);
@@ -282,6 +295,16 @@ function telephony(world: TelephonyScene): Faked {
       acknowledgeSmsNotice: ({ token }) => {
         if (world.smsNotice?.token === token) world.smsNotice = undefined;
         return Promise.resolve();
+      },
+      smsDraftPending: () => {
+        const offer = world.smsDraft;
+        if (offer !== undefined) world.smsDraftReads.push(offer.token);
+        return Promise.resolve(offer ?? {});
+      },
+      acknowledgeSmsDraft: async ({ token }) => {
+        world.smsDraftAcknowledgments.push(token);
+        await world.holdSmsDraftAcknowledgment;
+        if (world.smsDraft?.token === token) world.smsDraft = undefined;
       },
       composeSms: () => Promise.reject(rejection("Send from Messages", "unavailable")),
       listThreads: ({ limit }) => {
