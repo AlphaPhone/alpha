@@ -4,6 +4,7 @@ import { act } from "react";
 import { createRoot } from "react-dom/client";
 import { expect, it, vi } from "vitest";
 import { App } from "../src/App.tsx";
+import { Machine as Layers } from "../gen/app__shell__layers.effect.vibe";
 import { boot } from "../src/boot.tsx";
 import type { Platform } from "../src/platform/platform.vibe";
 import { button, closeAll, drawn, hardware, only, openOver, press, underAct } from "./alpha.tsx";
@@ -97,6 +98,12 @@ it("Shows native Access after sign-in and keeps the owner's place through restar
     await step(1);
     expect(button("Settings")).toBeUndefined();
     expect(world.settings.permissionRequests).toEqual([]);
+    await drawn(() => first.alpha.runtime.runPromise(Layers.use((work) =>
+      work.send({ type: "openLayer", id: "covered-startup", kind: "DialogLayer", covers: true }))));
+    await vi.waitFor(() => expect(dialog()?.textContent ?? "").not.toContain("Step 1 of 7"));
+    expect(button("Settings")).toBeUndefined();
+    await hardware("back");
+    await step(1);
     await hardware("back");
     await step(1);
     await vi.waitFor(() => expect(button("Allow")).toBeDefined());

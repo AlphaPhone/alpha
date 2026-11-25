@@ -100,8 +100,9 @@ export function App({ alpha }: AppProps) {
   useEffect(() => {
     if (enrolled) alpha.runtime.runFork(openStartupAccess(accessCovered));
   }, [alpha, enrolled, accessCovered]);
-  const accessHolding = enrolled && !accessCovered && (!access || !access.begun || !accessCompleted(access));
-  const accessShowing = accessHolding && access !== undefined && accessPanel(access) === "Walkthrough";
+  const accessHolding = enrolled && (!access || !access.begun || !accessCompleted(access));
+  const accessMayShow = accessHolding && !accessCovered;
+  const accessShowing = accessMayShow && access !== undefined && accessPanel(access) === "Walkthrough";
   if (!state) {
     if (updating) return <>{alpha.slot("overlay")}</>;
     return cause
@@ -185,7 +186,7 @@ export function App({ alpha }: AppProps) {
   const fullScreen = state.assistant === "Full" && !side;
   const strip = comms && fullScreen;
   const back = !shellFailed && can({ type: "goBack" });
-  const canGoBack = String(!shellFailed && (accessHolding || (signingIn ? canLeaveSignInStep(signedIn, signInFlow)
+  const canGoBack = String(!shellFailed && (accessMayShow || (signingIn ? canLeaveSignInStep(signedIn, signInFlow)
     : back || state.textAsk.tag === "TextAskVisit" || (layers !== undefined && takesBack(layers)))));
   const frameStyle = preview
     ? { left: preview.left, top: preview.top, width: preview.width, height: preview.height, transform: `scale(${preview.scale})`, transformOrigin: "top left" }
@@ -216,7 +217,7 @@ export function App({ alpha }: AppProps) {
         inert={signingIn ? updating : inert || fullScreen}
       >
         {signingIn && !updating ? <SignIn alpha={alpha} read={signedIn} state={signInFlow} /> : null}
-        {accessHolding && !accessShowing ? <StartupMark /> : null}
+        {accessMayShow && !accessShowing ? <StartupMark /> : null}
         {!signingIn && !accessHolding && comms && alpha.slot("phone/stage")}
         {signingIn || accessHolding || page === undefined || !editorsMounted(page) ? null : showing === undefined
           ? alpha.slot("home")

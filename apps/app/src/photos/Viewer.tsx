@@ -1,6 +1,6 @@
 import { ChevronLeft, ChevronRight, Crop, Ellipsis, FolderInput, Heart, Info, Mail, MessageCircle, Pause, Pencil, Play, RotateCw, Share2, Trash2, Undo2, X } from "lucide-react";
 import { Effect, Exit, type ManagedRuntime } from "effect";
-import { useCallback, useId, useRef, useState, type PointerEvent, type RefCallback } from "react";
+import { Fragment, useCallback, useId, useRef, useState, type PointerEvent, type RefCallback } from "react";
 import { Button, Input, Mark, Menu, MenuContent, MenuItem, MenuTrigger, Sheet, SheetContent, cn, dockClearance } from "@repo/ui";
 import { useMachine } from "../../gen/app__photos__viewer.react.ts";
 import { canPlay, maxZoom, panUnits, type Event, type Look, type Pan, type Viewer as ViewerState } from "../../gen/app__photos__viewer.ts";
@@ -20,7 +20,7 @@ const messages = {
   NoRefusal: "", Animated: "This photo is animated.", TooLarge: "This item is too large to edit.", TooLong: "This video is too long to edit.",
   NoRoom: "There is not enough storage to edit this video.", NoEditor: "This item cannot be edited here.",
 };
-const formatDate = new Intl.DateTimeFormat(undefined, { dateStyle: "medium" });
+const formatDate = new Intl.DateTimeFormat(undefined, { weekday: "short", month: "short", day: "numeric", year: "numeric" });
 const formatTime = new Intl.DateTimeFormat(undefined, { timeStyle: "short" });
 const hiddenChrome = "pointer-events-none opacity-0 focus-within:pointer-events-auto focus-within:opacity-100";
 const dragX = "--alpha-photo-drag-x";
@@ -44,6 +44,18 @@ function clipTime(tenths: number): string {
   return `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, "0")}`;
 }
 
+function infoSize(bytes: number): string {
+  if (!Number.isFinite(bytes) || bytes <= 0) return "";
+  const units = ["B", "KB", "MB", "GB"];
+  let unit = 0;
+  let value = bytes;
+  while (value >= 1000 && unit < units.length - 1) {
+    value /= 1000;
+    unit += 1;
+  }
+  return `${unit === 0 || value >= 10 ? Math.round(value) : value.toFixed(1)} ${units[unit]}`;
+}
+
 function imageTransform(zoom: number, pan: Pan): string {
   const axis = (name: string, offset: number, container: string) =>
     `calc(-50% + max(0px, (${zoom * 100}% - ${container}) / 2) * var(${name}, ${offset / panUnits}))`;
@@ -56,6 +68,7 @@ interface Props {
   readonly after?: number;
   readonly row?: Row;
   readonly inTrash: boolean;
+  readonly albumNamesFor: (itemId: string) => readonly string[];
   readonly onBack: () => void;
   readonly backToCamera: boolean;
   readonly onAddToAlbum?: () => void;
@@ -64,7 +77,7 @@ interface Props {
 }
 
 /** The photo or video shown at full size, with its metadata, owner actions and preview. */
-export function MediaViewer({ runtime, before, after, row, inTrash, onBack, backToCamera, onAddToAlbum, onRecover, onDelete }: Props) {
+export function MediaViewer({ runtime, before, after, row, inTrash, albumNamesFor, onBack, backToCamera, onAddToAlbum, onRecover, onDelete }: Props) {
   const { state, can, send } = useMachine(runtime);
   const positionId = useId();
   const [startedClip, setStartedClip] = useState<{ readonly readTicket: number; readonly uri: string }>();
@@ -91,15 +104,28 @@ export function MediaViewer({ runtime, before, after, row, inTrash, onBack, back
   const clipEditor = state.kind === "Clip" && state.editing;
   const preview = runtime.runSync(Effect.flatMap(OpenedPhoto, (opened) => opened.preview()));
   const showing = state.read.status === "Loaded" && current.photo === state.open && !state.gone;
-  const showingRow: Row | undefined = showing && current.item !== undefined ? { kind: "phone", item: current.item }
-    : showing && current.browser !== undefined ? { kind: "browser", item: current.browser.item } : row;
+  const loadedRow: Row | undefined = showing && current.item !== undefined ? { kind: "phone", item: current.item }
+    : showing && current.browser !== undefined ? { kind: "browser", item: current.browser.item } : undefined;
+  const showingRow = loadedRow ?? row;
   const item = showingRow?.item;
   const name = item?.name ?? (state.kind === "Clip" ? "Video" : "Photo");
   const timestamp = showingRow === undefined ? 0 : taken(showingRow);
   const now = runtime.runSync(Effect.flatMap(Time, (time) => time.latest()));
-  const date = timestamp > 0 ? new Date(timestamp) : undefined;
+  const capturedAt = timestamp > 0 ? new Date(timestamp) : undefined;
+  const date = capturedAt !== undefined && Number.isFinite(capturedAt.getTime()) ? capturedAt : undefined;
   const expiry = inTrash && showingRow?.kind === "phone" ? trashDaysLeft(showingRow.item.expiresAt, now) : undefined;
   const day = date === undefined ? name : headingOf(timestamp, now, true);
+  const info = state.info ? loadedRow?.item : undefined;
+  const duration = info?.duration;
+  const facts = info === undefined ? [] : [
+    { label: "Date", value: date === undefined ? "" : `${formatDate.format(date)} ${formatTime.format(date)}` },
+    { label: "File", value: info.name ?? "" },
+    { label: "Size", value: infoSize(info.size || current.browser?.file.size || 0) },
+    { label: "Dimensions", value: info.width > 0 && info.height > 0 ? `${info.width} × ${info.height}` : "" },
+    { label: "Length", value: state.kind === "Clip" && duration !== undefined && duration > 0 && Number.isFinite(duration) ? clipTime(duration * 10) : "" },
+    { label: "Folder", value: loadedRow?.kind === "phone" ? loadedRow.item.folder?.replace(/\/+$/u, "") ?? "" : "" },
+    { label: "Albums", value: state.secure ? "" : albumNamesFor(info.id).join(", ") },
+  ].filter(({ value }) => value !== "");
   function action(event: Event) {
     if (can(event, "Owner")) void send(event, "Owner");
   }
@@ -271,12 +297,13 @@ export function MediaViewer({ runtime, before, after, row, inTrash, onBack, back
         {control("Info", { type: "toggleInfo" }, <Info />)}
         {after !== undefined && <Button className="sr-only focus:not-sr-only" variant="ghost" size="icon" aria-label="Next photo" onClick={() => action({ type: "swipe", neighbour: after })}><ChevronRight /></Button>}
       </div>}
-      <Sheet open={state.info} onOpenChange={(open) => { if (!open) action({ type: "toggleInfo" }); }}>
-        <SheetContent title={name} actions={onAddToAlbum && <Button variant="secondary" onClick={onAddToAlbum}><FolderInput />Add to album</Button>}>
-          <dl className="grid grid-cols-2 gap-2 text-sm">
-            {date && <><dt>Taken</dt><dd>{formatDate.format(date)} {formatTime.format(date)}</dd></>}
-            {item !== undefined && <><dt>Dimensions</dt><dd>{item.width} × {item.height}</dd></>}
-            {item !== undefined && <><dt>Size</dt><dd>{Math.round((item.size) / 1024)} KB</dd></>}
+      <Sheet open={state.info && loadedRow !== undefined} onOpenChange={(open) => { if (!open) action({ type: "toggleInfo" }); }}>
+        <SheetContent aria-label="Photo info" title={day} description={date && formatTime.format(date)}
+          actions={onAddToAlbum && <Button variant="secondary" onClick={() => { action({ type: "toggleInfo" }); onAddToAlbum(); }}><FolderInput />Add to album</Button>}>
+          <dl className="grid grid-cols-[auto_minmax(0,1fr)] gap-x-4 gap-y-2 text-sm">
+            {facts.map(({ label, value }) => <Fragment key={label}>
+              <dt className="text-muted-foreground">{label}</dt><dd className="wrap-anywhere">{value}</dd>
+            </Fragment>)}
           </dl>
         </SheetContent>
       </Sheet>

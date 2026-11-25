@@ -972,7 +972,13 @@ describe("Talk from Ask Alpha's composer (spec/app/voice/index.md, \"Story: Hold
   });
 
   // spec/app/voice/index.md, "A reply that needs the owner's review in chat keeps voice listening with the microphone open"
-  it("accepts one spoken confirmation of the entire current text review without asking the agent again", async () => {
+  it.each([
+    { phrase: "Send this text.", outcome: "send" },
+    { phrase: "Send it.", outcome: "send" },
+    { phrase: "Yep, go ahead and send the message to +1 (415) 555-0100.", outcome: "send" },
+    { phrase: "Send the draft to +14155550101.", outcome: "refuse" },
+    { phrase: "When should I send it?", outcome: "ask" },
+  ] as const)("keeps ownership of the displayed text review when I say $phrase", async ({ phrase, outcome }) => {
     const world = { ...scene(), phone: true, image: true, signedIn: false };
     const operation = { type: "sms_send", recipients: ["+14155550100"], body: "Meet upstairs.\nBring the keys.", subscriptionId: 1 } as const;
     const review = textReview(world.notes.owner, "spoken-reviewed-sms", operation);
@@ -1019,12 +1025,16 @@ describe("Talk from Ask Alpha's composer (spec/app/voice/index.md, \"Story: Hold
     const sendBounds = vi.spyOn(send, "getBoundingClientRect").mockReturnValue(new DOMRect(16, 58, 60, 30));
     const viewportBounds = vi.spyOn(viewport, "getBoundingClientRect").mockReturnValue(new DOMRect(0, 0, 320, 120));
     try {
-      await drawn(() => speakUtterance(world, "Send this text."));
-      await vi.waitFor(() => expect(review.confirmations).toHaveLength(1), { timeout: 12_000 });
-      await drawn(() => review.confirmations[0]?.confirm());
+      await drawn(() => speakUtterance(world, phrase));
+      if (outcome === "send") {
+        await vi.waitFor(() => expect(review.confirmations).toHaveLength(1), { timeout: 12_000 });
+        await drawn(() => review.confirmations[0]?.confirm());
+      }
       await drawnUntil(alpha, area, Voice.Machine, (state) => state.sent === 2 && !state.reviewPending && state.phase === "Listening" && state.mic === "On");
-      await drawn(() => speakUtterance(world, "Send this text."));
-      await drawnUntil(alpha, area, Voice.Machine, (state) => state.sent === 3 && state.phase === "Listening" && state.mic === "On");
+      if (outcome === "send") {
+        await drawn(() => speakUtterance(world, "Send this text."));
+        await drawnUntil(alpha, area, Voice.Machine, (state) => state.sent === 3 && state.phase === "Listening" && state.mic === "On");
+      }
     } finally {
       for (const confirmation of review.confirmations) confirmation.confirm();
       hit.mockRestore();
@@ -1032,11 +1042,11 @@ describe("Talk from Ask Alpha's composer (spec/app/voice/index.md, \"Story: Hold
       sendBounds.mockRestore();
       viewportBounds.mockRestore();
     }
-    expect(world.ask.said).toEqual(["Start this chat", text]);
-    expect(button("Send this text")).toBeUndefined();
-    expect([review.decisions, review.claims, world.telephony.sent]).toEqual([
+    expect(world.ask.said).toEqual(outcome === "ask" ? ["Start this chat", text, phrase] : ["Start this chat", text]);
+    expect(button("Send this text") !== undefined).toBe(outcome === "refuse");
+    expect([review.decisions, review.claims, world.telephony.sent]).toEqual(outcome === "send" ? [
       [review.proposal.id], [review.proposal.id], [{ operationId: review.proposal.id, recipients: [...operation.recipients], body: operation.body }],
-    ]);
+    ] : [[], [], []]);
   });
 
   // spec/app/files/index.md, "An explicit request to open or filter Files may act directly on the same idle Files view"

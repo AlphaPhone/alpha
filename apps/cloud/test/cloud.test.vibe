@@ -28,13 +28,14 @@ import { hosting } from "./hosts.ts"
 import resources from "./fixtures/resources.json" with { type: "json" }
 
 module node {
-  import { pathOf, readCloudError, routesByName } from "@elizaos/cloud"
+  import { pathOf, readCloudError, routesByName, type EnvironmentProfile } from "@elizaos/cloud"
   import { createHash, randomBytes } from "node:crypto"
   import http from "node:http"
   import type { AddressInfo } from "node:net"
   import { runInNewContext } from "node:vm"
 
-  type Plans = Readonly<Record<"plus_monthly" | "pro_monthly", { readonly priceId: string; readonly productId: string }>>
+  /** The paid plans a billing profile binds to provider prices: Plus always, Pro only where the deployment sells it. */
+  type Plans = NonNullable<EnvironmentProfile["billing"]>["plans"]
 
   /** Sends the device key to the session-only portal and reads the actual refusal. */
   export async function portalAnswer(local: string, credential: string) {
@@ -52,7 +53,7 @@ module node {
     const cents = { plus_monthly: 3_000, pro_monthly: 10_000 }
     const monthly = { interval: "month", interval_count: 1, usage_type: "licensed", trial_period_days: null }
     const listed = new Map<string, object>()
-    for (const [plan, { priceId, productId }] of Object.entries(plans) as [keyof Plans, Plans[keyof Plans]][]) {
+    for (const [plan, { priceId, productId }] of Object.entries(plans) as [keyof Plans, NonNullable<Plans[keyof Plans]>][]) {
       listed.set(`/v1/products/${productId}`, { object: "product", id: productId, livemode: false, active: true })
       listed.set(`/v1/prices/${priceId}`, {
         object: "price", id: priceId, product: productId, unit_amount: cents[plan], currency: "usd", recurring: monthly,

@@ -818,8 +818,8 @@ pure def navigate(c: Conversation, ticket: int, view: S::View): Moved =
 ### A complete reply may take the owner Home, once, as it may open a view
 
 The agent names Home as it names any view (`spec/agent/index.md`, "The
-launch names Home and every Alpha app but Notes as a view the agent may
-show, by the id the phone opens it by"). The phone claims it once for the
+launch names Home and every Alpha app but Notes and Browser as a view the
+agent may show, by the id the phone opens it by"). The phone claims it once for the
 turn, on the same terms, and asks the shell to go Home.
 
 ```quint

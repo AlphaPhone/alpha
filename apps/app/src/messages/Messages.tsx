@@ -1,7 +1,6 @@
 // spec/app/messages/index.md, "Story: See my conversations"; spec/app/messages/index.md, "Story: Read a conversation"; spec/app/messages/index.md, "Story: Act on a message"; spec/app/messages/index.md, "Story: Start a new message"; spec/app/messages/composer.md, "Story: Keep my draft"; spec/app/messages/composer.md, "Story: Send a message"
-import { MMS_ATTACHMENT_TYPES, MMS_MAX_BODY, MMS_MAX_RECIPIENTS } from "@elizaos/os-bridges";
+import { MMS_ATTACHMENT_TYPES, MMS_MAX_BODY } from "@elizaos/os-bridges";
 import type { MessageRow, ThreadRow } from "@elizaos/os-bridges";
-import { normalizePhoneNumber } from "@elizaos/os-bridges";
 import { Alert, Avatar, Banner, Button, Chip, Mark, Dialog, DialogContent, DialogDescription, DialogTitle, Input, Menu, MenuContent, MenuItem, MenuTrigger, SearchField, Textarea } from "@repo/ui";
 import { Effect, type Layer, type ManagedRuntime } from "effect";
 import { ArrowUp, Camera, ChevronDown, ChevronLeft, ChevronUp, CircleAlert, Copy, Image as PictureIcon, ImagePlus, Mic, Pencil, Phone as Call, Plus, RefreshCw, Search, Sparkles, Square, Trash2, X } from "lucide-react";
@@ -14,7 +13,7 @@ import { delivered, sentAll, uncertain } from "../../gen/app__messages__sending.
 import { useMachine as useComposer } from "../../gen/app__messages__composer.react.ts";
 import { Time } from "../runtime/time.vibe";
 import { callerInitials, displayNumber, shortWhen } from "../phone/words.ts";
-import { Drafts, attachAll, prepare, sameSubscription, supported } from "./composer.vibe";
+import { Drafts, attachAll, editNewMessage, messageRecipients, newDraftHeld, prepare, sameSubscription, startNewMessage, supported } from "./composer.vibe";
 import { Conversations, type CopyReport, Inbox, titleOf } from "./messages.vibe";
 import { CommsBar, useCommsDock } from "../phone/CommsBar.tsx";
 import { commsHeld } from "../phone/comms.vibe";
@@ -22,6 +21,7 @@ import type { Resident } from "../runtime/area.tsx";
 import { untimed } from "../runtime/reactor.vibe";
 import { useMachine as useVoice } from "../../gen/app__voice.react.ts";
 import { dictateMessage, type voiceArea } from "./dictation.vibe";
+import { NewMessageDock } from "./NewMessageDock.tsx";
 
 export interface MessagesProps {
   /** Provides Messages' and the composer's machines, both resident, Phone's, for whether a call may be an emergency call, and what they count. */
@@ -82,7 +82,8 @@ export function Messages({ runtime, onBack, onOpenLink }: MessagesProps) {
     <section ref={setView} data-alpha-messages data-sheet={dock.open ? "open" : "closed"} aria-label="Messages" className="group/messages relative flex h-full min-h-0 flex-col overflow-hidden data-[sheet=closed]:pt-2">
       {state.pane === "Threads" && <Threads runtime={runtime} messages={messages} onBack={onBack} />}
       {state.pane === "Conversation" && <Conversation key={state.thread} runtime={runtime} messages={messages} onOpenLink={onOpenLink} view={view} />}
-      {state.pane === "Picker" && <Picker runtime={runtime} messages={messages} />}
+      {state.pane === "Picker" && <Picker key="handoff" runtime={runtime} messages={messages} />}
+      {state.pane === "New" && <Picker key={state.newDraft.visit} runtime={runtime} messages={messages} />}
     </section>
   );
 }
@@ -123,8 +124,7 @@ function Threads({ runtime, messages: { state, can, send }, onBack }: MessagesPr
           <div aria-hidden className="min-w-0 flex-1" />
           {!smsNeeded(state) && <Button variant="ghost" size="icon" className="rounded-tile" aria-label="Search messages" data-alpha-messages-search onClick={() => setSearching(true)}><Search className="size-5" /></Button>}
           {can({ type: "newMessage" }) && <Button variant="ghost" size="icon" className="rounded-tile" aria-label="New message" data-alpha-messages-new onClick={() => {
-            runtime.runSync(Effect.flatMap(Inbox, (inbox) => inbox.set({ typed: "" })));
-            void send({ type: "newMessage" });
+            void runtime.runPromise(startNewMessage());
           }}><Pencil className="size-5" /></Button>}
         </header>
       )}
@@ -590,39 +590,75 @@ function Compose({ runtime, title, addresses, thread }: MessagesProps & { title:
   );
 }
 
-/** A typed recipient list or a contact's number opens one exact conversation. */
+/** A recipient choice either addresses the separate New draft or completes an existing handoff. */
 function Picker({ runtime, messages: { state, can, send } }: MessagesProps & { messages: MessagesUI }) {
+  const composer = useComposer(runtime);
   const [typed, setTyped] = useState("");
   const [browsing, setBrowsing] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
   if (!state) return null;
+  const fresh = state.pane === "New" ? state.newDraft : undefined;
+  const editable = !fresh || !composer.state || !newDraftHeld(composer.state, fresh.revision);
+  const kept = fresh && runtime.runSync(Effect.flatMap(Drafts, (drafts) => drafts.newDraft()));
+  const selecting = fresh?.picking ?? browsing;
+  const typedTo = kept && !selecting ? kept.recipients : typed;
+  const before = kept ? messageRecipients(kept.recipients) : [];
   const held = runtime.runSync(Effect.flatMap(Inbox, (inbox) => inbox.get()));
-  const find = (text: string) => {
-    setTyped(text);
+  const query = (text: string) => {
     runtime.runSync(Effect.flatMap(Inbox, (inbox) => inbox.set({ typed: text.split(",").at(-1)?.trim() ?? "" })));
     if (can({ type: "findChoices" })) void send({ type: "findChoices" });
   };
+  const find = (text: string) => {
+    if (fresh && !selecting) void runtime.runPromise(editNewMessage(fresh.visit, { recipients: text }, false));
+    else setTyped(text);
+    query(text);
+  };
   const open = (addresses: ReadonlyArray<string>, typedIn: boolean) => {
+    if (fresh) {
+      const previous = selecting ? before : messageRecipients(typedTo.split(",").slice(0, -1).join(","));
+      const recipients = [...new Set([...previous, ...addresses])].join(", ");
+      void runtime.runPromise(editNewMessage(fresh.visit, { recipients }, true, fresh.revision));
+      setTyped("");
+      return;
+    }
     clearChoice(runtime);
     const thread = runtime.runSync(Effect.flatMap(Conversations, (numbering) => numbering.of({ id: "", addresses })));
     const event = { type: state.offeredPicture > 0 ? "choosePictureRecipient" : "choose", thread, typed: typedIn } as const;
     if (can(event)) void send(event);
   };
   const offer = state.offeredPicture > 0 ? runtime.runSync(Effect.flatMap(Drafts, (drafts) => drafts.offeredPicture())) : undefined;
-  const to = typed.split(",").map((part) => part.trim());
-  const parsed = to.map((part) => /^\+?[\d\s().-]+$/u.test(part) && part.replace(/\D/gu, "").length >= 3 ? normalizePhoneNumber(part) : null);
-  const numbers = parsed.length <= MMS_MAX_RECIPIENTS && parsed.every((number) => number !== null) ? [...new Set(parsed)] : [];
+  const to = typedTo.split(",").map((part) => part.trim());
+  const numbers = messageRecipients(typedTo);
+  const showChoices = !fresh || selecting || fresh.recipient === 0;
+  const togglePicker = () => {
+    if (!fresh) setBrowsing(!browsing);
+    else if (selecting) {
+      if (numbers.length > 0) open(numbers, true);
+      else { setTyped(""); void send({ type: "back" }); }
+    } else {
+      const event = { type: "openNewContacts", visit: fresh.visit } as const;
+      if (!can(event)) return;
+      setTyped("");
+      runtime.runSync(Effect.flatMap(Inbox, (inbox) => inbox.set({ typed: "" })));
+      void send(event);
+    }
+    inputRef.current?.focus();
+  };
   const allow = { type: "allow", need: "ContactsAccess" } as const;
   const settings = { type: "goToSettings", need: "ContactsAccess" } as const;
   return (
     <>
       <header data-alpha-navigation-header className={`${header} pr-4 pb-2`}>
         {can({ type: "back" }) && <Button variant="ghost" size="icon" aria-label="Back" onClick={() => void send({ type: "back" })}><ChevronLeft /></Button>}
-        <form className="min-w-0 flex-1" onSubmit={(event) => { event.preventDefault(); if (numbers.length > 0) open(numbers, true); }}>
-          <Input ref={inputRef} type="text" aria-label="To" placeholder={browsing ? `Recipient ${to.slice(0, -1).filter(Boolean).length + 1}` : "To"} autoComplete="off" autoCapitalize="none" autoCorrect="off" spellCheck={false} maxLength={230}
-            data-alpha-messages-recipients value={typed} onChange={(event) => find(event.target.value)} className="h-11 rounded-tile border-0 px-4 focus-visible:outline-none" />
+        <form className="min-w-0 flex-1" onSubmit={(event) => {
+          event.preventDefault();
+          if (numbers.length > 0 && (!fresh || selecting)) open(numbers, true);
+          else if (fresh && selecting) query(typedTo);
+        }}>
+          <Input ref={inputRef} type="text" aria-label="To" placeholder={selecting ? `Recipient ${fresh ? before.length + 1 : to.slice(0, -1).filter(Boolean).length + 1}` : "To"} autoComplete="off" autoCapitalize="none" autoCorrect="off" spellCheck={false} maxLength={230}
+            data-alpha-messages-recipients value={typedTo} readOnly={!editable} onChange={(event) => find(event.target.value)} className="h-11 rounded-tile border-0 px-4 text-body leading-[normal] focus-visible:outline-none" />
         </form>
-        <Button variant="ghost" size="icon" aria-label={browsing ? "Close contact picker" : "Choose contacts"} aria-expanded={browsing} onClick={() => { setBrowsing(!browsing); inputRef.current?.focus(); }}><Plus /></Button>
+        <Button variant="ghost" size="icon" aria-label={selecting ? "Close contact picker" : "Choose contacts"} aria-expanded={selecting} disabled={!editable && !selecting} onClick={togglePicker}>{selecting && fresh ? <X /> : <Plus />}</Button>
       </header>
       {offer?.ticket === state.offeredPicture && (
         <div aria-label="Picture for this message" className="flex px-5 py-2">
@@ -632,17 +668,17 @@ function Picker({ runtime, messages: { state, can, send } }: MessagesProps & { m
         </div>
       )}
       <div data-alpha-messages-picks className="min-h-0 flex-1 touch-pan-y overflow-y-auto overscroll-contain pb-2">
-        {numbers.length > 0 && <div className="px-5 py-1"><Button variant="outline" onClick={() => open(numbers, true)}>{numbers.length === 1 ? `Text ${numbers[0]}` : `Text ${numbers.length} recipients`}</Button></div>}
+        {!fresh && numbers.length > 0 && <div className="px-5 py-1"><Button variant="outline" onClick={() => open(numbers, true)}>{numbers.length === 1 ? `Text ${numbers[0]}` : `Text ${numbers.length} recipients`}</Button></div>}
         {state.picker.status === "Loading" && <p role="status" className="mx-4 my-2 text-muted-foreground">Checking Contacts</p>}
         {state.picker.status === "Failed" && can({ type: "findChoices" }) && <p role="status" className="mx-4 my-2 text-muted-foreground">Contacts could not be read <button type="button" className={textLink} onClick={() => void send({ type: "findChoices" })}>Retry</button></p>}
         {can(allow) && <button type="button" className={`${textLink} mx-4`} onClick={() => void send(allow)}>Allow Contacts access</button>}
         {can(settings) && <button type="button" className={`${textLink} mx-4`} onClick={() => void send(settings)}>Open Settings for Contacts access</button>}
-        {state.choices > 0 && (
-          <ul aria-label="Contacts" data-alpha-messages-contact-picker={browsing || undefined}>
-            {held.choices.flatMap((contact) => contact.phones.map((phone) => (
+        {state.choices > 0 && showChoices && (
+          <ul aria-label="Contacts" data-alpha-messages-contact-picker={selecting || undefined}>
+            {held.choices.flatMap((contact) => contact.phones.filter((phone) => !fresh || !before.some((number) => number === phone)).map((phone) => (
               <li key={`${contact.id}:${phone}`}>
                 <button type="button" className={contactRow} aria-label={contact.name} aria-description={phone} onClick={() => {
-                  if (to.length === 1) { open([phone], false); return; }
+                  if (fresh || to.length === 1) { open([phone], false); return; }
                   find([...to.slice(0, -1), phone].join(", "));
                 }}>
                   <Avatar name={contact.name} aria-hidden className="size-11 text-base font-bold" />
@@ -653,9 +689,9 @@ function Picker({ runtime, messages: { state, can, send } }: MessagesProps & { m
             )))}
           </ul>
         )}
-        {can({ type: "loadMoreChoices" }) && <button type="button" className={`${textLink} mx-4`} onClick={() => void send({ type: "loadMoreChoices" })}>More contacts</button>}
+        {showChoices && can({ type: "loadMoreChoices" }) && <button type="button" className={`${textLink} mx-4`} onClick={() => void send({ type: "loadMoreChoices" })}>More contacts</button>}
       </div>
-      <CommsBar runtime={runtime} />
+      {fresh && kept ? <NewMessageDock runtime={runtime} scope={fresh} draft={kept} /> : <CommsBar runtime={runtime} />}
     </>
   );
 }

@@ -5,6 +5,7 @@ import type { SettingsNotificationsPageProps } from "./SettingsNotificationsPage
 
 const onAndroid = fn();
 const onHandOver = fn();
+const chooseAlerts = fn();
 
 export const meta: ComponentMeta<SettingsNotificationsPageProps> = {
   args: {
@@ -15,8 +16,15 @@ export const meta: ComponentMeta<SettingsNotificationsPageProps> = {
     onHandOver,
   },
   decorator: fullHeight,
-  examples: { "Some off": { alerts: reported("Some off", "warn") }, "No channels": { channels: [] }, "Channel starting": { starting: { target: "alert-channel", channel: "reminders" } } },
+  examples: { "Browser alerts": { onPhone: false, browserAlerts: { enabled: true, onChoose: chooseAlerts } }, "Some off": { alerts: reported("Some off", "warn") }, "No channels": { channels: [] }, "Channel starting": { starting: { target: "alert-channel", channel: "reminders" } } },
   play: {
+    "Browser alerts": async ({ canvasElement }: { canvasElement: HTMLElement }) => {
+      chooseAlerts.mockClear();
+      const canvas = within(canvasElement);
+      await userEvent.click(canvas.getByRole("switch", { name: "Alerts" }));
+      await expect(chooseAlerts).toHaveBeenCalledWith(false);
+      await expect(canvas.queryByText("Do Not Disturb")).toBeNull();
+    },
     Default: async ({ canvasElement }: { canvasElement: HTMLElement }) => {
       onAndroid.mockClear();
       onHandOver.mockClear();

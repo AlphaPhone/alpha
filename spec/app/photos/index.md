@@ -588,6 +588,9 @@ pure def alwaysSelectionIsListed(s: Photos): bool =
 
 ### Selection starts over a grid of items, toggles only items it lists, and has no limit
 
+Select all takes every item listed in that grid. When all are already
+selected, Deselect all clears the selection and keeps selection mode open.
+
 ```quint
 pure def canStartSelect(s: Photos, by: Actor): bool =
   by == Owner and unlocked(s) and showsItems(s) and s.rows.size() > 0 and not(s.selecting) and s.shelf.dialog == AL::NoDialog
@@ -602,7 +605,8 @@ pure def toggle(s: Photos, photo: int, by: Actor): Photos =
 
 pure def canSelectAll(s: Photos, by: Actor): bool = by == Owner and s.selecting and s.shelf.dialog == AL::NoDialog
 
-pure def selectAll(s: Photos, by: Actor): Photos = { ...s, selected: s.rows }
+pure def selectAll(s: Photos, by: Actor): Photos =
+  { ...s, selected: if (s.rows.subseteq(s.selected)) Set() else s.rows }
 
 pure def canEndSelect(s: Photos, by: Actor): bool = by == Owner and s.selecting and s.shelf.dialog == AL::NoDialog
 

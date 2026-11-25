@@ -312,6 +312,12 @@ pure def played(s: Viewer, position: int, by: Actor): Viewer =
 
 ### The info sheet opens over the item showing
 
+The sheet shows the loaded item's date, filename, file size and dimensions.
+For a video with a known duration it also shows the length. The phone's
+folder and the names of personal albums that contain that exact item
+appear when those facts are available. The locked viewer omits personal
+album names.
+
 ```quint
 pure def canToggleInfo(s: Viewer, by: Actor): bool = by == Owner and shown(s) and not(s.editing)
 

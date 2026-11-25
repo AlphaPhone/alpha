@@ -7,16 +7,19 @@ import { Machine as Conversation } from "../gen/app__assistant.effect.vibe";
 import { Machine as Chats } from "../gen/app__assistant__chats.effect.vibe";
 import { Machine as Composer } from "../gen/app__assistant__composer.effect.vibe";
 import { Machine as Ask } from "../gen/app__ask.effect.vibe";
+import { Machine as Mailbox } from "../gen/app__inbox.effect.vibe";
+import { Machine as Message } from "../gen/app__inbox__message.effect.vibe";
 import { Machine as Shell } from "../gen/app__shell.effect.vibe";
 import ask from "../src/ask/index.tsx";
 import assistant from "../src/assistant/index.tsx";
+import inbox from "../src/inbox/index.tsx";
 import { Agent } from "../src/platform/agent.vibe";
 import { Cloud } from "../src/platform/cloud.vibe";
-import { askExample, askExampleLines, button, closeAll, drawn, fill, only, openOver, press, underAct, until } from "./alpha.tsx";
+import { askExample, askExampleLines, button, closeAll, drawn, fill, only, openOver, press, pressOnTop, underAct, until } from "./alpha.tsx";
 import { owned } from "@repo/eliza-harness";
 import { elizaWorld } from "./eliza/world.vibe";
 import type { Answering } from "./fakes/routes.ts";
-import { scene } from "./fakes/scene.ts";
+import { scene, services } from "./fakes/scene.ts";
 import { fakeWorld } from "./fakes/world.vibe";
 
 let mine: Awaited<ReturnType<typeof owned>>;
@@ -175,6 +178,52 @@ function forward(origin: string, token: string): Answering {
     });
   };
 }
+
+it('Send one reviewed email as context to my resident agent (spec/app/inbox/message.md, "Story: Ask Alpha about a message")', async () => {
+  const world = scene();
+  const source = world.inbox.mail.find(({ card }) => card.id === "g4");
+  if (!source) throw new Error("The test mailbox has no review email");
+  const mailbox = services(world).cloud;
+  const cloud = forward(mine.cloud.local, mine.key.token);
+  const { alpha } = await openOver(fakeWorld(world, {
+    agent: forward(mine.agent.origin, mine.agent.token),
+    cloud: (request) => new URL(request.url).pathname.startsWith("/api/v1/eliza/google/") ? mailbox(request) : cloud(request),
+  }), only("home", "view:Inbox", "assistant", "notice"));
+  const mail = inbox.runtime(alpha);
+  const chat = assistant.runtime(alpha);
+  await drawn(() => vi.waitFor(() => expect(button("Inbox")).toBeDefined()));
+  await press("Inbox");
+  await until(alpha, mail, Mailbox, (state) => state.list.status === "Loaded");
+  await press(/Standup notes/u);
+  await until(alpha, mail, Message, (state) => state.body.status === "Loaded");
+  await drawn(() => button("More actions")?.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true })));
+  await drawn(() => {
+    const action = [...document.querySelectorAll<HTMLElement>("[role=menuitem]")].find((item) => item.textContent === "Ask Alpha");
+    if (!action) throw new Error("Ask Alpha was not offered for the email");
+    action.click();
+  });
+  const review = () => document.querySelector("[role=alertdialog]")?.textContent ?? "";
+  await drawn(() => vi.waitFor(() => expect(review()).toContain(source.body)));
+  const before = (await mine.asked()).length;
+  await pressOnTop("Add to chat");
+  await until(alpha, chat, Composer, (state) => state.slot === "Open" && state.away === "Free");
+  expect(await mine.asked()).toHaveLength(before);
+
+  const prompt = "Who owns the onboarding copy?";
+  const reply = "Maya owns the onboarding copy.";
+  await mine.script({ kind: "text", parts: [`[answer] ${reply}`] });
+  await fill("Message Alpha", prompt);
+  await drawn(() => vi.waitFor(() => expect(button("Send")?.disabled).toBe(false)));
+  await press("Send");
+  await until(alpha, chat, Conversation, (state) => state.turn.reply === "Complete");
+  await drawn(() => vi.waitFor(() => expect(document.querySelector("[role=log]")?.textContent).toContain(reply)));
+  const requests = (await mine.asked()).slice(before);
+  const received = requests[0]?.findLast((message) => message.role === "user")?.content;
+  expect([requests.length, received, world.inbox.changes]).toEqual([1, expect.stringContaining(JSON.stringify({
+    from: source.card.from, to: [...source.card.to, ...source.card.cc], subject: source.card.subject, bodyText: source.body,
+  })), []]);
+  expect(received).toEqual(expect.stringContaining(prompt));
+}, 300_000);
 
 it('Approve a photo requested by the resident agent (spec/app/camera/index.md, "Story: Let Alpha take a photo")', async () => {
   const world = { ...scene(), phone: true, image: true, now: Date.now() };
