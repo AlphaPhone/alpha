@@ -143,7 +143,7 @@ export function TimersTab({ runtime }: TimersTabProps) {
                     </Button>
                   )}
                   {item.status === "Running" && (
-                    <Button size="sm" variant="secondary" aria-label={`Pause ${title}`} onClick={() => void runtime.runPromise(pauseTimer(item.id))}>
+                    <Button size="sm" variant="secondary" className="bg-background" aria-label={`Pause ${title}`} onClick={() => void runtime.runPromise(pauseTimer(item.id))}>
                       <Pause aria-hidden className="size-4.5" />
                       Pause
                     </Button>

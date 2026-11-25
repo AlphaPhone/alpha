@@ -92,7 +92,7 @@ export function AlarmsTab({ runtime }: AlarmsTabProps) {
                     className="flex min-w-0 flex-1 flex-col items-start text-left"
                   >
                     <div className="flex items-baseline gap-1.5">
-                      <span className={`font-display text-3xl font-light tabular-nums ${item.enabled ? "text-foreground" : "text-muted-foreground"}`}>
+                      <span className={`text-3xl font-light tabular-nums ${item.enabled ? "text-foreground" : "text-muted-foreground"}`}>
                         {display.time}
                       </span>
                       {display.period && (
@@ -128,7 +128,7 @@ export function AlarmsTab({ runtime }: AlarmsTabProps) {
                 {item.phase !== "Idle" && (
                   <div className="flex items-center gap-2 pt-1">
                     {item.phase === "Ringing" && (
-                      <Button variant="secondary" size="sm" onClick={() => void runtime.runPromise(snoozeAlarm(item.id))}>
+                      <Button variant="secondary" size="sm" className="bg-background" onClick={() => void runtime.runPromise(snoozeAlarm(item.id))}>
                         {`Snooze ${item.snoozeMinutes}m`}
                       </Button>
                     )}
