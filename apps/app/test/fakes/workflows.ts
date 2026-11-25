@@ -23,13 +23,19 @@ const receipt = {
   status: "finished", startedAt, finished: true, output: "Your statement is ready.",
 };
 
+type Statement = typeof record & { triggerCleanup?: "complete" };
+
 export interface WorkflowsScene {
   readonly admissions: Array<{ submission: string; version: string }>;
+  /** Each lifecycle change the agent applied, in order: what it did and the version it was asked on. */
+  readonly changes: Array<{ operation: string; version: string }>;
+  /** Monthly statement as the agent has it now. */
+  statement: Statement;
   run: boolean;
   failingPrompts: boolean;
 }
 
-export const workflowsScene = (): WorkflowsScene => ({ admissions: [], run: false, failingPrompts: false });
+export const workflowsScene = (): WorkflowsScene => ({ admissions: [], changes: [], statement: { ...record }, run: false, failingPrompts: false });
 
 /** The boundaries exercised by Workflows, with one current definition, removed history and an agent-run receipt. */
 export function workflowRoutes(world: WorkflowsScene): Route[] {
@@ -48,9 +54,9 @@ export function workflowRoutes(world: WorkflowsScene): Route[] {
           }],
         });
         case "/api/scheduled-tasks": return Response.json({ tasks: [] });
-        case "/api/workflow/workflows": return Response.json({ workflows: [record] });
-        case "/api/workflow/removed-workflows": return Response.json({ workflows: [removed] });
-        case `/api/workflow/workflows/${record.id}`: return Response.json(record);
+        case "/api/workflow/workflows": return Response.json({ workflows: world.statement.removed ? [] : [world.statement] });
+        case "/api/workflow/removed-workflows": return Response.json({ workflows: world.statement.removed ? [world.statement, removed] : [removed] });
+        case `/api/workflow/workflows/${record.id}`: return Response.json(world.statement);
         case `/api/workflow/workflows/${removed.id}`: return Response.json(removed);
         case `/api/workflow/workflows/${record.id}/executions`: return Response.json({ executions: world.run ? [receipt] : [] });
         case `/api/workflow/workflows/${removed.id}/executions`: return Response.json({ executions: [] });
@@ -60,10 +66,30 @@ export function workflowRoutes(world: WorkflowsScene): Route[] {
     (request, url) => {
       if (request.method !== "POST" || url.pathname !== `/api/workflow/workflows/${record.id}/run`) return;
       return readJsonBody(request).then((body) => {
-        if (typeof body.submissionId !== "string" || body.expectedVersionId !== record.versionId) return Response.json({}, { status: 409 });
+        if (typeof body.submissionId !== "string" || body.expectedVersionId !== world.statement.versionId || world.statement.removed) return Response.json({}, { status: 409 });
         world.admissions.push({ submission: body.submissionId, version: body.expectedVersionId });
         world.run = true;
         return Response.json({ submissionId: body.submissionId, execution: receipt });
+      });
+    },
+    (request, url) => {
+      if (request.method !== "POST" || url.pathname !== `/api/workflow/workflows/${record.id}/lifecycle`) return;
+      return readJsonBody(request).then((body) => {
+        const { mutationId, expectedVersionId, operation } = body;
+        if (typeof mutationId !== "string" || (operation !== "remove" && operation !== "restore")) return Response.json({}, { status: 400 });
+        const before = world.statement;
+        if (expectedVersionId !== before.versionId || (operation === "remove") === before.removed) {
+          return Response.json({ code: "WORKFLOW_LIFECYCLE_NOT_APPLIED", workflowId: record.id, mutationId, expectedVersionId }, { status: 409 });
+        }
+        const versionId = `${record.id}-v${4 + world.changes.length}`;
+        world.changes.push({ operation, version: expectedVersionId });
+        world.statement = operation === "remove"
+          ? { ...before, versionId, active: false, removed: true, triggerCleanup: "complete" }
+          : { ...record, versionId, active: false, removed: false };
+        return Response.json({
+          mutationId,
+          receipt: { workflowId: record.id, previousVersionId: expectedVersionId, mutationId, operation, versionId, appliedAt: "2026-11-24T08:00:00.000Z" },
+        });
       });
     },
   ];
