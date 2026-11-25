@@ -1,5 +1,7 @@
 // @vitest-environment happy-dom
-import { afterEach, describe, expect, it } from "vitest";
+import { digestInbox, type DigestResult, hostedDigestProtocol } from "@elizaos/plugin-workflow/digests";
+import { Effect } from "effect";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import * as Home from "../gen/app__home.effect.vibe";
 import * as Cards from "../gen/app__home__cards.effect.vibe";
 import { Machine as Shell } from "../gen/app__shell.effect.vibe";
@@ -10,6 +12,7 @@ import { scene, type Scene } from "./fakes/scene.ts";
 import { savedKey, written } from "../src/home/saved.vibe";
 import { waiting } from "../src/home/waiting.vibe";
 import { fromAreas } from "../src/home/cards.vibe";
+import { digestScope } from "../src/workflows/brief.vibe";
 
 underAct();
 afterEach(closeAll);
@@ -102,15 +105,18 @@ describe("Home on a phone", () => {
     ];
     const { alpha } = await open(world);
     const homes = home.runtime(alpha);
-    const agenda = () => [...document.querySelectorAll("button")].find((found) => /^(Next|Overdue reminder)/.test(found.textContent ?? ""));
+    const agenda = () => document.querySelector<HTMLButtonElement>("button[aria-label^='Open calendar event:'], button[aria-label^='Open overdue reminder:']");
+    const time = (offset: number) => new Date(day + offset * hour).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
 
     // spec/app/home/cards.md, "When Home shows, when Alpha comes back to the front, and when the local day turns while Home shows, Home asks again for every calendar it has not read today"; spec/app/home/cards.md, "The card leads with an overdue reminder, then the item that begins first; of two alike, the first read"
     await until(alpha, homes, Cards.Machine, (c) => c.calendar.source === "Ready" && c.calendar.items.length === 2);
-    expect(agenda()?.textContent).toMatch(/^NextDentist/);
+    expect(agenda()?.getAttribute("aria-label")).toMatch(/^Open calendar event: Dentist,/);
+    expect(agenda()?.textContent).toContain(`${time(9)} – `);
+    expect(agenda()?.textContent).toContain(time(10));
 
     // spec/app/home/cards.md, "The agenda draws on both calendars and the reminders saved on the phone, leaving out a calendar Calendar hides and a reminder already done"
     await drawn(() => fromAreas.hidden([2]));
-    expect(agenda()?.textContent).toMatch(/^NextStandup/);
+    expect(agenda()?.getAttribute("aria-label")).toMatch(/^Open calendar event: Standup,/);
     await drawn(() => fromAreas.reminders([{ due: day + 7 * hour, overdue: true, done: false, title: "Call the bank" }, { due: day, overdue: true, done: true, title: "Paid rent" }]));
     // spec/app/home/cards.md, "Under an overdue reminder the card also names the next item that is not overdue, so the reminder never hides it"
     expect(agenda()?.textContent).toMatch(/^Overdue reminderCall the bank.*Standup/);
@@ -232,6 +238,39 @@ describe("Home on a phone", () => {
 });
 
 describe("Home in a browser", () => {
+  // spec/app/digests/index.md, "Home shows the newest kept result of the owner that ran, finished or failed, through a restart; a result that did not run never replaces it, and a page of another owner never reaches it"
+  it("Shows the current owner's retained brief after restart (spec/app/digests/index.md, \"Story: Receive results without losing or repeating one\")", async () => {
+    const world = scene();
+    const setup = await open(world);
+    const result = (cursor: number, status: string, output: string): DigestResult => {
+      const at = new Date(cursor * 3600000).toISOString();
+      return { cursor, runId: `run-${cursor}`, workflowId: "workflow", workflowVersionId: "version", templateVersion: "template",
+        scheduledAt: at, startedAt: at, completedAt: at, source: {}, status, output, error: null };
+    };
+    const store = async (owner: string, entries: readonly DigestResult[]) => {
+      let acknowledged = false;
+      const agent = hostedDigestProtocol((path) => Effect.sync(() => {
+        if (path.endsWith("/ack")) { acknowledged = true; return {}; }
+        return { entries: acknowledged ? [] : entries };
+      }));
+      await setup.alpha.runtime.runPromise(Effect.flatMap(digestInbox(digestScope(owner)), (inbox) => inbox.sync(agent, 1)));
+    };
+    await store(world.notes.owner, [result(1, "finished", "Owner’s morning brief"), result(2, "missed", "Must stay off Home")]);
+    await store("another-owner", [result(1, "finished", "Another owner’s morning brief")]);
+    await setup.close();
+
+    await open(world);
+    const latest = () => [...document.querySelectorAll("section[aria-label='Your day'] > button")]
+      .find((card) => card.textContent?.startsWith("Latest brief"))?.textContent;
+    await vi.waitFor(() => expect(latest()).toContain("Owner’s morning brief"));
+    expect(latest()).not.toContain("Must stay off Home");
+
+    world.notes.owner = "another-owner";
+    await seen(false);
+    await seen(true);
+    await vi.waitFor(() => expect(latest()).toContain("Another owner’s morning brief"));
+  });
+
   // spec/app/home/index.md, "Story: Open an app"
   it("Open one of Alpha's apps from Home (spec/app/home/index.md, \"Story: Open an app\")", async () => {
     const world = scene();

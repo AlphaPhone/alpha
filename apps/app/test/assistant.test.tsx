@@ -1,7 +1,7 @@
 // @vitest-environment happy-dom
 import { Effect } from "effect";
 import { act } from "react";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { Machine as Conversation } from "../gen/app__assistant.effect.vibe";
 import { Machine as Chats } from "../gen/app__assistant__chats.effect.vibe";
 import { Machine as Composer } from "../gen/app__assistant__composer.effect.vibe";
@@ -14,7 +14,7 @@ import { Machine as Shell } from "../gen/app__shell.effect.vibe";
 import type { Mount } from "../src/areas.ts";
 import assistant from "../src/assistant/index.tsx";
 import { untimed } from "../src/runtime/reactor.vibe";
-import { button, closeAll, fill, hardware, later, open, press, underAct, until } from "./alpha.tsx";
+import { button, closeAll, fill, hardware, later, open, press, pressOnTop, underAct, until } from "./alpha.tsx";
 import { scene } from "./fakes/scene.ts";
 
 underAct();
@@ -316,6 +316,34 @@ describe.each([["a browser", false], ["a phone", true]])("in %s", (_where, phone
     await until(fourth.alpha, runtime, Chats, (s) => s.chosen > 0 && s.page.status === "Loaded");
     await until(fourth.alpha, runtime, Conversation, (s) => s.turn.reply === "Complete");
     expect([lines(), world.ask.said.at(-1), world.ask.opened]).toEqual([["Hello after restart", "You said: Hello after restart"], "Hello after restart", 2]);
+    await fourth.close();
+
+    // spec/app/assistant/chats.md, "The newest list says which conversations there are, and a conversation no longer listed stops showing"; spec/app/assistant/chats.md, "A new chat holds no conversation's page": a list without the conversation that lands while its 404 is being checked leaves its page behind, and the new chat settles.
+    world.ask.kept.clear();
+    world.ask.kept.set("c7", { roomId: "r7", title: "Lunch", messages: [{ id: "m7", role: "user", text: "Lunch on Friday?" }] });
+    world.ask.holdLists = true;
+    const fifth = await open(world, mounts);
+    runtime = assistant.runtime(fifth.alpha);
+    await vi.waitFor(() => expect(world.ask.heldLists.length).toBe(1));
+    world.ask.holdLists = false;
+    chatsList();
+    await until(fifth.alpha, runtime, Chats, (s) => s.chosen === 0 && s.list.status === "Loaded" && s.page.status === "Idle");
+    expect([document.querySelector("[role=log] [aria-busy]"), document.body.textContent?.includes("Messages did not load")]).toEqual([null, false]);
+    for (const release of world.ask.heldLists.splice(0)) release();
+
+    // spec/app/assistant/chats.md, "A list asked before a conversation was made is left behind, so its answer never takes that conversation away": the list read asked before New chat answers after the conversation was made.
+    world.ask.holdLists = true;
+    chatsList();
+    await vi.waitFor(() => expect(world.ask.heldLists.length).toBe(1));
+    await pressOnTop("New chat");
+    await until(fifth.alpha, runtime, Chats, (s) => s.chosen > 0 && s.make.outcome === "Confirmed" && s.page.status === "Loaded");
+    const chats = () => runtime.runPromise(Effect.flatMap(Chats, (machine) => machine.get()));
+    const made = (await chats()).chosen;
+    world.ask.holdLists = false;
+    for (const release of world.ask.heldLists.splice(0)) release();
+    await until(fifth.alpha, runtime, Chats, (s) => s.list.status === "Loaded");
+    const after = await chats();
+    expect([after.chosen, after.ids.includes(made)]).toEqual([made, true]);
   });
 
   // spec/app/assistant/index.md, "Story: Stop a reply"

@@ -21,14 +21,25 @@ export interface CommsPrompt {
   readonly text: string
 }
 
+export interface CommsTalkRequest {
+  readonly about: string
+  readonly view: "Phone" | "Messages" | "Contacts"
+}
+
 export service CommsPrompts {
   submit(prompt: CommsPrompt): void!!
   readonly submissions: Stream.Stream<CommsPrompt>
+  talk(request: CommsTalkRequest): void!!
+  readonly talkRequests: Stream.Stream<CommsTalkRequest>
 }
 
 const prompts = Layer.effect(CommsPrompts, effect {
   const queue = try Queue.sliding<CommsPrompt>(1)
-  return { submit: (prompt: CommsPrompt) => asVoid(Queue.offer(queue, prompt)), submissions: Stream.fromQueue(queue) }
+  const talk = try Queue.sliding<CommsTalkRequest>(1)
+  return {
+    submit: (prompt: CommsPrompt) => asVoid(Queue.offer(queue, prompt)), submissions: Stream.fromQueue(queue),
+    talk: (request: CommsTalkRequest) => asVoid(Queue.offer(talk, request)), talkRequests: Stream.fromQueue(talk),
+  }
 })
 
 // spec/app/phone/comms.md, "End is beside the bar when closed, in the call card when open, in the strip when full, and on the voice panel during a voice turn"

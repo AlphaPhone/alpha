@@ -88,8 +88,10 @@ public class MainActivity extends BridgeActivity {
   registerPlugin(AlphaLocalSpeechPlugin.class);
   registerPlugin(AlphaCloudSpeechPlugin.class);
   boolean image = AlphaImageCapability.verified(this);
-  if (image) registerPlugin(AlphaTelephonyPlugin.class);
-  if (AlphaImageCapabilities.aospImage(this)) registerPlugin(ai.eliza.plugins.contacts.ContactsPlugin.class);
+  if (image) {
+   registerPlugin(AlphaTelephonyPlugin.class);
+   registerPlugin(AlphaContactsPlugin.class);
+  }
   AlphaLauncher.register(this, image);
   super.onCreate(state);
   if (getBridge() == null) return;

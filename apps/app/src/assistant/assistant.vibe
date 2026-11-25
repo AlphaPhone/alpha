@@ -24,7 +24,7 @@ import { Machine as Layers } from "../../gen/app__shell__layers.effect.vibe"
 import { syncClockNow } from "../clock/sync.vibe"
 import { type NotesSelection, type RendererNote, noteSubjects, notesSelection } from "../notes/selection.vibe"
 import { syncRemindersNow } from "../reminders/reminders.vibe"
-import { Agent } from "../platform/agent.vibe"
+import { Agent, isCloudFundsRefusal } from "../platform/agent.vibe"
 import { Device } from "../platform/device.vibe"
 import { Location } from "../platform/location.vibe"
 import type { VoiceBridge } from "../platform/voice.vibe"
@@ -32,7 +32,7 @@ import { Refused, ask, outcomeOf } from "../platform/remote.vibe"
 import { Attempts, fresh } from "../runtime/attempts.vibe"
 import { CommsPrompts, type CommsPrompt, commsViewOf } from "../phone/comms.vibe"
 import { MailQuestions, withMail } from "../inbox/mail-context.vibe"
-import { type Job, answer, contained, following, reacting, run, started, stream, tell, together, untimed } from "../runtime/reactor.vibe"
+import { type Job, answer, applying, contained, following, reacting, run, started, stream, tell, together, untimed } from "../runtime/reactor.vibe"
 import { Time } from "../runtime/time.vibe"
 import { MediaReview, mediaReview } from "./media-review.vibe"
 import { type Board, type Line, Talk, talk } from "./talk.vibe"
@@ -92,11 +92,6 @@ const failures: Readonly<Record<string, Reply.Failure>> = {
   credential_invalid: "CredentialInvalid", insufficient_credits: "InsufficientCredits", limit_reached: "LimitReached",
   rate_limited: "LimitReached", provider_issue: "ProviderIssue", timeout: "TimedOut", missing_capability: "MissingCapability",
   no_provider: "NoProvider", billing_refused: "PlanLimit", subscription_required: "PlanLimit", allowance_exhausted: "PlanLimit",
-}
-
-/** Whether the resident's failed turn carries Cloud's own code for spent allowance and credits. */
-export function isCloudFundsRefusal(result: TurnResult | undefined): boolean {
-  return result?.kind === "AgentFailed" && result.reply?.cloudCode !== undefined
 }
 
 // spec/app/assistant/reply.md, "The settled reply is the whole final answer, shown and spoken, never the acknowledgment"; spec/app/assistant/reply.md, "A failure refused before any output replaces the streamed text; any other failure is added after it"
@@ -269,7 +264,7 @@ function posted(ticket: number, told: boolean, context: Conversation.Context): S
         if (board.snapshot().reply === "") board.change({ label: label ?? `Using ${name}` })
       },
     }
-    board.change({ media: [], mediaNote: "" })
+    board.change({ media: [], mediaNote: undefined })
     const metadata = { ...observed(told, context, location, selection), ...(quoted === undefined ? {} : { replyToMessageId: quoted.id }) }
     const images = files.map(({ data, mimeType, name }) => ({ data, mimeType, name }))
     const result = tryPromise(() => controller.send({ text: outgoing, ...(images.length === 0 ? {} : { images }), ...(Object.keys(metadata).length === 0 ? {} : { metadata }) }, { stream: hooks, ...(enrolled === undefined ? {} : { headers: enrolled.headers }) })) catch () => undefined
@@ -278,7 +273,6 @@ function posted(ticket: number, told: boolean, context: Conversation.Context): S
       const archive = { owner: composer.binding.owner, conversation: known.record.id, room: known.record.roomId }
       if (!(try rememberFiles(archive, result.clientMessageId, files))) board.change({ attachmentNotice: "Could not keep the sent attachments on this phone." })
     }
-    board.change({ reply: "", label: "" })
     board.lastSentId = result !== undefined && "clientMessageId" in result ? result.clientMessageId : ""
     const ending = replied(ticket, result)
     const keepStreamed = ending.type === "stop" || (ending.type === "failed" && !Reply.refusedBeforeOutput(ending.kind))
@@ -779,18 +773,16 @@ function carryDock(fx: Dock.Effect): Job<Dock.Event, Shell, []> {
   }
 }
 
-// spec/app/assistant/dock.md, "A keyboard closed while typing puts Ask Alpha back on the bar"
-const keyboardGone = started(effect {
-  const canvas = try Canvas
-  const shell = try Shell
-  try Stream.runForEach(Stream.changes(Stream.map(canvas.changes, (shown) => shown.released)), effect (_released) => {
-    const current = try shell.get()
-    for (const _lower of Dock.keyboardClosed(current.assistant)) try contained(shell.send({ type: "goBack" }), "putting the bar away")
-  })
-}, "putting the bar away")
-
 // spec/app/assistant/dock.md, "Ask Alpha put away forgets the height its sheet was left at"
 const rested = following(Shell, (shown) => shown.assistant === "Bar", Dock.Machine, (bar): Dock.Event | undefined => (bar ? { type: "putAway", now: untimed } : undefined))
+
+// spec/app/assistant/dock.md, "A keyboard closed while typing puts Ask Alpha back on the bar"
+const keyboardRest = applying(Canvas, (canvas) => canvas.released, effect (releases) => {
+  if (releases === 0) return
+  const shell = try Shell
+  const current = try shell.get()
+  if (Dock.keyboardClosed(current.assistant).length > 0) try contained(shell.send({ type: "goBack" }), "resting Ask Alpha after typing")
+})
 
 // spec/app/assistant/index.md, "Back closes a review, then search, then a quote or an edit, one at a time; with none of them open Back is the shell's"; spec/app/shell/layers.md, "A screen says when it has a step of its own to take Back, and when it has none left; its page stays usable"
 const steppingBack = started(effect {
@@ -849,7 +841,7 @@ export const assisting = Layer.provideMerge(
     reacting(Dock, { carry: carryDock }),
     Attachments.machine(),
     reacting(Locator, { carry: carryLocator }),
-    reached, looked, left, opening, saving, bound, requested, submitted, allowing, forgetting, rested, steppingBack, keyboardGone,
+    reached, looked, left, opening, saving, bound, requested, submitted, allowing, forgetting, rested, keyboardRest, steppingBack,
   ),
   Layer.merge(Layer.fresh(turns), talk),
 )

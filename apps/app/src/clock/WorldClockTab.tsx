@@ -78,43 +78,45 @@ export function WorldClockTab({ runtime }: WorldClockTabProps) {
             const prevId = index > 0 ? cities[index - 1] : undefined;
             const nextId = index + 1 < cities.length ? cities[index + 1] : undefined;
             return (
-              <Card key={entry.id} className="flex-row items-center justify-between gap-3 py-3">
-                <div className="flex min-w-0 flex-1 flex-col">
-                  <span className="truncate text-base font-semibold text-foreground">{entry.city}</span>
-                  <span className="truncate text-xs text-muted-foreground">
-                    {reading ? `${reading.dayDelta}, ${reading.offsetLabel} · ${reading.zoneAbbr}` : entry.region}
-                  </span>
-                </div>
-                <div className="flex items-center gap-1">
-                  <div className="mr-2 flex items-baseline gap-1">
+              <Card key={entry.id} className="gap-2 py-3">
+                <div className="flex items-center justify-between gap-3">
+                  <div className="flex min-w-0 flex-1 flex-col">
+                    <span className="truncate text-base font-semibold text-foreground">{entry.city}</span>
+                    <span className="text-xs text-muted-foreground">
+                      {reading ? `${reading.dayDelta}, ${reading.offsetLabel} · ${reading.zoneAbbr}` : entry.region}
+                    </span>
+                  </div>
+                  <div className="flex shrink-0 items-baseline gap-1">
                     <span className="text-2xl font-light tabular-nums text-foreground">{reading?.time ?? "--:--"}</span>
                     {reading?.period && <span className="text-xs font-medium text-muted-foreground">{reading.period}</span>}
                   </div>
+                </div>
+                <div className="flex items-center justify-end gap-1 border-t border-border/60 pt-1.5">
                   <Button
                     variant="ghost"
-                    size="icon"
+                    size="sm"
                     aria-label={`Move ${entry.city} up`}
                     disabled={prevId === undefined}
                     onClick={() => prevId !== undefined && void world.send({ type: "moveCity", cityId: entry.id, onto: prevId, behind: false })}
                   >
-                    <ArrowUp aria-hidden className="size-4" />
+                    <ArrowUp aria-hidden className="size-3.5" />
                   </Button>
                   <Button
                     variant="ghost"
-                    size="icon"
+                    size="sm"
                     aria-label={`Move ${entry.city} down`}
                     disabled={nextId === undefined}
                     onClick={() => nextId !== undefined && void world.send({ type: "moveCity", cityId: entry.id, onto: nextId, behind: true })}
                   >
-                    <ArrowDown aria-hidden className="size-4" />
+                    <ArrowDown aria-hidden className="size-3.5" />
                   </Button>
                   <Button
                     variant="ghost"
-                    size="icon"
+                    size="sm"
                     aria-label={`Remove ${entry.city}`}
                     onClick={() => void world.send({ type: "removeCity", cityId: entry.id })}
                   >
-                    <Trash2 aria-hidden className="size-4" />
+                    <Trash2 aria-hidden className="size-3.5" />
                   </Button>
                 </div>
               </Card>

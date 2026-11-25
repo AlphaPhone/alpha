@@ -515,7 +515,7 @@ export function remindersRoutes(store: AlphaAppsStore, runtime: AgentRuntimeLike
         const body = asRecord(input.body);
         const item = store.snoozeItem(input.parameters.get("id") ?? "", {
           minutes: readNumber(body, "minutes"),
-          untilMs: readNumber(body, "untilMs"),
+          untilMs: readNumber(body, "untilMs") ?? readNumber(body, "snoozedUntilMs"),
         });
         if (item === undefined) return { status: 404, body: { error: "reminder_not_found" } };
         await notifyReminder(runtime, `Snoozed: ${item.title}`, "Reminder snoozed.", item.id);

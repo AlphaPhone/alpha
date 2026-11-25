@@ -34,8 +34,6 @@ export const meta: ComponentMeta<AssistantConversationProps> = {
     "Loading": { header, transcript: { messages: [], status: "loading" }, composer },
     "Attachment refused": { header, transcript, composer, attachmentNotice: "Could not attach example.zip" },
     "Offline": { header, transcript, composer: { ...composer, value: "Hello", unavailable: "away" } },
-    "Chat history": { header, transcript, composer, history: { chats: [{ id: "4", title: "Friday plans", current: true }, { id: "3", title: "Dentist and invoices" }], onChoose: fn(), onBack: fn() } },
-    "Pill in an app": { header, transcript, composer, detent: "pill", pill: { onOpen: fn(), onType: fn(), onTalk: fn() } },
   },
   play: {
     "Attachment refused": async ({ canvasElement }: { canvasElement: HTMLElement }) => {

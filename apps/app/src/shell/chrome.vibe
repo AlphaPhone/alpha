@@ -7,13 +7,15 @@ module page {
 
   export type Chrome = Extract<Event, { type: "dockMeasured" | "headerMeasured" }>
 
-  /** Follow the mounted dock and header instead of observing transcript or list contents. @throws {never} */
+  const pageHeader = "[data-host-chrome]:not([data-alpha-comms-dock]):not([data-host-chrome=bottom])"
+
+  /** Follow the mounted dock and headers. @throws {never} */
   export function watchChrome(root: HTMLElement, heard: (event: Chrome) => void): () => void {
     const page = root.querySelector<HTMLElement>("[data-alpha-shell-page]")
     const assistant = root.querySelector<HTMLElement>("[data-alpha-assistant-host]")
     const win = root.ownerDocument.defaultView
     let dock: HTMLElement | null = null
-    let header: HTMLElement | null = null
+    let headers: HTMLElement[] = []
     let detent: string | undefined
     let clearance = 0
     let rest = 0
@@ -23,8 +25,11 @@ module page {
     const measure = () => {
       const frame = root.getBoundingClientRect()
       if (frame.height <= 0) return
-      const headerBox = header?.getBoundingClientRect()
-      const headerPx = headerBox && headerBox.height > 0 ? Math.max(0, Math.round(headerBox.bottom - frame.top)) : 0
+      let headerPx = 0
+      for (const header of headers) {
+        const box = header.getBoundingClientRect()
+        if (box.height > 0) headerPx = Math.max(headerPx, Math.round(box.bottom - frame.top))
+      }
       if (headerPx !== headerBottom) {
         headerBottom = headerPx
         root.style.setProperty("--alpha-header-clearance", `${headerPx}px`)
@@ -51,14 +56,20 @@ module page {
       }
     }
     const sizes = typeof ResizeObserver === "undefined" ? undefined : new ResizeObserver(measure)
-    const changes = typeof MutationObserver === "undefined" ? undefined : new MutationObserver(() => refresh())
+    const headerIn = (node: Node): boolean => node instanceof Element && (node.matches(pageHeader) || node.querySelector(pageHeader) !== null)
+    const changes = typeof MutationObserver === "undefined" ? undefined : new MutationObserver((records) => {
+      if (records.some((record) => record.type === "attributes" || record.target === assistant ||
+        Array.from(record.addedNodes).some(headerIn) || Array.from(record.removedNodes).some(headerIn))) refresh()
+    })
     const refresh = () => {
-      const nextDock = assistant?.querySelector<HTMLElement>("[data-alpha-detent]") ?? null
+      const nextDock = assistant?.hidden ? null : assistant?.querySelector<HTMLElement>("[data-alpha-detent]") ?? null
       const nextDetent = nextDock?.dataset.alphaDetent
-      const nextHeader = (nextDetent === "full" ? nextDock?.querySelector("header") : page?.querySelector<HTMLElement>("header[data-host-chrome]")) ?? null
-      if (dock !== nextDock || header !== nextHeader || detent !== nextDetent) {
+      const matches = nextDetent === "full" ? nextDock?.querySelectorAll<HTMLElement>("header") : page?.querySelectorAll<HTMLElement>(pageHeader)
+      const nextHeaders = matches ? Array.from(matches) : []
+      if (dock !== nextDock || detent !== nextDetent ||
+        headers.length !== nextHeaders.length || headers.some((header, index) => header !== nextHeaders[index])) {
         dock = nextDock
-        header = nextHeader
+        headers = nextHeaders
         detent = nextDetent
         observe()
       }
@@ -68,9 +79,12 @@ module page {
       sizes?.disconnect()
       changes?.disconnect()
       sizes?.observe(root)
-      if (page) { sizes?.observe(page); changes?.observe(page, { childList: true }) }
-      if (assistant) changes?.observe(assistant, { childList: true })
-      if (header) sizes?.observe(header)
+      if (page) {
+        sizes?.observe(page)
+        changes?.observe(page, { childList: true, subtree: true })
+      }
+      if (assistant) changes?.observe(assistant, { childList: true, attributes: true, attributeFilter: ["hidden"] })
+      for (const header of headers) sizes?.observe(header)
       if (dock) {
         sizes?.observe(dock)
         changes?.observe(dock, { attributes: true, attributeFilter: ["data-alpha-detent", "data-alpha-dragging"] })

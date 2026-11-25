@@ -17,7 +17,7 @@ import type { Composer as Writing, Machine as ComposerMachine } from "../../gen/
 import { content, textLimit } from "../../gen/app__assistant__composer.ts";
 import { useMachine as useComposer } from "../../gen/app__assistant__composer.react.ts";
 import type { Machine as DockMachine } from "../../gen/app__assistant__dock.effect.vibe";
-import { type Effect as Ask, focused as dockFocused, isOpen as dockOpen, opened as dockOpened, pill as dockPill } from "../../gen/app__assistant__dock.ts";
+import { type Effect as Ask, focused as dockFocused, isOpen as dockOpen, opened as dockOpened } from "../../gen/app__assistant__dock.ts";
 import { useMachine as useDock } from "../../gen/app__assistant__dock.react.ts";
 import type { Machine as ReplyMachine } from "../../gen/app__assistant__reply.effect.vibe";
 import { useMachine as useReply } from "../../gen/app__assistant__reply.react.ts";
@@ -112,6 +112,18 @@ export function Assistant({ runtime, messageActions, speech, canReadAloud = fals
   const [listing, setListing] = useState(false);
   const [words, setWords] = useState("");
   const composerRef = useRef<HTMLTextAreaElement>(null);
+  const focusOnRevealRef = useRef(false);
+  const currentView = shell.state?.trail.at(-1);
+  const onComms = isCommsView(currentView);
+  const assistantDetent = shell.state?.assistant ?? "Bar";
+  const compact = assistantDetent === "Bar" && currentView !== undefined && currentView !== "Browser" && !onComms;
+  const composerField = useCallback((element: HTMLTextAreaElement | null) => {
+    composerRef.current = element;
+    if (element && !compact && focusOnRevealRef.current) {
+      focusOnRevealRef.current = false;
+      if (assistantDetent === "Typing") element.focus();
+    }
+  }, [assistantDetent, compact]);
   const fileInput = useRef<HTMLInputElement>(null);
   const fileTarget = useRef<{ binding: Writing["binding"]; slot: number } | undefined>(undefined);
   const [talking, shown, writing, finding] = [conversation.state, chats.state, composer.state, search.state];
@@ -135,7 +147,6 @@ export function Assistant({ runtime, messageActions, speech, canReadAloud = fals
   const hold = { type: "hold", askable: askable(talking) } as const;
   const start = { type: "start", ...free } as const;
   const newChat = shown.chosen === 0;
-  const onComms = isCommsView(shell.state?.trail.at(-1));
   const subject = onComms ? comms.state?.key : undefined;
   const request = subject === undefined ? "" : (comms.state?.requests.find((draft) => draft.about === subject)?.request ?? "");
   const sendable = subject !== undefined
@@ -198,15 +209,14 @@ export function Assistant({ runtime, messageActions, speech, canReadAloud = fals
       </div>
     ),
   }));
-  const mediaNote = seen.mediaNote === "" ? [] : [{ id: "media result", author: "alpha" as const, text: seen.mediaNote }];
+  const mediaNote = talking.context.sensitive || seen.mediaNote?.conversation !== shown.chosen
+    ? [] : [{ id: "media result", author: "alpha" as const, text: seen.mediaNote.text }];
   const failed = seen.failure === undefined ? [] : [{ id: "failure", author: "alpha", text: "", children: <ReplyFailure {...seen.failure} fix={seen.failure.kind === "OutOfFunds" ? "FundingFix" : seen.failure.fix} live onRetry={() => type(board.lastSent)} onSettings={settingsAction ? onSettings : undefined} /> } as const];
   const quoted = board.line(shown.chosen, writing.editor.quote)?.text;
   const view = talking.context.showing.tag === "App" ? talking.context.showing.view : "Home";
-  const assistantDetent = shell.state?.assistant ?? "Bar";
   const open = dockOpen(assistantDetent);
   const full = assistantDetent === "Full";
   const keptHeight = assistantDetent === "Sheet" && dock.state && dock.state.kept > 0 ? dock.state.kept : undefined;
-  const inPill = !onComms && shell.state !== undefined && dockPill(shell.state);
   const carry = (asks: readonly Ask[]) => {
     for (const ask of asks) {
       if (ask.tag === "Raise" && shell.can({ type: "raise", detent: ask.detent })) void shell.send({ type: "raise", detent: ask.detent });
@@ -220,6 +230,14 @@ export function Assistant({ runtime, messageActions, speech, canReadAloud = fals
     carry(dockFocused(assistantDetent));
     composerRef.current?.focus();
   };
+  const revealComposer = () => {
+    const typing = { type: "raise", detent: "Typing" } as const;
+    if (!shell.can(typing)) return;
+    focusOnRevealRef.current = true;
+    void shell.send(typing).then((sent) => {
+      if (sent._tag === "Failure") focusOnRevealRef.current = false;
+    });
+  };
   const grabber = shell.state ? (
     <AssistantGrabber
       variant={open ? "handle" : "mark"}
@@ -231,12 +249,12 @@ export function Assistant({ runtime, messageActions, speech, canReadAloud = fals
       }}
       onLift={() => {
         void dock.send({ type: "lift", now: untimed });
-        if (!open) composerRef.current?.focus();
+        if (!open && !compact) composerRef.current?.focus();
       }}
       onCancel={() => { void dock.send({ type: "shift", now: untimed }); }}
       onTap={({ keyboard }) => {
         void dock.send({ type: "click", now: untimed });
-        if (!open && keyboard) composerRef.current?.focus();
+        if (!open && keyboard && !compact) composerRef.current?.focus();
       }}
     />
   ) : undefined;
@@ -258,8 +276,8 @@ export function Assistant({ runtime, messageActions, speech, canReadAloud = fals
       }} />
       {onComms && full && <CommsTarget runtime={runtime} placement="strip" />}
       {(!onComms || open) && <AssistantConversation
-        detent={assistantDetent === "Full" ? "full" : assistantDetent === "Sheet" ? "sheet" : inPill ? "pill" : "bar"}
-        className={onComms ? "relative w-full motion-safe:transition-[height] motion-safe:duration-[420ms]" : open || inPill ? "fixed inset-x-0 bottom-0 mx-auto max-w-md" : "sticky bottom-0"}
+        detent={assistantDetent === "Full" ? "full" : assistantDetent === "Sheet" ? "sheet" : "bar"}
+        className={onComms ? "relative w-full motion-safe:transition-[height] motion-safe:duration-[420ms]" : open ? "fixed inset-x-0 bottom-0 mx-auto max-w-md" : "sticky bottom-0"}
         style={onComms
           ? { height: assistantDetent === "Full" ? "calc(100dvh - 52px)" : `clamp(38dvh, ${keptHeight === undefined ? "50dvh" : `${keptHeight}px`}, 60dvh)` }
           : keptHeight ? { height: keptHeight } : undefined}
@@ -288,12 +306,6 @@ export function Assistant({ runtime, messageActions, speech, canReadAloud = fals
           onBack: () => setListing(false),
           onRetry: () => void chats.send({ type: "browse" }),
         } : undefined}
-        pill={{
-          onOpen: () => openWithFocus(true),
-          onType: typeWithFocus,
-          onTalk: speech?.onTalk,
-          onStop: conversation.can({ type: "stop" }) ? () => void conversation.send({ type: "stop" }) : undefined,
-        }}
         attachmentNotice={onComms ? undefined : seen.attachmentNotice}
         transcript={{
           messages,
@@ -313,10 +325,10 @@ export function Assistant({ runtime, messageActions, speech, canReadAloud = fals
             openWithFocus(false);
             speech.onDictate?.();
           },
-          fieldRef: composerRef,
+          fieldRef: composerField,
           value: subject === undefined ? seen.typed : request,
           onValueChange: type,
-          placeholder: onComms ? "Ask Alpha" : undefined,
+          placeholder: onComms ? "Ask Alpha" : assistantDetent === "Bar" && currentView === "Browser" ? "Ask about this page" : undefined,
           leading: onComms ? <CommsTarget runtime={runtime} placement="composer" /> : undefined,
           closed: subject === undefined && !composer.can({ type: "edit", blank: false, long: false }),
           notice: notice === undefined || onComms ? undefined : {
@@ -341,8 +353,12 @@ export function Assistant({ runtime, messageActions, speech, canReadAloud = fals
           quote: onComms ? undefined : quoted,
           editing: !onComms && writing.editor.editing > 0,
           opener: !open ? grabber : undefined,
-          onOpen: !open && !grabber ? () => openWithFocus(true) : undefined,
-          onSend: sendable && !inFlight(talking.turn) ? send : undefined,
+          onOpen: !open && !grabber ? () => openWithFocus(!compact) : undefined,
+          onType: compact ? revealComposer : undefined,
+          onSend: sendable && !inFlight(talking.turn) ? () => {
+            if (assistantDetent === "Typing") openWithFocus(false);
+            send();
+          } : undefined,
           onStop: conversation.can({ type: "stop" }) ? () => void conversation.send({ type: "stop" }) : undefined,
           stopping: talking.turn.stopping,
           onAttach: !onComms && composer.can({ type: "attach", count: 1 }) ? () => {
@@ -359,7 +375,7 @@ export function Assistant({ runtime, messageActions, speech, canReadAloud = fals
           onSearch: search.can({ type: "openSearch" }) ? () => { void chats.send({ type: "browse" }); void search.send({ type: "openSearch" }); } : undefined,
           onNew: chats.can(start) ? () => { setListing(false); void chats.send(start); } : undefined,
           making: making(shown),
-          onClick: !open ? (event) => {
+          onClick: assistantDetent === "Bar" && !compact ? (event) => {
             if (event.target instanceof Element && event.target.closest("button, textarea")) return;
             typeWithFocus();
           } : undefined,
