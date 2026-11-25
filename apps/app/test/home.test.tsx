@@ -525,7 +525,7 @@ describe("Home on a phone", () => {
     await later(alpha, 5_000);
     await until(alpha, homes, Home.Machine, (h) => h.handoff.attempt.outcome === "Unknown");
     await until(alpha, alpha.runtime, Toasts, (t) => t.showing);
-    expect(toast()).toBe("Android didn't answer about notifications");
+    expect(toast()).toBe("Android didn't answer about notifications. Swipe down from the top edge of the screen for Android notifications.");
 
     // spec/app/home/index.md, "Alpha speaks about the shade only to say that Android did not open it or did not answer"
     world.launcher.shade = "opened";

@@ -509,6 +509,11 @@ pure def sometimesErasureUnknown(r: Recorder): bool = r.erasing.outcome == A::Un
 
 ## Story: Pick up a recording a crash cut off
 
+The browser saves the audio and its elapsed time as the recorder sends each
+part. After a reload, it offers the saved parts only under the same Notes
+connection. A recording already bound to a canonical note uses that same
+note on retry.
+
 > As the owner, I want a recording the phone lost in the middle to be
 > waiting for me, with everything written, before I can start another, and
 > never offered as whole when the phone cannot find all of it.

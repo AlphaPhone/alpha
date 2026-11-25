@@ -2,6 +2,7 @@
 package ai.alphacompute.alphaphone;
 
 import ai.alphacompute.alphaphone.browser.AlphaBrowserCopy;
+import ai.alphacompute.alphaphone.browser.BrowserDesktopSite;
 import ai.alphacompute.alphaphone.browser.LinkHandoff;
 import ai.alphacompute.alphaphone.browser.AlphaPageContext;
 import ai.eliza.plugins.browsersurface.BrowserPageReading;
@@ -207,7 +208,7 @@ public class AlphaBrowserPlugin extends Plugin {
  /** Kept separate from dispatch so resolver changes cannot bypass page/owner checks. */
  private java.util.function.Function<Intent,java.util.List<android.content.pm.ResolveInfo>> externalBrowserResolver =
   intent->getContext().getPackageManager().queryIntentActivities(intent,android.content.pm.PackageManager.MATCH_DEFAULT_ONLY|android.content.pm.PackageManager.GET_RESOLVED_FILTER);
- static class Tab { BrowserReadingWorld readingWorld; BrowserBlobCapture capture; String findQuery; /** Latest main-frame request or redirect target (any thread). */ volatile String pendingMain; /** Main-frame start address before any document history updates. */ String startedMain; /** Origin of a submitted HTTP sign-in whose result is pending; Save waits for it. */ String authSaveOrigin; int authAttempts; boolean passkeys; String id, profile, opener, url = "", error = "", finishedUrl = "", lastCommittedUrl = ""; WebView web; TabFrame frame; LinearLayout status; TextView message; Button browserRetry; /** Engine-attested login fields (null when the WebView cannot attest field origins). */ BrowserLoginFields fields; boolean priv, handedOff, loading, dead, committed, autofillEnabled; /** The engine started a new document for the current load. */ boolean documentStarted; /** The host this load moved from HTTP to HTTPS, so a redirect back to HTTP fails instead of looping. */ String upgradedHost = ""; /** The address another browser may open after this page failed, or "". */ String elsewhereUrl = ""; int httpStatus, autofillVirtualId=View.NO_ID; long navigation; Runnable timeout; }
+ static class Tab { BrowserReadingWorld readingWorld; BrowserBlobCapture capture; String findQuery; /** Latest main-frame request or redirect target (any thread). */ volatile String pendingMain; /** Main-frame start address before any document history updates. */ String startedMain; /** Origin of a submitted HTTP sign-in whose result is pending; Save waits for it. */ String authSaveOrigin; int authAttempts; boolean passkeys; boolean desktop; String mobileUserAgent = ""; String id, profile, opener, url = "", error = "", finishedUrl = "", lastCommittedUrl = ""; WebView web; TabFrame frame; LinearLayout status; TextView message; Button browserRetry; /** Engine-attested login fields (null when the WebView cannot attest field origins). */ BrowserLoginFields fields; boolean priv, handedOff, loading, dead, committed, autofillEnabled; /** The engine started a new document for the current load. */ boolean documentStarted; /** The host this load moved from HTTP to HTTPS, so a redirect back to HTTP fails instead of looping. */ String upgradedHost = ""; /** The address another browser may open after this page failed, or "". */ String elsewhereUrl = ""; int httpStatus, autofillVirtualId=View.NO_ID; long navigation; Runnable timeout; }
  /** Credentials stay in the framework/provider and the remote document. No bridge API
   * reads fields or replaces Chromium's frame-specific webDomain metadata. The only addition
   * is the committed top-level origin, which the password provider requires to equal the
@@ -440,7 +441,7 @@ public class AlphaBrowserPlugin extends Plugin {
    if (!config().admits(profileName, priv)) throw new IllegalStateException();
    t.profile = profileName; WebViewCompat.setProfile(t.web, t.profile);
    if (!WebViewFeature.isFeatureSupported(WebViewFeature.MULTI_PROCESS) || !WebViewCompat.isMultiProcessEnabled()) throw new IllegalStateException();
-   WebSettings settings = t.web.getSettings(); settings.setJavaScriptEnabled(true); settings.setDomStorageEnabled(true); settings.setAllowFileAccess(false); settings.setAllowContentAccess(false); settings.setAllowFileAccessFromFileURLs(false); settings.setAllowUniversalAccessFromFileURLs(false); settings.setMixedContentMode(WebSettings.MIXED_CONTENT_NEVER_ALLOW); settings.setJavaScriptCanOpenWindowsAutomatically(false); settings.setSupportMultipleWindows(true); settings.setSaveFormData(false); settings.setSafeBrowsingEnabled(true); t.web.setImportantForAutofill(View.IMPORTANT_FOR_AUTOFILL_NO_EXCLUDE_DESCENDANTS);
+   WebSettings settings = t.web.getSettings(); t.mobileUserAgent = settings.getUserAgentString(); settings.setJavaScriptEnabled(true); settings.setDomStorageEnabled(true); settings.setAllowFileAccess(false); settings.setAllowContentAccess(false); settings.setAllowFileAccessFromFileURLs(false); settings.setAllowUniversalAccessFromFileURLs(false); settings.setMixedContentMode(WebSettings.MIXED_CONTENT_NEVER_ALLOW); settings.setJavaScriptCanOpenWindowsAutomatically(false); settings.setSupportMultipleWindows(true); settings.setSaveFormData(false); settings.setSafeBrowsingEnabled(true); t.web.setImportantForAutofill(View.IMPORTANT_FOR_AUTOFILL_NO_EXCLUDE_DESCENDANTS);
    settings.setUseWideViewPort(true); settings.setLoadWithOverviewMode(true); settings.setLayoutAlgorithm(WebSettings.LayoutAlgorithm.TEXT_AUTOSIZING); settings.setSupportZoom(true); settings.setBuiltInZoomControls(true); settings.setDisplayZoomControls(false);
    CookieManager tabCookies=WebViewCompat.getProfile(t.web).getCookieManager();
    tabCookies.setAcceptThirdPartyCookies(t.web, !priv);
@@ -961,6 +962,19 @@ public class AlphaBrowserPlugin extends Plugin {
   showSiteDialog(t,dialog,keep);
  }
  @PluginMethod public void command(PluginCall call) { run(call,t -> { String expected=call.getString("navigation");if(expected!=null&&(paused||!getActivity().hasWindowFocus()||siteDialog!=null||!expected.equals(String.valueOf(t.navigation))))throw new IllegalStateException("Browser foreground or document changed"); String op=call.getString("command"); if ("back".equals(op)) { if(t.web.canGoBack()){loading(t);if(t.readingWorld!=null)t.readingWorld.prepareHistory(-1);t.web.goBack();} } else if ("forward".equals(op)) { if(t.web.canGoForward()){loading(t);if(t.readingWorld!=null)t.readingWorld.prepareHistory(1);t.web.goForward();} } else if ("reload".equals(op)) {loading(t);if(t.readingWorld!=null)t.readingWorld.prepare(t.web.getUrl());t.web.reload();} else if ("stop".equals(op)) { clearTimeout(t); if(!t.committed)fail(t,"Loading stopped. Reload from the menu to try again."); else {t.web.stopLoading();t.loading=false;syncAutofill(t);} } else throw new IllegalArgumentException(); emit(t); }); }
+ @PluginMethod public void setDesktopSite(PluginCall call) { run(call, t -> {
+  Boolean requested = call.getBoolean("enabled");
+  if (requested == null) throw new IllegalArgumentException("Desktop site flag required");
+  t.desktop = requested;
+  WebSettings settings = t.web.getSettings();
+  settings.setUserAgentString(t.desktop ? BrowserDesktopSite.userAgent(t.mobileUserAgent) : t.mobileUserAgent);
+  if (t.committed && !t.url.isEmpty()) {
+   loading(t);
+   if (t.readingWorld != null) t.readingWorld.prepare(t.web.getUrl());
+   t.web.reload();
+  }
+  emit(t);
+ }); }
  private TabInputRouter tabInputRouter;
  /** Below-host tabs take their gestures through one router placed just above Alpha's WebView. */
  private TabInputRouter ensureTabInputRouter() {

@@ -28,20 +28,24 @@ import sending as S from "./sending"
 type Author = Nobody | OwnerWrote | AlphaWrote
 type Need = SendAccess | SimAccess
 type Slot = { author: Author, draft: D::Draft }
+type NewSource = { visit: int, revision: int }
 type Composer = {
   thread: int, recipients: int,
   slot: Slot, saved: int -> Author, suggestion: R::Read,
   sending: P::Permission, simInfo: P::Permission, sims: int, sim: int, pictures: int,
   outgoing: S::Outgoing,
+  newSend: NewSource,
 }
 
 pure val emptySlot: Slot = { author: Nobody, draft: D::blank }
+pure val noNewSend: NewSource = { visit: 0, revision: 0 }
 
 pure val initial: Composer = {
   thread: 0, recipients: 0,
   slot: emptySlot, saved: Map(), suggestion: R::unread,
   sending: P::unasked, simInfo: P::unasked, sims: 1, sim: 0, pictures: 0,
   outgoing: S::initial,
+  newSend: noNewSend,
 }
 ```
 
@@ -55,6 +59,7 @@ what Alpha cannot send; and what the send asks.
 type Effect =
   | SaveDraft({ thread: int, author: Author })
   | DropDraft({ thread: int })
+  | FinishNewDraft({ thread: int, visit: int, revision: int })
   | Suggest({ ticket: int, thread: int })
   | Prompt({ need: Need })
   | OpenSettings
@@ -77,6 +82,8 @@ pure val ticketValues = Set(1, 2)
 pure val idValues = Set(1, 2, 3)
 pure val threadValues = Set(0, 1, 2)
 pure val recipientsValues = Set(0, 1, 2)
+pure val revisionValues = Set(1, 2, 3)
+pure val visitValues = Set(1, 2)
 pure val countValues = Set(0, 1, 2)
 pure val simValues = Set(0, 1, 2)
 pure val weight_typeText = 3
@@ -120,7 +127,7 @@ is unknown.
 
 ```quint
 pure def bound(c: Composer): bool =
-  c.outgoing.thread == c.thread and (S::busy(c.outgoing) or S::uncertain(c.outgoing))
+  c.newSend.revision == 0 and c.outgoing.thread == c.thread and (S::busy(c.outgoing) or S::uncertain(c.outgoing))
 
 pure def canTypeText(c: Composer, empty: bool): bool = c.thread > 0 and not(bound(c))
 
@@ -192,12 +199,14 @@ lacked a final answer becomes unknown. Checking it reads its saved receipt.
 ```quint
 pure def restart(c: Composer): Composer =
   { ...initial, saved: c.saved, outgoing: if (S::busy(c.outgoing)) S::lost(c.outgoing) else c.outgoing,
+    newSend: { ...c.newSend, visit: 0 },
     sending: c.sending, simInfo: c.simInfo, sims: c.sims,
     suggestion: { ...c.suggestion, status: R::Idle } }
 
 pure def stepSavedDraftsSurviveARestart(before: Composer, via: str, after: Composer): bool =
   val held = if (S::busy(before.outgoing)) S::lost(before.outgoing) else before.outgoing
   via == "restart" implies (after.saved == before.saved and after.outgoing == held and after.thread == 0
+    and after.newSend.revision == before.newSend.revision and after.newSend.visit == 0
     and after.sending == before.sending and after.simInfo == before.simInfo and after.sims == before.sims
     and after.suggestion.ticket == before.suggestion.ticket and after.suggestion.status == R::Idle)
 ```
@@ -335,8 +344,16 @@ pure def goToSettings(c: Composer, need: Need): Moved = { state: c, out: List(Op
 
 pure def accessReported(c: Composer, need: Need, grant: P::Grant): Composer = granted(need, P::observe(permission(need, c), grant), c)
 
+pure def canAllowNew(c: Composer, need: Need): bool = c.thread == 0 and P::canAsk(permission(need, c))
+
+pure def allowNew(c: Composer, need: Need): Moved = allow(c, need)
+
+pure def canSettingsNew(c: Composer, need: Need): bool = c.thread == 0 and P::needsSettings(permission(need, c))
+
+pure def settingsNew(c: Composer, need: Need): Moved = goToSettings(c, need)
+
 pure def stepThePromptNeedsTheControl(before: Composer, via: str, after: Composer, out: List[Effect]): bool =
-  out.some(e => match e { | Prompt(p) => true | _ => false }) implies via == "allow"
+  out.some(e => match e { | Prompt(p) => true | _ => false }) implies (via == "allow" or via == "allowNew")
 ```
 
 ### The phone says how many SIMs it has, and with more than one the owner picks one, which needs SIM access
@@ -398,10 +415,28 @@ pure def ready(c: Composer, supported: bool, clear: bool): bool =
     and (c.sims == 1 or c.sim > 0) and supported and clear
 
 pure def canSend(c: Composer, supported: bool, clear: bool): bool =
-  (if (S::uncertain(c.outgoing)) clear else ready(c, supported, clear))
+  (if (S::uncertain(c.outgoing)) clear and c.newSend.revision == 0 else ready(c, supported, clear))
     and S::canSend(c.outgoing, c.thread, c.recipients)
 
-pure def send(c: Composer, supported: bool, clear: bool): Moved = withSend(S::send(c.outgoing, c.thread, c.recipients), c)
+pure def send(c: Composer, supported: bool, clear: bool): Moved =
+  withSend(S::send(c.outgoing, c.thread, c.recipients), { ...c, newSend: noNewSend })
+```
+
+### The owner's New message uses the same send and never takes another draft's place
+
+The visible New draft and its exact recipients are reviewed together at
+Send. It is held by the same journal as a conversation draft. An uncertain
+send is looked up only for the same draft revision and recipients. Sending
+New leaves an existing draft for that conversation alone.
+
+```quint
+pure def canSendNew(c: Composer, thread: int, recipients: int, visit: int, revision: int, supported: bool, clear: bool): bool =
+  c.thread == 0 and visit > 0 and revision > 0 and clear and S::canSend(c.outgoing, thread, recipients)
+    and (if (S::uncertain(c.outgoing)) c.newSend.revision == revision and c.outgoing.recipients == recipients
+      else supported and P::allows(c.sending))
+
+pure def sendNew(c: Composer, thread: int, recipients: int, visit: int, revision: int, supported: bool, clear: bool): Moved =
+  withSend(S::send(c.outgoing, thread, recipients), { ...c, newSend: { visit: visit, revision: revision } })
 ```
 
 ### The phone's answers move the send, and a message sent clears its conversation's draft
@@ -412,7 +447,9 @@ delivered, to the person it names.
 ```quint
 pure def sentOff(o: S::Outgoing, c: Composer): Moved =
   val done = { ...c, outgoing: o }
-  if (S::sentAll(o) and not(S::sentAll(c.outgoing)) and o.thread == c.thread)
+  if (S::sentAll(o) and not(S::sentAll(c.outgoing)) and c.newSend.revision > 0)
+    { state: done, out: List(FinishNewDraft({ thread: o.thread, visit: c.newSend.visit, revision: c.newSend.revision })) }
+  else if (S::sentAll(o) and not(S::sentAll(c.outgoing)) and o.thread == c.thread)
     { state: { ...done, pictures: 0, slot: { author: Nobody, draft: D::edit(c.slot.draft) } }, out: List() }
   else if (S::sentAll(o) and not(S::sentAll(c.outgoing)))
     { state: { ...done, saved: c.saved.put(o.thread, emptySlot.author) }, out: List(DropDraft({ thread: o.thread })) }
@@ -444,7 +481,11 @@ pure def retire(c: Composer, id: int): Moved = withSend(S::retire(c.outgoing, id
 
 ```quint
 pure def stepOnlyTheOwnersTapSends(before: Composer, via: str, after: Composer): bool =
-  after.outgoing.op.id != before.outgoing.op.id implies via == "send"
+  after.outgoing.op.id != before.outgoing.op.id implies (via == "send" or via == "sendNew")
+
+pure def stepNewSendLeavesExistingDraftsAlone(before: Composer, via: str, after: Composer, out: List[Effect]): bool =
+  out.some(e => match e { | FinishNewDraft(finished) => true | _ => false }) implies
+    (before.newSend.revision > 0 and S::sentAll(after.outgoing) and before.saved == after.saved and before.slot == after.slot)
 ```
 
 ### The composer holds at most five pictures and a SIM the phone has

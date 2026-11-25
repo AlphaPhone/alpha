@@ -289,7 +289,7 @@ function VoiceNote({ runtime, collection }: { readonly runtime: Runtime; readonl
     owner: state.owner, number: state.note, opened: state.opened,
     record: { kind: "canonical-note", id: note.id, revision: String(state.revision - 1) },
   })) : undefined;
-  const player = device.available && audio;
+  const player = device.canPlay && audio;
   const canPlay = player && current && voice.can(play, "Owner");
   const toggle = voice.can(stop, "Owner") ? () => void voice.send(stop, "Owner") : canPlay ? () => void voice.send(play, "Owner") : undefined;
   const seek = canPlay && Array.isArray(data?.segments) && data.segments.length > 0 ? (from: number) => {
