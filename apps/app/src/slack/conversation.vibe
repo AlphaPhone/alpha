@@ -1,0 +1,129 @@
+// spec/app/slack/conversation.md, "Story: Read Slack channels and threaded replies accurately"
+import type * as Auth from "../../gen/app__slack__auth.effect.vibe"
+import * as Conversation from "../../gen/app__slack__conversation.effect.vibe"
+import type { Effect as Out, Event } from "../../gen/app__slack__conversation.effect.vibe"
+import type { MessagingSessions } from "../platform/messaging.vibe"
+import type { Slack } from "../platform/slack.vibe"
+import { type Job, answer, reacting, run } from "../runtime/reactor.vibe"
+import { SlackLedger, compareSlackTs, runChannelAction, runWorkspaceCall } from "./ledger.vibe"
+
+effect function readChannelHistory(
+  ticket: number,
+  workspace: number,
+  channel: number,
+  cursor: number,
+): Event!!(Slack | SlackLedger | MessagingSessions | Auth.Machine) {
+  const ledger = try SlackLedger
+  const channelId = ledger.channelId(workspace, channel)
+  if (channelId === undefined) return { type: "channelPageRead", ticket, ok: false, following: 0, unread: 0, upToTs: 0 }
+  const cursorStr = cursor > 0 ? ledger.cursorStr(workspace, cursor) : undefined
+  const res = try runWorkspaceCall(workspace, (slack, token) => slack.history(token, channelId, { cursor: cursorStr, limit: 20 }))
+  if (!res.ok) return { type: "channelPageRead", ticket, ok: false, following: 0, unread: 0, upToTs: 0 }
+  ledger.putChannelMessages(workspace, channel, res.value.messages, cursor > 0)
+  const newest = [...res.value.messages].sort((a, b) => compareSlackTs(a.ts, b.ts)).at(-1)
+  const upToTs = newest ? ledger.tsNum(workspace, channel, newest.ts) : 0
+  const nextCursor = res.value.response_metadata?.next_cursor ?? ""
+  const following = res.value.has_more && nextCursor !== "" ? ledger.cursorNum(workspace, nextCursor) : 0
+  const summary = ledger.channelOf(workspace, channel)
+  return { type: "channelPageRead", ticket, ok: true, following, unread: summary?.unread_count_display ?? summary?.unread_count ?? 0, upToTs }
+}
+
+effect function readThreadReplies(
+  ticket: number,
+  workspace: number,
+  channel: number,
+  threadTs: number,
+  cursor: number,
+): Event!!(Slack | SlackLedger | MessagingSessions | Auth.Machine) {
+  const ledger = try SlackLedger
+  const channelId = ledger.channelId(workspace, channel)
+  const threadStr = ledger.tsStr(workspace, channel, threadTs)
+  if (channelId === undefined || threadStr === undefined) return { type: "threadPageRead", ticket, ok: false, following: 0 }
+  const cursorStr = cursor > 0 ? ledger.cursorStr(workspace, cursor) : undefined
+  const res = try runWorkspaceCall(workspace, (slack, token) => slack.replies(token, channelId, threadStr, { cursor: cursorStr, limit: 20 }))
+  if (!res.ok) return { type: "threadPageRead", ticket, ok: false, following: 0 }
+  ledger.putThreadMessages(workspace, channel, threadTs, res.value.messages, cursor > 0)
+  const nextCursor = res.value.response_metadata?.next_cursor ?? ""
+  const following = res.value.has_more && nextCursor !== "" ? ledger.cursorNum(workspace, nextCursor) : 0
+  return { type: "threadPageRead", ticket, ok: true, following }
+}
+
+effect function markChannelRead(workspace: number, channel: number, upToTs: number): void!!(Slack | SlackLedger | MessagingSessions | Auth.Machine) {
+  const tsStr = (try SlackLedger).tsStr(workspace, channel, upToTs)
+  if (tsStr === undefined) return
+  try runChannelAction(
+    workspace,
+    channel,
+    (slack, token, channelId) => slack.markRead(token, channelId, tsStr),
+    (_resp, _channelId, store) => store.setChannelRead(workspace, channel, tsStr),
+  )
+}
+
+effect function runMessageMutation(
+  id: number,
+  workspace: number,
+  channel: number,
+  ts: number,
+  kind: "edit" | "delete" | "react",
+  emoji?: string,
+  add?: boolean,
+): Event!!(Slack | SlackLedger | MessagingSessions | Auth.Machine) {
+  const ledger = try SlackLedger
+  const tsStr = ledger.tsStr(workspace, channel, ts)
+  if (tsStr === undefined) return { type: "mutationAnswered", id, ok: false, known: true }
+  if (kind === "edit") {
+    const text = ledger.takePendingEdit(workspace, channel, ts)
+    if (text === undefined) return { type: "mutationAnswered", id, ok: false, known: true }
+    const out = try runChannelAction(
+      workspace,
+      channel,
+      (slack, token, channelId) => slack.updateMessage(token, { channel: channelId, ts: tsStr, text }),
+      (resp, _cid, store) => store.updateMessageText(workspace, channel, tsStr, resp.text),
+    )
+    return { type: "mutationAnswered", id, ...out }
+  }
+  if (kind === "delete") {
+    const out = try runChannelAction(
+      workspace,
+      channel,
+      (slack, token, channelId) => slack.deleteMessage(token, { channel: channelId, ts: tsStr }),
+      (_resp, _cid, store) => store.removeMessage(workspace, channel, tsStr),
+    )
+    return { type: "mutationAnswered", id, ...out }
+  }
+  const ownerId = ledger.workspaceMeta(workspace)?.ownerUserId ?? ""
+  const name = emoji ?? ""
+  const adding = add !== false
+  const out = try runChannelAction(
+    workspace,
+    channel,
+    (slack, token, channelId) => {
+      const req = { channel: channelId, timestamp: tsStr, name }
+      return adding ? slack.addReaction(token, req) : slack.removeReaction(token, req)
+    },
+    (_resp, _cid, store) => store.applyReaction(workspace, channel, tsStr, name, ownerId, adding),
+  )
+  return { type: "mutationAnswered", id, ...out }
+}
+
+function carry(
+  fx: Out,
+): Job<Event, Slack | SlackLedger | MessagingSessions | Auth.Machine, []> {
+  return match (fx) {
+    when { tag: "ReadChannelHistory", let ticket, let workspace, let channel, let cursor }:
+      answer("slack-channel-read", readChannelHistory(ticket, workspace, channel, cursor), { type: "channelPageRead", ticket, ok: false, following: 0, unread: 0, upToTs: 0 });
+    when { tag: "ReadThreadReplies", let ticket, let workspace, let channel, let threadTs, let cursor }:
+      answer("slack-thread-read", readThreadReplies(ticket, workspace, channel, threadTs, cursor), { type: "threadPageRead", ticket, ok: false, following: 0 });
+    when { tag: "MarkRead", let workspace, let channel, let upToTs }:
+      run("slack-mark-read", markChannelRead(workspace, channel, upToTs));
+    when { tag: "EditMessage", let id, let workspace, let channel, let ts }:
+      answer(`slack-edit-${id}`, runMessageMutation(id, workspace, channel, ts, "edit"), { type: "mutationAnswered", id, ok: false, known: false });
+    when { tag: "DeleteMessage", let id, let workspace, let channel, let ts }:
+      answer(`slack-delete-${id}`, runMessageMutation(id, workspace, channel, ts, "delete"), { type: "mutationAnswered", id, ok: false, known: false });
+    when { tag: "ReactMessage", let id, let workspace, let channel, let ts, let emoji, let add }:
+      answer(`slack-react-${id}`, runMessageMutation(id, workspace, channel, ts, "react", emoji, add), { type: "mutationAnswered", id, ok: false, known: false });
+  }
+}
+
+/** Slack channel timeline and thread drawer machine layer. */
+export const slackConversation = reacting(Conversation, { carry })

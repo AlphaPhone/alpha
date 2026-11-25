@@ -1,0 +1,128 @@
+// spec/app/slack/index.md, "Story: Switch workspaces and browse Slack conversations with strict isolation"
+import * as Workspaces from "../../gen/app__slack.effect.vibe"
+import type { Effect as Out, Event, Section } from "../../gen/app__slack.effect.vibe"
+import type * as Auth from "../../gen/app__slack__auth.effect.vibe"
+import * as Notices from "../../gen/app__slack__notices.effect.vibe"
+import type { MessagingSessions } from "../platform/messaging.vibe"
+import type { Slack, SlackChannelSummary } from "../platform/slack.vibe"
+import { type Job, answer, contained, reacting, untimed } from "../runtime/reactor.vibe"
+import { SlackLedger, runChannelAction, runWorkspaceCall } from "./ledger.vibe"
+
+function typesForSection(section: Section): string {
+  return match (section) {
+    when "Channels": "public_channel,private_channel";
+    when "DirectMessages": "im,mpim";
+    default: "public_channel,private_channel,im,mpim";
+  }
+}
+
+function hasMentionFor(channel: SlackChannelSummary, ownerUserId: string): boolean {
+  const latestText = channel.latest?.text ?? ""
+  return ownerUserId !== "" && latestText.includes(`<@${ownerUserId}>`)
+}
+
+function filterSection(
+  channels: ReadonlyArray<SlackChannelSummary>,
+  section: Section,
+  ownerUserId: string,
+): SlackChannelSummary[] {
+  return match (section) {
+    when "UnreadConversations":
+      channels.filter((ch) => (ch.unread_count_display ?? ch.unread_count ?? 0) > 0);
+    when "MentionsAndThreads":
+      channels.filter((ch) => hasMentionFor(ch, ownerUserId) || (ch.latest?.reply_count ?? 0) > 0 || ch.latest?.thread_ts !== undefined);
+    when "Channels":
+      channels.filter((ch) => !ch.is_im && !ch.is_mpim);
+    when "DirectMessages":
+      channels.filter((ch) => ch.is_im || ch.is_mpim);
+    default:
+      [...channels];
+  }
+}
+
+effect function readConversations(
+  ticket: number,
+  workspace: number,
+  section: Section,
+  query: string,
+  cursor: number,
+): Event!!(Slack | SlackLedger | MessagingSessions | Auth.Machine) {
+  const ledger = try SlackLedger
+  if (ledger.usersOf(workspace).size === 0) {
+    const usersRes = try runWorkspaceCall(workspace, (slack, token) => slack.listUsers(token, { limit: 200 }))
+    if (usersRes.ok) ledger.putUsers(workspace, usersRes.value.members)
+  }
+  const ownerId = ledger.workspaceMeta(workspace)?.ownerUserId ?? ""
+  if (query !== "") {
+    const searchRes = try runWorkspaceCall(workspace, (slack, token) => slack.searchMessages(token, query, { page: 1, count: 25 }))
+    if (!searchRes.ok) return { type: "listed", ticket, answer: { tag: "ListErr", failure: searchRes.failure } }
+    ledger.putSearchMatches(workspace, searchRes.value.messages.matches)
+    return {
+      type: "listed",
+      ticket,
+      answer: { tag: "ListOk", found: searchRes.value.messages.matches.length, following: 0, unread: 0, mentions: 0, now: untimed },
+    }
+  }
+  const cursorStr = cursor > 0 ? ledger.cursorStr(workspace, cursor) : undefined
+  const listRes = try runWorkspaceCall(workspace, (slack, token) => slack.listConversations(token, {
+    types: typesForSection(section),
+    excludeArchived: true,
+    cursor: cursorStr,
+    limit: 20,
+  }))
+  if (!listRes.ok) return { type: "listed", ticket, answer: { tag: "ListErr", failure: listRes.failure } }
+  const filtered = filterSection(listRes.value.channels, section, ownerId)
+  ledger.putConversations(workspace, filtered, cursor > 0)
+  const nextCursor = listRes.value.response_metadata?.next_cursor ?? ""
+  const following = nextCursor !== "" ? ledger.cursorNum(workspace, nextCursor) : 0
+  let unread = 0
+  let mentions = 0
+  for (const ch of listRes.value.channels) {
+    const count = ch.unread_count_display ?? ch.unread_count ?? 0
+    if (count > 0) {
+      unread += count
+      if (hasMentionFor(ch, ownerId)) mentions += 1
+    }
+  }
+  return {
+    type: "listed",
+    ticket,
+    answer: { tag: "ListOk", found: filtered.length, following, unread, mentions: Math.min(mentions, unread), now: untimed },
+  }
+}
+
+effect function setChannelMute(
+  id: number,
+  workspace: number,
+  channel: number,
+  muted: boolean,
+): Event!!(Slack | SlackLedger | MessagingSessions | Auth.Machine | Notices.Machine) {
+  let finalMuted = muted
+  const outcome = try runChannelAction(
+    workspace,
+    channel,
+    (slack, token, channelId) => slack.setMute(token, channelId, muted),
+    (resp, _channelId, store) => {
+      finalMuted = resp.is_muted
+      store.setChannelMuted(workspace, channel, resp.is_muted)
+    },
+  )
+  if (outcome.ok) {
+    try contained((try Notices.Machine).send({ type: "muteChannelChanged", channel, isMuted: finalMuted }), "Slack mute sync")
+  }
+  return { type: "muteAnswered", id, channel, muted: finalMuted, ok: outcome.ok, known: outcome.known }
+}
+
+function carry(
+  fx: Out,
+): Job<Event, Slack | SlackLedger | MessagingSessions | Auth.Machine | Notices.Machine, []> {
+  return match (fx) {
+    when { tag: "ReadConversations", let ticket, let workspace, let section, let query, let cursor }:
+      answer("slack-list", readConversations(ticket, workspace, section, query, cursor), { type: "listed", ticket, answer: { tag: "ListErr", failure: "Unreachable" } });
+    when { tag: "SetChannelMute", let id, let workspace, let channel, let muted }:
+      answer(`slack-mute-${id}`, setChannelMute(id, workspace, channel, muted), { type: "muteAnswered", id, channel, muted, ok: false, known: false });
+  }
+}
+
+/** Slack multi-workspace conversation list, search, cursor pagination, and mute machine layer. */
+export const slackWorkspaces = reacting(Workspaces, { carry })

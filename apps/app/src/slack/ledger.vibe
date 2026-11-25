@@ -1,0 +1,679 @@
+// spec/app/slack/index.md, "Story: Switch workspaces and browse Slack conversations with strict isolation"; spec/app/slack/auth.md, "Story: Connect and manage my Slack workspaces with user tokens only"
+import * as Auth from "../../gen/app__slack__auth.effect.vibe"
+import type { ConvKind } from "../../gen/app__slack__conversation.effect.vibe"
+import type { TargetKey } from "../../gen/app__slack__composer.effect.vibe"
+import type { MutationTool } from "../../gen/app__slack__agent.effect.vibe"
+import {
+  type MessagingFailure,
+  AuthRevoked,
+  Forbidden,
+  MessagingSessions,
+  RateLimited,
+  tokenValue,
+} from "../platform/messaging.vibe"
+import { Unreachable } from "../platform/remote.vibe"
+import { type SlackChannelSummary, type SlackClient, type SlackMessage, type SlackSearchMatch, type SlackUser, Slack } from "../platform/slack.vibe"
+import { contained } from "../runtime/reactor.vibe"
+
+/** Metadata for one connected Slack workspace (strictly free of tokens, codes, or PKCE verifiers). */
+export interface WorkspaceMeta {
+  readonly num: number
+  readonly teamId: string
+  readonly name: string
+  readonly ownerUserId: string
+  readonly ownerUserNum: number
+  readonly credentialRev: number
+}
+
+/** Ephemeral in-flight PKCE OAuth state kept strictly in memory until exchange or cancel. */
+export interface PendingOAuth {
+  readonly nonce: number
+  readonly state: string
+  readonly verifier: string
+  readonly authorizeUrl: string
+  readonly team?: string
+}
+
+/** Stored metadata for one posted Slack notification. */
+export interface SlackNoticeRecord {
+  readonly key: string
+  readonly workspace: number
+  readonly channel: number
+  readonly threadTs: number
+  readonly ts: number
+  readonly title: string
+  readonly body: string
+}
+
+/** Pending payload for an Ask Alpha mutation awaiting owner approval on a specific revision. */
+export interface PendingAgentMutation {
+  readonly turn: number
+  readonly workspace: number
+  readonly channel: number
+  readonly ts: number
+  readonly tool: MutationTool
+  readonly text?: string
+  readonly emoji?: string
+  readonly add?: boolean
+  readonly muted?: boolean
+  readonly tsStr?: string
+}
+
+interface WorkspaceBucket {
+  readonly channels: Map<string, SlackChannelSummary>
+  readonly users: Map<string, SlackUser>
+  listOrder: string[]
+  searchMatches: SlackSearchMatch[]
+  readonly channelMessages: Map<string, SlackMessage[]>
+  readonly threadMessages: Map<string, SlackMessage[]>
+  readonly channelNums: Map<string, number>
+  readonly channelIds: Map<number, string>
+  nextChannelNum: number
+  readonly tsNums: Map<string, number>
+  readonly tsStrs: Map<string, string>
+  nextTsNum: number
+  readonly cursorNums: Map<string, number>
+  readonly cursorStrs: Map<number, string>
+  nextCursorNum: number
+  readonly userNums: Map<string, number>
+  nextUserNum: number
+  readonly draftTexts: Map<string, string>
+  readonly stagedAlphaDrafts: Map<string, string>
+  readonly alphaRequestTexts: Map<string, string>
+  readonly pendingEdits: Map<string, string>
+  readonly notices: Map<string, SlackNoticeRecord>
+  readonly participatedThreads: Set<string>
+  watermarkPoint: number
+}
+
+interface LedgerCore {
+  readonly metas: Map<number, WorkspaceMeta>
+  readonly buckets: Map<number, WorkspaceBucket>
+  bucketOf(workspace: number): WorkspaceBucket
+  channelNum(workspace: number, channelId: string): number
+  tsNum(workspace: number, channel: number, ts: string): number
+  notify(): void
+}
+
+function createBucket(): WorkspaceBucket {
+  return {
+    channels: new Map(),
+    users: new Map(),
+    listOrder: [],
+    searchMatches: [],
+    channelMessages: new Map(),
+    threadMessages: new Map(),
+    channelNums: new Map(),
+    channelIds: new Map(),
+    nextChannelNum: 1,
+    tsNums: new Map(),
+    tsStrs: new Map(),
+    nextTsNum: 1,
+    cursorNums: new Map(),
+    cursorStrs: new Map(),
+    nextCursorNum: 1,
+    userNums: new Map(),
+    nextUserNum: 1,
+    draftTexts: new Map(),
+    stagedAlphaDrafts: new Map(),
+    alphaRequestTexts: new Map(),
+    pendingEdits: new Map(),
+    notices: new Map(),
+    participatedThreads: new Set(),
+    watermarkPoint: 0,
+  }
+}
+
+/** Storage key for one workspace's user token inside `MessagingSessions`. */
+export function slackSessionKey(teamId: string): string {
+  return `slack:${teamId}`
+}
+
+/** Canonical string key for a `(workspace, channel, threadTs)` composer or notice target. */
+export function targetId(target: TargetKey): string {
+  return `${target.workspace}:${target.channel}:${target.threadTs}`
+}
+
+/** Map a Slack conversation summary to the conversation spec's `ConvKind`. */
+export function convKindOf(channel: SlackChannelSummary): ConvKind {
+  if (channel.is_im) return "DirectMsg"
+  if (channel.is_mpim) return "GroupDm"
+  if (channel.is_private || channel.is_group) return "PrivateChannel"
+  return "PublicChannel"
+}
+
+/** Resolve a Slack user ID to a readable display name within a workspace. */
+export function userNameOf(users: ReadonlyMap<string, SlackUser>, userId: string): string {
+  const user = users.get(userId)
+  if (!user) return userId
+  return user.real_name || user.display_name || user.name || userId
+}
+
+/** Resolve a Slack conversation's display label (DM counterpart name or channel name). */
+export function channelTitleOf(
+  channel: SlackChannelSummary,
+  users: ReadonlyMap<string, SlackUser>,
+  ownerUserId: string,
+): string {
+  if (channel.is_im) {
+    const peerId = channel.user ?? channel.members?.find((id) => id !== ownerUserId)
+    return peerId ? userNameOf(users, peerId) : channel.name
+  }
+  if (channel.is_mpim && channel.members && channel.members.length > 0) {
+    const others = channel.members.filter((id) => id !== ownerUserId).map((id) => userNameOf(users, id))
+    if (others.length > 0) return others.join(", ")
+  }
+  return channel.name
+}
+
+/** Format a Slack epoch timestamp string (`"1730000100.000100"`) into HH:MM for display. */
+export function formatSlackTs(ts: string): string {
+  const seconds = Number.parseFloat(ts)
+  if (!Number.isFinite(seconds)) return ""
+  const date = new Date(seconds * 1000)
+  return date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
+}
+
+/** Compare two Slack timestamp strings chronologically. */
+export function compareSlackTs(a: string, b: string): number {
+  const diff = Number.parseFloat(a) - Number.parseFloat(b)
+  return Number.isFinite(diff) && diff !== 0 ? diff : a.localeCompare(b)
+}
+
+function mergeMessages(existing: ReadonlyArray<SlackMessage>, incoming: ReadonlyArray<SlackMessage>): SlackMessage[] {
+  const byTs = new Map<string, SlackMessage>()
+  for (const msg of existing) byTs.set(msg.ts, msg)
+  for (const msg of incoming) byTs.set(msg.ts, msg)
+  return [...byTs.values()].sort((a, b) => compareSlackTs(a.ts, b.ts))
+}
+
+function patchMessageReaction(msg: SlackMessage, tsStr: string, emoji: string, userId: string, add: boolean): SlackMessage {
+  if (msg.ts !== tsStr) return msg
+  const current = [...(msg.reactions ?? [])]
+  const idx = current.findIndex((r) => r.name === emoji)
+  if (add) {
+    if (idx === -1) current.push({ name: emoji, users: [userId], count: 1 })
+    else if (!current[idx].users.includes(userId)) {
+      const users = [...current[idx].users, userId]
+      current[idx] = { name: emoji, users, count: users.length }
+    }
+  } else if (idx !== -1) {
+    const users = current[idx].users.filter((u) => u !== userId)
+    if (users.length === 0) current.splice(idx, 1)
+    else current[idx] = { name: emoji, users, count: users.length }
+  }
+  return { ...msg, reactions: current }
+}
+
+function buildMessageOps(core: LedgerCore) {
+  return {
+    putChannelMessages(workspace: number, num: number, messages: ReadonlyArray<SlackMessage>, appendOlder: boolean) {
+      const bucket = core.bucketOf(workspace)
+      const id = bucket.channelIds.get(num)
+      if (!id) return
+      const ownerId = core.metas.get(workspace)?.ownerUserId
+      for (const msg of messages) {
+        core.tsNum(workspace, num, msg.ts)
+        if (msg.thread_ts) {
+          core.tsNum(workspace, num, msg.thread_ts)
+          if (ownerId && msg.user === ownerId) bucket.participatedThreads.add(`${id}:${msg.thread_ts}`)
+        }
+      }
+      const prev = appendOlder ? (bucket.channelMessages.get(id) ?? []) : []
+      bucket.channelMessages.set(id, mergeMessages(prev, messages))
+      core.notify()
+    },
+    channelMessagesOf(workspace: number, num: number) {
+      const bucket = core.buckets.get(workspace)
+      const id = bucket?.channelIds.get(num)
+      return id ? (bucket?.channelMessages.get(id) ?? []) : []
+    },
+    putThreadMessages(workspace: number, num: number, threadTs: number, messages: ReadonlyArray<SlackMessage>, appendOlder: boolean) {
+      const bucket = core.bucketOf(workspace)
+      const id = bucket.channelIds.get(num)
+      const threadStr = bucket.tsStrs.get(`${num}:${threadTs}`)
+      if (!id || !threadStr) return
+      const ownerId = core.metas.get(workspace)?.ownerUserId
+      for (const msg of messages) {
+        core.tsNum(workspace, num, msg.ts)
+        if (ownerId && msg.user === ownerId) bucket.participatedThreads.add(`${id}:${threadStr}`)
+      }
+      const key = `${id}:${threadStr}`
+      const prev = appendOlder ? (bucket.threadMessages.get(key) ?? []) : []
+      bucket.threadMessages.set(key, mergeMessages(prev, messages))
+      core.notify()
+    },
+    threadMessagesOf(workspace: number, num: number, threadTs: number) {
+      const bucket = core.buckets.get(workspace)
+      const id = bucket?.channelIds.get(num)
+      const threadStr = bucket?.tsStrs.get(`${num}:${threadTs}`)
+      return id && threadStr ? (bucket?.threadMessages.get(`${id}:${threadStr}`) ?? []) : []
+    },
+    upsertMessage(workspace: number, channelId: string, message: SlackMessage, incrementUnread: boolean) {
+      const bucket = core.bucketOf(workspace)
+      const chNum = core.channelNum(workspace, channelId)
+      const msgTsNum = core.tsNum(workspace, chNum, message.ts)
+      const threadStr = message.thread_ts && message.thread_ts !== message.ts ? message.thread_ts : undefined
+      const tNum = threadStr ? core.tsNum(workspace, chNum, threadStr) : 0
+      const ownerId = core.metas.get(workspace)?.ownerUserId
+      if (threadStr) {
+        const key = `${channelId}:${threadStr}`
+        bucket.threadMessages.set(key, mergeMessages(bucket.threadMessages.get(key) ?? [], [message]))
+        if (ownerId && message.user === ownerId) bucket.participatedThreads.add(key)
+        const existingChannel = bucket.channelMessages.get(channelId) ?? []
+        const updatedChannel = existingChannel.map((item) => (item.ts === threadStr
+          ? { ...item, reply_count: (item.reply_count ?? 0) + 1, latest_reply: message.ts }
+          : item))
+        bucket.channelMessages.set(channelId, message.reply_broadcast ? mergeMessages(updatedChannel, [message]) : updatedChannel)
+      } else {
+        bucket.channelMessages.set(channelId, mergeMessages(bucket.channelMessages.get(channelId) ?? [], [message]))
+      }
+      const existingCh = bucket.channels.get(channelId)
+      if (existingCh) {
+        const prevUnread = existingCh.unread_count_display ?? existingCh.unread_count ?? 0
+        const nextUnread = incrementUnread ? prevUnread + 1 : prevUnread
+        bucket.channels.set(channelId, { ...existingCh, latest: message, unread_count: nextUnread, unread_count_display: nextUnread })
+      }
+      core.notify()
+      return { channel: chNum, ts: msgTsNum, threadTs: tNum }
+    },
+    updateMessageText(workspace: number, num: number, tsStr: string, text: string) {
+      transformChannelStreams(core, workspace, num, (list) =>
+        list.map((msg) => (msg.ts === tsStr ? { ...msg, text, edited: { user: msg.user, ts: tsStr } } : msg)))
+    },
+    removeMessage(workspace: number, num: number, tsStr: string) {
+      transformChannelStreams(core, workspace, num, (list) => list.filter((msg) => msg.ts !== tsStr))
+    },
+    applyReaction(workspace: number, num: number, tsStr: string, emoji: string, userId: string, add: boolean) {
+      transformChannelStreams(core, workspace, num, (list) => list.map((m) => patchMessageReaction(m, tsStr, emoji, userId, add)))
+    },
+  }
+}
+
+function transformChannelStreams(
+  core: LedgerCore,
+  workspace: number,
+  num: number,
+  transform: (list: ReadonlyArray<SlackMessage>) => SlackMessage[],
+) {
+  const bucket = core.buckets.get(workspace)
+  const id = bucket?.channelIds.get(num)
+  if (!bucket || !id) return
+  const chMsgs = bucket.channelMessages.get(id)
+  if (chMsgs) bucket.channelMessages.set(id, transform(chMsgs))
+  for (const [key, list] of bucket.threadMessages.entries()) {
+    if (key.startsWith(`${id}:`)) bucket.threadMessages.set(key, transform(list))
+  }
+  core.notify()
+}
+
+function buildConversationOps(core: LedgerCore) {
+  return {
+    putUsers(workspace: number, users: ReadonlyArray<SlackUser>) {
+      const bucket = core.bucketOf(workspace)
+      for (const user of users) {
+        bucket.users.set(user.id, user)
+        if (!bucket.userNums.has(user.id)) bucket.userNums.set(user.id, bucket.nextUserNum++)
+      }
+      core.notify()
+    },
+    usersOf: (workspace: number) => core.buckets.get(workspace)?.users ?? new Map<string, SlackUser>(),
+    putConversations(workspace: number, channels: ReadonlyArray<SlackChannelSummary>, append: boolean) {
+      const bucket = core.bucketOf(workspace)
+      const ids: string[] = append ? [...bucket.listOrder] : []
+      for (const ch of channels) {
+        core.channelNum(workspace, ch.id)
+        bucket.channels.set(ch.id, ch)
+        if (!ids.includes(ch.id)) ids.push(ch.id)
+      }
+      bucket.listOrder = ids
+      core.notify()
+    },
+    putSearchMatches(workspace: number, matches: ReadonlyArray<SlackSearchMatch>) {
+      const bucket = core.bucketOf(workspace)
+      bucket.searchMatches = [...matches]
+      for (const m of matches) {
+        const ch = core.channelNum(workspace, m.channel.id)
+        core.tsNum(workspace, ch, m.ts)
+        if (m.thread_ts) core.tsNum(workspace, ch, m.thread_ts)
+      }
+      core.notify()
+    },
+    searchMatchesOf: (workspace: number) => core.buckets.get(workspace)?.searchMatches ?? [],
+    conversationsOf(workspace: number) {
+      const bucket = core.buckets.get(workspace)
+      if (!bucket) return []
+      return bucket.listOrder.flatMap((id) => {
+        const ch = bucket.channels.get(id)
+        return ch ? [ch] : []
+      })
+    },
+    channelOf(workspace: number, num: number) {
+      const bucket = core.buckets.get(workspace)
+      const id = bucket?.channelIds.get(num)
+      return id ? bucket?.channels.get(id) : undefined
+    },
+    setChannelMuted(workspace: number, num: number, muted: boolean) {
+      updateChannelEntry(core, workspace, num, (existing) => ({ ...existing, is_muted: muted }))
+    },
+    setChannelRead(workspace: number, num: number, lastReadTs: string) {
+      updateChannelEntry(core, workspace, num, (existing) => ({ ...existing, last_read: lastReadTs, unread_count: 0, unread_count_display: 0 }))
+    },
+  }
+}
+
+function updateChannelEntry(
+  core: LedgerCore,
+  workspace: number,
+  num: number,
+  update: (existing: SlackChannelSummary) => SlackChannelSummary,
+) {
+  const bucket = core.buckets.get(workspace)
+  const id = bucket?.channelIds.get(num)
+  const existing = id ? bucket?.channels.get(id) : undefined
+  if (!bucket || !id || !existing) return
+  bucket.channels.set(id, update(existing))
+  core.notify()
+}
+
+function setBucketText(
+  core: LedgerCore,
+  workspace: number,
+  select: (bucket: WorkspaceBucket) => Map<string, string>,
+  key: string,
+  text: string | undefined,
+) {
+  const map = select(core.bucketOf(workspace))
+  if (text === undefined || text === "") map.delete(key)
+  else map.set(key, text)
+  core.notify()
+}
+
+function buildDraftAndNoticeOps(core: LedgerCore) {
+  return {
+    draftText: (target: TargetKey) => core.buckets.get(target.workspace)?.draftTexts.get(targetId(target)) ?? "",
+    setDraftText(target: TargetKey, text: string) {
+      setBucketText(core, target.workspace, (b) => b.draftTexts, targetId(target), text)
+    },
+    stagedAlphaDraft: (target: TargetKey) => core.buckets.get(target.workspace)?.stagedAlphaDrafts.get(targetId(target)),
+    setStagedAlphaDraft(target: TargetKey, text: string | undefined) {
+      setBucketText(core, target.workspace, (b) => b.stagedAlphaDrafts, targetId(target), text)
+    },
+    alphaRequestText: (target: TargetKey) => core.buckets.get(target.workspace)?.alphaRequestTexts.get(targetId(target)) ?? "",
+    setAlphaRequestText(target: TargetKey, text: string) {
+      setBucketText(core, target.workspace, (b) => b.alphaRequestTexts, targetId(target), text)
+    },
+    setPendingEdit(workspace: number, channel: number, ts: number, text: string) {
+      core.bucketOf(workspace).pendingEdits.set(`${channel}:${ts}`, text)
+      core.notify()
+    },
+    takePendingEdit(workspace: number, channel: number, ts: number) {
+      const bucket = core.buckets.get(workspace)
+      if (!bucket) return undefined
+      const key = `${channel}:${ts}`
+      const text = bucket.pendingEdits.get(key)
+      bucket.pendingEdits.delete(key)
+      return text
+    },
+    putNotice(record: SlackNoticeRecord) {
+      core.bucketOf(record.workspace).notices.set(record.key, record)
+      core.notify()
+    },
+    removeTargetNotice(target: TargetKey) {
+      const bucket = core.buckets.get(target.workspace)
+      if (!bucket) return
+      bucket.notices.delete(targetId(target))
+      core.notify()
+    },
+    clearAllNotices() {
+      for (const bucket of core.buckets.values()) bucket.notices.clear()
+      core.notify()
+    },
+    noticesList() {
+      const all: SlackNoticeRecord[] = []
+      for (const bucket of core.buckets.values()) {
+        for (const item of bucket.notices.values()) all.push(item)
+      }
+      return all
+    },
+    nextWatermarkPoint(workspace: number) {
+      const bucket = core.bucketOf(workspace)
+      bucket.watermarkPoint += 1
+      return bucket.watermarkPoint
+    },
+    hasParticipatedThread(workspace: number, channelId: string, threadTs: string) {
+      return core.buckets.get(workspace)?.participatedThreads.has(`${channelId}:${threadTs}`) ?? false
+    },
+  }
+}
+
+/** Service shape for the non-secret Slack workspace ledger and external UI store. */
+export type SlackLedgerStore = ReturnType<typeof createSlackLedger>
+
+function createSlackLedger() {
+  let version = 0
+  const listeners = new Set<() => void>()
+  let oauth: PendingOAuth | undefined
+  let nextTeamHint: string | undefined
+  let rateNotice: string | undefined
+  let nextWorkspaceNum = 1
+  const teamToNum = new Map<string, number>()
+  const metas = new Map<number, WorkspaceMeta>()
+  const buckets = new Map<number, WorkspaceBucket>()
+  const sendPayloads = new Map<number, { readonly target: TargetKey; readonly text: string }>()
+  let pendingMutation: PendingAgentMutation | undefined
+  const agentResults = new Map<number, unknown>()
+
+  function notify() {
+    version += 1
+    for (const listener of [...listeners]) listener()
+  }
+
+  function bucketOf(workspace: number): WorkspaceBucket {
+    let found = buckets.get(workspace)
+    if (!found) {
+      found = createBucket()
+      buckets.set(workspace, found)
+    }
+    return found
+  }
+
+  function channelNum(workspace: number, channelId: string): number {
+    const bucket = bucketOf(workspace)
+    const known = bucket.channelNums.get(channelId)
+    if (known !== undefined) return known
+    const assigned = bucket.nextChannelNum++
+    bucket.channelNums.set(channelId, assigned)
+    bucket.channelIds.set(assigned, channelId)
+    return assigned
+  }
+
+  function tsNum(workspace: number, channel: number, ts: string): number {
+    if (ts === "") return 0
+    const bucket = bucketOf(workspace)
+    const key = `${channel}:${ts}`
+    const known = bucket.tsNums.get(key)
+    if (known !== undefined) return known
+    const assigned = bucket.nextTsNum++
+    bucket.tsNums.set(key, assigned)
+    bucket.tsStrs.set(`${channel}:${assigned}`, ts)
+    return assigned
+  }
+
+  const core: LedgerCore = { metas, buckets, bucketOf, channelNum, tsNum, notify }
+
+  return {
+    ...buildConversationOps(core),
+    ...buildMessageOps(core),
+    ...buildDraftAndNoticeOps(core),
+    snapshot: () => version,
+    subscribe(listener: () => void) {
+      listeners.add(listener)
+      return () => { listeners.delete(listener) }
+    },
+    notify,
+    pendingTeam: () => nextTeamHint,
+    setPendingTeam(team: string | undefined) {
+      nextTeamHint = team
+      notify()
+    },
+    pendingOAuth: () => oauth,
+    setPendingOAuth(next: PendingOAuth | undefined) {
+      oauth = next
+      notify()
+    },
+    rateLimitNotice: () => rateNotice,
+    setRateLimitNotice(message: string | undefined) {
+      rateNotice = message
+      notify()
+    },
+    registerWorkspace(teamId: string, name: string, ownerUserId: string): WorkspaceMeta {
+      const num = teamToNum.get(teamId) ?? nextWorkspaceNum++
+      teamToNum.set(teamId, num)
+      const bucket = bucketOf(num)
+      const ownerUserNum = bucket.userNums.get(ownerUserId) ?? (() => {
+        const assigned = bucket.nextUserNum++
+        bucket.userNums.set(ownerUserId, assigned)
+        return assigned
+      })()
+      const prev = metas.get(num)
+      const meta: WorkspaceMeta = { num, teamId, name, ownerUserId, ownerUserNum, credentialRev: prev?.credentialRev ?? 0 }
+      metas.set(num, meta)
+      notify()
+      return meta
+    },
+    setWorkspaceCredentialRev(workspace: number, credentialRev: number) {
+      const meta = metas.get(workspace)
+      if (!meta) return
+      metas.set(workspace, { ...meta, credentialRev })
+      notify()
+    },
+    workspaceMeta: (workspace: number) => metas.get(workspace),
+    workspaceByTeamId(teamId: string) {
+      const num = teamToNum.get(teamId)
+      return num === undefined ? undefined : metas.get(num)
+    },
+    connectedMetas(workspaces: ReadonlyArray<number>) {
+      return workspaces.flatMap((w) => {
+        const meta = metas.get(w)
+        return meta ? [meta] : []
+      })
+    },
+    channelNum,
+    channelId: (workspace: number, num: number) => buckets.get(workspace)?.channelIds.get(num),
+    tsNum,
+    tsStr: (workspace: number, channel: number, num: number) => buckets.get(workspace)?.tsStrs.get(`${channel}:${num}`),
+    cursorNum(workspace: number, cursor: string) {
+      if (cursor === "") return 0
+      const bucket = bucketOf(workspace)
+      const known = bucket.cursorNums.get(cursor)
+      if (known !== undefined) return known
+      const assigned = bucket.nextCursorNum++
+      bucket.cursorNums.set(cursor, assigned)
+      bucket.cursorStrs.set(assigned, cursor)
+      return assigned
+    },
+    cursorStr: (workspace: number, num: number) => buckets.get(workspace)?.cursorStrs.get(num),
+    recordSendPayload(id: number, target: TargetKey, text: string) {
+      sendPayloads.set(id, { target, text })
+    },
+    sendPayload: (id: number) => sendPayloads.get(id),
+    clearSendPayload(id: number) {
+      sendPayloads.delete(id)
+    },
+    setPendingAgentMutation(mutation: PendingAgentMutation | undefined) {
+      pendingMutation = mutation
+      notify()
+    },
+    pendingAgentMutation: () => pendingMutation,
+    setAgentResult(turn: number, result: unknown) {
+      agentResults.set(turn, result)
+      notify()
+    },
+    agentResult: (turn: number) => agentResults.get(turn),
+    wipeWorkspace(workspace: number) {
+      buckets.delete(workspace)
+      for (const [id, payload] of [...sendPayloads.entries()]) {
+        if (payload.target.workspace === workspace) sendPayloads.delete(id)
+      }
+      if (pendingMutation?.workspace === workspace) pendingMutation = undefined
+      notify()
+    },
+  }
+}
+
+/** Effect service tag for the in-memory non-secret Slack workspace ledger. */
+export service SlackLedger: SlackLedgerStore {}
+
+/** Layer providing the in-memory non-secret `SlackLedger` service. */
+export const slackLedger = Layer.sync(SlackLedger, createSlackLedger)
+
+/** Retrieve the raw `xoxp-` user token for `workspace` from isolated `MessagingSessions` at the outbound HTTP boundary. */
+export effect function tokenForWorkspace(workspace: number): (string | undefined)!!(SlackLedger | MessagingSessions) {
+  const ledger = try SlackLedger
+  const sessions = try MessagingSessions
+  const meta = ledger.workspaceMeta(workspace)
+  if (!meta) return undefined
+  const secret = try sessions.get(slackSessionKey(meta.teamId))
+  return Option.isSome(secret) ? tokenValue(secret.value) : undefined
+}
+
+/** Handle a typed Slack HTTP/SSE failure: propagate `AuthRevoked` to `Auth.Machine` for that workspace only, and surface `RateLimited`. */
+export effect function handleSlackFailure(
+  workspace: number,
+  failure: MessagingFailure,
+): ("Revoked" | "Offline" | "Unreachable")!!(Auth.Machine | SlackLedger) {
+  const ledger = try SlackLedger
+  if (failure instanceof AuthRevoked) {
+    ledger.setRateLimitNotice(undefined)
+    try contained((try Auth.Machine).send({ type: "workspaceRevoked", workspace }), "Slack workspace revoked")
+    return "Revoked"
+  }
+  if (failure instanceof RateLimited) {
+    ledger.setRateLimitNotice(`Rate limited — retry after ${failure.retryAfter}s`)
+    return "Unreachable"
+  }
+  if (failure instanceof Unreachable) return "Offline"
+  if (failure instanceof Forbidden) return "Unreachable"
+  return "Unreachable"
+}
+
+/** Result of one workspace-authenticated Slack HTTP call with unified failure/revocation handling. */
+export type SlackCallResult<A> =
+  | { readonly ok: true; readonly value: A }
+  | { readonly ok: false; readonly failure: "Revoked" | "Offline" | "Unreachable"; readonly known: boolean }
+
+/** Execute one authenticated Slack API call for `workspace`, clearing rate-limit state on success and handling revocation on failure. */
+export effect function runWorkspaceCall<A>(
+  workspace: number,
+  invoke: (slack: SlackClient, token: string, ledger: SlackLedgerStore) => A!MessagingFailure,
+): SlackCallResult<A>!!(Slack | SlackLedger | MessagingSessions | Auth.Machine) {
+  const slack = try Slack
+  const ledger = try SlackLedger
+  const token = try tokenForWorkspace(workspace)
+  if (token === undefined) return { ok: false, failure: "Revoked", known: true }
+  const outcome = effect {
+    const value = try invoke(slack, token, ledger)
+    ledger.setRateLimitNotice(undefined)
+    return { ok: true as const, value }
+  } catch (err) => ({ ok: false as const, err })
+  if (outcome.ok) return outcome
+  const failure = try handleSlackFailure(workspace, outcome.err)
+  return { ok: false, failure, known: !(outcome.err instanceof Unreachable) }
+}
+
+/** Execute a channel-scoped Slack mutation and report `{ ok, known }` for `kit/attempt` conclusion. */
+export effect function runChannelAction<A>(
+  workspace: number,
+  channel: number,
+  invoke: (slack: SlackClient, token: string, channelId: string, ledger: SlackLedgerStore) => A!MessagingFailure,
+  onSuccess?: (value: A, channelId: string, ledger: SlackLedgerStore) => void,
+): { readonly ok: boolean; readonly known: boolean }!!(Slack | SlackLedger | MessagingSessions | Auth.Machine) {
+  const ledger = try SlackLedger
+  const channelId = ledger.channelId(workspace, channel)
+  if (channelId === undefined) return { ok: false, known: true }
+  const res = try runWorkspaceCall(workspace, (slack, token, store) => invoke(slack, token, channelId, store))
+  if (!res.ok) return { ok: false, known: res.known }
+  onSuccess?.(res.value, channelId, ledger)
+  return { ok: true, known: true }
+}
