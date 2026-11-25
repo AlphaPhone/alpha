@@ -291,16 +291,17 @@ effect function guardOf(tab: number): Option.Option<BrowserPageGuard>!!TabHost {
 }
 
 // spec/app/browser/share.md, "The other browser opens, or the owner is told that none could and the page is still here"; spec/app/browser/share.md, "Only an unreachable HTTPS address makes a failed page leave, and only from a normal tab"
-/** Open the page in front in another browser: a failed page at the HTTPS address the host named, or a page that asked for a passkey. */
-export effect function leaving(confirmed: boolean): ShareEvent!!(TabHost | Tabs.Machine | Share.Machine) {
+/**
+ * Open the failed page in front in another browser, at the HTTPS address the host named.
+ * A committed page leaves only through the menu's reviewed hand-off (`launchOtherBrowser` in share.vibe), never from here.
+ */
+export effect function leaving(): ShareEvent!!(TabHost | Tabs.Machine | Share.Machine) {
   const tab = (try (try Tabs.Machine).get()).selected
   const guard = try guardOf(tab)
   const share = try (try Share.Machine).get()
   const failedAt = elsewhere.get(idOf(tab))
-  if (Option.isNone(guard) || (share.stranded && failedAt === undefined)) return { type: "launched", ok: false, found: true }
-  const sent = share.stranded && failedAt !== undefined
-    ? hosted("openFailedPage", (plugin) => plugin.openFailedPage({ ...guard.value, url: failedAt }))
-    : hosted("openExternalBrowser", (plugin) => plugin.openExternalBrowser({ ...guard.value, privateConfirmed: confirmed }))
+  if (Option.isNone(guard) || !share.stranded || failedAt === undefined) return { type: "launched", ok: false, found: true }
+  const sent = hosted("openFailedPage", (plugin) => plugin.openFailedPage({ ...guard.value, url: failedAt }))
   const launched = effect { try sent; return { type: "launched", ok: true, found: true } as ShareEvent }
     catch (failed) => ({ type: "launched", ok: false, found: !String((failed.cause as { message?: unknown } | undefined)?.message ?? failed.cause).includes("No other installed browser") }) as ShareEvent
   return launched

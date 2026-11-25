@@ -107,9 +107,9 @@ const absent = (panel: number): Share.Event => ({ type: "delivered", panel, ok: 
 const noBrowser: Share.Event = { type: "launched", ok: false, found: false }
 
 // spec/app/browser/share.md, "The other browser opens, or the owner is told that none could and the page is still here"
-/** Open the page in front in another browser, and say at the top of the screen when none could. */
-effect function launched(confirmed: boolean) {
-  const event = try leaving(confirmed)
+/** Open the failed page in front in another browser, and say at the top of the screen when none could. */
+effect function launched() {
+  const event = try leaving()
   if (event.type === "launched" && !event.ok) try say(event.found ? "The other browser did not open. The page is still here." : "No other browser on this phone can open this page.", true)
   return event
 }
@@ -223,7 +223,7 @@ effect function launchOtherBrowser(confirmed: boolean): Share.Event!!(SharePages
 /** Open the reviewed page when one is held (the menu's hand-off or a private web frame), and otherwise a normal tab's failed page at the HTTPS address the host named. */
 effect function elsewhereOf(confirmed: boolean) {
   if ((try SharePages).external.page !== undefined) return try launchOtherBrowser(confirmed)
-  return try launched(confirmed)
+  return try launched()
 }
 
 const sharingPage = reacting(Share, {

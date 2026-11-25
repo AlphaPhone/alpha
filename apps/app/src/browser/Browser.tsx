@@ -84,7 +84,9 @@ function Tab({ runtime, alpha, tabs, page }: BrowserProps & { tabs: State; page:
   const native = Option.isSome(tabHost.plugin);
   const hasLibrary = native || tabHost.web !== undefined;
   // spec/app/browser/share.md, "Only an unreachable HTTPS address makes a failed page leave, and only from a normal tab": the offer is drawn under the bar, never near Ask Alpha.
-  const elsewhere = { type: "openExternally", kind: state.kind, secure: state.secure } as const;
+  // A failed page has no secure mark, so only a stranded page is offered here; a committed HTTPS page leaves from the menu's reviewed "Open externally".
+  const elsewhere = { type: "openExternally", kind: state.kind, secure: false } as const;
+  const offerElsewhere = state.phase === "Failed" && share.can(elsewhere);
   const privateTab = state.kind === "Private";
   const readSuggestions = () => hasLibrary ? loadLibrary(runtime) : undefined;
   const cover = (layer: State["layer"]) => (browser.can({ type: "cover", layer }) ? () => void browser.send({ type: "cover", layer }) : undefined);
@@ -192,7 +194,7 @@ function Tab({ runtime, alpha, tabs, page }: BrowserProps & { tabs: State; page:
             onMenu={tabs.layer === "Menu" ? () => void browser.send({ type: "uncover" }) : cover("Menu") && menu}
           />}
       {state.phase === "Loading" && <div role="progressbar" aria-label="Loading website" className="h-0.75 shrink-0 overflow-hidden bg-secondary"><div className="h-full w-[35%] bg-alpha motion-safe:animate-page-loading motion-reduce:w-full" /></div>}
-      {share.can(elsewhere) && (
+      {offerElsewhere && (
         <div className="flex shrink-0 justify-center px-4 py-2">
           <Button variant="outline" onClick={() => void share.send(elsewhere)}>Open in browser<ExternalLink aria-hidden className="size-4" /></Button>
         </div>
