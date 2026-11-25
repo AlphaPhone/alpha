@@ -212,7 +212,8 @@ describe("Alpha product plugin: Clock actions, provider, and routes", () => {
     const { runtime } = makeFakeRuntime();
     const { plugin } = createAlphaAppsPlugin({ store, timeZone: "UTC", runtime });
     expect(plugin.name).toBe(alphaAppsPluginName);
-    expect(plugin.views?.map((v) => v.id)).toEqual(["clock", "reminders"]);
+    // spec/agent/index.md, "The launch names Home and every Alpha app but Notes as a view the agent may show, by the id the phone opens it by": the product plugin loads after eliza's views module, so Clock and Reminders are the launch's views, not the plugin's.
+    expect(plugin.views).toBeUndefined();
 
     const alarmAction = plugin.actions!.find((a) => a.name === "CLOCK_ALARM")!;
     const timerAction = plugin.actions!.find((a) => a.name === "CLOCK_TIMER")!;
@@ -225,6 +226,8 @@ describe("Alpha product plugin: Clock actions, provider, and routes", () => {
     expect(setRes?.success).toBe(true);
     const alarmId = ((setRes?.data as { alarm: { id: string } }).alarm).id;
     expect(store.getClock().alarms[0]?.daysMask).toBe(62);
+    // spec/app/clock/alarms.md, "A new alarm snoozes for ten minutes until the owner picks another length, as v121's Clock did"
+    expect(store.getClock().alarms[0]?.snoozeMinutes).toBe(10);
 
     const toggleRes = await alarmAction.handler(runtime, emptyMessage("Turn off alarm"), emptyState, { parameters: { action: "toggle", id: alarmId, enabled: false } });
     expect(toggleRes?.success).toBe(true);

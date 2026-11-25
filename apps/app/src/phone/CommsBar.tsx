@@ -89,7 +89,8 @@ export function CommsBar({ runtime, closed, filter, person }: CommsBarProps) {
   const phone = view === "Phone";
   const placeholder = ending ? "Ask during call" : phone ? "Call or ask" : person ? `Ask about ${person.label.split(" ")[0]}` : "Search or ask";
   return (
-    <div data-alpha-comms-dock="" data-host-chrome="" className="sticky bottom-0 z-dock mx-[3.9%] mt-auto mb-[max(clamp(1.5rem,6.8vw,1.75rem),calc(env(safe-area-inset-bottom)_+_0.75rem))] flex min-h-[clamp(4rem,18vw,4.625rem)] shrink-0 items-center gap-1 rounded-dock bg-secondary py-1.5 pr-2 pl-2.25 shadow-dock dark:shadow-dock-dark">
+    <div data-alpha-comms-dock="" data-host-chrome="" className={cn("sticky bottom-0 z-dock mx-[3.9%] mt-auto mb-[max(clamp(1.5rem,6.8vw,1.75rem),calc(env(safe-area-inset-bottom)_+_0.75rem))] flex min-h-[clamp(4rem,18vw,4.625rem)] shrink-0 items-center gap-1 rounded-dock bg-secondary py-1.5 pr-2 pl-2.25 shadow-dock dark:shadow-dock-dark",
+      person && !closed && !ending && "ring-[1.5px] ring-primary ring-inset")}>
       <Button ref={holdButton} size="icon" aria-label="Open Alpha" className="size-11 shrink-0 touch-none overflow-hidden bg-alpha text-alpha-foreground hover:bg-alpha/90" disabled={!opening}
         onPointerDown={(event) => {
           if (!event.isPrimary || event.button !== 0) return;
@@ -143,8 +144,8 @@ function CommsQuery({ runtime, phone, filter, placeholder, onAsk, onTalk }: { ru
     }}>
       <Input key={owned ? "search" : "ask"} name="query" data-alpha-composer="" aria-label={placeholder} placeholder={placeholder}
         value={query} maxLength={owned?.maxLength} onChange={(event) => (owned?.onChange ?? setDraft)(event.currentTarget.value)}
-        className="h-11 min-w-0 flex-1 rounded-full border-0 bg-transparent py-2.75 pr-0.5 pl-2 shadow-none" />
-      {query.trim() === "" && onTalk
+        className="h-11 min-w-0 flex-1 rounded-full border-0 bg-transparent py-2.75 pr-0.5 pl-2 shadow-none focus-visible:outline-none" />
+      {(query.trim() === "" || owned) && onTalk
         ? <Button size="icon" variant="ghost" type="button" aria-label="Talk" onClick={onTalk}><Mic /></Button>
         : <Button size="icon" variant="ghost" type="submit" aria-label="Ask Alpha"><ArrowUp /></Button>}
     </form>

@@ -5,7 +5,7 @@ import { type CalendarScene, calendarRoutes, calendarScene } from "./calendar.ts
 import { type ClockScene, clockRoutes, clockScene } from "./clock.ts";
 import { type MapsScene, mapsRoutes, mapsScene } from "./maps.ts";
 import { type NotesScene, notesRoutes, notesScene } from "./notes.ts";
-import { cloudRoutes } from "./cloud.ts";
+import { type CheckoutScene, cloudRoutes } from "./cloud.ts";
 import { type InboxScene, inboxRoutes, inboxScene } from "./inbox.ts";
 import { type PlatformScene, platformRoutes, platformScene } from "./platform.ts";
 import { type RemindersScene, remindersRoutes, remindersScene } from "./reminders.ts";
@@ -22,12 +22,14 @@ import { textReviewRoute } from "./text-review.ts";
 import { type UpdateScene, updateScene } from "./update.ts";
 import { type VoiceScene, voiceScene } from "./voice.ts";
 import { type BrowserScene, browserScene } from "./browser.ts";
+import { type WalletScene, walletRoutes, walletScene } from "./wallet.ts";
 
 export interface Scene {
   phone: boolean;
   image: boolean;
   now: number;
   signedIn: boolean;
+  checkout?: CheckoutScene;
   /** The phone's device lease for mail and calendar: a phone signed in before mail leases existed holds none. */
   readonly mailLease: MailLeaseScene;
   residentAvailable: boolean;
@@ -52,6 +54,7 @@ export interface Scene {
   readonly update: UpdateScene;
   readonly voice: VoiceScene;
   readonly browser: BrowserScene;
+  readonly wallet: WalletScene;
 }
 
 export function scene(): Scene {
@@ -77,6 +80,7 @@ export function scene(): Scene {
     update: updateScene(),
     voice: voiceScene(),
     browser: browserScene(),
+    wallet: walletScene(),
   };
 }
 
@@ -99,9 +103,10 @@ export function services(world: Scene) {
       ...workflowRoutes(world.workflows),
       ...platformRoutes(world.platform),
       ...telephonyRoutes(world.telephony),
+      ...walletRoutes(world.wallet, () => world.now),
     ]),
     cloud: answering([
-      ...cloudRoutes(() => world.signedIn, () => world.now),
+      ...cloudRoutes(() => world.signedIn, () => world.now, world.checkout),
       ...inboxRoutes(world.inbox),
       ...mapsRoutes(world.maps, () => world.now),
     ]),

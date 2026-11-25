@@ -18,9 +18,9 @@ import { useMachine as useChanges } from "../../gen/app__inbox__sending.react.ts
 import { useTimed } from "../runtime/react.ts";
 import { untimed } from "../runtime/reactor.vibe";
 import type { Time } from "../runtime/time.vibe";
-import { Incoming, mibOf } from "./adding.vibe";
+import { Incoming } from "./adding.vibe";
 import { Offers, fits } from "./suggestion.vibe";
-import { Letters, type Words, acceptable, backFromDraft, choiceOf, policy, restoreMyEdits, useLatestSavedDraft } from "./composer.vibe";
+import { Letters, type Words, acceptable, backFromDraft, choiceOf, mibOf, policy, restoreMyEdits, useLatestSavedDraft } from "./composer.vibe";
 import { Mail } from "./gmail.vibe";
 
 export interface ComposeProps {
@@ -33,7 +33,7 @@ const emptyAddressFields = { to: "", cc: "", bcc: "" } as const;
 
 /** How the last operation on `letter` stands, while it is worth telling. */
 function outcomeOf(ops: Operations, letter: Letter): InboxSendOutcomeProps["outcome"] | undefined {
-  if (ops.draft !== letter.id || ops.kind !== "Send" || ops.of !== ops.session) return undefined;
+  if (ops.draft !== letter.id || ops.kind !== "Send" || ops.of !== ops.session) return letter.doubt.attempt !== 0 ? "unknown" : undefined;
   const outcome = ops.attempt.outcome;
   if (outcome === "Recorded" || outcome === "Sent") return "sending";
   if (outcome === "Confirmed") return "sent";
@@ -43,6 +43,10 @@ function outcomeOf(ops: Operations, letter: Letter): InboxSendOutcomeProps["outc
 }
 
 const refusals = { TooBig: "fileTooBig", NotReadable: "fileUnreadable", NoRoom: "noRoom" } as const satisfies Partial<Record<Refusal, InboxNoticeKind>>;
+const notices: Partial<Record<Composer["notice"], InboxNoticeKind>> = {
+  MineRestored: "mineRestored", SavedTaken: "savedTaken", SaveFound: "saveFound", SaveNotFound: "saveNotFound",
+  CopyDeleted: "copyDeleted", CopyNotDeleted: "copyNotDeleted",
+};
 
 const keepingOf = (s: Composer) => (s.unkept ? (s.full ? "full" : "notKept") : s.write.status === "Loading" || s.pending ? "writing" : "kept");
 
@@ -91,6 +95,13 @@ export function Compose({ runtime, list }: ComposeProps) {
       void send(removed, "Owner");
     },
   });
+  const query = typing.to.trim().toLowerCase();
+  const correspondents = list.selected.account === letter.account
+    ? runtime.runSync(Mail.use((mail) => Effect.sync(() => mail.shown(list))))
+      .map(({ card }) => ({ name: card.from.replace(/<[^>]*>/u, "").replace(/"/gu, "").trim(), email: /<([^>]+)>/u.exec(card.from)?.[1] ?? card.from }))
+      .filter((one, at, all) => acceptable(one.email) && one.email !== from && !words.to.includes(one.email) && all.findIndex((other) => other.email.toLowerCase() === one.email.toLowerCase()) === at)
+    : [];
+  const suggested = query === "" ? (words.to.length === 0 ? correspondents.slice(0, 3) : []) : correspondents.filter(({ name, email }) => name.toLowerCase().includes(query) || email.toLowerCase().includes(query));
   const kept = state.stored && flushed(state);
   const addressed = Object.values(typing).every((value) => value.trim() === "");
   const changeFrom = (account: number) => ({ type: "changeFrom", account, access: accessOf(list, account), typing: !addressed }) as const;
@@ -102,16 +113,28 @@ export function Compose({ runtime, list }: ComposeProps) {
   // spec/app/inbox/sending.md, "Story: Save my draft to Gmail, or delete it there, knowingly"
   const saving = { type: "prepare", kind: letter.gmail === 0 ? "SaveDraft" : "ReplaceDraft", access, letter, kept: kept && addressed, again: false } as const;
   const lookUp = { type: "lookUp", access } as const;
-  const checkCopy = !letter.unsure && kept && addressed && can(lookUp, "Owner") ? () => void send(lookUp, "Owner") : undefined;
+  const checkCopy = kept && addressed && can(lookUp, "Owner") ? () => void send(lookUp, "Owner") : undefined;
   const clash = letter.draft.sync === "Conflicted";
   const copy = clash ? runtime.runSync(Letters.use((all) => Effect.sync(() => all.copy(letter.gmail)))) : undefined;
   const latest = choiceOf(copy);
-  const gmail = clash ? "clash" : letter.unsure ? "unsure" : letter.draft.sync === "Saving" ? "saving" : letter.gmail === 0 ? "none" : letter.draft.sync === "Edited" ? "unsaved" : "saved";
+  const gmail = clash ? "clash" : letter.draft.sync === "Saving" ? "saving" : letter.gmail === 0 || letter.unsure ? "none" : letter.draft.sync === "Edited" ? "unsaved" : "saved";
   const deleting = { type: "prepare", kind: "DeleteDraft", access, letter, kept, again: false } as const;
   const confirm = { type: "confirm", revision: letter.revision, access, now: untimed } as const;
   const reviewed = ops.state.kind === "Send" || ops.state.kind === "SaveDraft" || ops.state.kind === "ReplaceDraft" || ops.state.kind === "DeleteDraft";
   const reviewing = ops.state.review.showing && ops.state.draft === draft && reviewed;
   const outcome = outcomeOf(ops.state, letter);
+  const checkingSent = state.checking === draft && state.check.status === "Loading";
+  const checkSent = { type: "checkSent", draft, access } as const;
+  const sendAgain = { ...sending, again: true } as const;
+  const sendOutcome: InboxSendOutcomeProps | undefined = outcome === undefined ? undefined : {
+    outcome, checking: checkingSent,
+    onCheckSent: checkingSent || can(checkSent, "Owner") ? () => { if (!checkingSent) void send(checkSent, "Owner"); } : undefined,
+    onSendAgain: outcome === "unknown" && !checkingSent && ops.can(sendAgain, "Owner") ? () => void ops.send(sendAgain, "Owner") : undefined,
+  };
+  const notice = state.lookup.status === "Loading" ? "checkingGmailCopy"
+    : letter.unsure ? "gmailCopyUnknown"
+    : state.lookup.status === "Failed" ? "unreachable"
+    : notices[state.notice] ?? (letter.textOnly ? "forwardTextOnly" : undefined);
   const aside = { type: "setAside" } as const;
   // spec/app/inbox/adding.md, "A file is attached to the draft open only once the picker gives one that fits within the room its account leaves; one too large, unreadable or without room is refused and said so"
   const attach = { type: "attach", draft } as const;
@@ -137,6 +160,7 @@ export function Compose({ runtime, list }: ComposeProps) {
           if (can(event, "Owner")) void send(event, "Owner");
         } : undefined}
         to={line("to")}
+        suggestions={suggested.map(({ name, email }) => ({ name: name || email, email }))}
         cc={line("cc")}
         bcc={line("bcc")}
         subject={words.subject}
@@ -146,9 +170,9 @@ export function Compose({ runtime, list }: ComposeProps) {
         attachments={words.files.map((file, at) => ({ id: String(at), name: file.name }))}
         onRemoveAttachment={(id) => detach(id)?.()}
         onAttach={adding.can(attach) && canAttach(letter, policy, 1) ? () => void adding.send(attach) : undefined}
-        notice={refused ?? (state.lookup.status === "Failed" ? "unreachable" : state.notice === "MineRestored" ? "mineRestored" : state.notice === "SavedTaken" ? "savedTaken" : letter.textOnly ? "forwardTextOnly" : undefined)}
-        onNoticeAction={refused === undefined && state.lookup.status === "Failed" ? checkCopy : undefined}
-        outcome={outcome === undefined ? undefined : { outcome }}
+        notice={refused ?? notice}
+        onNoticeAction={refused === undefined ? checkCopy : undefined}
+        outcome={sendOutcome}
         storage={ready(state) ? undefined : state.load.status === "Failed" ? "unavailable" : "checking"}
         onReloadStorage={can({ type: "reload" }, "World") ? () => void send({ type: "reload" }, "World") : undefined}
         keeping={keepingOf(state)}

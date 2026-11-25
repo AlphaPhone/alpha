@@ -31,6 +31,10 @@ export function composeRecipient(operation: SmsCompose) {
   return "target" in operation ? operation.target : { kind: "contact", query: operation.query } as const
 }
 
+export function composeDraftOnly(operation: SmsCompose): boolean {
+  return "draft" in operation && operation.draft === true
+}
+
 const refused = { kind: "refused", code: NOT_DISPATCHED } as const
 
 type ReadSelected = Extract<DeviceOperation, { type: "messages_read_selected" }>
@@ -181,7 +185,7 @@ export effect function messageAction(operation: DeviceOperation, target: Message
     if (target === undefined || !(try stage(body, target.thread, approved, target))) return refused
     return { kind: "applied", result: { kind: "sms-reply", status: "drafted" } }
   }
-  if (!reviewedCompose(operation)) return refused
+  if (!reviewedCompose(operation) || !composeDraftOnly(operation)) return refused
   const recheck = continueDraft ?? current
   const recipient = composeRecipient(operation)
   const chosen = recipient.kind === "contact" ? contact : undefined

@@ -17,7 +17,7 @@ import { NoteDevice, type Tape, ownerDigest, noteDevice } from "../platform/note
 import { ownerAt } from "../platform/owner.vibe"
 import { Attempts } from "../runtime/attempts.vibe"
 import { type Job, answer, following, reacting, run, started, together } from "../runtime/reactor.vibe"
-import { NoteContent, numberOf } from "./content.vibe"
+import { NoteContent, audioIdOf, numberOf } from "./content.vibe"
 
 const phone: Actor = "Phone"
 
@@ -183,10 +183,10 @@ effect function commitRecording(fx: Extract<Rec.Effect, { readonly tag: "Finishe
   const folder = collection.folderByNumber.get(fx.folder)
   const have = store.read() catch () => undefined
   if (have === undefined) return lost
-  const capture = have.notes.find((note) => note.format?.data.audioId === id)
+  const capture = have.notes.find((note) => note.format?.kind === "voice" && audioIdOf(note) === id)
   const made = capture === undefined ? (store.create({
     content: "Voice note",
-    format: { kind: "voice", data: { audioId: id, durationMs: tape.durationMs ?? 0, segments: (tape.segments ?? []).map((part) => ({ durationMs: part.durationMs })), ...(folder === undefined ? {} : { folderId: folder.id }) } },
+    format: { kind: "voice", data: { recordingId: id, audio: { audioId: id, durationMs: tape.durationMs ?? 0 }, segments: (tape.segments ?? []).map((part) => ({ durationMs: part.durationMs })), ...(folder === undefined ? {} : { folderId: folder.id }) } },
     creationId: id,
   }) catch () => undefined)?.note : capture
   if (made === undefined) return lost
@@ -206,7 +206,7 @@ effect function findRecording(fx: Extract<Rec.Effect, { readonly tag: "Looks" }>
   if (recording === undefined) return failed
   const snapshot = (try NoteStore).read() catch () => undefined
   if (snapshot === undefined) return failed
-  const note = snapshot.notes.find((one) => one.format?.data.audioId === recording)
+  const note = snapshot.notes.find((one) => one.format?.kind === "voice" && audioIdOf(one) === recording)
   if (note === undefined) return { ...failed, ok: true }
   const device = try NoteDevice
   const held = device.describe(recording) catch () => undefined

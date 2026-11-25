@@ -79,7 +79,9 @@ function fetching(direct: Wired): typeof globalThis.fetch {
       : HttpClientRequest.bodyUint8Array(started, body.bytes, headers["content-type"])
     return runPromise(effect {
       const opened = try direct.open(request)
-      return answer(Stream.toReadableStream(opened.body), opened.status, { ...opened.headers })
+      // The typed client reads a refusal's whole body. A bodyless HTTP refusal still carries its status.
+      const response = opened.status >= 400 ? try opened.text : Stream.toReadableStream(opened.body)
+      return answer(response, opened.status, { ...opened.headers })
     }, { signal })
   }
 }
@@ -178,6 +180,17 @@ function relaying(relay: Relay, wifi: WiFi.Shape): typeof globalThis.fetch {
       throw new TypeError("the cloud request failed", { cause })
     }
   }
+}
+
+/** Open the exact Stripe checkout Cloud answered through the Android host's URL allowlist. */
+export effect function openCloudCheckout(url: string): boolean!! {
+  const target = Effect.try(() => new URL(url)) catch () => undefined
+  if (target === undefined || target.protocol !== "https:" || target.hostname !== "checkout.stripe.com"
+    || target.port || target.username || target.password) return false
+  return effect {
+    try tryPromise(() => client().openExternal({ url, environment: CLOUD_ENVIRONMENT }))
+    return true
+  } catch () => false
 }
 
 /**

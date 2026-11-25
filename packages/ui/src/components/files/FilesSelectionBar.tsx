@@ -14,13 +14,13 @@ export type FilesSelectionBarProps = {
   className?: string;
 };
 
-/** The bar that floats over the foot of a folder while items are chosen: Share, Move, Rename, Delete. */
+/** The bar that floats over the foot of a folder while items are chosen: Share, Move, Copy, Rename, Delete. */
 export function FilesSelectionBar({ actions, className }: FilesSelectionBarProps) {
   return (
-    <div role="toolbar" aria-label="Selection actions" className={cn("absolute inset-x-3 bottom-24 z-20 flex justify-around rounded-sheet bg-background p-1.5 shadow-md ring-1 ring-border", className)}>
+    <div role="toolbar" aria-label="Selection actions" className={cn("absolute inset-x-3 bottom-27 z-20 flex justify-around rounded-group bg-background p-1.5 shadow-dock-compact ring-1 ring-border dark:shadow-dock-compact-dark", className)}>
       {actions.map(({ label, icon, onPress }) => (
         <button key={label} type="button" disabled={!onPress} onClick={onPress}
-          className={cn(focusRing, "flex min-h-13 min-w-15 flex-col items-center justify-center gap-0.5 rounded-tile text-xs active:bg-accent disabled:opacity-35 [&_svg]:size-5")}>
+          className={cn(focusRing, "flex min-h-13 min-w-15 flex-col items-center justify-center gap-0.5 text-xs active:bg-accent disabled:opacity-40 [&_svg]:size-5")}>
           <span aria-hidden className="flex">{icon}</span>{label}
         </button>
       ))}

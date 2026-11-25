@@ -1,5 +1,5 @@
 // spec/app/browser/index.md, "The Browser holds its open tabs, which are private, the one shown, their native tabs, the saved session and its writer, and what covers the page"
-import { BrowserPage } from "@elizaos/agent"
+import { BrowserPage, type DeviceOperation } from "@elizaos/agent"
 import type { BrowserTabHostListener, BrowserTabSelection, BrowserTabSession } from "@elizaos/os-bridges"
 import { type Found, type Front, handed } from "../../gen/app__browser__reading.effect.vibe"
 import { registered } from "./device.vibe"
@@ -72,6 +72,23 @@ export service TabHost {
 /** Open the retained Files area when the owner chooses Show in Files in the phone's Browser Downloads. */
 export service BrowserDownloadsHandoff {
   open(): void!!
+}
+
+// spec/app/inbox/message.md, "Only an https link without credentials in it can be reviewed and opened; any other link stays text"
+/** Opens a link the owner confirmed in Inbox while the same message and grant are current. */
+export service InboxBrowserLinks {
+  open(href: string, current: Effect.Effect<boolean>): boolean!!
+}
+
+/** A page the agent's reply asked the Browser to open: eliza's typed open, which waits for the owner's Open on the Browser's card. */
+export interface AgentPage {
+  readonly operation: Extract<DeviceOperation, { readonly type: "browser_navigate" }>
+}
+
+// spec/app/browser/index.md, "Story: Let the agent open a page"
+/** Hand a page the agent asked for to the Browser, which shows it on its card for the owner's Open while `current` says the request that asked for it is still the owner's latest: whether the Browser took it. */
+export service AgentPages {
+  open(page: AgentPage, current: Effect.Effect<boolean>): boolean!!
 }
 
 /** One call of the tab host, failing with `TabHostFailed` where it refused, broke, or there is none. */

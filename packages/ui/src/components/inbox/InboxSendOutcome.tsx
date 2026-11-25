@@ -12,11 +12,11 @@ const outcomes = {
 } as const;
 
 export type InboxSendOutcomeProps = {
-  /** How the send ended: under way, sent, refused or stopped before anything went out, unknown, or settled by looking in Sent. */
+  /** How the send ended, including a later settlement from its Gmail receipt. */
   outcome: keyof typeof outcomes;
-  /** Looks in Gmail's Sent once to find out; offered only for an unknown send not yet checked. */
+  /** Checks the original send's receipt once. */
   onCheckSent?: () => void;
-  /** A check of Sent is under way. */
+  /** A receipt check is under way. */
   checking?: boolean;
   /** Reviews sending again, knowing it may already have gone; the owner's choice alone does this, never Alpha. */
   onSendAgain?: () => void;
