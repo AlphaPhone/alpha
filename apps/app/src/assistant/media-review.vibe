@@ -15,6 +15,7 @@ import { Talk } from "./talk.vibe"
 /** Area-owned equipment and approved executors. The resident protocol never receives a media bridge handle. */
 export service MediaExecutors {
   execute(operation: DeviceOperation, call: ExecutorCall, authority: ReviewAuthority): unknown!!
+  static readonly defaultValue = () => ({ execute: () => succeed({ kind: "refused", code: NOT_DISPATCHED }) })
 }
 
 export interface ReviewAuthority {
@@ -221,13 +222,15 @@ function routes(runtime: Runtime, headers: RuntimeRequestHeaders): DeviceAgent {
   }
 }
 
-effect function enrolled(epoch: number, runtime: Runtime, owner: string, image: boolean, executeAction: (op: DeviceOperation, call: ExecutorCall) => Promise<unknown>): Session!unknown {
+error EnrollmentRefused { reason: string }
+
+effect function enrolled(epoch: number, owner: string, image: boolean, runtime: Runtime, executeAction: (op: DeviceOperation, call: ExecutorCall) => Promise<unknown>): Session!unknown {
   const offer = try Schema.decodeUnknownEffect(protocol)(try tryPromise(() => runtime.request(`${prefix}/capabilities`)))
-  if (offer.identityId !== owner) throw new Error("Device owner changed")
+  if (offer.identityId !== owner) throw new EnrollmentRefused({ reason: "Device owner changed" })
   const origin = "https://device.alpha.invalid"
   const slot = try tryPromise(() => slotFor([origin, owner, offer.agentId]))
   const { key } = try tryPromise(() => enrollment().enrollmentKey({ slot }))
-  if (!/^[a-f0-9]{64}$/.test(key)) throw new Error("Invalid enrollment key")
+  if (!/^[a-f0-9]{64}$/.test(key)) throw new EnrollmentRefused({ reason: "Invalid enrollment key" })
   const capabilities = [
     ...(registered("ElizaCamera") ? cameraCapabilities : []),
     ...(registered("AlphaPhotoLibrary") ? photosCapabilities : []),
@@ -235,16 +238,16 @@ effect function enrolled(epoch: number, runtime: Runtime, owner: string, image: 
     ...(registered("AlphaNotes") ? ["notes.organize.v1"] : []),
     ...(image && registered("ElizaTelephony") ? phoneCapabilities : []),
   ].filter((name) => offer.deviceActions.capabilities.includes(name))
-  if (capabilities.length === 0) throw new Error("Media operations are unavailable")
+  if (capabilities.length === 0) throw new EnrollmentRefused({ reason: "Media operations are unavailable" })
   const headers = { "x-eliza-device-id": offer.agentId, "x-eliza-device-key": key, "x-eliza-device-capabilities": capabilities.join(",") }
   let raw = tryPromise(() => runtime.request(`${prefix}/context`, undefined, headers)) catch () => undefined
   if (raw === undefined) {
     const answer = try Schema.decodeUnknownEffect(registration)(try tryPromise(() => runtime.request(`${prefix}/register`, { label: "Alpha Phone", capabilities }, headers)))
-    if (answer.installationId !== offer.agentId) throw new Error("Another installation answered")
+    if (answer.installationId !== offer.agentId) throw new EnrollmentRefused({ reason: "Another installation answered" })
     raw = try tryPromise(() => runtime.request(`${prefix}/context`, undefined, headers))
   }
   const confirmed = try Schema.decodeUnknownEffect(context)(raw)
-  if (confirmed.subjectUserId !== owner || confirmed.agentId !== offer.agentId || confirmed.installationId !== offer.agentId) throw new Error("Device scope changed")
+  if (confirmed.subjectUserId !== owner || confirmed.agentId !== offer.agentId || confirmed.installationId !== offer.agentId) throw new EnrollmentRefused({ reason: "Device scope changed" })
   const identity = { origin, ownerId: owner, ...confirmed }
   const agent = routes(runtime, headers)
   const execute = new DeviceExecution<DeviceOperation>({
@@ -253,6 +256,16 @@ effect function enrolled(epoch: number, runtime: Runtime, owner: string, image: 
     readBack: () => Promise.resolve(undefined),
   })
   return { epoch, identity, headers, execute, decide: agent.decide }
+}
+
+function completion(op: DeviceOperation, synced: boolean): string {
+  switch (op.type) {
+    case "photos_album_create":
+    case "photos_share":
+    case "photo_library_review": return "Continue the review in Photos."
+    case "files_share": return "Choose where to share in Android."
+    default: return synced ? "Done" : "Done. Agent receipt pending."
+  }
 }
 
 const notStarted = "Alpha couldn’t start that action."
@@ -286,7 +299,7 @@ export const mediaReview = Layer.effect(MediaReview, effect {
     if (latest?.epoch === status.epoch) return latest
     const owner = Effect.provideService(ownerAt(), Agent, agent) catch () => undefined
     const { image } = try device.capabilities()
-    latest = owner === undefined ? undefined : (enrolled(status.epoch, runtime, owner, image, guarded) catch () => undefined)
+    latest = owner === undefined ? undefined : (enrolled(status.epoch, owner, image, runtime, guarded) catch () => undefined)
     const fresh = latest
     if (fresh !== undefined) try ignore(tryPromise(() => fresh.execute.sync()))
     return latest
@@ -389,7 +402,7 @@ export const mediaReview = Layer.effect(MediaReview, effect {
         scopes.set(card.id, { active: current(held), ...(card.target === undefined ? {} : { target: card.target }) })
         const result = (tryPromise(() => held.execute.approve(card, { live: true, nonsensitive: true, exact: true, forceReview: true, requestEligible: true, reviewed: true }))
           |> ensuring(%, sync(() => { scopes.delete(card.id) }))) catch () => undefined
-        const note = result?.kind !== "settled" ? notStarted : result.result.tag === "Applied" ? (result.synced ? "Done" : "Done. Agent receipt pending.")
+        const note = result?.kind !== "settled" ? notStarted : result.result.tag === "Applied" ? completion(card.operation, result.synced)
           : result.result.tag === "Unknown" ? "The result could not be confirmed. Check before trying again." : "Nothing changed."
         board.change({ mediaNote: note })
       })

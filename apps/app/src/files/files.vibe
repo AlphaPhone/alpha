@@ -15,8 +15,8 @@ import type { Machine as CorrectionMachine } from "../../gen/app__files__correct
 import { Handles, type Spot, handles } from "./handles.vibe"
 import * as Shown from "../../gen/app__files__preview.effect.vibe"
 import * as Recent from "../../gen/app__files__recent.effect.vibe"
-import { Documents } from "../platform/documents.vibe"
-import { Opened, preview, taken, view } from "./preview.vibe"
+import type { Documents } from "../platform/documents.vibe"
+import { type Opened, preview, taken, view } from "./preview.vibe"
 import { Answers, type ReviewedItem, answers } from "./agent.vibe"
 
 module names {

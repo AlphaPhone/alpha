@@ -36,7 +36,7 @@ function ToolBar({ tools }: { tools: readonly Tool[] }) {
   );
 }
 
-export interface PhotosProps extends Shown<PhotosRuntime> {}
+type PhotosProps = Shown<PhotosRuntime>;
 
 /** The Library, Albums and Recently deleted, with the viewer and edit surfaces over the grid. */
 export function Photos({ runtime, alpha }: PhotosProps) {

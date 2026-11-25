@@ -331,7 +331,7 @@ function carryVoice(fx: Voice.Effect): Job<Voice.Event, Agent | VoiceBridge | Vo
       const grant = try (try VoiceBridge).requestPermission()
       return { type: "answerPrompt", granted: grant === "granted" }
     }, { type: "answerPrompt", granted: false });
-    when { tag: "OpenSettings" }: run("openSettings", effect { try (try SystemSettings).open("AppPermissions", 0) });
+    when { tag: "OpenSettings" }: run("openSettings", effect { try (try SystemSettings).open("AppPermissions", "") });
     when { tag: "Listen", let session, let network }: answer("mic", effect {
       const opened = effect { try (try VoiceBridge).openMic(session, network); return true } catch () => false
       return opened ? { type: "micOpened", session } : { type: "micFailed", session }
