@@ -17,7 +17,7 @@ import type { Machine as Shown } from "../../gen/app__inbox__message.effect.vibe
 import { imagesLoad } from "../../gen/app__inbox__message.ts";
 import { useMachine as useMessage } from "../../gen/app__inbox__message.react.ts";
 import type { Machine as Changes } from "../../gen/app__inbox__sending.effect.vibe";
-import { type Kind, type Operations, aside } from "../../gen/app__inbox__sending.ts";
+import { type Kind, type Operations, aside, checksSelection } from "../../gen/app__inbox__sending.ts";
 import { useMachine as useChanges } from "../../gen/app__inbox__sending.react.ts";
 import type { Machine as Writing } from "../../gen/app__inbox__drafts.effect.vibe";
 import { useMachine as useDrafts } from "../../gen/app__inbox__drafts.react.ts";
@@ -59,7 +59,10 @@ const faultNames = { Unreachable: "unreachable", Stale: "changed", Moved: "conve
 
 const markNotices = { Busy: "markBusy", NotMarked: "markFailed", Unconfirmed: "markUnconfirmed" } as const satisfies Record<string, InboxNoticeKind>;
 
-const operationNames = { Archive: "archive", Trash: "trash", Unarchive: "unarchive", Untrash: "untrash" } as const satisfies Partial<Record<Kind, string>>;
+const operationNames = {
+  Archive: "archive", Trash: "trash", Unarchive: "unarchive", Untrash: "untrash",
+  Star: "star", Unstar: "unstar", MarkRead: "markRead", MarkUnread: "markUnread",
+} as const satisfies Partial<Record<Kind, string>>;
 type Change = keyof typeof operationNames;
 const isChange = (kind: Kind): kind is Change => kind in operationNames;
 
@@ -139,7 +142,7 @@ function ChangeReview({ runtime, list, cards }: { runtime: Runtime; list: Mailbo
         messages={state.messages.map((message) => ({ id: String(message), sender: senderName(cards(message)?.from ?? ""), subject: cards(message)?.subject ?? "" }))}
         changed={state.changed}
         onConfirm={can(confirm, "Owner") ? () => void send(confirm, "Owner").then(() => {
-          if (listed.can({ type: "held" })) void listed.send({ type: "held" });
+          if (!checksSelection(state.kind) && listed.can({ type: "held" })) void listed.send({ type: "held" });
         }) : undefined}
         onCancel={() => void send({ type: "cancel" }, "Owner")}
       />
@@ -152,7 +155,7 @@ function toastOf(state: Operations, operation: (typeof operationNames)[Change], 
   const count = state.messages.length;
   if (onUndo) return <InboxChangeToast operation={operation} count={count} phase={state.attempt.outcome === "Confirmed" ? "done" : "holding"} onUndo={onUndo} />;
   if (!state.noticed) return <div onClick={onDismiss}><InboxChangeToast operation={operation} count={count} phase="unknown" /></div>;
-  if (state.attempt.outcome === "Refused") return <InboxChangeToast operation={operation} count={count} phase={state.history >= 1 ? "outOfDate" : "refused"} />;
+  if (state.attempt.outcome === "Refused") return <InboxChangeToast operation={operation} count={count} phase={state.kind === "Unarchive" || state.kind === "Untrash" ? "outOfDate" : "refused"} />;
   return null;
 }
 
@@ -480,6 +483,10 @@ export function Inbox({ runtime, alpha }: InboxProps & { alpha: Alpha }) {
         onArchive={state.selected.folder === "Archived" ? undefined : chosenChange("Archive")}
         onTrash={state.selected.folder === "Trashed" ? undefined : chosenChange("Trash")}
         onRestore={state.selected.folder === "Archived" ? chosenChange("Unarchive") : state.selected.folder === "Trashed" ? chosenChange("Untrash") : undefined}
+        labelChanges={accessOf(state, account).grant.modify}
+        onStar={chosenChange(state.selected.folder === "Starred" ? "Unstar" : "Star")}
+        onMarkRead={chosenChange("MarkRead")}
+        onMarkUnread={chosenChange("MarkUnread")}
         onRefresh={refresh}
         onCompose={onBegin({ kind: "Fresh", account })}
         accounts={accounts}

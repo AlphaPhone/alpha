@@ -155,6 +155,37 @@ it("Choose a phone contact for the email I’m writing (spec/app/inbox/adding.md
   expect([world.telephony.contacts, added, world.inbox.changes]).toEqual([true, [email], []]);
 });
 
+it("Star and mark the mail I reviewed (spec/app/inbox/sending.md, \"Story: Change the stars or read state of selected mail\")", async () => {
+  const world = scene();
+  const { alpha } = await openInbox(world);
+  const runtime = inbox.runtime(alpha);
+  const subjects: readonly [string, string] = ["Notes for the 3:00 review", "Dinner Friday?"];
+  await tile("Inbox");
+  await until(alpha, runtime, List, (state) => state.list.status === "Loaded");
+  await select(subjects[0]);
+  await row(subjects[1]);
+  await until(alpha, runtime, List, (state) => state.chosen.length === subjects.length);
+  await menu("Star", "Mail options");
+  await until(alpha, runtime, Changes, (state) => state.review.showing && state.kind === "Star");
+  expect([...(document.querySelector("[role=alertdialog] ul")?.querySelectorAll("li") ?? [])].map((one) => one.textContent)).toEqual(expect.arrayContaining(subjects));
+  expect(world.inbox.changes).toEqual([]);
+  await confirm("Yes");
+  await until(alpha, runtime, Changes, (state) => state.attempt.outcome === "Confirmed");
+  await menu("Starred", "More folders");
+  await until(alpha, runtime, List, (state) => state.selected.folder === "Starred" && state.list.status === "Loaded");
+  expect(rows()).toEqual(subjects);
+
+  await select(subjects[0]);
+  await row(subjects[1]);
+  await until(alpha, runtime, List, (state) => state.chosen.length === subjects.length);
+  await menu("Mark as read", "Mail options");
+  await until(alpha, runtime, Changes, (state) => state.review.showing && state.kind === "MarkRead");
+  await confirm("Yes");
+  await until(alpha, runtime, Changes, (state) => state.attempt.outcome === "Confirmed");
+  expect(world.inbox.mail.filter(({ card }) => subjects.includes(card.subject)).map(({ card }) => [card.labels.includes("STARRED"), card.isUnread])).toEqual([[true, false], [true, false]]);
+  expect(world.inbox.changes).toHaveLength(4);
+});
+
 describe.each([["a browser", false], ["a phone", true]])("in %s", (_where, phone) => {
   it("See my mail (spec/app/inbox/index.md, \"Story: See my mail\"; spec/app/inbox/message.md, \"Story: Ask Alpha about a message\")", async () => {
     const world = { ...scene(), phone };

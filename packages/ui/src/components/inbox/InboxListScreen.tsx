@@ -1,4 +1,4 @@
-import { Archive, Check, ChevronLeft, Ellipsis, Plus, RotateCw, Search, Trash2 } from "lucide-react";
+import { Archive, Check, ChevronLeft, Ellipsis, Mail, MailOpen, Plus, RotateCw, Search, Star, Trash2 } from "lucide-react";
 import { useRef } from "react";
 import { cn, focusRing } from "../../lib/cn.ts";
 import { Button } from "../Button.tsx";
@@ -27,6 +27,14 @@ export type InboxListScreenProps = Pick<InboxListProps, "rows" | "loading" | "on
     onTrash?: () => void;
     /** Reviews putting the messages chosen back where they were, in Archive or Trash; offered only there. */
     onRestore?: () => void;
+    /** The selected account can change tags on the mail it shows. */
+    labelChanges?: boolean;
+    /** Reviews adding stars, or removing them from the Starred folder. */
+    onStar?: () => void;
+    /** Reviews marking the chosen messages as read. */
+    onMarkRead?: () => void;
+    /** Reviews marking the chosen messages as unread. */
+    onMarkUnread?: () => void;
     /** Chooses every message the list shows; offered while some shown are not chosen. */
     onChooseAll?: () => void;
     /** The address of the account whose mail is shown. */
@@ -82,7 +90,7 @@ export type InboxListScreenProps = Pick<InboxListProps, "rows" | "loading" | "on
 export function InboxListScreen({
   account, onBack, folder, unavailable, onChooseFolder, searching = false, search, onSearchChange, onSearch, onOpenSearch, onCloseSearch,
   notice, onNoticeAction, state, onStateAction, chosen = 0, onStartSelection, onFinishSelection, onClearSelection,
-  onArchive, onTrash, onRestore, onChooseAll, onRefresh, onCompose, accounts = [], onChooseAccount, aside = [], rows, loading, onLoadMore, loadingMore,
+  onArchive, onTrash, onRestore, labelChanges = false, onStar, onMarkRead, onMarkUnread, onChooseAll, onRefresh, onCompose, accounts = [], onChooseAccount, aside = [], rows, loading, onLoadMore, loadingMore,
 }: InboxListScreenProps) {
   const focusSearchAfterCloseRef = useRef(false);
   const closeSearch = () => {
@@ -112,6 +120,11 @@ export function InboxListScreen({
                   ? <MenuItem disabled={!onRestore} onSelect={onRestore}><Archive className="size-5.5" />{folder === "trashed" ? "Restore from Trash" : "Restore to Inbox"}</MenuItem>
                   : <MenuItem disabled={!onArchive} onSelect={onArchive}><Archive className="size-5.5" />Archive</MenuItem>}
                 {folder === "trashed" ? null : <MenuItem disabled={!onTrash} onSelect={onTrash}><Trash2 className="size-5.5" />Move to Trash</MenuItem>}
+                {labelChanges ? <>
+                  <MenuItem disabled={!onStar} onSelect={onStar}><Star className="size-5.5" />{folder === "starred" ? "Remove stars" : "Star"}</MenuItem>
+                  <MenuItem disabled={!onMarkRead} onSelect={onMarkRead}><MailOpen className="size-5.5" />Mark as read</MenuItem>
+                  <MenuItem disabled={!onMarkUnread} onSelect={onMarkUnread}><Mail className="size-5.5" />Mark as unread</MenuItem>
+                </> : null}
               </>
             ) : null}
           </MenuContent>
