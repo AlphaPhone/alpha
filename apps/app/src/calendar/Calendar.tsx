@@ -270,15 +270,16 @@ export function Calendar({ runtime, alpha }: CalendarProps) {
     const { first, last } = span(columns.length > 0 ? columns.flatMap(dayRows) : rows, s.anchor);
     return Array.from({ length: Math.min(last, 23) - first + 1 }, (_, at) => first + at).map((hour) => ({ hour, label: hourOnly.format(dayStart(s.anchor) + hour * hourMs) }));
   })();
+  const pageCovered = open !== undefined || editor.state?.shown === true;
   return (
     <div className="absolute inset-0 flex flex-col overflow-hidden leading-plain">
-      <div data-alpha-subview="calendar-list" inert={open !== undefined || editor.state?.shown === true} className="flex min-h-0 flex-1 flex-col">
-        <CalendarHeader title={title} expanded={month} onTitle={month ? send({ type: "closeOverlay" }) : view.can({ type: "openMonth" }) ? send({ type: "openMonth" }) : undefined}
-          className="pr-2 pl-2" leading={alpha ? <AppBack alpha={alpha} className="size-13 [&_svg]:size-5.5" /> : null}>
-          {month ? null : view.can({ type: "goToday" }) ? <CalendarHeaderAction aria-label="Today" onClick={send({ type: "goToday" })}><CalendarDays aria-hidden /></CalendarHeaderAction> : null}
-          {!month && view.can({ type: "openSearch" }) ? <CalendarHeaderAction aria-label="Search events" onClick={send({ type: "openSearch" })}><Search aria-hidden /></CalendarHeaderAction> : null}
-          {!month && editor.can(newEvent) ? <CalendarHeaderAction aria-label="New event" onClick={() => void runtime.runPromise(startForm(newEvent, s.anchor))}><Plus aria-hidden /></CalendarHeaderAction> : null}
-        </CalendarHeader>
+      <CalendarHeader inert={pageCovered} title={title} expanded={month} onTitle={month ? send({ type: "closeOverlay" }) : view.can({ type: "openMonth" }) ? send({ type: "openMonth" }) : undefined}
+        className="pr-2 pl-2" leading={alpha ? <AppBack alpha={alpha} className="size-13 [&_svg]:size-5.5" /> : null}>
+        {month ? null : view.can({ type: "goToday" }) ? <CalendarHeaderAction aria-label="Today" onClick={send({ type: "goToday" })}><CalendarDays aria-hidden /></CalendarHeaderAction> : null}
+        {!month && view.can({ type: "openSearch" }) ? <CalendarHeaderAction aria-label="Search events" onClick={send({ type: "openSearch" })}><Search aria-hidden /></CalendarHeaderAction> : null}
+        {!month && editor.can(newEvent) ? <CalendarHeaderAction aria-label="New event" onClick={() => void runtime.runPromise(startForm(newEvent, s.anchor))}><Plus aria-hidden /></CalendarHeaderAction> : null}
+      </CalendarHeader>
+      <div data-alpha-subview="calendar-list" inert={pageCovered} className="relative flex min-h-0 flex-1 flex-col">
         {searching ? <Searching runtime={runtime} /> : null}
         <Access runtime={runtime} />
         {s.phoneLimited ? <CalendarNotice tone="caution">Android gave only part of this day. Some events may be missing.</CalendarNotice> : null}
@@ -340,8 +341,8 @@ export function Calendar({ runtime, alpha }: CalendarProps) {
             <Days rows={visible.filter((row) => row.end > dayStart(s.today))} today={s.today} from={dayStart(s.today)} open={openRow} empty="No upcoming events" />
           </CalendarList>
         ) : null}
+        {month ? <Month runtime={runtime} /> : null}
       </div>
-      {month ? <Month runtime={runtime} /> : null}
       <Calendars runtime={runtime} />
       {open === undefined ? null : <EventPage runtime={runtime} row={open} today={s.today} />}
       {editor.state?.shown ? <Form runtime={runtime} day={s.anchor} today={s.today} connected={s.connected} /> : null}

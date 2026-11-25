@@ -47,7 +47,7 @@ export function CalendarMonthPanel({ month, year, months, years, onMonth, onYear
     <div className={cn("absolute inset-0 z-20", className)} {...props}>
       <button type="button" aria-hidden tabIndex={-1} onClick={onClose} className="absolute inset-0 size-full bg-foreground/18 dark:bg-background/55" />
       <div role="dialog" aria-modal="true" aria-label="Choose calendar date"
-        className="absolute inset-x-0 top-11 box-border max-h-[calc(100%-64px)] overflow-auto rounded-sheet bg-background px-4 pt-3 pb-5">
+        className="absolute inset-x-0 top-0 box-border max-h-full overflow-auto rounded-sheet bg-background px-4 pt-3 pb-5">
         <div className="mb-3 flex items-center gap-1">
           <select aria-label="Calendar month" value={month} onChange={(event) => onMonth(Number(event.target.value))} className={cn(select, "flex-1")}>
             {months.map((choice) => <option key={choice.value} value={choice.value}>{choice.label}</option>)}
