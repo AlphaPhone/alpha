@@ -1,4 +1,4 @@
-// spec/app/browser/index.md, "Story: Open, pick and close tabs"; spec/app/browser/index.md, "A page the agent asks for opens at once only when my message asked for that address, and any other only once I choose Open on the Browser's card"; spec/app/browser/address.md, "Story: Go where I typed"; spec/app/browser/address.md, "Story: Watch a page load"; spec/app/browser/address.md, "Story: Browse privately"
+// spec/app/browser/index.md, "Story: Open, pick and close tabs"; spec/app/browser/index.md, "Story: Let the agent open a page"; spec/app/browser/address.md, "Story: Go where I typed"; spec/app/browser/address.md, "Story: Watch a page load"; spec/app/browser/address.md, "Story: Browse privately"
 import { Button, BrowserAddressBar, type BrowserAddressChoice, BrowserAddressChoices, BrowserFindBar, BrowserBar, BrowserLibrary, type BrowserMenuItem, BrowserMenu, BrowserNewTab, BrowserReview, BrowserTabs, ConfirmDialog, PrivateMark } from "@repo/ui";
 import { ChevronLeft, Clock, Download, Link, ListFilter, Plus, RotateCw, Search, Share2, Square, Star, Trash2 } from "lucide-react";
 import { Effect, Option } from "effect";

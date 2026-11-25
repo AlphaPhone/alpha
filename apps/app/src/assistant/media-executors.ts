@@ -1,4 +1,4 @@
-// spec/app/browser/index.md, "A page the agent asks for opens at once only when my message asked for that address, and any other only once I choose Open on the Browser's card"
+// spec/app/browser/index.md, "Story: Let the agent open a page"
 import { type ExecutorCall, NOT_DISPATCHED, type DeviceOperation } from "@elizaos/agent";
 import type { Alpha } from "../runtime/area.tsx";
 import type { ReviewAuthority } from "./media-review.vibe";

@@ -122,8 +122,9 @@ eliza's names, and Alpha's `alpha-apps` product plugin registers
 `CLOCK_ALARM`, `CLOCK_TIMER`, `CLOCK_WORLD` and `REMINDERS_MANAGE`. Eliza's
 wallet module registers `WALLET`, which reads the wallet and asks for a
 transfer and can approve none.
-`BROWSER_OPEN` opens a web page the owner asks for where no enrolled phone
-takes the open as a proposed step, as the old phone opened one. The
+`BROWSER_OPEN` hands a web page the owner asks for to the screen they asked
+from, where no enrolled phone takes the open as a proposed step; the screen
+shows it for the owner to open, as the old phone did. The
 policy names `alpha-apps` as its product plugin and allows each action by
 name, so an action a later pin adds is refused until it is reviewed here.
 Core's `REPLY`, `IGNORE` and `NONE` are always allowed. Every other

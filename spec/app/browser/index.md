@@ -15,8 +15,8 @@ What one tab does is in the specs beside it:
 - [Reading](./reading.md): reading a page for Ask Alpha and reading it aloud
 
 Whether Alpha is in the foreground comes from the [Shell](../shell/), and
-a page the agent wants to open from the reply that asked for it, through
-the [assistant](../assistant/index.md); the owner approves it here. Clearing all browsing data here also empties the library's history
+the owner's approval of a page the agent wants to open from the approvals
+area. Clearing all browsing data here also empties the library's history
 and the sites' remembered answers.
 
 ## Story: Open, pick and close tabs
@@ -497,8 +497,8 @@ pure def sometimesPrivateTabsOutliveAClearing(s: Browser): bool =
 
 ### The agent opens only an HTTPS address with no user name or password in it, in a new normal tab, one at a time
 
-The owner approves it as below. The tab gets its native tab at once and
-does not take the place of the tab the owner is on.
+The approval comes from the approvals area. The tab gets its native tab at
+once and does not take the place of the tab the owner is on.
 
 ```quint
 pure def canAgentOpen(s: Browser, secure: bool, userInfo: bool): bool =
@@ -510,40 +510,6 @@ pure def agentOpen(s: Browser, secure: bool, userInfo: bool): Step =
     out: List(Create({ tab: tab, kind: Normal })) }
 ```
 
-### A page the agent asks for opens at once only when my message asked for that address, and any other only once I choose Open on the Browser's card
-
-The agent's reply hands the Browser the address with eliza's word on
-whether the owner's whole message asked to open exactly that address. Only
-such an address opens at once. Any other, such as a site or article the
-owner named without its address, shows on the Browser's own card with its
-address, Open and Cancel, and opens only on Open; Cancel opens nothing. The
-card stands for the request that asked for it: once the owner has asked
-anything newer, Open on it only closes it, and a newer page, held or opened
-at once, takes its place. No reading of the owner's words here decides it,
-and an address that fails the agent's guard opens neither way.
-
-On a phone enrolled for the agent's device actions, eliza asks for the same
-open as its `browser_navigate` device proposal instead. That proposal is
-reviewed on Ask Alpha's card for the phone's proposals, as the phone's other
-proposals are. Approve there brings the Browser to the front and opens the
-page as an approved one, under the same guard. Decline opens nothing.
-
-```quint
-type AgentRequest = { secure: bool, userInfo: bool, asked: bool, approved: bool, current: bool }
-pure def agentPageOpens(request: AgentRequest): bool =
-  request.secure and not(request.userInfo) and request.current and (request.asked or request.approved)
-pure val askedRequest: AgentRequest = { secure: true, userInfo: false, asked: true, approved: false, current: true }
-pure val requestValues = Set(askedRequest, { ...askedRequest, asked: false }, { ...askedRequest, asked: false, approved: true },
-  { ...askedRequest, asked: false, approved: true, current: false }, { ...askedRequest, current: false },
-  { ...askedRequest, secure: false }, { ...askedRequest, userInfo: true, approved: true })
-pure def lawAnAddressIDidNotAskForOpensOnlyOnOpen(request: AgentRequest): bool =
-  (agentPageOpens(request) and not(request.asked)) implies request.approved
-pure def lawTheGuardHoldsEitherWay(request: AgentRequest): bool =
-  agentPageOpens(request) implies (request.secure and not(request.userInfo))
-pure def lawOnlyMyLatestRequestOpensAPage(request: AgentRequest): bool =
-  agentPageOpens(request) implies request.current
-```
-
 ### "Stop and take over" stops the agent and gives its tab to the owner
 
 ```quint
@@ -553,10 +519,6 @@ pure def takeOver(s: Browser): Step = { state: { ...s, agent: 0 }, out: List(Hal
 ```
 
 ### The agent gives its tab up when it is done
-
-A page the owner asked for or approved is done once it is loading: the
-Browser picks the agent's tab, as the owner asked to see the page, and the
-agent gives it up.
 
 ```quint
 pure def canAgentDone(s: Browser): bool = s.agent != 0

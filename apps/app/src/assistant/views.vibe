@@ -1,4 +1,4 @@
-// spec/app/assistant/index.md, "Story: Let Alpha open what it is talking about"; spec/app/browser/index.md, "A page the agent asks for opens at once only when my message asked for that address, and any other only once I choose Open on the Browser's card"; spec/app/assistant/context.md, "A spoken turn carries what a typed turn sent at that moment would, the view claim included"
+// spec/app/assistant/index.md, "Story: Let Alpha open what it is talking about"; spec/app/browser/index.md, "Story: Let the agent open a page"; spec/app/assistant/context.md, "A spoken turn carries what a typed turn sent at that moment would, the view claim included"
 import type { TurnResult } from "@elizaos/agent"
 import * as Conversation from "../../gen/app__assistant.effect.vibe"
 import { resent } from "../../gen/app__assistant__context.effect.vibe"
@@ -35,8 +35,8 @@ schema Handoff {
 }
 
 schema Prepared { readonly values: Handoff }
-/** A page eliza's BROWSER_OPEN asked the screen `clientId` to open, and whether it waits for the owner's review. */
-schema PageAsked { readonly actionName: "BROWSER_OPEN"; readonly mode: "open"; readonly operation: Schema.Unknown; readonly clientId: string; readonly review: boolean }
+/** A page eliza's BROWSER_OPEN asked the screen `clientId` to show for the owner's Open. */
+schema PageAsked { readonly actionName: "BROWSER_OPEN"; readonly mode: "open"; readonly operation: Schema.Unknown; readonly clientId: string }
 const pageAskedOf = Schema.decodeUnknownOption(PageAsked)
 const Claimed = Schema.Struct({ claimId: Schema.String, target: Schema.optionalKey(Schema.Struct({ kind: Schema.Literal("saved-note"), noteId: Schema.String })) })
 schema Answered { readonly ok: boolean }
@@ -146,7 +146,7 @@ export function pageIn(results: ReadonlyArray<{ readonly action: string; readonl
   return results.flatMap((result): AgentPage[] => {
     const asked = result.action === "BROWSER_OPEN" ? Option.getOrUndefined(pageAskedOf(result.data)) : undefined
     const operation = asked?.clientId === clientId ? readOperation(asked.operation)?.operation : undefined
-    return asked !== undefined && operation?.type === "browser_navigate" ? [{ operation, review: asked.review }] : []
+    return asked !== undefined && operation?.type === "browser_navigate" ? [{ operation }] : []
   }).at(-1)
 }
 
