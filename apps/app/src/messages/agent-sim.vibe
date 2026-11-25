@@ -65,5 +65,5 @@ export effect function captureSmsSelection(): (SmsSelection | undefined)!!(SmsSe
   if (status?.permissions.sms !== "granted" || status.permissions.phoneState !== "granted" || status.sendMode !== "direct"
     || !sameSelection(selected, try selectedSim())) return undefined
   const selection: SmsSelection = { ...selected, observation: { kind: "sms-subscription", id: String(selected.subscription.id), revision: fresh() } }
-  return activeSmsSelection(selection, status.subscriptions) ? selection : undefined
+  return activeSmsSelection(selection, status.subscriptions ?? undefined) ? selection : undefined
 }

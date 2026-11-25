@@ -1,5 +1,5 @@
 // spec/app/photos/index.md, "Story: Browse the library"; spec/app/photos/index.md, "Story: Give Photos access"; spec/app/photos/index.md, "Story: Change albums from what I am looking at"; spec/app/photos/index.md, "Story: Select photos"
-import type { AlbumChange, LibraryAccess, MediaId, MediaItem, MediaPage, PhotosClient, Reviewed } from "@elizaos/os-bridges"
+import { MediaId as MediaIdSchema, type AlbumChange, type LibraryAccess, type MediaId, type MediaItem, type MediaPage, type PhotosClient, type Reviewed } from "@elizaos/os-bridges"
 import * as Library from "../../gen/app__photos.effect.vibe"
 import type { Actor } from "../../gen/app__photos__actor.effect.vibe"
 import * as Viewer from "../../gen/app__photos__viewer.effect.vibe"
@@ -168,7 +168,9 @@ function cameraLookup(capture: PhotoHandoff, page: MediaPage, own: boolean): Cam
 }
 
 effect function verifiedCameraItem(phone: PhotosClient, lookup: CameraLookup): (Extract<Row, { kind: "phone" }> | undefined)!! {
-  const { id, source } = lookup
+  const id = Option.getOrUndefined(Schema.decodeUnknownOption(MediaIdSchema)(lookup.id))
+  if (id === undefined) return undefined
+  const { source } = lookup
   const item = tryPromise(() => source === "owned" ? phone.read({ id }) : phone.readPermitted({ id, pixels: false })) catch () => undefined
   if (item === undefined || item.id !== id || item.trashed === true) return undefined
   return { kind: "phone", item: source === "owned" ? { ...item, owned: true } : item }
@@ -587,10 +589,13 @@ const libraryChanges = started(effect {
   try Stream.runForEach(changes, effect () => {
     const before = try photos.get()
     if (!before.visible) return
-    try cache.changed()
     const access = try permission()
     const after = try photos.get()
     if (!after.visible) return
+    const writingCameraFlag = after.cameraItem > 0 && after.job.sending.includes(after.cameraItem)
+      && (after.job.change === "Favorite" || after.job.change === "Unfavorite")
+    if (writingCameraFlag && access?.grant === "Granted" && after.access.grant === "Granted" && access.videos === after.videos) return
+    try cache.changed()
     if (access?.grant === "Limited" && (before.access.grant === "Granted" || before.access.grant === "Limited")) try revoke()
     try ignore(photos.send(access ?? { type: "libraryChanged" }, "Phone"))
   })

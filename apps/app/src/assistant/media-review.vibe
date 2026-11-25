@@ -540,7 +540,7 @@ export const mediaReview = Layer.effect(MediaReview, effect {
       const option = card.phone?.tag === "Choices" ? card.phone.options[choice] : undefined
       const query = namedReviewQuery(card.operation)
       if (option === undefined || query === undefined) return
-      effect function shown(opened: Session): boolean!! {
+      effect function shown(opened: Session): boolean!!Conversation {
         const time = try Clock.currentTimeMillis
         return opened === latest && card.enrollmentId === opened.identity.enrollmentId
           && board.snapshot().media.includes(card) && card.conversation === (try chats.get()).chosen
@@ -563,7 +563,7 @@ export const mediaReview = Layer.effect(MediaReview, effect {
       const { board } = try Talk
       const conversation = try Conversation
       const chats = try Chats
-      effect function matches(session: Session): boolean!! {
+      effect function matches(session: Session): boolean!!Conversation {
         const showing = (try conversation.get()).context
         const chosen = (try chats.get()).chosen
         const time = try Clock.currentTimeMillis
@@ -572,7 +572,7 @@ export const mediaReview = Layer.effect(MediaReview, effect {
           || card.revision !== showing.revision || showing.sensitive || time >= card.expiresAt) return false
         return card.reviewRequest === undefined || (board.lastSentId === card.reviewRequest && (try reviewContext(card.revision)))
       }
-      effect function current(session: Session): boolean!! {
+      effect function current(session: Session): boolean!!Conversation {
         return (try matches(session)) && (try enrollmentIsCurrent(session)) && (try matches(session))
       }
       effect function canStage(session: Session): boolean!! {
