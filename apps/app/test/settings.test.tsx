@@ -9,8 +9,10 @@ import * as Network from "../gen/app__settings__network.effect.vibe";
 import * as Prefs from "../gen/app__settings__preferences.effect.vibe";
 import * as Reset from "../gen/app__settings__reset.effect.vibe";
 import * as Pages from "../gen/app__settings.effect.vibe";
+import { Machine as Home } from "../gen/app__home.effect.vibe";
 import { Machine as Shell } from "../gen/app__shell.effect.vibe";
 import * as Layers from "../gen/app__shell__layers.effect.vibe";
+import home from "../src/home/index.tsx";
 import settings from "../src/settings/index.tsx";
 import { button, closeAll, drawn, fill, hardware, later, only, open as openAlpha, press, seen, underAct, until } from "./alpha.tsx";
 import { account, checkoutSession, checkoutUrl, type CheckoutScene } from "./fakes/cloud.ts";
@@ -30,7 +32,7 @@ const fetchWithNotices: typeof fetch = (input, init) => {
 };
 vi.stubGlobal("fetch", fetchWithNotices);
 
-const open = (world: Scene) => openAlpha(world, only("home", "view:Settings", "settings/phone", "settings/activity", "overlay"));
+const open = (world: Scene) => openAlpha(world, only("home", "view:Settings", "settings/phone", "settings/activity", "settings/notification-collection", "overlay"));
 
 /** The row, switch or choice whose title is `title`, as a person reads it: a row's title, never its value beside it. */
 const titled = (title: string) => [...document.querySelectorAll<HTMLElement>("button, label")].find((found) => found.querySelector("span > span")?.textContent === title);
@@ -48,6 +50,8 @@ const page = (alpha: Awaited<ReturnType<typeof open>>["alpha"]) => alpha.runtime
 /** Alpha on a phone, its Settings open at the first page with the phone's facts read. */
 async function settingsOpen(world = { ...scene(), phone: true }) {
   const running = await open(world);
+  await until(running.alpha, home.runtime(running.alpha), Home, (state) => state.tiles.load.status === "Loaded");
+  await vi.waitFor(() => expect(button("Settings")).toBeDefined(), { timeout: 15_000 });
   await press("Settings");
   await until(running.alpha, running.alpha.runtime, Shell, (s) => s.trail.at(-1) === "Settings");
   const machines = settings.runtime(running.alpha);
@@ -280,6 +284,35 @@ describe("Settings", () => {
     });
   });
 
+  it("Review notification collection and choose apps (spec/app/notices/collection.md, \"Story: Manage collection in Settings\")", async () => {
+    const { world } = await settingsOpen();
+    await press("General");
+    await tap("Notifications");
+    await vi.waitFor(() => expect(titled("Other apps’ notifications")).toBeDefined());
+    await tap("Other apps’ notifications");
+    expect(world.settings.mirror.enabled).toBe(false);
+    await press("Turn on");
+    await vi.waitFor(() => expect(world.settings.mirror.enabled).toBe(true));
+    await vi.waitFor(() => expect(titled("Choose notification apps")?.hasAttribute("disabled")).toBe(false));
+    await tap("Choose notification apps");
+    await press("Add News reader");
+    await vi.waitFor(() => expect(world.settings.mirror.apps).toEqual([{
+      packageName: "example.reader", label: "News reader", preview: false, available: true,
+    }]));
+    await vi.waitFor(() => expect(titled("Keep notification history")).toBeDefined());
+    await tap("Keep notification history");
+    await press("Turn on");
+    await vi.waitFor(() => expect(world.settings.mirror.history).toBe(true));
+    world.settings.mirrorHistory.push({ id: "old", appLabel: "Reading archive", at: 1000, state: "Posted" });
+    await vi.waitFor(() => expect(titled("View history")).toBeDefined());
+    await tap("View history");
+    await vi.waitFor(() => expect(document.body.textContent).toContain("Reading archive"));
+    await tap("Clear history");
+    await press("Clear");
+    await vi.waitFor(() => expect(document.body.textContent).not.toContain("Reading archive"));
+    expect(world.settings.mirrorHistory).toEqual([]);
+  });
+
   it("Manage saved passwords and choose Android autofill (spec/app/settings/facts.md, \"Story: Manage my saved passwords\"; spec/app/settings/android.md, \"Story: Change what only Android can change\")", async () => {
     const { alpha, machines, world } = await settingsOpen();
     await press("Apps");
@@ -390,11 +423,11 @@ describe("Settings", () => {
       pauseReply: pause.promise,
       openSettings: false,
     };
-    const stock = await settingsOpen({ ...scene(), phone: true });
+    await settingsOpen({ ...scene(), phone: true });
     await press("Privacy");
     await vi.waitFor(() => expect(button("Permissions")).toBeDefined());
     expect(button("Listening settings")).toBeUndefined();
-    await stock.close();
+    await closeAll();
 
     const world = { ...scene(), phone: true, image: true };
     world.settings.listener = listener;

@@ -13,7 +13,7 @@ import home from "../src/home/index.tsx";
 import { Machine as Home } from "../gen/app__home.effect.vibe";
 import { button, closeAll, drawn, fill, later, only, open, press, pressOnTop, seen, underAct, until } from "./alpha.tsx";
 import { type Scene, scene } from "./fakes/scene.ts";
-import { workflowNoteOffer } from "./fakes/workflows.ts";
+import { nativeApprovalNotices, workflowNoteOffer } from "./fakes/workflows.ts";
 
 underAct();
 afterEach(closeAll);
@@ -230,12 +230,14 @@ describe("Workflows", () => {
     expect(world.workflows.prompts.get("weekly-prompt")?.instructions).toBe("Changed in another session.");
   });
 
-  it('Runs the reviewed version, follows its approval and opens its output (spec/app/workflows/runs.md, "Story: Run a workflow now"; spec/app/workflows/sheet.md, "Story: Read a run\'s sheet"; spec/app/workflows/approvals.md, "Story: Answer a run\'s approval on the phone"; spec/app/workflows/approvals.md, "Story: Confirm exactly what this workflow does on my phone")', async () => {
+  it('Runs the reviewed version, follows its approval and opens its output (spec/app/workflows/runs.md, "Story: Run a workflow now"; spec/app/workflows/sheet.md, "Story: Read a run\'s sheet"; spec/app/workflows/approvals.md, "Story: Answer a run\'s approval on the phone"; spec/app/workflows/approvals.md, "Story: Confirm exactly what this workflow does on my phone"; spec/app/workflows/approvals.md, "Story: Open the run a notice names")', async () => {
     const world = scene();
     world.phone = true;
     world.image = true;
     const device = await workflowNoteOffer(world.workflows, world.notes.owner);
     world.telephony.textReview = device;
+    const notices = nativeApprovalNotices();
+    world.workflows.nativeNotices = notices;
     world.workflows.stage = "Running";
     const alpha = await openWorkflows(world);
     const area = workflows.runtime(alpha);
@@ -259,11 +261,23 @@ describe("Workflows", () => {
     world.workflows.stage = "Waiting";
     await later(alpha, 8_000);
     expect(world.workflows.receiptReads).toBe(reads);
+    expect(notices.posted).toEqual([]);
+    await drawn(() => alpha.back());
+    await until(alpha, area, Sheet, (state) => state.runId === 0);
+    await drawn(() => alpha.back());
+    await until(alpha, area, Listing, (state) => state.place.tag === "ListingRows");
 
     await seen(true);
-    await later(alpha, 4_000);
-    await until(alpha, area, Approvals, (state) => state.approval === "Waiting" && state.sheet);
+    await vi.waitFor(() => expect(notices.posted).toHaveLength(1));
+    const first = notices.posted[0];
+    if (first === undefined) throw new Error("The phone received no approval notice");
+    expect(first.route).toMatchObject({ workflowId: "monthly-statement", runId: "monthly-statement-r1", versionId: "monthly-statement-v3" });
+    expect(Object.keys(first).sort()).toEqual(["bindingHash", "expiresAt", "id", "route"]);
+    await drawn(() => notices.tap(first));
+    await until(alpha, area, Approvals, (state) => state.opened === "Ready" && state.sheet);
     expect(document.querySelector('[aria-label="Workflow approval"]')?.textContent).toContain("Review the statement preview");
+    await vi.waitFor(() => expect(notices.consumed).toEqual(["tap-1"]));
+    expect(world.workflows.decisions).toEqual([]);
     world.workflows.approvalTitle = "Review the revised statement preview";
     await press("Approve");
     await until(alpha, area, Approvals, (state) => state.approval === "NotApplied");

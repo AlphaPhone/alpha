@@ -520,6 +520,8 @@ pure val pageQueries: List[RequestQuery] = List(
   { method: Get, path: "/api/lifeops/calendar/feed", key: "timeMin", kind: AnyQuery, value: "", example: "2026-11-24T00:00:00.000Z" },
   { method: Get, path: "/api/lifeops/calendar/feed", key: "timeMax", kind: AnyQuery, value: "", example: "2026-11-25T00:00:00.000Z" },
   { method: Get, path: "/api/lifeops/calendar/feed", key: "timeZone", kind: AnyQuery, value: "", example: "America/New_York" },
+  { method: Get, path: "/api/notifications", key: "category", kind: FixedQuery, value: "workflow", example: "workflow" },
+  { method: Get, path: "/api/notifications", key: "limit", kind: FixedQuery, value: "50", example: "50" },
   { method: Get, path: "/api/approvals", key: "state", kind: PatternQuery, value: "pending", example: "pending" },
   { method: Get, path: "/api/approvals", key: "limit", kind: PatternQuery, value: "50", example: "50" },
   { method: Get, path: "/api/scheduled-tasks", key: "ownerVisibleOnly", kind: FixedQuery, value: "1", example: "1" },
