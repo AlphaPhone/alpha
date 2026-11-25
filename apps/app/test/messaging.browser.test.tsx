@@ -116,7 +116,7 @@ async function connectSlackWorkspace(
 }
 
 describe("Messaging E2E", () => {
-  // spec/app/home/tiles.md, "Story: Choose the apps on Home"; spec/app/settings/preferences.md, "Story: Decide whether Alpha asks before it acts"
+  // spec/app/home/tiles.md, "Story: Keep my apps on Home"; spec/app/settings/preferences.md, "Story: Decide whether Alpha asks before it acts"
   it("Home tiles and Privacy switches", async () => {
     await controlJson(telegramOrigin, "/__control/reset", {});
     await controlJson(slackOrigin, "/__control/reset", {});
@@ -139,7 +139,7 @@ describe("Messaging E2E", () => {
     await expect.element(telegramSwitch).toHaveAttribute("aria-checked", "true");
   });
 
-  // spec/app/telegram/auth.md, "Story: Sign in to my Telegram user account"; spec/app/telegram/index.md, "Story: Browse and search my Telegram chats"; spec/app/telegram/composer.md, "Story: Draft and send Telegram messages under my sole authority"; spec/app/telegram/notices.md, "Story: Hear about incoming Telegram messages without noise"
+  // spec/app/telegram/auth.md, "Story: Sign in to my Telegram user account"; spec/app/telegram/index.md, "Story: Browse and search my Telegram chats"; spec/app/telegram/composer.md, "Story: Draft and send Telegram messages under my sole authority"; spec/app/telegram/notices.md, "Story: Hear about new Telegram messages without noise"
   it("Telegram full UI E2E", async () => {
     await controlJson(telegramOrigin, "/__control/reset", {});
     const { alpha } = await openMessagingAlpha();

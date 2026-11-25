@@ -5,7 +5,11 @@ import { extract } from "@antithesishq/bombadil/browser";
 const slackSurface = extract(({ document }) => {
   const text = document.body.textContent ?? "";
   const admitsBotToken = /\bxoxb-[a-z0-9-]+\b/i.test(text);
-  const consentShown = text.includes("Connect Slack workspace") || text.includes("Slack user permissions");
+  const consentShown = document.querySelector('[data-alpha-slack-auth][data-alpha-sensitive="true"]') !== null
+    || text.includes("Review Slack user scopes")
+    || text.includes("Continue in Slack")
+    || text.includes("Connect Slack")
+    || text.includes("Add Slack workspace");
   const askSendEnabled = [...document.querySelectorAll<HTMLButtonElement>("section[aria-label='Ask Alpha'] button")]
     .some((button) => (button.getAttribute("aria-label") ?? button.textContent) === "Send" && !button.disabled);
   return { admitsBotToken, consentShown, askSendEnabled };

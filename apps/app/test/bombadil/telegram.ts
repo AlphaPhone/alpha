@@ -4,8 +4,14 @@ import { extract } from "@antithesishq/bombadil/browser";
 
 const telegramSurface = extract(({ document }) => {
   const text = document.body.textContent ?? "";
-  const hasBotTokenPrompt = /\b(bot\s+token|botfather)\b/i.test(text);
-  const authShown = text.includes("Sign in to Telegram") || text.includes("Enter verification code") || text.includes("Two-factor password");
+  const withoutDisclaimers = text.replace(/\bno\s+bot\s+token\b|\bbot\s+tokens?\s+are\s+not\s+supported\b/gi, "");
+  const hasBotTokenPrompt = /\b(bot\s+token|botfather)\b/i.test(withoutDisclaimers)
+    || [...document.querySelectorAll<HTMLInputElement | HTMLTextAreaElement>("input, textarea")]
+      .some((el) => /\b(bot\s+token|botfather)\b/i.test(`${el.placeholder} ${el.getAttribute("aria-label") ?? ""}`));
+  const authShown = document.querySelector('[data-alpha-telegram-auth][data-alpha-sensitive="true"]') !== null
+    || text.includes("Sign in to Telegram")
+    || text.includes("Enter verification code")
+    || text.includes("Two-factor password");
   const askSendEnabled = [...document.querySelectorAll<HTMLButtonElement>("section[aria-label='Ask Alpha'] button")]
     .some((button) => (button.getAttribute("aria-label") ?? button.textContent) === "Send" && !button.disabled);
   return { hasBotTokenPrompt, authShown, askSendEnabled };

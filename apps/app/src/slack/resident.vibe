@@ -8,10 +8,6 @@ import * as Auth from "../../gen/app__slack__auth.effect.vibe"
 import * as Workspaces from "../../gen/app__slack.effect.vibe"
 import * as Preferences from "../../gen/app__settings__preferences.effect.vibe"
 import {
-  type SlackAgentRequest,
-  type SlackAgentResult,
-  type SlackAmbientMessage,
-  type SlackAmbientSnapshot,
   executeSlackAgentRequest,
   slackAgent,
   slackAmbientSnapshot,
@@ -24,21 +20,12 @@ import { SlackLedger, channelTitleOf, slackLedger } from "./ledger.vibe"
 import { slackNotices } from "./notices.vibe"
 import { slackWorkspaces } from "./workspaces.vibe"
 
-export type { SlackAgentRequest, SlackAgentResult, SlackAmbientMessage, SlackAmbientSnapshot }
 export { executeSlackAgentRequest, slackAmbientSnapshot }
 
 /** One preview row shown on the Home `SlackCard`. */
-export interface SlackHomeRow {
+interface SlackHomeRow {
   readonly title: string
   readonly detail: string
-}
-
-/** Snapshot read by Home's `SlackCard` for the active Slack workspace. */
-export interface SlackHomeCard {
-  readonly standing: Workspaces.Standing
-  readonly unread: number
-  readonly mentions: number
-  readonly rows: ReadonlyArray<SlackHomeRow>
 }
 
 function waitingLabel(said: Workspaces.Attention): string | undefined {

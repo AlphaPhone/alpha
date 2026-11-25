@@ -1,5 +1,6 @@
 // spec/app/slack/notices.md, "Story: Hear about Slack DMs, mentions and thread replies per workspace"
 import * as Toasts from "../../gen/app__notices__toasts.effect.vibe"
+import { Machine as Shell, showing } from "../../gen/app__shell.effect.vibe"
 import { Said, say } from "../notices/toasts.vibe"
 import type { MessagingSessions } from "../platform/messaging.vibe"
 import { type SlackEventEnvelope, type SlackMessage, Slack } from "../platform/slack.vibe"
@@ -196,6 +197,10 @@ effect function openSlackTarget(target: Target): void!!(Workspaces.Machine | Con
   const compState = try composer.get()
   if (Composer.canOpenTarget(compState, target.workspace, target.channel, target.threadTs, "Device")) {
     try contained(composer.send({ type: "openTarget", workspace: target.workspace, channel: target.channel, threadTs: target.threadTs }, "Device"), "Slack notice open composer")
+  }
+  const shellOpt = try Effect.serviceOption(Shell)
+  if (Option.isSome(shellOpt) && !showing(try shellOpt.value.get(), "Slack")) {
+    try contained(shellOpt.value.send({ type: "openView", view: "Slack" }), "open Slack from notice")
   }
 }
 

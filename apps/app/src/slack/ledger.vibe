@@ -35,7 +35,7 @@ export interface PendingOAuth {
 }
 
 /** Stored metadata for one posted Slack notification. */
-export interface SlackNoticeRecord {
+interface SlackNoticeRecord {
   readonly key: string
   readonly workspace: number
   readonly channel: number
@@ -46,7 +46,7 @@ export interface SlackNoticeRecord {
 }
 
 /** Pending payload for an Ask Alpha mutation awaiting owner approval on a specific revision. */
-export interface PendingAgentMutation {
+interface PendingAgentMutation {
   readonly turn: number
   readonly workspace: number
   readonly channel: number

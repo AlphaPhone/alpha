@@ -34,7 +34,7 @@ import { useState, useSyncExternalStore } from "react";
 import type { Machine as WorkspacesMachine, Section } from "../../gen/app__slack.effect.vibe";
 import { useMachine as useWorkspaces } from "../../gen/app__slack.react.ts";
 import type { Machine as AgentMachine } from "../../gen/app__slack__agent.effect.vibe";
-import type { Machine as AuthMachine, Trouble } from "../../gen/app__slack__auth.effect.vibe";
+import { type Machine as AuthMachine, type Trouble, sensitive } from "../../gen/app__slack__auth.effect.vibe";
 import { useMachine as useAuth } from "../../gen/app__slack__auth.react.ts";
 import type { Machine as ComposerMachine } from "../../gen/app__slack__composer.effect.vibe";
 import { useMachine as useComposer } from "../../gen/app__slack__composer.react.ts";
@@ -128,9 +128,14 @@ function SlackAuthView({
   const troubleText = TROUBLE_MESSAGES[state.trouble];
   const pending = ledger.pendingOAuth();
 
+  const authAttrs = {
+    "data-alpha-slack-auth": state.step,
+    "data-alpha-sensitive": String(sensitive(state)),
+  };
+
   if (state.step === "ScopeConsent") {
     return (
-      <Screen title="Slack">
+      <Screen title="Slack" {...authAttrs}>
         <AuthStepFrame
           platform="Slack"
           title="Review Slack user scopes"
@@ -155,7 +160,7 @@ function SlackAuthView({
 
   if (state.step === "BrowserOAuth") {
     return (
-      <Screen title="Slack">
+      <Screen title="Slack" {...authAttrs}>
         <AuthStepFrame
           platform="Slack"
           title="Continue in Slack"
@@ -179,7 +184,7 @@ function SlackAuthView({
 
   if (state.step === "Exchanging") {
     return (
-      <Screen title="Slack">
+      <Screen title="Slack" {...authAttrs}>
         <AuthStepFrame
           platform="Slack"
           title="Verifying user token"
@@ -192,7 +197,7 @@ function SlackAuthView({
   }
 
   return (
-    <Screen title="Slack">
+    <Screen title="Slack" {...authAttrs}>
       <AuthStepFrame
         platform="Slack"
         title={hasExistingWorkspaces ? "Add Slack workspace" : "Connect Slack"}

@@ -5,9 +5,6 @@ import * as Auth from "../../gen/app__telegram__auth.effect.vibe"
 import * as Conversation from "../../gen/app__telegram__conversation.effect.vibe"
 import { contained, together } from "../runtime/reactor.vibe"
 import {
-  type TelegramAgentRequest,
-  type TelegramAgentResult,
-  type TelegramAmbientSnapshot,
   executeTelegramAgentRequest,
   readTelegramAmbientSnapshot,
   telegramAgent,
@@ -19,11 +16,10 @@ import { telegramConversation } from "./conversation.vibe"
 import { telegramNotices } from "./notices.vibe"
 import { TelegramStore, dialogTitle, isDialogMuted, telegramStore } from "./store.vibe"
 
-export type { TelegramAgentRequest, TelegramAgentResult, TelegramAmbientSnapshot }
 export { executeTelegramAgentRequest }
 
 /** Summary row rendered on Home's Telegram card. */
-export interface TelegramHomeCardRow {
+interface TelegramHomeCardRow {
   readonly chatId: number
   readonly peerKey: string
   readonly title: string
@@ -36,7 +32,7 @@ export interface TelegramHomeCardRow {
 }
 
 /** Snapshot supplied to Home's `TelegramCard`. */
-export interface TelegramHomeCardSnapshot {
+interface TelegramHomeCardSnapshot {
   readonly standing: Standing
   readonly unread: number
   readonly mentions: number
