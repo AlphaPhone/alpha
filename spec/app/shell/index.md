@@ -22,7 +22,7 @@ Home is the empty trail; the app showing is the last one on it. Ask Alpha
 rests as a bar, takes typing, opens as a sheet, or fills the screen.
 
 ```quint
-type View = Phone | Messages | Inbox | Calendar | Clock | Reminders | Browser | Camera | Photos | Maps | Notes | Contacts | Files | Workflows | Wallet | Settings
+type View = Phone | Messages | Inbox | Telegram | Slack | Calendar | Clock | Reminders | Browser | Camera | Photos | Maps | Notes | Contacts | Files | Workflows | Wallet | Settings
 type Detent = Bar | Typing | Sheet | Full
 type TextAsk = NoTextAsk | TextAskVisit({ ticket: int, prior: Detent, closing: bool })
 type Shell = { trail: List[View], drawer: bool, assistant: Detent, image: bool, contacts: bool, route: int, spokenRoute: int, textAsk: TextAsk, textAskThrough: int }

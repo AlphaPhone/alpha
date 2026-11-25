@@ -1,7 +1,7 @@
 // spec/app/assistant/index.md, "Story: Ask Alpha something"; spec/app/assistant/index.md, "Story: Stop a reply"; spec/app/assistant/chats.md, "Story: Find my conversations"; spec/app/assistant/composer.md, "Story: Send what I wrote"; spec/app/assistant/dock.md, "Focusing or tapping the composer on the bar opens Ask Alpha as a sheet"; spec/app/assistant/dock.md, "Inside an app other than the Browser, Ask Alpha at rest is the pill; Type raises it to typing, where the whole bar shows, and a swipe up from it opens the sheet"; spec/app/assistant/search.md, "Story: Search my conversations"; spec/app/assistant/reply.md, "Story: Hear a brief acknowledgment and still get the whole answer"; spec/app/assistant/reply.md, "A recognized tool block outside a fence becomes its card; inside a fence every line stays code"
 import {
-  Alert, AssistantCard, AssistantCardFrame, Button, AssistantConversation, AssistantGrabber, AssistantNoticeCard, AssistantPhotoPreview, ConfirmDialog, Sheet, SheetContent, SmsReviewCard, Textarea,
-  type AssistantAttachment, type AssistantComposerProps, type AssistantPull, type AssistantDraftNoticeProps, type AssistantTurnNoteProps,
+  Alert, AssistantCard, AssistantCardFrame, Button, AssistantConversation, AssistantGrabber, AssistantMessageDraftCard, AssistantNoticeCard, AssistantPhotoPreview, ConfirmDialog, Sheet, SheetContent, SmsReviewCard, Textarea,
+  type AssistantAttachment, type AssistantComposerProps, type AssistantPull, type AssistantDraftNoticeProps, type AssistantMessageProps, type AssistantTurnNoteProps,
 } from "@repo/ui";
 import { Effect, type ManagedRuntime } from "effect";
 import { FileText } from "lucide-react";
@@ -34,6 +34,7 @@ import { useMachine as useLayers } from "../../gen/app__shell__layers.react.ts";
 import { useMachine as useShell } from "../../gen/app__shell.react.ts";
 import { untimed } from "../runtime/reactor.vibe";
 import { acceptMailReview, MailQuestions, type MailQuestion } from "../inbox/mail-context.vibe";
+import { MessagingBridge, type MessagingBridgeApi, type MessagingDraftProposal } from "../messaging/bridge.vibe";
 import { home } from "../shell/shell.vibe";
 import { isCommsView } from "../shell/views.tsx";
 import { type MediaCard, MediaReview, namedReviewQuery, spokenText } from "./media-review.vibe";
@@ -45,7 +46,7 @@ import { Documents } from "../platform/documents.vibe";
 import { AttachmentSources, type AttachmentSourceRow } from "./AttachmentSources.tsx";
 import { AttachmentPicker, choosePickerRow, clearPickerChoice, importPickerFiles, openAttachmentPicker, pickSystemDocument, upPickerFolder, usePickerVolume } from "./attachment-picker.vibe";
 import { askComms, freedom, openChatSearch, restTyping } from "./assistant.vibe";
-import { contactChatActionsId } from "./contact-search.ts";
+import { contactChatActionsId } from "./contact-chat-id.ts";
 import { acceptedFiles, acceptedPhotos, attachmentAuthority, previewFile, removeFile, retireTranscript, sameBinding } from "./attachments.vibe";
 import { chip, type MessageActions, useHistorySheets, useMessageRows } from "./history.tsx";
 import { barHeight, ChatScrim, useSheetFollow } from "./follow.tsx";
@@ -64,7 +65,7 @@ import type { MapsCard } from "@elizaos/plugin-maps-client";
 import { type DictationKeyboard, type TalkStopReceipt, type VoiceKeyboard, useTalkKeyboard } from "../voice/useTalkKeyboard.ts";
 
 export interface AssistantProps {
-  runtime: ManagedRuntime.ManagedRuntime<ConversationMachine | AttachmentMachine | ChatsMachine | ComposerMachine | SearchMachine | ReplyMachine | DockMachine | ShellMachine | CommsMachine | CommsTargetServices | CommsBriefing | Talk | MailQuestions | LayersMachine | MediaReview | Documents | AttachmentPicker | Agent | Device | NoteStore | NotesMachine, unknown>;
+  runtime: ManagedRuntime.ManagedRuntime<ConversationMachine | AttachmentMachine | ChatsMachine | ComposerMachine | SearchMachine | ReplyMachine | DockMachine | ShellMachine | CommsMachine | CommsTargetServices | CommsBriefing | Talk | MailQuestions | MessagingBridge | LayersMachine | MediaReview | Documents | AttachmentPicker | Agent | Device | NoteStore | NotesMachine, unknown>;
   messageActions?: MessageActions;
   speech?: Pick<AssistantComposerProps, "onTalk" | "onDictate" | "showUnavailableTalk" | "voiceNotice"> & {
     voicePanel?: (onKeyboard: DictationKeyboard) => ReactNode;
@@ -394,6 +395,58 @@ function DockHandle({ dock, detent, compact, focusOnPointerOpen, field, gesture,
   );
 }
 
+function draftMessageCards(
+  drafts: ReadonlyArray<MessagingDraftProposal>,
+  bridge: MessagingBridgeApi,
+  runSend: (id: string) => void,
+  runOpen: (draft: MessagingDraftProposal) => void,
+): (AssistantMessageProps & { id: string })[] {
+  return drafts.map((draft) => ({
+    id: `messaging-draft-${draft.id}`,
+    author: "alpha",
+    text: "",
+    children: (
+      <AssistantMessageDraftCard
+        platform={draft.platform}
+        target={draft.target}
+        replyContext={draft.replyContext}
+        body={draft.body}
+        onBodyChange={(body) => bridge.editDraft(draft.id, body)}
+        status={draft.status}
+        error={draft.error}
+        settled={draft.settled}
+        onSend={() => runSend(draft.id)}
+        onOpenInApp={() => runOpen(draft)}
+        onDecline={() => bridge.declineDraft(draft.id)}
+      />
+    ),
+  }));
+}
+
+function useMessagingDrafts(
+  runtime: AssistantProps["runtime"],
+  shell: ReturnType<typeof useShell>,
+): (AssistantMessageProps & { id: string })[] {
+  const bridge = useMemo(() => runtime.runSync(MessagingBridge), [runtime]);
+  const store = useMemo(() => ({ subscribe: (listener: () => void) => bridge.subscribe(listener), snapshot: () => bridge.snapshot() }), [bridge]);
+  const snap = useSyncExternalStore(store.subscribe, store.snapshot, store.snapshot);
+  return draftMessageCards(
+    snap.drafts,
+    bridge,
+    (id) => { void runtime.runPromise(bridge.sendDraft(id)); },
+    (draft) => {
+      void runtime.runPromise(bridge.openDraftInApp(draft.id));
+      const openView = { type: "openView", view: draft.platform } as const;
+      if (shell.can(openView)) void shell.send(openView);
+    },
+  );
+}
+
+function useExternal<T>(store: { readonly subscribe: (listener: () => void) => () => void; readonly snapshot: () => T }): T {
+  const bound = useMemo(() => ({ subscribe: (listener: () => void) => store.subscribe(listener), snapshot: () => store.snapshot() }), [store]);
+  return useSyncExternalStore(bound.subscribe, bound.snapshot);
+}
+
 /** The route and draft that own the composer during a Talk-to-keyboard request. */
 function keyboardScope(runtime: AssistantProps["runtime"]): string | undefined {
   const held = runtime.runSyncExit(Effect.gen(function* () {
@@ -419,11 +472,10 @@ export function Assistant({ runtime, messageActions, speech, canReadAloud = fals
   const dock = useDock(runtime);
   const comms = useComms(runtime);
   const board = useMemo(() => runtime.runSync(Effect.map(Talk, (talk) => talk.board)), [runtime]);
-  const boardStore = useMemo(() => ({ subscribe: (listener: () => void) => board.subscribe(listener), snapshot: () => board.snapshot() }), [board]);
-  const seen = useSyncExternalStore(boardStore.subscribe, boardStore.snapshot);
+  const seen = useExternal(board);
   const mail = useMemo(() => runtime.runSync(MailQuestions), [runtime]);
-  const mailStore = useMemo(() => ({ subscribe: (listener: () => void) => mail.subscribe(listener), snapshot: () => mail.snapshot() }), [mail]);
-  const reviewed = useSyncExternalStore(mailStore.subscribe, mailStore.snapshot);
+  const reviewed = useExternal(mail);
+  const draftCards = useMessagingDrafts(runtime, shell);
   const acceptingMail = useRef<MailQuestion | undefined>(undefined);
   const sectionRef = useRef<HTMLElement>(null);
   const composerRef = useRef<HTMLTextAreaElement>(null);
@@ -605,18 +657,14 @@ export function Assistant({ runtime, messageActions, speech, canReadAloud = fals
   const textAsk = shell.state?.textAsk.tag === "TextAskVisit";
   const keptHeight = assistantDetent === "Sheet" && dock.state && dock.state.kept > 0 ? dock.state.kept : undefined;
   const openWithFocus = (focusField: boolean) => {
-    for (const ask of dockFocused(assistantDetent)) {
-      if (ask.tag === "Raise" && shell.can({ type: "raise", detent: ask.detent })) void shell.send({ type: "raise", detent: ask.detent });
-    }
+    for (const ask of dockFocused(assistantDetent)) if (ask.tag === "Raise" && shell.can({ type: "raise", detent: ask.detent })) void shell.send({ type: "raise", detent: ask.detent });
     if (focusField) composerRef.current?.focus();
   };
   const revealComposer = () => {
     const typing = { type: "raise", detent: "Typing" } as const;
     if (!shell.can(typing)) return;
     focusOnRevealRef.current = true;
-    void shell.send(typing).then((sent) => {
-      if (sent._tag === "Failure") focusOnRevealRef.current = false;
-    });
+    void shell.send(typing).then((sent) => { if (sent._tag === "Failure") focusOnRevealRef.current = false; });
   };
   const draftEditable = composer.can({ type: "edit", blank: false, long: false });
   const pullFromField = shell.state && browserFieldPull(shell.state, seen.typed === "", draftEditable);
@@ -667,7 +715,7 @@ export function Assistant({ runtime, messageActions, speech, canReadAloud = fals
           messages,
           holdMessage: open ? holdMessage : undefined,
           briefing: brief === "" ? undefined : <AssistantNoticeCard key={`briefing:${subject}`} title="Phone" detail={brief} />,
-          liveMessages: [...writingReply, ...failed, ...mediaCards, ...mediaNote, ...recordingSummary],
+          liveMessages: [...writingReply, ...draftCards, ...failed, ...mediaCards, ...mediaNote, ...recordingSummary],
           interim: open && shown.around === 0 && !talking.context.sensitive ? interim : undefined,
           position: { page: `${shown.chosen}/${shown.page.ticket}`, around: board.messageId(shown.around), earlier, later },
           visible: open,

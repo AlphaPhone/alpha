@@ -15,6 +15,7 @@ import { scene, type Scene } from "./fakes/scene.ts";
 import { savedKey, written } from "../src/home/saved.vibe";
 import { waiting } from "../src/home/waiting.vibe";
 import { fromAreas } from "../src/home/cards.vibe";
+import { MessagingBridge } from "../src/messaging/bridge.vibe";
 import { digestScope } from "../src/workflows/brief.vibe";
 import workflows from "../src/workflows/index.tsx";
 import type { NativeDigestScene, WorkflowsScene } from "./fakes/workflows.ts";
@@ -32,8 +33,8 @@ const pulled = (startY = 68, dx = 0) => drawn(() => {
   zone?.dispatchEvent(pointer("pointerdown", 100, startY));
   zone?.dispatchEvent(pointer("pointerup", 100 + dx, startY + 80));
 });
-const alphaApps = ["view:Inbox", "view:Calendar", "view:Browser", "view:Camera", "view:Photos", "view:Maps", "view:Notes", "view:Files", "view:Workflows", "view:Settings"];
-const homeOrder = ["view:Phone", "view:Messages", "view:Inbox", "view:Calendar", "view:Browser", "view:Camera", "view:Photos", "view:Maps", "view:Notes", "view:Contacts", "view:Files", "view:Workflows", "view:Settings"];
+const alphaApps = ["view:Inbox", "view:Telegram", "view:Slack", "view:Calendar", "view:Browser", "view:Camera", "view:Photos", "view:Maps", "view:Notes", "view:Files", "view:Workflows", "view:Settings"];
+const homeOrder = ["view:Phone", "view:Messages", "view:Inbox", "view:Telegram", "view:Slack", "view:Calendar", "view:Browser", "view:Camera", "view:Photos", "view:Maps", "view:Notes", "view:Contacts", "view:Files", "view:Workflows", "view:Settings"];
 const holdingHome = (world: Scene) => {
   world.settings.roles = world.settings.roles.map((role) => role.role === "home" ? { ...role, held: true, holders: ["ai.alphacompute.alphaphone"] } : role);
   return world;
@@ -66,9 +67,14 @@ describe("Home on a phone", () => {
     await until(alpha, homes, Home.Machine, (h) => h.host === "AsLauncher" && h.tiles.load.status === "Loaded");
     expect([tiles(), Boolean(button("Apps"))]).toEqual([alphaApps, true]);
 
-    // spec/app/home/tiles.md, "Only Phone, Messages and Inbox carry a badge, only when something waits there, and no tile does while Home is being edited"
-    await drawn(() => { waiting.tell("Inbox", "3 unread"); waiting.tell("Notes", "1 shared"); });
-    expect([button("Inbox3 unread") !== undefined, button("Notes") !== undefined]).toEqual([true, true]);
+    // spec/app/home/tiles.md, "Only Phone, Messages, Inbox, Telegram and Slack carry a badge, only when something waits there, and no tile does while Home is being edited"
+    await drawn(() => {
+      waiting.tell("Inbox", "3 unread");
+      waiting.tell("Telegram", "2 unread");
+      waiting.tell("Slack", "1 mention");
+      waiting.tell("Notes", "1 shared");
+    });
+    expect([button("Inbox3 unread") !== undefined, button("Telegram2 unread") !== undefined, button("Slack1 mention") !== undefined, button("Notes") !== undefined]).toEqual([true, true, true, true]);
 
     // spec/app/home/index.md, "A long press on bare Home starts editing, only on the phone and once the tiles are read"
     await drawn(() => button("Notes")?.dispatchEvent(pointer("pointerdown", 80, 330)));
@@ -262,7 +268,16 @@ describe("Home on a phone", () => {
     // spec/app/home/cards.md, "Under an overdue reminder the card also names the next item that is not overdue, so the reminder never hides it"
     expect(agenda()?.textContent).toMatch(/^Overdue reminderCall the bank.*Standup/);
 
-    // spec/app/home/cards.md, "A card opens its app: the agenda Calendar, Messages and Phone their own, mail Inbox, the brief and Workflows Workflows; the agenda asks its calendar again if the last read did not succeed"
+    // spec/app/home/cards.md, "The Telegram and Slack cards show unread and mention counts with up to two preview rows, marked not up to date when stale, and are not drawn when disconnected or with nothing unread"
+    const bridge = alpha.runtime.runSync(MessagingBridge);
+    await drawn(() => {
+      bridge.publishHomeCard("Telegram", { connected: true, unread: 2, mentions: 1, rows: [{ title: "Alex", detail: "See you at 5" }], current: true });
+      bridge.publishHomeCard("Slack", { connected: true, unread: 0, mentions: 0, rows: [{ title: "#design", detail: "Quiet" }], current: true });
+    });
+    expect(Boolean(button("Open Telegram: Telegram · 2 unread · 1 @"))).toBe(true);
+    expect(Boolean(button("Open Slack: Slack · 0 unread"))).toBe(false);
+
+    // spec/app/home/cards.md, "A card opens its app: the agenda Calendar, Messages and Phone their own, mail Inbox, Telegram and Slack their own, the brief and Workflows Workflows; the agenda asks its calendar again if the last read did not succeed"
     await drawn(() => agenda()?.click());
     await until(alpha, alpha.runtime, Shell, (s) => s.trail.at(-1) === "Calendar");
     await drawn(() => { fromAreas.reminders([]); fromAreas.hidden([]); });
@@ -358,13 +373,13 @@ describe("Home on a phone", () => {
     });
     expect(card("Morning brief")?.textContent).toBe("Morning briefInbox sweepSome unavailable");
 
-    // spec/app/home/cards.md, "The row holds the agenda, Messages, Phone, Workflows, mail and brief cards in that order, each only when drawn, and is not drawn when none is"
+    // spec/app/home/cards.md, "The row holds the agenda, Messages, Phone, Workflows, mail, Telegram, Slack and brief cards in that order, each only when drawn, and is not drawn when none is"
     expect([...document.querySelectorAll("section[aria-label='Your day'] > button")].map((found) => ["Messages", "Morning brief", "4 unread", "Latest brief"].find((title) => found.textContent?.startsWith(title) || found.getAttribute("aria-label")?.startsWith(`Open ${title}`)))).toEqual(["Messages", "Morning brief", "4 unread", "Latest brief"]);
 
     await drawn(() => { fromAreas.messages([]); fromAreas.mail({ connected: false, unread: 0, rows: [], current: false }); fromAreas.flows({ rows: [], freshness: "UpToDate" }); fromAreas.brief(undefined); });
     expect(document.querySelector("section[aria-label='Your day']")).toBeNull();
 
-    // spec/app/home/cards.md, "A card opens its app: the agenda Calendar, Messages and Phone their own, mail Inbox, the brief and Workflows Workflows; the agenda asks its calendar again if the last read did not succeed"
+    // spec/app/home/cards.md, "A card opens its app: the agenda Calendar, Messages and Phone their own, mail Inbox, Telegram and Slack their own, the brief and Workflows Workflows; the agenda asks its calendar again if the last read did not succeed"
     await drawn(() => fromAreas.mail(mail));
     await pressCard("4 unread");
     await showing("Inbox");

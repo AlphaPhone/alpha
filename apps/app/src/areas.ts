@@ -39,6 +39,8 @@ export const mounts: readonly Mount[] = [
   at("view:Maps", () => import("./maps/index.tsx")),
   at("view:Phone", () => import("./phone/index.tsx")),
   at("view:Messages", () => import("./messages/index.tsx")),
+  at("view:Telegram", () => import("./telegram/index.tsx")),
+  at("view:Slack", () => import("./slack/index.tsx")),
   at("view:Contacts", () => import("./contacts/index.tsx")),
   at("view:Clock", () => import("./clock/index.tsx")),
   at("view:Reminders", () => import("./reminders/index.tsx")),
@@ -57,4 +59,5 @@ export const mounts: readonly Mount[] = [
   at("view:Browser", () => import("./browser/index.tsx")),
   at("view:Wallet", () => import("./wallet/index.tsx")),
   at("settings/voice", () => import("./assistant/settingsVoice.tsx")),
+  at("settings/notification-collection", () => import("./notices/SettingsCollection.tsx")),
 ];

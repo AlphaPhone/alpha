@@ -9,8 +9,10 @@ import * as Network from "../gen/app__settings__network.effect.vibe";
 import * as Prefs from "../gen/app__settings__preferences.effect.vibe";
 import * as Reset from "../gen/app__settings__reset.effect.vibe";
 import * as Pages from "../gen/app__settings.effect.vibe";
+import { Machine as Home } from "../gen/app__home.effect.vibe";
 import { Machine as Shell } from "../gen/app__shell.effect.vibe";
 import * as Layers from "../gen/app__shell__layers.effect.vibe";
+import home from "../src/home/index.tsx";
 import settings from "../src/settings/index.tsx";
 import { button, closeAll, drawn, fill, hardware, later, only, open as openAlpha, press, seen, underAct, until } from "./alpha.tsx";
 import { account, checkoutSession, checkoutUrl, type CheckoutScene } from "./fakes/cloud.ts";
@@ -30,7 +32,7 @@ const fetchWithNotices: typeof fetch = (input, init) => {
 };
 vi.stubGlobal("fetch", fetchWithNotices);
 
-const open = (world: Scene) => openAlpha(world, only("home", "view:Settings", "settings/phone", "settings/activity", "overlay"));
+const open = (world: Scene) => openAlpha(world, only("home", "view:Settings", "settings/phone", "settings/activity", "settings/notification-collection", "overlay"));
 
 /** The row, switch or choice whose title is `title`, as a person reads it: a row's title, never its value beside it. */
 const titled = (title: string) => [...document.querySelectorAll<HTMLElement>("button, label")].find((found) => found.querySelector("span > span")?.textContent === title);
@@ -48,6 +50,8 @@ const page = (alpha: Awaited<ReturnType<typeof open>>["alpha"]) => alpha.runtime
 /** Alpha on a phone, its Settings open at the first page with the phone's facts read. */
 async function settingsOpen(world = { ...scene(), phone: true }) {
   const running = await open(world);
+  await until(running.alpha, home.runtime(running.alpha), Home, (state) => state.tiles.load.status === "Loaded");
+  await vi.waitFor(() => expect(button("Settings")).toBeDefined(), { timeout: 15_000 });
   await press("Settings");
   await until(running.alpha, running.alpha.runtime, Shell, (s) => s.trail.at(-1) === "Settings");
   const machines = settings.runtime(running.alpha);
@@ -280,6 +284,35 @@ describe("Settings", () => {
     });
   });
 
+  it("Review notification collection and choose apps (spec/app/notices/collection.md, \"Story: Manage collection in Settings\")", async () => {
+    const { world } = await settingsOpen();
+    await press("General");
+    await tap("Notifications");
+    await vi.waitFor(() => expect(titled("Other apps’ notifications")).toBeDefined());
+    await tap("Other apps’ notifications");
+    expect(world.settings.mirror.enabled).toBe(false);
+    await press("Turn on");
+    await vi.waitFor(() => expect(world.settings.mirror.enabled).toBe(true));
+    await vi.waitFor(() => expect(titled("Choose notification apps")?.hasAttribute("disabled")).toBe(false));
+    await tap("Choose notification apps");
+    await press("Add News reader");
+    await vi.waitFor(() => expect(world.settings.mirror.apps).toEqual([{
+      packageName: "example.reader", label: "News reader", preview: false, available: true,
+    }]));
+    await vi.waitFor(() => expect(titled("Keep notification history")).toBeDefined());
+    await tap("Keep notification history");
+    await press("Turn on");
+    await vi.waitFor(() => expect(world.settings.mirror.history).toBe(true));
+    world.settings.mirrorHistory.push({ id: "old", appLabel: "Reading archive", at: 1000, state: "Posted" });
+    await vi.waitFor(() => expect(titled("View history")).toBeDefined());
+    await tap("View history");
+    await vi.waitFor(() => expect(document.body.textContent).toContain("Reading archive"));
+    await tap("Clear history");
+    await press("Clear");
+    await vi.waitFor(() => expect(document.body.textContent).not.toContain("Reading archive"));
+    expect(world.settings.mirrorHistory).toEqual([]);
+  });
+
   it("Manage saved passwords and choose Android autofill (spec/app/settings/facts.md, \"Story: Manage my saved passwords\"; spec/app/settings/android.md, \"Story: Change what only Android can change\")", async () => {
     const { alpha, machines, world } = await settingsOpen();
     await press("Apps");
@@ -390,11 +423,11 @@ describe("Settings", () => {
       pauseReply: pause.promise,
       openSettings: false,
     };
-    const stock = await settingsOpen({ ...scene(), phone: true });
+    await settingsOpen({ ...scene(), phone: true });
     await press("Privacy");
     await vi.waitFor(() => expect(button("Permissions")).toBeDefined());
     expect(button("Listening settings")).toBeUndefined();
-    await stock.close();
+    await closeAll();
 
     const world = { ...scene(), phone: true, image: true };
     world.settings.listener = listener;
@@ -493,14 +526,17 @@ describe("Settings", () => {
     await press("Privacy");
     await tap("Recover device settings");
     await press("Recover");
-    // spec/app/settings/preferences.md, "A new phone lets Alpha act without asking first, load images in Inbox, use its location and the Browser page open, and change Gmail and Calendar"
-    await until(alpha, alpha.runtime, Prefs.Machine, (s) => s.document.read.status === "Loaded" && Prefs.allows(s, "BrowserPage") && !Prefs.asksBeforeActing(s, "WebAction") && s.images);
+    // spec/app/settings/preferences.md, "A new phone lets Alpha act without asking first, load images in Inbox, use its location, the Browser page open, and Telegram or Slack screen context, and change Gmail and Calendar"
+    await until(alpha, alpha.runtime, Prefs.Machine, (s) => s.document.read.status === "Loaded" && Prefs.allows(s, "BrowserPage") && Prefs.allows(s, "TelegramContext") && Prefs.allows(s, "SlackContext") && !Prefs.asksBeforeActing(s, "WebAction") && s.images);
     // spec/app/settings/preferences.md, "The owner changes Ask before Alpha acts, Load images or what Alpha may share only once the phone has read them, one save at a time, with ten seconds to save"
     await tap("Ask before Alpha acts");
     await until(alpha, alpha.runtime, Prefs.Machine, (s) => s.saving.read.status === "Loaded" && Prefs.asksBeforeActing(s, "WebAction"));
     await tap("Browser page for Alpha");
     await until(alpha, alpha.runtime, Prefs.Machine, (s) => s.saving.read.status === "Loaded" && !Prefs.allows(s, "BrowserPage"));
-    expect(JSON.parse(localStorage.getItem("alpha.preferences") ?? "{}")).toEqual({ askFirst: true, images: true, shares: ["AgentLocation", "GmailChanges", "CalendarEdits"] });
+    // spec/app/settings/preferences.md, "Alpha shares the phone's location, the Browser page open, or Telegram or Slack screen context with a chat turn, and changes Gmail or Calendar, only when the phone read that the owner allowed it"
+    await tap("Telegram screen");
+    await until(alpha, alpha.runtime, Prefs.Machine, (s) => s.saving.read.status === "Loaded" && !Prefs.allows(s, "TelegramContext"));
+    expect(JSON.parse(localStorage.getItem("alpha.preferences") ?? "{}")).toEqual({ askFirst: true, images: true, shares: ["AgentLocation", "GmailChanges", "CalendarEdits", "SlackContext"] });
     await tap("Gmail changes");
     await until(alpha, alpha.runtime, Prefs.Machine, (s) => s.saving.read.status === "Loaded" && !Prefs.allows(s, "GmailChanges"));
     await vi.waitFor(() => expect(world.settings.consents).toEqual([
@@ -512,7 +548,7 @@ describe("Settings", () => {
     await until(alpha, alpha.runtime, Prefs.Machine, (s) => s.saving.read.status === "Failed" && s.notice === "NotSaved");
     const refused = await alpha.runtime.runPromise(Prefs.Machine.use((prefs) => prefs.get()));
     expect([Prefs.allows(refused, "CalendarEdits"), refused.agentGoogle]).toEqual([true, { tag: "Consents", gmailChanges: false, calendarEdits: true }]);
-    expect(JSON.parse(localStorage.getItem("alpha.preferences") ?? "{}")).toEqual({ askFirst: true, images: true, shares: ["AgentLocation", "CalendarEdits"] });
+    expect(JSON.parse(localStorage.getItem("alpha.preferences") ?? "{}")).toEqual({ askFirst: true, images: true, shares: ["AgentLocation", "CalendarEdits", "SlackContext"] });
     const toldBefore = world.settings.told;
     await tap("Location for Alpha");
     await until(alpha, alpha.runtime, Prefs.Machine, (s) => s.saving.read.status === "Loaded" && !Prefs.allows(s, "AgentLocation"));
@@ -536,7 +572,7 @@ describe("Settings", () => {
     answer();
     await until(alpha, alpha.runtime, Prefs.Machine, (s) => s.document.read.status === "Loaded" && Prefs.allows(s, "GmailChanges"));
     expect([JSON.parse(localStorage.getItem("alpha.preferences") ?? "{}"), world.settings.consents.at(-1)])
-      .toEqual([{ askFirst: true, images: true, shares: ["CalendarEdits", "GmailChanges"] }, { gmailChanges: true, calendarEdits: true }]);
+      .toEqual([{ askFirst: true, images: true, shares: ["CalendarEdits", "SlackContext", "GmailChanges"] }, { gmailChanges: true, calendarEdits: true }]);
   });
 
   it("A consent the host refused after a read is told again at the next read (spec/app/settings/preferences.md, \"Story: Decide whether Alpha asks before it acts\")", async () => {
@@ -575,7 +611,7 @@ describe("Settings", () => {
     await later(alpha, 0);
     await vi.waitFor(() => expect(world.settings.consents.at(-1)).toEqual({ gmailChanges: false, calendarEdits: true }));
     await vi.waitFor(() => expect(world.settings.told).toBe(told + 3));
-    expect(JSON.parse(localStorage.getItem("alpha.preferences") ?? "{}")).toEqual({ askFirst: false, images: true, shares: ["AgentLocation", "BrowserPage", "CalendarEdits"] });
+    expect(JSON.parse(localStorage.getItem("alpha.preferences") ?? "{}")).toEqual({ askFirst: false, images: true, shares: ["AgentLocation", "BrowserPage", "CalendarEdits", "TelegramContext", "SlackContext"] });
     // spec/app/settings/preferences.md, "The agent is launched allowed to change Gmail and Calendar exactly as the phone last read or saved, allowed neither once it could not read them, and Alpha says nothing of it before the first answer": a save holds the host past both ten-second limits while the consent of the read that gave up waits its turn, so the host is told neither, and the next read tells it what the save kept.
     world.settings.consentGate = new Promise((resolve) => { answer = resolve; });
     told = world.settings.told;
@@ -587,7 +623,7 @@ describe("Settings", () => {
     expect(world.settings.told).toBe(told + 1);
     answer();
     await vi.waitFor(() => expect(world.settings.consents.slice(-2)).toEqual([{ gmailChanges: true, calendarEdits: true }, { gmailChanges: false, calendarEdits: false }]));
-    expect(JSON.parse(localStorage.getItem("alpha.preferences") ?? "{}")).toEqual({ askFirst: false, images: true, shares: ["AgentLocation", "BrowserPage", "CalendarEdits", "GmailChanges"] });
+    expect(JSON.parse(localStorage.getItem("alpha.preferences") ?? "{}")).toEqual({ askFirst: false, images: true, shares: ["AgentLocation", "BrowserPage", "CalendarEdits", "TelegramContext", "SlackContext", "GmailChanges"] });
     await seen(false);
     await seen(true);
     await until(alpha, alpha.runtime, Prefs.Machine, (s) => s.document.read.status === "Loaded" && Prefs.allows(s, "GmailChanges"));
@@ -599,7 +635,7 @@ describe("Settings", () => {
     const { alpha } = await open({ ...scene(), phone: true });
     await until(alpha, alpha.runtime, Prefs.Machine, (s) => s.document.read.status === "Loaded");
     const adopted = await alpha.runtime.runPromise(Prefs.Machine.use((prefs) => prefs.get()));
-    expect([adopted.askFirst, adopted.images, adopted.shares]).toEqual([false, true, ["BrowserPage", "GmailChanges", "CalendarEdits"]]);
+    expect([adopted.askFirst, adopted.images, adopted.shares]).toEqual([false, true, ["BrowserPage", "GmailChanges", "CalendarEdits", "TelegramContext", "SlackContext"]]);
     expect(localStorage.getItem("alpha.preferences")).toBeNull();
   });
 
@@ -674,6 +710,22 @@ describe("Settings", () => {
     await press("Erase all data");
     await until(alpha, machines, Reset.Machine, (s) => s.said === "EraseUnavailable");
     expect([world.settings.reviews, (await machines.runPromise(Reset.Machine.use((reset) => reset.get()))).pending]).toEqual([[1, 2], false]);
+  });
+
+  it("Shows Carrier setup guidance on the web without exposing phone identifiers", async () => {
+    const { alpha } = await open(scene());
+    await press("Settings");
+    await press("General");
+    expect(button("Wi-Fi")).toBeUndefined();
+    expect(button("Default apps in Android")).toBeUndefined();
+    await drawn(() => titled("Carrier & SIM setup")?.focus());
+    await tap("Carrier & SIM setup");
+    await vi.waitFor(() => expect(document.body.textContent).toContain("Available only on an Android phone"));
+    expect(await page(alpha)).toBe("CarrierInfoPage");
+    expect(button("Show identifiers")).toBeUndefined();
+    expect(button("Android SIM settings")).toBeUndefined();
+    await hardware("back");
+    await vi.waitFor(() => expect(titled("Carrier & SIM setup")).toBe(document.activeElement));
   });
 
   it("Join a nearby network (spec/app/settings/network.md, \"Story: Join a nearby network\"; spec/app/settings/network.md, \"Story: See whether I am online\")", async () => {

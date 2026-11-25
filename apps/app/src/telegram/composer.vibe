@@ -1,0 +1,181 @@
+// spec/app/telegram/composer.md, "Story: Draft and send Telegram messages under my sole authority"
+import * as Auth from "../../gen/app__telegram__auth.effect.vibe"
+import * as Composer from "../../gen/app__telegram__composer.effect.vibe"
+import type { Actor, Effect as Out, Event } from "../../gen/app__telegram__composer.effect.vibe"
+import * as Conversation from "../../gen/app__telegram__conversation.effect.vibe"
+import type { MessagingSessions } from "../platform/messaging.vibe"
+import { Telegram } from "../platform/telegram.vibe"
+import { Attempts } from "../runtime/attempts.vibe"
+import { type Job, answer, contained, due, following, reacting, run, together, untimed } from "../runtime/reactor.vibe"
+import { reportSessionRevoked, resolveAuthedPeer } from "./auth.vibe"
+import {
+  TelegramStore,
+  currentSessionToken,
+  deleteChatDraft,
+  isRevokedFailure,
+  mergeTimeline,
+  messagingOutcomeOf,
+} from "./store.vibe"
+
+// spec/app/telegram/composer.md, "Only the owner's tap sends: Recorded before Sent, read-back only on Unknown, confirmed clears the draft"
+effect function recordSend(id: number, chat: number): Event!!(TelegramStore | Conversation.Machine | Attempts) {
+  const store = try TelegramStore
+  const peerKey = try store.peerKeyOf(chat)
+  const text = ((try store.get()).drafts.get(chat) ?? "").trim()
+  if (peerKey === undefined || text === "") return { type: "sendRecorded", id, ok: false }
+  const conv = try (try Conversation.Machine).get()
+  const replyToMsgId = conv.chat === chat && conv.replyTo > 0 ? conv.replyTo : undefined
+  const idempotencyKey = try (try Attempts).key(id)
+  try store.update((current) => ({
+    ...current,
+    pendingSend: { id, chat, peerKey, text, replyToMsgId, idempotencyKey },
+  }))
+  return { type: "sendRecorded", id, ok: true }
+}
+
+effect function dispatchSend(
+  id: number,
+  chat: number,
+): Event!!(Telegram | MessagingSessions | TelegramStore | Auth.Machine | Conversation.Machine) {
+  const token = try currentSessionToken()
+  const store = try TelegramStore
+  const pending = (try store.get()).pendingSend
+  if (Option.isNone(token) || pending === undefined || pending.id !== id || pending.chat !== chat) {
+    if (Option.isNone(token)) try reportSessionRevoked()
+    return { type: "sendAnswered", id, confirmed: false, known: true }
+  }
+  const res = (try Telegram).sendMessage(
+    token.value,
+    {
+      peer: pending.peerKey,
+      message: pending.text,
+      replyToMsgId: pending.replyToMsgId,
+      randomId: pending.idempotencyKey,
+    },
+    pending.idempotencyKey,
+  ) catch (failure) => ({ failed: failure })
+  if ("failed" in res) {
+    if (isRevokedFailure(res.failed)) try reportSessionRevoked()
+    const outcome = messagingOutcomeOf(res.failed)
+    if (outcome.known) try store.update((snap) => ({ ...snap, pendingSend: undefined }))
+    return { type: "sendAnswered", id, confirmed: outcome.confirmed, known: outcome.known }
+  }
+  try store.update((snap) => {
+    const nextHistory = new Map(snap.historyByPeer)
+    nextHistory.set(pending.peerKey, mergeTimeline(snap.historyByPeer.get(pending.peerKey) ?? [], [res.message]))
+    const nextDrafts = new Map(snap.drafts)
+    nextDrafts.delete(chat)
+    return {
+      ...snap,
+      historyByPeer: nextHistory,
+      drafts: nextDrafts,
+      pendingSend: undefined,
+      agentStagedDraft: snap.agentStagedDraft?.chat === chat ? undefined : snap.agentStagedDraft,
+      dialogs: snap.dialogs.map((dialog) => dialog.peer_key === pending.peerKey
+        ? { ...dialog, top_message: res.message.id, top_date: res.message.date }
+        : dialog),
+      pts: Math.max(snap.pts, res.pts),
+    }
+  })
+  const conv = try Conversation.Machine
+  if (Conversation.canClearReply(try conv.get())) {
+    try contained(conv.send({ type: "clearReply" }), "clear telegram reply target")
+  }
+  return { type: "sendAnswered", id, confirmed: true, known: true }
+}
+
+effect function readBackSend(
+  ticket: number,
+  id: number,
+  chat: number,
+): Event!!(Telegram | MessagingSessions | TelegramStore | Auth.Machine) {
+  const target = try resolveAuthedPeer(chat)
+  if (Option.isNone(target)) return { type: "readBackAnswered", ticket, ok: false, wasSent: false }
+  const { token, peerKey } = target.value
+  const store = try TelegramStore
+  const pending = (try store.get()).pendingSend
+  const res = (try Telegram).getHistory(token, peerKey, { limit: 20 }) catch (failure) => ({ failed: failure })
+  if ("failed" in res) {
+    if (isRevokedFailure(res.failed)) try reportSessionRevoked()
+    return { type: "readBackAnswered", ticket, ok: false, wasSent: false }
+  }
+  const wasSent = pending !== undefined && pending.id === id
+    && res.messages.some((msg) => msg.out && msg.message === pending.text)
+  try store.update((snap) => {
+    const nextHistory = new Map(snap.historyByPeer)
+    nextHistory.set(peerKey, mergeTimeline(snap.historyByPeer.get(peerKey) ?? [], res.messages))
+    const nextDrafts = new Map(snap.drafts)
+    if (wasSent) nextDrafts.delete(chat)
+    return { ...snap, historyByPeer: nextHistory, drafts: nextDrafts, pendingSend: undefined, pts: Math.max(snap.pts, res.pts) }
+  })
+  return { type: "readBackAnswered", ticket, ok: true, wasSent }
+}
+
+function carry(fx: Out): Job<Event, Telegram | MessagingSessions | TelegramStore | Auth.Machine | Conversation.Machine, [Actor]> {
+  return match (fx) {
+    when { tag: "SaveDraft", let chat, let author }: answer(
+      `save-draft ${chat}`,
+      effect {
+        if (author === "Nobody") try deleteChatDraft(chat)
+        return { type: "draftSaved" } satisfies Event
+      },
+      { type: "draftSaved" },
+      "Device",
+    );
+    when { tag: "DropDraft", let chat }: run(`drop-draft ${chat}`, asVoid(deleteChatDraft(chat)), "Device");
+    when { tag: "RecordSend", let id, let chat }: answer(
+      `record-send ${id}`,
+      recordSend(id, chat),
+      { type: "sendRecorded", id, ok: false },
+      "Device",
+    );
+    when { tag: "DispatchSend", let id, let chat }: answer(
+      `dispatch-send ${id}`,
+      dispatchSend(id, chat),
+      { type: "sendAnswered", id, confirmed: false, known: false },
+      "Device",
+    );
+    when { tag: "ReadBackSend", let ticket, let id, let chat }: answer(
+      `readback-send ${ticket}`,
+      readBackSend(ticket, id, chat),
+      { type: "readBackAnswered", ticket, ok: false, wasSent: false },
+      "Device",
+    );
+  }
+}
+
+const machine = reacting(Composer, {
+  keep: 1,
+  open: [{ type: "restart" }, "Device"],
+  carry,
+  timers: (state) => state.alphaUndo.holding === "Held"
+    ? [due("alpha-undo", state.alphaUndo.until, { type: "releaseUndo", now: untimed }, "Device")]
+    : [],
+})
+
+const authSync = following(
+  Auth.Machine,
+  (auth) => auth.step === "Authenticated",
+  Composer.Machine,
+  (authenticated): Event => ({ type: "sessionChanged", authenticated }),
+  "Device",
+)
+
+const chatSync = following(
+  Conversation.Machine,
+  (conv) => ({ chat: conv.chat, canPost: Conversation.composable(conv) }),
+  Composer.Machine,
+  ({ chat, canPost }): Event => chat > 0 ? { type: "openChat", chat, canPost } : { type: "closeChat" },
+  "Device",
+)
+
+const autoSave = following(
+  Composer.Machine,
+  (state) => Composer.canSaveDraft(state, "Device"),
+  Composer.Machine,
+  (shouldSave): Event | undefined => (shouldSave ? { type: "saveDraft" } : undefined),
+  "Device",
+)
+
+/** Telegram composer shell: per-chat drafts, Alpha draft provenance & undo, Owner-only idempotent send, and AP-16 split-stage bar. */
+export const telegramComposer = together(machine, authSync, chatSync, autoSave)

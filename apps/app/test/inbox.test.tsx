@@ -26,6 +26,11 @@ afterEach(closeAll);
 const opens = () => [...document.querySelectorAll<HTMLButtonElement>("ul[aria-label='Email messages'] button")];
 const subjectOf = (button: HTMLButtonElement) => button.querySelector("[data-inbox-subject]")?.textContent;
 const rows = () => opens().map(subjectOf);
+const tile = (view: string) => drawn(() => {
+  const found = document.querySelector<HTMLButtonElement>(`[data-home-tile='view:${view}']`);
+  if (!found) throw new Error(`no tile ${view}`);
+  found.click();
+});
 const row = (subject: string) => drawn(() => {
   const found = opens().find((open) => subjectOf(open) === subject);
   if (!found) throw new Error(`no message ${subject}`);
@@ -167,7 +172,7 @@ it("Star and mark the mail I reviewed (spec/app/inbox/sending.md, \"Story: Chang
   await until(alpha, runtime, List, (state) => state.chosen.length === subjects.length);
   await menu("Star", "Mail options");
   await until(alpha, runtime, Changes, (state) => state.review.showing && state.kind === "Star");
-  expect([...(document.querySelector("[role=alertdialog] ul")?.querySelectorAll("li") ?? [])].map((one) => one.textContent)).toEqual(expect.arrayContaining(subjects));
+  expect([...(document.querySelector("[role=alertdialog] ul")?.querySelectorAll("li") ?? [])].map((one) => one.textContent)).toEqual(expect.arrayContaining([...subjects]));
   expect(world.inbox.changes).toEqual([]);
   await confirm("Yes");
   await until(alpha, runtime, Changes, (state) => state.attempt.outcome === "Confirmed");

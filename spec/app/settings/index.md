@@ -34,8 +34,9 @@ through the [shell](../shell/). Messages is listed on an Alpha image.
 
 ### Settings is a small tree of pages, each with one parent
 
-General holds Display, Sound, Notifications, Battery and, on a phone,
-Network and Carrier & SIM setup, and on an Alpha image, Phone. Privacy
+General holds Display, Notifications and Carrier & SIM setup. On a phone
+it also offers Sound, Battery and Network, and on an Alpha image, Phone.
+In a browser the carrier page gives setup guidance without reading the phone. Privacy
 holds Permissions. Apps holds a page for each app with something to set:
 Inbox, Workflows, Calendar, Camera, Photos, Maps, Notes and Passwords. About holds
 Agent activity and the Licences. Developer and its Problem log hang from
@@ -44,12 +45,12 @@ the first page.
 ```quint
 import facts as F from "./facts"
 
-type Page = Top | General | Display | Sound | Notifications | Battery | NetworkPage | CarrierPage | PhonePage | Privacy | Permissions | Apps | InboxApp | WorkflowsApp | CalendarApp | CameraApp | PhotosApp | MapsApp | NotesApp | PasswordsPage | BrowserPasswordsPage | About | Activity | Licences | Developer | Problems
+type Page = Top | General | Display | Sound | Notifications | Battery | NetworkPage | CarrierPage | CarrierInfoPage | PhonePage | Privacy | Permissions | Apps | InboxApp | WorkflowsApp | CalendarApp | CameraApp | PhotosApp | MapsApp | NotesApp | PasswordsPage | BrowserPasswordsPage | About | Activity | Licences | Developer | Problems
 
 pure def passwordPage(page: Page): bool = page == PasswordsPage or page == BrowserPasswordsPage
 
 pure def parent(page: Page): Page =
-  if (page == Display or page == Sound or page == Notifications or page == Battery or page == NetworkPage or page == CarrierPage or page == PhonePage) General
+  if (page == Display or page == Sound or page == Notifications or page == Battery or page == NetworkPage or page == CarrierPage or page == CarrierInfoPage or page == PhonePage) General
   else if (page == Permissions) Privacy
   else if (page == InboxApp or page == WorkflowsApp or page == CalendarApp or page == CameraApp or page == PhotosApp or page == MapsApp or page == NotesApp or page == PasswordsPage) Apps
   else if (page == Activity or page == Licences) About
@@ -92,8 +93,9 @@ pure def refocused(places: List[int], focused: int): List[int] =
 ### The build says once whether it is a development build, and the phone whether Alpha runs on a phone and on an Alpha image
 
 The Developer page and its Problem log exist only in a development build,
-Network and Carrier & SIM setup only on a phone, which a browser is not,
-and the Phone page only on an Alpha image, which is a phone. What the build
+Network and the carrier identifiers only on a phone, and the carrier
+guidance without identifiers only in a browser. The Phone page is only on
+an Alpha image, which is a phone. What the build
 and the phone are never changes while Alpha runs. A development build is
 the development server or a build that allows test mocks
 ([platform](../platform/index.md)), opened with the explicit `?tools=1`
@@ -106,6 +108,7 @@ never shows the developer pages or their controls.
 pure def admitted(s: Settings, page: Page): bool =
   if (page == Developer or page == Problems) s.development
   else if (page == NetworkPage or page == CarrierPage) s.phone
+  else if (page == CarrierInfoPage) s.told and not(s.phone)
   else if (page == PhonePage) s.image
   else true
 
@@ -248,9 +251,10 @@ pure def sometimesProblemLogShowing(s: Settings): bool = s.page == Problems
 pure def sometimesPhonePageShowing(s: Settings): bool = s.page == PhonePage
 ```
 
-### Carrier & SIM setup and Phone are sensitive screens, only on a phone
+### The carrier identifiers and Phone are sensitive screens, only on a phone
 
-While either page shows, phone numbers and identifiers stay on the phone. Password manager is also sensitive on a phone, where it reports Android's autofill choice and takes the owner to Android's own provider selection.
+While either page shows, phone numbers and identifiers stay on the phone.
+The browser carrier page contains public setup guidance alone. Password manager is also sensitive on a phone, where it reports Android's autofill choice and takes the owner to Android's own provider selection.
 The assistant is told only that the screen is sensitive and admits
 nothing that acts on it ([assistant](../assistant/index.md)).
 

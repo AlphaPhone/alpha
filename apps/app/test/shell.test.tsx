@@ -187,7 +187,7 @@ describe("the shell", () => {
 
   // spec/app/shell/keyboard.md, "Story: Type without the page turning sideways"; spec/app/shell/keyboard.md, "Story: Read everything at the text size I chose"
   it("Keep layout consistent across resizes, large text, and backgrounding the composer (spec/app/shell/keyboard.md, \"Story: Type without the page turning sideways\"; spec/app/shell/keyboard.md, \"Story: Read everything at the text size I chose\")", async () => {
-    const { alpha } = await open(scene());
+    const { alpha } = await open({ ...scene(), phone: true });
     await until(alpha, alpha.runtime, Canvas, (c) => c.mounted);
 
     // spec/app/shell/keyboard.md, "From 150% text a list and its item take one pane each and Calendar shows its day as an agenda; below it, a list splits from a 1000-point canvas, and Calendar shows as many 240-point day columns as fit beside its 76-point times, widened with the text, at most seven"
@@ -197,16 +197,16 @@ describe("the shell", () => {
     await until(alpha, alpha.runtime, Canvas, (c) => c.canvasWidth === 1280 && c.split && c.days === 5);
     expect([document.documentElement.hasAttribute("data-alpha-split"), document.documentElement.hasAttribute("data-alpha-agenda")]).toEqual([true, false]);
 
-    await drawn(() => { document.documentElement.style.fontSize = "150%"; });
+    await drawn(() => { document.documentElement.style.fontSize = "24px"; });
     await until(alpha, alpha.runtime, Canvas, (c) => c.textScale === 150 && c.agenda && !c.split && c.days === 1);
     expect(["data-alpha-split", "data-alpha-agenda", "data-alpha-title-row"].map((mark) => document.documentElement.hasAttribute(mark))).toEqual([false, true, false]);
 
     // spec/app/shell/keyboard.md, "Above 150% text, larger than Alpha's own largest size, an app's header gives its title a row of its own under the way back and the screen's actions"
-    await drawn(() => { document.documentElement.style.fontSize = "300%"; });
+    await drawn(() => { document.documentElement.style.fontSize = "48px"; });
     await until(alpha, alpha.runtime, Canvas, (c) => c.textScale === 300);
     expect(document.documentElement.hasAttribute("data-alpha-title-row")).toBe(true);
 
-    await drawn(() => { document.documentElement.style.fontSize = "100%"; });
+    await drawn(() => { document.documentElement.style.fontSize = "16px"; });
     await until(alpha, alpha.runtime, Canvas, (c) => c.textScale === 100 && c.split && !c.agenda);
 
     // spec/app/shell/keyboard.md, "Alpha going to the background puts the composer away"

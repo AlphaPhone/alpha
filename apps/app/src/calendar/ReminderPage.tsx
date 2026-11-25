@@ -1,5 +1,5 @@
 // spec/app/calendar/index.md, "Story: See reminders among my events"; spec/app/reminders/index.md, "Story: Create, update, flag, move, complete and delete reminders with Undo"
-import type { ReminderItemRecord } from "@repo/launcher-records";
+import type { ReminderCompletion, ReminderItemRecord } from "@repo/launcher-records";
 import { Button, CalendarEventMenu, CalendarEventPage, CalendarEventRow, CalendarEventRows, cn } from "@repo/ui";
 import { Effect } from "effect";
 import { Bell, Repeat } from "lucide-react";
@@ -55,11 +55,12 @@ export function ReminderPage({ alpha, runtime, row, onBack }: { alpha: Alpha; ru
   const oneTime = record.recurrence === "none";
   const completion = record.completedAtMs;
   const kept = record.history ?? [];
-  const occurrences = record.completed && completion !== null && !kept.some((item) => item.completedAtMs === completion && item.dueAtMs === begin)
+  const occurrences: readonly ReminderCompletion[] = record.completed && completion !== null && !kept.some((item) => item.completedAtMs === completion && item.dueAtMs === begin)
     ? [...kept, { revision: record.revision, dueAtMs: begin, completedAtMs: completion }] : kept;
-  const history = occurrences.map(({ revision, completedAtMs, dueAtMs }, at) => (
+  const history = occurrences.map(({ revision, completedAtMs, dueAtMs, skippedDates }, at) => (
     <div key={revision} className={cn("text-caption text-muted-foreground", record.completed && at === 0 ? "mt-2.5" : "mt-2")}>
       {`Completed ${new Date(completedAtMs).toLocaleString()} · due ${new Date(dueAtMs).toLocaleString()}`}
+      {skippedDates ? ` · ${skippedDates} elapsed repeat dates skipped` : null}
     </div>
   ));
   const snoozed = !record.completed && record.notifiedAtMs === null && record.alertMinutes !== null && record.snoozedUntilMs !== null

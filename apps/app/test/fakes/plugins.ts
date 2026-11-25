@@ -16,7 +16,7 @@ import { telephonyPlugins } from "./telephony.ts";
 import { alphaDevice } from "./update.ts";
 import { alphaBrowser } from "./browser.ts";
 import { alphaVoiceCloud, elizaCloudSpeech, elizaSignIn } from "./voice.ts";
-import { alphaHostedDigests } from "./workflows.ts";
+import { alphaHostedDigests, workflowNoticesHost } from "./workflows.ts";
 
 /**
  * The plugins the fake phone's host registers, by the names their `@CapacitorPlugin` gives: one line per plugin, and
@@ -48,7 +48,10 @@ export function plugins(world: Scene, services: { readonly agent: Answering; rea
       if (world.checkout) world.checkout.returned = null;
       return Promise.resolve({ session });
     } }),
-    ElizaNotifications: elizaNotices(world.settings),
+    ElizaNotifications: (emit) => ({ ...elizaNotices(world.settings)(emit),
+      ...(world.workflows.nativeNotices === undefined ? {} : workflowNoticesHost(world.workflows.nativeNotices, () => world.signedIn
+        ? { kind: "owned", userId: world.notes.ownerIdentity, organizationId: "organization", agentId: world.notes.owner, epoch: 1 }
+        : { kind: "signedOut" })(emit)) }),
     ElizaPasswords: elizaPasswords(world.settings),
     AlphaConnection: alphaConnection(world.platform),
     ...(world.voice.onDevice ? { AlphaVoiceCloud: alphaVoiceCloud(world.voice) } : {}),

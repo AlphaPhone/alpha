@@ -232,7 +232,7 @@ describe("Alpha product plugin: Clock actions, provider, and routes", () => {
     const { runtime } = makeFakeRuntime();
     const { plugin } = createAlphaAppsPlugin({ store, timeZone: "UTC", runtime });
     expect(plugin.name).toBe(alphaAppsPluginName);
-    // spec/agent/index.md, "The launch names Home and every Alpha app but Notes as a view the agent may show, by the id the phone opens it by": the product plugin loads after eliza's views module, so Clock and Reminders are the launch's views, not the plugin's.
+    // spec/agent/index.md, "The launch names Home and every Alpha app but Notes and Browser as a view the agent may show, by the id the phone opens it by": the product plugin loads after eliza's views module, so Clock and Reminders are the launch's views, not the plugin's.
     expect(plugin.views).toBeUndefined();
 
     const alarmAction = plugin.actions!.find((a) => a.name === "CLOCK_ALARM")!;
@@ -439,6 +439,31 @@ describe("Alpha product plugin: Reminders actions, provider, recurrence, and rou
     }
   });
 
+  it("registers the Clock context for activity labels, marks read-only ops, and gives accurate parameter guidance", async () => {
+    const store = new AlphaAppsStore({ now: () => Date.UTC(2026, 10, 24, 14, 0, 0) });
+    const registeredContexts: unknown[] = [];
+    const { runtime } = makeFakeRuntime();
+    const { plugin } = createAlphaAppsPlugin({ store, timeZone: "UTC", runtime });
+    await plugin.init?.({}, { ...runtime, contexts: { tryRegister: (ctx: unknown) => { registeredContexts.push(ctx); } } } as never);
+    expect(registeredContexts).toContainEqual(expect.objectContaining({ id: "clock", label: "Clock" }));
+
+    const alarm = plugin.actions!.find((a) => a.name === "CLOCK_ALARM")!;
+    const timer = plugin.actions!.find((a) => a.name === "CLOCK_TIMER")!;
+    const world = plugin.actions!.find((a) => a.name === "CLOCK_WORLD")!;
+    const reminders = plugin.actions!.find((a) => a.name === "REMINDERS_MANAGE")!;
+
+    expect((await alarm.handler(runtime, emptyMessage("list alarms"), emptyState, { parameters: { action: "list" } }))?.data).toMatchObject({ readOnlyOperation: true });
+    expect((await timer.handler(runtime, emptyMessage("list timers"), emptyState, { parameters: { action: "list" } }))?.data).toMatchObject({ readOnlyOperation: true });
+    expect((await world.handler(runtime, emptyMessage("list cities"), emptyState, { parameters: { action: "list" } }))?.data).toMatchObject({ readOnlyOperation: true });
+    expect((await world.handler(runtime, emptyMessage("time in Tokyo"), emptyState, { parameters: { action: "time_in", city: "Tokyo" } }))?.data).toMatchObject({ readOnlyOperation: true });
+    expect((await reminders.handler(runtime, emptyMessage("list reminders"), emptyState, { parameters: { op: "list" } }))?.data).toMatchObject({ readOnlyOperation: true });
+
+    for (const act of [alarm, timer, world, reminders]) {
+      const idParam = act.parameters?.find((p) => p.name === "id");
+      expect(idParam?.description).not.toContain("context lists it");
+    }
+  });
+
   // spec/agent/index.md, "A reminder with a due time keeps one scheduled task, and the task follows what the owner does to the reminder"; spec/agent/index.md, "The page names the query values each gated route can receive"
   it("keeps each reminder's scheduled task following it, so a delete, completion or new time made in the app or in chat holds, and says so only when it does", async () => {
     const nowMs = Date.UTC(2026, 10, 24, 15, 0, 0);
@@ -557,5 +582,18 @@ describe("Alpha product plugin: Reminders actions, provider, recurrence, and rou
     const undo = await callRoute(routes, "POST", "/api/alpha/reminders/items/{id}/restore", { params });
     expect(undo.body.item).toMatchObject({ id: selected.id, dueDate: input.dueDate });
     expect((undo.body.item as ReminderItemRecord).history).toBeUndefined();
+  });
+
+  it("skips elapsed repeat dates while keeping the completed Saturday occurrence", async () => {
+    const now = Date.UTC(2027, 2, 15, 10, 30);
+    const store = new AlphaAppsStore({ now: () => now });
+    const routes = createAlphaAppsPlugin({ store, timeZone: "UTC" }).plugin.routes!;
+    const input = { title: "Bring a notebook", dueDate: "2027-03-13", dueMinute: 570, alertMinutes: 0, recurrence: "daily" };
+    const created = await callRoute(routes, "POST", "/api/alpha/reminders/items", { body: input });
+    const selected = created.body.item as ReminderItemRecord;
+    const completed = await callRoute(routes, "POST", "/api/alpha/reminders/items/{id}/complete", { params: { id: selected.id } });
+    expect(completed.body.item).toMatchObject({ id: selected.id, completed: false, dueDate: "2027-03-16", history: [
+      { revision: selected.revision, dueAtMs: Date.UTC(2027, 2, 13, 9, 30), completedAtMs: now, skippedDates: 2 },
+    ] });
   });
 });

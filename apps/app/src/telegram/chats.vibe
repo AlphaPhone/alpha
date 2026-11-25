@@ -1,0 +1,170 @@
+// spec/app/telegram/index.md, "Story: Browse and search my Telegram chats"
+import * as ChatList from "../../gen/app__telegram.effect.vibe"
+import type { Effect as Out, Event, Filter } from "../../gen/app__telegram.effect.vibe"
+import * as Auth from "../../gen/app__telegram__auth.effect.vibe"
+import * as Notices from "../../gen/app__telegram__notices.effect.vibe"
+import { waiting } from "../home/waiting.vibe"
+import type { MessagingSessions } from "../platform/messaging.vibe"
+import { Telegram } from "../platform/telegram.vibe"
+import { type Job, answer, contained, following, reacting, started, together, untimed } from "../runtime/reactor.vibe"
+import { reportSessionRevoked, runPeerMutation } from "./auth.vibe"
+import {
+  TelegramStore,
+  currentSessionToken,
+  isDialogMuted,
+  isRevokedFailure,
+  listFailureOf,
+  mergeEntities,
+  updateDialogNotify,
+} from "./store.vibe"
+
+// spec/app/telegram/index.md, "Only the newest read's answer is taken; revocation wipes cached data, offline failures keep what was on screen as stale"
+effect function readChats(
+  ticket: number,
+  tab: Filter,
+  folderId: number,
+  query: string,
+  cursor: number,
+): Event!!(Telegram | MessagingSessions | TelegramStore | Auth.Machine | Notices.Machine | ChatList.Machine) {
+  const token = try currentSessionToken()
+  if (Option.isNone(token)) {
+    try reportSessionRevoked()
+    return { type: "listed", ticket, answer: { tag: "ListErr", failure: "Revoked" } }
+  }
+  const store = try TelegramStore
+  const cursorStr = try store.cursorValue(cursor)
+  const client = try Telegram
+  if (query !== "") {
+    const found = client.searchGlobal(token.value, query, { cursor: cursorStr }) catch (failure) => failure
+    if (!("ok" in found)) {
+      if (isRevokedFailure(found)) try reportSessionRevoked()
+      return { type: "listed", ticket, answer: { tag: "ListErr", failure: listFailureOf(found) } }
+    }
+    for (const msg of found.messages) try store.chatIdOf(msg.peer_key)
+    const followingId = found.has_more && found.next_cursor !== "" ? try store.nextCursorId(found.next_cursor) : 0
+    try store.update((snap) => {
+      const entities = mergeEntities(snap, found.users, found.chats)
+      return {
+        ...snap,
+        ...entities,
+        searchMessages: cursor === 0 ? found.messages : [...snap.searchMessages, ...found.messages],
+      }
+    })
+    return {
+      type: "listed",
+      ticket,
+      answer: { tag: "ListOk", found: found.messages.length, following: followingId, unread: 0, mentions: 0, now: untimed },
+    }
+  }
+  const res = client.getDialogs(token.value, {
+    archived: tab === "ArchivedChats",
+    pinnedOnly: tab === "PinnedChats",
+    unreadOnly: tab === "UnreadChats",
+    folderId: tab === "FolderChat" ? folderId : undefined,
+    cursor: cursorStr,
+  }) catch (failure) => failure
+  if (!("ok" in res)) {
+    if (isRevokedFailure(res)) try reportSessionRevoked()
+    return { type: "listed", ticket, answer: { tag: "ListErr", failure: listFailureOf(res) } }
+  }
+  const notices = try Notices.Machine
+  for (const dialog of res.dialogs) {
+    const id = try store.chatIdOf(dialog.peer_key)
+    if (Notices.canMuteOrArchiveChanged(try notices.get(), id, isDialogMuted(dialog), dialog.archived)) {
+      try contained(notices.send({ type: "muteOrArchiveChanged", chat: id, isMuted: isDialogMuted(dialog), isArchived: dialog.archived }), "telegram mute sync")
+    }
+  }
+  const credRev = (try (try ChatList.Machine).get()).credentialRev
+  const followingId = res.has_more && res.next_cursor !== "" ? try store.nextCursorId(res.next_cursor) : 0
+  try store.update((snap) => {
+    const entities = mergeEntities(snap, res.users, res.chats)
+    const mergedDialogs = cursor === 0 ? res.dialogs : [...snap.dialogs, ...res.dialogs]
+    const nextHistory = new Map(snap.historyByPeer)
+    for (const msg of res.messages) {
+      const prior = nextHistory.get(msg.peer_key) ?? []
+      if (!prior.some((item) => item.id === msg.id)) nextHistory.set(msg.peer_key, [...prior, msg].sort((a, b) => a.id - b.id))
+    }
+    return {
+      ...snap,
+      ...entities,
+      dialogs: mergedDialogs,
+      savedDialogs: tab === "AllChats" && query === "" ? mergedDialogs : snap.savedDialogs,
+      savedCredentialRev: tab === "AllChats" && query === "" ? credRev : snap.savedCredentialRev,
+      folders: res.folders,
+      searchMessages: [],
+      historyByPeer: nextHistory,
+      pts: Math.max(snap.pts, res.pts),
+    }
+  })
+  const unread = res.dialogs.reduce((sum, dialog) => sum + (dialog.archived ? 0 : dialog.unread_count), 0)
+  const mentions = Math.min(unread, res.dialogs.reduce((sum, dialog) => sum + (dialog.archived ? 0 : dialog.unread_mentions_count), 0))
+  return {
+    type: "listed",
+    ticket,
+    answer: { tag: "ListOk", found: res.dialogs.length, following: followingId, unread, mentions, now: untimed },
+  }
+}
+
+// spec/app/telegram/index.md, "Muting or unmuting a chat runs as a once-only attempt"
+effect function setChatMute(
+  id: number,
+  chat: number,
+  muted: boolean,
+): Event!!(Telegram | MessagingSessions | TelegramStore | Auth.Machine | Notices.Machine) {
+  const muteUntil = muted ? 2147483647 : 0
+  const outcome = try runPeerMutation(
+    chat,
+    (client, token, peerKey) => client.updateNotifySettings(token, peerKey, muteUntil),
+    (res, peerKey) => asVoid(updateDialogNotify(peerKey, res.notify_settings)),
+  )
+  if (outcome.confirmed) {
+    const peerKey = try (try TelegramStore).peerKeyOf(chat)
+    const dialog = peerKey === undefined ? undefined : (try (try TelegramStore).get()).dialogs.find((item) => item.peer_key === peerKey)
+    const notices = try Notices.Machine
+    if (Notices.canMuteOrArchiveChanged(try notices.get(), chat, muted, dialog?.archived ?? false)) {
+      try contained(notices.send({ type: "muteOrArchiveChanged", chat, isMuted: muted, isArchived: dialog?.archived ?? false }), "telegram mute notice sync")
+    }
+  }
+  return { type: "muteAnswered", id, chat, muted, ok: outcome.confirmed, known: outcome.known }
+}
+
+function carry(fx: Out): Job<Event, Telegram | MessagingSessions | TelegramStore | Auth.Machine | Notices.Machine | ChatList.Machine, []> {
+  return match (fx) {
+    when { tag: "ReadChats", let ticket, let tab, let folderId, let query, let cursor }: answer(
+      "chats",
+      readChats(ticket, tab, folderId, query, cursor),
+      { type: "listed", ticket, answer: { tag: "ListErr", failure: "Unreachable" } },
+    );
+    when { tag: "SetMute", let id, let chat, let muted }: answer(
+      `mute ${id}`,
+      setChatMute(id, chat, muted),
+      { type: "muteAnswered", id, chat, muted, ok: false, known: false },
+    );
+  }
+}
+
+function waitingOf(att: ChatList.Attention): string | undefined {
+  if ((att.standing !== "Ready" && att.standing !== "Stale") || att.unread < 1) return undefined
+  return att.mentions > 0 ? `${att.unread} unread · ${att.mentions} @` : `${att.unread} unread`
+}
+
+const machine = reacting(ChatList, { keep: 1, open: [{ type: "restart" }], carry })
+
+const authSync = following(
+  Auth.Machine,
+  (auth) => ({ authenticated: auth.step === "Authenticated", credentialRev: auth.credentialRev }),
+  ChatList.Machine,
+  ({ authenticated, credentialRev }): Event | undefined => authenticated && credentialRev > 0
+    ? { type: "sessionAuthenticated", credentialRev }
+    : { type: "sessionEnded" },
+)
+
+const homeBadge = started(effect {
+  const list = try ChatList.Machine
+  try Stream.runForEach(list.changes, (state) => sync(() => {
+    waiting.tell("Telegram", waitingOf(ChatList.attention(state)))
+  }))
+}, "telegram home badge")
+
+/** Telegram chat list shell: filters, search, cursor pagination, mute attempts, and Home attention. */
+export const telegramChats = together(machine, authSync, homeBadge)

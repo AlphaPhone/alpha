@@ -10,6 +10,8 @@ rules.
 - [Assistant](./assistant/): Ask Alpha, its conversation, composer and cards
 - [Settings](./settings/): the phone's facts, preferences, agent activity and reset
 - [Inbox](./inbox/): Gmail's list, a message, drafts and the agent's operations
+- [Telegram](./telegram/): the owner's Telegram user account, chats, conversation, composer, notices and agent actions
+- [Slack](./slack/): the owner's Slack workspaces, channels, threads, composer, notices and agent actions
 - [Account](./account/): the agent as the owner sees it, signing in to Alpha Cloud and the session
 - [Notes](./notes/): the notes list, a note, the editor and what the agent may propose
 - [Calendar](./calendar/): the agenda of the phone's and the agent's calendars, an event, its form and reviewed writes

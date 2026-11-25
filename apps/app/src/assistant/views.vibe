@@ -66,7 +66,7 @@ interface SpokenView {
   readonly completed: Deferred.Deferred<void>
 }
 
-/** The id the launch declares Home by (spec/agent/index.md, "The launch names Home and every Alpha app but Notes as a view the agent may show, by the id the phone opens it by"). */
+/** The id the launch declares Home by (spec/agent/index.md, "The launch names Home and every Alpha app but Notes and Browser as a view the agent may show, by the id the phone opens it by"). */
 const homeViewId = "home"
 
 /** The place an agent's view id names: Home by its id, else the app of the same name, compared without its case, as the shell's own events name views. */
