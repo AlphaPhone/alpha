@@ -73,7 +73,9 @@ describe.each([["a browser", false], ["a phone", true]])("in %s", (_where, phone
     const attachmentText = '<strong data-attachment-fixture>Review agenda</strong>';
     for (let at = 10; at <= 30; at += 1) world.inbox.mail.push(letter(at, `Newsletter ${at}`, ["INBOX"]));
     const termSheet = world.inbox.mail.find(({ card }) => card.id === "g1");
-    if (!termSheet) throw new Error("Missing term sheet fixture");
+    const dinner = world.inbox.mail.find(({ card }) => card.id === "g3");
+    if (!termSheet || !dinner) throw new Error("Missing mailbox fixture");
+    dinner.card = { ...dinner.card, hasAttachments: false };
     termSheet.body += "\n\nThe data room is at https://northpoint.test/room";
     termSheet.files = [...termSheet.files, {
       partId: "2", name: "agenda.txt", mimeType: "text/plain", size: new TextEncoder().encode(attachmentText).byteLength, supported: true,
@@ -90,6 +92,14 @@ describe.each([["a browser", false], ["a phone", true]])("in %s", (_where, phone
     await until(alpha, runtime, List, (s) => s.list.status === "Loaded" && s.pages === 1);
     step("1");
     expect([rows().slice(0, 2), rows().length]).toEqual([["Revised term sheet", "Notes for the 3:00 review"], 25]);
+
+    // spec/app/inbox/index.md, "Only a card with a positive attachment hint shows a paperclip"
+    const attachmentBadge = (subject: string) => {
+      const message = opens().find((open) => subjectOf(open) === subject);
+      return [Boolean(message?.querySelector("svg.lucide-paperclip")), message?.textContent?.includes("Has attachments.")];
+    };
+    expect([attachmentBadge("Revised term sheet"), attachmentBadge("Dinner Friday?"), attachmentBadge("Standup notes")]).toEqual([[true, true], [false, false], [false, false]]);
+    expect(world.inbox.attachmentReads).toEqual([]);
 
     // spec/app/inbox/index.md, "More messages are read with the page cursor, which is given up as its page is asked"
     await press("Load more");
