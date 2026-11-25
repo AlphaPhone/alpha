@@ -13,6 +13,8 @@ import { scene } from "./fakes/scene.ts";
 underAct();
 afterEach(closeAll);
 
+const timerText = () => document.querySelector("[role='timer'][aria-label='Recording']")?.textContent;
+
 describe("Camera on a phone", () => {
   it("Frame the shot and take photos and videos (spec/app/camera/index.md, \"Story: Frame the shot\")", async () => {
     const world = { ...scene(), phone: true };
@@ -39,6 +41,14 @@ describe("Camera on a phone", () => {
     await until(alpha, runtime, Machine, (state) => state.mode === "Video");
     await press("Start recording");
     await until(alpha, runtime, Machine, (state) => state.film.stage === "Running");
+    // spec/app/camera/recording.md, "Story: Read the clock"
+    expect(timerText()).toBe("0:00");
+    await later(alpha, 1000);
+    await until(alpha, runtime, Machine, (state) => state.film.elapsed === 1);
+    expect(timerText()).toBe("0:01");
+    await later(alpha, 240_000);
+    await until(alpha, runtime, Machine, (state) => state.film.elapsed === 241);
+    expect(timerText()).toBe("4:01 · 0:59 left");
     await hardware("back");
     await until(alpha, runtime, Machine, (state) => state.film.stage === "Saved");
     expect(button("Start recording")).toBeDefined();
