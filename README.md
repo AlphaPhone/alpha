@@ -92,13 +92,14 @@ the scenes, and under reduced motion shows each whole. `alpha-home.webp` in
 [Alpha `develop`'s docs assets](https://github.com/eliza-research/alpha/tree/bd70db55b2b3cab4c6f0ec2f4faa28edfa83979a/docs/assets)
 at 370 by 813 and saved as WebP.
 
-The Alpha site workflow, `.github/workflows/site-deploy.yml`, runs on `main`
-when the site, its spec, the design system, `@repo/ui`, the toolchain or the
+The Alpha site workflow, `.github/workflows/site-deploy.yml`, runs on
+`vibestack-develop` when the site, its spec, the design system, `@repo/ui`, the toolchain or the
 lockfile change, and on demand. It builds the same way and uploads `dist/`
 with wrangler to the Cloudflare Pages project `alphaphone` under its
 production branch `vibestack` (a Pages label, not a GitHub branch), and
 refuses if the project's production branch is anything else; change both
-together. The GitHub environment `alpha-site-production` admits `main` and
+together. The GitHub environment `alpha-site-production` admits
+`vibestack-develop` and
 holds the `CLOUDFLARE_ACCOUNT_ID` variable and the
 `CLOUDFLARE_PAGES_API_TOKEN` secret (Cloudflare Pages Edit on that account).
 
