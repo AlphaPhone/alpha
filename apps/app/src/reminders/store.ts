@@ -1,6 +1,7 @@
 // spec/app/reminders/index.md, "Story: Organize reminders across smart views and custom lists"
 import type { Priority, SmartView, SortKey } from "../../gen/app__reminders.ts";
 import type { Repeat } from "../../gen/app__reminders__recurrence.ts";
+import { externalStore } from "../runtime/store.ts";
 import { type ReminderRecurrence, civilDayFromString, civilDayNumber, dueInstantMs } from "./recurrence.ts";
 
 export type { ReminderRecurrence };
@@ -281,12 +282,7 @@ function emptyStoreView(): RemindersStoreView {
   };
 }
 
-let current: RemindersStoreView = emptyStoreView();
-const listeners = new Set<() => void>();
-
-function notify(): void {
-  for (const listener of [...listeners]) listener();
-}
+const { snapshot: current, subscribe, set: publish } = externalStore<RemindersStoreView>(emptyStoreView());
 
 function assignSpecIds(
   lists: readonly ReminderListRecord[],
@@ -351,63 +347,57 @@ export function normalizeSnapshot(snapshot: RemindersSnapshot): RemindersSnapsho
 /** Synchronous external store for Reminders data, read by screens with `useSyncExternalStore`. */
 export const remindersStore = {
   /** @throws {never} */
-  snapshot: (): RemindersStoreView => current,
+  snapshot: current,
   /** @throws {never} */
-  subscribe(listener: () => void): () => void {
-    listeners.add(listener);
-    return () => { listeners.delete(listener); };
-  },
+  subscribe,
   /** @throws {never} */
   reset(): void {
-    current = emptyStoreView();
-    notify();
+    publish(emptyStoreView());
   },
   /** @throws {never} */
   replace(snapshot: RemindersSnapshot, syncError: string | null = null): RemindersStoreView {
     const normalized = normalizeSnapshot(snapshot);
-    const ids = assignSpecIds(normalized.lists, normalized.items, current.listSpecIds, current.itemSpecIds);
-    current = { snapshot: normalized, hiddenIds: current.hiddenIds, syncError, ...ids };
-    notify();
-    return current;
+    const { listSpecIds, itemSpecIds, hiddenIds } = current();
+    const ids = assignSpecIds(normalized.lists, normalized.items, listSpecIds, itemSpecIds);
+    publish({ snapshot: normalized, hiddenIds, syncError, ...ids });
+    return current();
   },
   /** @throws {never} */
   setHidden(hiddenIds: ReadonlySet<string>): void {
-    current = { ...current, hiddenIds: new Set(hiddenIds) };
-    notify();
+    publish({ ...current(), hiddenIds: new Set(hiddenIds) });
   },
   /** @throws {never} */
   setSyncError(syncError: string | null): void {
-    current = { ...current, syncError };
-    notify();
+    publish({ ...current(), syncError });
   },
   /** @throws {never} */
   findItem(id: string): ReminderItemRecord | undefined {
-    return current.snapshot.items.find((item) => item.id === id);
+    return current().snapshot.items.find((item) => item.id === id);
   },
   /** @throws {never} */
   findItemBySpecId(specId: number): ReminderItemRecord | undefined {
-    for (const [id, num] of current.itemSpecIds) {
-      if (num === specId) return current.snapshot.items.find((item) => item.id === id);
+    for (const [id, num] of current().itemSpecIds) {
+      if (num === specId) return current().snapshot.items.find((item) => item.id === id);
     }
     return undefined;
   },
   /** @throws {never} */
   findList(id: string): ReminderListRecord | undefined {
-    return current.snapshot.lists.find((list) => list.id === id);
+    return current().snapshot.lists.find((list) => list.id === id);
   },
   /** @throws {never} */
   findListBySpecId(specId: number): ReminderListRecord | undefined {
-    for (const [id, num] of current.listSpecIds) {
-      if (num === specId) return current.snapshot.lists.find((list) => list.id === id);
+    for (const [id, num] of current().listSpecIds) {
+      if (num === specId) return current().snapshot.lists.find((list) => list.id === id);
     }
     return undefined;
   },
   /** @throws {never} */
   specIdForItem(id: string): number {
-    return current.itemSpecIds.get(id) ?? 0;
+    return current().itemSpecIds.get(id) ?? 0;
   },
   /** @throws {never} */
   specIdForList(id: string): number {
-    return current.listSpecIds.get(id) ?? 1;
+    return current().listSpecIds.get(id) ?? 1;
   },
 };

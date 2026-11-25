@@ -5,16 +5,18 @@ import type { ReactNode } from "react";
 import { Keyboard, Mic, MicOff, Square, Volume2, VolumeX } from "lucide-react";
 import type { Machine as Shell } from "../../gen/app__shell.effect.vibe";
 import { useMachine as useShell } from "../../gen/app__shell.react.ts";
-import type { Machine } from "../../gen/app__voice.effect.vibe";
+import { Machine } from "../../gen/app__voice.effect.vibe";
 import { useMachine } from "../../gen/app__voice.react.ts";
 import type { Phase } from "../../gen/app__voice.ts";
 import { untimed } from "../runtime/reactor.vibe";
+import type { VoiceKeyboard } from "./useTalkKeyboard.ts";
 import { VoiceWaveform } from "./VoiceWaveform.tsx";
 
 export interface TalkControlsProps {
   runtime: ManagedRuntime.ManagedRuntime<Machine | Shell, unknown>;
   trailing?: ReactNode;
   compact?: boolean;
+  onKeyboard?: VoiceKeyboard;
 }
 
 const compactStatus: Record<Phase, string> = {
@@ -27,7 +29,7 @@ const expandedStatus: Partial<Record<Phase, string>> = {
 };
 
 /** The controls the Voice machine offers while Talk owns the composer. The sheet shows a brief phase label beside the controls. */
-export function TalkControls({ runtime, trailing, compact = false }: TalkControlsProps) {
+export function TalkControls({ runtime, trailing, compact = false, onKeyboard }: TalkControlsProps) {
   const { state, can, send } = useMachine(runtime);
   const shell = useShell(runtime);
   if (!state || state.phase === "Idle" || state.phase === "Failed") return null;
@@ -35,6 +37,9 @@ export function TalkControls({ runtime, trailing, compact = false }: TalkControl
   const allow = { ...decline, agree: true } as const;
   const stop = { type: "stop", keyboard: false } as const;
   const type = { ...stop, keyboard: true } as const;
+  const typeAfterStop = async () => (await runtime.runPromiseExit(Machine.use((machine) =>
+    machine.send(type, (current) => current.session === state.session),
+  )))._tag === "Success";
   const mute = { type: state.muted ? "unmute" : "mute" } as const;
   const open = { type: "raise", detent: "Sheet" } as const;
   const connecting = state.phase === "Starting";
@@ -68,7 +73,7 @@ export function TalkControls({ runtime, trailing, compact = false }: TalkControl
             {!connecting && activity}
           </div>
         )}
-        {!compact && can(type) && <Button variant="ghost" size="icon" aria-label="Switch to keyboard" onClick={() => void send(type)}><Keyboard /></Button>}
+        {!compact && onKeyboard && can(type) && <Button variant="ghost" size="icon" aria-label="Switch to keyboard" onClick={(event) => onKeyboard(event.currentTarget, typeAfterStop)}><Keyboard /></Button>}
         {(!compact || !speakerConfirmed) && can({ type: "interrupt" }) && <Button variant="ghost" size="icon" aria-label="Stop speaking" onClick={() => void send({ type: "interrupt" })}><VolumeX /></Button>}
         {speakerConfirmed && <Button variant="ghost" size="icon" disabled={!can(setSpeaker)} aria-pressed={speakerMuted}
           aria-label={speakerMuted ? "Unmute speaker" : "Mute speaker"} onClick={() => void send(setSpeaker)}>
