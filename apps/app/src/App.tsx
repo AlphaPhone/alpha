@@ -219,6 +219,7 @@ export function App({ alpha }: AppProps) {
         className={cn(
           "in-[body:has([data-alpha-notes-trash-sheet])]:invisible",
           "in-[body:has([data-alpha-subview=photos-clip-editor])]:invisible",
+          "in-[body:has([data-alpha-covers-assistant])]:invisible",
           comms && "shrink-0",
           !comms && "[&>[data-alpha-detent]]:absolute [&>[data-alpha-detent]]:inset-x-0 [&>[data-alpha-detent]]:bottom-0 [&>[data-alpha-detent]]:max-w-none",
           side && [
