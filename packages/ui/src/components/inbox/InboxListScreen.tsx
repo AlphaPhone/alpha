@@ -1,5 +1,5 @@
 import { CheckCheck, ChevronLeft, Ellipsis, ListChecks, PenLine, Plus, RefreshCw, Search, UserRound } from "lucide-react";
-import { useRef } from "react";
+import { type ReactNode, useRef } from "react";
 import { Button } from "../Button.tsx";
 import { Menu, MenuContent, MenuItem, MenuTrigger } from "../Menu.tsx";
 import { Screen } from "../Screen.tsx";
@@ -54,6 +54,8 @@ export type InboxListScreenProps = Pick<InboxListProps, "rows" | "loading" | "on
     onCompose?: () => void;
     /** Opens the choice among the connected accounts. */
     onAccount?: () => void;
+    /** The way out of Inbox before the folder's name, such as the shell's Back; search shows its own. */
+    leading?: ReactNode;
   };
 
 /**
@@ -65,7 +67,7 @@ export type InboxListScreenProps = Pick<InboxListProps, "rows" | "loading" | "on
 export function InboxListScreen({
   account, folder, unavailable, onChooseFolder, searching = false, search, onSearchChange, onSearch, onOpenSearch, onCloseSearch,
   notice, onNoticeAction, state, onStateAction, chosen = 0, onStartSelection, onFinishSelection, onClearSelection,
-  onArchive, onTrash, onRestore, onChooseAll, aside = 0, onShelf, onRefresh, onCompose, onAccount, rows, loading, onLoadMore, loadingMore,
+  onArchive, onTrash, onRestore, onChooseAll, aside = 0, onShelf, onRefresh, onCompose, onAccount, rows, loading, onLoadMore, loadingMore, leading,
 }: InboxListScreenProps) {
   const focusSearchAfterCloseRef = useRef(false);
   const closeSearch = () => {
@@ -100,7 +102,7 @@ export function InboxListScreen({
   return (
     <Screen
       title={chosen > 0 ? `${chosen} selected` : inboxFolders[folder]}
-      leading={searching ? <Button variant="ghost" size="icon" aria-label="Back to inbox" onClick={closeSearch}><ChevronLeft /></Button> : undefined}
+      leading={searching ? <Button variant="ghost" size="icon" aria-label="Back to inbox" onClick={closeSearch}><ChevronLeft /></Button> : leading}
       titleControl={searching ? <InboxSearchBar value={search} onValueChange={onSearchChange} onSearch={onSearch} onClose={closeSearch} focusOnOpen /> : undefined}
       actions={searching ? undefined : actions}
       className="[&_main>div]:gap-2 [&_main>div]:pt-1"

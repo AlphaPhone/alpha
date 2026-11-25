@@ -1,11 +1,11 @@
 // spec/app/calendar/index.md, "Story: See my days"; spec/app/calendar/index.md, "Story: Move through the days"; spec/app/calendar/index.md, "Story: Look at an event"; spec/app/calendar/index.md, "Story: Search my events and choose which calendars I see"; spec/app/calendar/editor.md, "Story: Write an event"; spec/app/calendar/agent.md, "Story: Approve what the agent changes"; spec/app/calendar/deletions.md, "Story: Undo a deletion before it is sent"
 import {
-  AppHeader, Banner, Button, Card, CardFooter, CardTitle, Dialog, DialogContent, DialogTitle, EmptyState, Input, Label,
-  ListGroup, ListRow, SearchField, Select, SelectContent, SelectItem, SelectTrigger, Sheet, SheetContent, Spinner, Switch, Textarea,
+  Banner, Button, Card, CardFooter, CardTitle, Dialog, DialogContent, DialogTitle, EmptyState, Input, Label,
+  ListGroup, ListRow, SearchField, Select, SelectContent, SelectItem, SelectTrigger, Sheet, SheetContent, Spinner, Switch, Textarea, cn, focusRing,
 } from "@repo/ui";
 import type { ManagedRuntime } from "effect";
-import { CalendarDays, Eye, Layers, Plus, Search } from "lucide-react";
-import { useState, useSyncExternalStore } from "react";
+import { CalendarCheck, CalendarDays, ChevronDown, Eye, Layers, Plus, Search, Settings as SettingsIcon } from "lucide-react";
+import { type ReactNode, useState, useSyncExternalStore } from "react";
 import * as View from "../../gen/app__calendar.ts";
 import { useMachine as useView } from "../../gen/app__calendar.react.ts";
 import type * as Changes from "../../gen/app__calendar__agent.ts";
@@ -31,16 +31,24 @@ import { type Fields, kept, typed } from "./editor.vibe";
 import { type Row, onDay, shown } from "./shown.ts";
 import { allows } from "../../gen/kit__permission.ts";
 import { civilDay, dateOf, dayStart, monthStart, readWindow, weekStart } from "./time.ts";
+import type { Alpha } from "../runtime/area.tsx";
+import { AppBack } from "../shell/AppBack.tsx";
+import { Time } from "../runtime/time.vibe";
 
 export interface CalendarProps {
   /** Provides Calendar's machines, `calendared` of calendar.vibe. */
   runtime: ManagedRuntime.ManagedRuntime<Calendared, unknown>;
+  /** Alpha, for the shell's Back in Calendar's own header. */
+  alpha?: Alpha;
 }
 
 const hour = new Intl.DateTimeFormat(undefined, { hour: "numeric", minute: "2-digit" });
 const longDate = new Intl.DateTimeFormat(undefined, { weekday: "long", month: "long", day: "numeric" });
 const monthName = new Intl.DateTimeFormat(undefined, { month: "long", year: "numeric" });
 const weekday = new Intl.DateTimeFormat(undefined, { weekday: "short" });
+const hourOnly = new Intl.DateTimeFormat(undefined, { hour: "numeric" });
+const letter = new Intl.DateTimeFormat(undefined, { weekday: "narrow" });
+const monthOnly = new Intl.DateTimeFormat(undefined, { month: "long" });
 
 const layouts: ReadonlyArray<{ layout: View.Layout; label: string }> = [
   { layout: "Agenda", label: "Agenda" },
@@ -114,7 +122,7 @@ function interval(row: Row): string {
   return `${days} · ${hour.format(row.begin)}${zones[0]} – ${hour.format(row.end)}${zones[1]}`;
 }
 
-// spec/app/calendar/presentation.md, "The timeline runs from seven to midnight, earlier or later only for an event that needs it"
+// spec/app/calendar/presentation.md, "The timeline runs from seven to midnight and grows to hold every event of the day"
 /** The hours the day's timeline shows, each with the timed events that start in it. */
 function hours(rows: ReadonlyArray<Row>, day: number): ReadonlyArray<{ hour: number; rows: ReadonlyArray<Row> }> {
   const timed = rows.filter((row) => !row.allDay);
@@ -132,7 +140,7 @@ function local(ms: number): string {
 }
 
 /** Calendar: the anchored day from the phone's calendar and the agent's, an event, its form, and the agent's card. */
-export function Calendar({ runtime }: CalendarProps) {
+export function Calendar({ runtime, alpha }: CalendarProps) {
   const view = useView(runtime);
   const editor = useEditor(runtime);
   const agent = useChanges(runtime);
@@ -160,51 +168,62 @@ export function Calendar({ runtime }: CalendarProps) {
   const free = dayEmptiness(!cut, allows(s.access) && s.phoneLimited, View.empty(s)) === "DayFree";
   const lead = (dateOf(monthStart(s.anchor, 0)).getDay() + 6) % 7;
   const cells = monthCells(monthStart(s.anchor, 1) - monthStart(s.anchor, 0), lead);
+  const notConnected = statusAction(s.connected, false) === "OfferSettings";
+  const latest = runtime.runSync(Time.use((time) => time.latest()));
+  const settings = view.can({ type: "openAccountSettings" }) ? send({ type: "openAccountSettings" }) : undefined;
   return (
     <div className="flex h-full flex-col">
-      <AppHeader title={longDate.format(dateOf(s.anchor))}>
-        {offer({ type: "goToday" }, "Today", "ghost")}
-        {view.can({ type: "openMonth" }) ? <Button variant="ghost" size="icon" aria-label="Choose a day" onClick={send({ type: "openMonth" })}><CalendarDays /></Button> : null}
-        {view.can({ type: "openLayoutMenu" }) ? <Button variant="ghost" size="icon" aria-label="Layout" onClick={send({ type: "openLayoutMenu" })}><Layers /></Button> : null}
+      <header data-host-chrome="" className="flex min-h-14 shrink-0 items-center gap-0.5 pr-2 pl-5 has-[[aria-label=Back]]:pl-2">
+        {alpha ? <AppBack alpha={alpha} /> : null}
+        <h1 className="flex min-w-0 flex-1">
+          <button type="button" aria-label="Choose a day" aria-expanded={s.overlay === "MonthDialog"} disabled={!view.can({ type: "openMonth" })} onClick={send({ type: "openMonth" })}
+            className={cn(focusRing, "flex min-h-12 min-w-0 items-center gap-1.5 rounded-sm text-left")}>
+            <span className="truncate font-display text-3xl font-light">{monthOnly.format(dateOf(s.anchor))}</span>
+            <ChevronDown aria-hidden className="mt-1 size-4.5 shrink-0 text-muted-foreground" />
+          </button>
+        </h1>
+        {view.can({ type: "goToday" }) ? <Button variant="ghost" size="icon" aria-label="Today" onClick={send({ type: "goToday" })}><CalendarCheck /></Button> : null}
         {view.can({ type: "openSearch" }) ? <Button variant="ghost" size="icon" aria-label="Search" onClick={send({ type: "openSearch" })}><Search /></Button> : null}
-        {view.can({ type: "openCalendars" }) ? <Button variant="ghost" size="icon" aria-label="Calendars" onClick={send({ type: "openCalendars" })}><Eye /></Button> : null}
         {editor.can(newEvent) ? <Button variant="ghost" size="icon" aria-label="New event" onClick={() => void editor.send(newEvent)}><Plus /></Button> : null}
-      </AppHeader>
-      <nav aria-label="Week" className="flex justify-between gap-1 px-4 py-2">
-        {week.map((day) => (
-          <Button key={day} variant={day === s.anchor ? "primary" : "ghost"} disabled={!view.can({ type: "pickDay", day }) && day !== s.anchor} onClick={send({ type: "pickDay", day })}>
-            {`${weekday.format(dateOf(day))} ${dateOf(day).getDate()}`}
-          </Button>
-        ))}
+      </header>
+      <nav aria-label="Week" className="grid shrink-0 grid-cols-7 px-3 pt-1 pb-2">
+        {week.map((day) => {
+          const today = day === s.today;
+          const marked = dayRows(day).length > 0;
+          return (
+            <button key={day} type="button" aria-label={`${weekday.format(dateOf(day))} ${dateOf(day).getDate()}`} aria-current={day === s.anchor ? "date" : undefined}
+              disabled={!view.can({ type: "pickDay", day }) && day !== s.anchor} onClick={send({ type: "pickDay", day })}
+              className={cn(focusRing, "flex flex-col items-center gap-1.25 rounded-tile py-1")}>
+              <span aria-hidden className="text-xs font-medium text-muted-foreground">{letter.format(dateOf(day))}</span>
+              <span aria-hidden className={cn("flex size-10 items-center justify-center rounded-full text-base font-semibold", today ? "bg-alpha text-alpha-foreground" : day === s.anchor && "ring-[1.5px] ring-foreground ring-inset")}>
+                {dateOf(day).getDate()}
+              </span>
+              <span aria-hidden className={cn("size-1 rounded-full", marked ? (today ? "bg-alpha" : "bg-muted-foreground") : "bg-transparent")} />
+            </button>
+          );
+        })}
       </nav>
       <Access runtime={runtime} />
       {s.phoneLimited ? <Banner variant="warn">Android gave only part of this day. Some events may be missing.</Banner> : null}
       {cut ? <Banner variant="warn">Google gave only part of your agent's calendar. Some events may be missing.</Banner> : null}
       {s.phone.status === "Failed" || s.google.status === "Failed" ? <Banner variant="warn" action={offer({ type: "refresh" }, "Retry")}>Calendar couldn't read this day.</Banner> : null}
-      {statusAction(s.connected, false) === "OfferSettings" ? <Banner action={offer({ type: "openAccountSettings" }, "Settings")}>Not connected: your agent has no Google Calendar.</Banner> : null}
       <Undo runtime={runtime} />
       {editor.state?.filed ? <Banner>{editor.state.kind === "Reply" ? "Your answer waits for your approval below." : "This change waits for your approval below."}</Banner> : null}
       <Drafts runtime={runtime} day={s.anchor} />
-      <GoogleRow runtime={runtime} />
       <Proposal runtime={runtime} />
-      <main className="flex-1 overflow-y-auto px-4 py-2">
+      <main aria-label="Calendar timeline" className={cn("min-h-0 flex-1 overflow-y-auto border-t border-border", s.layout === "Timeline" ? null : "px-4 py-2")}>
         {s.layout === "Columns" ? (
           <div className="grid grid-cols-3 gap-2">
             {columns.map((day) => (
               <ListGroup key={day} heading={longDate.format(dateOf(day))}>{dayRows(day).map(listed)}</ListGroup>
             ))}
           </div>
-        ) : free ? <EmptyState title="Nothing on this day" icon={<CalendarDays />} /> : s.layout === "Timeline" ? (
-          <ListGroup heading={longDate.format(dateOf(s.anchor))}>
-            {rows.filter((row) => row.allDay).map(listed)}
-            {hours(rows, s.anchor).map((slot) => (
-              <div key={slot.hour} className="flex gap-2 border-t border-border py-1">
-                <span className="w-14 shrink-0 text-xs text-muted-foreground">{hour.format(dayStart(s.anchor) + slot.hour * 3_600_000)}</span>
-                <div className="flex-1">{slot.rows.map(listed)}</div>
-              </div>
-            ))}
-          </ListGroup>
-        ) : (
+        ) : s.layout === "Timeline" ? (
+          <Timeline rows={rows} day={s.anchor} now={s.anchor === s.today ? latest : undefined} open={(row) => (view.can(opening(row)) ? send(opening(row)) : undefined)}
+            empty={notConnected
+              ? <><CalendarDays aria-hidden className="size-7" /><span>Not connected</span>{settings ? <Button variant="secondary" size="sm" onClick={settings}><SettingsIcon />Settings</Button> : null}</>
+              : free ? <><CalendarDays aria-hidden className="size-7" /><span>Nothing on this day</span></> : undefined} />
+        ) : free ? <EmptyState title="Nothing on this day" icon={<CalendarDays />} /> : (
           <ListGroup heading={s.layout === "Agenda" ? "From today" : longDate.format(dateOf(s.anchor))}>
             {rows.map(listed)}
             {s.reminders > 0 ? <ListRow title={s.reminders === 1 ? "1 reminder" : `${s.reminders} reminders`} detail={longDate.format(dateOf(s.remindersDay))} /> : null}
@@ -221,6 +240,7 @@ export function Calendar({ runtime }: CalendarProps) {
       <Searching runtime={runtime} />
       <Sheet open={s.overlay === "CalendarsSheet"} onOpenChange={(opened) => (opened ? undefined : void view.send({ type: "closeOverlay" }))}>
         <SheetContent title="Calendars">
+          <GoogleRow runtime={runtime} />
           {[...new Map([...shown.all("Google"), ...shown.all("Phone")].map((row) => [row.calendar, row])).values()].map((row) => (
             <Label key={row.calendar} className="flex items-center justify-between">
               {row.source === "Google" ? "Your agent's calendar" : `Phone calendar ${row.calendarId}`}
@@ -231,16 +251,31 @@ export function Calendar({ runtime }: CalendarProps) {
         </SheetContent>
       </Sheet>
       <Dialog open={s.overlay === "MonthDialog"} onOpenChange={(opened) => (opened ? undefined : void view.send({ type: "closeOverlay" }))}>
-        <DialogContent closeLabel="Close">
+        <DialogContent closeLabel="Close" aria-describedby={undefined}>
           <DialogTitle>{monthName.format(dateOf(s.anchor))}</DialogTitle>
-          <div className="grid grid-cols-7 gap-1">
-            {Array.from({ length: 7 }, (_, at) => <span key={`h${at}`} className="text-center text-xs text-muted-foreground">{weekday.format(dateOf(weekStart(s.anchor) + at))}</span>)}
-            {Array.from({ length: cells }, (_, at) => monthStart(s.anchor, 0) - lead + at).map((day) => (
-              <Button key={day} variant={day === s.today ? "primary" : "ghost"} disabled={!view.can({ type: "pickDay", day })} onClick={send({ type: "pickDay", day })}
-                className={day < monthStart(s.anchor, 0) || day >= monthStart(s.anchor, 1) ? "text-muted-foreground" : undefined}>
-                {dateOf(day).getDate()}
-              </Button>
-            ))}
+          <div className="grid grid-cols-7 gap-y-0.5">
+            {Array.from({ length: 7 }, (_, at) => <span key={`h${at}`} aria-hidden className="text-center text-xs font-medium text-muted-foreground">{letter.format(dateOf(weekStart(s.anchor) + at))}</span>)}
+            {Array.from({ length: cells }, (_, at) => monthStart(s.anchor, 0) - lead + at).map((day) => {
+              const outside = day < monthStart(s.anchor, 0) || day >= monthStart(s.anchor, 1);
+              return (
+                <button key={day} type="button" aria-label={longDate.format(dateOf(day))} aria-current={day === s.anchor ? "date" : undefined} disabled={!view.can({ type: "pickDay", day })}
+                  onClick={send({ type: "pickDay", day })} className={cn(focusRing, "flex flex-col items-center gap-0.5 rounded-tile py-0.5 disabled:opacity-50")}>
+                  <span aria-hidden className={cn("flex size-9.5 items-center justify-center rounded-full text-sm font-semibold",
+                    day === s.today ? "bg-alpha text-alpha-foreground" : day === s.anchor ? "ring-[1.5px] ring-foreground ring-inset" : null, outside && day !== s.today && "text-muted-foreground")}>
+                    {dateOf(day).getDate()}
+                  </span>
+                  <span aria-hidden className={cn("size-1 rounded-full", dayRows(day).length > 0 ? (day === s.today ? "bg-alpha" : "bg-foreground") : "bg-transparent")} />
+                </button>
+              );
+            })}
+          </div>
+          <div role="group" aria-label="Calendar view" className="flex flex-wrap gap-2 pt-1">
+            {view.can({ type: "closeOverlay" }) ? (
+              <>
+                <Button variant="secondary" size="sm" onClick={() => void view.send({ type: "closeOverlay" }).then(() => view.send({ type: "openLayoutMenu" }))}><Layers />Layout</Button>
+                <Button variant="secondary" size="sm" onClick={() => void view.send({ type: "closeOverlay" }).then(() => view.send({ type: "openCalendars" }))}><Eye />Calendars</Button>
+              </>
+            ) : null}
           </div>
         </DialogContent>
       </Dialog>
@@ -267,6 +302,79 @@ export function Calendar({ runtime }: CalendarProps) {
       </Sheet>
       {editor.state?.shown ? <Form runtime={runtime} day={s.anchor} connected={s.connected} /> : null}
     </div>
+  );
+}
+
+/** One hour of the day's timeline, in pixels at the default text size (v121's `CAL_PX`). */
+const hourHeight = 56;
+
+// spec/app/calendar/presentation.md, "The timeline runs from seven to midnight and grows to hold every event of the day"
+/**
+ * The day as v121 drew it: hour labels at the left over thin hour lines, all-day events above them, and each timed
+ * event a block at its start and length with a blue bar at its left edge, side by side where events overlap.
+ */
+function Timeline({ rows, day, now, open, empty }: { rows: ReadonlyArray<Row>; day: number; now?: number; open: (row: Row) => (() => void) | undefined; empty?: ReactNode }) {
+  const slots = hours(rows, day);
+  const first = slots[0]?.hour ?? 7;
+  const span = slots.length;
+  const timed = rows.filter((row) => !row.allDay).sort((a, b) => a.begin - b.begin || b.end - a.end);
+  const lanes: number[] = [];
+  const laneOf = new Map<number, number>();
+  for (const row of timed) {
+    const free = lanes.findIndex((end) => end <= row.begin);
+    const lane = free === -1 ? lanes.length : free;
+    lanes[lane] = row.end;
+    laneOf.set(row.id, lane);
+  }
+  const top = (ms: number) => ((ms - dayStart(day)) / 3_600_000 - first) * hourHeight + 8;
+  const block = (row: Row) => {
+    const overlapping = timed.filter((other) => other.begin < row.end && other.end > row.begin);
+    const across = Math.max(1, ...overlapping.map((other) => (laneOf.get(other.id) ?? 0) + 1));
+    const lane = laneOf.get(row.id) ?? 0;
+    const from = Math.max(top(Math.max(row.begin, dayStart(day))), 8);
+    const height = Math.max(24, Math.min(top(row.end), span * hourHeight + 8) - from - 4);
+    const short = height < 40;
+    const pressed = open(row);
+    return (
+      <button key={row.id} type="button" aria-label={`${row.title || "Untitled event"}, ${hour.format(row.begin)}`} disabled={!pressed} onClick={pressed}
+        style={{ top: from, height, left: `calc(3.75rem + (100% - 4.75rem) * ${lane / across})`, width: `calc((100% - 4.75rem) / ${across} - 0.25rem)` }}
+        className={cn(focusRing, "absolute grid grid-cols-[minmax(0,1fr)_auto] content-center items-center gap-x-2 overflow-hidden rounded-md bg-secondary pr-3 pl-4 text-left before:absolute before:inset-y-1.5 before:left-1.5 before:w-0.75 before:rounded-full before:bg-alpha", short ? "py-0" : "py-2")}>
+        <span className="truncate text-sm leading-tight font-semibold">{row.title || "Untitled event"}</span>
+        {across === 1 ? <span className="row-span-2 text-xs whitespace-nowrap opacity-75">{hour.format(row.begin)}</span> : null}
+        {!short && row.place ? <span className="mt-0.75 truncate text-xs opacity-85">{row.place}</span> : null}
+      </button>
+    );
+  };
+  const nowAt = now === undefined ? undefined : top(now);
+  return (
+    <>
+      {rows.some((row) => row.allDay) ? (
+        <div className="flex gap-2.5 border-b border-border py-2 pr-4 pl-3">
+          <span className="w-9.5 shrink-0 pt-3 text-right text-xs text-muted-foreground">All day</span>
+          <div className="flex min-w-0 flex-1 flex-col gap-1.5">
+            {rows.filter((row) => row.allDay).map((row) => (
+              <button key={row.id} type="button" aria-label={`${row.title || "Untitled event"}, All day`} disabled={!open(row)} onClick={open(row)}
+                className={cn(focusRing, "min-h-10 rounded-md bg-secondary px-4 py-2.5 text-left text-sm font-semibold")}>
+                <span>{row.title || "Untitled event"}</span>
+              </button>
+            ))}
+          </div>
+        </div>
+      ) : null}
+      <div className="relative mb-28" style={{ height: span * hourHeight + 16 }}>
+        {slots.map((slot, at) => (
+          <div key={slot.hour}>
+            <div aria-hidden className="absolute right-4 left-15 h-px bg-border opacity-70" style={{ top: at * hourHeight + 8 }} />
+            <span className="absolute left-0 w-12.5 text-right text-xs text-muted-foreground" style={{ top: at * hourHeight }}>{hourOnly.format(dayStart(day) + slot.hour * 3_600_000)}</span>
+          </div>
+        ))}
+        {empty ? <div className="absolute top-30 right-4 left-15 flex flex-col items-center gap-1.5 text-center text-sm text-muted-foreground">{empty}</div> : null}
+        {timed.map(block)}
+        {nowAt !== undefined && nowAt >= 8 && nowAt <= span * hourHeight + 8 ? (
+          <div aria-hidden className="pointer-events-none absolute right-4 left-13.5 h-0.5 bg-alpha before:absolute before:-top-1 before:-left-1 before:size-2.5 before:rounded-full before:bg-alpha" style={{ top: nowAt }} />
+        ) : null}
+      </div>
+    </>
   );
 }
 

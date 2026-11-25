@@ -110,6 +110,7 @@ describe.each([["a browser", false], ["a phone", true]])("in %s", (_where, phone
     await until(alpha, runtime, View, (s) => s.anchor === world.today && s.google.status === "Loaded");
 
     // spec/app/calendar/index.md, "Choosing a layout closes the menu, and the agenda goes back to today"; spec/app/calendar/presentation.md, "A read for a day covers the month before it through the month after next": the agenda lists what is coming, not only today.
+    await press("Choose a day");
     await press("Layout");
     await until(alpha, runtime, View, (s) => s.overlay === "LayoutMenu");
     await press("Agenda");
@@ -226,6 +227,8 @@ describe("on a phone", () => {
     await until(alpha, runtime, Link, (l) => l.owner > 0);
 
     // spec/app/calendar/link.md, "Setup starts only from a write grant, for the owner signed in; a read-only grant goes on to consent for more access, and a missing one sends nothing"
+    await press("Choose a day");
+    await press("Calendars");
     await press("Link Google Calendar");
     await until(alpha, runtime, Link, (l) => l.ending === "NeedsGrant" && l.said === "ReadOnlyAccess");
     expect(world.calendar.writes).toEqual([]);
@@ -314,6 +317,7 @@ describe("in a browser", () => {
     expect(titles()).toEqual(["Dentist"]);
 
     // spec/app/calendar/index.md, "A switch of the Calendars sheet hides or shows one calendar"; spec/app/calendar/presentation.md, "A hidden calendar's rows show neither in Calendar nor on Home"
+    await press("Choose a day");
     await press("Calendars");
     await until(alpha, runtime, View, (s) => s.overlay === "CalendarsSheet");
     const agent = [...document.querySelectorAll("[role=switch]")][0] as HTMLElement | undefined;

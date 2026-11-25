@@ -25,6 +25,9 @@ const ways: ReadonlyArray<{ travel: Travel; label: string }> = [
   { travel: "Drive", label: "Drive" }, { travel: "Transit", label: "Transit" }, { travel: "Walk", label: "Walk" }, { travel: "Bicycle", label: "Bike" },
 ];
 
+/** A round control floating on the map, as v121 drew its info and locate buttons. */
+const floating = "size-12.5 shrink-0 rounded-full bg-background shadow-md ring-1 ring-border hover:bg-background";
+
 /** The open map drawn where no provider is working, and outside the provider's coverage. */
 const worldStyle = "https://tiles.openfreemap.org/styles/bright";
 
@@ -187,15 +190,12 @@ export function Maps({ runtime, alpha }: Shown<ScreenMachine | CreditsMachine | 
             <AppBack alpha={alpha} />
           </div>
         )}
-        <div className="absolute right-4 bottom-4 flex flex-col gap-1">
-          {can({ type: "recenter" }) && <Button size="sm" variant="outline" onClick={() => void send({ type: "recenter" })}><LocateFixed />Recenter</Button>}
-          {can({ type: "useMyLocation" }) && <Button size="icon" variant="outline" aria-label="My location" onClick={() => void send({ type: "useMyLocation" })}><Crosshair /></Button>}
+        <div className="absolute right-4 bottom-4 z-10 flex flex-col gap-2">
+          {can({ type: "recenter" }) && <Button size="icon" variant="ghost" aria-label="Recenter" className={floating} onClick={() => void send({ type: "recenter" })}><LocateFixed /></Button>}
+          {can({ type: "useMyLocation" }) && <Button size="icon" variant="ghost" aria-label="My location" className={floating} onClick={() => void send({ type: "useMyLocation" })}><Crosshair /></Button>}
         </div>
-        <div className="absolute bottom-4 left-4">
-          {credits.can({ type: "openInfo" }) && (badgeOnly(state.link)
-            ? <button type="button" aria-label="Google Maps" onClick={() => void credits.send({ type: "openInfo" })}><img src={googleMaps} alt="Google Maps" width={98} height={18} /></button>
-            : <Button size="icon" variant="outline" aria-label="Map credits" onClick={() => void credits.send({ type: "openInfo" })}><Info /></Button>)}
-        </div>
+        <MapCredits google={badgeOnly(state.link)} attribution={coverage?.available ? coverage.attribution : undefined}
+          onInfo={credits.can({ type: "openInfo" }) ? () => void credits.send({ type: "openInfo" }) : undefined} />
       </MapView>
       <div className="pointer-events-none absolute inset-x-3 top-17 bottom-16 in-data-[alpha-launcher]:top-29 z-10 flex flex-col gap-2 overflow-auto *:pointer-events-auto">
         {state.link.coverage.status === "Failed" && !holding(state.link) && (
@@ -372,5 +372,27 @@ export function Maps({ runtime, alpha }: Shown<ScreenMachine | CreditsMachine | 
         )}
       </div>
     </section>
+  );
+}
+
+/** The map's credits as v121 floated them over its foot: the information button, then the credit links on a white chip, or Google's badge alone. */
+function MapCredits({ google, attribution, onInfo }: { google: boolean; attribution?: string; onInfo?: () => void }) {
+  return (
+    <div className="absolute right-19 bottom-4 left-4 z-10 flex items-center gap-2 text-xs text-foreground">
+      {onInfo && (google
+        ? <button type="button" aria-label="Google Maps" onClick={onInfo}><img src={googleMaps} alt="Google Maps" width={98} height={18} /></button>
+        : <Button size="icon" variant="ghost" aria-label="Map credits" className={floating} onClick={onInfo}><Info /></Button>)}
+      {!google && (
+        <span className="min-w-0 flex-1 rounded-md bg-background px-2 py-1.5 shadow-md [overflow-wrap:anywhere]">
+          {attribution ?? (
+            <>
+              <a href="https://openfreemap.org/" target="_blank" rel="noopener noreferrer" className="underline">OpenFreeMap</a>{" · "}
+              <a href="https://www.openmaptiles.org/" target="_blank" rel="noopener noreferrer" className="underline">© OpenMapTiles</a>{" · "}
+              <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener noreferrer" className="underline">© OpenStreetMap</a>
+            </>
+          )}
+        </span>
+      )}
+    </div>
   );
 }
