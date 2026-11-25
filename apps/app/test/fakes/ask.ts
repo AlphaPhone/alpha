@@ -113,11 +113,14 @@ function reply(scene: AskScene, room: string, text: string, keep: (said: string)
       if (scene.acknowledgment !== undefined) controller.enqueue(frame({ type: "acknowledgment", text: scene.acknowledgment }));
       if (scene.acknowledgment !== undefined) controller.enqueue(frame({ type: "tool", name: "CALENDAR", label: "Using Calendar" }));
       if (scene.stalled) {
-        controller.enqueue(frame({ type: "token", text: "Thinking" }));
+        for (const piece of custom ?? ["Thinking"]) controller.enqueue(frame({ type: "token", text: piece }));
         scene.turns.set(room, () => controller.close());
         return;
       }
       const answer = () => {
+        for (const { action } of actions as readonly { readonly action?: unknown }[]) {
+          if (typeof action === "string") controller.enqueue(frame({ type: "tool", name: action, label: "Working" }));
+        }
         if (custom !== undefined && custom.length > 0) {
           for (const piece of custom) controller.enqueue(frame({ type: "token", text: piece, ...(provisional ? { provisional } : {}) }));
           const full = custom.join("");

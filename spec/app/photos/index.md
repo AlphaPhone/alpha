@@ -330,8 +330,9 @@ pure def sometimesOwnBeforeAsking(s: Photos): bool =
 
 ## Story: Browse the library
 
-> As the owner, I want to see my photos and albums, narrow them by
-> favourites, videos, people or a search, scroll on through them, change the thumbnail size, and be
+> As the owner, I want to see my photos and albums, find my favourites and
+> videos in their albums, see the Library as Alpha narrowed it and clear that,
+> scroll on through them, change the thumbnail size, and be
 > told when they are loading, empty, locked, or could not be read, with a
 > way to try again.
 

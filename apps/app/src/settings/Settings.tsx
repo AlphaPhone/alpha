@@ -393,7 +393,7 @@ function About({ runtime, alpha, common }: PageProps) {
   const activity = useActivity(runtime).state;
   const agent = activity === undefined ? undefined : agentWords[ActivityGen.agentWord(activity.connection)];
   return (
-    <SettingsAboutPage {...common} onPhone={pages?.phone} agent={agent} alphaVersion={reading(facts, "Versions")} androidVersion={reading(facts, "AndroidVersion")} storage={reading(facts, "Storage")}>
+    <SettingsAboutPage {...common} onPhone={pages?.phone} agent={agent} alphaVersion={reading(facts, "Versions")} androidVersion={reading(facts, "AndroidVersion")}>
       {alpha.slot("settings/about")}
     </SettingsAboutPage>
   );

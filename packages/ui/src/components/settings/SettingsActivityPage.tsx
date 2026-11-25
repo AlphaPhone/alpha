@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { MessagesSquare, RotateCw, Wrench } from "lucide-react";
+import { RotateCw, Wrench } from "lucide-react";
 import { Banner } from "../Banner.tsx";
 import { EmptyState } from "../EmptyState.tsx";
 import { ListGroup } from "../ListGroup.tsx";
@@ -33,7 +33,7 @@ export type SettingsActivityPageProps = {
   failed?: boolean;
   /** The last decision was sent or attempted and the agent could not confirm it. */
   unconfirmed?: boolean;
-  /** Conversation commands owned by Ask Alpha. */
+  /** The conversations, owned by Ask Alpha: New, History and each saved conversation, above the phone actions as Alpha's earlier build had them. */
   children?: ReactNode;
   /** This is a development build, which links the agent's restart details. */
   development?: boolean;
@@ -47,7 +47,7 @@ export type SettingsActivityPageProps = {
   onDecline?: (proposal: string) => void;
   /** Says whether an action whose outcome the agent could not see happened. */
   onReconcile?: (proposal: string, happened: boolean) => void;
-  /** Hands over to Ask Alpha for the conversations, or to the account area for the agent's restart details. */
+  /** Hands over to the account area for the agent's restart details. */
   onHandOver?: (neighbour: Neighbour) => void;
 };
 
@@ -62,13 +62,14 @@ export function SettingsActivityPage({ connection, actions, reading = false, fai
   return (
     <SettingsPage title="Agent activity" onBack={onBack} backLabel="Back to About">
       {ready ? null : <SettingsAgentRecovery connection={connection} onRecover={onRecover} />}
+      {children}
       {unconfirmed ? <Banner variant="warn">Alpha could not confirm the action decision</Banner> : null}
       {failed ? <Banner variant="warn">The actions could not be read{actions.length ? ". Showing the last read" : ""}</Banner> : null}
-      {children}
-      <ListGroup>
-        <SettingsNavRow title="Conversations" icon={<MessagesSquare />} onOpen={onHandOver && (() => onHandOver("conversations"))} />
-        {development ? <SettingsNavRow title="Restart details" icon={<Wrench />} onOpen={onHandOver && (() => onHandOver("restart-details"))} /> : null}
-      </ListGroup>
+      {development ? (
+        <ListGroup>
+          <SettingsNavRow title="Restart details" icon={<Wrench />} onOpen={onHandOver && (() => onHandOver("restart-details"))} />
+        </ListGroup>
+      ) : null}
       {ready ? (
         <ListGroup>
           <ListRow
