@@ -213,6 +213,12 @@ export effect function transcribeVoicemail(id: string): string!VoiceBridgeFailed
   })
 }
 const CLOUD_STREAM_PLUGIN = "ElizaCloudSpeech"
+
+/** The transport used for a voice conversation on its chosen route. */
+export function speechDestination(network: boolean): "Cloud" | "OnDevice" | "Unavailable" {
+  if (network && registered(CLOUD_STREAM_PLUGIN)) return "Cloud"
+  return registered(LOCAL_PLUGIN) ? "OnDevice" : "Unavailable"
+}
 const SIGN_IN_PLUGIN = "ElizaSignIn"
 /** The cloud the phone signs in to, whose account the relay speaks for. */
 export const CLOUD_ENVIRONMENT = "production" as EnvironmentName
@@ -429,7 +435,8 @@ export const phoneVoiceBridge = Layer.effect(VoiceBridge, effect {
   effect function openMic(session: number, network: boolean): boolean!VoiceBridgeFailed {
     const reopen = activeSession === session
     activeSession = session
-    if (network && registered(CLOUD_STREAM_PLUGIN)) {
+    const destination = speechDestination(network)
+    if (destination === "Cloud") {
       const currentSession = session
       const stream = cloudStream ?? createCloudStreamingSpeech({
         environment: CLOUD_ENVIRONMENT,
@@ -459,7 +466,7 @@ export const phoneVoiceBridge = Layer.effect(VoiceBridge, effect {
       cloudCapture = capture
       return capture.fullDuplex
     }
-    if (!registered(LOCAL_PLUGIN)) throw new VoiceBridgeFailed({ method: "startLiveCapture", cause: "no-voice-plugin" })
+    if (destination === "Unavailable") throw new VoiceBridgeFailed({ method: "startLiveCapture", cause: "no-voice-plugin" })
     const live = tryPromise(() => localPlugin().liveCaptureStatus({})) catch () => undefined
     if (live?.available !== true || live.nativeTransport !== true) {
       throw new VoiceBridgeFailed({ method: "startLiveCapture", cause: "resident-speech-transport-unavailable" })

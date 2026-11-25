@@ -295,6 +295,7 @@ function Privacy({ runtime, alpha, common }: PageProps) {
     <>
       {recovery}
       <SettingsPrivacyPage {...common} {...shown} onSetUpAccess={can(review) ? () => void send(review) : undefined}>
+        {alpha.slot("settings/voice")}
         {alpha.slot("settings/listening")}
       </SettingsPrivacyPage>
     </>

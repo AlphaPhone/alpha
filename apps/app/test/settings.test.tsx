@@ -24,7 +24,7 @@ afterEach(closeAll);
 const shipped = vi.fn(() => Promise.resolve(Response.json(notices)));
 vi.stubGlobal("fetch", ((input: RequestInfo | URL, init?: RequestInit) => (String(input).endsWith("licenses/third-party-notices.json") ? shipped() : fetch(input, init))) as typeof fetch);
 
-const open = (world: Scene) => openAlpha(world, only("home", "view:Settings", "settings/phone", "settings/activity", "settings/listening", "overlay"));
+const open = (world: Scene) => openAlpha(world, only("home", "view:Settings", "settings/phone", "settings/activity", "settings/listening", "settings/voice", "overlay"));
 
 /** The row, switch or choice whose title is `title`, as a person reads it: a row's title, never its value beside it. */
 const titled = (title: string) => [...document.querySelectorAll<HTMLElement>("button, label")].find((found) => found.querySelector("span > span")?.textContent === title);
@@ -146,6 +146,18 @@ describe("Settings", () => {
     await vi.waitFor(() => expect(listeningSwitch()?.getAttribute("aria-checked")).toBe("false"));
     expect(titled("Listening")?.textContent).toContain("Off");
     expect(mutations()).toEqual(["openSettings", "pause", "turnOff"]);
+  });
+
+  it.each([
+    ["Unavailable in this browser", false, false],
+    ["On this phone", true, false],
+    ["Alpha Cloud", true, true],
+  ] as const)('Shows the speech destination %s (spec/app/voice/index.md, "Story: Choose where my speech goes")', async (shown, phone, signedIn) => {
+    const { world } = await settingsOpen({ ...scene(), phone, signedIn });
+    await press("Privacy");
+    await vi.waitFor(() => expect(document.querySelector('[aria-label="Voice processing"]')?.textContent).toContain(shown));
+    expect(world.voice.startLiveCaptureCalls).toBe(0);
+    expect(world.voice.startCloudSpeechCalls).toBe(0);
   });
 
   it("See what the phone says (spec/app/settings/facts.md, \"Story: See what the phone says\")", async () => {

@@ -29,6 +29,8 @@ through the [shell](../shell/), as does Photos in the browser. Messages is liste
 on an Alpha image. Returning from an app opened this way shows Apps and the row
 that opened it.
 
+The voice area also shows the current speech destination on Privacy.
+
 ## Story: Find a setting and come back
 
 > As the owner, I want every setting on a page I can reach in a few taps,

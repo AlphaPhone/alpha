@@ -154,6 +154,24 @@ describe("Messages on an Alpha image", () => {
     expect(menu()).not.toBeNull();
     await drawn(() => { pointer("pointerup", 30); click(); });
     expect(menu()).not.toBeNull();
+
+    // spec/app/messages/index.md, "Keep clipboard feedback on the selected message's menu"
+    await press("Copy");
+    await vi.waitFor(async () => {
+      await drawn(() => undefined);
+      expect(button("Copied!")).toBeDefined();
+    }, { timeout: 12_000, interval: 50 });
+    expect([menu()?.querySelector('[role="status"]')?.textContent, world.settings.copied]).toEqual(["Copied.", ["See you at five"]]);
+    await later(alpha, 1_400);
+    expect(button("Copy")).toBeDefined();
+    world.settings.refusesCopy = true;
+    await press("Copy");
+    await vi.waitFor(async () => {
+      await drawn(() => undefined);
+      expect(menu()?.querySelector('[role="status"]')?.textContent).toBe("Copy failed");
+    }, { timeout: 12_000, interval: 50 });
+    expect([Boolean(button("Copy")), world.settings.copied]).toEqual([true, ["See you at five"]]);
+
     await drawn(() => { pointer("pointerdown", 30); pointer("pointerup", 30); click(); });
     expect(menu()).toBeNull();
 
