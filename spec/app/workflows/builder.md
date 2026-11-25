@@ -80,6 +80,7 @@ pure val dayValues = Set(0, 3, 7)
 pure val hourValues = Set(7, 24)
 pure val minuteValues = Set(0, 60)
 pure val zoneValues = Set(0, 1)
+pure val whenValues = S::wValues.union(Set({ ...S::daily(0), hour: 24 }))
 pure val heldValues = Set(1, 2)
 pure val opValues = Set(T::SuppliedText, T::CalendarRange, T::Contains, T::ReadAloud, T::SelectedNotes)
 pure val stepsValues = Set(
