@@ -1,8 +1,11 @@
 // @vitest-environment happy-dom
 import { afterEach, describe, expect, it } from "vitest";
 import { Machine } from "../gen/app__camera.effect.vibe";
+import { Machine as Library } from "../gen/app__photos.effect.vibe";
+import { Machine as Viewer } from "../gen/app__photos__viewer.effect.vibe";
 import { requestCapture, type CaptureAnswer } from "../src/camera/camera.vibe";
 import camera from "../src/camera/index.tsx";
+import { photosArea } from "../src/photos/index.tsx";
 import { button, closeAll, drawn, hardware, later, only, open, press, seen, underAct, until } from "./alpha.tsx";
 import { scene } from "./fakes/scene.ts";
 
@@ -46,6 +49,58 @@ describe("Camera on a phone", () => {
     await until(alpha, runtime, Machine, (state) => state.phase === "Ready");
     await hardware("home");
     await until(alpha, runtime, Machine, (state) => !state.showing && state.phase === "Off");
+  });
+
+  it.each(["photo", "video"] as const)("Open the last owned %s without library access (spec/app/camera/index.md, \"The last capture opens in Photos\")", async (kind) => {
+    const world = { ...scene(), phone: true };
+    const { alpha } = await open(world, only("home", "view:Camera", "view:Photos", "notice"));
+    const runtime = camera.runtime(alpha);
+    await press("Camera");
+    await until(alpha, runtime, Machine, (state) => state.phase === "Ready");
+    if (kind === "video") {
+      await press("Video mode");
+      await until(alpha, runtime, Machine, (state) => state.mode === "Video");
+      await press("Record video");
+      await until(alpha, runtime, Machine, (state) => state.film.stage === "Running");
+      await press("Stop recording");
+      await until(alpha, runtime, Machine, (state) => state.film.stage === "Saved");
+    } else {
+      await press("Take photo");
+      await until(alpha, runtime, Machine, (state) => state.last > 0 && state.shot === 0 && world.camera.photos.length === 1);
+    }
+
+    const playback = "https://localhost/_alpha_video_/capture.mp4";
+    world.photos.rows.unshift({
+      id: kind === "video" ? "m:external_primary:v:1" : "m:external_primary:i:1",
+      name: kind === "video" ? "Owned clip.mp4" : "Owned still.jpg", owned: true,
+      kind: kind === "video" ? "video" : "image", image: world.photos.rows[0]?.image ?? "",
+      width: 1280, height: 720, size: 10_000, date: 1795401800000, revision: "owned-capture",
+      ...(kind === "video" ? { path: playback, duration: 1 } : {}),
+    });
+    await press("Open last capture in Photos");
+    await until(alpha, photosArea.runtime(alpha), Viewer, (state) => state.read.status === "Loaded");
+    if (kind === "video") expect(document.querySelector("video")?.getAttribute("src")).toBe(playback);
+    else expect(document.querySelector('img[alt="Owned still.jpg"]')).not.toBeNull();
+    expect(world.photos.promptCount).toBe(0);
+  });
+
+  it("An aggregate camera URI cannot choose a permitted row on another volume (spec/app/camera/index.md, \"The last capture opens in Photos\")", async () => {
+    const world = { ...scene(), phone: true };
+    world.photos.access = { scope: "full", images: "full", videos: "full" };
+    const { alpha } = await open(world, only("home", "view:Camera", "view:Photos", "notice"));
+    const runtime = camera.runtime(alpha);
+    await press("Camera");
+    await until(alpha, runtime, Machine, (state) => state.phase === "Ready");
+    await press("Take photo");
+    await until(alpha, runtime, Machine, (state) => state.last > 0 && state.shot === 0 && world.camera.photos.length === 1);
+
+    world.photos.rows.unshift({
+      id: "m:a0b1-c2d3:i:1", name: "Different still.jpg", owned: false, kind: "image", image: "",
+      width: 1280, height: 720, size: 10_000, date: 1795401800000, revision: "different-capture",
+    });
+    await press("Open last capture in Photos");
+    await until(alpha, photosArea.runtime(alpha), Library, (state) => state.visible && state.library.status === "Loaded" && state.access.grant === "Granted");
+    expect([Boolean(button("Different still.jpg")), world.photos.readCount]).toEqual([true, 0]);
   });
 
   it("Let Alpha take a photo after owner approval (spec/app/camera/index.md, \"Story: Let Alpha take a photo\")", async () => {

@@ -5,12 +5,20 @@ import { plugin, type Faked } from "./phone.ts";
 const photo = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+T5XQAAAAASUVORK5CYII=";
 
 function row(id: number, name: string, owned: boolean) {
-  return { id: `lib:i:${id}:1`, name, owned, kind: "image", image: photo, date: 1795400000000 + id * 60_000, width: 1, height: 1, size: 68, revision: `rev-image-${id}` };
+  return { id: `m:external_primary:i:${id}`, name, owned, kind: "image", image: photo, date: 1795400000000 + id * 60_000, width: 1, height: 1, size: 68, revision: `rev-image-${id}` };
+}
+
+type FixtureRow = ReturnType<typeof row> & { duration?: number; path?: string };
+type ListedRow = Omit<FixtureRow, "owned"> & { owned?: boolean };
+
+function ownedKey(row: Pick<FixtureRow, "id" | "kind">): string {
+  const id = row.id.slice(row.id.lastIndexOf(":") + 1);
+  return row.kind === "video" ? "v:" + id : id;
 }
 
 export interface PhotosScene {
   access: LibraryAccess;
-  readonly rows: ReturnType<typeof row>[];
+  readonly rows: FixtureRow[];
   watching: boolean;
   changed(): void;
   promptCount: number;
@@ -32,8 +40,12 @@ export function alphaPhotos(scene: PhotosScene): Faked {
     | "thumbnails" | "beginEdit" | "previewEdit" | "saveEdit" | "cancelEdit" | "albums" | "openLibrarySettings";
   return plugin<Pick<PhotosPlugin, Used>, { libraryChanged: undefined }>((emit) => {
     scene.changed = () => { if (scene.watching) emit("libraryChanged", undefined); };
-    const listed = (rows: PhotosScene["rows"], thumbnails?: boolean) => rows.map(({ image, ...row }) => thumbnails ? { ...row, image } : row);
-    const owned = () => scene.rows.filter((item) => item.owned);
+    const listed = (rows: readonly ListedRow[], thumbnails?: boolean) => rows.map(({ image, ...row }) => thumbnails ? { ...row, image } : row);
+    const owned = () => scene.rows.filter((item) => item.owned).map(({ owned: _owned, ...item }) => ({
+      ...item,
+      id: ownedKey(item),
+    }));
+    const available = () => scene.access.scope === "denied" ? owned() : scene.rows;
     const session = "alpha-test-photo-edit";
     const preview = { sessionId: session, operationId: session, image: photo, width: 1, height: 1, reduced: false, maxEdge: 1024, filter: "none", canReplace: true };
     return {
@@ -47,15 +59,17 @@ export function alphaPhotos(scene: PhotosScene): Faked {
         scene.watching = active;
         return Promise.resolve({ active });
       },
-      list: ({ thumbnails }) => Promise.resolve({ items: listed(owned(), thumbnails), next: "", access: scene.access }),
+      list: ({ thumbnails }) => Promise.resolve(scene.access.scope === "denied"
+        ? { items: listed(owned(), thumbnails), next: "" }
+        : { items: listed(scene.rows, thumbnails), next: "", access: scene.access }),
       listPermitted({ before, query, thumbnails }: Parameters<PhotosPlugin["listPermitted"]>[0] = {}) {
         const rows = scene.rows.filter((item) => query === undefined || item.name.toLowerCase().includes(query.toLowerCase()));
         return Promise.resolve({ items: listed(before === undefined ? rows.slice(0, 2) : rows.slice(2), thumbnails), next: before === undefined && rows.length > 2 ? "next" : "", access: scene.access });
       },
-      thumbnails: ({ ids }) => Promise.resolve({ items: ids.flatMap((id) => scene.rows.filter((row) => row.id === id).map((row) => ({ id, image: row.image }))) }),
+      thumbnails: ({ ids }) => Promise.resolve({ items: ids.flatMap((id) => available().filter((row) => row.id === id).map((row) => ({ id, image: row.image }))) }),
       read({ id }) {
         scene.readCount++;
-        return Promise.resolve(scene.rows.find((item) => item.id === id));
+        return Promise.resolve(available().find((item) => item.id === id));
       },
       beginEdit: ({ id, revision }) => scene.rows.some((item) => item.id === id && item.revision === revision)
         ? Promise.resolve(preview) : Promise.reject(new Error("This item changed")),

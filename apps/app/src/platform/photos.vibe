@@ -709,6 +709,11 @@ import { type BrowserAlbum, type BrowserCapture, type BrowserEditReceipt, type B
 export { latestBrowserCapture, saveBrowserCapture, isBrowserEdit, canReplaceBrowserEdit }
 export type { BrowserAlbum, BrowserCapture, BrowserSource }
 
+export interface PhotoHandoff {
+  readonly libraryId: string | undefined
+  readonly ownedId: string | undefined
+}
+
 /** The phone's permitted library and its reviewed read surface, or the captures saved in this browser. */
 export service PhotosPort {
   readonly phone: Option.Option<PhotosClient>
@@ -719,17 +724,17 @@ export service PhotosPort {
   capture(id: string): (BrowserSource | undefined)!PhotosFailed
   saveEdit(request: BrowserEditSave): BrowserEditReceipt!PhotosFailed
   editResult(operation: string): BrowserEditReceipt!PhotosFailed
-  handoff(id: string): void!!
+  handoff(capture: PhotoHandoff): void!!
   hasHandoff(): boolean!!
-  takeHandoff(): (string | undefined)!!
+  takeHandoff(): (PhotoHandoff | undefined)!!
 }
 
 export error PhotosFailed { cause: unknown }
 
 function entry() {
-  let next: string | undefined
+  let next: PhotoHandoff | undefined
   return {
-    handoff: (id: string) => sync(() => { next = id }),
+    handoff: (capture: PhotoHandoff) => sync(() => { next = capture }),
     hasHandoff: () => sync(() => next !== undefined),
     takeHandoff: () => sync(() => { const known = next; next = undefined; return known }),
   }

@@ -5,7 +5,7 @@ import type { Actor } from "../../gen/app__photos__actor.effect.vibe"
 import * as Viewer from "../../gen/app__photos__viewer.effect.vibe"
 import * as Trash from "../../gen/app__photos__trash.effect.vibe"
 import type { Change } from "../../gen/app__photos__changes.effect.vibe"
-import type { Grant } from "../../gen/kit__permission.effect.vibe"
+import { allows, type Grant } from "../../gen/kit__permission.effect.vibe"
 import { Machine as Shell, showing } from "../../gen/app__shell.effect.vibe"
 import { Device, native } from "../platform/device.vibe"
 import { duration as noticeDuration } from "../../gen/app__notices__toasts.effect.vibe"
@@ -193,8 +193,13 @@ effect function fetched(request: Fetch): Library.Event!!(PhotosPort | Catalog | 
     return scope?.locked ? { type: "lockedOut", ticket: request.ticket } : fail
   }
   if (!Library.canListed(try machine.get(), request.ticket, "Phone")) return fail
-  const rows = (listed?.items ?? []).filter((item) => !request.own || item.owned === true)
-    .map((item): Row => ({ kind: "phone", item })).sort((a, b) => taken(b) - taken(a))
+  const ownedPage = request.own && album === undefined && listed !== undefined && listed.access === undefined
+  const rows = (listed?.items ?? []).flatMap((item): Row[] => {
+    if (item.owned === true || !request.own) return [{ kind: "phone", item }]
+    const ownedId = item.kind === "video" ? /^v:[1-9][0-9]*$/ : /^[1-9][0-9]*$/
+    return ownedPage && item.owned === undefined && ownedId.test(item.id)
+      ? [{ kind: "phone", item: { ...item, owned: true } }] : []
+  }).sort((a, b) => taken(b) - taken(a))
   const handles = try cache.index(rows)
   const accepted = request.only.length === 0 ? rows : rows.filter((_, index) => request.only.includes(handles[index] ?? 0))
   const acceptedHandles = request.only.length === 0 ? handles : handles.filter((id) => request.only.includes(id))
@@ -458,10 +463,15 @@ const handoff = started(effect {
   const cache = try Catalog
   try Stream.runForEach(photos.changes, effect (state) => {
     if (!state.visible || state.library.status !== "Loaded" || state.tab !== "Library" || state.filter !== "Everything") return
-    const id = try port.takeHandoff()
-    if (id === undefined) return
+    const capture = try port.takeHandoff()
+    if (capture === undefined) return
     const { rows } = try cache.displayed()
-    const photo = state.rows.find((number) => rows.get(number)?.item.id === id)
+    const exact = capture.libraryId === undefined ? undefined : state.rows.find((number) => rows.get(number)?.item.id === capture.libraryId)
+    const owned = exact !== undefined || capture.ownedId === undefined || allows(state.access) ? undefined : state.rows.find((number) => {
+      const row = rows.get(number)
+      return row?.kind === "phone" && row.item.owned === true && row.item.id === capture.ownedId
+    })
+    const photo = exact ?? owned
     if (photo !== undefined) try ignore(viewer.send({ type: "openItem", photo, listed: true, secure: state.secure, only: state.only, reviewing: false }, "Owner"))
   })
 }, "Camera photo handoff")
