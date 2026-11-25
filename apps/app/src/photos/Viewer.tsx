@@ -53,9 +53,9 @@ export function MediaViewer({ runtime, before, after, row, inTrash, onAddToAlbum
   const current = runtime.runSync(Effect.flatMap(OpenedPhoto, (opened) => opened.current()));
   const preview = runtime.runSync(Effect.flatMap(OpenedPhoto, (opened) => opened.preview()));
   const showing = state.read.status === "Loaded" && current.photo === state.open && !state.gone;
-  const item = row?.item;
+  const item = showing ? current.item ?? current.browser?.item ?? row?.item : row?.item;
   const name = item?.name ?? (state.kind === "Clip" ? "Video" : "Photo");
-  const timestamp = current.item?.takenAt ?? current.item?.date ?? (row?.kind === "browser" ? row.item.created : undefined);
+  const timestamp = current.item?.takenAt ?? current.item?.date ?? current.browser?.item.created ?? (row?.kind === "browser" ? row.item.created : undefined);
   const now = runtime.runSync(Effect.flatMap(Time, (time) => time.latest()));
   const date = timestamp === undefined ? undefined : new Date(timestamp);
   const day = date === undefined ? name : date.toDateString() === new Date(now).toDateString() ? "Today" : formatDate.format(date);

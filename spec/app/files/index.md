@@ -748,11 +748,11 @@ pure def agentFilterAt(s: Files, request: int, wanted: S::Filter, openedTrail: L
   val safe = s.open and allowed(s) and not(s.trash) and not(guarded) and s.picked.length() == 0 and s.details == 0
     and not(s.deleting.showing) and not(C::busy(s.change)) and not(C::asking(s.change)) and s.change.panel == 0 and not(s.sheet.open)
   val known = openedTrail.length() == 0 or (openedTrail.every(i => i > 0) and s.volumes.some(v => v.id == openedTrail.nthOr(0, 0)))
-  if (safe and known) {
-    val there = entered(openedTrail, false, F::Other, { ...s, search: S::clearFilter(s.search), handed: false })
-    val filtered = asking(wanted, request, there.state)
+  val there = entered(openedTrail, false, F::Other, { ...s, search: S::clearFilter(s.search), handed: false })
+  val filtered = asking(wanted, request, there.state)
+  if (safe and known)
     { state: filtered.state, out: unanswered({ ...s.search, peeker: 0 }).concat(there.out).concat(filtered.out) }
-  } else { state: s, out: List(Tell({ request: request, ok: false, items: List() })) }
+  else { state: s, out: List(Tell({ request: request, ok: false, items: List() })) }
 ```
 
 ### The agent opens a file the owner is shown, as listed or found now, when no file is open over Files; otherwise it is told it failed

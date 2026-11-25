@@ -44,10 +44,11 @@ do next.
   row, `rounded-action` a labelled action button; `rounded-segment` is a segmented control and
   `rounded-segment-option` the option chosen in it. `rounded-tile` is an app tile, a menu and a dialog;
   `rounded-sheet` the top of a bottom sheet, `rounded-chat` the top of the Ask Alpha sheet; `rounded-full` a
-  button and a chip, `rounded-dock` the Ask Alpha bar.
+  button and a chip, `rounded-dock` the Ask Alpha bar and `rounded-dock-compact` its compact controls.
   Everything pressed is at least 44px in both directions.
 - **Elevation.** `shadow-sm` lifts a control, `shadow-menu` a menu, `shadow-md` a dialog or a notice, `shadow-lg` a raised card,
-  `shadow-dock` the floating Ask Alpha bar (`shadow-dock-dark` on black), `shadow-sheet` a bottom sheet.
+  `shadow-dock` the floating Ask Alpha bar, `shadow-dock-compact` its compact controls, and `shadow-sheet` a bottom sheet.
+  Both dock shadows have a `-dark` variant for black surfaces.
 - **Layers.** `z-dock` is the Ask Alpha bar, `z-sheet` the conversation and bottom sheets, `z-dialog` a
   dialog, `z-toast` a notice, `z-voice` the voice overlay. `z-10`, `z-20` and `z-50` order things inside one view.
 - **Motion.** `fast` for press, `base` for most changes, `slow` for entering and leaving, on
@@ -120,6 +121,7 @@ this prose into tokens. To change the design, describe it, and have the change w
 | `rounded.group` | 1.625rem |
 | `rounded.panel` | 1.5rem |
 | `rounded.dock` | 1.9375rem |
+| `rounded.dock-compact` | 1.875rem |
 | `rounded.chat` | 1.875rem |
 | `rounded.tab-count` | 0.4375rem |
 | `rounded.action` | 1.125rem |
@@ -243,6 +245,8 @@ this prose into tokens. To change the design, describe it, and have the change w
 | `shadow.menu` | 0 4px 20px oklch(0 0 0 / 0.12) |
 | `shadow.dock` | 0 14px 40px oklch(0 0 0 / 0.12) |
 | `shadow.dock-dark` | 0 14px 40px oklch(0 0 0 / 0.45) |
+| `shadow.dock-compact` | 0 12px 34px oklch(0 0 0 / 0.12) |
+| `shadow.dock-compact-dark` | 0 12px 34px oklch(0 0 0 / 0.45) |
 | `keyframes.rise` | from{opacity:0;transform:translateY(1.75rem)}to{opacity:1;transform:none} |
 | `keyframes.drop` | from{opacity:0;transform:translateY(-2.25rem)}to{opacity:1;transform:none} |
 | `keyframes.fade` | from{opacity:0}to{opacity:1} |

@@ -434,6 +434,25 @@ describe("Files on a phone", () => {
     await press("Select again: notes.txt");
     await until(alpha, runtime, Shown, (s) => s.content.status === "Loaded" && s.kind === "Text");
     expect(document.querySelector("pre")?.textContent).toBe("The words of restored.txt");
+
+    // spec/app/files/preview.md, "A picked document is renamed through its provider using the access held for the viewer"
+    const pickedViewer = runtime.runSync(Shown.use((machine) => machine.get())).viewer;
+    await choose("Rename", "File actions");
+    await fill("Name", "retained.txt");
+    await pressOnTop("Rename");
+    await until(alpha, runtime, Shown, (s) => s.viewer > pickedViewer && s.renaming === 0 && s.content.status === "Loaded");
+    expect(document.querySelector("pre")?.textContent).toBe("The words of retained.txt");
+
+    world.files.pickerRenameNeedsReselection = true;
+    await choose("Rename", "File actions");
+    await fill("Name", "reselect.txt");
+    await pressOnTop("Rename");
+    await until(alpha, runtime, Shown, (s) => s.viewer > pickedViewer && s.renaming === 0 && !s.reachable);
+    expect(document.querySelector("[aria-label='Preview']")?.textContent).toContain("reselect.txt");
+    world.files.selectedByPicker = "Download/reselect.txt";
+    await press("Select again");
+    await until(alpha, runtime, Shown, (s) => s.content.status === "Loaded" && s.reachable);
+    expect(document.querySelector("pre")?.textContent).toBe("The words of reselect.txt");
     await hardware("back");
     await until(alpha, runtime, Shown, (s) => s.viewer === 0);
     // spec/app/files/recent.md, "A file selected again takes the place of its lapsed row": restored.txt stands where notes.txt was, ahead of code.txt, which still holds its access
@@ -513,13 +532,17 @@ describe("Files on a phone", () => {
     expect([read.ok, read.items.map((item) => item.name), now().trail.length, now().items.length]).toEqual([true, ["notes.txt"], 2, 2]);
     expect((await runtime.runPromise(agentRead(2, { volume: "primary", path: "Documents" }, everything, true))).ok).toBe(false);
 
+    // spec/app/files/index.md, "An approved filter for a named folder goes to that folder before it searches"
+    const targeted = await runtime.runPromise(fileAction({ type: "files_filter", folder: "Documents", text: "notes" }, { attemptId: 1, proposalId: "targeted-filter", operationId: "targeted-filter" }));
+    expect([targeted?.kind, now().search.hits.map((item) => item.name)]).toEqual(["applied", ["notes.txt"]]);
+
     const dated = Date.parse("2026-03-04T12:00:00Z");
     world.files.stored.push(
       { volume: "primary", path: "Download/during.pdf", directory: false, mimeType: "application/pdf", size: 10, modified: dated },
       { volume: "primary", path: "Download/earlier.pdf", directory: false, mimeType: "application/pdf", size: 10, modified: dated - 86_400_000 },
       { volume: "primary", path: "Download/plain.pdf", directory: false, mimeType: "text/plain", size: 10, modified: dated },
     );
-    const filter = { type: "files_filter", kind: "pdf", from: "2026-03-04T00:00:00Z", to: "2026-03-04T23:59:59Z" } as const;
+    const filter = { type: "files_filter", folder: "Download", kind: "pdf", from: "2026-03-04T00:00:00Z", to: "2026-03-04T23:59:59Z" } as const;
     const filteredByDate = await runtime.runPromise(fileAction(filter, { attemptId: 1, proposalId: "dated-pdfs", operationId: "dated-pdfs" }));
     expect([filteredByDate?.kind, now().search.hits.map((item) => item.name)]).toEqual(["applied", ["during.pdf"]]);
 

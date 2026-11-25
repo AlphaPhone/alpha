@@ -134,10 +134,10 @@ pure def loaded(s: Scan, ticket: int, ok: bool, readable: bool, base: int, pages
   { ...s, keeping: K::loaded(s.keeping, ticket, ok, readable, base, pages) }
 ```
 
-### A selected image opens a transient text review above Photos, reads text immediately, and becomes a multi-page document only at the owner's request
+### A selected image or live Camera frame opens a transient text review, reads text immediately, and becomes a multi-page document only at the owner's request
 
-The selected image does not enter the Photos library or replace the saved
-Files draft. The owner can correct its text, review links, save a note,
+The image does not enter the Photos library or replace the saved Files draft.
+A Camera frame can be kept in Photos at the owner's request. The owner can correct its text, review links, save a note,
 review an event, and save a PDF. Choosing Multi-page adds page controls
 to this review, leaving the saved Files draft alone.
 
@@ -145,10 +145,15 @@ to this review, leaving the saved Files draft alone.
 pure def canStartImage(s: Scan, frame: int, by: Actor): bool =
   by == Phone and not(s.open) and not(exporting(s)) and frame > 0 and not(s.keeping.stored) and not(D::unsaved(s.keeping.draft))
 
-pure def startImage(s: Scan, frame: int, by: Actor): Moved =
+pure def imageReview(s: Scan, camera: bool): Moved =
   val image = s.images + 1
-  val opened = { ...s, origin: SelectedImage, open: true, images: image, pages: List({ ...K::noPage, image: image }), problem: NoProblem }
+  val opened = { ...s, origin: SelectedImage, open: true, images: image, pages: List({ ...K::noPage, image: image, camera: camera }), problem: NoProblem }
   recognize(opened, image, Owner)
+
+pure def startImage(s: Scan, frame: int, by: Actor): Moved = imageReview(s, false)
+
+pure def canStartCameraImage(s: Scan, frame: int, by: Actor): bool = canStartImage(s, frame, by)
+pure def startCameraImage(s: Scan, frame: int, by: Actor): Moved = imageReview(s, true)
 
 pure def canShowPages(s: Scan, by: Actor): bool = by == Owner and s.origin == SelectedImage and editable(s)
 pure def showPages(s: Scan, by: Actor): Scan = { ...s, origin: SelectedDocument }
