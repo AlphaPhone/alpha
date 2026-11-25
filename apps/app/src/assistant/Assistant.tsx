@@ -1,9 +1,10 @@
 // spec/app/assistant/index.md, "Story: Ask Alpha something"; spec/app/assistant/index.md, "Story: Stop a reply"; spec/app/assistant/chats.md, "Story: Find my conversations"; spec/app/assistant/composer.md, "Story: Send what I wrote"; spec/app/assistant/dock.md, "Focusing or tapping the composer on the bar opens Ask Alpha as a sheet"; spec/app/assistant/search.md, "Story: Search my conversations"; spec/app/assistant/reply.md, "Story: Hear a brief acknowledgment and still get the whole answer"
 import {
-  Alert, AssistantCard, Button, AssistantConversation, AssistantGrabber, AssistantPhotoPreview, ConfirmDialog,
+  Alert, AssistantCard, AssistantCardFrame, Button, AssistantConversation, AssistantGrabber, AssistantPhotoPreview, ConfirmDialog,
   type AssistantAttachment, type AssistantComposerProps, type AssistantDraftNoticeProps, type AssistantTurnNoteProps,
 } from "@repo/ui";
 import { Effect, type ManagedRuntime } from "effect";
+import { ClipboardCheck } from "lucide-react";
 import { type ReactNode, type RefObject, useCallback, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { type Conversation as Talking, Machine as ConversationMachine } from "../../gen/app__assistant.effect.vibe";
 import { askable, inFlight, pending } from "../../gen/app__assistant.ts";
@@ -17,7 +18,7 @@ import { type Composer as Writing, Machine as ComposerMachine } from "../../gen/
 import { attachments as attachmentCount, content, maxFiles, textLimit } from "../../gen/app__assistant__composer.ts";
 import { useMachine as useComposer } from "../../gen/app__assistant__composer.react.ts";
 import type { Machine as DockMachine } from "../../gen/app__assistant__dock.effect.vibe";
-import { focused as dockFocused, isOpen as dockOpen } from "../../gen/app__assistant__dock.ts";
+import { browserFieldPull, focused as dockFocused, isOpen as dockOpen } from "../../gen/app__assistant__dock.ts";
 import { useMachine as useDock } from "../../gen/app__assistant__dock.react.ts";
 import type { Machine as ReplyMachine } from "../../gen/app__assistant__reply.effect.vibe";
 import { liveAddsToHistory } from "../../gen/app__assistant__reply.ts";
@@ -108,14 +109,16 @@ const maps = { type: "openView", view: "Maps" } as const;
 const back = { type: "goBack" } as const;
 
 function DeviceReview({ runtime, card }: { runtime: AssistantProps["runtime"]; card: MediaCard }) {
-  const decide = (approve: boolean) => void runtime.runPromise(Effect.flatMap(MediaReview, (review) => review.decide(card, approve)));
+  const decide = (approve: boolean, confirmation?: "Tap") => void runtime.runPromise(Effect.flatMap(MediaReview, (review) => review.decide(card, approve, confirmation)));
+  const deciding = card.decision === "Deciding";
+  const unavailable = card.decision === "Unconfirmed";
   return (
-    <div className="grid gap-2">
+    <div className="grid gap-2" aria-busy={deciding}>
       {card.phone?.tag === "Choices" ? (
         <div role="group" aria-label="Choose a phone number" className="grid gap-2 rounded-sheet bg-secondary p-3">
           <p className="font-semibold">Choose a number for {namedReviewQuery(card.operation)}</p>
           {card.phone.options.map((choice, index) => (
-            <Button key={`${choice.contact}\n${choice.number}`} variant="ghost" className="h-auto min-h-11 justify-start text-left whitespace-normal"
+            <Button key={`${choice.contact}\n${choice.number}`} variant="ghost" className="h-auto min-h-11 justify-start text-left whitespace-normal" disabled={card.decision !== undefined}
               onClick={() => void runtime.runPromise(Effect.flatMap(MediaReview, (review) => review.choosePhone(card, index)))}>
               {choice.name} · {displayNumber(choice.number)}
             </Button>
@@ -126,11 +129,21 @@ function DeviceReview({ runtime, card }: { runtime: AssistantProps["runtime"]; c
         <Alert role="status">{card.phone.reason}</Alert>
       ) : card.notice !== undefined ? (
         <Alert role="status">{`${card.title}: ${card.detail}. ${card.notice}`}</Alert>
+      ) : card.operation.type === "sms_send" ? (
+        <AssistantCardFrame icon={<ClipboardCheck />} title={card.title} data-alpha-review={card.id}
+          detail={card.sms === undefined ? undefined : `SIM ${card.sms.subscription.slot + 1} · ${card.sms.subscription.displayName}`}
+          actions={<Button data-alpha-review-send="" disabled={deciding || unavailable} onClick={(event) => decide(true, event.nativeEvent.isTrusted ? "Tap" : undefined)}>Approve</Button>}>
+          <p className="font-semibold wrap-anywhere">{card.operation.recipients.map(displayNumber).join(", ")}</p>
+          <p className="whitespace-pre-wrap wrap-anywhere">{card.operation.body}</p>
+          {card.spokenSms !== undefined && card.decision === undefined && <p className="text-meta text-muted-foreground">Say “Send this text”</p>}
+        </AssistantCardFrame>
       ) : (
-        <AssistantCard card={{ kind: "decision", variant: "proposal", title: card.title, detail: card.detail, action: card.operation.type === "sms_compose" ? "Open draft" : "Approve" }}
-          onHandOn={() => decide(true)} />
+        <AssistantCard card={{ kind: "decision", variant: "proposal", title: card.title, detail: card.detail, waiting: deciding, action: card.operation.type === "sms_compose" ? "Open draft" : "Approve" }}
+          onHandOn={unavailable ? undefined : () => decide(true)} />
       )}
-      <Button className="justify-self-end" variant="ghost" onClick={() => decide(false)}>Decline</Button>
+      {unavailable
+        ? <Alert role="status">Alpha couldn’t confirm the decision. Check Activity before trying again.</Alert>
+        : <Button className="justify-self-end" variant="ghost" disabled={deciding} onClick={() => decide(false)}>Decline</Button>}
     </div>
   );
 }
@@ -214,22 +227,28 @@ interface DockHandleProps {
   field: RefObject<HTMLTextAreaElement | null>;
 }
 
+function dockPull(dock: DockHandleProps["dock"], detent: DockHandleProps["detent"]): NonNullable<AssistantComposerProps["fieldPull"]> {
+  return {
+    onPress: () => { void dock.send({ type: "press", detent, now: untimed }); },
+    onDrag: () => { void dock.send({ type: "drag" }); },
+    onRelease: ({ direction, flick, y }) => {
+      const height = Math.max(0, Math.round(window.innerHeight - y));
+      void dock.send({ type: "release", direction: direction === "up" ? "Up" : "Down", flick, height, floor: barHeight, full: window.innerHeight, now: untimed });
+    },
+    onCancel: () => { void dock.send({ type: "shift", now: untimed }); },
+  };
+}
+
 function DockHandle({ dock, detent, compact, focusOnPointerOpen, field }: DockHandleProps) {
   const open = dockOpen(detent);
   return (
     <AssistantGrabber
       variant={open ? "handle" : "mark"}
-      onPress={() => { void dock.send({ type: "press", detent, now: untimed }); }}
-      onDrag={() => { void dock.send({ type: "drag" }); }}
-      onRelease={({ direction, flick, y }) => {
-        const height = Math.max(0, Math.round(window.innerHeight - y));
-        void dock.send({ type: "release", direction: direction === "up" ? "Up" : "Down", flick, height, floor: barHeight, full: window.innerHeight, now: untimed });
-      }}
+      {...dockPull(dock, detent)}
       onLift={() => {
         void dock.send({ type: "lift", now: untimed });
         if (!open && focusOnPointerOpen) field.current?.focus();
       }}
-      onCancel={() => { void dock.send({ type: "shift", now: untimed }); }}
       onTap={({ keyboard }) => {
         void dock.send({ type: "click", now: untimed });
         if (!open && keyboard && !compact) field.current?.focus();
@@ -421,6 +440,8 @@ export function Assistant({ runtime, messageActions, speech, canReadAloud = fals
       if (sent._tag === "Failure") focusOnRevealRef.current = false;
     });
   };
+  const draftEditable = composer.can({ type: "edit", blank: false, long: false });
+  const pullFromField = shell.state && browserFieldPull(shell.state, seen.typed === "", draftEditable);
   const grabber = shell.state ? <DockHandle dock={dock} detent={assistantDetent} compact={compact}
     focusOnPointerOpen={currentView !== undefined && !compact} field={composerRef} /> : undefined;
 
@@ -468,11 +489,15 @@ export function Assistant({ runtime, messageActions, speech, canReadAloud = fals
             speech.onDictate?.();
           },
           fieldRef: composerField,
+          fieldPull: pullFromField ? {
+            ...dockPull(dock, assistantDetent),
+            onLift: () => { void dock.send({ type: "fieldLift", now: untimed }); },
+          } : undefined,
           value: subject === undefined ? seen.typed : request,
           onValueChange: type,
           placeholder: onComms ? "Ask Alpha" : assistantDetent === "Bar" && currentView === "Browser" ? "Ask about this page" : undefined,
           leading: onComms ? <CommsTarget runtime={runtime} placement="composer" /> : undefined,
-          closed: subject === undefined && !composer.can({ type: "edit", blank: false, long: false }),
+          closed: subject === undefined && !draftEditable,
           notice: notice === undefined || onComms ? undefined : {
             status: notice,
             saved: seen.saved,

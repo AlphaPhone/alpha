@@ -4,6 +4,7 @@ import type { DeviceOperation } from "@elizaos/agent"
 import { operationIdOf, type DirectSmsReview, type SmsSendResult } from "@elizaos/os-bridges"
 import { normalizePhoneNumber } from "@elizaos/os-bridges"
 import { Machine as Phone, clear } from "../../gen/app__phone.effect.vibe"
+import type { SmsApproval } from "../platform/composerPort.vibe"
 import { Device } from "../platform/device.vibe"
 import { type Telephony, TelephonyAbsent, TelephonyRefused, telephony } from "../platform/telephony.vibe"
 import { activeSmsSelection, type SmsSelection } from "./agent-sim.vibe"
@@ -30,7 +31,7 @@ function resultOf(receipt: SmsSendResult | undefined) {
 }
 
 /** A reviewed agent request uses the exact native SMS confirmation, never a fallback composer or a fresh send ID. */
-export effect function reviewAgentSms(op: Sms, call: ExecutorCall, current: () => Promise<boolean>, selection?: SmsSelection) {
+export effect function reviewAgentSms(op: Sms, call: ExecutorCall, current: () => Promise<boolean>, selection?: SmsSelection, approval?: Omit<SmsApproval, "attemptId">) {
   const wanted = binding(op, call)
   const device = try Device
   const phone = try Phone
@@ -41,13 +42,14 @@ export effect function reviewAgentSms(op: Sms, call: ExecutorCall, current: () =
   if (status?.sendMode !== "direct" || status.permissions.sendSms !== "granted" || !status.subscriptions?.some((sim) => sim.id === wanted.review.subscriptionId)) return refused
   if (selection !== undefined && (status.permissions.sms !== "granted" || status.permissions.phoneState !== "granted" || !activeSmsSelection(selection, status.subscriptions))) return refused
   if (!(tryPromise(current) catch () => false) || !(try device.showing()) || !clear(try phone.get())) return refused
-  let receipt = telephony("sendSms", (client) => client.messages.sendSms(wanted.review, wanted.id)) catch (failure) => {
+  let receipt = telephony("sendSms", (client, signal) => approval === undefined || selection === undefined
+    ? client.messages.sendSms(wanted.review, wanted.id)
+    : client.approvedSms({ ...approval, attemptId: call.attemptId }, signal, current).sendSms(wanted.review, wanted.id)) catch (failure) => {
     if (failure instanceof TelephonyAbsent || (failure instanceof TelephonyRefused &&
-      (failure.tag === "BridgeUnavailable" || failure.tag === "InvalidMessageRequest" || failure.tag === "SmsSendNotAttempted"))) return null
+      (failure.tag === "BridgeUnavailable" || failure.tag === "InvalidMessageRequest" || failure.tag === "SmsSendNotAttempted" || failure.code === "composer-not-started"))) return null
     return undefined
   }
   if (receipt === null) return refused
-  // Only the carrier can advance a submission. Every follow-up reads the same native receipt.
   for (let read = 0; receipt?.status === "submitted" && read < 6; read += 1) {
     try sleep("500 millis")
     if (!(try device.showing())) break

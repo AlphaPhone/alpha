@@ -1,7 +1,7 @@
 // @vitest-environment happy-dom
 // spec/app/voice/index.md, "Story: Hold a spoken conversation"; spec/app/voice/index.md, "The speech pipeline warms on startup, foreground return and account readiness without opening the microphone"; spec/app/voice/index.md, "A reply that needs the owner's review in chat keeps voice listening with the microphone open"; spec/app/voice/index.md, "Story: Go where the conversation takes me"; spec/app/voice/index.md, "A spoken reply says a written date, clock time, range and percentage in words"; spec/app/voice/index.md, "A turn Cloud refuses because the account is out of funds ends voice quietly, as Stop does"
 import { type Context, Effect, Layer, ManagedRuntime, Stream } from "effect";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import * as Shell from "../gen/app__shell.effect.vibe";
 import * as Voice from "../gen/app__voice.effect.vibe";
 import { VoiceBridge } from "../src/platform/voice.vibe";
@@ -10,6 +10,9 @@ import { shell } from "../src/shell/shell.vibe";
 import { placeOf, VoiceWords, voicing } from "../src/voice/voice.vibe";
 import { DictationClock } from "../src/voice/dictation-clock.vibe";
 import { Machine as Conversation } from "../gen/app__assistant.effect.vibe";
+import { Machine as Chats } from "../gen/app__assistant__chats.effect.vibe";
+import { Machine as Messages } from "../gen/app__messages.effect.vibe";
+import { Machine as Phone } from "../gen/app__phone.effect.vibe";
 import { Machine as Composer } from "../gen/app__assistant__composer.effect.vibe";
 import { Machine as Dock } from "../gen/app__assistant__dock.effect.vibe";
 import { Machine as Locator } from "../gen/app__assistant__context.effect.vibe";
@@ -22,6 +25,7 @@ import assistant from "../src/assistant/index.tsx";
 import files from "../src/files/index.tsx";
 import { button, closeAll, drawn, fill, later, open, press, seen, underAct, until as drawnUntil } from "./alpha.tsx";
 import { scene, type Scene } from "./fakes/scene.ts";
+import { prepared } from "./fakes/notes.ts";
 import { textReview } from "./fakes/text-review.ts";
 import { fakeWorld } from "./fakes/world.vibe";
 
@@ -75,7 +79,10 @@ const sendShell = (runtime: VoiceRuntime, event: Shell.Event) =>
   runtime.runPromise(Effect.flatMap(Shell.Machine, (m) => m.send(event)));
 
 async function startListening(world: Scene): Promise<VoiceRuntime> {
-  const runtime = bootVoice(world);
+  const { alpha } = await open(world, talkMounts);
+  const runtime = assistant.runtime(alpha);
+  await drawnUntil(alpha, runtime, Conversation, (s) => s.ready);
+  await drawnUntil(alpha, runtime, Composer, (s) => s.slot === "Open" && s.binding.owner > 0);
   await until(runtime, Voice.Machine, (s) => s.warmed);
   await sendVoice(runtime, { type: "permissionChanged", grant: "Granted" });
   await sendVoice(runtime, { type: "startTalking", now: untimed });
@@ -267,6 +274,7 @@ describe("Voice Bug 1 & Bug 3 journeys", () => {
       "Final sentence wraps up.",
     ];
     const runtime = await startListening(world);
+    expect(world.ask.opened).toBe(0);
 
     speakUtterance(world, "Give me an update");
     await until(runtime, Voice.Machine, (s) => s.phase === "Listening" && s.mic === "On" && s.sent === 1 && s.turn === 2);
@@ -277,6 +285,7 @@ describe("Voice Bug 1 & Bug 3 journeys", () => {
       { text: "Final sentence wraps up.", append: true },
     ]);
     expect(world.voice.engineHeld).toBe(true);
+    expect([...world.ask.kept.values()].map((chat) => chat.title)).toEqual(["Ask Alpha"]);
 
     world.ask.nextReplyChunks = [
       "Sun, Nov 22:\n",
@@ -379,26 +388,43 @@ describe("Voice Bug 1 & Bug 3 journeys", () => {
   });
 
   // spec/app/voice/index.md, "A reply that needs the owner's review in chat keeps voice listening with the microphone open"
-  it("keeps voice active and the microphone open when an agent action needs review in chat, and settling review does not stop voice", async () => {
-    const world = { ...scene(), phone: true, signedIn: false };
-    world.ask.nextReplyChunks = ["[APPROVAL:send_email] Draft ready for your review in chat."];
-    const runtime = await startListening(world);
+  it("keeps Talk listening during a confirmed chat review and its decision", async () => {
+    const world = { ...scene(), phone: true, image: true, signedIn: false };
+    const review = textReview(world.notes.owner, "spoken-folder", { type: "files_folder_create", parent: "Download", name: "Review folder" });
+    world.telephony.textReview = review;
+    const { alpha } = await open(world, talkMounts);
+    const area = assistant.runtime(alpha);
+    await drawnUntil(alpha, area, Conversation, (state) => state.ready && state.observing);
+    await drawnUntil(alpha, area, Composer, (state) => state.slot === "Open" && state.binding.owner > 0);
+    await drawnUntil(alpha, alpha.runtime, Preferences, (state) => state.document.read.status === "Loaded");
+    await drawn(() => alpha.runtime.runPromise(Preferences.use((machine) => machine.send({ type: "setAskFirst", askFirst: true, at: untimed }, "Owner"))));
+    await drawnUntil(alpha, alpha.runtime, Preferences, (state) => state.askFirst);
+    await drawnUntil(alpha, area, Voice.Machine, (state) => state.warmed);
+    await press("Talk");
+    await drawnUntil(alpha, area, Voice.Machine, (state) => state.phase === "Listening" && state.mic === "On");
+    world.ask.nextReplyChunks = [""];
+    world.ask.nextActions = () => [{ action: "PROPOSE_DEVICE_ACTION", data: {
+      proposalId: review.proposal.id, state: "pending", executed: false, approvalRequired: true, awaitingUserInput: true,
+    } }];
 
-    speakUtterance(world, "Send the draft email");
-    await until(runtime, Voice.Machine, (s) => s.phase === "Listening" && s.mic === "On" && s.reviewPending && s.sent === 1);
+    speakUtterance(world, "Create a Review folder in Downloads");
+    await drawnUntil(alpha, area, Voice.Machine, (state) => state.phase === "Listening" && state.mic === "On" && state.reviewPending);
+    expect(document.body.textContent).toContain("Review in chat");
+    expect([world.voice.engineHeld, world.voice.activeMicSession !== undefined, world.voice.spoken]).toEqual([true, true, []]);
+    expect(review.claims).toEqual([]);
 
-    const duringReview = await getVoice(runtime);
-    expect([duringReview.phase, duringReview.mic, duringReview.reviewPending, duringReview.engineHeld, world.voice.activeMicSession !== undefined]).toEqual([
-      "Listening", "On", true, true, true,
-    ]);
-    expect(world.voice.hushCalls).toBeGreaterThanOrEqual(1);
-    expect(world.voice.spoken).toEqual([]);
-
-    await sendVoice(runtime, { type: "reviewSettled" });
-    const afterSettle = await getVoice(runtime);
-    expect([afterSettle.phase, afterSettle.mic, afterSettle.reviewPending, afterSettle.engineHeld, world.voice.activeMicSession !== undefined]).toEqual([
-      "Listening", "On", false, true, true,
-    ]);
+    const decision = Promise.withResolvers<void>();
+    review.decisionGate = decision.promise;
+    try {
+      await press("Decline");
+      await drawn(() => vi.waitFor(() => expect(button("Decline")?.disabled).toBe(true)));
+      expect(document.body.textContent).toContain("Review in chat");
+    } finally {
+      decision.resolve();
+    }
+    await drawnUntil(alpha, area, Voice.Machine, (state) => state.phase === "Listening" && state.mic === "On" && !state.reviewPending);
+    expect([button("Decline"), review.proposal.state, review.claims, world.voice.activeMicSession !== undefined]).toEqual([undefined, "rejected", [], true]);
+    expect(document.body.textContent).not.toContain("Review in chat");
   });
 
   // spec/app/voice/index.md, "An active voice conversation may ask the shell to open Home or any admitted screen"; spec/app/voice/index.md, "Voice keeps talking after a navigation only when it is the one the conversation asked for; any other ends it"; spec/app/shell/index.md, "Agent navigation shows an admitted app or Home without lowering Ask Alpha"
@@ -647,7 +673,7 @@ describe("Talk from Ask Alpha's composer (spec/app/voice/index.md, \"Story: Hold
   });
 
   // spec/app/assistant/context.md, "A spoken turn carries what a typed turn sent at that moment would, the view claim included"
-  it("a spoken turn tells the agent the same screen a typed turn sent at that moment does, location and view claim included", async () => {
+  it("a spoken turn tells the agent the same screen as typing and follows the current prepared view with Talk still open", async () => {
     const world = { ...scene(), phone: true, signedIn: false };
     const { alpha } = await open(world, talkMounts);
     const area = assistant.runtime(alpha);
@@ -670,8 +696,117 @@ describe("Talk from Ask Alpha's composer (spec/app/voice/index.md, \"Story: Hold
     speakUtterance(world, "And now?");
     await drawnUntil(alpha, area, Voice.Machine, (s) => s.sent === 1 && s.phase === "Listening");
     expect([world.ask.said.at(-1), world.ask.metadata.length, world.ask.metadata.at(-1)]).toEqual(["And now?", 3, typed]);
-    await press("Stop voice conversation");
-    await drawnUntil(alpha, area, Voice.Machine, (s) => s.phase === "Idle");
+    // spec/app/voice/index.md, "Talk keeps what it sends in the selected Ask Alpha conversation"
+    expect(world.ask.opened).toBe(1);
+    expect(world.ask.kept.get("c1")?.messages.slice(-2).map(({ role, text }) => ({ role, text }))).toEqual([
+      { role: "user", text: "And now?" },
+      { role: "assistant", text: "You said: And now?" },
+    ]);
+
+    // spec/app/voice/index.md, "An active voice conversation may ask the shell to open Home or any admitted screen"
+    const shellState = () => alpha.runtime.runSync(Shell.Machine.use((machine) => machine.get()));
+    const preparedFor = (view: string) => (metadata: unknown) => [
+      prepared(String((metadata as { viewClientId?: unknown }).viewClientId), view, false),
+    ];
+    const client = (typed as { viewClientId: string }).viewClientId;
+    const binding = (viewId: string) => ({ requestId: `request-${viewId}`, clientId: client, viewId, viewType: "gui", installationId: "alpha" });
+    world.ask.nextReplyChunks = ["[NAVIGATE:Notes] Opening Calendar."];
+    world.ask.nextActions = preparedFor("calendar");
+    speakUtterance(world, "Open my calendar");
+    await drawnUntil(alpha, area, Voice.Machine, (s) => s.sent === 2 && s.phase === "Listening" && s.mic === "On");
+    expect(shellState().trail).toEqual(["Calendar"]);
+    expect(world.notes.views).toEqual([
+      { path: "claim", body: binding("calendar") },
+      { path: "result", body: { ...binding("calendar"), claimId: "claim-1", success: true, result: { switched: true } } },
+    ]);
+
+    // spec/app/voice/index.md, "Voice keeps talking after a navigation only when it is the one the conversation asked for; any other ends it"
+    const gate = Promise.withResolvers<void>();
+    world.notes.viewClaimGate = gate.promise;
+    try {
+      await drawnUntil(alpha, area, Conversation, (s) => s.observing && s.context.showing.tag === "App" && s.context.showing.view === "Calendar");
+      world.ask.nextReplyChunks = ["Opening Notes."];
+      world.ask.nextActions = preparedFor("notes");
+      speakUtterance(world, "Open Notes");
+      await drawn(() => vi.waitFor(() => expect(world.notes.views.at(-1)).toEqual({ path: "claim", body: binding("notes") })));
+      await drawn(() => alpha.runtime.runPromise(Shell.Machine.use((machine) => machine.send({ type: "openView", view: "Notes" }))));
+      await drawnUntil(alpha, area, Voice.Machine, (s) => s.phase === "Idle");
+    } finally {
+      gate.resolve();
+    }
+    await drawn(() => vi.waitFor(() => expect(world.notes.views.at(-1)).toEqual({
+      path: "result", body: { ...binding("notes"), claimId: "claim-3", success: false, result: { switched: false } },
+    })));
+    expect(shellState()).toMatchObject({ trail: ["Calendar", "Notes"], assistant: "Bar" });
+  });
+
+  // spec/app/voice/index.md, "A reply that needs the owner's review in chat keeps voice listening with the microphone open"
+  it("accepts one spoken confirmation of the entire current text review without asking the agent again", async () => {
+    const world = { ...scene(), phone: true, image: true, signedIn: false };
+    const operation = { type: "sms_send", recipients: ["+14155550100"], body: "Meet upstairs.\nBring the keys.", subscriptionId: 1 } as const;
+    const review = textReview(world.notes.owner, "spoken-reviewed-sms", operation);
+    world.telephony.textReview = review;
+    world.ask.metadata = [];
+    const { alpha } = await open(world, [...talkMounts, { at: "view:Messages", load: () => import("../src/messages/index.tsx") }]);
+    const area = assistant.runtime(alpha);
+    await drawnUntil(alpha, area, Conversation, (state) => state.ready && state.observing);
+    await fill("Message Alpha", "Start this chat");
+    await press("Send");
+    await drawnUntil(alpha, area, Conversation, (state) => state.turn.reply === "Complete");
+    await drawnUntil(alpha, area, Chats, (state) => state.chosen > 0 && state.page.status === "Loaded");
+    const room = [...world.ask.kept.values()].find((one) => one.messages.some((line) => line.text === "Start this chat"));
+    if (room === undefined) throw new Error("The visible chat was not saved");
+
+    await drawn(() => alpha.runtime.runPromise(Effect.flatMap(Shell.Machine, (machine) => machine.send({ type: "openView", view: "Messages" }))));
+    await drawnUntil(alpha, alpha.runtime, Messages, (state) => state.front && state.sms.grant === "Granted" && state.list.status === "Loaded");
+    await drawnUntil(alpha, alpha.runtime, Phone, (state) => state.telecom === "NoCall");
+    await drawn(() => alpha.runtime.runPromise(Effect.flatMap(Shell.Machine, (machine) => machine.send({ type: "raise", detent: "Sheet" }))));
+    await drawnUntil(alpha, area, Conversation, (state) => state.context.showing.tag === "App" && state.context.showing.view === "Messages");
+    await drawnUntil(alpha, area, Voice.Machine, (state) => state.warmed);
+    await press("Talk");
+    await drawnUntil(alpha, area, Voice.Machine, (state) => state.phase === "Listening" && state.mic === "On");
+
+    world.ask.nextReplyChunks = ["Review the text on your phone."];
+    world.ask.nextActions = () => [{ action: "PROPOSE_DEVICE_ACTION", data: {
+      proposalId: review.proposal.id, state: "pending", executed: false, approvalRequired: true, awaitingUserInput: true,
+    } }];
+    const text = "Text +14155550100 saying Meet upstairs. Bring the keys.";
+    speakUtterance(world, text);
+    await drawnUntil(alpha, area, Voice.Machine, (state) => state.sent === 1 && state.reviewPending && state.phase === "Listening" && state.mic === "On");
+    expect(room.messages.some((line) => line.role === "user" && line.text === text)).toBe(true);
+    expect(world.ask.metadata.at(-1)).toMatchObject({ observation: { selectedObject: { kind: "sms-subscription", id: "1" } } });
+    expect(button("Approve")).toBeDefined();
+    expect(document.body.textContent).toContain(operation.body);
+    expect([review.decisions, review.claims, world.telephony.sent]).toEqual([[], [], []]);
+
+    const send = button("Approve");
+    const card = send?.closest<HTMLElement>("[data-alpha-review]");
+    const viewport = card?.closest<HTMLElement>("[role='log']");
+    if (send === undefined || !card || !viewport) throw new Error("The addressed text was not drawn in the conversation");
+    const bounds = new DOMRect(8, 8, 300, 92);
+    const hit = vi.spyOn(document, "elementFromPoint").mockReturnValue(send);
+    const cardBounds = vi.spyOn(card, "getBoundingClientRect").mockReturnValue(bounds);
+    const sendBounds = vi.spyOn(send, "getBoundingClientRect").mockReturnValue(new DOMRect(16, 58, 60, 30));
+    const viewportBounds = vi.spyOn(viewport, "getBoundingClientRect").mockReturnValue(new DOMRect(0, 0, 320, 120));
+    try {
+      speakUtterance(world, "Send this text.");
+      await vi.waitFor(() => expect(review.confirmations).toHaveLength(1));
+      await drawn(() => review.confirmations[0]?.confirm());
+      await drawnUntil(alpha, area, Voice.Machine, (state) => state.sent === 2 && !state.reviewPending && state.phase === "Listening" && state.mic === "On");
+      speakUtterance(world, "Send this text.");
+      await drawnUntil(alpha, area, Voice.Machine, (state) => state.sent === 3 && state.phase === "Listening" && state.mic === "On");
+    } finally {
+      for (const confirmation of review.confirmations) confirmation.confirm();
+      hit.mockRestore();
+      cardBounds.mockRestore();
+      sendBounds.mockRestore();
+      viewportBounds.mockRestore();
+    }
+    expect(world.ask.said).toEqual(["Start this chat", text]);
+    expect(button("Approve")).toBeUndefined();
+    expect([review.decisions, review.claims, world.telephony.sent]).toEqual([
+      [review.proposal.id], [review.proposal.id], [{ operationId: review.proposal.id, recipients: [...operation.recipients], body: operation.body }],
+    ]);
   });
 
   // spec/app/files/index.md, "An explicit request to open or filter Files may act directly on the same idle Files view"

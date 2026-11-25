@@ -3,7 +3,7 @@ import type { TurnResult } from "@elizaos/agent"
 import * as Conversation from "../../gen/app__assistant.effect.vibe"
 import { resent } from "../../gen/app__assistant__context.effect.vibe"
 import type { Machine as ConversationMachine } from "../../gen/app__assistant.effect.vibe"
-import { Machine as Shell, type Detent, type View, canAgentGoHome, parseEvent, showing } from "../../gen/app__shell.effect.vibe"
+import { type Detent, type View, parseEvent } from "../../gen/app__shell.effect.vibe"
 import { Agent } from "../platform/agent.vibe"
 import { ask } from "../platform/remote.vibe"
 import { agentOpen, mayAgentOpen } from "../notes/agent.vibe"
@@ -48,6 +48,13 @@ type TypedHeld = Held | { readonly asked: number; readonly continueFiles: Effect
 /** Where an agent's view goes: Home, or one of Alpha's apps. */
 type Place = View | "Home"
 
+interface SpokenView {
+  readonly held: Held
+  readonly current: Effect.Effect<boolean>
+  readonly front: (place: Place) => Effect.Effect<boolean>
+  readonly completed: Deferred.Deferred<void>
+}
+
 /** The id the launch declares Home by (spec/agent/index.md, "The launch names Home and every Alpha app but Notes as a view the agent may show, by the id the phone opens it by"). */
 const homeViewId = "home"
 
@@ -66,8 +73,7 @@ function placeFor(handoff: Handoff): Place | undefined {
 
 /**
  * This screen as a renderer of the agent's views: the owner's requests, numbered as they are sent, typed or spoken,
- * the latest one current; the view a typed turn's reply prepared, held by its turn until the reply is complete; and
- * the views spoken replies prepared, in order.
+ * and the view a typed turn's reply prepared, held by its turn until the reply is complete.
  */
 export service Views {
   readonly clientId: string
@@ -75,13 +81,13 @@ export service Views {
   current(): number!!
   hold(ticket: number, held: TypedHeld): void!!
   take(ticket: number): Option.Option<TypedHeld>!!
-  spoken(held: Held): void!!
-  readonly heard: Queue.Dequeue<Held>
+  spoken(held: Held, current: Effect.Effect<boolean>, front: (place: Place) => Effect.Effect<boolean>): void!!
+  readonly heard: Queue.Dequeue<SpokenView>
 }
 
 export const handoffs = Layer.effect(Views, effect {
   const clientId = renderer()
-  const heard = try Queue.unbounded<Held>()
+  const heard = try Queue.unbounded<SpokenView>()
   let latest = 0
   let typed: { readonly ticket: number; readonly held: TypedHeld } | undefined
   return {
@@ -100,7 +106,11 @@ export const handoffs = Layer.effect(Views, effect {
       typed = undefined
       return Option.some(found)
     }),
-    spoken: (held: Held) => sync(() => { Queue.offerUnsafe(heard, held) }),
+    spoken: effect (held: Held, current: Effect.Effect<boolean>, front: (place: Place) => Effect.Effect<boolean>) => {
+      const completed = try Deferred.make<void>()
+      try Queue.offer(heard, { held, current, front, completed })
+      try Deferred.await(completed)
+    },
   }
 })
 
@@ -155,15 +165,6 @@ effect function navigationEnded(conversation: ConversationMachine.Shape, ticket:
   return Option.isSome(ended) && ended.value.opening.id === ticket && ended.value.opening.outcome === "Confirmed"
 }
 
-// spec/app/voice/index.md, "An active voice conversation may ask the shell to open Home or any admitted screen"
-/** Open `place` as voice opens any screen it is asked for; whether it is in front. */
-effect function voiced(place: Place) {
-  const shell = try Shell
-  const now = try shell.get()
-  if (place === "Home") return !canAgentGoHome(now) || (try contained(shell.send({ type: "agentGoHome" }), "going Home as a spoken reply prepared"))
-  return showing(now, place) || (try contained(shell.send({ type: "agentOpenView", view: place }), "opening the view a spoken reply prepared"))
-}
-
 /**
  * Open the saved note `noteId` for the owner's request `asked`: only if Notes would let the agent open it as it is
  * now, Notes is brought to the front by `front`, and then opened there. Whether the view switched and the note opened;
@@ -214,12 +215,12 @@ export const carried = started(effect {
 }, "opening what a reply prepared")
 
 // spec/app/assistant/context.md, "A spoken turn carries what a typed turn sent at that moment would, the view claim included"
-/** Each spoken reply's prepared view is carried out once, in order, while its request is still the owner's current one. */
+/** Carry out the completed reply's prepared view through the spoken turn's own navigation claim. */
 export const carriedAloud = started(effect {
   const views = try Views
-  try Stream.runForEach(Stream.fromQueue(views.heard), effect (held) => {
-    const place = placeFor(held.handoff)
-    if (place === undefined || held.asked !== (try views.current())) return
-    try contained(carriedOut(held, voiced(place)), "opening what a spoken reply prepared")
-  })
+  try Stream.runForEach(Stream.fromQueue(views.heard), (work) => Effect.ensuring(effect {
+    const place = placeFor(work.held.handoff)
+    if (place === undefined || work.held.asked !== (try views.current()) || !(try work.current)) return
+    try contained(carriedOut(work.held, work.front(place)), "opening what a spoken reply prepared")
+  }, asVoid(Deferred.succeed(work.completed, undefined))))
 }, "opening what a spoken reply prepared")
