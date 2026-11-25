@@ -17,13 +17,14 @@ export function AccessReview({ runtime }: { runtime: ManagedRuntime.ManagedRunti
   if (!state || state.look === "NotLooking") return null;
   const current = state.look === "AtOne" ? state.target : undefined;
   const act = { type: "act", now: untimed } as const;
-  const rows: StartupAccessRowState[] = (current === undefined ? ordered : [current]).filter((key) => offered(state, key)).map((key) => {
+  const mayAct = can(act, "Owner");
+  const rows: StartupAccessRowState[] = ordered.filter((key) => offered(state, key)).map((key) => {
     const showing = flow(state, key);
     return {
       access: key,
       word: word(key, showing, grantOf(state, key)),
       busy: current === key && busy(state),
-      action: current === undefined ? "Settings" : can(act, "Owner")
+      action: current === undefined ? "Settings" : current === key && mayAct
         ? state.stalled ? "Check" : showing === "Unavailable" ? "Try again" : "Settings"
         : undefined,
     };

@@ -14,7 +14,7 @@ import { Machine as Shell } from "../gen/app__shell.effect.vibe";
 import type { Mount } from "../src/areas.ts";
 import assistant from "../src/assistant/index.tsx";
 import { untimed } from "../src/runtime/reactor.vibe";
-import { button, closeAll, fill, hardware, later, open, press, underAct, until } from "./alpha.tsx";
+import { button, closeAll, fill, hardware, later, open, press, pressOnTop, underAct, until } from "./alpha.tsx";
 import { scene } from "./fakes/scene.ts";
 
 underAct();
@@ -323,6 +323,20 @@ describe.each([["a browser", false], ["a phone", true]])("in %s", (_where, phone
     await until(fifth.alpha, runtime, Chats, (s) => s.chosen === 0 && s.list.status === "Loaded" && s.page.status === "Idle");
     expect([document.querySelector("[role=log] [aria-busy]"), document.body.textContent?.includes("Messages did not load")]).toEqual([null, false]);
     for (const release of world.ask.heldLists.splice(0)) release();
+
+    // spec/app/assistant/chats.md, "A list asked before a conversation was made is left behind, so its answer never takes that conversation away": the list read asked before New chat answers after the conversation was made.
+    world.ask.holdLists = true;
+    chatsList();
+    await vi.waitFor(() => expect(world.ask.heldLists.length).toBe(1));
+    await pressOnTop("New chat");
+    await until(fifth.alpha, runtime, Chats, (s) => s.chosen > 0 && s.make.outcome === "Confirmed" && s.page.status === "Loaded");
+    const chats = () => runtime.runPromise(Effect.flatMap(Chats, (machine) => machine.get()));
+    const made = (await chats()).chosen;
+    world.ask.holdLists = false;
+    for (const release of world.ask.heldLists.splice(0)) release();
+    await until(fifth.alpha, runtime, Chats, (s) => s.list.status === "Loaded");
+    const after = await chats();
+    expect([after.chosen, after.ids.includes(made)]).toEqual([made, true]);
   });
 
   // spec/app/assistant/index.md, "Story: Stop a reply"

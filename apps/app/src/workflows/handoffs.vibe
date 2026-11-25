@@ -1,5 +1,5 @@
 // spec/app/workflows/automations.md, "Story: Create or edit an automation on a schedule"; spec/app/reminders/editor.md, "Story: Create or edit a reminder with safe validation and draft recovery"
-import * as KeyValueStore from "effect/persistence/KeyValueStore"
+import type * as KeyValueStore from "effect/persistence/KeyValueStore"
 import { Machine as Editor } from "../../gen/app__reminders__editor.effect.vibe"
 import { Machine as Shell, canOpenView } from "../../gen/app__shell.effect.vibe"
 import { beginNewReminder } from "../reminders/editor.vibe"

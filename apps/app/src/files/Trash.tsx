@@ -1,17 +1,18 @@
 // spec/app/files/trash.md, "Story: See what is in the Trash"; spec/app/files/trash.md, "Story: Bring something back"; spec/app/files/trash.md, "Story: Erase for good"; spec/app/files/trash.md, "The owner restores everything listed that is still kept, together, from a list read since the last job"; spec/app/files/trash.md, "The owner marks listed entries, one by one or every one, and a mark lasts while its entry is listed and no job has started"; spec/app/files/trash.md, "The phone keeps an item thirty days from when it went in; its days left count down from thirty and never go below zero"
 import { Alert, AppHeader, Button, Checkbox, Dialog, DialogContent, DialogTitle, EmptyState, ListGroup, ListRow, Spinner } from "@repo/ui";
 import { Effect, type ManagedRuntime } from "effect";
-import { ChevronLeft, Trash2 } from "lucide-react";
+import { AudioLines, ChevronLeft, FileText, Folder, Image, Trash2, Video } from "lucide-react";
 import type { Machine } from "../../gen/app__files__trash.effect.vibe";
 import { daysLeft, view } from "../../gen/app__files__trash.ts";
 import { useMachine } from "../../gen/app__files__trash.react.ts";
 import { useTimed } from "../runtime/react.ts";
 import { untimed } from "../runtime/reactor.vibe";
 import { Time } from "../runtime/time.vibe";
+import { TrashFacts } from "./trashFacts.vibe";
 
 export interface TrashProps {
   /** Provides the Trash machine, of files.vibe, and Alpha's time, at which `can` is asked. */
-  runtime: ManagedRuntime.ManagedRuntime<Machine | Time, unknown>;
+  runtime: ManagedRuntime.ManagedRuntime<Machine | Time | TrashFacts, unknown>;
   /** Back to the top of Files, where the rules allow it. */
   onBack?: (() => void) | undefined;
 }
@@ -30,9 +31,14 @@ export function Trash({ runtime, onBack }: TrashProps) {
   const ended = state.attempt.outcome;
   const now = runtime.runSync(Effect.flatMap(Time, (time) => time.latest()));
   const left = (days: number) => (days === 1 ? "1 day left" : `${days} days left`);
+  const detail = state.entries.find((entry) => entry.mark === state.details);
+  const facts = runtime.runSync(Effect.flatMap(TrashFacts, (trash) => trash.rows()));
+  const details = detail === undefined ? undefined : facts.get(detail.mark);
+  const restore = detail === undefined ? undefined : { type: "restore", entry: detail, now: untimed } as const;
+  const erase = detail === undefined ? undefined : { type: "askToErase", entry: detail } as const;
   return (
     <section aria-label="Trash" className="flex min-h-0 flex-1 flex-col">
-      <AppHeader title="Trash" leading={onBack && <Button variant="ghost" size="icon" aria-label="Files" onClick={onBack}><ChevronLeft /></Button>}>
+      <AppHeader title="Trash" detail leading={onBack && <Button variant="ghost" size="icon" aria-label="Files" onClick={onBack}><ChevronLeft /></Button>}>
         {owner({ type: "refresh" }) && <Button variant="ghost" className="h-11 px-3.5" onClick={() => tell({ type: "refresh" })}>Refresh</Button>}
         {owner({ type: "restoreAll", now: untimed }) && <Button variant="ghost" className="h-11 px-3.5" onClick={() => tell({ type: "restoreAll", now: untimed })}>Restore all</Button>}
         {owner({ type: "askToEmpty" }) && <Button variant="ghost" aria-label="Empty the Trash" className="h-11 px-3.5 text-warn" onClick={() => tell({ type: "askToEmpty" })}>Empty</Button>}
@@ -54,30 +60,46 @@ export function Trash({ runtime, onBack }: TrashProps) {
       {state.entries.length > 0 && (
         <ListGroup aria-label="In the Trash" surface="plain">
           {state.entries.map((entry) => {
-            const restore = { type: "restore", entry, now: untimed } as const;
-            const erase = { type: "askToErase", entry } as const;
+            const open = { type: "openItemDetails", entry } as const;
             const mark = { type: "mark", entry } as const;
+            const listed = facts.get(entry.mark);
+            const mime = listed?.mimeType ?? "";
+            const Icon = listed?.directory ? Folder : mime.startsWith("image/") ? Image : mime.startsWith("video/") ? Video : mime.startsWith("audio/") ? AudioLines : FileText;
             return (
+              <div key={entry.mark} className="relative">
               <ListRow
-                key={entry.mark}
                 title={entry.name}
-                className="min-h-15 gap-3.5 rounded-drawer-icon px-2"
-                leading={<span className="grid size-11 shrink-0 place-items-center rounded-md bg-secondary text-foreground"><Trash2 className="size-5" /></span>}
+                aria-label={entry.name}
+                className="min-h-15 w-full gap-3.5 rounded-drawer-icon px-2 pr-10"
+                leading={<span className="grid size-11 shrink-0 place-items-center rounded-md bg-secondary text-foreground"><Icon className="size-5" /></span>}
                 selected={state.marked.includes(entry.mark)}
-                trailing={(
-                  <span className="flex items-center gap-1">
-                    {owner(mark) && <Checkbox aria-label={`Mark ${entry.name}`} checked={state.marked.includes(entry.mark)} onCheckedChange={() => tell(mark)} />}
-                    {owner(restore) && <Button variant="ghost" size="sm" aria-label={`Restore ${entry.name}`} onClick={() => tell(restore)}>Restore</Button>}
-                    {owner(erase) && <Button variant="ghost" size="sm" aria-label={`Erase ${entry.name}`} onClick={() => tell(erase)}>Erase</Button>}
-                  </span>
-                )}
-                detail={<time dateTime={new Date(entry.until).toISOString()}>{left(daysLeft(entry, now))}</time>}
+                onClick={owner(open) ? () => tell(open) : undefined}
+                trailing={<time dateTime={new Date(entry.until).toISOString()}>{left(daysLeft(entry, now))}</time>}
+                detail={listed === undefined ? undefined : listed.directory ? listed.location : `${new Intl.NumberFormat().format(listed.bytes)} bytes · ${listed.location}`}
               />
+              {owner(mark) && <Checkbox aria-label={`Mark ${entry.name}`} checked={state.marked.includes(entry.mark)} className="absolute right-2 top-1/2 -translate-y-1/2" onCheckedChange={() => tell(mark)} />}
+              </div>
             );
           })}
         </ListGroup>
       )}
       </div>
+      <Dialog open={detail !== undefined} onOpenChange={(open) => { if (!open && owner({ type: "closeItemDetails" })) tell({ type: "closeItemDetails" }); }}>
+        <DialogContent closeLabel="Close details">
+          <DialogTitle>{detail?.name}</DialogTitle>
+          {detail !== undefined && (
+            <dl aria-label="Trash item details" className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1 text-sm">
+              {details !== undefined && <><dt>Original location</dt><dd>{details.location}</dd></>}
+              {details !== undefined && !details.directory && <><dt>Size</dt><dd>{new Intl.NumberFormat().format(details.bytes)} bytes</dd></>}
+              <dt>Time left</dt><dd>{left(daysLeft(detail, now))}</dd>
+            </dl>
+          )}
+          <div className="flex gap-2 *:flex-1">
+            {restore !== undefined && owner(restore) && <Button variant="secondary" onClick={() => tell(restore)}>Restore</Button>}
+            {erase !== undefined && owner(erase) && <Button variant="destructive" onClick={() => tell(erase)}>Delete now</Button>}
+          </div>
+        </DialogContent>
+      </Dialog>
       <Dialog open={state.erasing.showing} onOpenChange={(open) => { if (!open && owner({ type: "keepThem" })) tell({ type: "keepThem" }); }}>
         <DialogContent>
           <DialogTitle>{state.doomed.length === 1 ? `Erase “${state.doomed[0]?.name}” for good?` : `Erase ${state.doomed.length} items for good?`}</DialogTitle>

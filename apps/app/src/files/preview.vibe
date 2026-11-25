@@ -1,10 +1,16 @@
 // spec/app/files/preview.md, "Story: Look at a file"; spec/app/files/preview.md, "Story: Act on the file I am looking at"; spec/app/files/preview.md, "Story: Get a file back when access was lost"; spec/app/files/recent.md, "Story: Find what I opened lately"
 import type { SelectedDocumentsClient, SelectionId } from "@elizaos/os/bridges/definitions/media"
+import { MMS_MAX_TOTAL_BYTES } from "@elizaos/os/bridges/definitions/messages"
+import { type Machine as TextMessages } from "../../gen/app__messages.effect.vibe"
+import { type Machine as MessageComposer } from "../../gen/app__messages__composer.effect.vibe"
+import { type Drafts as MessageDrafts, handOverPicture, pictureMessagingReady } from "../messages/composer.vibe"
+import type { Telephony } from "../platform/telephony.vibe"
 import * as KeyValueStore from "effect/persistence/KeyValueStore"
 import * as Browser from "../../gen/app__files.effect.vibe"
 import * as Shown from "../../gen/app__files__preview.effect.vibe"
 import * as Recent from "../../gen/app__files__recent.effect.vibe"
 import type { Item } from "../../gen/app__files__shared.effect.vibe"
+import { kindOf as storageKind } from "./entries.vibe"
 import { type MediaHandoff, attachToAlpha } from "../assistant/attachments.vibe"
 import * as Inbox from "../../gen/app__inbox.effect.vibe"
 import type { Machine as Adding } from "../../gen/app__inbox__adding.effect.vibe"
@@ -26,6 +32,9 @@ export interface Grant {
   readonly name: string
   readonly mimeType: string
   readonly revision: number
+  readonly bytes?: number
+  readonly canRename?: boolean
+  readonly storage?: { readonly volume: string; readonly path: string; readonly label: string }
 }
 
 /** What the viewer shows of its file: its text, the address of a picture or recording, and the PDF page drawn. */
@@ -57,6 +66,42 @@ module kept {
     }
   }
   /** @throws {never} */
+  export function upgradePreview(raw: string | undefined): unknown {
+    if (raw === undefined) return undefined
+    try {
+      const found: unknown = JSON.parse(raw)
+      return typeof found === "object" && found !== null && !Array.isArray(found) && !("renaming" in found)
+        ? { ...found, renaming: 0 } : undefined
+    } catch {
+      return undefined
+    }
+  }
+
+  /** @throws {never} */
+  export function namesOf(raw: string | undefined): Map<number, string> {
+    try {
+      const found: unknown = JSON.parse(raw ?? "[]")
+      return new Map(Array.isArray(found) ? found.filter((one): one is [number, string] => Array.isArray(one) && Number.isSafeInteger(one[0]) && typeof one[1] === "string") : [])
+    } catch {
+      return new Map()
+    }
+  }
+
+  /** @throws {never} */
+  export function pictureBytes(data: string, type: "image/png" | "image/jpeg", size: number, max: number): Uint8Array | undefined {
+    if (data.length % 4 !== 0 || data.length > Math.ceil(max / 3) * 4) return undefined
+    try {
+      const decoded = atob(data)
+      if (decoded.length !== size) return undefined
+      const signature = type === "image/png" ? [137, 80, 78, 71, 13, 10, 26, 10] : [255, 216, 255]
+      if (!signature.every((byte, at) => decoded.charCodeAt(at) === byte)) return undefined
+      return Uint8Array.from(decoded, (byte) => byte.charCodeAt(0))
+    } catch {
+      return undefined
+    }
+  }
+
+  /** @throws {never} */
   export function textFromBase64(data: string): string | undefined {
     try {
       return new TextDecoder("utf-8", { fatal: true }).decode(Uint8Array.from(atob(data), (byte) => byte.charCodeAt(0)))
@@ -86,7 +131,7 @@ module kept {
     }
   }
 }
-import { earlierOf, grantsOf, textFromBase64 } from kept
+import { earlierOf, grantsOf, namesOf, pictureBytes, textFromBase64, upgradePreview } from kept
 
 /**
  * The documents Recent holds access to, each by its grant's number, kept across restarts with what the owner calls
@@ -96,15 +141,19 @@ export service Opened {
   grant(grant: number): Option.Option<Grant>!!
   give(grant: number, given: Grant): void!!
   take(grant: number): Option.Option<Grant>!!
+  nameAt(key: number): (string | undefined)!!
+  rememberName(key: number, name: string): void!!
   content(): Content!!
   hold(content: Content): void!!
 }
 
 const grantsKey = "alpha/files/grants@1"
+const namesKey = "alpha/files/lapsed-names@1"
 
 export const opened = Layer.effect(Opened, effect {
   const store = try KeyValueStore.KeyValueStore
   const grants = grantsOf(store.get(grantsKey) catch () => undefined)
+  const names = namesOf(store.get(namesKey) catch () => undefined)
   let shown: Content = { viewer: 0 }
   const save = () => ignore(store.set(grantsKey, JSON.stringify([...grants])))
   return {
@@ -118,6 +167,14 @@ export const opened = Layer.effect(Opened, effect {
       grants.delete(grant)
       try save()
       return found
+    },
+    nameAt: (key: number) => sync(() => names.get(key)),
+    effect rememberName(key: number, name: string): void!! {
+      names.delete(key)
+      names.set(key, name)
+      const at = names.keys().next()
+      if (names.size > Recent.limit && !at.done) names.delete(at.value)
+      try ignore(store.set(namesKey, JSON.stringify([...names])))
     },
     content: () => sync(() => shown),
     hold: (content: Content) => sync(() => { shown = content }),
@@ -159,7 +216,8 @@ effect function grantOf(key: number): number!!Recent.Machine {
  */
 export effect function view(item: Item, siblings: ReadonlyArray<string>): void!!(Files | Handles | Documents | Opened | Recent.Machine | Shown.Machine) {
   try ignore(effect {
-    const spot = try (try Handles).spot(item.id)
+    const handles = try Handles
+    const spot = try handles.spot(item.id)
     if (Option.isNone(spot)) return
     if (Option.isNone((try Documents).client)) return try called("storageOpen", (plugin) => plugin.storageOpen(spot.value))
     const selected = try called("storageSelect", (plugin) => plugin.storageSelect(spot.value))
@@ -167,7 +225,9 @@ export effect function view(item: Item, siblings: ReadonlyArray<string>): void!!
     const recent = try Recent.Machine
     try recent.send({ type: "remember", key: item.id }, "Phone")
     const grant = (try recent.get()).shown.grant
-    try (try Opened).give(grant, { selection: selected.selectionId, key: item.id, name: selected.name, mimeType: selected.mimeType, revision: item.revision })
+    const label = Option.getOrElse(try handles.label(item.volume), () => spot.value.volume === "primary" ? "Internal storage" : "Storage")
+    try (try Opened).give(grant, { selection: selected.selectionId, key: item.id, name: selected.name, mimeType: selected.mimeType,
+      revision: item.revision, bytes: item.bytes, storage: { volume: spot.value.volume, path: spot.value.path, label } })
     try (try Shown.Machine).send({ type: "show", file: item.id, kind: kindOf(selected.mimeType), revision: item.revision, siblings: [...siblings] }, "Phone")
   })
 }
@@ -333,7 +393,180 @@ effect function toRecent(event: Recent.Event): void!!Recent.Machine {
   try ignore((try Recent.Machine).send(event, "Phone"))
 }
 
-function carryShown(fx: Shown.Effect): Job<Shown.Event, Documents | Opened | Recent.Machine | Shown.Machine | Files | MediaHandoff | MailTarget | Toasts | Said, [by: Shown.Actor]> {
+effect function samePreview(viewer: number, item: number, revision: number, grant: number): boolean!!(Shown.Machine | Recent.Machine) {
+  const state = try (try Shown.Machine).get()
+  return Shown.usable(state) && state.viewer === viewer && state.item === item && state.revision === revision && (try grantOf(item)) === grant
+}
+
+/** A PNG or JPEG the phone can carry as one MMS picture. */
+export function pictureFits(file: Grant | undefined): boolean {
+  const size = file?.bytes
+  return (file?.mimeType === "image/png" || file?.mimeType === "image/jpeg") && size !== undefined && Number.isSafeInteger(size) && size > 0 && size <= MMS_MAX_TOTAL_BYTES
+}
+
+type MessageTarget = TextMessages | MessageComposer | MessageDrafts | Shell | Telephony
+
+// spec/app/files/preview.md, "Use in Messages offers the exact readable PNG or JPEG to the owner’s recipient picker"
+effect function offerPicture(viewer: number, item: number, revision: number): void!!(Documents | Opened | Recent.Machine | Shown.Machine | Files | MessageTarget | Toasts | Said) {
+  const offered = effect {
+    const grant = try grantOf(item)
+    const file = try (try Opened).grant(grant)
+    const selection = try selectionOf(grant)
+    if (Option.isNone(file) || Option.isNone(selection) || !pictureFits(file.value) || !(try samePreview(viewer, item, revision, grant))) return false
+    const contentType = file.value.mimeType
+    const size = file.value.bytes
+    if ((contentType !== "image/png" && contentType !== "image/jpeg") || size === undefined || !(try pictureMessagingReady())) return false
+    const docs = try documents()
+    const before = try tryPromise(() => docs.describe(selection.value))
+    const place = file.value.storage
+    const matches = (one: typeof before) => one.status === "selected" && one.selectionId === selection.value && one.name === file.value.name &&
+      one.mimeType === contentType && (one.size === undefined || one.size === size) &&
+      (place !== undefined && one.modified === undefined || Math.max(0, Math.trunc(one.modified ?? 0)) === revision)
+    if (!matches(before) || !(try samePreview(viewer, item, revision, grant))) return false
+    const attachment = try (try Documents).attachment(selection.value)
+    if (Option.isNone(attachment) || attachment.value.name !== file.value.name || attachment.value.mimeType !== contentType) return false
+    const bytes = pictureBytes(attachment.value.dataBase64, contentType, size, MMS_MAX_TOTAL_BYTES)
+    if (bytes === undefined) return false
+    const after = try tryPromise(() => docs.describe(selection.value))
+    if (!matches(after) || before.uri !== after.uri) return false
+    if (place !== undefined) {
+      const listed = try called("storageList", (plugin) => plugin.storageList({ volume: place.volume, path: parentPath(place.path) }))
+      if (listed.status !== "ready" || !listed.entries?.some((one) =>
+        one.path === place.path && !one.directory && one.name === file.value.name && one.size === size && Math.trunc(one.modified) === revision)) return false
+    }
+    if (!(try samePreview(viewer, item, revision, grant))) return false
+    const wireName = contentType === "image/png" ? "picture-1.png" : "picture-1.jpg"
+    return try handOverPicture({ name: file.value.name, wireName, contentType, bytes })
+  } catch () => false
+  if (!offered) try say("Messages could not open this picture", true)
+}
+
+// spec/app/files/preview.md, "The owner can share the readable file shown through Android using its own selected-document grant"
+effect function shareViewed(viewer: number, item: number, revision: number): void!!(Documents | Opened | Recent.Machine | Shown.Machine | Toasts | Said) {
+  try ignore(effect {
+    const grant = try grantOf(item)
+    const selection = try selectionOf(grant)
+    if (Option.isNone(selection) || !(try samePreview(viewer, item, revision, grant))) return
+    const docs = try documents()
+    const held = try tryPromise(() => docs.describe(selection.value))
+    if (held.status !== "selected" || !(try samePreview(viewer, item, revision, grant))) return
+    const opened = try tryPromise(() => docs.share(selection.value))
+    if (opened.status !== "opened") try say("Android could not share this file", true)
+  })
+}
+
+// spec/app/files/preview.md, "A picked document is renamed through its provider using the access held for the viewer"
+effect function renamePicked(viewer: number, item: number, revision: number, name: string): Shown.Event!!(Documents | Opened | Recent.Machine | Shown.Machine | Toasts | Said) {
+  const finished: Shown.Event = { type: "pickedRenameFinished", viewer }
+  const holder = try Opened
+  const recent = try Recent.Machine
+  const machine = try Shown.Machine
+  const grant = (try recent.get()).shown
+  const applied = effect {
+    const selection = try selectionOf(grant.grant)
+    const file = try holder.grant(grant.grant)
+    if (grant.origin !== "Picked" || grant.key !== item || Option.isNone(selection) || Option.isNone(file) || file.value.canRename !== true) return false
+    if (!(try samePreview(viewer, item, revision, grant.grant)) || (try machine.get()).renaming !== viewer) return false
+    const docs = try documents()
+    const described = try tryPromise(() => docs.describe(selection.value))
+    if (described.status !== "selected" || described.canRename !== true || described.name !== file.value.name ||
+      (described.modified !== undefined && Math.max(0, Math.trunc(described.modified)) !== revision) ||
+      !(try samePreview(viewer, item, revision, grant.grant))) return false
+    const changed = try tryPromise(() => docs.rename(selection.value, name))
+    const held = try recent.get()
+    if (held.shown.grant !== grant.grant && !held.rows.some((row) => row.grant === grant.grant)) return true
+    if (changed.status === "renamed-reselect" || changed.status === "unavailable") {
+      if (changed.status === "renamed-reselect") try holder.rememberName(item, name)
+      else try holder.rememberName(item, file.value.name)
+      if (try samePreview(viewer, item, revision, grant.grant)) try ignore(machine.send({ type: "lost" }, "Phone"))
+      else try toRecent({ type: "lapsed", key: item })
+      return changed.status === "renamed-reselect"
+    }
+    if (changed.status !== "selected" || changed.selectionId !== selection.value || !changed.name) return false
+    const renamed = { ...file.value, name: changed.name, mimeType: changed.mimeType ?? file.value.mimeType,
+      revision: Math.max(0, Math.trunc(changed.modified ?? revision)), canRename: changed.canRename === true }
+    try holder.give(grant.grant, renamed)
+    if (try samePreview(viewer, item, revision, grant.grant)) {
+      try ignore(machine.send({ type: "show", file: item, revision: renamed.revision, kind: kindOf(renamed.mimeType), siblings: [] }, "Phone"))
+    }
+    return true
+  } catch () => false
+  if (!applied) try say("The provider could not confirm the rename. Select the file again before retrying.", true)
+  return finished
+}
+
+type PreviewWorkspace = Browser.Machine | Documents | Files | Handles | Opened | Recent.Machine | Shown.Machine
+
+function parentPath(path: string): string {
+  return path.slice(0, Math.max(0, path.lastIndexOf("/")))
+}
+
+// spec/app/files/preview.md, "Rename, Move to and Move to Trash act on the storage-backed preview still showing"
+effect function actOnViewed(viewer: number, item: number, revision: number, operation: Shown.StorageAction, name: string): void!!(PreviewWorkspace | Toasts | Said) {
+  const applied = effect {
+    const recent = try Recent.Machine
+    const row = (try recent.get()).shown
+    const grant = row.grant
+    if (row.origin !== "InFolder" || row.key !== item || !(try samePreview(viewer, item, revision, grant))) return false
+    const shown = try Shown.Machine
+    const files = try Browser.Machine
+    const handle = try Handles
+    const place = try handle.spot(item)
+    const document = try (try Opened).grant(grant)
+    const selection = try selectionOf(grant)
+    if (Option.isNone(place) || Option.isNone(document) || Option.isNone(selection)) return false
+    const { volume, path } = place.value
+    if (path === "" || (document.value.storage !== undefined && (document.value.storage.path !== path || document.value.storage.volume !== volume))) return false
+    const parent = parentPath(path)
+    const docs = try documents()
+    const described = try tryPromise(() => docs.describe(selection.value))
+    if (described.status !== "selected" || described.name !== document.value.name) return false
+    const reply = try called("storageList", (plugin) => plugin.storageList({ volume, path: parent }))
+    const listed = reply.status === "ready" ? reply.entries?.find((one) => one.path === path && !one.directory) : undefined
+    if (listed === undefined || listed.name !== described.name || Math.trunc(listed.modified) !== revision || !Browser.allowed(try files.get()) || !(try samePreview(viewer, item, revision, grant))) return false
+    if (described.size !== undefined && described.size !== listed.size) return false
+    const root = try handle.of({ volume, path: "" })
+    const exact: Item = { id: item, volume: root, name: listed.name, revision, bytes: Math.max(0, Math.trunc(listed.size)), kind: storageKind(listed) }
+    if (operation === "RenameFile") {
+      const ticket = (try files.get()).change.attempt.id + 1
+      const siblings = (reply.entries ?? []).map((one) => one.name)
+      try files.send({ type: "renameShown", file: exact, name, siblings }, "Owner")
+      const settled = Stream.filter(files.changes, (next) => next.change.attempt.id >= ticket && next.change.attempt.outcome !== "Sent")
+      const answered = try Effect.timeoutOption(Stream.runHead(settled), "20 seconds")
+      if (Option.isNone(answered) || Option.isNone(answered.value) || answered.value.value.change.attempt.id !== ticket || answered.value.value.change.attempt.outcome !== "Confirmed") return false
+      const changedPath = parent === "" ? name : `${parent}/${name}`
+      const updated = try called("storageList", (plugin) => plugin.storageList({ volume, path: parent }))
+      const renamed = updated.status === "ready" ? updated.entries?.find((one) => one.path === changedPath && !one.directory) : undefined
+      const stillShowing = try samePreview(viewer, item, revision, grant)
+      if (stillShowing && renamed !== undefined) {
+        const key = try handle.of({ volume, path: changedPath })
+        const renamedItem = { ...exact, id: key, name: renamed.name, revision: Math.max(0, Math.trunc(renamed.modified)), bytes: Math.max(0, Math.trunc(renamed.size)) }
+        try view(renamedItem, (updated.entries ?? []).map((one) => one.name))
+      }
+      if (stillShowing && (try shown.get()).viewer === viewer) try ignore(shown.send({ type: "gone", file: item }, "Phone"))
+      try toRecent({ type: "gone", key: item })
+      return true
+    }
+    const segments = parent === "" ? [] : parent.split("/")
+    const parentTrail = [...(try handle.many(Array.from({ length: segments.length + 1 }, (_, depth) => ({ volume, path: segments.slice(0, depth).join("/") }))))]
+    const here = try files.get()
+    if (here.inCategory || here.trail.length !== parentTrail.length || !here.trail.every((id, at) => id === parentTrail[at])
+      || here.listing.status !== "Loaded" || !here.items.some((one) => one.id === exact.id && one.revision === exact.revision && one.bytes === exact.bytes)) {
+      try files.send({ type: "openPreviewParent", parentTrail }, "Phone")
+      const ticket = here.listing.ticket + 1
+      const read = Stream.filter(files.changes, (next) => next.listing.ticket >= ticket && next.listing.status !== "Loading")
+      const answer = try Effect.timeoutOption(Stream.runHead(read), "15 seconds")
+      if (Option.isNone(answer) || Option.isNone(answer.value)) return false
+    }
+    const now = try files.get()
+    if (now.inCategory || now.trail.length !== parentTrail.length || !now.trail.every((id, at) => id === parentTrail[at]) || !(try samePreview(viewer, item, revision, grant))) return false
+    try files.send({ type: "stagePreviewFile", file: exact, ticket: now.listing.ticket, trashing: operation === "TrashFile" }, "Phone")
+    return true
+  } catch () => false
+  if (!applied) try say("Files could not confirm the action for this file", true)
+}
+
+function carryShown(fx: Shown.Effect): Job<Shown.Event, PreviewWorkspace | MediaHandoff | MailTarget | MessageTarget | Toasts | Said, [by: Shown.Actor]> {
   return match (fx) {
     when { tag: "Read", let ticket, let item, let revision }: answer("read", read(ticket, item, revision), { type: "contentRead", ticket, ok: false, pages: 0, why: "Fine", secret: false }, "Phone");
     when { tag: "Draw", let ticket, let item, let revision, let page }: answer("draw", drew(ticket, item, revision, page), { type: "drawn", ticket, ok: false, isolated: true, readOnly: true }, "Phone");
@@ -352,11 +585,15 @@ function carryShown(fx: Shown.Effect): Job<Shown.Event, Documents | Opened | Rec
         try tryPromise(() => docs.open(selection.value))
       }
     }), "Phone");
+    when { tag: "ShareFile", let viewer, let item, let revision }: run(`share ${viewer}`, shareViewed(viewer, item, revision), "Phone");
+    when { tag: "ActOnStoredFile", let viewer, let item, let revision, let operation, let name }: run(`act on file ${viewer}`, actOnViewed(viewer, item, revision, operation, name), "Phone");
+    when { tag: "RenamePicked", let viewer, let item, let revision, let name }: answer("rename picked", renamePicked(viewer, item, revision, name), { type: "pickedRenameFinished", viewer }, "Phone");
     when { tag: "Forget", let item }: run("forget", effect { try ignore((try Recent.Machine).send({ type: "forget", key: item }, "Owner")) }, "Phone");
     when { tag: "Lost", let item }: run("lost", toRecent({ type: "lapsed", key: item }), "Phone");
     when { tag: "SelectAgain", let item }: run("again", effect { try ignore((try Recent.Machine).send({ type: "openPicker", replacing: item }, "Owner")) }, "Phone");
     when { tag: "AskAlpha", let item }: run("ask", askAbout(item), "Phone");
     when { tag: "Transcribe" }: stop("transcribe");
+    when { tag: "OfferPicture", let viewer, let item, let revision }: run(`offer picture ${viewer}`, offerPicture(viewer, item, revision), "Phone");
     when { tag: "OfferEmail", let ticket, let viewer, let item, let revision, let account }: answer("email", offerEmail(ticket, viewer, item, revision, account), { type: "answered", ticket, confirmed: false, known: false }, "Phone");
   }
 }
@@ -398,7 +635,7 @@ effect function picked(ticket: number): Recent.Event!!(Documents | Opened | Rece
       return canceled
     }
     const issued = s.issued + 1
-    try (try Opened).give(issued, { selection: selected.value, key: issued, name: choice.name, mimeType: choice.mimeType ?? "application/octet-stream", revision: Math.max(0, Math.trunc(choice.modified ?? 0)) })
+    try (try Opened).give(issued, { selection: selected.value, key: issued, name: choice.name, mimeType: choice.mimeType ?? "application/octet-stream", revision: Math.max(0, Math.trunc(choice.modified ?? 0)), canRename: choice.canRename === true, ...(choice.size === undefined ? {} : { bytes: choice.size }) })
     return { ...canceled, chose: true, keep: true }
   } catch () => canceled
 }
@@ -420,7 +657,19 @@ function carryRecent(fx: Recent.Effect): Job<Recent.Event, Documents | Opened | 
 }
 
 // spec/app/files/preview.md, "A restart closes the viewer and reports an insert cut off as unknown, so no answer from before it is taken"
-const previewing = reacting(Shown, { keep: 1, open: [{ type: "restart" }, "Phone"], carry: carryShown })
+function storedPreview(key: string, start?: Shown.Preview) {
+  return Layer.unwrap(effect {
+    const store = try KeyValueStore.KeyValueStore
+    const raw = store.get(key) catch () => undefined
+    const upgraded = upgradePreview(raw)
+    if (upgraded !== undefined) {
+      const decoded = Shown.decodeState(upgraded) catch () => undefined
+      if (decoded !== undefined) try ignore(store.set(key, JSON.stringify(decoded)))
+    }
+    return Shown.stored(key, start)
+  })
+}
+const previewing = reacting({ ...Shown, stored: storedPreview }, { keep: 1, open: [{ type: "restart" }, "Phone"], carry: carryShown })
 
 // spec/app/files/recent.md, "A restart ends the folder session, closes the pickers, the viewer and the opening under way, and keeps the list"
 const recenting = reacting(Recent, { keep: 1, open: [{ type: "restart" }, "Phone"], carry: carryRecent })

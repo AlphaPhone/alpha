@@ -1,12 +1,13 @@
 // spec/app/phone/index.md, "Story: See my recent calls"; spec/app/phone/index.md, "Story: Type a number"; spec/app/phone/index.md, "Story: Call a number"; spec/app/phone/index.md, "Story: Know when a call is live"
 import type { AddressBookRow } from "@elizaos/os/bridges/contacts"
-import type { TelephonyCallLogEntry, TelephonyPermissionState } from "@elizaos/os/bridges/phone"
+import type { PhoneNumber, TelephonyCallLogEntry, TelephonyPermissionState } from "@elizaos/os/bridges/phone"
+import { normalizePhoneNumber } from "@elizaos/os/bridges/definitions/phone"
 import * as Phone from "../../gen/app__phone.effect.vibe"
-import type { Effect as Out, Event, Telecom, Typed } from "../../gen/app__phone.effect.vibe"
+import type { Carrier, DialMode, DialNumberKind, Effect as Out, Event, Telecom, Typed } from "../../gen/app__phone.effect.vibe"
 import type { Grant } from "../../gen/kit__permission.ts"
 import { Calls } from "../platform/calls.vibe"
 import { SystemSettings } from "../platform/systemSettings.vibe"
-import { Telephony, TelephonyRefused, namesOf, telephony } from "../platform/telephony.vibe"
+import { Telephony, TelephonyAbsent, TelephonyRefused, namesOf, telephony } from "../platform/telephony.vibe"
 import { type Job, answer, applying, contained, hearing, reacting, run, started, together } from "../runtime/reactor.vibe"
 import { on, visiting } from "./visit.vibe"
 import { judge, matches } from "./words.ts"
@@ -95,14 +96,32 @@ effect function matchNumber(ticket: number): Event!!(Telephony | Dialer) {
   return { type: "numberMatched", ticket, found: found !== undefined }
 }
 
+/** Android's classification of the canonical number, when available. */
+export effect function classifyDialNumber(number: string): DialNumberKind!!Telephony {
+  const normalized = normalizePhoneNumber(number)
+  if (normalized === null) return "NumberUnknown"
+  const kind = telephony("classifyDialNumber", (c) => c.classifyDialNumber(normalized)) catch () => "unknown" as const
+  return kind === "emergency" ? "EmergencyNumber" : kind === "ordinary" ? "OrdinaryNumber" : "NumberUnknown"
+}
+
+// spec/app/phone/index.md, "Only the current number's Android emergency classification is used"
+effect function classifyInput(ticket: number): Event!!(Telephony | Dialer) {
+  const kind = try classifyDialNumber((try (try Dialer).get()).digits)
+  return { type: "numberClassified", ticket, kind }
+}
+
 // spec/app/phone/index.md, "Access that arrives reads the log, and access that goes forgets the rows"
 effect function askLog(): Event!!Telephony {
   const status = telephony("requestAccess", (c) => c.phone.requestAccess("callLog")) catch () => undefined
   return { type: "logReported", grant: grantOf(status?.permissions.callLog) }
 }
 
-/** Whether a failure means the phone may have acted: no answer came back. */
-const lost = (failure: unknown) => failure instanceof TelephonyRefused && failure.code === undefined && failure.tag === ""
+/** Explicit refusals before Android opened the dialer or placed a call. */
+function refusedBeforeDispatch(failure: unknown): boolean {
+  return failure instanceof TelephonyAbsent || (failure instanceof TelephonyRefused &&
+    (failure.tag === "BridgeUnavailable" || failure.tag === "PhoneRequestRefused" ||
+      failure.code === "invalid" || failure.code === "unavailable" || failure.code === "UNIMPLEMENTED"))
+}
 
 /** Final handoff reply known to have opened the system dialer or placed the call. */
 function dialAnswered(ticket: number, opened: boolean, placed = false): Event {
@@ -110,29 +129,30 @@ function dialAnswered(ticket: number, opened: boolean, placed = false): Event {
 }
 
 /** The dial screen opened with `number`, as the phone answers it. */
-effect function dialScreen(ticket: number, number: string): Event!!Telephony {
-  const report = telephony("dial", (c) => c.phone.dial(number)) catch (failure) => (lost(failure) ? undefined : null)
-  return report === undefined ? { type: "dialLost", ticket } : dialAnswered(ticket, report?.dialStatus === "DialHandedOff")
+effect function dialScreen(ticket: number, number: PhoneNumber): Event!!Telephony {
+  const opened = telephony("ownerDialScreen", (c) => c.ownerDialScreen(number)) catch (failure) => (refusedBeforeDispatch(failure) ? false : undefined)
+  return opened === undefined ? { type: "dialLost", ticket } : dialAnswered(ticket, opened)
 }
 
-effect function mayHandoff(ticket: number, typed: Typed): boolean!!Phone.Machine {
+effect function handoffMode(ticket: number, kind: DialNumberKind): DialMode!!Phone.Machine {
   const state = try (try Phone.Machine).get()
-  return Phone.canDialLost(state, ticket) && (typed === "Emergency" || (state.carrier && Phone.clear(state)))
+  return Phone.canDialLost(state, ticket) ? Phone.ownerDialMode(state, kind) : "DialBlocked"
 }
 
 // spec/app/phone/index.md, "Call hands the typed number to the dialer, only if the phone says it is a number it can dial"; spec/app/phone/index.md, "Tapping a recent call hands its number to the dialer"; spec/app/phone/index.md, "With the dialer role a call is placed through Telecom, and counts as started only when Telecom accepted it"
 effect function handoff(ticket: number, typed: boolean, tapped: string): Event!!(Telephony | Dialer | Phone.Machine) {
   const store = try Dialer
-  const held = try store.get()
-  const number = typed ? held.digits : tapped
-  const shape = judge(number)
-  if (shape !== "Dialable" && shape !== "Emergency") return dialAnswered(ticket, false)
-  if (!(try mayHandoff(ticket, shape))) return dialAnswered(ticket, false)
-  if (shape === "Emergency") return try dialScreen(ticket, number)
+  const number = normalizePhoneNumber(typed ? (try store.get()).digits : tapped)
+  if (number === null || !Phone.canDialLost(try (try Phone.Machine).get(), ticket)) return dialAnswered(ticket, false)
+  const kind = try classifyDialNumber(number)
+  const mode = try handoffMode(ticket, kind)
+  if (mode === "DialBlocked") return dialAnswered(ticket, false)
+  if (mode === "SystemDial") return try dialScreen(ticket, number)
   const status = telephony("status", (c) => c.phone.status()) catch () => undefined
-  if (!(try mayHandoff(ticket, shape))) return dialAnswered(ticket, false)
-  if (status?.roles.dialer.held !== true) return try dialScreen(ticket, number)
-  const placed = telephony("placeCall", (c) => c.phone.placeCall(number)) catch (failure) => (lost(failure) ? undefined : null)
+  const current = try handoffMode(ticket, kind)
+  if (current === "DialBlocked") return dialAnswered(ticket, false)
+  if (current === "SystemDial" || status?.roles.dialer.held !== true) return try dialScreen(ticket, number)
+  const placed = telephony("placeCall", (c) => c.phone.placeCall(number)) catch (failure) => (refusedBeforeDispatch(failure) ? null : undefined)
   if (placed === undefined) return { type: "dialLost", ticket }
   switch (placed?.placeStatus) {
     case "CallPlaced":
@@ -140,7 +160,7 @@ effect function handoff(ticket: number, typed: boolean, tapped: string): Event!!
       return dialAnswered(ticket, true, true)
     case "CallEmergencyHandoff": return dialAnswered(ticket, true)
     case "CallRoleRequired": case "CallPermissionRequired":
-      return (try mayHandoff(ticket, shape)) ? try dialScreen(ticket, number) : dialAnswered(ticket, false)
+      return (try handoffMode(ticket, kind)) !== "DialBlocked" ? try dialScreen(ticket, number) : dialAnswered(ticket, false)
     default: return dialAnswered(ticket, false)
   }
 }
@@ -149,6 +169,7 @@ function carry(fx: Out): Job<Event, Telephony | Dialer | Phone.Machine | SystemS
   return match (fx) {
     when { tag: "ReadLog", let ticket, let device }: answer("log", readLog(ticket, device), { type: "recentsRead", ticket, ok: false, grant: "Unasked", count: 0 });
     when { tag: "MatchNumber", let ticket }: answer("match", matchNumber(ticket), { type: "numberMatched", ticket, found: false });
+    when { tag: "ClassifyNumber", let ticket }: answer("number classification", classifyInput(ticket), { type: "numberClassified", ticket, kind: "NumberUnknown" });
     when { tag: "AskLog" }: answer("ask", askLog(), { type: "logReported", grant: "Unasked" });
     when { tag: "OpenSettings" }: run("settings", effect { try (try SystemSettings).open("AppPermissions", "") });
     when { tag: "MarkSeen" }: run("seen", effect {});
@@ -172,11 +193,12 @@ export function prefilled(number: string): { readonly digits: string; readonly e
 const Reading = Schema.Struct({ inCall: Schema.NullOr(Schema.Boolean), emergency: Schema.NullOr(Schema.Boolean), emergencyLive: Schema.Boolean, carrier: Schema.optional(Schema.Boolean) })
 
 /** Telecom's call-state reading as Phone takes it: a call it cannot rule out as an emergency call may be one, and without a reading Alpha cannot tell. */
-export function telecomOf(raw: unknown): { readonly telecom: Telecom; readonly carrier: boolean } {
+export function telecomOf(raw: unknown): { readonly telecom: Telecom; readonly carrier: Carrier } {
   const row = Option.getOrUndefined(Schema.decodeUnknownOption(Reading)(raw))
-  if (row === undefined || row.inCall === null) return { telecom: "CallUnknown", carrier: row?.carrier ?? false }
+  const carrier = row?.carrier === true ? "CarrierReady" : row?.carrier === false ? "CarrierUnavailable" : "CarrierUnknown"
+  if (row === undefined || row.inCall === null) return { telecom: "CallUnknown", carrier }
   const telecom: Telecom = !row.inCall ? "NoCall" : row.emergencyLive || row.emergency !== false ? "MaybeEmergencyCall" : "OrdinaryCall"
-  return { telecom, carrier: row.carrier ?? false }
+  return { telecom, carrier }
 }
 
 /** Telecom's reading when Alpha opens; afterwards each one the phone pushes. */

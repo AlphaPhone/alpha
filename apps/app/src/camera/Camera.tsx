@@ -1,6 +1,6 @@
 // spec/app/camera/index.md, "Story: Open the camera"; spec/app/camera/index.md, "Story: Frame the shot"; spec/app/camera/index.md, "Story: Take photos and videos"; spec/app/camera/index.md, "Story: Let Alpha take a photo"
 import { Button, cn, focusRing, Spinner } from "@repo/ui";
-import { CameraOff, ChevronLeft, FileScan, Flashlight, FlashlightOff, Grid3x3, MicOff, RefreshCcw, Sparkles, Timer, Video, Zap, ZapOff } from "lucide-react";
+import { CameraOff, ChevronLeft, Clock as ClockIcon, FileScan, Flashlight, FlashlightOff, Grid3x3, MicOff, Sparkles, SwitchCamera, Video, Zap, ZapOff } from "lucide-react";
 import { useCallback, useRef, useState, type PointerEvent } from "react";
 import type { Camera as Visit, Event, Mode, Said } from "../../gen/app__camera.ts";
 import { chosenLens, ready, recording } from "../../gen/app__camera.ts";
@@ -10,13 +10,15 @@ import { nearLimit, remaining, timer } from "../../gen/app__camera__recording.ts
 import { allows } from "../../gen/kit__permission.ts";
 import { CameraPort, type LensFacts, type Point } from "../platform/camera.vibe";
 import type { Resident, Shown } from "../runtime/area.tsx";
+import { Scan } from "../files/Scan.tsx";
+import type { cameraScan } from "../files/scan.vibe";
 import { useTimed } from "../runtime/react.ts";
 import { untimed } from "../runtime/reactor.vibe";
 import { useMachine as useShell } from "../../gen/app__shell.react.ts";
 import { approveCapture, CameraAssets, focus, shutter, type camera } from "./camera.vibe";
 import { Effect, type Layer } from "effect";
 
-type Runtime = Layer.Success<typeof camera> | Resident;
+type Runtime = Layer.Success<typeof camera> | Layer.Success<typeof cameraScan> | Resident;
 type Can = (event: Event) => boolean;
 type Fire = (event: Event) => void;
 
@@ -161,7 +163,7 @@ function ZoomStops({ state, lens, zoom }: { state: Visit; lens: LensFacts | unde
   if (!ready(state) || enabled.length < 2) return null;
   const nearest = enabled.reduce((a, b) => Math.abs(a[0] - state.zoom) < Math.abs(b[0] - state.zoom) ? a : b);
   return (
-    <div role="group" aria-label="Zoom" className="pointer-events-none absolute inset-x-0 bottom-2 z-10 flex justify-center">
+    <div role="group" aria-label="Zoom" className="pointer-events-none absolute inset-x-0 bottom-7 z-10 flex justify-center landscape:bottom-2">
       {enabled.map(([level, label]) => (
         <Button
           key={level}
@@ -169,9 +171,13 @@ function ZoomStops({ state, lens, zoom }: { state: Visit; lens: LensFacts | unde
           size="icon"
           aria-label={`Zoom ${level / 10}×`}
           aria-pressed={nearest[0] === level}
-          className={cn("pointer-events-auto bg-background/75 text-xs", nearest[0] === level && "bg-foreground text-background hover:bg-foreground")}
+          className="pointer-events-auto hover:bg-transparent active:bg-transparent"
           onClick={() => zoom(level)}
-        >{label}{nearest[0] === level ? "×" : ""}</Button>
+        >
+          <span className={cn("grid place-items-center rounded-full", nearest[0] === level ? "size-10 bg-foreground text-sm text-background" : "size-8.5 bg-background/65 text-xs text-foreground")}>
+            {label}{nearest[0] === level ? "×" : ""}
+          </span>
+        </Button>
       ))}
     </div>
   );
@@ -221,10 +227,10 @@ export function Camera({ runtime, alpha }: Shown<Runtime>) {
         {shell.can({ type: "goBack" }) && <Button variant="ghost" size="icon" aria-label="Back to apps" onClick={() => void alpha.back()}><ChevronLeft /></Button>}
         <span className="flex-1" />
         {inProgress && <span role="timer" aria-label="Recording" className="flex items-center gap-2 rounded-full bg-background/75 px-3 py-1 text-sm font-semibold tabular-nums"><span aria-hidden className="size-2 rounded-full bg-record" />{timed(state.film)}</span>}
-        {can({ type: "flip" }) && <Button variant="ghost" size="icon" aria-label="Switch camera" onClick={() => fire({ type: "flip" })}><RefreshCcw /></Button>}
+        {can({ type: "flip" }) && <Button variant="ghost" size="icon" aria-label="Switch camera" onClick={() => fire({ type: "flip" })}><SwitchCamera /></Button>}
         {can({ type: "cycleDelay" }) && (
           <Button variant="ghost" size="icon" className="relative" aria-label={state.delay === 0 ? "Timer off" : `Timer ${state.delay} seconds`} aria-pressed={state.delay !== 0} onClick={() => fire({ type: "cycleDelay" })}>
-            <Timer />
+            <ClockIcon />
             {state.delay > 0 && <span aria-hidden className="absolute bottom-1 right-0 text-xs leading-none">{state.delay}</span>}
           </Button>
         )}
@@ -240,7 +246,7 @@ export function Camera({ runtime, alpha }: Shown<Runtime>) {
             {state.flashAuto && <span aria-hidden className="absolute bottom-1 right-1 text-xs leading-none">A</span>}
           </Button>
         )}
-        {can({ type: "scanDocument", now: untimed }) && <Button variant="ghost" size="icon" aria-label="Scan document" onClick={() => fire({ type: "scanDocument", now: untimed })}><FileScan /></Button>}
+        {can({ type: "scanDocument" }) && <Button variant="ghost" size="icon" aria-label="Scan document" onClick={() => fire({ type: "scanDocument" })}><FileScan /></Button>}
       </header>
 
       <div className="relative flex min-h-36 flex-col">
@@ -267,16 +273,16 @@ export function Camera({ runtime, alpha }: Shown<Runtime>) {
         )}
       </div>
 
-      <footer className="z-10 flex flex-col justify-center gap-2 bg-background pb-4 landscape:row-start-2 landscape:pb-0">
+      <footer className="z-10 flex flex-col justify-center gap-4 bg-background pb-4 landscape:row-start-2 landscape:gap-2 landscape:pb-0">
         {!inProgress && (
-          <div role="group" aria-label="Camera mode" className="flex min-h-11 justify-center overflow-x-auto landscape:flex-wrap">
+          <div role="group" aria-label="Camera mode" className="flex min-h-11 justify-center gap-2 overflow-x-auto landscape:flex-wrap landscape:gap-0">
             {(["Video", "Photo"] satisfies Mode[]).map((mode) => (
               <button
                 key={mode}
                 type="button"
                 aria-label={`${mode} mode`}
                 aria-pressed={state.mode === mode}
-                className={cn("flex min-h-11 shrink-0 flex-col items-center justify-center gap-1 px-4 text-base font-semibold", state.mode === mode ? "text-foreground" : "text-foreground/60", focusRing)}
+                className={cn("flex min-h-11 shrink-0 flex-col items-center justify-center gap-1.25 px-3.5 text-sm font-semibold", state.mode === mode ? "text-foreground" : "text-foreground/60", focusRing)}
                 onClick={() => fire({ type: "setMode", mode })}
               >
                 {mode}<span aria-hidden className={cn("size-1 rounded-full bg-foreground", state.mode !== mode && "invisible")} />
@@ -284,9 +290,9 @@ export function Camera({ runtime, alpha }: Shown<Runtime>) {
             ))}
           </div>
         )}
-        <div className="grid grid-cols-[1fr_auto_1fr] items-center justify-items-center px-4 landscape:grid-cols-1 landscape:gap-2">
+        <div className="grid grid-cols-[1fr_auto_1fr] items-center justify-items-center px-11 landscape:grid-cols-1 landscape:gap-2 landscape:px-3">
           {last && can({ type: "openLast" }) ? (
-            <button type="button" aria-label={last.mime.startsWith("video/") ? "Open last video" : "Open last photo"} onClick={() => fire({ type: "openLast" })} className={cn("size-13 overflow-hidden rounded-drawer-icon border border-foreground/70", focusRing)}>
+            <button type="button" aria-label={last.mime.startsWith("video/") ? "Open last video" : "Open last photo"} onClick={() => fire({ type: "openLast" })} className={cn("size-13 justify-self-start overflow-hidden rounded-drawer-icon border border-foreground/70 landscape:justify-self-center", focusRing)}>
               {last.mime.startsWith("video/") && !last.thumbnail ? <Video aria-hidden className="m-auto size-5" /> : <img src={last.thumbnail ?? last.source} alt="" className="size-full object-cover" />}
             </button>
           ) : <span />}
@@ -298,11 +304,12 @@ export function Camera({ runtime, alpha }: Shown<Runtime>) {
             onClick={click}
             className={cn("flex size-20 items-center justify-center rounded-full border-4 border-foreground disabled:opacity-60", focusRing)}
           >
-            <span aria-hidden className={cn("transition-all duration-fast motion-reduce:transition-none", !video ? "size-16 rounded-full bg-foreground" : inProgress ? "size-8 rounded-sm bg-record" : "size-16 rounded-full bg-record")} />
+            <span aria-hidden className={cn("transition-all duration-fast motion-reduce:transition-none", inProgress ? "size-7.5 rounded-lg bg-record" : cn("size-15.5 rounded-full", video ? "bg-record" : "bg-foreground"))} />
           </button>
           <span />
         </div>
       </footer>
+      <Scan runtime={runtime} alpha={alpha} />
     </section>
   );
 }

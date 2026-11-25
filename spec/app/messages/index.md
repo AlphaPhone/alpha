@@ -39,7 +39,7 @@ type Messages = {
   list: R::Read, threads: int, moreThreads: bool, sought: bool, chip: Filter, unread: int,
   thread: int, page: R::Read, shown: Page, earlier: bool, smsApp: bool,
   confirming: bool, removal: A::Attempt,
-  picker: R::Read, choices: int, moreChoices: bool,
+  picker: R::Read, choices: int, moreChoices: bool, offeredPicture: int,
 }
 
 pure val blankPage: Page = { rows: 0, failed: 0, partial: 0 }
@@ -49,7 +49,7 @@ pure val initial: Messages = {
   list: R::unread, threads: 0, moreThreads: false, sought: false, chip: AllThreads, unread: 0,
   thread: 0, page: R::unread, shown: blankPage, earlier: false, smsApp: false,
   confirming: false, removal: A::plan(0),
-  picker: R::unread, choices: 0, moreChoices: false,
+  picker: R::unread, choices: 0, moreChoices: false, offeredPicture: 0,
 }
 ```
 
@@ -138,7 +138,7 @@ pure def show(s: Messages): Moved = askThreads(false, { ...s, front: true, pane:
 ```quint
 pure def cleared(pane: Pane, s: Messages): Messages =
   { ...s, pane: pane, thread: 0, threads: 0, moreThreads: false, shown: blankPage, earlier: false, confirming: false,
-    choices: 0, moreChoices: false, list: idle(s.list), page: idle(s.page), picker: idle(s.picker) }
+    choices: 0, moreChoices: false, list: idle(s.list), page: idle(s.page), picker: idle(s.picker), offeredPicture: 0 }
 
 pure def canLeave(s: Messages): bool = s.front
 
@@ -590,6 +590,39 @@ pure def canChoose(s: Messages, thread: int, typed: bool): bool =
   showingPane(s, Picker) and thread > 0 and (typed or s.choices > 0)
 
 pure def choose(s: Messages, thread: int, typed: bool): Moved = openConversation(thread, s)
+```
+
+### A picture from Files is offered in a new recipient picker and can join only its chosen empty draft
+
+The picker names the picture while the owner chooses. Only choosing a
+recipient from that picker can give it to the composer. Back, showing a
+different conversation, or leaving clears the offer. The composer checks
+the chosen draft and the phone's picture messaging capability before it
+takes the attachment. Sending still needs the owner's ordinary Send.
+
+```quint
+pure def canNewPictureMessage(s: Messages): bool = canNewMessage(s)
+
+pure def newPictureMessage(s: Messages): Moved =
+  askChoices(false, { ...cleared(Picker, s), offeredPicture: s.picker.ticket + 1 })
+
+pure def canChoosePictureRecipient(s: Messages, thread: int, typed: bool): bool =
+  s.offeredPicture > 0 and canChoose(s, thread, typed)
+
+pure def choosePictureRecipient(s: Messages, thread: int, typed: bool): Moved =
+  val opened = openConversation(thread, s)
+  { ...opened, state: { ...opened.state, offeredPicture: s.offeredPicture } }
+
+pure def canClearPictureOffer(s: Messages, ticket: int): bool = s.offeredPicture > 0 and s.offeredPicture == ticket
+
+pure def clearPictureOffer(s: Messages, ticket: int): Messages = { ...s, offeredPicture: 0 }
+
+pure def alwaysAnOfferedPictureBelongsToAPane(s: Messages): bool =
+  s.offeredPicture > 0 implies s.front and (s.pane == Picker or s.pane == Conversation)
+
+pure def stepOnlyThePicturePickerNamesTheReply(before: Messages, via: str, after: Messages): bool =
+  (after.offeredPicture > 0 and after.pane == Conversation and before.pane != Conversation) implies
+    (via == "choosePictureRecipient" and before.pane == Picker and before.offeredPicture == after.offeredPicture)
 ```
 
 ### The picker can offer more choices, and a chosen recipient opens a conversation

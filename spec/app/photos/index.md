@@ -14,6 +14,13 @@ the senders are [Who acts on photos](./actor.md). Photos are taken in the
 [Camera](../camera/). The shell decides when Photos is showing and from
 where; Notices shows Undo and says when it is gone.
 
+## Story: Scan text from a selected image
+
+> As the owner, I want to read text from one image I choose, with on-device
+> recognition and a review over Photos. Dismissing the review returns to the
+> same library. The image is only used in the [scan review](../files/scan.md)
+> unless I explicitly save something from it.
+
 ## Domain
 
 ### What Photos shows
@@ -22,7 +29,9 @@ The Library tab lists photos and videos, narrowed to favourites, videos, a
 person or a search; the Albums tab lists albums, and an album opened from it
 lists its items. Either list is read a page at a time from the phone's
 library, at a revision the phone numbers: each change to the library has a
-higher one.
+higher one. A browser's library consists of captures and images saved in
+that browser and needs no phone permission. It has the same Favorites,
+custom albums, selection and Recently deleted controls.
 
 ```quint
 import permission as P from "../../kit/permission"
@@ -34,6 +43,7 @@ import albums as AL from "./albums"
 
 type Tab = Library | Albums
 type Filter = Everything | Favorites | Videos | People | Matching
+type Density = Spacious | Regular | Compact
 ```
 
 ### What Photos asks of the phone
@@ -70,9 +80,9 @@ changes. None of it is kept through a restart: the phone holds the library.
 type Photos = {
   access: P::Permission, videos: bool, visible: bool, secure: bool, only: Set[int],
   library: R::Read, locked: bool, paging: bool, more: bool, revision: int,
-  tab: Tab, filter: Filter, query: str, person: int, album: int,
+  tab: Tab, filter: Filter, query: str, person: int, album: int, density: Density,
   rows: Set[int], mine: Set[int], starred: Set[int], albums: Set[int],
-  selecting: bool, selected: Set[int],
+  selecting: bool, selected: Set[int], choosingImage: bool, imageChoice: int,
   shelf: AL::Shelf, job: C::Run,
 }
 
@@ -81,9 +91,9 @@ type Done = { state: Photos, out: List[Effect] }
 pure val initial: Photos = {
   access: P::unasked, videos: false, visible: true, secure: false, only: Set(),
   library: R::unread, locked: false, paging: false, more: false, revision: 0,
-  tab: Library, filter: Everything, query: "", person: 0, album: 0,
+  tab: Library, filter: Everything, query: "", person: 0, album: 0, density: Regular,
   rows: Set(), mine: Set(), starred: Set(), albums: Set(),
-  selecting: false, selected: Set(),
+  selecting: false, selected: Set(), choosingImage: false, imageChoice: 0,
   shelf: AL::initial, job: C::initial,
 }
 
@@ -104,6 +114,7 @@ pure def still(s: Photos): bool = s.shelf.dialog == AL::NoDialog and not(C::runn
 ```quint
 pure val photoValues = Set(1, 2, 3)
 pure val albumValues = Set(1, 2)
+pure val choiceValues = Set(0, 1, 2, 3)
 pure val rowsValues = Set(Set(), Set(1), Set(1, 2), Set(2, 3))
 pure val ownedValues = Set(Set(), Set(1), Set(3))
 pure val starredValues = Set(Set(), Set(1), Set(1, 2))
@@ -117,6 +128,7 @@ pure val revisionValues = Set(1, 2)
 pure val basisValues = Set(1, 2)
 pure val queryValues = Set("", "beach")
 pure val personValues = Set(0, 4)
+pure val densityValues = Set(Spacious, Regular, Compact)
 pure val nameValues = Set("", "Trip")
 pure val lettersValues = Set(0, 4, 81)
 pure val weight_listed = 4
@@ -125,6 +137,33 @@ pure val weight_startSelect = 2
 pure val weight_toggle = 2
 pure val weight_chooseAlbum = 4
 pure val weight_addTo = 4
+```
+
+## Story: Choose an image in the browser
+
+> As the owner, I want to choose and preview one JPEG, PNG or WebP up to
+> 16 MB, then save a photo copy or scan the original for text. Leaving or
+> dismissing the chooser drops the selection.
+
+### Only the owner can open the browser chooser and act on its current image
+
+The owner has to be looking at the library on an unlocked device. A new
+chooser supersedes the earlier choice. Saving prepares a JPEG copy up to
+2048 pixels on its longest side. Scanning hands the original to the scan
+review and saves no photo. Neither changes anything until an owner chooses.
+
+```quint
+pure def canOpenImageChoice(s: Photos, browser: bool, by: Actor): bool =
+  by == Owner and browser and s.visible and not(s.secure) and s.tab == Library
+    and not(s.selecting) and not(s.choosingImage) and s.shelf.dialog == AL::NoDialog
+
+pure def openImageChoice(s: Photos, browser: bool, by: Actor): Photos =
+  { ...s, choosingImage: true, imageChoice: s.imageChoice + 1 }
+
+pure def canCloseImageChoice(s: Photos, choice: int, by: Actor): bool =
+  by == Owner and s.visible and not(s.secure) and s.choosingImage and choice == s.imageChoice
+
+pure def closeImageChoice(s: Photos, choice: int, by: Actor): Photos = { ...s, choosingImage: false }
 ```
 
 ## Story: Give Photos access
@@ -185,7 +224,7 @@ pure def listing(out: List[Effect], s: Photos): Done = fetching(false, out, s)
 
 pure def forgetting(albums: bool, s: Photos): Photos =
   {
-    ...s, rows: Set(), mine: Set(), starred: Set(), more: false, selecting: false, selected: Set(),
+    ...s, rows: Set(), mine: Set(), starred: Set(), more: false, selecting: false, selected: Set(), choosingImage: false,
     shelf: AL::closeDialog(s.shelf), job: C::cancel(s.job),
     albums: if (albums) Set() else s.albums, album: if (albums) 0 else s.album, tab: if (albums) Library else s.tab,
   }
@@ -268,7 +307,7 @@ pure def sometimesOwnBeforeAsking(s: Photos): bool =
 ## Story: Browse the library
 
 > As the owner, I want to see my photos and albums, narrow them by
-> favourites, videos, people or a search, scroll on through them, and be
+> favourites, videos, people or a search, scroll on through them, change the thumbnail size, and be
 > told when they are loading, empty, locked, or could not be read, with a
 > way to try again.
 
@@ -311,6 +350,11 @@ pure def stepAPageKeepsWhatWasListed(before: Photos, via: str, after: Photos): b
     implies (before.rows.subseteq(after.rows) and allOlder(after.rows.exclude(before.rows), before.rows))
 ```
 
+The grid reads small previews separately for the rows near the viewport.
+Moving or resizing the viewport does not change which rows are listed,
+selected or focusable. A new library revision or a closed grid makes any
+outstanding preview answer obsolete.
+
 ### The phone can say its library is locked until the phone is unlocked
 
 Photos then lists nothing and says "Unlock the phone, then reopen Photos".
@@ -335,6 +379,21 @@ pure def loadMore(s: Photos, by: Actor): Done = fetching(true, List(), s)
 pure def canRetry(s: Photos, by: Actor): bool = by == Owner and s.visible and s.library.status == R::Failed
 
 pure def retry(s: Photos, by: Actor): Done = listing(List(), s)
+```
+
+### While Photos is open, the owner can pinch the grid between three, four and five columns
+
+Four columns is the starting size. Spreading two fingers increases the
+thumbnail size by one step from the size at the start of the gesture;
+bringing them together decreases it by one step. The Library, album and
+Recently deleted grids use the same size throughout the session. Pinching
+changes the layout without rereading the rows or changing the selection.
+
+```quint
+pure def canSetDensity(s: Photos, density: Density, by: Actor): bool =
+  by == Owner and s.visible and s.shelf.dialog == AL::NoDialog and s.density != density
+
+pure def setDensity(s: Photos, density: Density, by: Actor): Photos = { ...s, density: density }
 ```
 
 ### Switching between Library and Albums lists the new tab afresh and ends the selection

@@ -8,7 +8,7 @@ import { Device, browserDevice, phoneDevice } from "./device.vibe"
 import { type MessagingSessions, messagingSessions } from "./messaging.vibe"
 import { type Plugins, browserPlugins, phonePlugins } from "./plugins.vibe"
 import { type Slack, slackAt } from "./slack.vibe"
-import { type Telegram, telegramAt } from "./telegram.vibe"
+import { type Telegram, telegramAt, unavailableTelegram } from "./telegram.vibe"
 import { type Vault, browserVault, relayedVault } from "./vault.vibe"
 
 module web {
@@ -36,7 +36,7 @@ function messagingLayers(overrides?: MessagingLayers) {
   return Layer.mergeAll(
     overrides?.sessions ?? messagingSessions,
     overrides?.slack ?? Layer.provide(slackAt("https://slack.com"), FetchHttpClient.layer),
-    overrides?.telegram ?? Layer.provide(telegramAt("http://127.0.0.1:4190"), FetchHttpClient.layer),
+    overrides?.telegram ?? unavailableTelegram,
   )
 }
 
