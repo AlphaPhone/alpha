@@ -295,7 +295,7 @@ export function Files({ runtime, alpha }: FilesProps) {
             <>
               {shown === "Reading" && (state.items.length === 0 || groupedCategory) && <Spinner label="Reading the folder" />}
               {shown === "Unreachable" && <Alert variant="destructive">This place cannot be read now</Alert>}
-              {empty(state) && folderGroups.length === 0 && <EmptyState icon={state.inCategory ? <CategoryIcon /> : <Folder />} title={state.inCategory ? `No ${category?.toLowerCase() ?? "files"}` : "Nothing here"} className={filesEmpty} />}
+              {empty(state) && folderGroups.length === 0 && <EmptyState icon={state.inCategory ? <CategoryIcon /> : <Folder />} title={state.inCategory ? `No ${category?.toLowerCase() ?? "files"}` : "This folder is empty"} className={filesEmpty} />}
               {shown === "Showing" && state.partial && <Alert variant="info">Only part of this place could be read</Alert>}
               {groupedCategory && folderGroups.length > 0 && (
                 <div role="group" aria-label="Folders" className={grid ? "grid grid-cols-3 gap-2" : undefined}>

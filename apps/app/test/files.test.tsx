@@ -113,7 +113,7 @@ describe("Files on a phone", () => {
     world.files.listMost = 0;
     await choose("Refresh");
     await until(alpha, runtime, Browser, (s) => s.listing.status === "Loaded" && s.items.length === 0);
-    expect([document.body.textContent?.includes("Nothing here"), document.body.textContent?.includes("Only part of this place could be read")]).toEqual([false, true]);
+    expect([document.body.textContent?.includes("This folder is empty"), document.body.textContent?.includes("Only part of this place could be read")]).toEqual([false, true]);
     world.files.listMost = 5_000;
 
     // spec/app/files/index.md, "The place showing is read again when asked, and only its newest answer is taken; a folder that no longer exists brings the owner back to the top and says so, never that the storage is unavailable"
@@ -875,7 +875,7 @@ describe("Files on a phone", () => {
     await until(alpha, runtime, Bin, (s) => s.attempt.outcome === "Confirmed" && s.entries.length === 0 && s.listing.status === "Loaded");
     expect(world.files.trash).toEqual([]);
     // spec/app/files/trash.md, "The Trash is closed, without access, reading, unreadable, empty or listing"
-    expect(document.body.textContent?.includes("The Trash is empty")).toBe(true);
+    expect(document.body.textContent?.includes("Trash is empty. Items in Trash are deleted after 30 days.")).toBe(true);
     await hardware("home");
   });
 });

@@ -56,7 +56,7 @@ export function Trash({ runtime, onBack }: TrashProps) {
       {shown === "NoAccess" && <Alert variant="warn">Alpha may not read your files</Alert>}
       {shown === "Reading" && <Spinner label="Reading the Trash" />}
       {shown === "Unreadable" && <Alert variant="destructive">The Trash cannot be read now</Alert>}
-      {shown === "Empty" && <EmptyState icon={<Trash2 />} title="The Trash is empty" className="gap-3 px-4 pt-24 pb-4 [&_svg]:size-11" />}
+      {shown === "Empty" && <EmptyState icon={<Trash2 />} title="Trash is empty. Items in Trash are deleted after 30 days." className="gap-3 px-4 pt-24 pb-4 [&_svg]:size-11" />}
       {state.entries.length > 0 && (
         <ListGroup aria-label="In the Trash" surface="plain">
           {state.entries.map((entry) => {
