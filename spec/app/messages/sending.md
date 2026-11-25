@@ -20,6 +20,7 @@ delivery reports, whether the phone denied it, and the last number retired.
 
 ```quint
 import attempt as A from "../../kit/attempt"
+import adoption as Ad from "../platform/adoption"
 
 type Outgoing = {
   thread: int, op: A::Attempt, denied: bool,
@@ -157,6 +158,50 @@ pure def readBack(o: Outgoing, id: int, wasSent: bool, known: bool): Outgoing =
   else { ...o, op: { ...o.op, outcome: A::Refused } }
 ```
 
+### A send the earlier Alpha recorded is taken in as one whose outcome is unknown, under the next number, while no send is under way or unknown
+
+The earlier Alpha kept the operation of a send it had recorded beside the
+draft it was sending ([Composer](./composer.md)). Whether it used the radio
+is not known here, so it is counted as having used it once for each
+recipient, and Send reads the journal back for it instead of sending it.
+
+```quint
+pure def canAdopt(o: Outgoing, thread: int, recipients: int): bool =
+  not(busy(o)) and not(uncertain(o)) and thread > 0 and recipients > 0
+
+pure def adopt(o: Outgoing, thread: int, recipients: int): Outgoing =
+  { ...o, thread: thread, op: { id: o.op.id + 1, outcome: A::Unknown }, denied: false,
+    recipients: recipients, radioed: recipients, sent: 0, failed: 0, reported: 0 }
+```
+
+### The phone's journal begins from the earlier Alpha's, so a send that Alpha journaled is read back and never sent again
+
+The earlier Alpha journaled its sends in the encrypted slot
+`sms-send-ledger:v1:device` of its own connection store, after a plain
+`alpha-sms-sends.journal` before that, with the filter of retired numbers
+salted `alpha-sms-operation:v1:` and the same receiver and actions for the
+radio's reports; this Alpha's journal keeps every one of those names, in
+the phone's secure store, up to the same megabyte. The first time the phone
+reads its journal and holds none, it reads the earlier one: copied into its
+own store, and cleared there only once the copy is written. Its sends,
+their parts and delivery reports, and the numbers it retired carry over, so
+a report the radio gives after the update counts on its send, a send read
+back finds its record, and a retired number is refused. An earlier journal
+that cannot be copied is still the one read, and is moved on a later
+reading; one that cannot be read stays where it was, and nothing is sent
+until it can be, as the earlier Alpha did.
+
+```quint
+pure val earlierValues = Set(Set(), Set(1), Set(1, 2))
+
+pure def journalRead(earlier: Set[int], own: Set[int], earlierHeld: bool, ownHeld: bool): Set[int] =
+  if (ownHeld) own else if (earlierHeld) earlier else Set()
+
+pure def lawASendTheEarlierAlphaJournaledIsNeverForgotten(earlier: Set[int], id: int, copied: bool): bool =
+  earlier.contains(id) implies (journalRead(earlier, Set(), true, false).contains(id)
+    and (Ad::earlierCleared(Ad::adoptionOf(true, false, copied)) implies copied))
+```
+
 ### A finished record is retired by a tombstone
 
 ```quint
@@ -219,7 +264,8 @@ pure def stepAnUnknownSendIsReadBack(before: Outgoing, via: str, after: Outgoing
 ### A denied send can be sent again under a new number
 
 Send is not blocked by the number of a send the phone denied, and the draft
-need not change first.
+need not change first. Each new number is the next one: Send's, recorded,
+or that of a send the earlier Alpha recorded, taken in as unknown.
 
 ```quint
 pure def lawADeniedSendCanBeSentAgain(thread: int, recipients: int): bool =
@@ -229,7 +275,8 @@ pure def lawADeniedSendCanBeSentAgain(thread: int, recipients: int): bool =
       and send(denied, thread, recipients).out == journalEntry(2, recipients))
 
 pure def stepARetryTakesANewNumber(before: Outgoing, via: str, after: Outgoing): bool =
-  after.op.id != before.op.id implies (via == "send" and after.op.id == before.op.id + 1 and after.op.outcome == A::Recorded)
+  after.op.id != before.op.id implies (after.op.id == before.op.id + 1
+    and ((via == "send" and after.op.outcome == A::Recorded) or (via == "adopt" and after.op.outcome == A::Unknown)))
 ```
 
 ### A send under way ends

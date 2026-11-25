@@ -87,7 +87,8 @@ pure val weight_draftSaved = 2
 ## Story: Keep my draft
 
 > As the owner, I want one draft for each conversation, kept on the phone
-> through a restart, and never lost by leaving the conversation.
+> through a restart and through the update from the earlier Alpha, and
+> never lost by leaving the conversation.
 
 ### Opening a conversation brings back the draft the phone saved for it
 
@@ -218,6 +219,52 @@ pure def stepADraftIsNotLostByLeaving(before: Composer, via: str, after: Compose
 ```quint
 pure def sometimesSavedDraftBack(c: Composer): bool =
   c.thread > 0 and c.slot.author == OwnerWrote and c.slot.draft == D::blank and c.outgoing.op.id == 0
+```
+
+### The earlier Alpha's draft for a conversation is carried into it once, as it opens holding no draft or send of its own, and a send that draft had recorded comes with it as one whose outcome is unknown
+
+The earlier Alpha kept one draft for each of the phone's conversations, in
+the encrypted slot `sms-draft:v1:thread:<id>` of its own connection plugin,
+and one for a new message in `sms-draft:v1:new`; this Alpha keeps a
+conversation's draft under the conversation, and the send in hand beside
+the composer ([Adoption](../platform/adoption.md)). As a conversation opens,
+the shell reads the earlier draft of the phone's conversation, and the new
+message's when its numbers are exactly the conversation's. The text comes
+with who wrote it: the owner's, or Alpha's where the owner had asked Alpha
+for it. Its pictures are attached as the owner's own would be, which this
+Alpha keeps until the message is sent or Alpha restarts; the SIM it had
+chosen is not carried, so the owner picks one again where the phone has
+several. A send the earlier Alpha had recorded for the draft comes as one
+whose outcome is unknown, under the next number, with its operation, its
+numbers, its SIM and its pictures' binding, so Send reads the phone's
+journal for it ([Sending](./sending.md)) and never sends it again; such a
+draft waits in its earlier place while another send is under way or
+unknown, since the composer holds one send at a time. A draft that cannot
+be read, or that is not one the earlier Alpha could have sent, also stays
+where it was. Where the conversation already holds a draft or a send of its
+own, that one is kept and the earlier one let go; where both earlier drafts
+are for the same conversation, the conversation's own comes first. The
+earlier slot is cleared only once the conversation holds what was carried.
+
+```quint
+pure def holdsItsOwn(c: Composer, thread: int): bool =
+  savedFor(thread, c) != Nobody or (c.outgoing.thread == thread and (S::busy(c.outgoing) or S::uncertain(c.outgoing)))
+
+pure def canAdoptDraft(c: Composer, thread: int, author: Author, recipients: int): bool =
+  thread > 0 and thread != c.thread and not(holdsItsOwn(c, thread)) and (author != Nobody or recipients > 0)
+    and (recipients > 0 implies S::canAdopt(c.outgoing, thread, recipients))
+
+pure def adoptDraft(c: Composer, thread: int, author: Author, recipients: int): Composer =
+  { ...c, saved: c.saved.put(thread, author),
+    outgoing: if (recipients > 0) S::adopt(c.outgoing, thread, recipients) else c.outgoing }
+```
+
+### An earlier Alpha's draft can be carried with the send it had recorded, to be read back when its conversation opens
+
+```quint
+pure def sometimesAnEarlierSendWaitsToBeReadBack(c: Composer): bool =
+  c.thread > 0 and bound(c) and c.slot.author == OwnerWrote and c.slot.draft == D::blank
+    and c.outgoing.radioed == c.outgoing.recipients and c.outgoing.sent == 0 and c.outgoing.op.id == 1
 ```
 
 ## Story: Let Alpha suggest a draft
@@ -422,9 +469,12 @@ pure def retire(c: Composer, id: int): Moved = withSend(S::retire(c.outgoing, id
 
 ### A new send starts only from the owner's Send
 
+A send the earlier Alpha had recorded is only carried in, as one whose
+outcome is unknown, to be read back and never sent again.
+
 ```quint
 pure def stepOnlyTheOwnersTapSends(before: Composer, via: str, after: Composer): bool =
-  after.outgoing.op.id != before.outgoing.op.id implies via == "send"
+  after.outgoing.op.id != before.outgoing.op.id implies (via == "send" or (via == "adoptDraft" and S::uncertain(after.outgoing)))
 ```
 
 ### The composer holds at most five pictures and a SIM the phone has
