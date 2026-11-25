@@ -40,7 +40,7 @@ function write(text: string) {
 /** Open the menu of the message that says `text` and choose `item`, as the owner does with the keyboard. */
 function onMessage(text: string, item: string) {
   act(() => {
-    const found = [...document.querySelectorAll("[role=log] article button")].find((one) => one.textContent === text);
+    const found = [...document.querySelectorAll("[role=log] article button[aria-haspopup=menu]")].find((one) => document.getElementById(one.getAttribute("aria-labelledby") ?? "")?.textContent === text);
     if (!(found instanceof HTMLButtonElement)) throw new Error(`no message ${text}`);
     found.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
   });
@@ -312,6 +312,28 @@ describe.each([["a browser", false], ["a phone", true]])("in %s", (_where, phone
       await press("Send");
       await until(alpha, runtime, Conversation, (s) => s.turn.send.id === 7 && s.turn.reply === "Complete");
       expect(locationIn(world.ask.metadata?.at(-1))).toBe(undefined);
+    }
+
+    // spec/app/assistant/reply.md, "Prose is drawn with its Markdown: bold, italics, code, headings, lists and quotes; a link is a link only to an https address, and HTML reads as text"
+    const marked = "**Limes** tonight?\n> Ask [Ana](https://ana.example/) <b>now</b>\n- [one](javascript:alert(1))";
+    write(marked);
+    await press("Send");
+    await until(alpha, runtime, Reply, (s) => s.status === "Settled" && s.final === `You said: ${marked}`.length);
+    await vi.waitFor(() => expect([...document.querySelectorAll("[role=log] article")].at(-1)?.querySelector("strong")).toBeTruthy());
+    const reply = [...document.querySelectorAll("[role=log] article")].at(-1);
+    expect([reply?.querySelector("strong")?.textContent, reply?.querySelector("blockquote a")?.getAttribute("href"), reply?.querySelectorAll("a").length, reply?.querySelector("b"), reply?.querySelector("li")?.textContent, lines().at(-1)])
+      .toEqual(["Limes", "https://ana.example/", 1, null, "one", "You said: Limes tonight?Ask Ana <b>now</b>one"]);
+    // spec/app/assistant/reply.md, "Prose is drawn with its Markdown: bold, italics, code, headings, lists and quotes; a link is a link only to an https address, and HTML reads as text": Enter on the link is the link's own, and the message's press still opens its actions.
+    const link = reply?.querySelector("a");
+    act(() => { link?.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true })); });
+    expect([link?.closest("button"), document.querySelector("[role=menu]")]).toEqual([null, null]);
+    act(() => { reply?.querySelector<HTMLButtonElement>("button[aria-haspopup=menu]")?.click(); });
+    expect(document.querySelector("[role=menu]")?.getAttribute("aria-label")).toBe("Message actions");
+    act(() => { reply?.querySelector<HTMLButtonElement>("button[aria-haspopup=menu]")?.click(); });
+    // spec/app/assistant/reply.md, "Copy, quote, read aloud, use in email and Talk take the reply's plain words, without its marks"
+    if (phone) {
+      await vi.waitFor(() => onMessage("You said: Limes tonight?Ask Ana <b>now</b>one", "Copy"));
+      await vi.waitFor(() => expect(world.settings.copied.at(-1)).toBe("You said: Limes tonight?\n\nAsk Ana (https://ana.example/) <b>now</b>\n\n• one"));
     }
   });
 

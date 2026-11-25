@@ -10,6 +10,7 @@ import { useMachine as useVoice } from "../../gen/app__voice.react.ts";
 import { quiet } from "../../gen/app__voice.ts";
 import { useMachine as useSpeaker } from "../../gen/app__voice__output.react.ts";
 import { voiceArea } from "../messages/dictation.vibe";
+import { registered } from "../platform/device.vibe";
 import { VoiceBridge } from "../platform/voice.vibe";
 import { VoiceEnd } from "../phone/CommsTarget.tsx";
 import { area, type Resident, type Shown } from "../runtime/area.tsx";
@@ -33,7 +34,7 @@ const screens = together(
 );
 
 /** The conversation with Talk, the system clipboard and Inbox's current review destination. */
-function LiveAssistant({ runtime }: Shown<Layer.Success<typeof screens> | Resident>) {
+function LiveAssistant({ runtime, alpha }: Shown<Layer.Success<typeof screens> | Resident>) {
   const inbox = useInbox(runtime).state;
   const drafts = useDrafts(runtime).state;
   const destination = emailDestination(inbox, drafts);
@@ -58,6 +59,9 @@ function LiveAssistant({ runtime }: Shown<Layer.Success<typeof screens> | Reside
     messageActions={{
       copy: (selection) => void runtime.runPromise(copyMessage(selection)),
       useInEmail: destination ? (selection) => void runtime.runPromise(emailMessage(selection, destination)) : undefined,
+      openLink: registered("AlphaBrowser") ? (href) => void Promise.all([import("../browser/index.tsx"), import("../browser/browser.vibe")])
+        .then(([{ default: browser }, { openMessageLink }]) => browser.runtime(alpha).runPromise(openMessageLink(href, "Ask Alpha")))
+        .catch(() => false) : undefined,
     }}
     speech={{
       keyboard: voice.state && {
