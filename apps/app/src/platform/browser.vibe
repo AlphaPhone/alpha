@@ -1,23 +1,46 @@
 // spec/app/browser/index.md, "The Browser holds its open tabs, which are private, the one shown, their native tabs, the saved session and its writer, and what covers the page"
-import type { BrowserTabHostPlugin, BrowserTabHostListener, BrowserTabSession } from "@elizaos/os-bridges"
+import { BrowserPage } from "@elizaos/agent"
+import type { BrowserTabHostListener, BrowserTabSelection, BrowserTabSession } from "@elizaos/os-bridges"
+import { type Found, type Front, handed } from "../../gen/app__browser__reading.effect.vibe"
 import { registered } from "./device.vibe"
 import { WebFrames, type FrameEvent } from "./browserWeb.vibe"
 
 module held {
-  import type { BrowserTabHostPlugin } from "@elizaos/os-bridges"
+  import type { BrowserPageGuard, BrowserTabHostPlugin } from "@elizaos/os-bridges"
   import { BrowserTabSession, tabHostPlugin } from "@elizaos/os-bridges"
 
-  let made: BrowserTabHostPlugin | undefined
-  /** eliza's client of Alpha's tab host, made once: Capacitor registers a plugin a single time for the life of the page. @throws {never} */
-  export function client(name: string): BrowserTabHostPlugin {
-    return (made ??= tabHostPlugin(name))
+  /** Alpha's `AlphaBrowser`: eliza's tab host, and the read of the page it presents for one chat turn (`AlphaBrowserPlugin.pageContext`). */
+  export interface AlphaTabHost extends BrowserTabHostPlugin {
+    pageContext(options: BrowserPageGuard): Promise<unknown>
+  }
+
+  let made: AlphaTabHost | undefined
+  let front: { readonly session: string; readonly id: string | null } | undefined
+  /**
+   * eliza's client of Alpha's tab host, made once: Capacitor registers a plugin a single time for the life of the page.
+   * It remembers the tab the host last drew, as the host does, once the host took it.
+   * @throws {never}
+   */
+  export function client(name: string): AlphaTabHost {
+    if (made !== undefined) return made
+    const plugin = tabHostPlugin(name) as AlphaTabHost
+    made = new Proxy(plugin, {
+      get: (target, key) => key === "present"
+        ? (options: Parameters<BrowserTabHostPlugin["present"]>[0]) => target.present(options).then(() => { front = { session: options.session, id: options.id } })
+        : Reflect.get(target, key),
+    })
+    return made
+  }
+  /** The tab the host draws for `session`, as it last took it. @throws {never} */
+  export function presented(session: string): string | undefined {
+    return front?.session === session ? front.id ?? undefined : undefined
   }
   /** eliza's record of the tabs one launch of the Browser holds, which takes each event of the tab host only once and in order. @throws {never} */
   export function session(): BrowserTabSession {
     return new BrowserTabSession()
   }
 }
-import { client, session } from held
+import { type AlphaTabHost, client, presented, session } from held
 
 /** The tab host refused, broke or is absent: `method` is the plugin's method, `cause` what it said. */
 export error TabHostFailed { method: string; cause: unknown }
@@ -37,7 +60,7 @@ export type Told =
  * event the host sends.
  */
 export service TabHost {
-  readonly plugin: Option.Option<BrowserTabHostPlugin>
+  readonly plugin: Option.Option<AlphaTabHost>
   readonly session: BrowserTabSession
   readonly told: Stream.Stream<Told>
   readonly web?: WebFrames
@@ -52,7 +75,7 @@ export service BrowserDownloadsHandoff {
 }
 
 /** One call of the tab host, failing with `TabHostFailed` where it refused, broke, or there is none. */
-export effect function hosted<A>(method: string, call: (plugin: BrowserTabHostPlugin, session: string) => Promise<A>): A!TabHostFailed!TabHost {
+export effect function hosted<A>(method: string, call: (plugin: AlphaTabHost, session: string) => Promise<A>): A!TabHostFailed!TabHost {
   const { plugin, session } = try TabHost
   if (Option.isNone(plugin)) throw new TabHostFailed({ method, cause: "no tab host" })
   return try tryPromise({ try: () => call(plugin.value, session.session), catch: (cause) => new TabHostFailed({ method, cause }) })
@@ -100,3 +123,42 @@ export const browserTabHost = Layer.effect(TabHost, effect {
   const web = try sync(() => new WebFrames((receipt) => { Queue.offerUnsafe(events, receipt) }))
   return { plugin: Option.none(), session: session(), told: Stream.fromQueue(events), web, observing: () => succeed(true) }
 })
+
+/** The page a question takes with it: the tab in front as the agent's observation names it, and what was read of its page. */
+export type PageInFront = { readonly selection: BrowserTabSelection; readonly page: BrowserPage }
+
+const readPage = Schema.decodeUnknownOption(BrowserPage, { onExcessProperty: "error" })
+const pageWait = "1500 millis"
+
+function frontOf(host: TabHost.Shape, id: string | undefined): Front {
+  if (id === undefined || !host.session.has(id)) return "NoTab"
+  if (host.session.isPrivate(id)) return "PrivateTab"
+  if (host.session.pageBinding(id) === undefined) return "NotLoaded"
+  return host.session.pageBinding(id, { https: true }) === undefined ? "NotSecure" : "Committed"
+}
+
+function foundOf(page: BrowserPage | undefined): Found {
+  if (page === undefined) return "Failed"
+  if (!("withheld" in page)) return "Visible"
+  return page.withheld === "unreadable" ? "Unreadable" : "Sensitive"
+}
+
+// spec/app/browser/reading.md, "A question asked while Browser is the open screen reads the tab in front once, only when it is a normal tab whose HTTPS page has committed and Browser page for Alpha is on"; spec/app/browser/reading.md, "The read hands over the text the owner can see, at most 6,000 characters, with the page's address and title, or its address and title alone where this phone cannot read the page"; spec/app/browser/reading.md, "A page that may hold a password, a payment or a code hands over nothing, nor does a read that failed or came too late"
+/** The page in front for one question asked at `now`, read by the tab host without a review, or none where the reading rules hand nothing over. */
+export effect function pageInFront(onBrowser: boolean, allowed: boolean, now: number): (PageInFront | undefined)!!TabHost {
+  const host = try TabHost
+  if (Option.isNone(host.plugin)) return undefined
+  const id = presented(host.session.session)
+  const front = frontOf(host, id)
+  const binding = id === undefined ? undefined : host.session.pageBinding(id, { https: true })
+  const selection = id === undefined ? undefined : host.session.selection(id)
+  if (binding === undefined || selection === undefined || handed(onBrowser, allowed, front, "Visible") === "NoPage") return undefined
+  const plugin = host.plugin.value
+  const asked = Effect.orElseSucceed(tryPromise(() => plugin.pageContext(host.session.guard(binding))), (): unknown => undefined)
+  const read = try Effect.timeoutOption(asked, pageWait)
+  const answer = Option.isNone(read) ? undefined : read.value
+  const page = typeof answer === "object" && answer !== null ? Option.getOrUndefined(readPage({ ...answer, tabId: selection.id, revision: selection.revision, capturedAt: Math.trunc(now) })) : undefined
+  const found: Found = Option.isNone(read) ? "Late" : foundOf(page)
+  if (page === undefined || handed(onBrowser, allowed, front, found) === "NoPage") return undefined
+  return { selection, page }
+}

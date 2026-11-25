@@ -1,0 +1,54 @@
+// spec/app/voice/index.md, "Story: Dictate into a field"; spec/app/voice/dictation.md, "Recording starts from ready, and only the answer to that start opens it"
+import { Machine as Voice } from "../../gen/app__voice.effect.vibe"
+import { started } from "../runtime/reactor.vibe"
+import { Time } from "../runtime/time.vibe"
+
+type Reading = { readonly ticket: number | undefined; readonly seconds: number }
+
+export service DictationClock {
+  readonly snapshot: () => Reading
+  readonly subscribe: (listener: () => void) => () => void
+  tell(ticket: number | undefined, seconds: number): void!!
+}
+
+const display = Layer.sync(DictationClock, () => {
+  let shown: Reading = { ticket: undefined, seconds: 0 }
+  const listeners = new Set<() => void>()
+  return {
+    snapshot: () => shown,
+    subscribe(listener: () => void) {
+      listeners.add(listener)
+      return () => { listeners.delete(listener) }
+    },
+    tell: (ticket: number | undefined, seconds: number) => sync(() => {
+      if (shown.ticket === ticket && shown.seconds === seconds) return
+      shown = { ticket, seconds }
+      for (const listener of listeners) listener()
+    }),
+  }
+})
+
+const ticking = started(effect {
+  const voice = try Voice
+  const clock = try DictationClock
+  const time = try Time
+  const live = Stream.changes(Stream.map(voice.changes, ({ recorder }) =>
+    recorder.field === "ComposerField" && recorder.stage === "Recording" ? recorder.ticket : undefined))
+  try Stream.runDrain(Stream.switchMap(live, (ticket) => {
+    if (ticket === undefined) return Stream.fromEffect(clock.tell(undefined, 0))
+    return Stream.fromEffectDrain(effect {
+      const since = try time.now()
+      for (;;) {
+        const now = try time.now()
+        const current = (try voice.get()).recorder
+        if (current.stage !== "Recording" || current.ticket !== ticket || current.field !== "ComposerField") return
+        const seconds = Math.floor((now - since) / 1000)
+        try clock.tell(ticket, seconds)
+        try time.until(since + (seconds + 1) * 1000)
+      }
+    })
+  }))
+}, "following the confirmed dictation recording")
+
+/** The current composer recording's elapsed time, derived only after the microphone opens. */
+export const dictationClock = Layer.provideMerge(ticking, display)
