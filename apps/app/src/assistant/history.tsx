@@ -160,6 +160,7 @@ export function useHistorySheets(
       />
       <AssistantSearchSheet
         open={finding.open}
+        onReturnFocus={returnFocus}
         onOpenChange={(open) => { if (!open && search.can({ type: "closeSearch" })) void search.send({ type: "closeSearch" }); }}
         search={{
           words,

@@ -72,7 +72,7 @@ function LiveAssistant({ runtime, alpha }: Shown<Layer.Success<typeof screens> |
       openLink: registered("AlphaBrowser") ? (href) => void Promise.all([import("../browser/index.tsx"), import("../browser/browser.vibe")])
         .then(([{ default: browser }, { openMessageLink }]) => browser.runtime(alpha).runPromise(openMessageLink(href, "Ask Alpha")))
         .catch(() => false) : undefined,
-      };
+    };
   }, [alpha, drafts, inbox, runtime, speaker]);
   return <Assistant
     runtime={runtime}
