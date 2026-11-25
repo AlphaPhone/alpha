@@ -268,9 +268,10 @@ describe("The Browser on a phone", () => {
     await press("Open");
     await drawn(() => vi.waitFor(async () => expect(await front()).toBe("https://en.wikipedia.org/wiki/Eiffel_Tower"), { timeout: 10_000 }));
 
-    await asked("open http://example.org", "http://example.org/", false);
-    const count = (await runtime.runPromise(Effect.flatMap(Tabs, (t) => t.get()))).open.length;
+    const tabs = async () => [...world.browser.tabs.values()].map((one) => one.history[one.at]);
+    const kept = await tabs();
+    await asked("open https://owner:secret@example.org", "https://owner:secret@example.org/", false);
     await drawn(() => vi.waitFor(async () => expect(await front()).toBe("https://en.wikipedia.org/wiki/Eiffel_Tower")));
-    expect((await runtime.runPromise(Effect.flatMap(Tabs, (t) => t.get()))).open.length).toBe(count);
+    expect(await tabs()).toEqual(kept);
   });
 });
