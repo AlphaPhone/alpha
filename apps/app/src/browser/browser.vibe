@@ -91,7 +91,8 @@ export service Pages {
   visit(url: string): void!!
 }
 
-effect function pageOf(tab: number): Page!!Pages {
+/** Read the current address machine for the exact tab. */
+export effect function pageOf(tab: number): Page!!Pages {
   const runtime = try (try Pages).of(tab)
   return try promise(() => runtime.runPromise(Address.Machine.use((machine) => machine.get())))
 }

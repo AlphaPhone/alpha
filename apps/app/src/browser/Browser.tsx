@@ -65,8 +65,9 @@ function Tab({ runtime, alpha, tabs, page }: BrowserProps & { tabs: State; page:
   const { host, path } = addressParts(shownAddress);
   const editing = tabs.layer === "Address";
   const native = Option.isSome(tabHost.plugin);
+  const hasLibrary = native || tabHost.web !== undefined;
   const privateTab = state.kind === "Private";
-  const readSuggestions = () => native ? loadLibrary(runtime) : undefined;
+  const readSuggestions = () => hasLibrary ? loadLibrary(runtime) : undefined;
   const cover = (layer: State["layer"]) => (browser.can({ type: "cover", layer }) ? () => void browser.send({ type: "cover", layer }) : undefined);
   const leading = <AppBack alpha={alpha} />;
   const submit = (text: string) => {
@@ -93,7 +94,9 @@ function Tab({ runtime, alpha, tabs, page }: BrowserProps & { tabs: State; page:
   const opening = (kind: "Normal" | "Private") => (canOpenTab(tabs, kind) ? () => {
     void browser.send({ type: "openTab", kind }).then(readSuggestions);
   } : undefined);
-  const binding = tabs.layer === "Menu" ? tabHost.session.pageBinding(idOf(tab)) : undefined;
+  const binding = tabs.layer === "Menu" && state.phase === "Shown"
+    ? tabHost.web === undefined ? tabHost.session.pageBinding(idOf(tab)) : tabHost.web.current(idOf(tab), state.load)
+    : undefined;
   const booked = binding !== undefined && runtime.runSync(Effect.flatMap(LibraryRows, (rows) => rows.bookmarks())).some((entry) => entry.url === binding.url);
   const canBookmark = library.can(booked ? { type: "unmark" } : { type: "mark", secure: state.secure, userInfo: false });
   const chooseBookmark = () => {
@@ -104,7 +107,7 @@ function Tab({ runtime, alpha, tabs, page }: BrowserProps & { tabs: State; page:
     void runtime.runPromise(markPage(binding, !booked)).then((sent) => { if (sent) void browser.send({ type: "uncover" }); });
   };
   const menu = () => void browser.send({ type: "cover", layer: "Menu" }).then(() => {
-    if (native && library.state?.read.status !== "Loaded") void loadLibrary(runtime);
+    if (hasLibrary && (tabHost.web !== undefined || library.state?.read.status !== "Loaded")) void loadLibrary(runtime);
   });
   const bookmarkNotice = library.state?.notice === "NotSecure" ? "HTTPS only"
     : library.state?.notice === "Full" ? "The bookmark list is full."
@@ -114,8 +117,8 @@ function Tab({ runtime, alpha, tabs, page }: BrowserProps & { tabs: State; page:
     can({ type: "stop" }) && { label: "Stop", name: "Stop loading", icon: <Square />, onSelect: () => { void browser.send({ type: "uncover" }).then(() => send({ type: "stop" })); } },
     canOpenTab(tabs, "Normal") && { label: "New tab", icon: <Plus />, onSelect: () => opening("Normal")?.() },
     canOpenTab(tabs, "Private") && { label: "Private tab", name: "New private tab", icon: <PrivateMark aria-hidden />, onSelect: () => opening("Private")?.() },
-    native && { label: booked ? "Bookmarked" : "Bookmark", icon: <Star fill={booked ? "currentColor" : "none"} />, disabled: !canBookmark, onSelect: chooseBookmark },
-    native && { label: "Library", name: "Library, bookmarks and history", icon: <History />, onSelect: openLibrary },
+    hasLibrary && { label: booked ? "Bookmarked" : "Bookmark", icon: <Star fill={booked ? "currentColor" : "none"} />, disabled: !canBookmark, onSelect: chooseBookmark },
+    hasLibrary && { label: "Library", name: "Library, bookmarks and history", icon: <History />, onSelect: openLibrary },
     native && { label: "Downloads", icon: <Download />, onSelect: () => void runtime.runPromise(openDownloads) },
     native && can({ type: "openFind" }) && { label: "Find", name: "Find in page", icon: <Search />, onSelect: () => { setFinding(""); void browser.send({ type: "uncover" }).then(() => send({ type: "openFind" })); } },
     canAskErase(tabs) && { label: "Clear all", name: "Clear all browsing data", icon: <Trash2 />, onSelect: () => void browser.send({ type: "askErase" }) },
