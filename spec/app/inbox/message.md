@@ -122,8 +122,9 @@ pure def newer(s: MessageView, access: Access, remote: bool): Shown = reading(s.
 
 ### Only the newest read's answer is shown, while its account may still be read; a read that fails says why
 
-Access withdrawn closes the message and has the list check the accounts
-again. A message no longer in Gmail closes, and the list is read again.
+Access withdrawn, or a read the phone holds back for want of its mail
+lease, closes the message and has the list check the accounts again, where
+the list asks for the sign-in that ends it. A message no longer in Gmail closes, and the list is read again.
 One changed in Gmail is loaded again by Retry, as is one that could not
 be reached. One too large or with too many parts is offered only "Open
 it in Gmail". A conversation that changed asks to be reopened.

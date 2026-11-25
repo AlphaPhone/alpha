@@ -407,7 +407,7 @@ pure def callsCard(image: bool, rows: List[Row]): Card = if (image and rows.leng
 What Inbox loaded is what the card shows: Home reads no mail of its own.
 As v121 drew it, the card closes on "Recent email" when Inbox's page did not
 see every message, else the account it read, and when it was read
-("Updated 10:24 PM").
+("Updated 10:24 PM"), or, when it is not up to date, since when.
 
 ```quint
 pure def mailCard(m: Mail): Card =
@@ -445,12 +445,12 @@ pure def briefCard(brief: Outcome): BriefCard =
   if (brief == Finished) BriefShown else if (brief == RunFailed) FailureShown else NoBriefCard
 ```
 
-### The row holds the agenda, Messages, Phone, mail, brief and Workflows cards in that order, each only when drawn, and is not drawn when none is
+### The row holds the agenda, Messages, Phone, Workflows, mail and brief cards in that order, each only when drawn, and is not drawn when none is
 
 ```quint
 type Kind = AgendaCard | MessagesCard | PhoneCard | MailCard | BriefOfToday | WorkflowsCard
 
-pure val cardOrder: List[Kind] = List(AgendaCard, MessagesCard, PhoneCard, MailCard, BriefOfToday, WorkflowsCard)
+pure val cardOrder: List[Kind] = List(AgendaCard, MessagesCard, PhoneCard, WorkflowsCard, MailCard, BriefOfToday)
 
 pure def drawn(c: Cards, now: int, o: Others, kind: Kind): bool =
   if (kind == AgendaCard) agendaCard(c, now, o) != Hidden

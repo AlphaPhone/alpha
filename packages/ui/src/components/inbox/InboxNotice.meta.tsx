@@ -10,6 +10,7 @@ export const meta: ComponentMeta<InboxNoticeProps> = {
   examples: {
     "Out of date": { kind: "listOutOfDate" },
     Reconnect: { kind: "reconnect" },
+    "In the list": { kind: "reconnect", plain: true },
     Offline: { kind: "offline" },
     "Sending off": { kind: "sendingOff" },
     "Not editable": { kind: "notEditable" },

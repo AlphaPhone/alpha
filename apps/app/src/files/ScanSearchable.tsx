@@ -1,13 +1,20 @@
 // spec/app/files/scan.md, "Searchable PDF reads only unread pages in order, then asks for a separate save"
-import { Alert, Button, Dialog, DialogContent, DialogTitle, Textarea } from "@repo/ui";
-import { Effect, type Layer } from "effect";
+import { Alert, Button, Dialog, DialogContent, DialogTitle, Textarea, cn } from "@repo/ui";
+import type { Layer } from "effect";
 import { useState } from "react";
 import type { Scan } from "../../gen/app__files__scan.ts";
 import { native } from "../platform/device.vibe";
 import type { Shown, Resident } from "../runtime/area.tsx";
 import { ScanAssets, confirmSearch, searchWords, type SearchLine, type scan } from "./scan.vibe";
+import { scanButton, scanPanel, scanPrimary, scanTitle } from "./scan-dialog.ts";
 
 type Runtime = Layer.Success<typeof scan> | Resident;
+const saveProblems = {
+  NoProblem: undefined,
+  TooLarge: "This document is too large to save.",
+  TooMuchText: "This text could not be added to the PDF.",
+  NotDrawn: "The PDF could not be prepared.",
+} satisfies Record<Scan["problem"], string | undefined>;
 
 /** One editable text-layer draft over the scan's exact current pages. */
 export function ScanSearchable({ runtime, state, close }: Pick<Shown<Runtime>, "runtime"> & { state: Scan; close: () => void }) {
@@ -17,17 +24,18 @@ export function ScanSearchable({ runtime, state, close }: Pick<Shown<Runtime>, "
   const saving = search.stage === "SearchSaving";
   const saveLabel = native() ? "Save" : "Download";
   const ready = search.stage === "SearchReview";
+  const problem = saveProblems[state.problem];
   const current = search.pages.findIndex((page) => page.image === search.remaining[0]);
   const submit = (save: boolean) => void runtime.runPromiseExit(confirmSearch(search.ticket, [...edits.values()], save));
   return (
     <Dialog open onOpenChange={(open) => { if (!open) close(); }}>
-      <DialogContent aria-label="Review searchable PDF" aria-describedby={undefined} closeLabel="Cancel searchable PDF" className="max-h-[90dvh] overflow-y-auto">
-        <DialogTitle>Review text</DialogTitle>
+      <DialogContent aria-label="Review searchable PDF" aria-describedby={undefined} closeLabel="Cancel searchable PDF" className={cn(scanPanel, "overflow-y-auto")}>
+        <DialogTitle className={scanTitle}>Review text</DialogTitle>
         <p className="text-sm font-medium text-muted-foreground">On device</p>
         {search.stage === "SearchReading" && <p role="status">Reading page {current + 1} of {search.pages.length}…</p>}
         {search.stage === "SearchFailed" && <Alert variant="destructive">Text could not be read. Close and try again.</Alert>}
         {saving && <p role="status">Saving searchable PDF…</p>}
-        {ready && search.tried && state.problem !== "NoProblem" && <Alert variant="destructive">{state.problem === "TooLarge" ? "This document is too large to save." : "This text could not be added to the PDF."}</Alert>}
+        {ready && search.tried && problem !== undefined && <Alert variant="destructive">{problem}</Alert>}
         {ready && search.tried && state.pdf.outcome === "Refused" && <Alert variant="destructive">The PDF was not saved.</Alert>}
         {search.pages.map((page, index) => {
           const number = index + 1;
@@ -55,9 +63,9 @@ export function ScanSearchable({ runtime, state, close }: Pick<Shown<Runtime>, "
             </section>
           );
         })}
-        <div className="flex justify-end gap-2">
-          <Button variant="secondary" aria-label="Keep reviewed text" disabled={!ready} onClick={() => submit(false)}>Keep text</Button>
-          <Button aria-label={`${saveLabel} reviewed searchable PDF`} disabled={!ready} loading={saving} onClick={() => submit(true)}>{saveLabel} PDF</Button>
+        <div className="flex flex-wrap gap-2">
+          <Button variant="secondary" className={scanButton} aria-label="Keep reviewed text" disabled={!ready} onClick={() => submit(false)}>Keep text</Button>
+          <Button className={cn(scanPrimary, "basis-full")} aria-label={`${saveLabel} reviewed searchable PDF`} disabled={!ready} loading={saving} onClick={() => submit(true)}>{saveLabel} PDF</Button>
         </div>
       </DialogContent>
     </Dialog>

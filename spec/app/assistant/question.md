@@ -8,8 +8,9 @@ file is attached to the [composer](./composer.md) at once, with no review.
 Add to chat puts the question and what goes with it in the composer as an
 attachment, for the owner to send; nothing is sent from the review. Files
 hands the file on ([preview](../files/preview.md)); a notice's question is
-reviewed by the [notices](../notices/) and the page's by
-[Browser](../browser/reading.md).
+reviewed by the [notices](../notices/), and a question asked while Browser
+is the open screen takes its page with it, unreviewed
+([Browser](../browser/reading.md)).
 
 ## Story: Ask Alpha about a file
 

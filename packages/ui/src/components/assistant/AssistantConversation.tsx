@@ -13,8 +13,8 @@ export type AssistantConversationProps = Omit<ComponentProps<"section">, "childr
   attachmentNotice?: string;
   /** The messages and the turn's state. */
   transcript: AssistantTranscriptProps;
-  /** The recorded transcript being reviewed within the open conversation. */
-  voiceReview?: ReactNode;
+  /** The dictation recorder within the open conversation. */
+  voicePanel?: ReactNode;
   /** The composer at the foot. */
   composer: AssistantComposerProps;
   /** How far Ask Alpha is raised: resting on its bar, open as a half-screen sheet, or filling the screen. */
@@ -28,10 +28,11 @@ export type AssistantConversationProps = Omit<ComponentProps<"section">, "childr
  * Keeping the composer mounted in one slot across detents preserves focus and the native keyboard session on tap.
  * @model spec/app/assistant/index.md
  */
-export function AssistantConversation({ header, attachmentNotice, transcript, voiceReview, composer, detent = "sheet", barDrag, className, ...props }: AssistantConversationProps) {
+export function AssistantConversation({ header, attachmentNotice, transcript, voicePanel, composer, detent = "sheet", barDrag, className, ...props }: AssistantConversationProps) {
   const resting = detent === "bar";
   const dragging = useAssistantBarDrag(barDrag ?? {});
   const full = detent === "full";
+  const panel = resting ? undefined : voicePanel;
   return (
     <section
       aria-label="Ask Alpha"
@@ -39,22 +40,22 @@ export function AssistantConversation({ header, attachmentNotice, transcript, vo
       data-alpha-detent={detent}
       className={cn(
         "flex flex-col text-foreground",
-        resting ? "z-dock" : "z-sheet overflow-hidden bg-card",
+        resting ? "z-dock in-[body:has([data-covers-dock])]:invisible" : "z-sheet overflow-hidden bg-card",
         full
           ? "h-full rounded-none pt-[calc(env(safe-area-inset-top)+--spacing(1))] in-data-[alpha-native]:pt-[calc(max(var(--alpha-native-inset-top,0px),env(safe-area-inset-top))+--spacing(4))]"
-          : resting ? null : cn("rounded-t-sheet pt-1", props.style?.height ? "max-h-dvh" : "min-h-[38dvh] max-h-[60dvh]"),
+          : resting ? null : cn("rounded-t-chat pt-1", props.style?.height ? "max-h-dvh" : "min-h-[38dvh] max-h-[60dvh]"),
         className,
       )}
       {...(resting && barDrag ? dragging : {})}
       {...props}
     >
-      <div hidden={resting} className={cn("min-h-0 flex-1 basis-auto flex-col", resting ? "hidden" : "flex", voiceReview && "overflow-y-auto")}>
+      <div hidden={resting} className={cn("min-h-0 flex-1 basis-auto flex-col", resting ? "hidden" : "flex", panel && "overflow-y-auto")}>
         <AssistantChatHeader {...header} grabber={full ? undefined : header.grabber} />
         {attachmentNotice && <Alert variant="warn" className="mx-3 shrink-0">{attachmentNotice}</Alert>}
-        {voiceReview}
+        {panel}
         <AssistantTranscript {...transcript} className={cn("flex-1", transcript.className)} />
       </div>
-      <AssistantComposer {...composer} hidden={Boolean(voiceReview) || composer.hidden} variant={resting ? "bar" : "sheet"} />
+      <AssistantComposer {...composer} voice={panel ? undefined : composer.voice} hidden={Boolean(panel) || composer.hidden} variant={resting ? "bar" : "sheet"} />
     </section>
   );
 }

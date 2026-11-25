@@ -136,6 +136,12 @@ function waitingOf(said: Inbox.Attention): string | undefined {
   return `${said.unread}${said.more ? "+" : ""} unread`
 }
 
+/** When Inbox read its page, as Home's mail card says it: the time today, else the day and the time. */
+function whenRead(at: number, now: number): string {
+  const time = new Date(at).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })
+  return civilDay(at) === civilDay(now) ? time : `${new Date(at).toLocaleDateString([], { weekday: "short", month: "short", day: "numeric" })} ${time}`
+}
+
 const home = started(effect {
   const list = try Inbox.Machine
   const ledger = try Mail
@@ -152,12 +158,15 @@ const home = started(effect {
       title: card.subject || "No subject",
       detail: card.from.replace(/<[^>]*>/u, "").replace(/"/gu, "").trim() || card.from,
     })) : []
-    const card = { connected, unread: unread.unread, rows, current: unread.standing === "Ready" && civilDay(unread.at) === civilDay(try time.now()) }
-    const read = connected ? { account: ledger.email(state.selected.account), at: unread.at } : undefined
-    const written = JSON.stringify([card, unread.more, read])
+    const now = try time.now()
+    const card = { connected, unread: unread.unread, rows, current: unread.standing === "Ready" && civilDay(unread.at) === civilDay(now) }
+    const read = unread.at > 0 ? whenRead(unread.at, now) : ""
+    const status = !connected ? "" : !card.current && read !== "" ? `Not updated since ${read}`
+      : [unread.more ? "Recent email" : ledger.email(state.selected.account), read === "" ? "" : `Updated ${read}`].filter((part) => part !== "").join(" · ")
+    const written = JSON.stringify([card, unread.more, status])
     if (written !== previous) {
       previous = written
-      fromAreas.mail(card, unread.more, read)
+      fromAreas.mail(card, unread.more, status)
     }
   })
 }, "telling Home")

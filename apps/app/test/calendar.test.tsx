@@ -66,11 +66,14 @@ async function fromMonth(pill: string) {
 /** Bring Calendar forward, as Home, a notice or Ask Alpha does through the shell. */
 const openCalendar = (alpha: Alpha) => alpha.runtime.runPromise(Shell.use((shell) => shell.send({ type: "openView", view: "Calendar" })));
 
+const calendarSettings = () => document.querySelector('[data-settings-page="Calendar"]');
+
 const dayButton = (day: number) => `${narrowDay.format(dateOf(day))} ${dateOf(day).getDate()}`;
 
 describe("Calendar without a connected account", () => {
   it("Shows Calendar settings on the empty standalone timeline (spec/app/calendar/presentation.md, \"Story: Know what to do when Calendar cannot read\")", async () => {
     const world = { ...morning(false), signedIn: false };
+    world.inbox.google = undefined;
     const { alpha } = await open(world, only("view:Calendar", "view:Settings"));
     const runtime = calendar.runtime(alpha);
     await openCalendar(alpha);
@@ -81,6 +84,8 @@ describe("Calendar without a connected account", () => {
     await press("Open Calendar settings");
     await until(alpha, alpha.runtime, Settings, (state) => state.page === "CalendarApp");
     expect((await alpha.runtime.runPromise(Shell.use((shell) => shell.get()))).trail).toEqual(["Calendar", "Settings"]);
+    await vi.waitFor(() => expect(calendarSettings()?.textContent).toContain("Google CalendarNot connected"));
+    expect(calendarSettings()?.textContent).not.toContain("Permissions");
   });
 
   it("Shows the granted local calendar while the account is signed out (spec/app/calendar/index.md, \"Story: Let Calendar read my phone's calendar\")", async () => {
@@ -94,6 +99,25 @@ describe("Calendar without a connected account", () => {
     expect(document.querySelector('[aria-label="Calendar timeline"]')?.textContent).not.toContain("Not connected");
     expect(button("Open Calendar settings")).toBeUndefined();
   });
+});
+
+it("Shows the newly verified Google grant when Calendar Settings reopens (spec/app/settings/index.md, \"Each page links to what another area owns there\")", async () => {
+  const world = morning(false);
+  world.inbox.google = { email: "owner@alpha.test", connection: "google-owner", capabilities: ["google.calendar.read"] };
+  const { alpha } = await open(world, only("view:Settings"));
+  await drawn(() => alpha.runtime.runPromise(Shell.use((shell) => shell.send({ type: "openView", view: "Settings" }))));
+  await until(alpha, alpha.runtime, Settings, (state) => state.page === "Top");
+  await press("Apps");
+  await press("Calendar");
+  await vi.waitFor(() => expect(calendarSettings()?.textContent).toContain("Google CalendarFinish setup"));
+
+  await press("Back to Apps");
+  await until(alpha, alpha.runtime, Settings, (state) => state.page === "Apps");
+  world.inbox.google = { email: "owner@alpha.test", connection: "google-owner", capabilities: ["google.calendar.read", "google.calendar.write"] };
+  await press("Calendar");
+  await vi.waitFor(() => expect(calendarSettings()?.textContent).toContain("Google CalendarConnected"));
+  expect(calendarSettings()?.textContent).not.toContain("Finish setup");
+  expect(world.calendar.writes).toEqual([]);
 });
 
 describe.each([["a browser", false], ["a phone", true]])("in %s", (_where, phone) => {
@@ -349,7 +373,12 @@ describe("in a browser", () => {
     await until(alpha, runtime, View, (s) => s.overlay === "Search");
     await fill("Search events", "dent");
     await tap("Dentist");
-    await until(alpha, runtime, View, (s) => s.anchor === world.today + 2 && s.overlay === "NoOverlay" && s.google.status === "Loaded");
+    await until(alpha, runtime, View, (s) => s.open !== 0 && s.overlay === "NoOverlay");
+    expect(document.querySelector("[data-alpha-subview=calendar-detail] h1")?.textContent).toBe("Dentist");
+    await press("Back to calendar");
+    await until(alpha, runtime, View, (s) => s.open === 0);
+    await press(dayButton(world.today + 2));
+    await until(alpha, runtime, View, (s) => s.anchor === world.today + 2 && s.google.status === "Loaded");
     expect(titles()).toEqual(["Dentist"]);
 
     // spec/app/calendar/index.md, "A switch of the Calendars sheet hides or shows one calendar"; spec/app/calendar/presentation.md, "A hidden calendar's rows show neither in Calendar nor on Home"
