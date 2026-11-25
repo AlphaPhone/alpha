@@ -318,7 +318,6 @@ function settledSignIns(): Stream.Stream<void> {
 export const phoneVoiceBridge = Layer.effect(VoiceBridge, effect {
   let cachedStatus: SpeechStatus | undefined
   let statusFlight: Deferred.Deferred<SpeechStatus> | undefined
-  let prewarmFlight: Deferred.Deferred<void> | undefined
   let activeSession = 0
   let nativeCapture: LiveCapture | undefined
   let cloudStream: CloudStreamingSpeech | undefined
@@ -358,60 +357,53 @@ export const phoneVoiceBridge = Layer.effect(VoiceBridge, effect {
       return cachedStatus
     }
     if (statusFlight !== undefined) return try Deferred.await(statusFlight)
+    const absent: SpeechStatus = { ready: false, ttsReady: false, liveCapture: false }
     if (!registered(LOCAL_PLUGIN)) {
-      const absent: SpeechStatus = { ready: false, ttsReady: false, liveCapture: false }
       cachedStatus = absent
       return absent
     }
     const flight = try Deferred.make<SpeechStatus>()
     statusFlight = flight
-    const plugin = localPlugin()
-    const [localResult, liveResult] = try Effect.all([
-      Effect.orElseSucceed(tryPromise(() => plugin.localSpeechStatus({ requestId: fresh(), ttsOnly })), () => ({ ready: false, ttsReady: false })),
-      Effect.orElseSucceed(tryPromise(() => plugin.liveCaptureStatus({})), () => ({ available: false, nativeTransport: false })),
-    ], { concurrency: "unbounded" })
-    const status: SpeechStatus = {
-      ready: localResult.ready === true,
-      ttsReady: localResult.ttsReady === true || localResult.ready === true,
-      liveCapture: liveResult.available === true && liveResult.nativeTransport === true,
-    }
-    cachedStatus = status
-    statusFlight = undefined
-    try Deferred.succeed(flight, status)
-    return status
+    return try ensuring(effect {
+      const plugin = localPlugin()
+      const [localResult, liveResult] = try Effect.all([
+        Effect.orElseSucceed(tryPromise(() => plugin.localSpeechStatus({ requestId: fresh(), ttsOnly })), () => ({ ready: false, ttsReady: false })),
+        Effect.orElseSucceed(tryPromise(() => plugin.liveCaptureStatus({})), () => ({ available: false, nativeTransport: false })),
+      ], { concurrency: "unbounded" })
+      const status: SpeechStatus = {
+        ready: localResult.ready === true,
+        ttsReady: localResult.ttsReady === true || localResult.ready === true,
+        liveCapture: liveResult.available === true && liveResult.nativeTransport === true,
+      }
+      cachedStatus = status
+      try Deferred.succeed(flight, status)
+      return status
+    }, effect {
+      statusFlight = undefined
+      try Deferred.succeed(flight, absent)
+    })
   }
 
   effect function prewarm(network: boolean): void!!Agent {
-    if (prewarmFlight !== undefined) {
-      try Deferred.await(prewarmFlight)
-      return
+    const warmDevice = registered(LOCAL_PLUGIN)
+      ? Effect.all([
+        ignore(tryPromise(() => localPlugin().warmSpeechOutput({}))),
+        Effect.asVoid(probeStatus(true)),
+      ], { concurrency: "unbounded" })
+      : Effect.void
+    const warmCloud = network
+      ? ignore(ask(Agent, HttpClientRequest.bodyJsonUnsafe(HttpClientRequest.post("/api/cloud/warm"), {}), Schema.Unknown))
+      : Effect.void
+    if (network && registered(CLOUD_STREAM_PLUGIN)) {
+      const relay = relayPlugin()
+      const accounts = signInAccounts()
+      const epoch = accountEpoch
+      fork.detached ignore(timeout(Effect.all([
+        effect { const read = signedInKey(accounts) catch () => undefined; if (epoch === accountEpoch) cloudKey = read },
+        ignore(tryPromise(() => relay.prewarmCloudSpeech({ environment: CLOUD_ENVIRONMENT }))),
+      ], { concurrency: "unbounded" }), RELAY_WARMUP_BOUND))
     }
-    const flight = try Deferred.make<void>()
-    prewarmFlight = flight
-    try ensuring(effect {
-      const warmDevice = registered(LOCAL_PLUGIN)
-        ? Effect.all([
-          ignore(tryPromise(() => localPlugin().warmSpeechOutput({}))),
-          Effect.asVoid(probeStatus(true)),
-        ], { concurrency: "unbounded" })
-        : Effect.void
-      const warmCloud = network
-        ? ignore(ask(Agent, HttpClientRequest.bodyJsonUnsafe(HttpClientRequest.post("/api/cloud/warm"), {}), Schema.Unknown))
-        : Effect.void
-      if (network && registered(CLOUD_STREAM_PLUGIN)) {
-        const relay = relayPlugin()
-        const accounts = signInAccounts()
-        const epoch = accountEpoch
-        fork.detached ignore(timeout(Effect.all([
-          effect { const read = signedInKey(accounts) catch () => undefined; if (epoch === accountEpoch) cloudKey = read },
-          ignore(tryPromise(() => relay.prewarmCloudSpeech({ environment: CLOUD_ENVIRONMENT }))),
-        ], { concurrency: "unbounded" }), RELAY_WARMUP_BOUND))
-      }
-      try Effect.all([warmDevice, warmCloud], { concurrency: "unbounded" })
-    }, effect {
-      prewarmFlight = undefined
-      try Deferred.succeed(flight, undefined)
-    })
+    try Effect.all([warmDevice, warmCloud], { concurrency: "unbounded" })
   }
 
   // spec/app/voice/index.md, "Speaker mute is offered after the current speech bridge confirms gain control"
