@@ -199,10 +199,11 @@ interface DockHandleProps {
   dock: ReturnType<typeof useDock>;
   detent: Parameters<typeof dockOpen>[0];
   compact: boolean;
+  focusOnPointerOpen: boolean;
   field: RefObject<HTMLTextAreaElement | null>;
 }
 
-function DockHandle({ dock, detent, compact, field }: DockHandleProps) {
+function DockHandle({ dock, detent, compact, focusOnPointerOpen, field }: DockHandleProps) {
   const open = dockOpen(detent);
   return (
     <AssistantGrabber
@@ -215,7 +216,7 @@ function DockHandle({ dock, detent, compact, field }: DockHandleProps) {
       }}
       onLift={() => {
         void dock.send({ type: "lift", now: untimed });
-        if (!open && !compact) field.current?.focus();
+        if (!open && focusOnPointerOpen) field.current?.focus();
       }}
       onCancel={() => { void dock.send({ type: "shift", now: untimed }); }}
       onTap={({ keyboard }) => {
@@ -357,7 +358,8 @@ export function Assistant({ runtime, messageActions, speech, canReadAloud = fals
       if (sent._tag === "Failure") focusOnRevealRef.current = false;
     });
   };
-  const grabber = shell.state ? <DockHandle dock={dock} detent={assistantDetent} compact={compact} field={composerRef} /> : undefined;
+  const grabber = shell.state ? <DockHandle dock={dock} detent={assistantDetent} compact={compact}
+    focusOnPointerOpen={currentView !== undefined && !compact} field={composerRef} /> : undefined;
 
   return (
     <>
