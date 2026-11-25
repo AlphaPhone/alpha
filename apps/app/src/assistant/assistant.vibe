@@ -179,7 +179,8 @@ export const spokenScreen = started(effect {
   const context = try Effect.context<Conversation.Machine | Locator.Machine | Prefs.Machine | Location | Time | Talk | NotesSelection>()
   memory.screen = () => Effect.provideContext(effect {
     const now = try (try Conversation.Machine).get()
-    return try screenTold(now.observing && !now.context.sensitive, now.context)
+    if (now.context.sensitive) return undefined
+    return try screenTold(now.observing, now.context)
   }, context)
 }, "telling voice the screen")
 
