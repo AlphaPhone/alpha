@@ -18,9 +18,17 @@ module checked {
 }
 import { type Android, client } from checked
 
+module browser {
+  /** @throws {never} */
+  export function textBlob(text: string): Blob {
+    return new Blob([text], { type: "text/plain;charset=utf-8" })
+  }
+}
+import { textBlob } from browser
+
 /** Ask the browser to save the exact text. It does not report the disk outcome. */
 export effect function downloadText(name: string, text: string): boolean!! {
-  return try saveBrowserCopy(name, new Blob([text], { type: "text/plain;charset=utf-8" }))
+  return try saveBrowserCopy(name, textBlob(text))
 }
 
 const Result = Schema.Struct({

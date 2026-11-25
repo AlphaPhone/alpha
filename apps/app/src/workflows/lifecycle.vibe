@@ -89,7 +89,7 @@ effect function changeContext() {
   const store = try KeyValueStore.KeyValueStore
   const { workflow } = try WorkflowsApi
   const state = try machine.get()
-  return { definition, rows, store, workflow, state }
+  return { definition, rows, store, workflow, state, machine }
 }
 
 effect function changed(id: number, change: Change, version: number, name: number): Event!!Needs {
@@ -126,7 +126,7 @@ effect function changed(id: number, change: Change, version: number, name: numbe
 }
 
 effect function checked(ticket: number, id: number): Event!!Needs {
-  const { definition, rows, store, workflow, state } = try changeContext()
+  const { definition, rows, store, workflow, state, machine } = try changeContext()
   const failed: Event = { type: "changeChecked", ticket, ok: false, found: false, version: Math.max(1, state.version) }
   const exact = try definition.read(state.target)
   const scope = ownerAt() catch () => ""

@@ -1,4 +1,5 @@
 // spec/app/calendar/index.md, "Story: See reminders among my events"; spec/app/reminders/index.md, "Story: Create, update, flag, move, complete and delete reminders with Undo"
+import type { ReminderItemRecord } from "@repo/launcher-records";
 import { Button, CalendarEventMenu, CalendarEventPage } from "@repo/ui";
 import { Effect } from "effect";
 import { Repeat } from "lucide-react";
@@ -6,7 +7,7 @@ import { Machine as Calendar } from "../../gen/app__calendar.effect.vibe";
 import * as Shell from "../../gen/app__shell.effect.vibe";
 import { beginEditReminder } from "../reminders/editor.vibe";
 import { deleteReminderItem, toggleReminderComplete } from "../reminders/reminders.vibe";
-import { remindersStore, type ReminderItemRecord } from "../reminders/store.ts";
+import { remindersStore } from "../reminders/store.ts";
 import type { Alpha } from "../runtime/area.tsx";
 import type { CalendarProps } from "./Calendar.tsx";
 import type { DatedReminder } from "./reminders.ts";

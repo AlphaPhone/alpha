@@ -690,10 +690,10 @@ describe("Talk from Ask Alpha's composer (spec/app/voice/index.md, \"Story: Hold
       world.voice.emitCloud?.({ type: "speech-start", sessionId });
       world.voice.emitCloud?.({ type: "transcript", sessionId, text: "Looking up my calendar", final: false });
     });
-    await settled(() => preview() === "Looking up my calendar");
+    await settleComposer(alpha, () => preview() === "Looking up my calendar");
     expect(world.ask.said).toEqual([]);
     await press("Mute microphone");
-    await settled(() => preview() === undefined);
+    await settleComposer(alpha, () => preview() === undefined);
     await drawn(() => {
       world.voice.emitCloud?.({ type: "transcript", sessionId, text: "A retired capture", final: false });
       world.voice.emitCloud?.({ type: "speech-end", sessionId, text: "" });

@@ -254,17 +254,17 @@ export const interimLiveness = started(effect {
   const shell = try Shell.Machine
   const layers = try Layers.Machine
   const device = try Device
-  const boardChanges = Stream.callback<void>((queue) => acquireRelease(
-    sync(() => board.subscribe(() => { Queue.offerUnsafe(queue, undefined) })),
+  const boardChanges = Stream.callback<boolean>((queue) => acquireRelease(
+    sync(() => board.subscribe(() => { Queue.offerUnsafe(queue, true) })),
     (off) => sync(off),
   ))
   const changes = Stream.mergeAll([
     boardChanges,
-    Stream.as(chats.changes, undefined),
-    Stream.as(conversation.changes, undefined),
-    Stream.as(voice.changes, undefined),
-    Stream.as(shell.changes, undefined),
-    Stream.as(layers.changes, undefined),
+    Stream.as(chats.changes, true),
+    Stream.as(conversation.changes, true),
+    Stream.as(voice.changes, true),
+    Stream.as(shell.changes, true),
+    Stream.as(layers.changes, true),
     Stream.filter(device.visible, (shown) => !shown),
   ], { concurrency: "unbounded" })
   try Stream.runForEach(changes, effect (visible) => {
