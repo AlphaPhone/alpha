@@ -24,9 +24,9 @@ rests as a bar, takes typing, opens as a sheet, or fills the screen.
 ```quint
 type View = Phone | Messages | Inbox | Calendar | Clock | Reminders | Browser | Camera | Photos | Maps | Notes | Contacts | Files | Workflows | Wallet | Settings
 type Detent = Bar | Typing | Sheet | Full
-type Shell = { trail: List[View], drawer: bool, assistant: Detent, image: bool, contacts: bool, route: int }
+type Shell = { trail: List[View], drawer: bool, assistant: Detent, image: bool, contacts: bool, route: int, spokenRoute: int }
 
-pure val initial: Shell = { trail: List(), drawer: false, assistant: Bar, image: false, contacts: false, route: 0 }
+pure val initial: Shell = { trail: List(), drawer: false, assistant: Bar, image: false, contacts: false, route: 0, spokenRoute: 0 }
 pure val maxTrail = 6
 
 type RouteMove = { before: Shell, after: Shell }
@@ -205,9 +205,37 @@ pure def canAgentGoHome(s: Shell): bool = s.trail.length() > 0 or s.drawer
 pure def agentGoHome(s: Shell): Shell = recordRoute({ before: s, after: { ...s, trail: List(), drawer: false } })
 
 pure def stepAgentNavigationKeepsAssistant(before: Shell, via: str, after: Shell): bool =
-  (via == "agentOpenView" or via == "agentOpenFilesFrom" or via == "agentGoHome") implies (after.assistant == before.assistant)
+  (via == "agentOpenView" or via == "agentOpenFilesFrom" or via == "agentGoHome"
+    or via == "agentOpenSpoken" or via == "agentHomeSpoken") implies (after.assistant == before.assistant)
 
 pure def sometimesAgentNavigatesKeepingSheet(s: Shell): bool = s.assistant == Sheet and s.trail.length() > 0
+```
+
+### Only a spoken move from its exact source route is marked as Talk's navigation
+
+An agent's spoken move can open the destination only from the route the
+turn was sent from. The shell records the route that this move created. A
+manual move names a new route even when it reaches the same destination.
+
+```quint
+pure def canAgentOpenSpoken(s: Shell, view: View, route: int): bool =
+  s.route == route and canAgentOpenView(s, view)
+
+pure def agentOpenSpoken(s: Shell, view: View, route: int): Shell =
+  val moved = agentOpenView(s, view)
+  { ...moved, spokenRoute: moved.route }
+
+pure def canAgentHomeSpoken(s: Shell, route: int): bool =
+  s.route == route and canAgentGoHome(s)
+
+pure def agentHomeSpoken(s: Shell, route: int): Shell =
+  val moved = agentGoHome(s)
+  { ...moved, spokenRoute: moved.route }
+
+pure def stepSpokenRouteMarksTheWriter(before: Shell, via: str, after: Shell): bool =
+  if (via == "agentOpenSpoken" or via == "agentHomeSpoken")
+    after.spokenRoute == after.route and after.route == before.route + 1
+  else after.spokenRoute == before.spokenRoute
 ```
 
 ### When Alpha opens again the trail is kept, and Ask Alpha is closed
