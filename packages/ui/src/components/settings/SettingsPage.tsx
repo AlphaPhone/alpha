@@ -34,8 +34,8 @@ export function SettingsPage({ title, top = false, leading, onBack, told, action
       leading={leading ?? (onBack ? <Button variant="ghost" size="icon" aria-label="Back" onClick={onBack}><ChevronLeft /></Button> : undefined)}
       actions={actions}
       className={cn(
-        "pt-[max(--spacing(11),env(safe-area-inset-top))] [&>main]:touch-pan-y [&>main]:pb-[calc(--spacing(32.5)+env(safe-area-inset-bottom))] [&>main>div]:gap-3 [&>main>div]:pt-1",
-        top ? "[&>header]:pl-5 [&>header>h1]:pl-0" : "[&>header]:pr-4 [&>header>h1]:text-home-display",
+        "in-data-alpha-launcher:pt-[max(--spacing(11),env(safe-area-inset-top))] [&>main]:touch-pan-y [&>main]:pb-[calc(--spacing(32.5)+env(safe-area-inset-bottom))] [&>main>div]:gap-3 [&>main>div]:pt-1",
+        top ? "in-data-alpha-launcher:[&>header]:pl-5 in-data-alpha-launcher:[&>header>h1]:pl-0" : "in-data-alpha-launcher:[&>header]:pr-4 in-data-alpha-launcher:[&>header>h1]:text-home-display",
       )}
     >
       {told ? <SettingsAndroidNotice told={told} /> : null}

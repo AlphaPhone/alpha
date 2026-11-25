@@ -87,6 +87,7 @@ describe("Settings", () => {
     // spec/app/settings/facts.md, "A read not answered within ten seconds is abandoned, and every fact is then unavailable"
     let answer = () => {};
     world.settings.gate = new Promise<void>((done) => { answer = done; });
+    await press("General");
     await press("Refresh");
     await until(alpha, machines, Facts.Machine, (s) => s.read.read.status === "Loading");
     await later(alpha, 10_000);

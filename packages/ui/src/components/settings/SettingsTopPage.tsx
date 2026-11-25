@@ -1,11 +1,11 @@
 import type { ReactNode } from "react";
-import { Code, Info, LayoutGrid, Mic, Settings, ShieldCheck, SlidersHorizontal, UserRound, RefreshCw } from "lucide-react";
+import { Code, Info, LayoutGrid, Mic, RefreshCw, Settings, Shield, UserRound } from "lucide-react";
 import { ListGroup } from "../ListGroup.tsx";
 import { StatusDot } from "../StatusDot.tsx";
 import { SettingsAndroidRow } from "./SettingsAndroidRow.tsx";
 import { SettingsNavRow } from "./SettingsNavRow.tsx";
 import { SettingsPage } from "./SettingsPage.tsx";
-import { type SettingsPageLink, SettingsPageLinks } from "./SettingsPageLinks.tsx";
+import type { SettingsPageLink } from "./SettingsPageLinks.tsx";
 import { type AndroidTold, type Neighbour, placed, type SettingsAndroidProps, type SettingsPageName, type SettingsPlaceProps } from "./vocabulary.ts";
 
 export type SettingsTopPageProps = SettingsAndroidProps &
@@ -27,16 +27,16 @@ export type SettingsTopPageProps = SettingsAndroidProps &
   };
 
 const links: SettingsPageLink[] = [
-  { page: "general", title: "General", icon: <SlidersHorizontal /> },
-  { page: "privacy", title: "Privacy", icon: <ShieldCheck /> },
+  { page: "general", title: "General", icon: <Settings /> },
+  { page: "privacy", title: "Privacy", icon: <Shield /> },
   { page: "apps", title: "Apps", icon: <LayoutGrid /> },
   { page: "about", title: "About", icon: <Info /> },
 ];
 
 /**
  * The first page of Settings: the account, General, Privacy, Apps and About, Android's own settings, and in a
- * development build the Developer page. Rows are numbered by slot, so a row keeps its place whether or not the ones
- * above it are shown.
+ * development build the Developer page, each on a card of its own. Rows are numbered by slot, so a row keeps its place
+ * whether or not the ones above it are shown.
  * @model spec/app/settings/index.md
  */
 export function SettingsTopPage({ developer = false, micMayBeOn = false, told, onOpen, onHandOver, starting, onAndroid, place, onPlace, children, leading }: SettingsTopPageProps) {
@@ -50,14 +50,22 @@ export function SettingsTopPage({ developer = false, micMayBeOn = false, told, o
         </ListGroup>
       ) : null}
       <ListGroup>
-        <SettingsNavRow title="Account and plan" icon={<UserRound />} onOpen={onHandOver && (() => onHandOver("account-and-plan"))} {...at(1)} />
+        <SettingsNavRow title="Account" icon={<UserRound />} onOpen={onHandOver && (() => onHandOver("account-and-plan"))} {...at(1)} />
       </ListGroup>
-      <ListGroup>
-        <SettingsPageLinks links={links} first={2} onOpen={onOpen} place={place} onPlace={onPlace} />
-        {developer ? <SettingsNavRow title="Developer" icon={<Code />} onOpen={onOpen && (() => onOpen("developer"))} {...at(6)} /> : null}
-      </ListGroup>
+      {links.map(({ page, title, icon }, index) => (
+        <ListGroup key={page}>
+          <SettingsNavRow title={title} icon={icon} onOpen={onOpen && (() => onOpen(page))} {...at(2 + index)} />
+        </ListGroup>
+      ))}
+      {developer ? (
+        <ListGroup>
+          <SettingsNavRow title="Developer" icon={<Code />} onOpen={onOpen && (() => onOpen("developer"))} {...at(6)} />
+        </ListGroup>
+      ) : null}
       <ListGroup>
         <SettingsAndroidRow target="android-home" title="Android settings" icon={<Settings />} {...android} {...at(7)} />
+      </ListGroup>
+      <ListGroup>
         <SettingsAndroidRow target="accounts-sync" title="Accounts and sync" icon={<RefreshCw />} {...android} {...at(8)} />
       </ListGroup>
       {children}

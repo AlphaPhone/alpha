@@ -445,7 +445,7 @@ export function Settings({ runtime, alpha, further }: { runtime: SettingsRuntime
   return (
     <section aria-label="Settings" className="flex h-full flex-col">
       {facts.state && facts.state.read.read.status === "Failed" ? <Banner variant="warn">The phone did not answer</Banner> : null}
-      {facts.can(refresh) && page !== "Licences" ? <Button variant="ghost" size="sm" className="self-end" onClick={() => void facts.send(refresh)}>Refresh</Button> : null}
+      {facts.can(refresh) && page !== "Licences" && page !== "Top" ? <Button variant="ghost" size="sm" className="self-end" onClick={() => void facts.send(refresh)}>Refresh</Button> : null}
       {Shown ? <Shown runtime={runtime} alpha={alpha} common={common} /> : null}
     </section>
   );
