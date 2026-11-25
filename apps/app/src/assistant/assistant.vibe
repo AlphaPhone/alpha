@@ -18,7 +18,7 @@ import * as Reminders from "../../gen/app__reminders.effect.vibe"
 import * as Comms from "../../gen/app__phone__comms.effect.vibe"
 import * as Voice from "../../gen/app__voice.effect.vibe"
 import type { Machine as Speaker } from "../../gen/app__voice__output.effect.vibe"
-import { Machine as Shell, canReturnCommsView, showing } from "../../gen/app__shell.effect.vibe"
+import { Machine as Shell, canAgentGoHome, canReturnCommsView, showing } from "../../gen/app__shell.effect.vibe"
 import { Machine as Canvas } from "../../gen/app__shell__keyboard.effect.vibe"
 import { Machine as Layers } from "../../gen/app__shell__layers.effect.vibe"
 import { syncClockNow } from "../clock/sync.vibe"
@@ -43,7 +43,7 @@ import { FileContext, documentObservation } from "./file-context.vibe"
 import { MediaReview, mediaReview } from "./media-review.vibe"
 import { agentWarmUp } from "./warm-up.vibe"
 import { type Attached, type Board, type Line, Talk, talk } from "./talk.vibe"
-import { Views, carried, carriedAloud, delivery, handoffs, preparedIn } from "./views.vibe"
+import { Views, carried, carriedAloud, delivery, handoffs, preparedIn, resendWithoutMode } from "./views.vibe"
 import { attachmentAuthority, dropFiles, readFiles, rememberFiles, retireTranscript, sameBinding, stageFiles } from "./attachments.vibe"
 import { readMessage } from "./read-aloud.vibe"
 import { type DraftAddress, exchangePhoneDraft, readPhoneDraft } from "./draft-device.vibe"
@@ -409,10 +409,15 @@ function posted(ticket: number, told: boolean, context: Conversation.Context): S
       filesShowing: context.showing.tag === "App" && context.showing.view === "Files", readable: openFile.mimeType === "text/plain",
       sensitive: context.sensitive, currentTurn: Conversation.canFinish(try conversation.get(), ticket),
     }) ? [openFile] : []
-    const directFiles = (requestedFiles !== undefined || outsideOrigin !== undefined) && openDocument.length === 0 && selected?.kind !== "document"
-    const metadata = { ...screen, ...(told ? delivery(views.clientId, directFiles) : {}), ...(quoted === undefined ? {} : { replyToMessageId: quoted.id }) }
+    const asksDirect = (requestedFiles !== undefined || outsideOrigin !== undefined) && openDocument.length === 0 && selected?.kind !== "document"
     const images = [...files, ...openDocument].map(({ data, mimeType, name }) => ({ data, mimeType, name }))
-    const result = tryPromise(() => controller.send({ text: outgoing, ...(images.length === 0 ? {} : { images }), ...(Object.keys(metadata).length === 0 ? {} : { metadata }) }, { stream: hooks, ...(enrolled === undefined ? {} : { headers: enrolled.headers }) })) catch () => undefined
+    const sent = effect (direct: boolean) => {
+      const metadata = { ...screen, ...(told ? delivery(views.clientId, direct ? "direct-files-v1" : undefined) : {}), ...(quoted === undefined ? {} : { replyToMessageId: quoted.id }) }
+      return tryPromise(() => controller.send({ text: outgoing, ...(images.length === 0 ? {} : { images }), ...(Object.keys(metadata).length === 0 ? {} : { metadata }) }, { stream: hooks, ...(enrolled === undefined ? {} : { headers: enrolled.headers }) })) catch () => undefined
+    }
+    const first = try sent(asksDirect)
+    const directFiles = asksDirect && !resendWithoutMode(first, asksDirect)
+    const result = directFiles || !asksDirect ? first : try sent(false)
     if (!(try ownsSeat(board, seat))) {
       Queue.offerUnsafe(queue, { type: "lose", ticket })
       Queue.endUnsafe(queue)
@@ -606,6 +611,11 @@ function carryTurn(fx: Conversation.Effect): Job<Conversation.Event, Views | Age
       const shell = try Shell
       const shown = showing(try shell.get(), view) || (try contained(shell.send({ type: "agentOpenView", view }), "opening the view the agent named"))
       return { type: "navigated", ticket: turn, opened: shown } as Conversation.Event
+    }, { type: "navigated", ticket: turn, opened: false });
+    when { tag: "NavigateHome", let turn }: answer("navigate", effect {
+      const shell = try Shell
+      const home = !canAgentGoHome(try shell.get()) || (try contained(shell.send({ type: "agentGoHome" }), "going Home as the agent named"))
+      return { type: "navigated", ticket: turn, opened: home } as Conversation.Event
     }, { type: "navigated", ticket: turn, opened: false });
     when { tag: "NavigateFiles", let turn, let source, let panel, let route }: answer("navigate", effect {
       const conversation = try Conversation.Machine
@@ -1132,6 +1142,19 @@ const requested = started(effect {
   })
 }, "leaving the previous conversation before sending its replacement's request")
 
+// spec/app/files/index.md, "A change the agent proposes while Files is not on screen shows a notice to open Files, and its card is built in Files, for Files as it then shows"
+const reviewedInFiles = started(effect {
+  const conversation = try Conversation.Machine
+  const review = try MediaReview
+  let lookedAt = -1
+  try Stream.runForEach(conversation.changes, effect (talking) => {
+    const { context } = talking
+    if (context.revision === lookedAt || context.showing.tag !== "App" || context.showing.view !== "Files") return
+    lookedAt = context.revision
+    try review.reviewInFiles()
+  })
+}, "building the Files cards that waited for Files to be opened")
+
 const submitted = started(effect {
   try Stream.runForEach((try CommsPrompts).submissions, askComms)
 }, "asking what was typed on the communications dock")
@@ -1223,7 +1246,7 @@ export const assisting = Layer.provideMerge(
     reacting(Dock, { carry: carryDock }),
     Attachments.machine(),
     reacting(Locator, { carry: carryLocator }),
-    reached, looked, opening, saving, bound, requested, submitted, allowing, forgetting, rested, keyboardRest, steppingBack, carried, carriedAloud, agentWarmUp,
+    reached, looked, opening, saving, bound, requested, reviewedInFiles, submitted, allowing, forgetting, rested, keyboardRest, steppingBack, carried, carriedAloud, agentWarmUp,
   ),
   Layer.mergeAll(Layer.fresh(turns), talk, handoffs),
 )

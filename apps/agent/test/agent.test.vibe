@@ -2,7 +2,7 @@
 // eslint-disable-next-line @typescript-eslint/consistent-type-imports -- ConversationRecord is the schema `schema Created` decodes with, a value the projection ESLint reads does not show
 import { ConversationRecord, TurnController, createRuntimeJsonClient } from "@elizaos/agent"
 import { describe, expect, it } from "@effect/vitest"
-import { configurationExit, coreActions, entryCarried, packedPlugins, productPluginName, refusedActions, workerAdmitted } from "../gen/agent.effect.vibe"
+import { configurationExit, coreActions, entryCarried, launchViews, packedPlugins, productPluginName, refusedActions, workerAdmitted } from "../gen/agent.effect.vibe"
 import { type Running, call, launchFor, listed, manifest, pinnedWorker, policy, ready, socketBridge, startPhoneAgent, startRun } from "./phone.ts"
 
 type Run = Awaited<ReturnType<typeof startRun>>
@@ -90,6 +90,7 @@ describe("Run Alpha's agent on the phone", () => {
   // spec/agent/index.md, "The launch names the pack's pinned workflow worker, and the agent refuses any other with its configuration code"
   // spec/agent/index.md, "The pack carries the plugins the old phone's agent loaded, under the pinned eliza's names, and the launch loads them with the agent's own modules the old agent had"
   // spec/agent/index.md, "A proposed device step goes through eliza's device-action module, and the phone says which steps it takes"
+  // spec/agent/index.md, "The launch names Home and every Alpha app but Notes as a view the agent may show, by the id the phone opens it by"
   it.live("Run Alpha's agent on the phone", () => scoped(effect {
     const run = try acquireRelease(promise(() => startRun()), (started) => promise(() => started.stop()))
     const phone = try Effect.try(() => run.place("phone"))
@@ -136,6 +137,14 @@ describe("Run Alpha's agent on the phone", () => {
       const read = try Schema.decodeUnknownEffect(Schema.fromJsonString(Interacted))(notes.body)
       try Effect.try(() => expect({ created: created.status, notes: read.result.state?.notes.map(({ title, body }) => body === "" ? title : `${title}\n${body}`) })
         .toEqual({ created: 200, notes: ["Heron food on Thursday"] }))
+      const shown: Record<string, number> = {}
+      for (const id of ["notes", ...launchViews.map((view) => view.id)]) {
+        const prepared = try promise(() => call(first, "POST", `/api/views/${id}/navigate`, {
+          clientId: `journey-${id}`, delivery: "completed-action", prepareOnly: true, viewType: "gui", completedActionHandoffId: `open-${id}`,
+        }))
+        shown[id] = prepared.status
+      }
+      try Effect.try(() => expect(shown).toEqual(Object.fromEntries(["notes", ...launchViews.map((view) => view.id)].map((id) => [id, 200]))))
       const proposals = try promise(() => call(first, "GET", "/api/approvals"))
       const pending = try Schema.decodeUnknownEffect(Schema.fromJsonString(Approvals))(proposals.body)
       try Effect.try(() => expect({ status: proposals.status, approvals: pending.approvals }).toEqual({ status: 200, approvals: [] }))

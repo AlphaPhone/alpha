@@ -20,6 +20,8 @@ import { type Scene, scene } from "./fakes/scene.ts";
 
 underAct();
 afterEach(closeAll);
+// spec/app/settings/index.md, "The build says once whether it is a development build, and the phone whether Alpha runs on a phone and on an Alpha image": these journeys open the development build with its developer tools.
+history.replaceState(null, "", "/?tools=1");
 
 const shipped = vi.fn(() => Promise.resolve(Response.json(notices)));
 vi.stubGlobal("fetch", ((input: RequestInfo | URL, init?: RequestInit) => (String(input).endsWith("licenses/third-party-notices.json") ? shipped() : fetch(input, init))) as typeof fetch);
