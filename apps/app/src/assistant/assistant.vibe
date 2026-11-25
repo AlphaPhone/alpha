@@ -1,5 +1,5 @@
 // spec/app/assistant/index.md, "Story: Ask Alpha something"; spec/app/assistant/index.md, "Story: Stop a reply"
-import { ConversationRecord, TurnController, encodeTurnContext, learnPeer, notLearned, sendsOptionalFields, statusRead, type LocationObservation, type TurnContext, type TurnReply, type TurnResult } from "@elizaos/agent"
+import { ConversationRecord, TurnController, encodeTurnContext, learnPeer, notLearned, sendsOptionalFields, statusRead, type LocationObservation, type TurnContext, type TurnReply, type TurnResult, type TurnTransport } from "@elizaos/agent"
 import * as KeyValueStore from "effect/persistence/KeyValueStore"
 import * as Conversation from "../../gen/app__assistant.effect.vibe"
 import * as Attachments from "../../gen/app__assistant__attachments.effect.vibe"
@@ -43,11 +43,29 @@ import { readMessage } from "./read-aloud.vibe"
 
 service Turns {
   readonly controller: TurnController
+  readonly streamed: (clientMessageId: string) => boolean
+}
+
+function clientMessageOf(body: unknown): string | undefined {
+  return typeof body === "object" && body !== null && "clientMessageId" in body && typeof body.clientMessageId === "string"
+    ? body.clientMessageId : undefined
 }
 
 const turns = Layer.effect(Turns, effect {
   const { runtime } = try Agent
-  return { controller: new TurnController(runtime) }
+  let streamed: string | undefined
+  const transport: TurnTransport = {
+    request: (path, body, headers) => {
+      // The SDK can recover a reply under the same message ID without a terminal stream frame.
+      if (clientMessageOf(body) === streamed) streamed = undefined
+      return runtime.request(path, body, headers)
+    },
+    stream: (path, body, signal, headers) => {
+      streamed = clientMessageOf(body)
+      return runtime.stream(path, body, signal, headers)
+    },
+  }
+  return { controller: new TurnController(transport), streamed: (id) => id === streamed }
 })
 
 const titled = Schema.Struct({ ...ConversationRecord.fields, title: Schema.String })
@@ -203,7 +221,7 @@ effect function syncAlphaApps(): void!!(Agent | KeyValueStore.KeyValueStore | Ti
 // spec/app/assistant/composer.md, "A quoted message goes with the next send, until the owner removes the quote"
 function posted(ticket: number, told: boolean, context: Conversation.Context): Stream.Stream<Conversation.Event, never, Views | Agent | KeyValueStore.KeyValueStore | Time | Turns | Talk | Chats.Machine | Conversation.Machine | Reply.Machine | Composer.Machine | Locator.Machine | Prefs.Machine | Location | Comms.Machine | MailQuestions | MediaReview | NotesSelection> {
   return Stream.callback<Conversation.Event, never, Views | Agent | KeyValueStore.KeyValueStore | Time | Turns | Talk | Chats.Machine | Conversation.Machine | Reply.Machine | Composer.Machine | Locator.Machine | Prefs.Machine | Location | Comms.Machine | MailQuestions | MediaReview | NotesSelection>((queue) => effect {
-    const { controller } = try Turns
+    const { controller, streamed } = try Turns
     const { board } = try Talk
     const reply = try Reply.Machine
     let shown: Promise<unknown> | undefined
@@ -316,8 +334,10 @@ function posted(ticket: number, told: boolean, context: Conversation.Context): S
       board.append(pageTicket, chats.chosen, { id: result.reply.messageId, mine: false, text: result.reply.text })
       try syncAlphaApps()
       if (enrolled !== undefined && result.reply.userMessageId !== undefined) {
-        const media = try review.pending(enrolled, result.reply.userMessageId, chats.chosen, context.revision, messageTarget)
-        if ((try conversation.get()).context.revision === context.revision && (try history.get()).chosen === chats.chosen) board.change({ media })
+        const media = try review.pending(enrolled, result.reply.userMessageId, chats.chosen, context.revision, messageTarget,
+          { clientMessageId: result.clientMessageId, actionResults: streamed(result.clientMessageId) ? result.reply.actionResults : [] })
+        if (board.lastSentId === result.clientMessageId && (try conversation.get()).context.revision === context.revision
+          && (try history.get()).chosen === chats.chosen) board.change({ media })
       }
     }
     if (event.type === "refuse") board.drop(pageTicket, mine)

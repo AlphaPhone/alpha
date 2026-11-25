@@ -3,6 +3,7 @@ import { NOT_DISPATCHED } from "@elizaos/agent";
 import { type Context, Effect, type ManagedRuntime, Stream } from "effect";
 import { act } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { Machine as Conversation } from "../gen/app__assistant.effect.vibe";
 import { Machine as Shell } from "../gen/app__shell.effect.vibe";
 import { Machine as Messages } from "../gen/app__messages.effect.vibe";
 import { Machine as Composer } from "../gen/app__messages__composer.effect.vibe";
@@ -12,14 +13,16 @@ import { Machine as Voice } from "../gen/app__voice.effect.vibe";
 import { Machine as Tabs } from "../gen/app__browser.effect.vibe";
 import { Machine as Page } from "../gen/app__browser__address.effect.vibe";
 import { Machine as Home } from "../gen/app__home.effect.vibe";
+import assistant from "../src/assistant/index.tsx";
 import { executeMedia } from "../src/assistant/media-executors.ts";
 import { readAgentSms } from "../src/messages/agent-send.vibe";
 import { idOf, Pages } from "../src/browser/browser.vibe";
 import browser from "../src/browser/index.tsx";
 import home from "../src/home/index.tsx";
 import messages from "../src/messages/index.tsx";
-import { closeAll, drawn, hardware, only, open, press, underAct } from "./alpha.tsx";
+import { button, closeAll, drawn, hardware, only, open, press, underAct } from "./alpha.tsx";
 import { scene } from "./fakes/scene.ts";
+import { textReview } from "./fakes/text-review.ts";
 
 underAct();
 afterEach(closeAll);
@@ -354,6 +357,52 @@ describe("Messages on an Alpha image", () => {
     expect(world.telephony.sent.map(({ operationId, recipients, body }) => ({ operationId, recipients, body }))).toEqual([
       { operationId: call.operationId, recipients: [...sms.recipients], body: sms.body },
     ]);
+  });
+
+  it("From Home, asks the owner to review the exact text the agent just proposed (spec/app/contacts/agent.md, \"Only the owner approves, only what is shown as it is now, and only when the phone has ruled out an emergency call\")", async () => {
+    const world = image();
+    const sms = { type: "sms_send", recipients: ["+14155550100"], body: "Meet at the front door", subscriptionId: 1 } as const;
+    const review = textReview(world.notes.owner, "reviewed-text", sms);
+    world.telephony.textReview = review;
+    const { alpha } = await openImage(world);
+    const runtime = assistant.runtime(alpha);
+    await ready(alpha.runtime, Shell, "Alpha image admitted", (state) => state.image);
+    await ready(alpha.runtime, Phone, "Known call state", (state) => state.telecom === "NoCall");
+    await ready(runtime, Conversation, "Ask Alpha ready on Home", (state) => state.ready && state.context.showing.tag === "Home");
+    await vi.waitFor(() => expect(button("Open conversation")).toBeDefined());
+    await press("Open conversation");
+    await ready(alpha.runtime, Shell, "Ask Alpha open", (state) => state.assistant === "Sheet");
+
+    const ask = async (proposalId: string, prompt: string) => {
+      const reads = review.pendingReads;
+      world.ask.nextReplyChunks = ["Review the text on your phone."];
+      world.ask.nextActions = () => [{ action: "PROPOSE_DEVICE_ACTION", data: { proposalId, state: "pending", executed: false, approvalRequired: true, awaitingUserInput: true } }];
+      await write("Message Alpha", prompt);
+      await vi.waitFor(() => expect(button("Send")?.disabled).toBe(false));
+      await press("Send");
+      await ready(runtime, Conversation, "Reviewed reply complete", (state) => review.pendingReads > reads && state.turn.reply === "Complete");
+    };
+
+    await ask("unrelated-proposal", "Text +14155550100 from SIM 1 saying Meet at the front door");
+    expect([button("Approve"), review.decisions, review.confirmations, world.telephony.sent]).toEqual([undefined, [], [], []]);
+
+    await ask(review.proposal.id, "Use SIM 1 to send +14155550100 the text Meet at the front door");
+    await vi.waitFor(() => expect(button("Approve")).toBeDefined());
+    expect(document.body.textContent).toContain("Review this text on your phone");
+    expect(document.body.textContent).toContain(sms.body);
+    expect([review.decisions, review.confirmations, world.telephony.sent]).toEqual([[], [], []]);
+    await press("Approve");
+    try {
+      await vi.waitFor(() => expect(review.confirmations).toHaveLength(1));
+      const confirmation = review.confirmations[0]!;
+      expect(confirmation).toMatchObject({ operationId: review.proposal.id, recipients: sms.recipients, body: sms.body, subscriptionId: sms.subscriptionId });
+      expect([review.decisions, review.claims, world.telephony.sent]).toEqual([[review.proposal.id], [review.proposal.id], []]);
+      await drawn(() => confirmation.confirm());
+      await vi.waitFor(() => expect(review.receipts).toEqual([expect.objectContaining({ outcome: "applied", operationId: review.proposal.id })]));
+      expect(world.telephony.sent).toEqual([{ operationId: review.proposal.id, recipients: sms.recipients, body: sms.body }]);
+    } finally {
+      for (const confirmation of review.confirmations) confirmation.confirm();
+    }
   });
 
   it("Opens the exact notified conversation and follows an owner's safe link tap (spec/app/messages/index.md, \"A message notification opens its exact conversation once access is available\"; spec/app/messages/index.md, \"Story: Read a conversation\")", async () => {
