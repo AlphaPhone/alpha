@@ -107,6 +107,9 @@ this prose into tokens. To change the design, describe it, and have the change w
 | `info` | oklch(0.354 0.245 264.1) | oklch(0.704 0.157 278) |
 | `alpha` | oklch(0.45201372 0.31321437 264.05202064) | — |
 | `alpha-foreground` | oklch(1 0 0) | — |
+| `voice-paused` | oklch(0.42871365 0.17763819 275.87797693) | oklch(0.49371435 0.17497524 277.85975720) |
+| `voice-processing` | oklch(0.35317586 0.24472654 264.05202064) | oklch(0.53252567 0.26097330 273.09464102) |
+| `voice-speaking` | oklch(0.46315925 0.30554663 264.59166337) | — |
 | `call` | oklch(0.509 0.134 149.4) | oklch(0.614 0.162 149.3) |
 | `record` | oklch(0.578 0.206 29) | oklch(0.663 0.224 28.3) |
 | `dial` | oklch(0.614 0.162 149.3) | — |
@@ -182,6 +185,8 @@ this prose into tokens. To change the design, describe it, and have the change w
 | `text.4xl.tracking` | -0.01em |
 | `text.figure.size` | 2.75rem |
 | `text.figure.leading` | 1 |
+| `text.recorder-clock.size` | 3rem |
+| `text.recorder-clock.leading` | 1 |
 | `text.headline.size` | 2.125rem |
 | `text.headline.leading` | 1.08 |
 | `text.headline.tracking` | -0.01em |
@@ -225,6 +230,8 @@ this prose into tokens. To change the design, describe it, and have the change w
 | `leading.snug` | 1.25 |
 | `leading.row` | 1.3 |
 | `leading.normal` | 1.4 |
+| `leading.transcript` | 1.45 |
+| `leading.voice-status` | 1rem |
 | `leading.relaxed` | 1.6 |
 | `leading.field` | 1.375 |
 | `leading.chat` | 1.5 |
@@ -254,12 +261,14 @@ this prose into tokens. To change the design, describe it, and have the change w
 | `keyframes.drop` | from{opacity:0;transform:translateY(-2.25rem)}to{opacity:1;transform:none} |
 | `keyframes.fade` | from{opacity:0}to{opacity:1} |
 | `keyframes.shimmer` | from{background-position:200% 0}to{background-position:-200% 0} |
+| `keyframes.page-loading` | from{transform:translateX(-100%)}to{transform:translateX(300%)} |
 | `keyframes.wiggle` | from{transform:rotate(-1.5deg)}to{transform:rotate(1.5deg)} |
 | `keyframes.blink` | 0%,100%{opacity:0.2}50%{opacity:1} |
 | `animate.rise` | rise 460ms cubic-bezier(0.19, 1, 0.22, 1) both |
 | `animate.drop` | drop 500ms cubic-bezier(0.19, 1, 0.22, 1) both |
 | `animate.fade` | fade 700ms ease both |
 | `animate.shimmer` | shimmer 2s linear infinite |
+| `animate.page-loading` | page-loading 1.2s linear infinite |
 | `animate.wiggle` | wiggle 300ms ease-in-out infinite alternate |
 | `animate.blink` | blink 1.2s ease-in-out infinite |
 | `breakpoint.sm` | 40rem |

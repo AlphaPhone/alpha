@@ -61,7 +61,6 @@ export function InboxMessageRow({ sender, subject, snippet, time, unread = false
   };
   return (
     <button type="button" role={selecting ? "checkbox" : undefined} aria-checked={selecting ? chosen : undefined}
-      aria-label={`${unread ? "Unread, " : ""}${sender}, ${subject}${attachment ? ", has attachments" : ""}`}
       disabled={selecting ? !onChosenChange : !onOpen} onClick={activate}
       onPointerDown={start} onPointerUp={end} onPointerCancel={() => { swipeFromRef.current = undefined; }}
       className={cn(focusRing, "flex w-full touch-pan-y items-start gap-3.5 bg-background px-5 py-3.25 text-left focus-visible:-outline-offset-focus")}
@@ -71,7 +70,8 @@ export function InboxMessageRow({ sender, subject, snippet, time, unread = false
           {chosen ? <Check className="size-4" /> : null}
         </span>
       ) : null}
-      <Avatar name={sender} className="size-11 text-sm font-bold" />
+      <Avatar name={sender} aria-hidden className="size-11 text-sm font-bold" />
+      {unread || attachment ? <span className="sr-only">{unread && "Unread. "}{attachment && "Has attachments."}</span> : null}
       <span className="flex min-w-0 flex-1 flex-col">
         <span className="flex h-4.25 items-center gap-1.5 leading-tight">
           <span className={cn("min-w-0 truncate text-base leading-tight", unread ? "font-bold" : "font-medium")}>{sender}</span>

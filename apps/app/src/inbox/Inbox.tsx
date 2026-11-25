@@ -37,12 +37,13 @@ import type { Incoming } from "./adding.vibe";
 import type { Machine as Adding } from "../../gen/app__inbox__adding.effect.vibe";
 import { type Beginning, Letters, begin, openGmailDraft } from "./composer.vibe";
 import { type Letter, Mail, revisionOf } from "./gmail.vibe";
+import { MailSignIn } from "./mailbox.vibe";
 import { connectMailFrame, frameDocument, prepareMessage } from "./mail-html.ts";
 import { AttachmentPreviews, canPreviewAttachment, canSaveAttachment } from "./attachment.vibe";
 
 export interface InboxProps {
-  /** Provides the list, the message open and its marks, the changes, the shell, and Mail, which holds what Gmail said. */
-  runtime: ManagedRuntime.ManagedRuntime<List | Shown | Marks | Changes | Writing | Adding | Incoming | Offering | Offers | Letters | Shell | Mail | Time | Preferences | Cloud | AttachmentPreviews, unknown>;
+  /** Provides the list, the message open and its marks, the changes, the shell, Mail, which holds what Gmail said, and the phone's sign-in for mail. */
+  runtime: ManagedRuntime.ManagedRuntime<List | Shown | Marks | Changes | Writing | Adding | Incoming | Offering | Offers | Letters | Shell | Mail | Time | Preferences | Cloud | AttachmentPreviews | MailSignIn, unknown>;
 }
 
 type Runtime = InboxProps["runtime"];
@@ -77,7 +78,7 @@ const senderAddress = (from: string) => /<([^>]+)>/u.exec(from)?.[1] ?? from;
 
 /** Why the list has nothing to show, as the list's state says it; none where it has rows to show or is reading. */
 function emptyOf(s: Mailbox): InboxListStateKind | undefined {
-  if (!s.signedIn) return "signedOut";
+  if (!s.signedIn || s.failure === "LeaseNeeded") return "signedOut";
   if (s.accounts.status === "Loaded" && s.selected.account === 0 && s.connected.length === 0) return "notConnected";
   if (s.accounts.status === "Loaded" && s.selected.account !== 0 && !readable(s)) return "needsAccess";
   if (readable(s) && !searchableIn(s.selected.folder, s)) return "unavailable";
@@ -309,6 +310,7 @@ export function Inbox({ runtime, alpha }: InboxProps & { alpha: Alpha }) {
   const review = <ChangeReview runtime={runtime} list={state} cards={cards} />;
   if (message.state.message !== 0) return <>{<Opened runtime={runtime} list={state} onRefresh={refresh} onBegin={onBegin} />}{review}</>;
   const settings = shell.can({ type: "openView", view: "Settings" }) ? () => void shell.send({ type: "openView", view: "Settings" }) : undefined;
+  const signIn = settings ? () => void runtime.runPromise(MailSignIn.use((mail) => mail.signIn(settings))) : undefined;
   const hidden = new Set(changes.state ? aside(changes.state) : []);
   const letters = mailOf(runtime, (mail) => mail.shown(state)).filter(({ message: number }) => !hidden.has(number));
   const { account, folder, query } = state.selected;
@@ -413,9 +415,9 @@ export function Inbox({ runtime, alpha }: InboxProps & { alpha: Alpha }) {
           }
         } : undefined}
         notice={noticeOf(state)}
-        onNoticeAction={noticeOf(state) === "reconnect" ? settings : retryList}
+        onNoticeAction={noticeOf(state) === "reconnect" ? signIn : retryList}
         state={mustChoose ? undefined : kind}
-        onStateAction={kind === "offline" || kind === "failed" ? retryList : settings}
+        onStateAction={kind === "offline" || kind === "failed" ? retryList : kind === "signedOut" ? signIn : settings}
         chosen={state.chosen.length}
         onStartSelection={!draftsFolder && !selecting && can(chooseAll) ? () => setSelection(folderKey) : undefined}
         onFinishSelection={selecting || chosenMessages.size > 0 ? finishSelection : undefined}

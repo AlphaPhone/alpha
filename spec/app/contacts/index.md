@@ -311,6 +311,9 @@ pure def alwaysAnOpenContactIsNamed(s: Contacts): bool = s.opened implies s.cont
 ### When the phone reports a change to the address book, Contacts reads the visible list and any open contact again
 
 A form keeps the exact contact and the version it opened with.
+The list and the open card keep their own requests in Alpha. Their reads
+take turns at the phone's address book, where starting a new read retires
+the preceding one.
 
 ```quint
 pure def canBookChanged(s: Contacts): bool = readable(s)

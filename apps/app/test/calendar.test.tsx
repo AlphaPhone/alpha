@@ -5,6 +5,7 @@ import { Machine as Changes } from "../gen/app__calendar__agent.effect.vibe";
 import { Machine as Editor } from "../gen/app__calendar__editor.effect.vibe";
 import { Machine as Held } from "../gen/app__calendar__deletions.effect.vibe";
 import { Machine as Shell } from "../gen/app__shell.effect.vibe";
+import { Machine as Settings } from "../gen/app__settings.effect.vibe";
 import { Machine as Link } from "../gen/app__calendar__link.effect.vibe";
 import calendar from "../src/calendar/index.tsx";
 import { civilDay, dateOf, dayStart } from "../src/calendar/time.ts";
@@ -17,7 +18,7 @@ underAct();
 afterEach(closeAll);
 
 const hour = 3_600_000;
-const longDate = new Intl.DateTimeFormat(undefined, { weekday: "long", month: "long", day: "numeric" });
+const narrowDay = new Intl.DateTimeFormat(undefined, { weekday: "narrow" });
 
 /** A world at nine in the morning of a Tuesday, whose agent keeps a stand-up, a lunch it was invited to and a dentist's appointment, and whose phone keeps the gym. */
 function morning(phone: boolean): Scene & { at: (day: number, hours: number) => number; today: number } {
@@ -40,27 +41,60 @@ function morning(phone: boolean): Scene & { at: (day: number, hours: number) => 
   return Object.assign(world, { at, today });
 }
 
-/** The titles of the events the days show, in order: each event's button is named by its title and time. */
-const titles = () => [...document.querySelectorAll("[data-alpha-subview=calendar-list] button")].map((found) => found.getAttribute("aria-label") ?? "")
-  .map((text) => ["Standup", "Team lunch", "Dentist", "Gym", "Coffee"].find((title) => text.startsWith(`${title}, `)) ?? "").filter((title) => title !== "");
+/** The timeline and list rows, separate from the invitation banner above them. */
+const events = () => [...document.querySelectorAll("[data-alpha-subview=calendar-list] [role=region] button")];
 
-/** Tap the event whose name starts with `text`, as a row's or a block's does. */
+/** The titles of the events the days show, in order: each event's button is named by its title and time. */
+const titles = () => events().map((found) => (found.getAttribute("aria-label") ?? "").split(", "))
+  .map((names) => ["Standup", "Team lunch", "Dentist", "Gym", "Coffee"].find((title) => names.includes(title)) ?? "").filter((title) => title !== "");
+
+/** Tap the row or block with `text` as the event title. */
 async function tap(text: string) {
-  const found = [...document.querySelectorAll("button")].find((candidate) => (candidate.getAttribute("aria-label") ?? "").startsWith(`${text}, `));
+  const found = events().find((candidate) => (candidate.getAttribute("aria-label") ?? "").split(", ").includes(text));
   if (!found) throw new Error(`no row ${text}`);
   await press(found.getAttribute("aria-label") ?? "");
 }
 
+const chooseDate = () => press(`Choose date: ${document.querySelector("[data-host-chrome] h1")?.textContent ?? ""}`);
+
 /** Open the month dialog under the title and choose `pill` there: a layout, or the Calendars sheet. */
 async function fromMonth(pill: string) {
-  await press("Choose date");
+  await chooseDate();
   await press(pill);
 }
 
 /** Bring Calendar forward, as Home, a notice or Ask Alpha does through the shell. */
 const openCalendar = (alpha: Alpha) => alpha.runtime.runPromise(Shell.use((shell) => shell.send({ type: "openView", view: "Calendar" })));
 
-const dayButton = (day: number) => longDate.format(dateOf(day));
+const dayButton = (day: number) => `${narrowDay.format(dateOf(day))} ${dateOf(day).getDate()}`;
+
+describe("Calendar without a connected account", () => {
+  it("Shows Calendar settings on the empty standalone timeline (spec/app/calendar/presentation.md, \"Story: Know what to do when Calendar cannot read\")", async () => {
+    const world = { ...morning(false), signedIn: false };
+    const { alpha } = await open(world, only("view:Calendar", "view:Settings"));
+    const runtime = calendar.runtime(alpha);
+    await openCalendar(alpha);
+    await until(alpha, runtime, View, (state) => state.owner === 0 && !state.connected);
+    const timeline = document.querySelector('[aria-label="Calendar timeline"]');
+    expect(timeline?.textContent).toContain("Not connected");
+    expect(button("Open Calendar settings")).toBeDefined();
+    await press("Open Calendar settings");
+    await until(alpha, alpha.runtime, Settings, (state) => state.page === "CalendarApp");
+    expect((await alpha.runtime.runPromise(Shell.use((shell) => shell.get()))).trail).toEqual(["Calendar", "Settings"]);
+  });
+
+  it("Shows the granted local calendar while the account is signed out (spec/app/calendar/index.md, \"Story: Let Calendar read my phone's calendar\")", async () => {
+    const world = { ...morning(true), signedIn: false };
+    world.calendar.granted = true;
+    const { alpha } = await open(world, only("view:Calendar"));
+    const runtime = calendar.runtime(alpha);
+    await openCalendar(alpha);
+    await until(alpha, runtime, View, (state) => state.owner === 0 && !state.connected && state.phoneRows === 1);
+    expect(titles()).toEqual(["Gym"]);
+    expect(document.querySelector('[aria-label="Calendar timeline"]')?.textContent).not.toContain("Not connected");
+    expect(button("Open Calendar settings")).toBeUndefined();
+  });
+});
 
 describe.each([["a browser", false], ["a phone", true]])("in %s", (_where, phone) => {
   it("See my days (spec/app/calendar/index.md, \"Story: See my days\"; spec/app/calendar/index.md, \"Story: Move through the days\")", async () => {
@@ -100,7 +134,7 @@ describe.each([["a browser", false], ["a phone", true]])("in %s", (_where, phone
     await until(alpha, runtime, View, (s) => s.anchor === world.today && s.google.status === "Loaded");
 
     // spec/app/calendar/index.md, "Choosing a layout closes the menu, and the agenda goes back to today"; spec/app/calendar/presentation.md, "A read for a day covers the month before it through the month after next": the agenda lists what is coming, not only today.
-    await press("Choose date");
+    await chooseDate();
     await until(alpha, runtime, View, (s) => s.overlay === "MonthDialog");
     await press("Schedule");
     await until(alpha, runtime, View, (s) => s.layout === "Agenda" && s.overlay === "NoOverlay");
@@ -212,12 +246,22 @@ describe("on a phone", () => {
     const world = morning(true);
     world.calendar.granted = true;
     world.inbox.google = { email: "owner@alpha.test", connection: "google-owner", capabilities: ["google.basic_identity", "google.calendar.read"] };
+    world.mailLease.held = false;
     const { alpha } = await open(world, only("view:Calendar"));
     const runtime = calendar.runtime(alpha);
     await openCalendar(alpha);
     await until(alpha, runtime, Link, (l) => l.owner > 0);
     await fromMonth("Calendars");
     await until(alpha, runtime, View, (s) => s.overlay === "CalendarsSheet");
+
+    // spec/app/platform/index.md, "A cloud request the phone holds back for want of a sign-in reads as the cloud's own 401": a phone signed in before mail leases existed cannot check Google yet.
+    await until(alpha, runtime, Link, (l) => l.checked === "CheckFailed");
+    expect([document.body.textContent?.includes("Couldn't check"), Boolean(button("Link Google Calendar"))]).toEqual([true, false]);
+
+    // spec/app/platform/index.md, "The owner's tap on a mail sign-in control starts the phone's one more sign-in for mail where the phone wants it, then reads again once": once the phone holds the lease, signed in from Inbox, Calendar's next read checks Google again by itself.
+    world.mailLease.held = true;
+    await runtime.runPromise(View.use((view) => view.send({ type: "refresh" })));
+    await until(alpha, runtime, Link, (l) => l.checked === "CheckedOk");
 
     // spec/app/calendar/link.md, "Setup starts only from a write grant, for the owner signed in; a read-only grant goes on to consent for more access, and a missing one sends nothing"
     await press("Link Google Calendar");

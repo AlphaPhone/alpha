@@ -31,6 +31,8 @@ import { clockResident } from "./clock/sync.vibe"
 import { remindersResident } from "./reminders/reminders.vibe"
 import { listing as workflowList } from "./workflows/list.vibe"
 import { digestBrief } from "./workflows/brief.vibe"
+import { browserDigestDelivery } from "./workflows/browser-digests.vibe"
+import { nativeDigestDelivery } from "./workflows/native-digests.vibe"
 
 /**
  * The machines that live from launch to exit: those another area follows or tells, and those that must act while
@@ -69,6 +71,8 @@ const machines = together(
   remindersResident,
   workflowList,
   digestBrief,
+  browserDigestDelivery,
+  nativeDigestDelivery,
 )
 
 /** The resident machines, closed: each machine one of them follows or tells is among them. */

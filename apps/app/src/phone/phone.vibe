@@ -7,7 +7,7 @@ import type { Carrier, DialMode, DialNumberKind, Effect as Out, Event, Telecom, 
 import type { Grant } from "../../gen/kit__permission.ts"
 import { Calls } from "../platform/calls.vibe"
 import { SystemSettings } from "../platform/systemSettings.vibe"
-import { Telephony, TelephonyAbsent, TelephonyRefused, namesOf, telephony } from "../platform/telephony.vibe"
+import { Telephony, TelephonyAbsent, TelephonyRefused, namesOf, readAddressBook, telephony } from "../platform/telephony.vibe"
 import { type Job, answer, applying, contained, hearing, reacting, run, started, together } from "../runtime/reactor.vibe"
 import { on, visiting } from "./visit.vibe"
 import { judge, matches } from "./words.ts"
@@ -86,8 +86,8 @@ effect function matchNumber(ticket: number): Event!!(Telephony | Dialer) {
     return { type: "numberMatched", ticket, found: false }
   }
   const page = effect {
-    try telephony("open", (c) => c.contacts.open())
-    return try telephony("list", (c) => c.contacts.list({ query, limit: 5 }))
+    try readAddressBook("open contacts", (c) => c.open())
+    return try readAddressBook("search contacts", (c) => c.list({ query, limit: 5 }))
   } catch () => undefined
   const found = page?.contacts.flatMap((row: AddressBookRow) => "incomplete" in row ? [] : row.phones
     .filter((number) => number.replace(/\D/g, "").includes(query))

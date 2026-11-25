@@ -1,4 +1,6 @@
 import type { AgentEvents, AgentRequest, AgentStatus, AgentStreamRequest, ElizaAgentPlugin, ElizaCloudPlugin, NativeCloudRequest, ElizaSecureStorePlugin, ElizaSecureStoreResult } from "@elizaos/os-bridges";
+import { deviceRoutes } from "@elizaos/cloud";
+import type { RecoveryScene } from "./settings.ts";
 import type { Answering } from "./routes.ts";
 
 /**
@@ -35,11 +37,12 @@ const base64 = (bytes: Uint8Array) => btoa(Array.from(bytes, (one) => String.fro
  * its channel admits; `subscribeEvents` answers `{ id }`, then emits each event the agent publishes on the topic as
  * `agentEvent`, until `unsubscribeEvents`.
  */
-export function elizaAgent(agent: Answering): Faked {
+export function elizaAgent(agent: Answering, recovery?: RecoveryScene): Faked {
   return plugin<ElizaAgentPlugin, AgentEvents>((emit) => {
     const calls = new Map<string, AbortController>();
-    let state: "running" | "stopped" = "running";
-    const status = (): AgentStatus => ({ available: true, state, epoch: 1, requestBodyLimit: 1_048_576 });
+    let state: "running" | "stopped" | "failed" = recovery === undefined ? "running" : "failed";
+    const base = { available: true, epoch: 1, requestBodyLimit: 1_048_576 } as const;
+    const status = (): AgentStatus => state === "failed" ? { ...base, state, failure: "storage" } : { ...base, state };
     const set = (next: "running" | "stopped"): Promise<AgentStatus> => {
       state = next;
       const now = status();
@@ -90,7 +93,7 @@ export function elizaAgent(agent: Answering): Faked {
     };
     return {
       getStatus: () => Promise.resolve(status()),
-      start: () => set("running"),
+      start: () => { if (recovery !== undefined) recovery.starts += 1; return set("running"); },
       stop: () => set("stopped"),
       restart: () => set("running"),
       async request(options: AgentRequest) {
@@ -125,23 +128,46 @@ export function elizaAgent(agent: Answering): Faked {
         }
       },
       unsubscribeEvents: aborted,
-      reviewRecovery: () => Promise.resolve({ kind: "unavailable" }),
-      archiveRecovery: () => Promise.resolve({ kind: "unavailable" }),
+      reviewRecovery: () => Promise.resolve(recovery !== undefined && state === "failed"
+        ? { kind: "reviewable", reviewToken: "1.check", retainedCount: recovery.retained }
+        : { kind: "unavailable" }),
+      archiveRecovery: async ({ reviewToken }) => {
+        if (recovery === undefined || state !== "failed" || reviewToken !== "1.check") return { kind: "unavailable" };
+        recovery.tokens.push(reviewToken);
+        await set("stopped");
+        return { kind: "archived", archivedCount: recovery.archived };
+      },
     };
   });
 }
 
+/** The phone's mail lease as eliza's sign-in keeps it: whether it holds one, how the owner answers the browser sign-in for one, how many of those sign-ins the phone started, and how many mail or calendar requests it held back for want of the lease. */
+export interface MailLeaseScene { held: boolean; answer: "SignsIn" | "Cancels"; asked: number; heldBack: number }
+
+/** Whether eliza's cloud client lists `method` and the path of `target` as a mail or calendar route (`Mail`), which the phone sends only with its device lease. */
+function mailRoute(method: string, target: string): boolean {
+  const pieces = new URL(target, "http://cloud.phone").pathname.slice(1).split("/");
+  return deviceRoutes.some((route) => route.auth === "Mail" && route.method.toUpperCase() === method && route.path.length === pieces.length
+    && route.path.every((piece, at) => piece.tag === "Param" || piece.text === pieces[at]));
+}
+
 /**
- * `ElizaCloudPlugin.java`, the `ElizaCloud` plugin: `request` sends one listed route under the device key it alone
- * holds and answers the status, the headers a page may read and the body in base64; what it will not send it rejects
- * with one of eliza's `CloudFailure` codes.
+ * `ElizaCloudPlugin.java`, the `ElizaCloud` plugin: `request` sends one listed route under the credential it alone
+ * holds, the device lease on a mail or calendar route and the device key on any other, and answers the status, the
+ * headers a page may read and the body in base64; what it will not send it rejects with one of eliza's `CloudFailure`
+ * codes, `mail-lease-upgrade-required` for a mail or calendar route on a phone signed in without a lease.
  */
-export function elizaCloud(cloud: Answering, signedIn: () => boolean): Faked {
+export function elizaCloud(cloud: Answering, signedIn: () => boolean, lease: MailLeaseScene): Faked {
   return plugin<ElizaCloudPlugin>(() => ({
     async request({ method, target, headers, body }: NativeCloudRequest) {
       if (!target.startsWith("/api/")) throw rejection("not-listed");
       if (!signedIn()) throw rejection("sign-in-required");
-      const response = await cloud(new Request(new URL(target, "http://cloud.phone"), { method, headers: { ...headers, authorization: "Bearer device-key", ...(body === undefined ? {} : { "content-type": "application/json" }) }, body })).catch(() => { throw rejection("network"); });
+      const mail = mailRoute(method, target);
+      if (mail && !lease.held) {
+        lease.heldBack += 1;
+        throw rejection("mail-lease-upgrade-required");
+      }
+      const response = await cloud(new Request(new URL(target, "http://cloud.phone"), { method, headers: { ...headers, authorization: mail ? "Bearer mail-lease" : "Bearer device-key", ...(body === undefined ? {} : { "content-type": "application/json" }) }, body })).catch(() => { throw rejection("network"); });
       const found = { etag: response.headers.get("etag"), contentType: response.headers.get("content-type"), retryAfter: response.headers.get("retry-after") };
       return { status: response.status, body: base64(new Uint8Array(await response.arrayBuffer())), ...Object.fromEntries(Object.entries(found).filter(([, value]) => value !== null)) };
     },
@@ -153,24 +179,24 @@ export function elizaCloud(cloud: Answering, signedIn: () => boolean): Faked {
 
 /**
  * `SecureStorePlugin.kt`, the `ElizaSecureStore` plugin: every call resolves, and says in `ok`, `error` and `outcome`
- * how it went. The host's policy opens `open` to the page and denies every other slot.
+ * how it went. The fake grants the slots the host's policy opens to the page.
  */
-export function elizaSecureStore(secrets: Map<string, string>, open: ReadonlySet<string>): Faked {
+export function elizaSecureStore(secrets: Map<string, string>, permits: (key: string) => boolean): Faked {
   const denied: ElizaSecureStoreResult = { ok: false, error: "denied", outcome: "Refused" };
   return plugin<ElizaSecureStorePlugin>(() => ({
-    get: ({ key }) => Promise.resolve(!open.has(key) ? { ok: false, error: "denied" } : secrets.has(key) ? { ok: true, value: secrets.get(key)! } : { ok: false, error: "not_found" }),
+    get: ({ key }) => Promise.resolve(!permits(key) ? { ok: false, error: "denied" } : secrets.has(key) ? { ok: true, value: secrets.get(key)! } : { ok: false, error: "not_found" }),
     set({ key, value }) {
-      if (!open.has(key)) return Promise.resolve(denied);
+      if (!permits(key)) return Promise.resolve(denied);
       secrets.set(key, value);
       return Promise.resolve({ ok: true, outcome: "Written" });
     },
     remove({ key }) {
-      if (!open.has(key)) return Promise.resolve(denied);
+      if (!permits(key)) return Promise.resolve(denied);
       secrets.delete(key);
       return Promise.resolve({ ok: true, outcome: "Removed" });
     },
     compareAndExchange({ key, expected, value }) {
-      if (!open.has(key)) return Promise.resolve(denied);
+      if (!permits(key)) return Promise.resolve(denied);
       if ((secrets.get(key) ?? null) !== expected) return Promise.resolve({ ok: false, error: "conflict", outcome: "Conflict" });
       if (value === null) secrets.delete(key);
       else secrets.set(key, value);

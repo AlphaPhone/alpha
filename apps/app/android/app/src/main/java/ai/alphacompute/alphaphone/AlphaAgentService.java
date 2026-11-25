@@ -3,13 +3,77 @@ package ai.alphacompute.alphaphone;
 
 import ai.eliza.os.agent.AgentConfig;
 import ai.eliza.os.agent.AgentService;
+import ai.eliza.os.agent.inference.InferenceHost;
+import ai.eliza.voice.LocalInferenceHost;
+import ai.eliza.voice.VoiceAssets;
 import android.content.Context;
 import android.content.SharedPreferences;
+import java.io.File;
+import java.io.IOException;
+import java.util.Map;
+import java.util.UUID;
+import java.util.concurrent.atomic.AtomicReference;
 
 public final class AlphaAgentService extends AgentService {
   private static final String STORE = "alpha-agent";
   private static final String GMAIL = "google-gmail-changes";
   private static final String CALENDAR = "google-calendar-edits";
+
+  private static final String SPEECH_SOCKET = "ALPHA_LOCAL_SPEECH_SOCKET";
+  private static final AtomicReference<AlphaAgentService> speechService = new AtomicReference<>();
+  private final Object speechLock = new Object();
+  private SpeechHost speech;
+  private boolean retiring;
+
+  private record SpeechHost(String name, InferenceHost host) {}
+
+  @Override protected void configureLaunch(Map<String, String> variables) {
+    synchronized (speechLock) {
+      if (retiring) return;
+      if (speech != null) {
+        variables.put(SPEECH_SOCKET, speech.name());
+        return;
+      }
+    }
+    SpeechHost started;
+    try {
+      String name = "alpha-talk-" + UUID.randomUUID();
+      File models = new File(getNoBackupFilesDir(), "resident-speech-models");
+      if (!models.isDirectory() && !models.mkdirs()) return;
+      started = new SpeechHost(name, LocalInferenceHost.start(this, name, VoiceAssets.install(this), models));
+    } catch (IOException | IllegalStateException | LinkageError unavailable) {
+      return;
+    }
+    synchronized (speechLock) {
+      if (!retiring) {
+        speech = started;
+        speechService.set(this);
+        variables.put(SPEECH_SOCKET, started.name());
+        return;
+      }
+    }
+    started.host().stop();
+  }
+
+  static boolean localSpeechHostReady() {
+    return speechService.get() != null;
+  }
+
+  @Override public void onDestroy() {
+    SpeechHost stopped;
+    synchronized (speechLock) {
+      retiring = true;
+      stopped = speech;
+      speech = null;
+      speechService.compareAndSet(this, null);
+    }
+    super.onDestroy();
+    if (stopped != null) {
+      Thread worker = new Thread(stopped.host()::stop, "AlphaResidentSpeechStop");
+      worker.setDaemon(true);
+      worker.start();
+    }
+  }
 
   /** The consent the owner's Settings last gave, in place of the host file's; none until Settings first read the owner's choice. */
   @Override protected AgentConfig.GoogleConsent googleConsent() { return kept(this); }

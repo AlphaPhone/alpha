@@ -1,0 +1,145 @@
+// spec/app/account/records.md, "Story: Restart after a failure that kept records"; spec/app/account/records.md, "Story: Reopen Alpha during a review"
+import * as Records from "../../gen/app__account__records.effect.vibe"
+import * as Pages from "../../gen/app__settings.effect.vibe"
+import * as Shell from "../../gen/app__shell.effect.vibe"
+import * as Layers from "../../gen/app__shell__layers.effect.vibe"
+import type { AgentStatus } from "@elizaos/os-bridges"
+import { Agent } from "../platform/agent.vibe"
+import { Device } from "../platform/device.vibe"
+import { SystemSettings } from "../platform/systemSettings.vibe"
+import { CLOUD_ENVIRONMENT, signInAccounts } from "../platform/voice.vibe"
+import { type Job, answer, contained, reacting, run, started, together } from "../runtime/reactor.vibe"
+
+export const needsRecords = (status: AgentStatus | undefined): boolean => status?.state === "failed" && status.failure === "storage"
+
+const atActivity = (shell: Parameters<typeof Shell.showing>[0], settings: Pages.Settings): boolean =>
+  Shell.showing(shell, "Settings") && shell.assistant !== "Full" && settings.page === "Activity"
+
+export const activityInFront = effect {
+  const shell = try (try Shell.Machine).get()
+  const settings = try (try Pages.Machine).get()
+  return atActivity(shell, settings) && !Layers.pageInert(try (try Layers.Machine).get()) && (try (try Device).showing())
+}
+
+effect function owner(): (string | undefined)!! {
+  const signIn = timeout(tryPromise(() => signInAccounts().status({ environment: CLOUD_ENVIRONMENT })), "5 seconds") catch () => undefined
+  if (signIn === undefined) return undefined
+  const account = signIn.account
+  return account.kind === "signedIn" ? JSON.stringify([account.organizationId, account.userId]) : "local"
+}
+
+interface Launch {
+  readonly epoch: number
+  readonly owner: string
+}
+
+interface Review extends Launch {
+  readonly check: number
+  readonly count: number
+  readonly token: string
+}
+
+service RecoveryAuthority {
+  review(): (Review | undefined)!!
+  hold(review: Review | undefined): void!!
+  clear(launch: Launch): void!!
+  takeCleared(): (Launch | undefined)!!
+}
+
+const recoveryAuthority = Layer.sync(RecoveryAuthority, () => {
+  let review: Review | undefined
+  let cleared: Launch | undefined
+  return {
+    review: () => sync(() => review),
+    hold: (next: Review | undefined) => sync(() => { review = next }),
+    clear: (launch: Launch) => sync(() => { cleared = launch }),
+    takeCleared: () => sync(() => { const launch = cleared; cleared = undefined; return launch }),
+  }
+})
+
+type Ports = Agent | Device | Shell.Machine | Layers.Machine | Pages.Machine | Records.Machine | RecoveryAuthority
+
+effect function readRecords(check: number): Records.Event!!Ports {
+  const host = (try Agent).life
+  const custody = try RecoveryAuthority
+  try custody.hold(undefined)
+  const failed = { type: "recordsRead" as const, ticket: check, ok: false, count: 0 }
+  if (!(try activityInFront)) return failed
+  const account = try owner()
+  const before = host.status() catch () => undefined
+  if (account === undefined || before === undefined || !needsRecords(before) || !(try activityInFront)) return failed
+  const result = timeout(host.review(), "10 seconds") catch () => undefined
+  const sameOwner = (try owner()) === account
+  const after = host.status() catch () => undefined
+  const records = try (try Records.Machine).get()
+  if (result?.kind !== "reviewable" || result.retainedCount <= 0 || !Number.isSafeInteger(result.retainedCount) || result.reviewToken === ""
+    || !sameOwner || after?.epoch !== before.epoch || !needsRecords(after) || !Records.canRecordsRead(records, check) || !(try activityInFront)) return failed
+  try custody.hold({ check, epoch: before.epoch, owner: account, count: result.retainedCount, token: result.reviewToken })
+  return { type: "recordsRead", ticket: check, ok: true, count: result.retainedCount }
+}
+
+effect function archive(attempt: number): Records.Event!!Ports {
+  const host = (try Agent).life
+  const custody = try RecoveryAuthority
+  const held = try custody.review()
+  try custody.hold(undefined)
+  const model = try Records.Machine
+  const account = try owner()
+  const before = host.status() catch () => undefined
+  const now = try model.get()
+  const ended = (result: Records.Archived): Records.Event => ({ type: "archived", ticket: attempt, result })
+  if (held === undefined || !now.showing || !Records.canArchived(now, attempt) || held.check !== now.review.ticket
+    || held.count !== now.kept || held.owner !== account || before?.epoch !== held.epoch || !needsRecords(before) || !(try activityInFront)) return ended("NoneArchived")
+  const receipt = timeout(host.archive(held.token), "30 seconds") catch () => undefined
+  if (receipt?.kind !== "archived" || receipt.archivedCount !== held.count) return ended("ArchiveUnknown")
+  try custody.clear({ owner: held.owner, epoch: held.epoch })
+  return ended("AllArchived")
+}
+
+const restartCleared = effect {
+  const launch = try (try RecoveryAuthority).takeCleared()
+  if (launch === undefined || !(try activityInFront) || (try owner()) !== launch.owner) return
+  const host = (try Agent).life
+  const current = host.status() catch () => undefined
+  if (current?.state === "stopped" && current.epoch === launch.epoch && (try activityInFront)) try ignore(host.start())
+}
+
+function carry(result: Records.Effect): Job<Records.Event, Ports, []> {
+  return match (result) {
+    when { tag: "ReadRecords", let check }: answer("read records", readRecords(check), { type: "recordsRead", ticket: check, ok: false, count: 0 });
+    when { tag: "Archive", let attempt }: answer("archive records", archive(attempt), { type: "archived", ticket: attempt, result: "ArchiveUnknown" });
+    when { tag: "Cleared" }: run("restart cleared agent", restartCleared);
+  }
+}
+
+const launching = effect {
+  return [{ type: "launched", boot: try (try SystemSettings).boot() }] as const
+}
+
+const leaving = started(effect {
+  const shell = try Shell.Machine
+  const settings = try Pages.Machine
+  const device = try Device
+  const records = try Records.Machine
+  const custody = try RecoveryAuthority
+  const layers = try Layers.Machine
+  const screens = Stream.zipLatest(shell.changes, settings.changes)
+  const pages = Stream.map(Stream.zipLatest(screens, layers.changes), ([[shell, settings], layers]) => atActivity(shell, settings) && !Layers.pageInert(layers))
+  const visible = Stream.concat(Stream.fromEffect(device.showing()), device.visible)
+  const shown = Stream.changes(Stream.map(Stream.zipLatest(pages, visible), ([page, visible]) => page && visible))
+  try Stream.runForEach(Stream.filter(shown, (front) => !front), effect () => {
+    try custody.hold(undefined)
+    if (Records.canCloseReview(try records.get())) try contained(records.send({ type: "closeReview" }), "close the records review")
+  })
+}, "agent recovery review visit")
+
+export const recoveryBack = effect {
+  const records = try Records.Machine
+  const state = try records.get()
+  if (!Records.canCloseReview(state)) return false
+  if (state.attempt.outcome === "Sent") return true
+  return try contained(records.send({ type: "closeReview" }), "close the records review")
+}
+
+/** Review and archive only the failed resident's own records, through the native recovery token. */
+export const recovery = Layer.provideMerge(together(reacting(Records, { keep: 1, open: launching, carry }), leaving), recoveryAuthority)
