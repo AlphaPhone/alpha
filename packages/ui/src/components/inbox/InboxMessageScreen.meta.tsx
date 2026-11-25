@@ -1,9 +1,10 @@
-import { expect, fn, userEvent, within } from "storybook/test";
+import { expect, fn, userEvent, waitFor, within } from "storybook/test";
 import type { ComponentMeta } from "vibestack/stories";
 import type { InboxMessageScreenProps } from "./InboxMessageScreen.tsx";
 
 const onClose = fn();
 const onShowImages = fn();
+const fullDate = "Friday, 14 November 2025 at 09:41:07 GMT";
 const none: Partial<InboxMessageScreenProps> = { cc: undefined, replyTo: undefined, onFaultAction: undefined, onShowImages: undefined, onNoticeAction: undefined };
 const actions = { onReply: fn(), onReplyAll: fn(), onForward: fn(), onToggleRead: fn(), onArchive: fn(), onTrash: fn(), onAskAlpha: fn() };
 const noActions = { onReply: undefined, onReplyAll: undefined, onForward: undefined, onToggleRead: undefined, onArchive: undefined, onTrash: undefined, onAskAlpha: undefined };
@@ -17,7 +18,7 @@ const body = (
 
 export const meta: ComponentMeta<InboxMessageScreenProps> = {
   args: {
-    ...none, ...actions, subject: "Lunch on Friday?", sender: "Ana Lima", address: "ana.lima@example.com", to: "me", date: "Fri 14 Nov, 09:41",
+    ...none, ...actions, subject: "Lunch on Friday?", sender: "Ana Lima", address: "ana.lima@example.com", to: "me", date: "09:41", fullDate,
     place: 3, count: 3, onOlder: fn(), onNewer: undefined, onClose, unread: false, reading: false, fromPhone: false, imagesHidden: false, children: body, attachments: [],
   },
   examples: {
@@ -32,13 +33,20 @@ export const meta: ComponentMeta<InboxMessageScreenProps> = {
     "Saved copy": { fromPhone: true, ...noActions, onOlder: undefined, attachments: [] },
     "Marking unconfirmed": { notice: "markUnconfirmed", onNoticeAction: fn() },
     "Read only account": { ...noActions, onAskAlpha: fn() },
-    "Full date in the details": { date: "09:41", fullDate: "Friday, 14 November 2025 at 09:41:07 GMT" },
   },
   play: {
     Default: async ({ canvasElement }: { canvasElement: HTMLElement }) => {
       onClose.mockClear();
       const canvas = within(canvasElement);
       await expect(canvas.getAllByRole("heading").length).toBe(1);
+      const summary = canvas.getByText("To me · 09:41").closest("summary")!;
+      const details = summary.closest("details")!;
+      const date = canvas.getByText(fullDate);
+      await expect(details.open).toBe(false);
+      await waitFor(() => expect(summary).toBeVisible());
+      await userEvent.click(summary);
+      await expect(details.open).toBe(true);
+      await waitFor(() => expect(date).toBeVisible());
       await userEvent.click(canvas.getByRole("button", { name: "Back to the list" }));
       await expect(onClose.mock.calls.length).toBe(1);
     },
@@ -46,15 +54,6 @@ export const meta: ComponentMeta<InboxMessageScreenProps> = {
       onShowImages.mockClear();
       await userEvent.click(within(canvasElement).getByRole("button", { name: "Show images" }));
       await expect(onShowImages.mock.calls.length).toBe(1);
-    },
-    "Full date in the details": async ({ canvasElement }: { canvasElement: HTMLElement }) => {
-      const canvas = within(canvasElement);
-      const summary = canvas.getByText("To me · 09:41");
-      const date = canvas.getByText("Friday, 14 November 2025 at 09:41:07 GMT");
-      await expect(summary).toBeVisible();
-      await expect(date).not.toBeVisible();
-      await userEvent.click(summary);
-      await expect(date).toBeVisible();
     },
     "Saved copy": async ({ canvasElement }: { canvasElement: HTMLElement }) => {
       await expect(within(canvasElement).queryByRole("button", { name: "Show images" })).toBeNull();
