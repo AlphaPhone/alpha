@@ -10,6 +10,7 @@ import { barHeight, edge, swipe } from "../gen/app__shell__gestures.ts";
 import { useMachine as usePage } from "../gen/app__update__page.react.ts";
 import { dialogShown, editorsMounted } from "../gen/app__update__page.ts";
 import { BrowserFrames } from "./browser/BrowserFrames.tsx";
+import { desktopPreview } from "./shell/canvas.vibe";
 import { native } from "./platform/device.vibe";
 import type { Alpha } from "./runtime/area.tsx";
 import { AppBack } from "./shell/AppBack.tsx";
@@ -75,6 +76,9 @@ export function App({ alpha }: AppProps) {
   const layers = useLayers(alpha.runtime).state;
   const page = usePage(alpha.runtime).state;
   const canvas = useCanvas(alpha.runtime).state;
+  const fitted = useSyncExternalStore(desktopPreview.subscribe, desktopPreview.snapshot, () => undefined);
+  const phone = native();
+  const preview = phone ? undefined : fitted;
   const launcher = canvas?.launcher ?? false;
   const coarsePointer = useSyncExternalStore(watchPrimaryPointer, () => primaryPointer()?.matches ?? false, () => false);
   const startedRef = useRef<StartedSwipe | undefined>(undefined);
@@ -85,7 +89,7 @@ export function App({ alpha }: AppProps) {
   if (!state) {
     if (updating) return <>{alpha.slot("overlay")}</>;
     return cause
-      ? <StartupFailureScreen kind="FailedToStart" platform={native() ? "android" : "web"} version="Unavailable" onReload={reloadBeforeMount} />
+      ? <StartupFailureScreen kind="FailedToStart" platform={phone ? "android" : "web"} version="Unavailable" onReload={reloadBeforeMount} />
       : <StartupMark className="min-h-dvh" />;
   }
   const shellFailed = cause !== undefined;
@@ -166,10 +170,14 @@ export function App({ alpha }: AppProps) {
   const strip = comms && fullScreen;
   const back = !shellFailed && can({ type: "goBack" });
   const canGoBack = String(!shellFailed && (back || (layers !== undefined && takesBack(layers))));
+  const frameStyle = preview
+    ? { left: preview.left, top: preview.top, width: preview.width, height: preview.height, transform: `scale(${preview.scale})`, transformOrigin: "top left" }
+    : canvas?.covered ? { height: canvas.visible } : undefined;
   return (
     <main
-      data-alpha-native={native() ? "" : undefined}
+      data-alpha-native={phone ? "" : undefined}
       data-alpha-launcher={launcher ? "" : undefined}
+      data-alpha-desktop-preview={preview ? "" : undefined}
       ref={frame}
       onPointerDown={beginSwipe}
       onPointerUp={swiped}
@@ -177,8 +185,8 @@ export function App({ alpha }: AppProps) {
       onTouchStart={touchStarted}
       onTouchEnd={touchEnded}
       onTouchCancel={() => { if (startedRef.current?.touch) startedRef.current = undefined; }}
-      style={canvas?.covered ? { height: canvas.visible } : undefined}
-      className={cn("relative mx-auto flex h-dvh w-full flex-col overflow-hidden bg-background font-sans text-base text-foreground has-[[data-alpha-camera-native]]:bg-transparent sm:pointer-fine:max-w-103", side && "flex-row")}
+      style={frameStyle}
+      className={cn("relative mx-auto flex h-dvh w-full flex-col overflow-hidden bg-background font-sans text-base text-foreground has-[[data-alpha-camera-native]]:bg-transparent sm:pointer-fine:max-w-103", side && "flex-row", preview && "absolute m-0 rounded-panel")}
     >
       <div
         data-alpha-shell-page=""
@@ -203,7 +211,7 @@ export function App({ alpha }: AppProps) {
               {alpha.slot(`view:${showing}`)}
             </div>
           )}
-        {!native() && <BrowserFrames alpha={alpha} />}
+        {!phone && <BrowserFrames alpha={alpha} preview={preview} />}
       </div>
       <div
         data-alpha-assistant-host=""

@@ -2,7 +2,7 @@
 import { Button, BrowserAddressBar, type BrowserAddressChoice, BrowserAddressChoices, BrowserFindBar, BrowserBar, BrowserLibrary, type BrowserMenuItem, BrowserMenu, BrowserNewTab, BrowserTabs, ConfirmDialog, PrivateMark } from "@repo/ui";
 import { ChevronLeft, Download, History, Link, Plus, RotateCw, Search, Share2, Square, Star, Trash2 } from "lucide-react";
 import { Effect, Option } from "effect";
-import { useState } from "react";
+import { useState, useSyncExternalStore } from "react";
 import { canAskErase, canCancelErase, canConfirmErase, canOpenTab } from "../../gen/app__browser.ts";
 import type { Browser as State } from "../../gen/app__browser.ts";
 import { useMachine } from "../../gen/app__browser.react.ts";
@@ -17,6 +17,7 @@ import type { Machine as Shell } from "../../gen/app__shell.effect.vibe";
 import { TabHost } from "../platform/browser.vibe";
 import type { Alpha, Resident } from "../runtime/area.tsx";
 import { AppBack } from "../shell/AppBack.tsx";
+import { desktopPreview } from "../shell/canvas.vibe";
 import type { ManagedRuntime } from "effect";
 import { Pages, type PageRuntime, addressOf, idOf, inputOf, openDownloads, placed } from "./browser.vibe";
 import { LibraryRows, markPage, setMark } from "./library.vibe";
@@ -51,6 +52,12 @@ export function Browser({ runtime, alpha }: BrowserProps) {
   if (!state) return null;
   const page = runtime.runSync(Effect.flatMap(Pages, (pages) => pages.of(state.selected)));
   return <Tab key={state.selected} runtime={runtime} alpha={alpha} tabs={state} page={page} />;
+}
+
+function BrowserPagePlace({ runtime }: Pick<BrowserProps, "runtime">) {
+  // The desktop canvas can move while this element's logical size stays the same.
+  useSyncExternalStore(desktopPreview.subscribe, desktopPreview.snapshot, () => undefined);
+  return <div data-alpha-browser-page="" aria-hidden ref={(place) => { if (place) void runtime.runPromise(placed); }} className="absolute inset-0" />;
 }
 
 function Tab({ runtime, alpha, tabs, page }: BrowserProps & { tabs: State; page: PageRuntime }) {
@@ -167,7 +174,7 @@ function Tab({ runtime, alpha, tabs, page }: BrowserProps & { tabs: State; page:
       <div inert={tabs.layer !== "Uncovered"} className="relative flex min-h-0 flex-1 flex-col overflow-y-auto">
         {state.phase === "Blank"
           ? <BrowserNewTab private={privateTab} privateNotice={privateNotice} onSearch={cover("Address") && edit} />
-          : <div data-alpha-browser-page="" aria-hidden ref={(place) => { if (place) void runtime.runPromise(placed); }} className="absolute inset-0" />}
+          : <BrowserPagePlace runtime={runtime} />}
       </div>
       {editing && <AddressChoices runtime={runtime} query={typed} privateTab={privateTab} privateNotice={privateNotice} refusal={state.refused ? refusal : undefined} onOpen={submit} />}
       {state.finding && tabs.layer === "Uncovered" && (
