@@ -1,5 +1,5 @@
 import type { ComponentProps, ReactNode } from "react";
-import { cn, focusRing } from "../../lib/cn.ts";
+import { cn, launcherRing } from "../../lib/cn.ts";
 import { Card } from "../Card.tsx";
 import { StatusDot } from "../StatusDot.tsx";
 
@@ -31,7 +31,8 @@ export function HomeCard({ title, icon, notCurrent, status, variant = "row", cla
     <Card
       asChild
       className={cn(
-        focusRing,
+        "focus-visible:outline-none",
+        launcherRing,
         "min-h-49 w-max min-w-43 max-w-full shrink-0 snap-start justify-between rounded-home-card border-0 bg-secondary p-5.5 text-left text-foreground transition-colors duration-fast ease-standard active:bg-accent",
         agenda && "w-[min(100%,calc(280px_*_clamp(1,var(--alpha-text-scale,1),1.3)))] bg-alpha text-alpha-foreground active:bg-alpha/90",
         className,

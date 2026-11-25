@@ -16,9 +16,15 @@ const where: Readonly<Record<Cards.Origin, string>> = { PhoneCalendar: "Calendar
 
 const clock = (at: number) => new Date(at).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
 
+/** When the mail was read, as v121's overviewWhenLabel: the time today, else the date and the time. */
+const readWhen = (at: number, now: number) =>
+  new Date(at).toDateString() === new Date(now).toDateString()
+    ? clock(at)
+    : `${new Date(at).toLocaleDateString([], { month: "short", day: "numeric" })} ${clock(at)}`;
+
 /** The mail card's foot, as v121's: "Recent email" for a page that did not see every message, else the account, and when it was read. */
 const mailFoot = (read: MailRead | undefined, now: number) =>
-  read && [read.more ? "Recent email" : read.account, read.at > 0 ? `Updated ${shortWhen(read.at, now)}` : ""].filter(Boolean).join(" · ");
+  read && [read.more ? "Recent email" : read.account, read.at > 0 ? `Updated ${readWhen(read.at, now)}` : ""].filter(Boolean).join(" · ");
 
 /** A Messages or Phone card's count and the time of its newest row, as v121's, and its name with what waits. */
 const waitingOf = (app: "Messages" | "Phone", waiting: Waiting | undefined, now: number) =>
