@@ -15,7 +15,7 @@ import * as Layers from "../gen/app__shell__layers.effect.vibe";
 import home from "../src/home/index.tsx";
 import settings from "../src/settings/index.tsx";
 import { button, closeAll, drawn, fill, hardware, later, only, open as openAlpha, press, seen, underAct, until } from "./alpha.tsx";
-import { account, checkoutSession, checkoutUrl, type CheckoutScene } from "./fakes/cloud.ts";
+import { account, checkoutSession, checkoutUrl, type CheckoutScene, type RedemptionScene } from "./fakes/cloud.ts";
 import { type ListenerScene, notices } from "./fakes/settings.ts";
 import { type Scene, scene } from "./fakes/scene.ts";
 
@@ -247,6 +247,22 @@ describe("Settings", () => {
     checkout.returned = checkoutSession;
     await drawn(() => window.dispatchEvent(new Event("alpha-billing-return")));
     expect(checkout.confirmations).toEqual([checkoutSession]);
+  });
+
+  it('Redeems the owner’s code once and refreshes the plan (spec/app/account/codes.md, "Story: Redeem a code")', async () => {
+    const redemption: RedemptionScene = { calls: [] };
+    await settingsOpen({ ...scene(), phone: true, redemption });
+    await press("Account");
+    await vi.waitFor(() => {
+      const form = [...document.querySelectorAll("summary")].find((row) => row.textContent === "Redeem code");
+      if (!form) throw new Error("No redemption control");
+      return drawn(() => form.click());
+    });
+    await fill("Redemption code", "ABCD-2345-EFGH-6789");
+    await press("Redeem");
+    await vi.waitFor(() => expect(document.querySelector('[role="dialog"]')?.textContent).toContain("Code redeemed"));
+    await vi.waitFor(() => expect(document.querySelector('[aria-label="Cloud plan"]')?.textContent).toContain("Plus"));
+    expect(redemption.calls).toEqual([{ code: "ABCD2345EFGH6789", key: expect.any(String) }]);
   });
 
   it("Make Alpha the Home app (spec/app/settings/facts.md, \"Story: Make Alpha the Home app\")", async () => {

@@ -154,12 +154,13 @@ function mailRoute(method: string, target: string): boolean {
  * headers a page may read and the body in base64; what it will not send it rejects with one of eliza's `CloudFailure`
  * codes, `mail-lease-upgrade-required` for a mail or calendar route on a phone signed in without a lease.
  */
-export function elizaCloud(cloud: Answering, signedIn: () => boolean, lease: MailLeaseScene, opened?: (url: string) => void): Faked {
+export function elizaCloud(cloud: Answering, signedIn: () => boolean, lease: MailLeaseScene, credential: () => string, opened?: (url: string) => void): Faked {
   return plugin<ElizaCloudPlugin>(() => ({
-    async request({ method, target, headers, body }: NativeCloudRequest) {
+    async request({ method, target, headers, body, expectedCredentialId }: NativeCloudRequest) {
       if (!target.startsWith("/api/")) throw rejection("not-listed");
       if (!signedIn()) throw rejection("sign-in-required");
       const mail = mailRoute(method, target);
+      if (expectedCredentialId !== undefined && (expectedCredentialId !== credential() || mail)) throw rejection("sign-in-required");
       if (mail && !lease.held) {
         lease.heldBack += 1;
         throw rejection("mail-lease-upgrade-required");
