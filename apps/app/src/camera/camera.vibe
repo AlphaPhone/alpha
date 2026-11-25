@@ -1,14 +1,14 @@
 // spec/app/camera/index.md, "Story: Open the camera"; spec/app/camera/index.md, "Story: Leave and come back"; spec/app/camera/index.md, "Story: Frame the shot"; spec/app/camera/index.md, "Story: Take photos and videos"; spec/app/camera/index.md, "Story: Let Alpha take a photo"
-import type { PhotosClient } from "@elizaos/os/bridges/definitions/media"
+import { MediaId, type PhotosClient } from "@elizaos/os-bridges"
 import * as Camera from "../../gen/app__camera.effect.vibe"
 import * as Film from "../../gen/app__camera__recording.effect.vibe"
 import * as Shell from "../../gen/app__shell.effect.vibe"
 import * as Layers from "../../gen/app__shell__layers.effect.vibe"
 import { allows } from "../../gen/kit__permission.effect.vibe"
 import { Machine as Scan } from "../../gen/app__files__scan.effect.vibe"
-import { scanCameraImage } from "../files/scan.vibe"
+import { scanBack, scanCameraImage } from "../files/scan.vibe"
 import { Device } from "../platform/device.vibe"
-import { CameraPort, playable, type CameraMedia, type LensFacts, type Point } from "../platform/camera.vibe"
+import { CameraPort, ownedCaptureId, playable, type CameraMedia, type LensFacts, type Point } from "../platform/camera.vibe"
 import { PhotosPort, latestBrowserCapture, saveBrowserCapture } from "../platform/photos.vibe"
 import { attachToAlpha } from "../assistant/attachments.vibe"
 import { SystemSettings } from "../platform/systemSettings.vibe"
@@ -25,6 +25,12 @@ export interface CaptureAnswer {
   readonly media?: CameraMedia
 }
 
+/** A last-capture tile can observe its own saved thumbnail. */
+export interface CameraThumbnails {
+  snapshot(this: void, id: number): string | undefined
+  subscribe(this: void, listener: () => void): () => void
+}
+
 /** The data behind the machine's identities: native receipts, the viewfinder element and focus coordinates. */
 export service CameraAssets {
   bind(element: HTMLVideoElement | null): void!!
@@ -33,6 +39,8 @@ export service CameraAssets {
   newest(): number!!
   store(media: CameraMedia, secure: boolean): number!!
   read(id: number): (CameraMedia | undefined)!!
+  readonly thumbnails: CameraThumbnails
+  setThumbnail(id: number, image: string): void!!
   setLens(ticket: number, lens: LensFacts): void!!
   lens(ticket: number): (LensFacts | undefined)!!
   setPoint(tap: number, point: Point): void!!
@@ -44,6 +52,7 @@ const assets = Layer.effect(CameraAssets, effect {
   const port = try CameraPort
   const shutter = try Semaphore.make(1)
   const captures = new Map<number, CameraMedia>()
+  const thumbnailListeners = new Set<() => void>()
   const points = new Map<number, Point>()
   let serial = 0
   let newest = 0
@@ -72,6 +81,19 @@ const assets = Layer.effect(CameraAssets, effect {
       return id
     },
     read: (id: number) => sync(() => captures.get(id)),
+    thumbnails: {
+      snapshot: (id: number) => captures.get(id)?.thumbnail,
+      subscribe: (listener: () => void) => {
+        thumbnailListeners.add(listener)
+        return () => { thumbnailListeners.delete(listener) }
+      },
+    },
+    setThumbnail: (id: number, image: string) => sync(() => {
+      const saved = captures.get(id)
+      if (saved === undefined || saved.thumbnail === image) return
+      captures.set(id, { ...saved, thumbnail: image })
+      for (const listener of [...thumbnailListeners]) listener()
+    }),
     setLens: (ticket: number, facts: LensFacts) => sync(() => {
       if (lens === undefined || lens.ticket <= ticket) lens = { ticket, facts }
     }),
@@ -250,7 +272,7 @@ const hardware = started(effect {
   const events = Stream.merge(port.signals, port.volumeKeys)
   try Stream.runForEach(events, effect (signal) => {
     if (signal === undefined) {
-      try shutter()
+      if (Camera.volumeShutter(try camera.get())) try shutter()
       return
     }
     const { ticket, kind } = signal
@@ -266,8 +288,8 @@ const hardware = started(effect {
   })
 }, "Camera hardware")
 
-const volume = applying(Camera.Machine, (state) => Camera.ready(state), effect (ready: boolean) => {
-  try (try CameraPort).volume(ready)
+const volume = applying(Camera.Machine, Camera.volumeShutter, effect (enabled: boolean) => {
+  try (try CameraPort).volume(enabled)
 })
 
 const mode = applying(Camera.Machine, (state) => ({ ticket: state.phase === "Ready" ? state.preview : 0, mode: state.mode }), effect ({ ticket, mode }: { ticket: number; mode: Camera.Mode }) => {
@@ -324,9 +346,34 @@ const latest = applying(Camera.Machine, (s) => s.showing && !s.secure ? s.visit 
   try tell({ type: "lastSeen", visit, previous, newest })
 })
 
+const videoThumbnail = started(effect {
+  const { phone } = try PhotosPort
+  if (Option.isNone(phone)) return
+  const native = phone.value
+  const machine = try Camera.Machine
+  const assets = try CameraAssets
+  const candidates = Stream.changes(Stream.map(machine.changes, Camera.savedVideoThumbnail))
+  try Stream.runDrain(Stream.switchMap(candidates, (id) => id === 0 ? Stream.empty : Stream.fromEffectDrain(effect {
+    const capture = try assets.read(id)
+    if (capture === undefined || capture.thumbnail || !capture.mime.startsWith("video/")) return
+    const owned = ownedCaptureId(capture.path, true)
+    const key = Option.getOrUndefined(Schema.decodeUnknownOption(MediaId)(owned))
+    if (key === undefined) return
+    const item = tryPromise(() => native.read({ id: key })) catch () => undefined
+    if (item === undefined || item.id !== key || item.kind !== "video" || item.trashed || item.size !== capture.size) return
+    if (item.image && /^data:image\/(jpeg|png|webp);base64,/.test(item.image) && Camera.savedVideoThumbnail(try machine.get()) === id)
+      try assets.setThumbnail(id, item.image)
+  })))
+}, "saved camera video thumbnail")
+
 effect function openLast(photo: number): void!!(CameraAssets | PhotosPort | Shell.Machine) {
   const media = try (try CameraAssets).read(photo)
-  if (media?.libraryId !== undefined) try (try PhotosPort).handoff(media.libraryId)
+  if (media !== undefined) {
+    const ownedId = ownedCaptureId(media.path, media.mime.startsWith("video/"))
+    if (media.libraryId !== undefined || ownedId !== undefined) {
+      try (try PhotosPort).handoff({ libraryId: media.libraryId, ownedId })
+    }
+  }
   try openView("Photos")
 }
 
@@ -387,7 +434,18 @@ effect function askAbout(photo: number) {
   try attachToAlpha({ id: `camera:${before.visit}:${photo}:${before.preview}`, name: "Camera.jpg", mimeType: from.mime, data: result })
 }
 
-export const camera = together(reacting(Camera, { carry, timers }), assets, visit, hardware, volume, mode, approval, latest)
+export const camera = together(reacting(Camera, { carry, timers }), assets, visit, hardware, volume, mode, approval, latest, videoThumbnail)
+
+/** Take one step within Camera before handing Back to the shell. */
+export const cameraBack = effect {
+  if (try scanBack) return true
+  const machine = try Camera.Machine
+  const state = try machine.get()
+  if (!Camera.recordingTakesBack(state)) return false
+  if (Camera.canStopRecording(state, "Owner"))
+    try contained(machine.send({ type: "stopRecording", now: untimed }, "Owner"), "stopping the recording")
+  return true
+}
 
 /** Take a photo, stop a recording, or start the mode's next capture from the screen or the hardware shutter. */
 export effect function shutter(): void!!Camera.Machine {

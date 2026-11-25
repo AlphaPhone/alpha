@@ -76,11 +76,12 @@ pure def moves(e: Effect): bool = match e { | Tap => false | _ => true }
 ### What the shell is asked brings Ask Alpha exactly where the gesture landed
 
 ```quint
-pure val phoneValues = Set({ trail: List(), assistant: S::Bar, image: false, contacts: false })
-  .union(Set({ trail: List(S::Notes), assistant: S::Sheet, image: false, contacts: false }))
-  .union(Set({ trail: List(S::Calendar, S::Notes), assistant: S::Full, image: true, contacts: false }))
-  .union(Set({ trail: List(), assistant: S::Typing, image: false, contacts: true }))
-  .union(Set({ trail: List(S::Calendar), assistant: S::Bar, image: false, contacts: false }))
+pure val phoneValues = Set(S::initial,
+  { ...S::initial, trail: List(S::Notes), assistant: S::Sheet },
+  { ...S::initial, trail: List(S::Calendar, S::Notes), assistant: S::Full, image: true },
+  { ...S::initial, assistant: S::Typing, contacts: true },
+  { ...S::initial, drawer: true, assistant: S::Sheet },
+  { ...S::initial, trail: List(S::Calendar), assistant: S::Bar })
 
 pure def lawTheShellSettlesWhereTheGestureLands(phone: S::Shell, direction: Direction, flick: bool, height: int, floor: int, full: int): bool =
   applied(asked(phone.assistant, landing(phone.assistant, direction, flick, height, floor, full).detent), phone).assistant

@@ -11,9 +11,25 @@ module clips {
   const center = 1.3
 
   /** @throws {never} */
-  export const clipRefusal = ({ file, duration, width, height }: ClipSource): "TooLarge" | "TooLong" | "NoEditor" | undefined =>
-    file.size > bytesLimit || width * height > 32_000_000 ? "TooLarge" : duration > maximumDuration ? "TooLong" :
-      typeof MediaRecorder === "undefined" || typeof AudioContext === "undefined" || typeof HTMLCanvasElement === "undefined" || typeof HTMLCanvasElement.prototype.captureStream !== "function" ? "NoEditor" : undefined
+  export function clipRefusal({ file, duration, width, height }: ClipSource): "TooLarge" | "TooLong" | "NoEditor" | undefined {
+    if (file.size > bytesLimit || width * height > 32_000_000) return "TooLarge"
+    if (duration > maximumDuration) return "TooLong"
+    if (!Number.isFinite(duration) || duration <= 0 || width < 1 || height < 1 || file.size === 0) return "NoEditor"
+    return typeof MediaRecorder === "undefined" || typeof AudioContext === "undefined" || typeof HTMLCanvasElement === "undefined"
+      || typeof HTMLCanvasElement.prototype.captureStream !== "function" || typeof AbortSignal.timeout !== "function" ? "NoEditor" : undefined
+  }
+
+  function within(parent: AbortSignal, milliseconds: number) {
+    const deadline = AbortSignal.timeout(milliseconds)
+    const merged = new AbortController()
+    const relay = () => merged.abort(parent.aborted ? parent.reason : deadline.reason)
+    if (parent.aborted) relay()
+    else {
+      parent.addEventListener("abort", relay, { once: true })
+      deadline.addEventListener("abort", relay, { once: true })
+    }
+    return { signal: merged.signal, release: () => { parent.removeEventListener("abort", relay); deadline.removeEventListener("abort", relay) } }
+  }
 
   function drawFrame(video: HTMLVideoElement, edit: ClipTransform) {
     const canvas = document.createElement("canvas")
@@ -133,8 +149,9 @@ module clips {
   /** Decode, trim and encode locally while preserving the source audio. */
   export async function renderBrowserClip(source: ClipSource, edit: ClipTransform, cancellation: AbortSignal): Promise<BrowserEditFrame> {
     if (clipRefusal(source) !== undefined || ![edit.start, edit.end, source.duration].every(Number.isFinite) || edit.start < 0 || edit.end <= edit.start || edit.end > source.duration + .05 || ![0, 1, 2, 3].includes(edit.turns)) throw new Error("Choose a valid video range.")
-    const signal = AbortSignal.any([cancellation, AbortSignal.timeout(Math.ceil((edit.end - edit.start) * 1000) + 30_000)])
-    signal.throwIfAborted()
+    cancellation.throwIfAborted()
+    const length = within(cancellation, Math.ceil((edit.end - edit.start) * 1000) + 30_000)
+    const decoding = within(length.signal, 15_000)
     const address = URL.createObjectURL(source.file)
     const video = document.createElement("video")
     let audio: AudioContext | undefined
@@ -143,9 +160,8 @@ module clips {
       video.src = address
       video.playsInline = true
       video.preload = "auto"
-      const decoding = AbortSignal.any([signal, AbortSignal.timeout(15_000)])
-      await waitFor(video, "loadeddata", () => video.load(), decoding)
-      if (edit.start > 0) await waitFor(video, "seeked", () => { video.currentTime = edit.start }, decoding)
+      await waitFor(video, "loadeddata", () => video.load(), decoding.signal)
+      if (edit.start > 0) await waitFor(video, "seeked", () => { video.currentTime = edit.start }, decoding.signal)
       const { canvas, draw } = drawFrame(video, edit)
       const still = document.createElement("canvas")
       const size = Math.min(1, 240 / Math.max(canvas.width, canvas.height))
@@ -157,10 +173,13 @@ module clips {
       const destination = audio.createMediaStreamDestination()
       audio.createMediaElementSource(video).connect(destination)
       for (const track of destination.stream.getAudioTracks()) stream.addTrack(track)
-      await resume(audio, decoding)
-      const output = await record(video, stream, draw, edit, signal)
+      await resume(audio, decoding.signal)
+      decoding.release()
+      const output = await record(video, stream, draw, edit, length.signal)
       return { ...output, width: canvas.width, height: canvas.height, thumbnail: still.toDataURL("image/jpeg", .78) }
     } finally {
+      decoding.release()
+      length.release()
       for (const track of stream?.getTracks() ?? []) track.stop()
       if (audio !== undefined) await audio.close().catch(() => undefined)
       video.pause()

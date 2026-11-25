@@ -52,6 +52,8 @@ export type AssistantComposerProps = Omit<ComponentProps<"div">, "children" | "o
   onHistory?: () => void;
   /** Starts a spoken turn; the voice area owns it. */
   onTalk?: () => void;
+  /** Shows the Talk control at rest when the current host has no speech bridge. */
+  showUnavailableTalk?: boolean;
   /** Records a transcript the owner can edit before it enters the draft; its mic stands where Talk does, only where Talk is not offered. */
   onDictate?: () => void;
   /** Takes the field's place while a voice conversation owns the composer. */
@@ -97,7 +99,7 @@ function keepComposerFocus(event: PointerEvent<HTMLButtonElement>) {
  */
 export function AssistantComposer({
   variant = "sheet", value, onValueChange, closed = false, notice, unavailable, attachments = [], limit = 4, quote, editing = false, lift,
-  onSend, onStop, stopping = false, onAttach, onSearch, onNew, making = false, onHistory, onTalk, onDictate, voice, voiceNotice, onOpen, onType, leading, opener, drag, placeholder, onFocusField, fieldRef, onRemoveAttachment, onPreviewAttachment, onUnquote, className, style, ...props
+  onSend, onStop, stopping = false, onAttach, onSearch, onNew, making = false, onHistory, onTalk, onDictate, showUnavailableTalk = false, voice, voiceNotice, onOpen, onType, leading, opener, drag, placeholder, onFocusField, fieldRef, onRemoveAttachment, onPreviewAttachment, onUnquote, className, style, ...props
 }: AssistantComposerProps) {
   const written = value.trim() !== "" || attachments.length > 0;
   const bar = variant === "bar";
@@ -126,7 +128,8 @@ export function AssistantComposer({
             <MenuTrigger asChild>
               <Button variant="ghost" size="icon" aria-label="Chat actions" disabled={!acting} className="hover:bg-transparent disabled:opacity-40"><Plus /></Button>
             </MenuTrigger>
-            <MenuContent side="top" align="start" sideOffset={12} className="min-w-55 rounded-tile border-0 bg-background p-2 shadow-dock dark:shadow-dock-dark">
+            <MenuContent side="top" align="start" alignOffset={bar ? 0 : -16} sideOffset={bar ? 12 : 20}
+              className="min-w-55 rounded-tile border-0 bg-background p-2 shadow-dock dark:shadow-dock-dark [&>[role=menuitem]]:min-h-12 [&>[role=menuitem]]:px-3">
               {onAttach ? <MenuItem onSelect={onAttach}><Paperclip aria-hidden />Attach media</MenuItem> : null}
               {onSearch ? <MenuItem onSelect={onSearch}><Search aria-hidden />Search chat</MenuItem> : null}
               {onNew || making ? <MenuItem disabled={making} onSelect={onNew}><Plus aria-hidden />New chat</MenuItem> : null}
@@ -167,8 +170,8 @@ export function AssistantComposer({
           <Button variant="ghost" size="icon" aria-label="Talk" className={bar ? undefined : "bg-foreground text-background hover:bg-foreground/90"} onPointerDown={keepComposerFocus} onClick={onTalk}><Mic /></Button>
         ) : !compact && onDictate ? (
           <Button variant="ghost" size="icon" aria-label="Dictate" onPointerDown={keepComposerFocus} onClick={onDictate}><Mic /></Button>
-        ) : compact ? (
-          <Button variant="ghost" size="icon" aria-label="Talk" className="disabled:opacity-100" disabled><Mic /></Button>
+        ) : compact || showUnavailableTalk ? (
+          <Button variant="ghost" size="icon" aria-label="Talk" className={cn("disabled:opacity-100", !bar && "bg-foreground text-background")} disabled><Mic /></Button>
         ) : null}
       </div>
     </div>

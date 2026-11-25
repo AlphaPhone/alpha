@@ -180,14 +180,18 @@ describe.each([["a browser", false], ["a phone", true]])("in %s", (_where, phone
       await alpha.runtime.runPromise(Effect.flatMap(Pages.Machine, (pages) => pages.send({ type: "open", page: "General" })));
       await alpha.runtime.runPromise(Effect.flatMap(Pages.Machine, (pages) => pages.send({ type: "open", page: "CarrierPage" })));
       await until(alpha, runtime, Conversation, (s) => s.context.sensitive && s.context.showing.tag === "App");
-      write("my password is hunter2");
+      await press("Type");
+      await until(alpha, alpha.runtime, Shell, (s) => s.assistant === "Typing");
+      await fill("Message Alpha", "my password is hunter2");
       expect([button("Send")?.disabled, world.ask.said.length]).toEqual([true, 2]);
       // spec/app/assistant/index.md, "A sensitive screen says only that it is sensitive: no selection and no day"
       await alpha.runtime.runPromise(Effect.flatMap(Pages.Machine, (pages) => pages.send({ type: "goBack" })));
       await until(alpha, runtime, Conversation, (s) => !s.context.sensitive);
       expect(button("Send")?.disabled).toBe(false);
-      await alpha.runtime.runPromise(Effect.flatMap(Shell, (shell) => shell.send({ type: "goBack" })));
+      await hardware("home");
       await until(alpha, runtime, Conversation, (s) => s.context.showing.tag === "Home");
+      await press("Open conversation");
+      await until(alpha, alpha.runtime, Shell, (s) => s.assistant === "Sheet");
     }
 
     // spec/app/assistant/reply.md, "Out of funds is refused before any output, is never spoken, and offers only Manage plan"
@@ -252,7 +256,7 @@ describe.each([["a browser", false], ["a phone", true]])("in %s", (_where, phone
   // spec/app/assistant/search.md, "Story: Search my conversations"; spec/app/assistant/chats.md, "Story: Open a message that search found"
   it("Search my conversations, and open a hit where it was said (spec/app/assistant/search.md, \"Story: Search my conversations\")", async () => {
     const world = { ...scene(), phone };
-    world.ask.kept.set("c7", { roomId: "r7", title: "Lunch", messages: [{ id: "m1", role: "user", text: "Lunch on Friday?" }, { id: "m2", role: "assistant", text: "Friday at noon works." }, Object.assign({ id: "m3", role: "assistant" as const, text: "" }, { failureKind: "limit_reached" })] });
+    world.ask.kept.set("c7", { roomId: "r7", title: "Lunch", messages: [{ id: "m1", role: "user", text: "Lunch on Friday?" }, { id: "m2", role: "assistant", text: "Friday at noon works." }, Object.assign({ id: "m3", role: "assistant" as const, text: "" }, { failureKind: "limit_reached" }), Object.assign({ id: "m4", role: "assistant" as const, text: "" }, { failureKind: "insufficient_credits", cloudCode: "allowance_exhausted" })] });
     const { alpha, runtime } = await openAssistant(world, false);
 
     // spec/app/assistant/search.md, "Words are searched from the first hit, and empty words are not searched"
@@ -266,6 +270,9 @@ describe.each([["a browser", false], ["a phone", true]])("in %s", (_where, phone
     expect([lines().slice(0, 2), document.querySelector("section[aria-label='Results']")]).toEqual([["Lunch on Friday?", "Friday at noon works."], null]);
     // spec/app/assistant/reply.md, "A failed reply offers the fix the agent named, and a limit reached shows its live wait, never sending the message again": a reply read again from history says why it did not finish, and to wait a moment.
     expect(document.querySelector("[role=log]")?.textContent).toContain("Too many requests. Wait a moment, then try again");
+    // spec/app/assistant/reply.md, "A failure refused before any output replaces the streamed text; any other failure is added after it": a reply kept with Cloud's funds code, read again, shows the one out-of-funds line, never spent credits.
+    const reread = document.querySelector("[role=log]")?.textContent ?? "";
+    expect([reread.includes("You’re out of plan allowance and credits, so I couldn’t reply."), reread.includes("Out of credits")]).toEqual([true, false]);
 
     // spec/app/assistant/search.md, "Only the newest asking's hits are shown, a page at a time, after those already shown": a search that fails says so.
     world.ask.searchDown = true;

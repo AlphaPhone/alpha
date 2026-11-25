@@ -45,15 +45,18 @@ export function History({ runtime, row, owner }: HistoryProps) {
           {opened && <time dateTime={opened.raw.startedAt} className="text-sm text-muted-foreground">{shownDate(Date.parse(opened.raw.startedAt))}</time>}
         </div>
         {newerVersion(state) && <Alert role="status">This workflow has changed since this run.</Alert>}
-        {state.output.status === "Loading" && <Spinner aria-label="Reading the run" />}
-        {state.output.status === "Failed" && <Alert variant="warn" role="status">The run could not be read.</Alert>}
+        {state.output.status === "Loading" && !opened && <Spinner aria-label="Reading the run" />}
+        {state.output.status === "Failed" && <Alert variant="warn" role="status">
+          {opened ? "The run could not be refreshed." : "The run could not be read."}
+          {sheet.can({ type: "refreshRun" }) && <Button variant="secondary" onClick={() => send({ type: "refreshRun" })}>Retry</Button>}
+        </Alert>}
         {opened?.raw.error && <Alert variant="destructive" role="status">{opened.raw.error}</Alert>}
         {opened?.raw.reconciliation?.state === "outcome-unknown" && <Alert variant="warn" role="status">{opened.raw.reconciliation.message}</Alert>}
         {state.text === "Empty" && <p className="text-sm text-muted-foreground">No output</p>}
         {opened?.raw.output && (state.text === "Text" || state.text === "Truncated") &&
           <div className="rounded-tile bg-secondary p-4 whitespace-pre-wrap break-words">{opened.raw.output}</div>}
         {state.text === "Truncated" && <p className="text-sm text-muted-foreground">Only the start of the output is shown.</p>}
-        <Approval runtime={runtime} run={state.runId} owner={owner} />
+        <Approval runtime={runtime} run={state.runId} owner={owner} {...(opened ? { approvals: opened.approvals } : {})} />
         {opened && sheet.can({ type: "askAbout" }) && <Button variant="secondary" onClick={() => send({ type: "askAbout" })}><Sparkles aria-hidden />Ask Alpha</Button>}
         {canSpeak() && sheet.can({ type: "readAloud" }) && <Button variant="secondary" onClick={() => send({ type: "readAloud" })}><Volume2 aria-hidden />Read aloud</Button>}
         {sheet.can({ type: "stopSpeech" }) && <Button variant="secondary" onClick={() => send({ type: "stopSpeech" })}><VolumeX aria-hidden />Stop reading</Button>}

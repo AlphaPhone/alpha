@@ -1,6 +1,7 @@
 // spec/app/home/index.md, "Story: Start Home"
 import * as KeyValueStore from "effect/persistence/KeyValueStore"
 import * as Home from "../../gen/app__home.effect.vibe"
+import * as Drawer from "../../gen/app__home__drawer.effect.vibe"
 import type { Actor, Effect as Out, Event, Host } from "../../gen/app__home.effect.vibe"
 import { type Ask, waiting } from "../../gen/app__home__android.effect.vibe"
 import type { Tile } from "../../gen/app__home__tiles.effect.vibe"
@@ -50,11 +51,11 @@ effect function saveTiles(tiles: ReadonlyArray<Tile>, ticket: number): Event!!Ke
 }
 
 // spec/app/home/index.md, "When the phone's apps change, or Alpha comes back to the front after a change, they are read again on the phone"
-effect function readApps(ticket: number): Event!!(Launcher | Device) {
+effect function readApps(ticket: number): Event!!(Launcher | Device | Home.Machine) {
   const listed = (try Launcher).apps() catch () => undefined
   const visible = try (try Device).showing()
   if (listed === undefined) return { type: "appsRead", ticket, ok: false, listed: [], visible }
-  catalog.listed(listed)
+  if (Home.canAppsRead(try (try Home.Machine).get(), ticket)) catalog.listed(listed)
   return { type: "appsRead", ticket, ok: true, listed: [...new Set(listed.map(({ key }) => key))], visible }
 }
 
@@ -161,6 +162,8 @@ export const home = together(
     timers: (h) => (waiting(h.handoff) ? [due("android", h.handoff.until, { type: "stopWaiting", now: untimed }, owner)] : []),
   }),
   presented,
+  reacting(Drawer, {}),
+  following(Shell.Machine, (shell) => shell.drawer, Drawer.Machine, (open) => open ? undefined : { type: "clear" } as const),
   hearing(Stream.unwrap(effect {
     const device = try Device
     return Stream.mapEffect((try Launcher).changes, () => device.showing())

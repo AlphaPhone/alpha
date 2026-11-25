@@ -43,7 +43,15 @@ public final class AlphaSelectedDocumentsPlugin extends Plugin {
 
  @PluginMethod public void restoreSelected(PluginCall call) { work(call, () -> SelectedDocumentCalls.restore(call, this::documents)); }
  @PluginMethod public void describeSelected(PluginCall call) { work(call, () -> SelectedDocumentCalls.describe(call, this::documents)); }
- @PluginMethod public void renameSelected(PluginCall call) { work(call, () -> SelectedDocumentCalls.rename(call, this::documents)); }
+ @PluginMethod public void renameSelected(PluginCall call) {
+  foreground(call, () -> work(call, () -> {
+   if (!AlphaDevicePlugin.shareForeground(getActivity())) {
+    call.reject("Open and unlock Alpha before renaming this document.");
+    return;
+   }
+   SelectedDocumentCalls.rename(call, this::documents);
+  }));
+ }
  @PluginMethod public void pdfSelected(PluginCall call) { work(call, () -> SelectedDocumentCalls.pdf(call, this::documents)); }
  @PluginMethod public void readSelected(PluginCall call) { work(call, () -> SelectedDocumentCalls.read(call, this::documents)); }
  @PluginMethod public void forgetSelected(PluginCall call) { work(call, () -> SelectedDocumentCalls.forget(call, this::documents)); }
@@ -54,7 +62,8 @@ public final class AlphaSelectedDocumentsPlugin extends Plugin {
   foreground(call, () -> {
    if (!picking.compareAndSet(false, true)) { call.reject("A document picker is already open."); return; }
    try {
-    Intent intent = DocumentDestinations.open("*/*").addFlags(Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION);
+    Intent intent = DocumentDestinations.open("*/*")
+      .addFlags(Intent.FLAG_GRANT_WRITE_URI_PERMISSION | Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION);
     startActivityForResult(call, intent, "picked");
    } catch (RuntimeException failure) {
     picking.set(false);
@@ -75,11 +84,22 @@ public final class AlphaSelectedDocumentsPlugin extends Plugin {
   work(call, () -> {
    ContentResolver resolver = getContext().getContentResolver();
    int flags = 0;
-   if ((answer.getFlags() & Intent.FLAG_GRANT_READ_URI_PERMISSION) != 0) {
+   int permission = answer.getFlags();
+   int read = Intent.FLAG_GRANT_READ_URI_PERMISSION;
+   int write = Intent.FLAG_GRANT_WRITE_URI_PERMISSION;
+   if ((permission & Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION) != 0 && (permission & read) != 0) {
+    int offered = permission & (read | write);
     try {
-     resolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION);
-     flags = Intent.FLAG_GRANT_READ_URI_PERMISSION;
-    } catch (SecurityException ignored) { }
+     resolver.takePersistableUriPermission(uri, offered);
+     flags = offered;
+    } catch (SecurityException refused) {
+     if (offered != read) {
+      try {
+       resolver.takePersistableUriPermission(uri, read);
+       flags = read;
+      } catch (SecurityException ignored) { }
+     }
+    }
    }
    try {
     call.resolve(new JSObject().put("selectionId", documents().authorize(uri, flags)));

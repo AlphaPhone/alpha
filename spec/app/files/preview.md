@@ -37,14 +37,14 @@ type Preview = {
   viewer: int, viewers: int, item: int, kind: Kind, revision: int, reachable: bool, siblings: List[str],
   content: R::Read, playing: bool, secret: bool,
   page: int, pages: int, drawing: R::Read, drawnAt: int, why: Why,
-  attempt: A::Attempt, offered: Seen,
+  attempt: A::Attempt, offered: Seen, renaming: int,
 }
 
 pure val initial: Preview = {
   viewer: 0, viewers: 0, item: 0, kind: Photo, revision: 0, reachable: false, siblings: List(),
   content: R::unread, playing: false, secret: false,
   page: 0, pages: 0, drawing: R::unread, drawnAt: 0, why: Fine,
-  attempt: A::plan(0), offered: { item: 0, revision: 0 },
+  attempt: A::plan(0), offered: { item: 0, revision: 0 }, renaming: 0,
 }
 ```
 
@@ -63,11 +63,13 @@ type Effect =
   | Read({ ticket: int, item: int, revision: int })
   | Draw({ ticket: int, item: int, revision: int, page: int })
   | OfferEmail({ ticket: int, viewer: int, item: int, revision: int, account: int })
-  | AskAlpha({ item: int })
+  | AskAlpha({ viewer: int, item: int, revision: int })
   | Transcribe({ item: int })
-  | OpenElsewhere({ item: int, revision: int, writable: bool })
+  | OpenElsewhere({ viewer: int, item: int, revision: int, writable: bool })
   | ShareFile({ viewer: int, item: int, revision: int })
   | ActOnStoredFile({ viewer: int, item: int, revision: int, operation: StorageAction, name: str })
+  | RenamePicked({ viewer: int, item: int, revision: int, name: str })
+  | OfferPicture({ viewer: int, item: int, revision: int })
   | Lost({ item: int })
   | SelectAgain({ item: int })
   | Forget({ item: int })
@@ -271,12 +273,19 @@ pure def sometimesAPhotoCouldNotBeRead(s: Preview): bool = s.content.status == R
 
 ### Ask Alpha, Transcribe and Open elsewhere hand the file on and change nothing here
 
+Ask Alpha uses the file the owner reviewed and only while its viewer,
+revision and grant still match. When the provider proves the full file is
+over the upload limit, Alpha may attach a bounded excerpt of the already
+read text or the already drawn PDF page. A failed exact read or changed
+file cannot be replaced with a preview. The excerpt is marked in its
+filename and must pass the same sensitive text check.
+
 Transcribe is offered for a recording or a video.
 
 ```quint
 pure def canAskAlpha(s: Preview, by: Actor): bool = by == Owner and loaded(s) and not(s.secret)
 
-pure def askAlpha(s: Preview, by: Actor): Moved = { state: s, out: List(AskAlpha({ item: s.item })) }
+pure def askAlpha(s: Preview, by: Actor): Moved = { state: s, out: List(AskAlpha({ viewer: s.viewer, item: s.item, revision: s.revision })) }
 
 pure def canTranscribe(s: Preview, by: Actor): bool = by == Owner and usable(s) and s.kind == Media
 
@@ -285,7 +294,7 @@ pure def transcribe(s: Preview, by: Actor): Moved = { state: s, out: List(Transc
 pure def canOpenElsewhere(s: Preview, by: Actor): bool = by == Owner and usable(s)
 
 pure def openElsewhere(s: Preview, by: Actor): Moved =
-  { state: s, out: List(OpenElsewhere({ item: s.item, revision: s.revision, writable: false })) }
+  { state: s, out: List(OpenElsewhere({ viewer: s.viewer, item: s.item, revision: s.revision, writable: false })) }
 ```
 
 ### The owner can share the readable file shown through Android using its own selected-document grant
@@ -331,6 +340,37 @@ pure def stepAStoredActionNamesTheExactPreview(before: Preview, via: str, after:
   })
 ```
 
+### A picked document is renamed through its provider using the access held for the viewer
+
+A provider that can rename it may keep access, in which case the renamed
+document is read again. If the provider completed the rename and access
+ended, the owner sees the requested name and must select the file again.
+The result of naming a picked document cannot change the document that a
+later viewer shows. While the provider is working, one rename is enough.
+
+```quint
+pure def canRenamePicked(s: Preview, name: str, renameable: bool, by: Actor): bool =
+  by == Owner and usable(s) and renameable and s.renaming == 0 and name != ""
+
+pure def renamePicked(s: Preview, name: str, renameable: bool, by: Actor): Moved =
+  { state: { ...s, renaming: s.viewer },
+    out: List(RenamePicked({ viewer: s.viewer, item: s.item, revision: s.revision, name: name })) }
+
+pure def canPickedRenameFinished(s: Preview, viewer: int, by: Actor): bool =
+  by == Phone and s.renaming != 0 and viewer == s.renaming
+
+pure def pickedRenameFinished(s: Preview, viewer: int, by: Actor): Preview =
+  { ...s, renaming: 0 }
+
+pure def stepAPickedRenameNamesTheExactPreview(before: Preview, via: str, after: Preview, out: List[Effect]): bool =
+  out.every(e => match e {
+    | RenamePicked(x) => via == "renamePicked" and usable(before) and before.renaming == 0
+        and x.viewer == before.viewer and x.item == before.item and x.revision == before.revision
+        and after.renaming == before.viewer
+    | _ => true
+  })
+```
+
 ### A file that holds a verification code or another secret is never handed to Ask Alpha
 
 The phone says so when it reads the file; it is said again each time the
@@ -338,16 +378,19 @@ file is read.
 
 ```quint
 pure def stepASecretIsNeverAsked(before: Preview, after: Preview, out: List[Effect]): bool =
-  out.every(e => match e { | AskAlpha(x) => not(before.secret) | _ => true })
+  out.every(e => match e { | AskAlpha(x) => not(before.secret) and x.viewer == before.viewer and x.item == before.item and x.revision == before.revision | _ => true })
 
 pure def sometimesASecretIsHeldBack(s: Preview): bool = loaded(s) and s.secret
 ```
 
 ### Open elsewhere hands the file over to read only
 
+The phone opens the chooser for the same live viewer and grant and says
+when Android cannot open it.
+
 ```quint
 pure def stepAnotherAppOnlyReads(before: Preview, after: Preview, out: List[Effect]): bool =
-  out.every(e => match e { | OpenElsewhere(x) => not(x.writable) and x.revision == before.revision | _ => true })
+  out.every(e => match e { | OpenElsewhere(x) => not(x.writable) and x.viewer == before.viewer and x.item == before.item and x.revision == before.revision | _ => true })
 ```
 
 ### Forget removes the file from Recent, with or without access, and closes the viewer
@@ -380,6 +423,27 @@ pure def stepAnEmailOfferNamesTheFileShown(before: Preview, via: str, after: Pre
   out.every(e => match e {
     | OfferEmail(x) => via == "useInEmail" and x.ticket == after.attempt.id and loaded(before)
         and x.viewer == before.viewer and x.item == before.item and x.revision == before.revision and x.account > 0
+    | _ => true
+  })
+```
+
+### Use in Messages offers the exact readable PNG or JPEG to the owner’s recipient picker
+
+The photo must fit the phone’s message limit. The source grant and its
+revision are checked again after reading, and the file cannot be sent
+from this viewer.
+
+```quint
+pure def canUseInMessages(s: Preview, fitsPicture: bool, by: Actor): bool =
+  by == Owner and loaded(s) and s.kind == Photo and fitsPicture
+
+pure def useInMessages(s: Preview, fitsPicture: bool, by: Actor): Moved =
+  { state: s, out: List(OfferPicture({ viewer: s.viewer, item: s.item, revision: s.revision })) }
+
+pure def stepAPictureOfferNamesTheFileShown(before: Preview, via: str, after: Preview, out: List[Effect]): bool =
+  out.every(e => match e {
+    | OfferPicture(x) => via == "useInMessages" and loaded(before) and before.kind == Photo
+        and x.viewer == before.viewer and x.item == before.item and x.revision == before.revision and after == before
     | _ => true
   })
 ```
@@ -481,7 +545,7 @@ pure def sometimesAFileMustBeSelectedAgain(s: Preview): bool = showing(s) and no
 pure def canRestart(s: Preview, by: Actor): bool = by == Phone
 
 pure def restart(s: Preview, by: Actor): Moved =
-  { state: { ...emptied(0, s), attempt: F::cut(s.attempt) }, out: closing(s) }
+  { state: { ...emptied(0, s), attempt: F::cut(s.attempt), renaming: 0 }, out: closing(s) }
 
 pure def stepARestartLeavesNothingToAnswer(before: Preview, via: str, after: Preview): bool =
   via == "restart" implies

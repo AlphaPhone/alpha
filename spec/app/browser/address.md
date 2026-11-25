@@ -175,6 +175,19 @@ pure def canFailed(p: Page, load: int): bool = p.phase == Loading and load == p.
 pure def failed(p: Page, load: int): Page = { ...p, phase: Failed }
 ```
 
+### A browser frame can be shown for the latest request, with no secure mark
+
+The web host can tell that a frame finished loading for the address the owner
+requested. It cannot inspect the page inside or say that the site served
+it. A normal tab remembers the requested address. A private tab leaves
+no entry.
+
+```quint
+pure def canFramed(p: Page, load: int): bool = canCommitted(p, load)
+
+pure def framed(p: Page, load: int): Step = committed(p, load, false)
+```
+
 ### Stop ends the load under way, and its late answer is refused
 
 ```quint
@@ -270,11 +283,17 @@ pure def stepLoadsGoForward(before: Page, via: str, after: Page): bool = after.l
 ### Only a page that committed in a normal tab becomes history
 
 A page that failed, was stopped or is still loading never does, and a
-private tab's pages never do.
+private tab's pages never do. A web frame that finished the current request
+records the requested address without claiming a secure page or a site response.
 
 ```quint
 pure def stepHistoryOnlyFromCommittedPages(before: Page, via: str, after: Page, out: List[Effect]): bool =
-  out.every(e => match e { | Visit(v) => via == "committed" and after.phase == Shown and after.kind == Normal | _ => true })
+  out.every(e => match e {
+    | Visit(v) => (via == "committed" or (via == "framed" and not(after.secure)))
+      and before.phase == Loading and v.load == before.load and v.load == after.load
+      and after.phase == Shown and after.kind == Normal
+    | _ => true
+  })
 ```
 
 ### A secure page can be shown, a load can be stopped, and the owner can go forward again

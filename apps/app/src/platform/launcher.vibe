@@ -1,8 +1,8 @@
 // spec/app/home/index.md, "Story: Open an app"; spec/app/home/index.md, "Story: See the apps on this phone"
-import type { InstalledApp } from "@elizaos/os/bridges/definitions/system"
+import type { InstalledApp } from "@elizaos/os-bridges"
 
 module held {
-  import type * as SystemBridge from "@elizaos/os/bridges/system"
+  import type * as SystemBridge from "@elizaos/os-bridges"
   type Bridge = typeof SystemBridge
   let loaded: Promise<Bridge> | undefined
   /**
@@ -11,7 +11,7 @@ module held {
    * @throws {never}
    */
   export function bridge(): Promise<Bridge> {
-    return (loaded ??= import("@elizaos/os/bridges/system"))
+    return (loaded ??= import("@elizaos/os-bridges"))
   }
 }
 import { bridge } from held
@@ -61,7 +61,7 @@ export interface Listed {
   readonly app: InstalledApp
 }
 
-/** The phone's launcher, through eliza's client `System` of `@elizaos/os/bridges/system`. */
+/** The phone's launcher, through eliza's client `System` of `@elizaos/os-bridges`. */
 export const phoneLauncher = Layer.effect(Launcher, effect {
   const loaded = try promise(() => bridge())
   const system = loaded.System

@@ -83,6 +83,7 @@ pure val zoneValues = Set(0, 1)
 pure val heldValues = Set(1, 2)
 pure val whenValues = S::wValues.union(Set(
   S::daily(0),
+  { ...S::daily(0), hour: 24 },
   S::pickPreset(S::daily(1), S::Manual),
   S::pickPreset(S::daily(1), S::Custom),
   { preset: S::Weekdays, days: Set(1, 2, 3, 4, 5), hour: 8, minute: 0, zone: 0 },

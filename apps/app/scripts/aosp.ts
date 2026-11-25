@@ -9,7 +9,7 @@ import {
   aaptManifestTree, composeProduct, createDevelopmentLauncherDescriptor, decrypt, enrollUpdater, generate, otaMain, parseArgs, provisioningComponents,
   requireClockProduct, signRelease, signReleaseRequest, stageLauncher, stageListener, validateDescriptor, verifyDeviceSource, verifyImage, verifySecureCameraSource,
   verifySource, writeImageCapability, writeImageProvisioningOverlay, writeReleaseRecord, writeRoleOverrides, writeSecureCameraOverlay,
-} from "@elizaos/os/image";
+} from "@elizaos/os";
 import { Data, Effect } from "effect";
 import {
   alphaChannel, alphaPrivileged, channelIsAlphas, firstBootGrants, grantsAdmitted, imageTelephony, listenerImage, privilegedAdmitted, provisionsHome, readsChannel,
@@ -194,6 +194,12 @@ const stage = (argv: readonly string[]) => Effect.gen(function* () {
     telephonyRoles: true,
     lockScreen: "SystemOwnsLockScreen" as const,
   };
+  if (!imageTelephony(stage)) yield* provisioningComponents(yield* aaptManifestTree(apk, { aapt }), launcher.packageName, {
+    assistant: { tag: "NoAssistant" },
+    requires: { autofill: false, allFilesAccess: false },
+    telephonyRoles: false,
+    lockScreen: provisioning.lockScreen,
+  });
   const scratch = yield* attempt(() => mkdtempSync(join(tmpdir(), "alpha-aosp-")));
   return yield* Effect.ensuring(Effect.gen(function* () {
     const descriptorFile = join(scratch, "launcher.json");

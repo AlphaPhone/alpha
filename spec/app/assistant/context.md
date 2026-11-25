@@ -5,7 +5,7 @@ What a turn tells the agent about the phone besides the screen the
 page open in Browser, what Maps shows, the time zone, the phone actions this
 phone can carry out, and whether the owner's words go to a hosted model.
 Eliza encodes the turn context (`encodeTurnContext` of
-`@elizaos/agent/client`) and drops what a peer does not declare; no wire
+`@elizaos/agent`) and drops what a peer does not declare; no wire
 shape is restated here. The location is read through eliza's location
 bridge, and the network answer through Alpha's network-location plugin,
 only on a phone and only while "Location for Alpha" is on in Settings'
@@ -233,28 +233,50 @@ pure def lawAPeerThatDoesNotTakeTheScreenGetsNoDay(observed: bool, onCalendar: b
   not(sendsDay(observed, onCalendar, { takes: false, declaresLocation: true, declaresPage: true }))
 ```
 
-### A spoken turn carries what a typed turn sent at that moment would, but the view claim
+### A spoken turn carries what a typed turn sent at that moment would, the view claim included
 
 Each turn of a voice conversation reads the screen again when it is sent:
 the observation with its day, location and selected record, the Browser
-page beside it, and the direct-request mode of approvals. The view a typed
-turn claims stays with typed turns; voice follows the agent's screen
-through its own claim.
+page beside it, the direct-request mode of approvals, and, from a screen
+that is not sensitive, the claim of a view the agent prepares for it. Voice
+opens that view as it opens any screen it is asked for, and a saved note
+the owner names aloud opens as one named in writing would ([Notes](../notes/index.md),
+"The agent opens the one note the owner named, as the list last read it,
+once for the owner's current request, and is told whether it opened").
 
 ```quint
 type Source = Typed | Spoken
 type Part = Observation | Page | DirectMode | ViewClaim
 
 pure def carries(source: Source, part: Part, observed: bool, direct: bool): bool =
-  if (part == ViewClaim) source == Typed else if (part == DirectMode) direct else observed
+  if (part == DirectMode) direct else observed
 
 pure def lawASpokenTurnCarriesWhatATypedTurnDoes(part: Part, observed: bool, direct: bool): bool =
-  part != ViewClaim implies carries(Spoken, part, observed, direct) == carries(Typed, part, observed, direct)
-
-pure def lawASpokenTurnClaimsNoView(observed: bool, direct: bool): bool = not(carries(Spoken, ViewClaim, observed, direct))
+  carries(Spoken, part, observed, direct) == carries(Typed, part, observed, direct)
 
 pure def lawASensitiveScreenSendsNoScreen(source: Source, direct: bool): bool =
   not(carries(source, Observation, false, direct)) and not(carries(source, Page, false, direct))
+    and not(carries(source, ViewClaim, false, direct))
+```
+
+### A spoken request about the open document attaches it for that turn
+
+When Files is showing a readable text document and the owner explicitly
+asks aloud about this file or the open document, Alpha attaches the text
+that Files confirmed for that same preview and send. An ordinary spoken or
+typed turn can name only the opaque selection. Secret text, an unreadable
+file, and a file whose selection or contents changed supply no attachment.
+The file belongs only to the spoken turn and does not enter the typed draft.
+
+```quint
+type OpenDocumentTurn = { filesShowing: bool, readable: bool, explicitlyRequested: bool, sensitive: bool, currentTurn: bool }
+
+pure def sendsOpenDocument(source: Source, doc: OpenDocumentTurn): bool =
+  source == Spoken and doc.filesShowing and doc.readable and doc.explicitlyRequested and not(doc.sensitive) and doc.currentTurn
+
+pure def lawAnOpenDocumentNeedsItsCurrentSpokenRequest(source: Source, doc: OpenDocumentTurn): bool =
+  sendsOpenDocument(source, doc) implies
+    (source == Spoken and doc.filesShowing and doc.readable and doc.explicitlyRequested and not(doc.sensitive) and doc.currentTurn)
 ```
 
 ## Story: Let my agent read the page I have open in Browser

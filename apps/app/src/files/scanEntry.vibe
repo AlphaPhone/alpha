@@ -1,5 +1,5 @@
 // spec/app/camera/index.md, "Story: Scan a document"; spec/app/files/scan.md, "Story: Arrange the pages"
-import type { SelectionId } from "@elizaos/os/bridges/definitions/media"
+import type { SelectionId } from "@elizaos/os-bridges"
 import type { Fields } from "../calendar/editor.vibe"
 
 /** The scanned event is a draft for the Calendar editor, still requiring owner save. */

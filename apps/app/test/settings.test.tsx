@@ -55,8 +55,8 @@ describe("Settings", () => {
     await until(alpha, alpha.runtime, Pages.Machine, (s) => s.told && s.phone && !s.image && s.development);
     // spec/app/settings/index.md, "A row opens only an admitted page that hangs from the page showing, at its top"
     await press("General");
-    expect([await page(alpha), Boolean(button("Network")), Boolean(button("Carrier & SIM setup")), Boolean(button("Phone"))]).toEqual(["General", true, true, false]);
-    await press("Display");
+    expect([await page(alpha), Boolean(button("Network")), Boolean(titled("Carrier & SIM setup")), Boolean(button("Phone"))]).toEqual(["General", true, true, false]);
+    await tap("Display");
     // spec/app/settings/index.md, "Back shows the parent and forgets the page it closed": Back inside Settings closes the page, and on the first page leaves the app.
     await hardware("back");
     expect(await page(alpha)).toBe("General");
@@ -70,7 +70,8 @@ describe("Settings", () => {
     await hardware("back");
     expect(await page(alpha)).toBe("General");
     await hardware("back");
-    // spec/app/settings/index.md, "Each page links to what another area owns there": the Account sheet reads the signed-in account and Back returns to Settings.
+    // spec/app/settings/index.md, "Each page links to what another area owns there": the Account row and sheet read the signed-in account and Back returns to Settings.
+    await vi.waitFor(() => expect(button("Account")?.textContent).toContain(account.email));
     await press("Account");
     await until(alpha, alpha.runtime, Layers.Machine, (state) => Layers.listed(state, "account"));
     await vi.waitFor(() => expect(document.querySelector('[role="dialog"]')?.textContent).toContain(account.email));
@@ -85,11 +86,12 @@ describe("Settings", () => {
     expect(document.querySelector('[role="dialog"]')?.textContent).not.toContain(account.email);
     await press("Close Account");
     await until(alpha, alpha.runtime, Layers.Machine, (state) => !Layers.listed(state, "account"));
+    await vi.waitFor(() => expect(button("Account")?.textContent).toContain("Signed out"));
     world.signedIn = true;
 
     // spec/app/settings/index.md, "Each page links to what another area owns there": Agent activity offers the conversations, which the shell opens over the app.
     await press("About");
-    await press("Agent activity");
+    await tap("Agent activity");
     await press("Conversations");
     await until(alpha, alpha.runtime, Shell, (s) => s.assistant === "Full");
     expect((await machines.runPromise(Facts.Machine.use((facts) => facts.get()))).read.read.status).toBe("Loaded");
@@ -127,6 +129,40 @@ describe("Settings", () => {
     await until(alpha, machines, Facts.Machine, (s) => Facts.word(s, "Bluetooth") === "Reported");
   });
 
+  it.each([3, 2])("Review retained agent records before restarting (spec/app/account/records.md, \"Story: Restart after a failure that kept records\")", async (archived) => {
+    const recovery = { retained: 3, archived, starts: 0, tokens: [] as string[] };
+    const world = { ...scene(), phone: true };
+    world.settings.recovery = recovery;
+    await settingsOpen(world);
+    await press("About");
+    await tap("Agent activity");
+    await press("Restart Alpha");
+    await vi.waitFor(() => expect(document.querySelector('[role="alertdialog"]')?.textContent).toContain("3 records"));
+    expect(recovery.tokens).toEqual([]);
+    await press("Cancel");
+    await vi.waitFor(() => expect(document.querySelector('[role="alertdialog"]')).toBeNull());
+    expect(recovery.tokens).toEqual([]);
+
+    await press("Restart Alpha");
+    await vi.waitFor(() => expect(document.querySelector('[role="alertdialog"]')?.textContent).toContain("3 records"));
+    world.signedIn = false;
+    await press("Archive and restart");
+    await vi.waitFor(() => expect(document.body.textContent).toContain("Alpha couldn’t confirm the recovery"));
+    expect(recovery.tokens).toEqual([]);
+    await press("Close review");
+    world.signedIn = true;
+
+    await press("Restart Alpha");
+    await vi.waitFor(() => expect(document.querySelector('[role="alertdialog"]')?.textContent).toContain("3 records"));
+    await press("Archive and restart");
+    await vi.waitFor(() => {
+      expect(recovery.tokens).toEqual(["1.check"]);
+      if (archived === recovery.retained) expect(recovery.starts).toBe(1);
+      else expect(document.body.textContent).toContain("Restart your phone");
+    });
+    expect(recovery.starts).toBe(archived === recovery.retained ? 1 : 0);
+  });
+
   it("Make Alpha the Home app (spec/app/settings/facts.md, \"Story: Make Alpha the Home app\")", async () => {
     const { alpha, machines } = await settingsOpen();
     await press("General");
@@ -140,7 +176,10 @@ describe("Settings", () => {
   describe.each([["a browser", false], ["a phone", true]])("in %s", (_where, phone) => {
     it("Change what only Android can change (spec/app/settings/android.md, \"Story: Change what only Android can change\")", async () => {
       const { alpha, machines, world } = await settingsOpen({ ...scene(), phone });
+      await until(alpha, machines, Facts.Machine, (state) => state.read.read.status === "Loaded");
+      expect(Boolean(button("Refresh"))).toBe(phone);
       await press("General");
+      expect(Boolean(button("Refresh"))).toBe(phone);
       // spec/app/settings/android.md, "Android says whether it opened that page, a nearby one, or none"
       await tap("Wi-Fi");
       await until(alpha, machines, Android.Machine, (s) => s.start.read.status !== "Loading");
@@ -150,7 +189,7 @@ describe("Settings", () => {
       await tap("Mobile data");
       await until(alpha, machines, Android.Machine, (s) => s.told === "SaidNearby");
       // spec/app/settings/android.md, "Alpha's alert, permission and photo pages open for Alpha itself, never for another app, and a channel's page names its channel"
-      await press("Notifications");
+      await tap("Notifications");
       await tap("Alpha's alerts");
       await until(alpha, machines, Android.Machine, (s) => s.target === "AlphaAlerts" && s.start.read.status === "Loaded");
       await tap("Reminders");
@@ -159,13 +198,41 @@ describe("Settings", () => {
     });
   });
 
+  it("Choose Android autofill in Passwords (spec/app/settings/android.md, \"Story: Change what only Android can change\")", async () => {
+    const { alpha, machines, world } = await settingsOpen();
+    await press("Apps");
+    await press("Passwords");
+    await until(alpha, machines, Facts.Machine, (s) => s.reported.some(({ fact, value }) => fact === "AutofillService" && value === "None"));
+    world.settings.autofillDestination = "system-settings";
+    await tap("Use for autofill");
+    await until(alpha, machines, Android.Machine, (s) => s.target === "PasswordAutofill" && s.told === "SaidNearby");
+    world.settings.autofillDestination = "autofill-picker";
+    await tap("Use for autofill");
+    await until(alpha, machines, Android.Machine, (s) => s.start.read.status === "Loaded" && s.told === "Silent");
+    expect(world.settings.opened).toEqual(["system-settings", "autofill-picker"]);
+
+    world.settings.autofill = { supported: true, selected: "this-app" };
+    await seen(false);
+    await seen(true);
+    await until(alpha, machines, Facts.Machine, (s) => s.reported.some(({ fact, value }) => fact === "AutofillService" && value === "Alpha"));
+    expect(titled("Use for autofill")).toBeUndefined();
+    await hardware("back");
+    expect(await page(alpha)).toBe("Apps");
+  });
+
   it("Look at access again (spec/app/startup/access.md, \"Story: Look at access again\")", async () => {
     const { alpha, world, machines } = await settingsOpen();
     await press("Privacy");
     await press("Permissions");
     await until(alpha, machines, Facts.Machine, (s) => Facts.accessWord(s, "MicrophoneAccess") === "Off");
     await tap("Microphone");
-    await vi.waitFor(() => expect(document.querySelector('[role="dialog"] [aria-current="step"]')?.textContent).toContain("Microphone"));
+    // spec/app/startup/access.md, "Settings opens one access of this walkthrough in review, also from the list of all, and the agent may ask to show one"
+    await vi.waitFor(() => {
+      const review = document.querySelector('[role="dialog"]');
+      const current = review?.querySelector('[aria-current="step"]');
+      expect([review?.querySelectorAll("li").length, current?.textContent?.includes("Microphone"), [...(review?.querySelectorAll("li button") ?? [])].map((action) => action.closest("li") === current)])
+        .toEqual([7, true, [true]]);
+    });
     await press("Settings");
     await vi.waitFor(() => expect(world.settings.opened).toEqual(["privacy"]));
     world.settings.hostFacts.permissions.Microphone = true;
@@ -186,7 +253,7 @@ describe("Settings", () => {
     expect(document.documentElement.classList.contains("dark")).toBe(true);
     await press("Settings");
     await press("General");
-    await press("Display");
+    await tap("Display");
     // spec/app/settings/preferences.md, "A choice shows at once and is kept on the phone, one at a time, with ten seconds to be kept"
     await press("Light");
     await until(first.alpha, first.alpha.runtime, Prefs.Machine, (s) => s.kept === "Light" && s.keeping.read.status === "Loaded");
@@ -370,7 +437,7 @@ describe("Settings", () => {
   it("Read what my carrier needs to activate a SIM (spec/app/settings/carrier.md, \"Story: Read what my carrier needs to activate a SIM\")", async () => {
     const { alpha, machines, world } = await settingsOpen();
     await press("General");
-    await press("Carrier & SIM setup");
+    await tap("Carrier & SIM setup");
     await until(alpha, machines, Carrier.Machine, (s) => s.showing);
     // spec/app/settings/carrier.md, "Opening the page reads nothing; leaving it, the phone locking or Alpha going to the background forgets everything it read, and an answer that comes later is refused"
     expect((await machines.runPromise(Carrier.Machine.use((carrier) => carrier.get()))).read.read.ticket).toBe(0);
