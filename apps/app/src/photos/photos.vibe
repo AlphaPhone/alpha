@@ -7,10 +7,11 @@ import type { Change } from "../../gen/app__photos__changes.effect.vibe"
 import { maxRequest } from "../../gen/app__photos__changes.effect.vibe"
 import * as Viewer from "../../gen/app__photos__viewer.effect.vibe"
 import type { Grant } from "../../gen/kit__permission.effect.vibe"
+import type { Actor } from "../../gen/app__photos__actor.effect.vibe"
 import { Machine as Shell, showing } from "../../gen/app__shell.effect.vibe"
 import { offer, withdraw } from "../notices/toasts.vibe"
 import { Device } from "../platform/device.vibe"
-import { Photos, called } from "../platform/photos.vibe"
+import { Photos, PhotosFailed, called } from "../platform/photos.vibe"
 import { type Job, answer, following, hearing, reacting, run, started, together } from "../runtime/reactor.vibe"
 import { Time } from "../runtime/time.vibe"
 import { Library, library } from "./library.vibe"
@@ -44,15 +45,18 @@ function lockedPhone(cause: unknown): boolean {
 
 type Fetch = Extract<Out, { tag: "Fetch" }>
 
+/** The album a change or a read names is not among the albums the phone last listed. */
+error NoAlbum { album: number }
+
 /** The page the phone gives for what is showing: an album's items, Alpha's own captures, or the permitted library narrowed. */
-effect function paged(fx: Fetch): { page: MediaPage; own: boolean }!!(Photos | Library) {
+effect function paged(fx: Fetch): { page: MediaPage; own: boolean }!(PhotosFailed | NoAlbum)!(Photos | Library) {
   const numbers = try Library
   const before = fx.page ? try numbers.cursor() : undefined
   const from = before === undefined ? {} : { before }
   if (fx.album !== 0) {
     const album = try numbers.album(fx.album)
     const custom = Option.isSome(album) ? `custom:${album.value.id}` as const : undefined
-    if (custom === undefined) throw new Error("no such album")
+    if (custom === undefined) throw new NoAlbum({ album: fx.album })
     return { page: try called("list", (photos) => photos.list({ ...from, album: custom, thumbnails: true })), own: true }
   }
   if (fx.own) {
@@ -108,6 +112,7 @@ type ChangeItems = Extract<Out, { tag: "ChangeItems" }>
 effect function changedItems(fx: ChangeItems): Event!!(Photos | Library) {
   const numbers = try Library
   const unknown: Event = { type: "changed", attempt: fx.attempt, done: [], stale: [], declined: false, known: false }
+  const flag = fx.change === "Share" ? undefined : operations[fx.change]
   return effect {
     const reviewed = try numbers.reviewed(fx.items)
     const byId = new Map<string, number>()
@@ -115,12 +120,12 @@ effect function changedItems(fx: ChangeItems): Event!!(Photos | Library) {
       const seen = try numbers.seen(photo)
       if (Option.isSome(seen)) byId.set(seen.value.item.id, photo)
     }
-    if (fx.change === "Share") {
-      const opened = try called("shareMany", (photos) => photos.shareMany(reviewed)) catch () => undefined
+    if (flag === undefined) {
+      const opened = called("shareMany", (photos) => photos.shareMany(reviewed)) catch () => undefined
       const told: Event = { type: "changed", attempt: fx.attempt, done: opened === undefined ? [] : [...fx.items], stale: [], declined: false, known: true }
       return told
     }
-    const report = try called("changeMany", (photos) => photos.changeMany(operations[fx.change], reviewed))
+    const report = try called("changeMany", (photos) => photos.changeMany(flag, reviewed))
     const done: number[] = []
     const stale: number[] = []
     let known = true
@@ -152,7 +157,7 @@ effect function albumWritten(fx: WriteAlbum): Event!!(Photos | Library) {
         return { id: made.id, revision: made.revision }
       };
       default: effect {
-        if (Option.isNone(found)) throw new Error("no such album")
+        if (Option.isNone(found)) throw new NoAlbum({ album: fx.album })
         return { id: found.value.id, revision: found.value.revision }
       };
     }
@@ -174,11 +179,11 @@ effect function albumWritten(fx: WriteAlbum): Event!!(Photos | Library) {
   } catch () => ({ type: "albumWritten", attempt: fx.attempt, confirmed: false, known: !wrote })
 }
 
-function carry(fx: Out): Job<Event, Photos | Library | Viewer.Machine, [by: Grid.Actor]> {
+function carry(fx: Out): Job<Event, Photos | Library | Viewer.Machine, [by: Actor]> {
   return match (fx) {
     when { tag: "AskAccess" }: answer("access", looked(true), { type: "accessIs", grant: "Denied", videos: false }, "Phone");
     when { tag: "PickItems" }: answer("access", looked(true), { type: "accessIs", grant: "Denied", videos: false }, "Phone");
-    when { tag: "OpenSettings" }: run("settings", called("openLibrarySettings", (photos) => photos.openLibrarySettings()) catch () => undefined, "Phone");
+    when { tag: "OpenSettings" }: run("settings", ignore(called("openLibrarySettings", (photos) => photos.openLibrarySettings())), "Phone");
     when { tag: "Revoke" }: run("revoke", effect {
       const viewing = try Viewer.Machine
       if (Viewer.canRevoked(try viewing.get(), "Phone")) try ignore(viewing.send({ type: "revoked" }, "Phone"))

@@ -3,6 +3,7 @@ import type { MediaItem } from "@elizaos/os/bridges/media"
 import * as Grid from "../../gen/app__photos.effect.vibe"
 import * as Viewer from "../../gen/app__photos__viewer.effect.vibe"
 import type { Effect as Out, Event } from "../../gen/app__photos__viewer.effect.vibe"
+import type { Actor } from "../../gen/app__photos__actor.effect.vibe"
 import { Machine as Shell, showing } from "../../gen/app__shell.effect.vibe"
 import { Photos, called } from "../platform/photos.vibe"
 import { type Job, answer, following, reacting, run, started, together } from "../runtime/reactor.vibe"
@@ -38,7 +39,7 @@ effect function requested(fx: Extract<Out, { tag: "Request" }>): void!!Grid.Mach
   try ignore((try Grid.Machine).send({ type: "requested", change: fx.change, photo: fx.photo, revision: fx.revision }, "Owner"))
 }
 
-function carry(fx: Out): Job<Event, Photos | Library | Grid.Machine, [by: Viewer.Actor]> {
+function carry(fx: Out): Job<Event, Photos | Library | Grid.Machine, [by: Actor]> {
   return match (fx) {
     when { tag: "Load" }: answer("load", loaded(fx.ticket, fx.photo), { type: "loaded", ticket: fx.ticket, ok: false, kind: "Still", duration: 0, revision: 0, favourite: false }, "Phone");
     when { tag: "Request" }: run(`request ${fx.change} ${fx.photo}`, requested(fx), "Phone");

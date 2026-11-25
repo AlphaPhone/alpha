@@ -1,5 +1,5 @@
 // spec/app/photos/index.md, "Only the newest read's answer is shown, only while Photos is showing, and a further page only adds older items"
-import { Effect, Option, type ManagedRuntime } from "effect";
+import { Option, type ManagedRuntime } from "effect";
 import type { Machine } from "../../gen/app__photos.effect.vibe";
 import type { Machine as ViewerMachine } from "../../gen/app__photos__viewer.effect.vibe";
 import { Time } from "../runtime/time.vibe";
@@ -18,12 +18,12 @@ export function lengthOf(tenths: number): string {
 
 /** What the phone said of an item when it last listed or read it. */
 export function seenOf(runtime: PhotosProps["runtime"], photo: number) {
-  return Option.getOrUndefined(runtime.runSync(Effect.flatMap(Library.asEffect(), (library) => library.seen(photo))));
+  return Option.getOrUndefined(runtime.runSync(Library.use((library) => library.seen(photo))));
 }
 
 /** What the phone said of an album when it last listed the albums. */
 export const albumOf = (runtime: PhotosProps["runtime"], album: number) =>
-  Option.getOrUndefined(runtime.runSync(Effect.flatMap(Library.asEffect(), (library) => library.album(album))));
+  Option.getOrUndefined(runtime.runSync(Library.use((library) => library.album(album))));
 
 /** The latest time Alpha gave, which a screen reads in place of a clock. */
 export const latestOf = (runtime: PhotosProps["runtime"]) => runtime.runSync(Time.use((time) => time.latest()));
