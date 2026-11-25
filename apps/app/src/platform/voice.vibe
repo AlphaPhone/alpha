@@ -717,7 +717,7 @@ export const phoneVoiceBridge = Layer.effect(VoiceBridge, effect {
   effect function prewarm(network: boolean): void!!Agent {
     const device = warmDevice()
     const warmCloud = network
-      ? ignore(ask(Agent, HttpClientRequest.bodyJsonUnsafe(HttpClientRequest.post("/api/cloud/warm"), {}), Schema.Unknown))
+      ? ignore(ask(Agent, HttpClientRequest.bodyJsonUnsafe(HttpClientRequest.post("/api/turns/warm"), {}), Schema.Unknown))
       : Effect.void
     if (network && registered(CLOUD_STREAM_PLUGIN)) {
       const relay = relayPlugin()
@@ -1012,7 +1012,7 @@ export const browserVoiceBridge = Layer.effect(VoiceBridge, effect {
     effect prewarm(network: boolean): void!!Agent {
       if (!network || warmedCloud) return
       warmedCloud = true
-      try ignore(ask(Agent, HttpClientRequest.bodyJsonUnsafe(HttpClientRequest.post("/api/cloud/warm"), {}), Schema.Unknown))
+      try ignore(ask(Agent, HttpClientRequest.bodyJsonUnsafe(HttpClientRequest.post("/api/turns/warm"), {}), Schema.Unknown))
     },
     streamTimings: () => succeed<unknown>(undefined),
     probeStatus: () => succeed<SpeechStatus>({ ready: false, ttsReady: false, liveCapture: false }),

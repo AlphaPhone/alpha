@@ -33,6 +33,8 @@ export interface AskScene {
   nextReplyProvisional?: boolean;
   /** The actions the next reply says it ran, made from the turn's metadata, as eliza's agent lists them on its done frame. */
   nextActions?: (metadata: unknown) => readonly unknown[];
+  /** When set, emits a `reply_ready` frame before `done` and awaits this promise before emitting `done`. */
+  holdDoneAfterReady?: Promise<void>;
   /** The agent is older than any direct-request mode: a turn that states one is refused whole, as eliza's agent refuses an invalid voice view context. */
   knowsNoActionMode?: boolean;
   cloudWarmCalls: number;
@@ -101,9 +103,11 @@ function reply(scene: AskScene, room: string, text: string, keep: (said: string)
   const custom = scene.nextReplyChunks;
   const provisional = scene.nextReplyProvisional;
   const actions = scene.nextActions?.(metadata) ?? [];
+  const holdDone = scene.holdDoneAfterReady;
   scene.nextReplyChunks = undefined;
   scene.nextReplyProvisional = undefined;
   scene.nextActions = undefined;
+  scene.holdDoneAfterReady = undefined;
   const body = new ReadableStream<Uint8Array>({
     start(controller) {
       controller.enqueue(frame({ type: "status", activity: "thinking" }));
@@ -127,6 +131,14 @@ function reply(scene: AskScene, room: string, text: string, keep: (said: string)
           for (const piece of custom) controller.enqueue(frame({ type: "token", text: piece, ...(provisional ? { provisional } : {}) }));
           const full = custom.join("");
           keep(full);
+          if (holdDone !== undefined) {
+            controller.enqueue(frame({ type: "reply_ready", fullText: full, actionResults: actions }));
+            void holdDone.then(() => {
+              controller.enqueue(frame({ type: "done", fullText: full, ...named(scene.said.length), actionResults: actions }));
+              controller.close();
+            });
+            return;
+          }
           controller.enqueue(frame({ type: "done", fullText: full, ...named(scene.said.length), actionResults: actions }));
           controller.close();
           return;
@@ -252,9 +264,9 @@ export function askRoutes(scene: AskScene): Route[] {
       return scene.warmUpFails ? Response.json({ error: "warm_up_failed" }, { status: 500 }) : Response.json({ started: true }, { status: 202 });
     },
     (request, url) => {
-      if (request.method !== "POST" || url.pathname !== "/api/cloud/warm") return;
+      if (request.method !== "POST" || (url.pathname !== "/api/turns/warm" && url.pathname !== "/api/cloud/warm")) return;
       scene.cloudWarmCalls += 1;
-      return Response.json({ warmed: true });
+      return Response.json({ started: true }, { status: 202 });
     },
   ];
 }

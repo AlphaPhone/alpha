@@ -378,22 +378,33 @@ effect function settleSpoken(board: Board, seat: DraftSeat, selected: number, re
     && now.chosen === selected && now.around === 0 && now.page.ticket === page))
 }
 
-effect function syncAlphaApps(): void!!(Agent | KeyValueStore.KeyValueStore | Time) {
+effect function syncAlphaApps(actionResults: ReadonlyArray<{ readonly action: string }>): void!!(Agent | KeyValueStore.KeyValueStore | Time) {
+  const ranClock = actionResults.some((result) => result.action.startsWith("CLOCK_"))
+  const ranReminders = actionResults.some((result) => result.action === "REMINDERS_MANAGE" || result.action === "OWNER_REMINDERS")
+  if (!ranClock && !ranReminders) return
   const ctx = try Effect.context<never>()
-  const alarms = Context.getOption(ctx, Alarms.Machine)
-  const timers = Context.getOption(ctx, Timers.Machine)
-  const world = Context.getOption(ctx, World.Machine)
-  if (Option.isSome(alarms) && Option.isSome(timers) && Option.isSome(world)) {
-    try ignore(Effect.provide(syncClockNow(), Layer.mergeAll(
-      Layer.succeed(Alarms.Machine, alarms.value),
-      Layer.succeed(Timers.Machine, timers.value),
-      Layer.succeed(World.Machine, world.value),
-    )))
+  if (ranClock) {
+    const alarms = Context.getOption(ctx, Alarms.Machine)
+    const timers = Context.getOption(ctx, Timers.Machine)
+    const world = Context.getOption(ctx, World.Machine)
+    if (Option.isSome(alarms) && Option.isSome(timers) && Option.isSome(world)) {
+      try ignore(Effect.provide(syncClockNow(), Layer.mergeAll(
+        Layer.succeed(Alarms.Machine, alarms.value),
+        Layer.succeed(Timers.Machine, timers.value),
+        Layer.succeed(World.Machine, world.value),
+      )))
+    }
   }
-  const reminders = Context.getOption(ctx, Reminders.Machine)
-  if (Option.isSome(reminders)) {
-    try ignore(Effect.provide(syncRemindersNow(), Layer.succeed(Reminders.Machine, reminders.value)))
+  if (ranReminders) {
+    const reminders = Context.getOption(ctx, Reminders.Machine)
+    if (Option.isSome(reminders)) {
+      try ignore(Effect.provide(syncRemindersNow(), Layer.succeed(Reminders.Machine, reminders.value)))
+    }
   }
+}
+
+effect function warmPlanner(): void!!Agent {
+  try ignore(ask(Agent, HttpClientRequest.bodyJsonUnsafe(HttpClientRequest.post("/api/turns/warm"), {}), Schema.Unknown))
 }
 
 // spec/app/assistant/index.md, "Every message asked is posted exactly once, under a new ticket, whoever gave the text, with the screen showing and never a sensitive one"; spec/app/assistant/index.md, "The first word of a reply shows that the agent has the message, and a withdrawal that came too late stops it there"
@@ -593,7 +604,7 @@ function posted(ticket: number, told: boolean, context: Conversation.Context): S
         ? undefined : try offerRecordingSummary({ source: transcript.offered, seat, conversation: chats.chosen,
           conversationId: known.record.id, message: result.reply.messageId }, result.reply.text)
       if (board.draftSeat === seat) board.change({ recordingSummary })
-      try syncAlphaApps()
+      fork.detached syncAlphaApps(result.reply.actionResults)
       if (enrolled !== undefined && result.reply.userMessageId !== undefined) {
         const replied = streamed(result.clientMessageId)
         const stillAuthored = effect {
@@ -1378,9 +1389,12 @@ const submitted = started(effect {
 }, "asking what was typed on the communications dock")
 
 // spec/app/assistant/dock.md, "A drag released asks the shell once for where it landed, and keeps a sheet's height"; spec/app/assistant/dock.md, "A gesture asks the shell to raise Ask Alpha, to go back a step or two, or nothing; a press that did not move is a tap on its control"; spec/app/assistant/dock.md, "Focusing or tapping the composer on the bar opens Ask Alpha as a sheet"
-function carryDock(fx: Dock.Effect): Job<Dock.Event, Shell, []> {
+function carryDock(fx: Dock.Effect): Job<Dock.Event, Shell | Agent, []> {
   return match (fx) {
-    when { tag: "Raise", let detent }: run("raise", effect { try contained((try Shell).send({ type: "raise", detent }), "raising Ask Alpha") });
+    when { tag: "Raise", let detent }: run("raise", effect {
+      fork.detached warmPlanner()
+      try contained((try Shell).send({ type: "raise", detent }), "raising Ask Alpha")
+    });
     when { tag: "Lower", let steps }: run("lower", effect {
       const shell = try Shell
       for (const _ of Array.from({ length: steps })) try contained(shell.send({ type: "goBack" }), "lowering Ask Alpha")
@@ -1389,7 +1403,10 @@ function carryDock(fx: Dock.Effect): Job<Dock.Event, Shell, []> {
       const shell = try Shell
       const current = try shell.get()
       for (const ask of Dock.focused(current.assistant)) {
-        if (ask.tag === "Raise") try contained(shell.send({ type: "raise", detent: ask.detent }), "raising Ask Alpha")
+        if (ask.tag === "Raise") {
+          fork.detached warmPlanner()
+          try contained(shell.send({ type: "raise", detent: ask.detent }), "raising Ask Alpha")
+        }
       }
     });
   }

@@ -439,6 +439,31 @@ describe("Alpha product plugin: Reminders actions, provider, recurrence, and rou
     }
   });
 
+  it("registers the Clock context for activity labels, marks read-only ops, and gives accurate parameter guidance", async () => {
+    const store = new AlphaAppsStore({ now: () => Date.UTC(2026, 10, 24, 14, 0, 0) });
+    const registeredContexts: unknown[] = [];
+    const { runtime } = makeFakeRuntime();
+    const { plugin } = createAlphaAppsPlugin({ store, timeZone: "UTC", runtime });
+    await plugin.init?.({}, { ...runtime, contexts: { tryRegister: (ctx: unknown) => { registeredContexts.push(ctx); } } } as never);
+    expect(registeredContexts).toContainEqual(expect.objectContaining({ id: "clock", label: "Clock" }));
+
+    const alarm = plugin.actions!.find((a) => a.name === "CLOCK_ALARM")!;
+    const timer = plugin.actions!.find((a) => a.name === "CLOCK_TIMER")!;
+    const world = plugin.actions!.find((a) => a.name === "CLOCK_WORLD")!;
+    const reminders = plugin.actions!.find((a) => a.name === "REMINDERS_MANAGE")!;
+
+    expect((await alarm.handler(runtime, emptyMessage("list alarms"), emptyState, { parameters: { action: "list" } }))?.data).toMatchObject({ readOnlyOperation: true });
+    expect((await timer.handler(runtime, emptyMessage("list timers"), emptyState, { parameters: { action: "list" } }))?.data).toMatchObject({ readOnlyOperation: true });
+    expect((await world.handler(runtime, emptyMessage("list cities"), emptyState, { parameters: { action: "list" } }))?.data).toMatchObject({ readOnlyOperation: true });
+    expect((await world.handler(runtime, emptyMessage("time in Tokyo"), emptyState, { parameters: { action: "time_in", city: "Tokyo" } }))?.data).toMatchObject({ readOnlyOperation: true });
+    expect((await reminders.handler(runtime, emptyMessage("list reminders"), emptyState, { parameters: { op: "list" } }))?.data).toMatchObject({ readOnlyOperation: true });
+
+    for (const act of [alarm, timer, world, reminders]) {
+      const idParam = act.parameters?.find((p) => p.name === "id");
+      expect(idParam?.description).not.toContain("context lists it");
+    }
+  });
+
   // spec/agent/index.md, "A reminder with a due time keeps one scheduled task, and the task follows what the owner does to the reminder"; spec/agent/index.md, "The page names the query values each gated route can receive"
   it("keeps each reminder's scheduled task following it, so a delete, completion or new time made in the app or in chat holds, and says so only when it does", async () => {
     const nowMs = Date.UTC(2026, 10, 24, 15, 0, 0);
