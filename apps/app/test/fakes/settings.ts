@@ -1,6 +1,6 @@
 // spec/app/settings/index.md, "Story: Find a setting and come back"
 import type { DataResetPlugin } from "@elizaos/os/bridges/definitions/reset";
-import type { AndroidRoleStatus, LaunchTarget, LauncherAppsChange, NativeCrashEntry, SystemFacts, SystemHostPlugin, SystemPlugin, SystemSettingsPage } from "@elizaos/os/bridges/definitions/system";
+import type { AndroidRoleStatus, ClockRequest, ClockStatus, LaunchTarget, LauncherAppsChange, NativeCrashEntry, SystemFacts, SystemHostPlugin, SystemPlugin, SystemSettingsPage } from "@elizaos/os/bridges/definitions/system";
 import type { ApprovedJoinResult, ConnectOptions, ConnectivityResult, WiFiNetwork, WiFiPlugin } from "@elizaos/os/bridges/definitions/wifi";
 import type { LauncherScene } from "./launcher.ts";
 import { type Faked, plugin, rejection } from "./phone.ts";
@@ -27,6 +27,9 @@ export interface SettingsScene {
   readonly joins: ConnectOptions[];
   connectivity: ConnectivityResult;
   carrier: { slots: Array<{ slotIndex: number; imei: CarrierField; simState: CarrierField }>; iccid: CarrierField; eid: CarrierField };
+  /** What Android's Clock answers a handoff, and each request handed to it. */
+  clock: ClockStatus;
+  readonly clocks: ClockRequest[];
 }
 
 export function settingsScene(): SettingsScene {
@@ -44,6 +47,7 @@ export function settingsScene(): SettingsScene {
       slots: [{ slotIndex: 0, imei: { status: "available", value: "356938035643809" }, simState: { status: "available", value: "Ready" } }, { slotIndex: 1, imei: { status: "permission-denied" }, simState: { status: "available", value: "Absent" } }],
       iccid: { status: "permission-denied" }, eid: { status: "available", value: "89049032000000000000000000000001" },
     },
+    clock: "opened", clocks: [],
   };
 }
 
@@ -107,7 +111,10 @@ export function elizaSystem(home: LauncherScene, scene: SettingsScene): Faked {
         scene.opened.push(`app-info ${target.packageName}`);
         return known(target) ? Promise.resolve() : Promise.reject(rejection("not-installed"));
       },
-      openClock: () => Promise.reject(rejection("unsupported")),
+      openClock(request) {
+        scene.clocks.push(request);
+        return Promise.resolve({ action: request.action, status: scene.clock, message: "" });
+      },
       crashLog: () => Promise.resolve({ entries: scene.crashes.map((entry) => ({ ...entry })), exitHistory: true }),
       recordRendererFailure: () => Promise.resolve(),
       clearCrashLog: () => {

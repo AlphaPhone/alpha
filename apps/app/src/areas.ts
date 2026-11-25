@@ -54,4 +54,5 @@ export const mounts: readonly Mount[] = [
   at("settings/update", () => import("./update/index.tsx")),
   at("overlay", () => import("./update/overlay.tsx")),
   at("view:Browser", () => import("./browser/index.tsx")),
+  at("view:Workflows", () => import("./workflows/clockPage.tsx")),
 ];

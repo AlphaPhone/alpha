@@ -16,6 +16,7 @@ import { type VoiceBridge, browserVoiceBridge, phoneVoiceBridge } from "./voice.
 import { type Documents, browserDocuments, phoneDocuments } from "./documents.vibe"
 import { type Navigation, browserNavigation, phoneNavigation } from "./navigation.vibe"
 import { type TabHost, browserTabHost, phoneTabHost } from "./browser.vibe"
+import { type PhoneClock, browserClock, phoneClock } from "./clock.vibe"
 
 export type Plugins =
   | never
@@ -36,6 +37,7 @@ export type Plugins =
   | Documents
   | Navigation
   | TabHost
+  | PhoneClock
 
 export const phonePlugins = Layer.mergeAll(
   Layer.empty,
@@ -56,6 +58,7 @@ export const phonePlugins = Layer.mergeAll(
   phoneDocuments,
   phoneNavigation,
   phoneTabHost,
+  phoneClock,
 )
 
 export const browserPlugins = Layer.mergeAll(
@@ -77,4 +80,5 @@ export const browserPlugins = Layer.mergeAll(
   browserDocuments,
   browserNavigation,
   browserTabHost,
+  browserClock,
 )
