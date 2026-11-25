@@ -308,7 +308,7 @@ function carry(fx: Out): Job<Event, Telephony | Inbox | Conversations | Messages
       if (Option.isSome(conversation) && conversation.value.id !== "") try ignore(telephony("markThreadRead", (c) => c.messages.markThreadRead(conversation.value.id as ThreadId, latest)))
     });
     when { tag: "Prompt", let need }: answer("prompt", prompted(need), { type: "accessReported", need, grant: "Unasked" });
-    when { tag: "OpenSettings" }: run("settings", effect { try (try SystemSettings).open("AppPermissions", 0) });
+    when { tag: "OpenSettings" }: run("settings", effect { try (try SystemSettings).open("AppPermissions", "") });
     when { tag: "CopyText" }: run("copy", effect {
       const row = try chosen()
       if (Option.isSome(row) && !("incomplete" in row.value)) try (try CarrierSetup).copy(row.value.body)

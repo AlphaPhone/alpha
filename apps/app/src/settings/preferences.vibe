@@ -194,5 +194,10 @@ const large = applying(Prefs.Machine, Prefs.largeText, effect (on) => {
   try (try Device).mark("large-text", on ? "" : undefined)
 })
 
-/** The owner's preferences, from launch: the look and the text the whole page follows, and what other areas ask before they act. */
-export const preferences = together(machine, opened, resumed, phoneLook, looked, bars, legible, large)
+// spec/app/settings/preferences.md, "The agent is launched allowed to change Gmail and Calendar exactly as the phone last read or saved, allowed neither once it could not read them, and Alpha says nothing of it before the first answer"
+const consented = applying(Prefs.Machine, (state) => state.agentGoogle, effect (said) => {
+  if (said.tag === "Consents") try (try Device).agentConsent({ gmailChanges: said.gmailChanges, calendarEdits: said.calendarEdits })
+})
+
+/** The owner's preferences, from launch: the look and the text the whole page follows, what other areas ask before they act, and what the agent is launched allowed to change. */
+export const preferences = together(machine, opened, resumed, phoneLook, looked, bars, legible, large, consented)

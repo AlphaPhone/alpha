@@ -33,7 +33,7 @@ import { type Deletions, type Reach, rowHidden } from "../../gen/app__calendar__
 import { type RequestStatus, requestStatus } from "../../gen/app__calendar__agent.ts";
 import { type Request, requests } from "./requests.ts";
 import type { Calendared } from "./calendar.vibe";
-import { type Fields, kept, typed } from "./editor.vibe";
+import { type Fields, kept, startForm, typed } from "./editor.vibe";
 import { type Row, onDay, shown } from "./shown.ts";
 import { allows } from "../../gen/kit__permission.ts";
 import { civilDay, dateOf, dayStart, monthStart, readWindow, weekStart } from "./time.ts";
@@ -277,7 +277,7 @@ export function Calendar({ runtime, alpha }: CalendarProps) {
           className="pr-2 pl-2" leading={alpha ? <AppBack alpha={alpha} className="size-13 [&_svg]:size-5.5" /> : null}>
           {month ? null : view.can({ type: "goToday" }) ? <CalendarHeaderAction aria-label="Today" onClick={send({ type: "goToday" })}><CalendarDays aria-hidden /></CalendarHeaderAction> : null}
           {!month && view.can({ type: "openSearch" }) ? <CalendarHeaderAction aria-label="Search events" onClick={send({ type: "openSearch" })}><Search aria-hidden /></CalendarHeaderAction> : null}
-          {!month && editor.can(newEvent) ? <CalendarHeaderAction aria-label="New event" onClick={() => void editor.send(newEvent)}><Plus aria-hidden /></CalendarHeaderAction> : null}
+          {!month && editor.can(newEvent) ? <CalendarHeaderAction aria-label="New event" onClick={() => void runtime.runPromise(startForm(newEvent, s.anchor))}><Plus aria-hidden /></CalendarHeaderAction> : null}
         </CalendarHeader>
         {searching ? <Searching runtime={runtime} /> : null}
         <Access runtime={runtime} />
@@ -495,7 +495,7 @@ function EventPage({ runtime, row, today }: CalendarProps & { row: Row; today: n
     const confirmed = { type: "confirm", id: row.id, reach, revision: row.revision, now: untimed } as const;
     const scope: Editor.Scope = reach === "WholeSeries" ? "WholeSeries" : reach === "FromThisOn" ? "ThisAndFollowing" : "ThisOne";
     return deletable && held.can(confirmed) && editor.can({ type: "deleteEvent", id: row.id, revision: row.revision, scope, repeating: row.recurring })
-      ? () => void held.send(confirmed) : undefined;
+      ? () => void held.send(confirmed).then(() => view.send({ type: "closeEvent" })) : undefined;
   };
   const respond = (going: boolean, offered: boolean): Editor.Event => ({ type: "respond", id: row.id, revision: row.revision, going, offered });
   const going = respond(true, goingOffered(row.answer, row.answerable));
@@ -523,7 +523,7 @@ function EventPage({ runtime, row, today }: CalendarProps & { row: Row; today: n
       source={row.source === "Phone" ? "Phone calendar" : "Your agent's calendar"} dot={stripe(row)} notes={row.notes}
       actions={menu ? (
         <CalendarEventMenu items={[
-          ...(editing ? [{ label: "Edit", name: "Edit event", onSelect: () => void editor.send(edit) }] : []),
+          ...(editing ? [{ label: "Edit", name: "Edit event", onSelect: () => void runtime.runPromise(startForm(edit, civilDay(row.begin), row)) }] : []),
           ...deletes.flatMap(({ label, act }) => (act ? [{ label, onSelect: act }] : [])),
         ]} />
       ) : null}>
@@ -561,7 +561,7 @@ function Undo({ runtime }: CalendarProps) {
   const d = held.state;
   if (!d) return null;
   const titled = (id: number) => shown.lastSeen(id)?.title || "the event";
-  const region = (toast: ReactNode) => <div role="status" aria-live="polite" className="pointer-events-none absolute inset-x-4 top-3 z-toast flex flex-col items-center">{toast}</div>;
+  const region = (toast: ReactNode) => <div role="status" aria-live="polite" className="pointer-events-none absolute inset-x-4 top-15 z-toast flex flex-col items-center">{toast}</div>;
   if (d.waiting === 0 || !d.notice) {
     if (d.dropped !== 0) return region(<Toast>{`${titled(d.dropped)} was not deleted: you signed in to another account.`}</Toast>);
     if (d.failed !== 0) return region(<Toast>{`Couldn't delete ${titled(d.failed)}. It may have changed; it's shown again.`}</Toast>);

@@ -12,13 +12,13 @@ export const meta: ComponentMeta<SettingsCarrierPageProps> = {
   examples: {
     Reading: { reading: true, onShow: undefined },
     Shown: {
-      fields: [{ name: "IMEI 1", value: "356938035643809" }, { name: "ICCID", missing: "access-denied" }, { name: "Carrier", value: "Example Mobile" }],
+      fields: [{ name: "IMEI 1", identifier: true, value: "356938035643809" }, { name: "ICCID", missing: "access-denied" }, { name: "Carrier", value: "Example Mobile" }],
       onShow: undefined,
       onReadEid: fn(),
       onCopy,
       smsChoice: true,
     },
-    Copied: { fields: [{ name: "IMEI 1", value: "356938035643809" }], onShow: undefined, copied: "copied" },
+    Copied: { fields: [{ name: "IMEI 1", identifier: true, value: "356938035643809" }], onShow: undefined, copied: "copied" },
     Failed: { failed: true },
   },
   play: {

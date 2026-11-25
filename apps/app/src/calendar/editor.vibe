@@ -1,5 +1,8 @@
 // spec/app/calendar/editor.md, "Story: Write an event"; spec/app/calendar/editor.md, "Story: Keep my draft through a restart"; spec/app/calendar/editor.md, "Story: Never create an event twice"; spec/app/calendar/editor.md, "Story: Delete an event, or answer an invitation"
 import * as KeyValueStore from "effect/persistence/KeyValueStore"
+import { ScanEntry } from "../files/scanEntry.vibe"
+import * as Shell from "../../gen/app__shell.effect.vibe"
+import { say } from "../notices/toasts.vibe"
 import * as Editor from "../../gen/app__calendar__editor.effect.vibe"
 import type { Effect as Out, Event, Scope } from "../../gen/app__calendar__editor.effect.vibe"
 import * as View from "../../gen/app__calendar.effect.vibe"
@@ -70,6 +73,20 @@ export effect function typed(fields: Fields, edit: Event) {
   const editor = try Editor.Machine
   if (!(try keep(fields, try owner()))) try contained(editor.send({ type: "keepFailed" }), "saying the draft was not kept")
   try contained(editor.send(edit), "counting an edit of the event")
+}
+
+// spec/app/calendar/editor.md, "Story: Write an event"; spec/app/calendar/editor.md, "The form's edits always build on the revision of the event as last read"
+/** Open the form: a new event blank on `day`, or `row` as last read; a draft set aside is offered back as it was, never replaced unseen. */
+export effect function startForm(edit: Event, day: number, row?: Row) {
+  const editor = try Editor.Machine
+  const state = try editor.get()
+  if (state.banner !== "Available") {
+    const fields: Fields = row === undefined
+      ? blank(day, try (try Time).latest())
+      : { title: row.title, place: row.place, notes: row.notes, begin: row.begin, end: row.end, allDay: row.allDay, people: "" }
+    try ignore(keep(fields, state.owner))
+  }
+  try contained(editor.send(edit), "opening the form")
 }
 
 // spec/app/calendar/editor.md, "A note or a scan opens a new event already filled in, as edits to review, only when no other draft is kept"
@@ -311,9 +328,23 @@ import { storeChanged } from web
 /** Another page of Alpha kept a draft over this one's: the form asks the owner which to keep. */
 const elsewhere = hearing(Stream.filter(storeChanged(), (key) => key.includes("alpha.calendar.form.")), Editor.Machine, (): Event => ({ type: "replacedElsewhere" }))
 
+// spec/app/calendar/editor.md, "A note or a scan opens a new event already filled in, as edits to review, only when no other draft is kept"
+const scanned = started(effect {
+  const entry = try ScanEntry
+  const shell = try Shell.Machine
+  try Stream.runForEach(Stream.zipLatest(shell.changes, entry.events), effect ([where, event]) => {
+    if (event === undefined || !Shell.showing(where, "Calendar")) return
+    const review = try entry.takeEvent()
+    if (review !== undefined && !(try fromNote(review.fields, review.day))) {
+      try say("Calendar already has a draft. Finish it before opening this scan’s event.", true)
+    }
+  })
+}, "opening a scanned Calendar draft")
+
 /** The editor: kept on the phone across restarts, which ends what was in flight; its writes go to the phone's calendar once. */
 export const editor = together(
   reacting(Editor, { keep: 1, open: [{ type: "restart" }], carry }),
   reread,
   elsewhere,
+  scanned,
 )

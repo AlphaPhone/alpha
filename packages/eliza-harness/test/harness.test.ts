@@ -1,14 +1,12 @@
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import fs from "node:fs";
 import http from "node:http";
 import type { AddressInfo } from "node:net";
 import path from "node:path";
-import * as NodeServices from "@effect/platform-node/NodeServices";
 import { describe, expect, it } from "@effect/vitest";
 import { Effect } from "effect";
 import { checkout, prepared } from "../src/checkout.ts";
-import { bunIn } from "../src/no-bun.vibe";
 import { pinnedCheckout } from "../src/pinned.vibe";
 import { type Cloud, type RealModel, said, scratch, startCloud } from "../src/services.ts";
 
@@ -128,7 +126,7 @@ describe("the eliza harness", () => {
     }
   }, 300_000);
 
-  it("names each Bun lock, command, import, action and shebang outside legacy/", async () => {
+  it("rejects Bun commands, runtime APIs, setup and lockfiles in the active tree", () => {
     const tree = scratch();
     try {
       fs.cpSync(path.join(import.meta.dirname, "fixtures/bun"), tree, { recursive: true });
@@ -138,17 +136,31 @@ describe("the eliza harness", () => {
       }
       execFileSync("git", ["init", "-q"], { cwd: tree });
       execFileSync("git", ["add", "-A"], { cwd: tree });
-      const found = await Effect.runPromise(Effect.provide(bunIn(tree), NodeServices.layer));
-      expect(found.map((line) => line.slice(0, line.indexOf(":"))).sort()).toEqual([
+
+      const check = () => spawnSync(process.execPath, [path.join(import.meta.dirname, "../scripts/no-bun.ts")], { cwd: tree, encoding: "utf8" });
+      const failed = check();
+      expect(failed.status, failed.stderr).toBe(1);
+      expect(failed.stderr.trimEnd().split("\n").slice(1).map((line) => line.slice(0, line.indexOf(":"))).sort()).toEqual([
         ".github/workflows/ci.yml",
+        "Dockerfile",
         "apps/agent/bun.lockb",
         "bun.lock",
         "bunfig.toml",
+        "package.json",
+        "scripts/build.sh",
+        "scripts/build.sh",
         "scripts/build.sh",
         "scripts/hello.ts",
         "scripts/setup.sh",
+        "scripts/setup.sh",
+        "scripts/store.ts",
         "scripts/store.ts",
       ]);
+
+      execFileSync("git", ["rm", "-qrf", ".github", "Dockerfile", "apps", "bun.lock", "bunfig.toml", "package.json", "scripts"], { cwd: tree });
+      const passed = check();
+      expect(passed.status, passed.stderr).toBe(0);
+      expect(passed.stdout).toContain("No Bun commands");
     } finally {
       fs.rmSync(tree, { recursive: true, force: true });
     }
