@@ -190,20 +190,18 @@ function routes(runtime: Runtime, headers: RuntimeRequestHeaders): DeviceAgent {
   }
 }
 
-effect function enrolled(epoch: number, runtime: Runtime, executeAction: (op: DeviceOperation, call: ExecutorCall) => Promise<unknown>): Session!unknown!(Agent | Device) {
+effect function enrolled(epoch: number, runtime: Runtime, owner: string, image: boolean, executeAction: (op: DeviceOperation, call: ExecutorCall) => Promise<unknown>): Session!unknown {
   const offer = try Schema.decodeUnknownEffect(protocol)(try tryPromise(() => runtime.request(`${prefix}/capabilities`)))
-  const owner = try ownerAt()
   if (offer.identityId !== owner) throw new Error("Device owner changed")
   const origin = "https://device.alpha.invalid"
   const slot = try tryPromise(() => slotFor([origin, owner, offer.agentId]))
   const { key } = try tryPromise(() => enrollment().enrollmentKey({ slot }))
   if (!/^[a-f0-9]{64}$/.test(key)) throw new Error("Invalid enrollment key")
-  const device = try (try Device).capabilities()
   const capabilities = [
     ...(registered("ElizaCamera") ? cameraCapabilities : []),
     ...(registered("AlphaPhotoLibrary") ? photosCapabilities : []),
     ...(registered("ElizaFiles") ? filesCapabilities : []),
-    ...(device.image && registered("ElizaTelephony") ? phoneCapabilities : []),
+    ...(image && registered("ElizaTelephony") ? phoneCapabilities : []),
   ].filter((name) => offer.deviceActions.capabilities.includes(name))
   if (capabilities.length === 0) throw new Error("Media operations are unavailable")
   const headers = { "x-eliza-device-id": offer.agentId, "x-eliza-device-key": key, "x-eliza-device-capabilities": capabilities.join(",") }
@@ -254,9 +252,9 @@ export const mediaReview = Layer.effect(MediaReview, effect {
     const status = life.status() catch () => undefined
     if (status?.state !== "running") { latest = undefined; return undefined }
     if (latest?.epoch === status.epoch) return latest
-    provide Agent = agent, Device = device {
-      latest = enrolled(status.epoch, runtime, guarded) catch () => undefined
-    }
+    const owner = Effect.provideService(ownerAt(), Agent, agent) catch () => undefined
+    const { image } = try device.capabilities()
+    latest = owner === undefined ? undefined : (enrolled(status.epoch, runtime, owner, image, guarded) catch () => undefined)
     const fresh = latest
     if (fresh !== undefined) try ignore(tryPromise(() => fresh.execute.sync()))
     return latest

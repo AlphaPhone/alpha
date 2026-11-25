@@ -71,15 +71,15 @@ module web {
     return new MediaRecorder(new MediaStream([...video.getVideoTracks(), ...(audio?.getAudioTracks() ?? [])]))
   }
   /** @throws {never} */
-  export function recordedBlob(chunks: Blob[], mimeType: string): Blob | undefined {
-    return chunks.length === 0 ? undefined : new Blob(chunks, { type: mimeType })
+  export function recordingBlob(chunks: Blob[], mimeType: string): Blob | undefined {
+    return chunks.length > 0 ? new Blob(chunks, { type: mimeType }) : undefined
   }
   /** @throws {never} */
   export function permissionFailure(cause: unknown): boolean {
     return cause instanceof DOMException && ["NotAllowedError", "PermissionDeniedError", "SecurityError"].includes(cause.name)
   }
 }
-import { image, media, permission, permissionFailure, recordedBlob, recorder, release, revoke, urlOf } from web
+import { image, media, permission, permissionFailure, recorder, recordingBlob, release, revoke, urlOf } from web
 
 export type Aspect = "4:3" | "16:9"
 export type Flash = "off" | "auto" | "on" | "torch"
@@ -349,7 +349,7 @@ export const browserCamera = Layer.effect(CameraPort, effect {
         recording.onerror = () => { Deferred.doneUnsafe(answer, succeed(undefined)) }
         recording.onstop = () => {
           release(audio)
-          Deferred.doneUnsafe(answer, succeed(recordedBlob(chunks, recording.mimeType)))
+          Deferred.doneUnsafe(answer, succeed(recordingBlob(chunks, recording.mimeType)))
         }
         try Effect.try(() => recording.start(1000))
         return recording

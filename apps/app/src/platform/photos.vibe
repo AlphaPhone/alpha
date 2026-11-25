@@ -200,7 +200,7 @@ module browser {
       && (!("thumbnail" in row) || row.thumbnail === undefined || typeof row.thumbnail === "string")
   }
 }
-import { browserCaptures, browserOriginal, captureEvent, latestBrowserCapture, page, saveBrowserCapture, type BrowserCapture } from browser
+import { type BrowserCapture, browserCaptures, browserOriginal, captureEvent, latestBrowserCapture, page, saveBrowserCapture } from browser
 export { latestBrowserCapture, saveBrowserCapture }
 export type { BrowserCapture }
 
