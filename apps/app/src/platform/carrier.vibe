@@ -4,34 +4,45 @@ import type { Field, Kind, Status } from "../../gen/app__settings__carrier.ts"
 module held {
   import { registerPlugin } from "@capacitor/core"
 
-  /** What `AlphaCarrierSetup` reports of one field: what Android returned, or why it returned nothing. */
-  export interface Reported { status: "available" | "permission-denied" | "unavailable" | "unsupported" | "not-read"; value?: string }
-  /** `AlphaCarrierSetup.read`: Alpha's own plugin, which reads on request only. */
-  export interface Setup {
-    canChooseSms: boolean
-    smsRole: Reported
-    dialerRole: Reported
-    eid: Reported
-    hardware: Record<"manufacturer" | "model" | "baseband", Reported>
-    slots: Array<{ slotIndex: number; imei: Reported; simState: Reported }>
-    subscriptions: { items: Array<{ subscriptionId: number; embedded: boolean; carrier: Reported; iccid: Reported; operator: Reported; operatorCode: Reported; dataEnabled: Reported; roaming: Reported }> }
-  }
   export interface CarrierPlugin {
-    read(): Promise<Setup>
-    readEid(): Promise<Reported>
+    read(): Promise<unknown>
+    readEid(): Promise<unknown>
+    openSettings(input: { page: "sim" | "apn" }): Promise<{ status: "opened"; specific: boolean }>
+  }
+
+  interface Clipboard {
+    copyText(input: { text: string }): Promise<void>
   }
 
   let made: CarrierPlugin | undefined
+  let clipboard: Clipboard | undefined
   /** The plugin, registered once for the life of the page. @throws {never} */
   export function plugin(): CarrierPlugin {
     return (made ??= registerPlugin<CarrierPlugin>("AlphaCarrierSetup"))
   }
-  /** Put `text` on the clipboard. */
-  export async function copied(text: string): Promise<void> {
-    await navigator.clipboard.writeText(text)
+  /** Put one reviewed carrier identifier on the Android clipboard while Alpha is foreground. */
+  export function copied(text: string): Promise<void> {
+    return (clipboard ??= registerPlugin<Clipboard>("AlphaDevice")).copyText({ text })
   }
 }
-import { type Reported, type Setup, copied, plugin } from held
+import { copied, plugin } from held
+
+const FieldStatus = Schema.Literals(["available", "permission-denied", "unavailable", "unsupported", "not-read"])
+const Reported = Schema.Struct({ status: FieldStatus, value: Schema.optionalKey(Schema.String) })
+type Reported = typeof Reported.Type
+const Subscription = Schema.Struct({
+  subscriptionId: Schema.Int, embedded: Schema.Boolean, slotIndex: Schema.optionalKey(Schema.Int),
+  carrier: Reported, iccid: Reported, operator: Reported, operatorCode: Reported,
+  name: Schema.optionalKey(Reported), dataState: Schema.optionalKey(Reported), networkType: Schema.optionalKey(Reported),
+  dataEnabled: Reported, roaming: Reported, defaultData: Schema.optionalKey(Schema.Boolean),
+})
+const Setup = Schema.Struct({
+  canChooseSms: Schema.Boolean, smsRole: Reported, dialerRole: Reported, eid: Reported,
+  hardware: Schema.Struct({ manufacturer: Reported, model: Reported, baseband: Reported, device: Schema.optionalKey(Reported), android: Schema.optionalKey(Reported) }),
+  slots: Schema.Array(Schema.Struct({ slotIndex: Schema.Int, imei: Reported, simState: Reported })),
+  subscriptions: Schema.Struct({ status: Schema.optionalKey(FieldStatus), items: Schema.Array(Subscription) }),
+})
+type Setup = typeof Setup.Type
 
 /** What one read of the carrier's identifiers found, and whether there is an eSIM and Alpha can take the SMS role. */
 export interface Identifiers {
@@ -47,6 +58,12 @@ export service CarrierSetup {
   copy(text: string): boolean!!
 }
 
+/** Ask Alpha's carrier bridge for Android's SIMs or access point page. */
+export effect function openCarrierSettings(page: "sim" | "apn"): ("exact" | "nearby" | "refused")!! {
+  const result = tryPromise(() => plugin().openSettings({ page })) catch () => undefined
+  return result?.status !== "opened" ? "refused" : result.specific === true ? "exact" : "nearby"
+}
+
 const statuses: Readonly<Record<Reported["status"], Status>> = { available: "Returned", "permission-denied": "AccessDenied", unavailable: "Missing", unsupported: "Unsupported", "not-read": "NotRead" }
 
 function fieldOf(kind: Kind, index: number, reported: Reported): Field {
@@ -54,26 +71,37 @@ function fieldOf(kind: Kind, index: number, reported: Reported): Field {
   return { kind, index, status, value: status === "Returned" ? reported.value ?? "" : "" }
 }
 
+const unknown: Reported = { status: "unavailable" }
+const reported = (value: string): Reported => ({ status: "available", value })
+
 function fieldsOf(setup: Setup): ReadonlyArray<Field> {
+  const sims = setup.subscriptions
+  const count = sims.status === "available" ? reported(String(sims.items.length)) : { status: sims.status ?? "unavailable" } as const
   return [
     ...setup.slots.flatMap((slot) => [fieldOf("Imei", slot.slotIndex, slot.imei), fieldOf("SimState", slot.slotIndex, slot.simState)]),
-    ...setup.subscriptions.items.flatMap((sim) => [
-      fieldOf("CarrierName", sim.subscriptionId, sim.carrier), fieldOf("Iccid", sim.subscriptionId, sim.iccid), fieldOf("Operator", sim.subscriptionId, sim.operator),
-      fieldOf("OperatorCode", sim.subscriptionId, sim.operatorCode), fieldOf("MobileData", sim.subscriptionId, sim.dataEnabled), fieldOf("Roaming", sim.subscriptionId, sim.roaming),
+    fieldOf("ActiveSims", 0, count),
+    ...sims.items.flatMap((sim, index) => [
+      fieldOf("SimType", index, reported(sim.embedded ? "eSIM" : "Physical SIM")),
+      fieldOf("SimSlot", index, sim.slotIndex !== undefined && sim.slotIndex >= 0 ? reported(String(sim.slotIndex + 1)) : unknown),
+      fieldOf("CarrierName", index, sim.carrier), fieldOf("SimName", index, sim.name ?? unknown), fieldOf("Iccid", index, sim.iccid),
+      fieldOf("Operator", index, sim.operator), fieldOf("OperatorCode", index, sim.operatorCode), fieldOf("MobileData", index, sim.dataEnabled),
+      fieldOf("DataState", index, sim.dataState ?? unknown), fieldOf("NetworkType", index, sim.networkType ?? unknown), fieldOf("Roaming", index, sim.roaming),
+      fieldOf("DefaultData", index, sim.defaultData === undefined ? unknown : reported(sim.defaultData ? "Yes" : "No")),
     ]),
     fieldOf("SmsRole", 0, setup.smsRole), fieldOf("PhoneRole", 0, setup.dialerRole),
-    fieldOf("Manufacturer", 0, setup.hardware.manufacturer), fieldOf("Model", 0, setup.hardware.model), fieldOf("Baseband", 0, setup.hardware.baseband),
+    fieldOf("Manufacturer", 0, setup.hardware.manufacturer), fieldOf("Model", 0, setup.hardware.model), fieldOf("DeviceName", 0, setup.hardware.device ?? unknown),
+    fieldOf("AndroidVersion", 0, setup.hardware.android ?? unknown), fieldOf("Baseband", 0, setup.hardware.baseband),
   ]
 }
 
 /** On the phone: Alpha's `AlphaCarrierSetup` plugin. */
 export const phoneCarrierSetup = Layer.succeed(CarrierSetup, {
-  read: () => Effect.map(Effect.option(tryPromise(() => plugin().read())), Option.map((setup): Identifiers => ({
+  read: () => Effect.map(Effect.option(Effect.flatMap(tryPromise(() => plugin().read()), Schema.decodeUnknownEffect(Setup))), Option.map((setup): Identifiers => ({
     fields: fieldsOf(setup),
-    esim: setup.subscriptions.items.some((sim) => sim.embedded) || setup.eid.status !== "unsupported",
+    esim: setup.eid.status === "not-read" || setup.eid.status === "available" || setup.subscriptions.items.some((sim) => sim.embedded),
     smsChoice: setup.canChooseSms,
   }))),
-  readEid: () => Effect.map(Effect.option(tryPromise(() => plugin().readEid())), (eid) => (Option.isSome(eid) ? fieldOf("Imei", 0, eid.value) : fieldOf("Imei", -1, { status: "not-read" }))),
+  readEid: () => Effect.map(Effect.option(Effect.flatMap(tryPromise(() => plugin().readEid()), Schema.decodeUnknownEffect(Reported))), (eid) => (Option.isSome(eid) ? fieldOf("Imei", 0, eid.value) : fieldOf("Imei", -1, { status: "not-read" }))),
   copy: (text: string) => Effect.map(Effect.option(tryPromise(() => copied(text))), Option.isSome),
 })
 

@@ -21,6 +21,7 @@ import { Machine as Speaker } from "../../gen/app__voice__output.effect.vibe"
 import { Machine as Shell, canReturnCommsView } from "../../gen/app__shell.effect.vibe"
 import { Machine as Layers } from "../../gen/app__shell__layers.effect.vibe"
 import { syncClockNow } from "../clock/sync.vibe"
+import { type NotesSelection, type RendererNote, noteSubjects, notesSelection } from "../notes/selection.vibe"
 import { syncRemindersNow } from "../reminders/reminders.vibe"
 import { Agent } from "../platform/agent.vibe"
 import { Device } from "../platform/device.vibe"
@@ -133,11 +134,14 @@ function viewOf(showing: Conversation.Showing): string {
 }
 
 // spec/app/assistant/index.md, "The agent is told the view, the time zone, the day only from Calendar, and whether something is selected"; spec/app/assistant/context.md, "The day and the location go only to a peer that takes them, and a sensitive screen sends no optional field"; spec/app/assistant/context.md, "The time zone told is the one the phone's interface shows, else the one the screen reported, else the one the agent was launched with, else the host's"
-function observed(told: boolean, context: Conversation.Context, location: LocationObservation | undefined) {
+function observed(told: boolean, context: Conversation.Context, location: LocationObservation | undefined, selectedNote?: RendererNote) {
   if (!told) return undefined
+  const section = Pages.selectionOf(context.section)
+  const selectedObject = context.sensitive ? undefined : section === "" ? selectedNote : { kind: "settings", id: section }
   return encodeTurnContext({
     observation: {
       view: viewOf(context.showing), revision: context.revision, sensitive: context.sensitive, timeZone: Locator.zoneOf(context.zone, "", "", zone()),
+      ...(selectedObject === undefined ? {} : { selectedObject }),
       ...(location === undefined ? {} : { location }),
     },
   }, { optionalFields: true })
@@ -182,8 +186,8 @@ effect function syncAlphaApps(): void!!(Agent | KeyValueStore.KeyValueStore | Ti
 
 // spec/app/assistant/index.md, "Every message asked is posted exactly once, under a new ticket, whoever gave the text, with the screen showing and never a sensitive one"; spec/app/assistant/index.md, "The first word of a reply shows that the agent has the message, and a withdrawal that came too late stops it there"
 // spec/app/assistant/composer.md, "A quoted message goes with the next send, until the owner removes the quote"
-function posted(ticket: number, told: boolean, context: Conversation.Context): Stream.Stream<Conversation.Event, never, Agent | KeyValueStore.KeyValueStore | Time | Turns | Talk | Chats.Machine | Conversation.Machine | Reply.Machine | Composer.Machine | Locator.Machine | Prefs.Machine | Location | Comms.Machine | MailQuestions | MediaReview> {
-  return Stream.callback<Conversation.Event, never, Agent | KeyValueStore.KeyValueStore | Time | Turns | Talk | Chats.Machine | Conversation.Machine | Reply.Machine | Composer.Machine | Locator.Machine | Prefs.Machine | Location | Comms.Machine | MailQuestions | MediaReview>((queue) => effect {
+function posted(ticket: number, told: boolean, context: Conversation.Context): Stream.Stream<Conversation.Event, never, Agent | KeyValueStore.KeyValueStore | Time | Turns | Talk | Chats.Machine | Conversation.Machine | Reply.Machine | Composer.Machine | Locator.Machine | Prefs.Machine | Location | Comms.Machine | MailQuestions | MediaReview | NotesSelection> {
+  return Stream.callback<Conversation.Event, never, Agent | KeyValueStore.KeyValueStore | Time | Turns | Talk | Chats.Machine | Conversation.Machine | Reply.Machine | Composer.Machine | Locator.Machine | Prefs.Machine | Location | Comms.Machine | MailQuestions | MediaReview | NotesSelection>((queue) => effect {
     const { controller } = try Turns
     const { board } = try Talk
     const reply = try Reply.Machine
@@ -226,6 +230,8 @@ function posted(ticket: number, told: boolean, context: Conversation.Context): S
       return
     }
     const location = try whereabouts(context.sensitive, told)
+    const seen = told && !context.sensitive && viewOf(context.showing) === "notes" ? try notesSelection() : undefined
+    const selection = seen?.kind === "canonical-note" && !context.selected ? undefined : seen
     const current = try conversation.get()
     if (!Conversation.canFinish(current, ticket) || current.turn.stopping || current.context.revision !== context.revision || (try history.get()).chosen !== chats.chosen) {
       if (Conversation.canRefuse(current, ticket)) Queue.offerUnsafe(queue, { type: "refuse", ticket })
@@ -263,7 +269,7 @@ function posted(ticket: number, told: boolean, context: Conversation.Context): S
       },
     }
     board.change({ media: [], mediaNote: "" })
-    const metadata = { ...observed(told, context, location), ...(quoted === undefined ? {} : { replyToMessageId: quoted.id }) }
+    const metadata = { ...observed(told, context, location, selection), ...(quoted === undefined ? {} : { replyToMessageId: quoted.id }) }
     const images = files.map(({ data, mimeType, name }) => ({ data, mimeType, name }))
     const result = tryPromise(() => controller.send({ text: outgoing, ...(images.length === 0 ? {} : { images }), ...(Object.keys(metadata).length === 0 ? {} : { metadata }) }, { stream: hooks, ...(enrolled === undefined ? {} : { headers: enrolled.headers }) })) catch () => undefined
     const event = ended(ticket, heard, result)
@@ -381,7 +387,7 @@ function giveBack(board: Board) {
   board.outgoing = ""
 }
 
-function carryTurn(fx: Conversation.Effect): Job<Conversation.Event, Agent | KeyValueStore.KeyValueStore | Time | Turns | Talk | Chats.Machine | Composer.Machine | Conversation.Machine | Reply.Machine | Comms.Machine | Shell | MailQuestions | MediaReview | Locator.Machine | Prefs.Machine | Location, []> {
+function carryTurn(fx: Conversation.Effect): Job<Conversation.Event, Agent | KeyValueStore.KeyValueStore | Time | Turns | Talk | Chats.Machine | Composer.Machine | Conversation.Machine | Reply.Machine | Comms.Machine | Shell | MailQuestions | MediaReview | Locator.Machine | Prefs.Machine | Location | NotesSelection, []> {
   return match (fx) {
     when { tag: "CheckSupport", let support }: answer("support", supported(support), { type: "supported", ticket: support, ok: false, takes: false });
     when { tag: "Upload", let ticket, let attachments }: answer("upload", staged(ticket, attachments), { type: "uploaded", ticket, ok: false });
@@ -655,21 +661,22 @@ const reached = started(effect {
   })
 }, "following Ask Alpha's agent")
 
-/** The Settings pages whose screen the agent is never told: the carrier's identifiers (and Passwords once ported). */
-const sensitivePages: ReadonlySet<Pages.Page> = new Set(["CarrierPage"])
-
 // spec/app/assistant/index.md, "A screen that changed takes a new revision and stops the turn in flight; an unchanged one is ignored"; spec/app/assistant/index.md, "A sensitive screen says only that it is sensitive: no selection and no day"
 const looked = started(effect {
   const shell = try Shell
   const settings = try Pages.Machine
   const conversation = try Conversation.Machine
   let taken: string | undefined
-  try Stream.runForEach(Stream.zipLatest(Stream.zipLatest(shell.changes, settings.changes), conversation.changes), effect ([[shown, pages]]) => {
+  const page = Stream.zipLatest(shell.changes, settings.changes)
+  const selection = Stream.zipLatest(noteSubjects, conversation.changes)
+  try Stream.runForEach(Stream.zipLatest(page, selection), effect ([[shown, pages], [note]]) => {
     const view = shown.trail.at(-1)
-    const sensitive = view === "Settings" && sensitivePages.has(pages.page)
-    const seen = `${view ?? ""} ${sensitive}`
+    const section: Pages.Page = view === "Settings" ? pages.page : "Top"
+    const sensitive = view === "Settings" && Pages.sensitive(pages)
+    const selected = view === "Notes" && !sensitive && note > 0
+    const seen = `${view ?? ""} ${section} ${sensitive} ${selected ? note : ""}`
     if (seen === taken) return
-    const event: Conversation.Event = { type: "look", showing: view === undefined ? { tag: "Home" } : { tag: "App", view }, zone: zone(), day: 0, selected: false, sensitive }
+    const event: Conversation.Event = { type: "look", showing: view === undefined ? { tag: "Home" } : { tag: "App", view }, zone: zone(), day: 0, selected, sensitive, section }
     if (!Conversation.enabled(try conversation.get(), event) || (try contained(conversation.send(event), "telling the screen"))) taken = seen
   })
 }, "telling the screen")

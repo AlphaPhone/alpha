@@ -1,17 +1,12 @@
-import { Button } from "../Button.tsx";
-import { ListGroup } from "../ListGroup.tsx";
-import { ListRow } from "../ListRow.tsx";
-import { Sheet, SheetClose, SheetContent } from "../Sheet.tsx";
 import { InboxNotice } from "./InboxNotice.tsx";
+import { InboxReviewDialog } from "./InboxReviewDialog.tsx";
 
 const operations = {
-  archive: { verb: "Archive", confirm: "Archive" },
-  trash: { verb: "Move to Trash", confirm: "Move to Trash" },
-  unarchive: { verb: "Move back to the Inbox", confirm: "Move back" },
-  untrash: { verb: "Take out of Trash", confirm: "Take out" },
+  archive: { verb: "Archive" },
+  trash: { verb: "Move to Trash" },
+  unarchive: { verb: "Restore" },
+  untrash: { verb: "Restore" },
 } as const;
-
-const shown = 4;
 
 export type InboxChangeReviewProps = {
   /** Whether the review is up; the parent keeps it. */
@@ -37,28 +32,11 @@ export type InboxChangeReviewProps = {
  * @model spec/app/inbox/sending.md
  */
 export function InboxChangeReview({ open, operation, messages, changed = false, onConfirm, confirming = false, onCancel }: InboxChangeReviewProps) {
-  const { verb, confirm } = operations[operation];
-  const rest = messages.length - shown;
+  const { verb } = operations[operation];
+  const one = messages.length === 1 ? messages[0] : undefined;
   return (
-    <Sheet open={open} onOpenChange={(next) => { if (!next && !confirming) onCancel(); }}>
-      <SheetContent
-        title={`${verb}?`}
-        description={`${messages.length} ${messages.length === 1 ? "email" : "emails"}`}
-        actions={
-          <>
-            <SheetClose asChild><Button variant="secondary" disabled={confirming}>Cancel</Button></SheetClose>
-            {changed ? null : <Button loading={confirming} disabled={!onConfirm} onClick={onConfirm}>{confirm}</Button>}
-          </>
-        }
-      >
-        <div className="flex flex-col gap-3">
-          {changed ? <InboxNotice kind="selectAgain" /> : null}
-          <ListGroup surface="plain">
-            {messages.slice(0, shown).map(({ id, sender, subject }) => <ListRow key={id} title={subject} detail={sender} />)}
-          </ListGroup>
-          {rest > 0 ? <p className="px-4 text-sm text-muted-foreground">+{rest}</p> : null}
-        </div>
-      </SheetContent>
-    </Sheet>
+    <InboxReviewDialog open={open} title={`${verb} ${messages.length} ${messages.length === 1 ? "email" : "emails"}?`} onYes={changed ? undefined : onConfirm} busy={confirming} onNo={onCancel}>
+      {changed ? <InboxNotice kind="selectAgain" /> : one ? <p className="truncate text-muted-foreground">{one.subject || one.sender}</p> : undefined}
+    </InboxReviewDialog>
   );
 }

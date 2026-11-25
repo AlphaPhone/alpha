@@ -38,6 +38,8 @@ export type VoiceNoteViewProps = Omit<ComponentProps<"section">, "title"> & {
   lines?: VoiceNoteLine[];
   /** The note's actions: a `NoteMenu`. */
   menu?: ReactNode;
+  /** A status or confirmation concerning this note. */
+  feedback?: ReactNode;
   /** Plays the recording, or pauses it; offered only with it. */
   onPlay?: () => void;
   /** Ticks or unticks an action item; offered only with it. */
@@ -51,7 +53,7 @@ export type VoiceNoteViewProps = Omit<ComponentProps<"section">, "title"> & {
 const card = "mt-5.5 flex flex-col gap-3 rounded-panel bg-secondary p-4.5";
 
 /** An open voice note: its title and length, playback, the summary and action items, and the transcript. */
-export function VoiceNoteView({ title, meta, time = "", playing = false, summary = [], actions = [], lines = [], menu, onPlay, onAction, onSeek, onBack, className, ...props }: VoiceNoteViewProps) {
+export function VoiceNoteView({ title, meta, time = "", playing = false, summary = [], actions = [], lines = [], menu, feedback, onPlay, onAction, onSeek, onBack, className, ...props }: VoiceNoteViewProps) {
   return (
     <section aria-label={title} className={cn("absolute inset-0 z-10 flex flex-col bg-background", className)} {...props}>
       <div className="flex h-14 shrink-0 items-center gap-0.5 px-2">
@@ -71,6 +73,7 @@ export function VoiceNoteView({ title, meta, time = "", playing = false, summary
             <div className="mt-1 text-right text-xs text-muted-foreground">{time}</div>
           </div>
         </div>
+        {feedback}
         <div className={card}>
           <span className="flex size-5 shrink-0 items-center justify-center text-primary"><Mark aria-hidden className="size-full" /></span>
           {summary.length === 0 && <div className="text-base text-muted-foreground">Too short</div>}

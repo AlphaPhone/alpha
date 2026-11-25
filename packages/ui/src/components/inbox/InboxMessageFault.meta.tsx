@@ -10,7 +10,7 @@ export const meta: ComponentMeta<InboxMessageFaultProps> = {
   play: {
     Default: async ({ canvasElement }: { canvasElement: HTMLElement }) => {
       onAction.mockClear();
-      await userEvent.click(within(canvasElement).getByRole("button", { name: "Try again" }));
+      await userEvent.click(within(canvasElement).getByRole("button", { name: "Retry" }));
       await expect(onAction.mock.calls.length).toBe(1);
     },
     "Too large": ({ canvasElement }: { canvasElement: HTMLElement }) => expect(within(canvasElement).getByRole("button", { name: "Open in Gmail" })).toBeInTheDocument(),

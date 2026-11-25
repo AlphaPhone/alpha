@@ -1,5 +1,3 @@
-import type { ReactNode } from "react";
-import { Calendar, Camera, Folder, Image, MapPin, Mic, Bell } from "lucide-react";
 import { SettingsNavRow } from "./SettingsNavRow.tsx";
 import { SettingsReading } from "./SettingsReading.tsx";
 import type { Access, AccessWord, Reading } from "./vocabulary.ts";
@@ -13,14 +11,14 @@ export type SettingsAccessRowProps = {
   onReview?: () => void;
 };
 
-const names: Record<Access, { title: string; icon: ReactNode }> = {
-  camera: { title: "Camera", icon: <Camera /> },
-  microphone: { title: "Microphone", icon: <Mic /> },
-  location: { title: "Location", icon: <MapPin /> },
-  calendar: { title: "Calendar", icon: <Calendar /> },
-  photos: { title: "Photos", icon: <Image /> },
-  files: { title: "Files", icon: <Folder /> },
-  notifications: { title: "Notifications", icon: <Bell /> },
+const names: Record<Access, string> = {
+  camera: "Camera",
+  microphone: "Microphone",
+  location: "Location",
+  calendar: "Calendar",
+  photos: "Photos",
+  files: "Files",
+  notifications: "Notifications",
 };
 
 const readings: Record<AccessWord, Reading> = {
@@ -37,6 +35,6 @@ const readings: Record<AccessWord, Reading> = {
  * @model spec/app/settings/facts.md
  */
 export function SettingsAccessRow({ access, grant, onReview }: SettingsAccessRowProps) {
-  const { title, icon } = names[access];
-  return <SettingsNavRow title={title} icon={icon} detail={<SettingsReading reading={readings[grant]} />} onOpen={onReview} />;
+  const title = names[access];
+  return <SettingsNavRow title={title} detail={<SettingsReading reading={readings[grant]} />} onOpen={onReview} />;
 }

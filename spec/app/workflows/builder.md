@@ -95,7 +95,7 @@ pure val weight_reviewResend = 3
 pure val weight_confirmResend = 3
 ```
 
-### A new workflow is opened with an empty slot or the slot's own draft, and a saved one only while no run of it is unfinished
+### A new workflow is opened with an empty slot or the owner's kept draft, and a saved one only while no run of it is unfinished
 
 A draft of another workflow, or one not yet kept, is never written over:
 the owner discards it first. Opening reads what this agent offers and, for
@@ -118,11 +118,11 @@ pure def canOfferRead(b: Builder, ticket: int, steps: List[T::Step]): bool =
   R::canAnswer(b.offer, ticket) and T::shaped(steps)
 
 pure def offerRead(b: Builder, ticket: int, ok: bool, speaks: bool, reminders: bool, runDay: bool, schedules: bool,
-                   generates: bool, steps: List[T::Step], name: int): Builder =
+                   generates: bool, steps: List[T::Step], name: int, when: S::When): Builder =
   val read = { ...b, offer: R::answer(b.offer, ok), catalog: { speaks: ok and speaks, reminders: ok and reminders, runDay: ok and runDay },
     schedules: ok and schedules, generates: ok and generates }
-  val loads = ok and b.workflow >= 1 and b.steps.length() == 0 and b.name == 0 and 1 <= name and name <= maxName
-  if (loads) { ...read, steps: steps, name: name, next: steps.foldl(1, (n, s) => if (s.id >= n) s.id + 1 else n) } else read
+  val loads = ok and b.steps.length() == 0 and b.name == 0 and 0 <= name and name <= maxName and S::wellFormed(when)
+  if (loads) { ...read, steps: steps, name: name, when: when, next: steps.foldl(1, (n, s) => if (s.id >= n) s.id + 1 else n) } else read
 ```
 
 ### The draft changes only while the builder is open on the agent's offer, and never while its save is kept or its copy on the phone is in conflict
@@ -137,10 +137,10 @@ pure def changed(draft: D::Draft, b: Builder): Builder =
   { ...b, draft: D::edit(draft), review: V::dismiss(V::revise(b.review)), discarding: false }
 ```
 
-### A workflow is named in 1 to 80 characters
+### A draft name may be empty while editing; a saved workflow is named in 1 to 80 characters
 
 ```quint
-pure def canRename(b: Builder, chars: int): bool = unlocked(b) and 1 <= chars and chars <= maxName and chars != b.name
+pure def canRename(b: Builder, chars: int): bool = unlocked(b) and 0 <= chars and chars <= maxName
 
 pure def rename(b: Builder, chars: int): Builder = changed(b.draft, { ...b, name: chars })
 ```

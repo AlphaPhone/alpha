@@ -25,7 +25,7 @@ const accesses: Access[] = ["camera", "microphone", "location", "calendar", "pho
  */
 export function SettingsPermissionsPage({ grants, told, onBack, onReview, starting, onAndroid }: SettingsPermissionsPageProps) {
   return (
-    <SettingsPage title="Permissions" told={told} onBack={onBack}>
+    <SettingsPage title="App permissions" told={told} onBack={onBack} backLabel="Back to Privacy">
       <ListGroup>
         {accesses.map((access) => (
           <SettingsAccessRow key={access} access={access} grant={grants[access]} onReview={onReview && (() => onReview(access))} />

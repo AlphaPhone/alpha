@@ -28,13 +28,13 @@ export function InboxMessageHeader({ sender, address, to, cc, replyTo, date }: I
       <Avatar name={sender} className="size-11 shrink-0" />
       <details className="group min-w-0 flex-1">
         <summary aria-label="Show message details" className={`${focusRing} flex min-h-11 cursor-pointer list-none flex-col justify-center rounded-sm`}>
-          <span className="flex min-w-0 items-center gap-1 text-base font-semibold">
+          <span className="flex min-w-0 items-center gap-2 text-body leading-tight font-semibold">
             <span className="truncate">{sender || "Unknown sender"}</span>
-            <ChevronDown aria-hidden className="size-4 shrink-0 text-muted-foreground group-open:rotate-180" />
+            <ChevronDown aria-hidden className="size-3.5 shrink-0 text-muted-foreground group-open:rotate-180" />
           </span>
-          <span className="truncate text-xs text-muted-foreground">{to ? `To ${to}` : "Undisclosed recipients"}{date ? ` · ${date}` : ""}</span>
+          <span className="mt-0.5 truncate text-meta text-muted-foreground">{to ? `To ${to}` : "Undisclosed recipients"}{date ? ` · ${date}` : ""}</span>
         </summary>
-        <dl className="mt-2 grid grid-cols-[auto_minmax(0,1fr)] gap-x-3 gap-y-1 rounded-md bg-muted p-3 text-sm [overflow-wrap:anywhere]">
+        <dl className="mt-3 grid grid-cols-[auto_minmax(0,1fr)] gap-x-3 gap-y-2 text-meta leading-snug [overflow-wrap:anywhere]">
           <dt className="text-muted-foreground">From</dt>
           <dd>{address && address !== sender ? `${sender} <${address}>` : sender || "Unknown sender"}</dd>
           <dt className="text-muted-foreground">To</dt>
