@@ -1,6 +1,7 @@
 // spec/app/phone/voicemail.md, "Story: See my voicemail"; spec/app/phone/voicemail.md, "Story: Listen to a voicemail"; spec/app/phone/voicemail.md, "Story: Read what was said"; spec/app/phone/voicemail.md, "Story: Answer a voicemail"; spec/app/phone/voicemail.md, "Story: Delete a voicemail"
 import type { ListedVoicemail } from "@elizaos/os-bridges";
-import { Banner, Button, Spinner, cn, focusRing } from "@repo/ui";
+import { Banner, Button, Slider, Spinner, cn, focusRing } from "@repo/ui";
+import { Effect } from "effect";
 import { useSyncExternalStore } from "react";
 import { useMachine as usePhone } from "../../gen/app__phone.react.ts";
 import { useMachine as useVoicemail } from "../../gen/app__phone__voicemail.react.ts";
@@ -16,12 +17,12 @@ const playbackPlaceholder = "size-11 shrink-0 rounded-full bg-accent motion-safe
 const action = "flex-1 bg-background hover:bg-accent";
 
 function Position({ runtime, length, enabled }: Pick<Props, "runtime"> & { length: number; enabled: boolean }) {
-  const player = runtime.runSync(Player.use((service) => service.controls()));
+  const player = runtime.runSync(Effect.flatMap(Player, (service) => service.controls()));
   const position = useSyncExternalStore(player.subscribe, player.position, () => 0);
   return (
     <>
-      <input type="range" aria-label="Position" className="h-11 min-w-0 flex-1 bg-background accent-foreground" min={0} max={length}
-        value={Math.min(position, length)} disabled={!enabled} onChange={(event) => player.seek(event.currentTarget.valueAsNumber)} />
+      <Slider aria-label="Position" aria-valuetext={clockLength(position)} className="min-w-0 flex-1"
+        min={0} max={Math.max(1, length)} value={Math.min(position, length)} disabled={!enabled || length === 0} onValueChange={player.seek} />
       <span className="shrink-0 text-sm text-muted-foreground tabular-nums">{clockLength(position)} / {clockLength(length)}</span>
     </>
   );
@@ -36,7 +37,7 @@ function OpenVoicemail({ runtime, row, label, title, date }: Pick<Props, "runtim
   const { state, can, send } = useVoicemail(runtime);
   const phone = usePhone(runtime);
   if (!state || !phone.state) return null;
-  const held = runtime.runSync(Voicemails.use((store) => store.get()));
+  const held = runtime.runSync(Effect.flatMap(Voicemails, (store) => store.get()));
   const busy = state.removal.outcome === "Sent";
   const live = phone.state.telecom === "OrdinaryCall" || phone.state.telecom === "MaybeEmergencyCall";
   const play = { type: "play", live } as const;
@@ -93,12 +94,12 @@ function OpenVoicemail({ runtime, row, label, title, date }: Pick<Props, "runtim
 export function VoicemailTab({ runtime, now }: Props) {
   const { state, can, send } = useVoicemail(runtime);
   if (!state) return null;
-  const held = runtime.runSync(Voicemails.use((store) => store.get()));
+  const held = runtime.runSync(Effect.flatMap(Voicemails, (store) => store.get()));
   const rows = state.items > 0 ? held.rows : [];
   const open = async (row: ListedVoicemail) => {
     const opening = { type: "open", carrierText: row.carrierTranscript !== null } as const;
     if (!can(opening)) return;
-    runtime.runSync(Voicemails.use((store) => store.set({ open: row.id, audio: "", transcript: "" })));
+    runtime.runSync(Effect.flatMap(Voicemails, (store) => store.set({ open: row.id, audio: "", transcript: "" })));
     await send(opening);
   };
   return (
