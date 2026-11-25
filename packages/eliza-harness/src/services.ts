@@ -9,7 +9,7 @@ import path from "node:path";
 import { pipeline } from "node:stream";
 import { Effect } from "effect";
 import { prepared } from "./checkout.ts";
-import { builtPack, packDist } from "./pack.ts";
+import { builtPack } from "./pack.ts";
 
 /** What the model answers next: the pieces of a reply, or one piece and then nothing until the caller gives up. */
 export type Reply = { readonly kind: "text"; readonly parts: readonly string[] } | { readonly kind: "stall"; readonly first: string };
@@ -400,10 +400,10 @@ const owner = { email: "owner@alpha.test", credits: 50_000_000 };
  * directory to keep the agent's in instead.
  */
 export async function startEliza(keep?: string, real?: RealModel) {
+  const { character } = await builtPack();
   const state = scratch();
   const cloud = await startCloud(state, [owner.email], owner.credits, real);
   const key = cloud.owners.get(owner.email)!;
-  const character = JSON.parse(fs.readFileSync(path.join(packDist, "host/character.json"), "utf8")) as { name: string; system: string };
   const agent = await startAgent(keep ?? state, cloud, key, character, keep !== undefined);
   return { cloud, agent, key, stop: async () => { await agent.stop(); await cloud.stop(); fs.rmSync(state, { recursive: true, force: true }); } };
 }
