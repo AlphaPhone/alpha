@@ -434,6 +434,25 @@ describe("Files on a phone", () => {
     await press("Select again: notes.txt");
     await until(alpha, runtime, Shown, (s) => s.content.status === "Loaded" && s.kind === "Text");
     expect(document.querySelector("pre")?.textContent).toBe("The words of restored.txt");
+
+    // spec/app/files/preview.md, "A picked document is renamed through its provider using the access held for the viewer"
+    const pickedViewer = runtime.runSync(Shown.use((machine) => machine.get())).viewer;
+    await choose("Rename", "File actions");
+    await fill("Name", "retained.txt");
+    await pressOnTop("Rename");
+    await until(alpha, runtime, Shown, (s) => s.viewer > pickedViewer && s.renaming === 0 && s.content.status === "Loaded");
+    expect(document.querySelector("pre")?.textContent).toBe("The words of retained.txt");
+
+    world.files.pickerRenameNeedsReselection = true;
+    await choose("Rename", "File actions");
+    await fill("Name", "reselect.txt");
+    await pressOnTop("Rename");
+    await until(alpha, runtime, Shown, (s) => s.viewer > pickedViewer && s.renaming === 0 && !s.reachable);
+    expect(document.querySelector("[aria-label='Preview']")?.textContent).toContain("reselect.txt");
+    world.files.selectedByPicker = "Download/reselect.txt";
+    await press("Select again");
+    await until(alpha, runtime, Shown, (s) => s.content.status === "Loaded" && s.reachable);
+    expect(document.querySelector("pre")?.textContent).toBe("The words of reselect.txt");
     await hardware("back");
     await until(alpha, runtime, Shown, (s) => s.viewer === 0);
     // spec/app/files/recent.md, "A file selected again takes the place of its lapsed row": restored.txt stands where notes.txt was, ahead of code.txt, which still holds its access

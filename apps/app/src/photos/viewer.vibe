@@ -4,7 +4,7 @@ import * as KeyValueStore from "effect/persistence/KeyValueStore"
 import * as Library from "../../gen/app__photos.effect.vibe"
 import type { Actor } from "../../gen/app__photos__actor.effect.vibe"
 import * as Viewer from "../../gen/app__photos__viewer.effect.vibe"
-import { PhotosPort, canReplaceBrowserEdit, isBrowserEdit, type BrowserCapture } from "../platform/photos.vibe"
+import { PhotosPort, canReplaceBrowserEdit, isBrowserEdit, type BrowserSource } from "../platform/photos.vibe"
 import { photoRefusal, renderBrowserPhoto, type BrowserEditFrame, type PhotoLook } from "../platform/photoCanvas.vibe"
 import { clipRefusal, renderBrowserClip } from "../platform/videoCanvas.vibe"
 import { Catalog } from "./catalog.vibe"
@@ -54,7 +54,7 @@ export interface MediaView {
   readonly uri: string
   readonly local: boolean
   readonly item?: MediaItem
-  readonly browser?: { readonly item: BrowserCapture; readonly file: Blob }
+  readonly browser?: BrowserSource
 }
 
 export interface EditView {
@@ -102,14 +102,14 @@ effect function loaded(ticket: number, photo: number): Viewer.Event!!(Viewer.Mac
   const { rows } = try cache.displayed()
   const row = rows.get(photo)
   if (row === undefined) return failed(ticket)
-  const { phone, original } = try PhotosPort
+  const { phone, capture } = try PhotosPort
   if (row.kind === "browser") {
-    const item = row.item
-    const kind = item.mimeType.startsWith("video/") ? "Clip" : "Still"
-    const duration = kind === "Clip" ? Math.max(1, Math.round((item.duration ?? 0) * 10)) : 0
-    const file = original(item.id) catch () => undefined
-    if (file === undefined || !Viewer.canLoaded(try viewing.get(), ticket, kind, duration, "Phone")) return failed(ticket)
-    try (try OpenedPhoto).hold({ photo, uri: localUri(file), local: true, browser: { item, file } })
+    const source = capture(row.item.id) catch () => undefined
+    if (source === undefined) return failed(ticket)
+    const kind = source.item.mimeType.startsWith("video/") ? "Clip" : "Still"
+    const duration = kind === "Clip" ? Math.max(1, Math.round((source.item.duration ?? 0) * 10)) : 0
+    if (!Viewer.canLoaded(try viewing.get(), ticket, kind, duration, "Phone")) return failed(ticket)
+    try (try OpenedPhoto).hold({ photo, uri: localUri(source.file), local: true, browser: source })
     return { type: "loaded", ticket, ok: true, kind, duration, revision: try cache.revision(), favourite: false }
   }
   if (Option.isNone(phone)) return failed(ticket)
@@ -195,7 +195,11 @@ effect function browserPreview(current: MediaView, revision: number, edit: Viewe
   }
   if (session === undefined) {
     const refusal = tryPromise(() => photoRefusal(source.file, source.item.width, source.item.height)) catch () => "NoEditor" as const
-    if (refusal !== undefined) return { type: "editRefused", why: refusal }
+    if (refusal !== undefined) {
+      const pending = try model.get()
+      return pending.open === current.photo && Viewer.canPreviewed(pending, revision, "Phone")
+        ? { type: "editRefused", why: refusal } : { type: "previewed", revision, ok: false }
+    }
   }
   const frame = tryPromise(() => renderBrowserPhoto(source.file, { turns: edit.turns, look: looks[edit.look], crop: cropSource ? undefined : cropRect(edit.bounds) })) catch () => undefined
   const pending = try model.get()
@@ -219,12 +223,11 @@ effect function written(request: Save): Viewer.Event!!(Library.Machine | Viewer.
   const { attempt, photo, revision, edit, replace } = request
   const answer = { type: "saved", attempt, known: true, confirmed: false } as const
   if (photo !== current.photo || revision !== model.revision || session === undefined) return answer
-  const { value } = session
-  const kept = store.set(operationKey(attempt), value.operationId) catch () => false
+  const preview = session.kind === "browser" ? try open.preview() : undefined
+  const kept = store.set(operationKey(attempt), session.value.operationId) catch () => false
   if (kept === false) return answer
   if (session.kind === "browser") {
     const source = current.browser
-    const preview = try open.preview()
     if (source === undefined || preview?.revision !== model.preview.revision) return answer
     const video = source.item.mimeType.startsWith("video/")
     const frame = video ? (tryPromise({
@@ -236,8 +239,9 @@ effect function written(request: Save): Viewer.Event!!(Library.Machine | Viewer.
     const receipt = saveEdit({ operation: session.value.operationId, source: source.item, frame, replace: replace && !video }) catch () => undefined
     if (receipt?.status !== "saved") return { ...answer, known: receipt !== undefined }
     const visible = try (try Viewer.Machine).get()
-    if (receipt.replaced && visible.open === current.photo && visible.revision === revision) {
-      const item = { ...source.item, id: receipt.id, revision: session.value.operationId, mimeType: frame.file.type, size: frame.file.size,
+    if (receipt.replaced && visible.visible && visible.open === current.photo && visible.revision === revision
+      && (try open.current()) === current) {
+      const item = { ...source.item, id: receipt.id, name: receipt.name ?? source.item.name, revision: session.value.operationId, mimeType: frame.file.type, size: frame.file.size,
         width: frame.width, height: frame.height, duration: frame.duration, thumbnail: frame.thumbnail }
       try open.hold({ photo, uri: localUri(frame.file), local: true, browser: { item, file: frame.file } })
     }
