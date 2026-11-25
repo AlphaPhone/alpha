@@ -438,9 +438,12 @@ function warmLocalVoice(selected: Active, now: number): void {
       return;
     }
     const native = registerPlugin<{ localSpeechStatus(input: { requestId: string; ttsOnly?: boolean }): Promise<unknown> }>('AlphaVoiceCloud');
-    void native.localSpeechStatus({ requestId: `warm-${crypto.randomUUID()}`, ttsOnly: true }).catch(() => {
-      if (lastLocalVoiceWarm === now) lastLocalVoiceWarm = Number.NEGATIVE_INFINITY;
-    });
+    // Registered so the owner's own speech requests wait for it instead of being refused (local-speech-warm).
+    void import('./local-speech-warm').then(({ runLocalSpeechWarm }) => runLocalSpeechWarm(() =>
+      native.localSpeechStatus({ requestId: `warm-${crypto.randomUUID()}`, ttsOnly: true }).catch(error => {
+        if (lastLocalVoiceWarm === now) lastLocalVoiceWarm = Number.NEGATIVE_INFINITY;
+        throw error;
+      })));
     if (alphaVoiceCloudMethodAvailable('liveCaptureStatus')) {
       void import('./native-live-voice').then(m => m.warmNativeLiveVoice()).catch(() => {});
     }

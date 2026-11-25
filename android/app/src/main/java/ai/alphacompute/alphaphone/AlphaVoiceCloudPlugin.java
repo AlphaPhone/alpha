@@ -45,7 +45,7 @@ public final class AlphaVoiceCloudPlugin extends LocalSpeechBridgePlugin {
  private static final Set<AlphaVoiceCloudPlugin> activeVoices=new java.util.concurrent.CopyOnWriteArraySet<>();
  private static final Set<Streaming> activeStreams=new java.util.concurrent.CopyOnWriteArraySet<>();
  private final PasswordSurfaces.Listener secretSurface=visible->{if(visible){closeWarmSpeech();retireSpeechAuthority();}};
- @Override protected void handleOnDestroy(){activeVoices.remove(this);PasswordSurfaces.removeListener(secretSurface);closeWarmSpeech();prewarmExecutor.shutdownNow();super.handleOnDestroy();}
+ @Override protected void handleOnDestroy(){activeVoices.remove(this);PasswordSurfaces.removeListener(secretSurface);getContext().unregisterComponentCallbacks(warmMemory);closeWarmSpeech();prewarmExecutor.shutdownNow();super.handleOnDestroy();}
  @Override protected boolean sensitiveSurfaceActive(){return PasswordSurfaces.visible();}
  static void retireProviderAuthority(){
   for(AlphaVoiceCloudPlugin voice:activeVoices)voice.mainHandler().post(voice::retireSpeechAuthority);
@@ -106,8 +106,10 @@ public final class AlphaVoiceCloudPlugin extends LocalSpeechBridgePlugin {
      boolean kept=false;
      try{
       speech.prepareVoice();
-      if(!destroyed()&&noteForeground&&!sensitiveSurfaceActive()&&!callActive()){
-       synchronized(warmSpeechLock){
+      // Checked under the lock pause, destroy and the password surface close it with: a warm-up that
+      // finishes as the app leaves the foreground is closed here or by that close, never kept.
+      synchronized(warmSpeechLock){
+       if(!destroyed()&&noteForeground&&!sensitiveSurfaceActive()&&!callActive()){
         if(warmSpeech!=null)warmSpeech.close();
         warmSpeech=speech;
         kept=true;
@@ -121,9 +123,15 @@ public final class AlphaVoiceCloudPlugin extends LocalSpeechBridgePlugin {
  }
  /** The shared bridge's refusal code for an active call, so the renderer shows its one call line. */
  private static final String CALL_ACTIVE_CODE="call-active";
- @Override public void load(){super.load();activeVoices.add(this);PasswordSurfaces.addListener(secretSurface);recording().selectAlso(id->AlphaNoteRecorder.get(getContext()).segment(id));prewarmVoiceAsync();}
+ @Override public void load(){super.load();activeVoices.add(this);PasswordSurfaces.addListener(secretSurface);recording().selectAlso(id->AlphaNoteRecorder.get(getContext()).segment(id));getContext().registerComponentCallbacks(warmMemory);prewarmVoiceAsync();}
  @Override protected void handleOnResume(){noteForeground=true;super.handleOnResume();prewarmVoiceAsync();}
  @Override protected void handleOnPause(){noteForeground=false;closeWarmSpeech();super.handleOnPause();}
+ // Memory pressure, or the UI hidden, releases the advisory warm voice; the bridge's own engine has its own callbacks.
+ private final android.content.ComponentCallbacks2 warmMemory=new android.content.ComponentCallbacks2(){
+  @Override public void onConfigurationChanged(android.content.res.Configuration value){}
+  @Override public void onLowMemory(){closeWarmSpeech();}
+  @Override public void onTrimMemory(int level){if(level==TRIM_MEMORY_UI_HIDDEN||level>=TRIM_MEMORY_RUNNING_LOW)closeWarmSpeech();}
+ };
  private boolean callActive(){android.media.AudioManager audio=(android.media.AudioManager)getContext().getSystemService(android.content.Context.AUDIO_SERVICE);int mode=audio==null?android.media.AudioManager.MODE_NORMAL:audio.getMode();return mode==android.media.AudioManager.MODE_IN_CALL||mode==android.media.AudioManager.MODE_IN_COMMUNICATION||mode==android.media.AudioManager.MODE_RINGTONE;}
  /** The last state the notification showed, so it is rebuilt only when the state changes. */
  private volatile String lastNoteState;

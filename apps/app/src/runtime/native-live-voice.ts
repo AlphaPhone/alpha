@@ -71,6 +71,20 @@ const cachedPort: NativeLiveCapturePort = {
   addListener: plugin.addListener.bind(plugin),
 };
 
+/** A shared status request settles for each caller on that caller's own signal, never another's. */
+function forCaller<T>(shared: Promise<T>, signal: AbortSignal | undefined): Promise<T> {
+  if (!signal) return shared;
+  if (signal.aborted) return Promise.reject(signal.reason);
+  return new Promise<T>((resolve, reject) => {
+    const abort = () => reject(signal.reason);
+    signal.addEventListener('abort', abort, { once: true });
+    shared.then(
+      value => { signal.removeEventListener('abort', abort); resolve(value); },
+      error => { signal.removeEventListener('abort', abort); reject(error); },
+    );
+  });
+}
+const SHARED_LIVE_STATUS_TIMEOUT_MS = 15_000;
 /** The resident session's live route, with its owner only while both name the same session. */
 function resident(): NativeResidentBinding | null {
   const live = connectionController.getResidentLiveVoice();
@@ -82,9 +96,10 @@ function resident(): NativeResidentBinding | null {
         return Promise.resolve(cachedAgentLiveStatus.value);
       }
       if (inflightAgentLiveStatus?.sessionId === live.sessionId) {
-        return inflightAgentLiveStatus.promise;
+        return forCaller(inflightAgentLiveStatus.promise, signal);
       }
-      const pending = live.request(path, body, signal).then(value => {
+      // Shared by every caller until it settles, so it carries its own bound, not the first caller's signal.
+      const pending = live.request(path, body, AbortSignal.timeout(SHARED_LIVE_STATUS_TIMEOUT_MS)).then(value => {
         if ((value as { ready?: unknown; streaming?: unknown } | null)?.ready === true) {
           cachedAgentLiveStatus = { sessionId: live.sessionId, at: Date.now(), value };
         }
@@ -93,7 +108,8 @@ function resident(): NativeResidentBinding | null {
         if (inflightAgentLiveStatus?.promise === pending) inflightAgentLiveStatus = undefined;
       });
       inflightAgentLiveStatus = { sessionId: live.sessionId, promise: pending };
-      return pending;
+      void pending.catch(() => {});
+      return forCaller(pending, signal);
     }
     return live.request(path, body, signal).catch(error => {
       if (String(path).startsWith('/api/asr/local-inference/live')) cachedAgentLiveStatus = undefined;

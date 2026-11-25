@@ -4,6 +4,7 @@ import fs from 'node:fs';
 import {build} from 'esbuild';
 import {createVoiceSessionClient} from '../apps/app/src/ui/voice/voice-session-client-core.ts';
 import {AlphaClient} from '../apps/app/src/runtime/alpha-client.ts';
+import {runLocalSpeechWarm, afterLocalSpeechWarm} from '../apps/app/src/runtime/local-speech-warm.ts';
 
 test('local-voice ready forwards ttsOnly: true when requested so live conversation does not load Phonon-2 in Context #1', async () => {
   const statusCalls = [];
@@ -340,4 +341,51 @@ test('AlphaClient.admitOwnContextRefresh preserves continuesContext on same-view
   client.admitOwnContextRefresh('calendar', 5000);
   client.setViewContext({view: 'calendar', timeZone: 'UTC', sensitive: true});
   assert.equal(client.continuesContext(cal), false, 'sensitive screen must never be admitted as own refresh');
+});
+
+test('an own context refresh keeps the request in flight only for the same object; another object or a Browser change retires it', () => {
+  const client = new AlphaClient();
+  const inFlight = () => { const active = new AbortController(); client.active = active; return active; };
+  client.setViewContext({view: 'notes', timeZone: 'UTC', selectedObject: {kind: 'note', id: 'n1', revision: 'r1'}});
+  let active = inFlight();
+  client.admitOwnContextRefresh('notes', 5000);
+  client.setViewContext({view: 'notes', timeZone: 'UTC', selectedObject: {kind: 'note', id: 'n1', revision: 'r2'}});
+  assert.equal(active.signal.aborted, false, 'the same note refreshed in place keeps the reply');
+  assert.equal(client.active, active);
+
+  const before = client.getState().context;
+  client.setViewContext({view: 'notes', timeZone: 'UTC', selectedObject: {kind: 'note', id: 'n2', revision: 'r1'}});
+  assert.equal(active.signal.aborted, true, 'another note never acquires the earlier turn');
+  assert.equal(client.continuesContext(before), true, 'the conversation still continues there');
+
+  client.setViewContext({view: 'browser', timeZone: 'UTC', selectedObject: {kind: 'browser-tab', id: 't1', revision: '1'}});
+  active = inFlight();
+  client.admitOwnContextRefresh('browser', 5000);
+  client.setViewContext({view: 'browser', timeZone: 'UTC', selectedObject: {kind: 'browser-tab', id: 't1', revision: '2'}});
+  assert.equal(active.signal.aborted, true, 'a new document in the same tab retires the request, as ownBrowserLoad does');
+});
+
+test('owner speech requests wait for the background warm-up instead of racing it', async () => {
+  let finish;
+  const order = [];
+  void runLocalSpeechWarm(() => new Promise(resolve => { finish = resolve; }).then(() => order.push('warm')));
+  const waiting = afterLocalSpeechWarm(undefined, 5000).then(() => order.push('owner'));
+  await new Promise(resolve => setTimeout(resolve, 10));
+  assert.deepEqual(order, []);
+  finish();
+  await waiting;
+  assert.deepEqual(order, ['warm', 'owner']);
+  void runLocalSpeechWarm(() => new Promise(() => {}));
+  const stop = new AbortController();
+  const aborted = afterLocalSpeechWarm(stop.signal, 5000);
+  stop.abort(new Error('stopped'));
+  await assert.rejects(aborted, /stopped/);
+  await afterLocalSpeechWarm(undefined, 20);
+});
+
+test('streaming Cloud Talk keeps the held microphone (no open mic) as develop assigns it', () => {
+  const adapter = fs.readFileSync('apps/app/src/prototype/voice-adapter.ts', 'utf8');
+  assert.match(adapter, /const openMic=!streamingCloud&&openMicrophoneAvailable\(\)/);
+  assert.match(adapter, /streamingCloud\?\{timing:\{shortGapMs:0,longGapMs:400\}\}/);
+  assert.doesNotMatch(adapter, /streamingCloud\?\{openMic:/);
 });
