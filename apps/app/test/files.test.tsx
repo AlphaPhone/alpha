@@ -147,6 +147,53 @@ describe("Files on a phone", () => {
     expect([world.files.watching, Boolean(button("Internal storage"))]).toEqual([undefined, true]);
   });
 
+  it('Selects a Files row with a stationary touch and lets drag or cancellation leave it alone (spec/app/files/index.md, "The owner selects items of the place showing, all of them, or none, and a changed selection closes the sheets, telling the owner a share sheet sent nothing, and voids the delete confirmation")', async () => {
+    const { alpha, runtime } = await onFiles();
+    await until(alpha, runtime, Browser, (state) => state.storage.status === "Loaded");
+    await press("Internal storage");
+    await until(alpha, runtime, Browser, (state) => state.listing.status === "Loaded");
+    await openRow("Download");
+    await until(alpha, runtime, Browser, (state) => state.listing.status === "Loaded" && state.trail.length === 2);
+
+    const picked = () => runtime.runSync(Browser.use((machine) => machine.get())).picked;
+    const touch = (type: string, clientX = 30) => drawn(() => {
+      const row = button("lease.pdf");
+      if (!row) throw new Error("The listed file is missing");
+      row.dispatchEvent(new PointerEvent(type, { bubbles: true, isPrimary: true, button: 0, pointerId: 1, pointerType: "touch", clientX, clientY: 20 }));
+    });
+    await touch("pointerdown");
+    await touch("pointermove", 70);
+    await later(alpha, 500);
+    expect(picked()).toEqual([]);
+    await touch("pointerup", 70);
+
+    await touch("pointerdown");
+    await touch("pointercancel");
+    await later(alpha, 500);
+    expect(picked()).toEqual([]);
+
+    await touch("pointerdown");
+    await later(alpha, 499);
+    expect(picked()).toEqual([]);
+    await later(alpha, 1);
+    await until(alpha, runtime, Browser, (state) => state.picked.length === 1);
+    await drawn(() => button("lease.pdf")?.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true })));
+    await touch("pointerup");
+    await drawn(() => button("lease.pdf")?.dispatchEvent(new MouseEvent("click", { bubbles: true, detail: 1 })));
+    expect(picked()).toHaveLength(1);
+    expect(button("lease.pdf")?.getAttribute("aria-pressed")).toBe("true");
+
+    await press("Cancel");
+    await until(alpha, runtime, Browser, (state) => state.picked.length === 0);
+    const checkbox = button("Select beach.jpg");
+    if (!checkbox) throw new Error("The keyboard selection control is missing");
+    await drawn(() => checkbox.focus());
+    expect(document.activeElement).toBe(checkbox);
+    await drawn(() => checkbox.dispatchEvent(new MouseEvent("click", { bubbles: true, detail: 0 })));
+    await until(alpha, runtime, Browser, (state) => state.picked.length === 1);
+    expect(button("beach.jpg")?.getAttribute("aria-pressed")).toBe("true");
+  });
+
   it("Browse my storage from the Browser's Show in Files, and go back (spec/app/files/index.md, \"Story: Browse my storage\"; spec/app/browser/downloads.md, \"Story: Download a file\")", async () => {
     const { alpha, runtime, world } = await onFiles({ ...scene(), phone: true, image: true }, "view:Browser");
     await until(alpha, runtime, Browser, (s) => s.storage.status === "Loaded");
