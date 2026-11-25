@@ -1,4 +1,4 @@
-// spec/app/platform/adoption.md, "The earlier Alpha's encrypted store is read where it is and never written: the page may only read one of the earlier page's own slots, or clear it while it still holds what was read"
+// spec/app/platform/adoption.md, "The page reads the earlier Alpha's encrypted store where it is and never writes it: it may only read one of the earlier page's own slots, or clear it while it still holds what was read"
 package ai.alphacompute.alphaphone;
 
 import com.getcapacitor.JSObject;

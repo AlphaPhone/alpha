@@ -47,7 +47,7 @@ pure def lawANewerValueIsNeverOverwritten(earlierHeld: bool, copied: bool): bool
   adoptionOf(earlierHeld, true, copied) != Adopted
 ```
 
-### The earlier Alpha's encrypted store is read where it is and never written: the page may only read one of the earlier page's own slots, or clear it while it still holds what was read
+### The page reads the earlier Alpha's encrypted store where it is and never writes it: it may only read one of the earlier page's own slots, or clear it while it still holds what was read
 
 The earlier Alpha kept every slot in one store: a file per slot in the
 app's `no_backup/connection-credentials`, named by the SHA-256 of the
@@ -63,8 +63,9 @@ sign-in, the phone's enrolment and the phone's own journals are never
 handed to the page. A value is read under the byte limit the earlier
 Alpha gave its slot; one over it, a file the key does not open, or a key
 the phone no longer holds is a failed reading, and the value stays where
-it is. Nothing creates the key, and only erasing Alpha's data removes the
-store.
+it is. Reading never creates the key or the store; only this Alpha's Notes
+recordings still write there, their own metadata, and only erasing
+Alpha's data removes the store.
 
 ```quint
 type EarlierCall = ReadEarlier | ClearEarlier | WriteEarlier

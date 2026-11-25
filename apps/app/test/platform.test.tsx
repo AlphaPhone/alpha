@@ -186,7 +186,7 @@ describe.each([["a browser", false], ["a phone", true]])("in %s", (_where, phone
     const draft = `assistant-draft:v1:${"a".repeat(64)}`;
     world.platform.earlier.set(draft, "Draft");
     const slotted = (slot: Slot, from = draft) => run(Effect.flatMap(vaulted(slot), (to) => adopt(earlierSlot(from), to, (value: string) => Option.some(Redacted.make(value)))));
-    // spec/app/platform/adoption.md, "The earlier Alpha's encrypted store is read where it is and never written: the page may only read one of the earlier page's own slots, or clear it while it still holds what was read": a slot the phone cannot open, and one the earlier page did not keep, stay where they are.
+    // spec/app/platform/adoption.md, "The page reads the earlier Alpha's encrypted store where it is and never writes it: it may only read one of the earlier page's own slots, or clear it while it still holds what was read": a slot the phone cannot open, and one the earlier page did not keep, stay where they are.
     world.platform.unreadable.add(draft);
     expect([await slotted(open_), world.platform.earlier.get(draft), world.secrets.has("alpha.test.open")]).toEqual(["NothingToAdopt", "Draft", false]);
     world.platform.unreadable.delete(draft);
