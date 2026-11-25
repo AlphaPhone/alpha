@@ -1,4 +1,4 @@
-import { fn } from "storybook/test";
+import { expect, fn, within } from "storybook/test";
 import type { ComponentMeta } from "vibestack/stories";
 import { AssistantCard } from "./AssistantCard.tsx";
 import { AssistantGrabber } from "./AssistantGrabber.tsx";
@@ -32,6 +32,12 @@ export const meta: ComponentMeta<AssistantConversationProps> = {
     Full: { header, transcript, composer, detent: "full" },
     Empty: { header: { ...header, title: "New chat" }, transcript: { messages: [] }, composer },
     "Loading": { header, transcript: { messages: [], status: "loading" }, composer },
+    "Attachment refused": { header, transcript, composer, attachmentNotice: "Could not attach example.zip" },
     "Offline": { header, transcript, composer: { ...composer, value: "Hello", unavailable: "away" } },
+  },
+  play: {
+    "Attachment refused": async ({ canvasElement }) => {
+      await expect(within(canvasElement).getByRole("alert")).toHaveTextContent("Could not attach example.zip");
+    },
   },
 };

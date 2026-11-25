@@ -1,7 +1,6 @@
 import type { ComponentProps, PointerEvent, ReactNode, Ref } from "react";
 import { ArrowUp, Clock, Mic, Paperclip, Plus, Search } from "lucide-react";
 import { cn } from "../../lib/cn.ts";
-import { Banner } from "../Banner.tsx";
 import { Button } from "../Button.tsx";
 import { Mark } from "../Mark.tsx";
 import { Menu, MenuContent, MenuItem, MenuTrigger } from "../Menu.tsx";
@@ -26,8 +25,6 @@ export type AssistantComposerProps = Omit<ComponentProps<"div">, "children" | "o
   unavailable?: "away" | "sensitive";
   /** What waits to go with the message. */
   attachments?: AssistantAttachment[];
-  /** Which files could not be attached or saved with the message. */
-  attachmentNotice?: string;
   /** How many files the upload allows. */
   limit?: number;
   /** The message the next send quotes. */
@@ -94,7 +91,7 @@ function keepComposerFocus(event: PointerEvent<HTMLButtonElement>) {
  * @model spec/app/assistant/composer.md
  */
 export function AssistantComposer({
-  variant = "sheet", value, onValueChange, closed = false, notice, unavailable, attachments = [], attachmentNotice, limit = 4, quote, editing = false, lift,
+  variant = "sheet", value, onValueChange, closed = false, notice, unavailable, attachments = [], limit = 4, quote, editing = false, lift,
   onSend, onStop, stopping = false, onAttach, onSearch, onNew, making = false, onHistory, onTalk, onDictate, voice, voiceNotice, onOpen, leading, opener, placeholder, onFocusField, fieldRef, onRemoveAttachment, onPreviewAttachment, onUnquote, className, style, ...props
 }: AssistantComposerProps) {
   const written = value.trim() !== "" || attachments.length > 0;
@@ -105,7 +102,6 @@ export function AssistantComposer({
     <div data-host-chrome={bar ? "" : undefined} className={cn("flex shrink-0 flex-col gap-2", bar ? "mx-4 mb-[max(1.75rem,calc(max(var(--alpha-native-inset-bottom,0px),env(safe-area-inset-bottom))_+_0.75rem))]" : "mx-3 mb-[max(1.875rem,calc(max(var(--alpha-native-inset-bottom,0px),env(safe-area-inset-bottom))_+_0.75rem))]", className)} style={lift ? { marginBottom: lift, ...style } : style} {...props}>
       {notice ? <AssistantDraftNotice {...notice} /> : null}
       {unavailable ? <span role="status" className="sr-only">{reasons[unavailable]}</span> : null}
-      {attachmentNotice ? <Banner variant="warn">{attachmentNotice}</Banner> : null}
       {attachments.length ? <AssistantPendingAttachments attachments={attachments} limit={limit} onRemove={onRemoveAttachment} onPreview={onPreviewAttachment} /> : null}
       {quote ? <AssistantQuoteBar kind="quote" text={quote} onRemove={onUnquote} /> : null}
       {editing ? <AssistantQuoteBar kind="editing" /> : null}

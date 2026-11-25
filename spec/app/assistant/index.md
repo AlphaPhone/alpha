@@ -22,7 +22,8 @@ conversation, with the status as its accessible name. The agent's own label
 stays visible, as does Check for reply where the owner must act. Why nothing
 can be sent, a draft too long to send and a draft still opening are said
 to a screen reader only, with Send disabled or the field closed. Attachment
-errors and draft notices that ask the owner to act remain visible.
+errors appear below the conversation header. Draft notices that ask the
+owner to act remain visible.
 
 Speaking a turn and reading a reply aloud belong to the voice area, the
 approval a proposal card asks for to the approvals area, and the height
