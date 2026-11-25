@@ -17,9 +17,10 @@ import { type Composer as Writing, Machine as ComposerMachine } from "../../gen/
 import { attachments as attachmentCount, content, maxFiles, textLimit } from "../../gen/app__assistant__composer.ts";
 import { useMachine as useComposer } from "../../gen/app__assistant__composer.react.ts";
 import type { Machine as DockMachine } from "../../gen/app__assistant__dock.effect.vibe";
-import { focused as dockFocused, isOpen as dockOpen } from "../../gen/app__assistant__dock.ts";
+import { browserFieldPull, focused as dockFocused, isOpen as dockOpen } from "../../gen/app__assistant__dock.ts";
 import { useMachine as useDock } from "../../gen/app__assistant__dock.react.ts";
 import type { Machine as ReplyMachine } from "../../gen/app__assistant__reply.effect.vibe";
+import { liveAddsToHistory } from "../../gen/app__assistant__reply.ts";
 import { useMachine as useReply } from "../../gen/app__assistant__reply.react.ts";
 import type { Machine as SearchMachine } from "../../gen/app__assistant__search.effect.vibe";
 import { useMachine as useSearch } from "../../gen/app__assistant__search.react.ts";
@@ -213,22 +214,28 @@ interface DockHandleProps {
   field: RefObject<HTMLTextAreaElement | null>;
 }
 
+function dockPull(dock: DockHandleProps["dock"], detent: DockHandleProps["detent"]): NonNullable<AssistantComposerProps["fieldPull"]> {
+  return {
+    onPress: () => { void dock.send({ type: "press", detent, now: untimed }); },
+    onDrag: () => { void dock.send({ type: "drag" }); },
+    onRelease: ({ direction, flick, y }) => {
+      const height = Math.max(0, Math.round(window.innerHeight - y));
+      void dock.send({ type: "release", direction: direction === "up" ? "Up" : "Down", flick, height, floor: barHeight, full: window.innerHeight, now: untimed });
+    },
+    onCancel: () => { void dock.send({ type: "shift", now: untimed }); },
+  };
+}
+
 function DockHandle({ dock, detent, compact, focusOnPointerOpen, field }: DockHandleProps) {
   const open = dockOpen(detent);
   return (
     <AssistantGrabber
       variant={open ? "handle" : "mark"}
-      onPress={() => { void dock.send({ type: "press", detent, now: untimed }); }}
-      onDrag={() => { void dock.send({ type: "drag" }); }}
-      onRelease={({ direction, flick, y }) => {
-        const height = Math.max(0, Math.round(window.innerHeight - y));
-        void dock.send({ type: "release", direction: direction === "up" ? "Up" : "Down", flick, height, floor: barHeight, full: window.innerHeight, now: untimed });
-      }}
+      {...dockPull(dock, detent)}
       onLift={() => {
         void dock.send({ type: "lift", now: untimed });
         if (!open && focusOnPointerOpen) field.current?.focus();
       }}
-      onCancel={() => { void dock.send({ type: "shift", now: untimed }); }}
       onTap={({ keyboard }) => {
         void dock.send({ type: "click", now: untimed });
         if (!open && keyboard && !compact) field.current?.focus();
@@ -396,7 +403,10 @@ export function Assistant({ runtime, messageActions, speech, canReadAloud = fals
   }));
   const mediaNote = talking.context.sensitive || seen.mediaNote?.conversation !== shown.chosen
     ? [] : [{ id: "media result", author: "alpha" as const, text: seen.mediaNote.text, onOpenLink }];
-  const failed = seen.failure === undefined ? [] : [{ id: "failure", author: "alpha", text: "", children: <ReplyFailure {...seen.failure} fix={seen.failure.kind === "OutOfFunds" ? "FundingFix" : seen.failure.fix} live onRetry={() => type(board.lastSent)} onSettings={settingsAction ? onSettings : undefined} /> } as const];
+  const failure = seen.failure;
+  const liveFix = failure?.kind === "OutOfFunds" ? "FundingFix" : failure?.fix ?? "NoFix";
+  const readAgain = failure?.messageId !== undefined && lines.some((line) => line.id === failure.messageId && line.failure === failure.kind);
+  const failed = failure === undefined || (readAgain && !liveAddsToHistory(failure.kind, liveFix, failure.waitMs)) ? [] : [{ id: "failure", author: "alpha", text: "", children: <ReplyFailure kind={failure.kind} fix={liveFix} waitMs={failure.waitMs} live onRetry={() => type(board.lastSent)} onSettings={settingsAction ? onSettings : undefined} /> } as const];
   const quotedLine = board.line(shown.chosen, writing.editor.quote);
   const quoted = quotedLine === undefined ? undefined : wordsOf(quotedLine);
   const view = talking.context.showing.tag === "App" ? talking.context.showing.view : "Home";
@@ -417,6 +427,8 @@ export function Assistant({ runtime, messageActions, speech, canReadAloud = fals
       if (sent._tag === "Failure") focusOnRevealRef.current = false;
     });
   };
+  const draftEditable = composer.can({ type: "edit", blank: false, long: false });
+  const pullFromField = shell.state && browserFieldPull(shell.state, seen.typed === "", draftEditable);
   const grabber = shell.state ? <DockHandle dock={dock} detent={assistantDetent} compact={compact}
     focusOnPointerOpen={currentView !== undefined && !compact} field={composerRef} /> : undefined;
 
@@ -464,11 +476,15 @@ export function Assistant({ runtime, messageActions, speech, canReadAloud = fals
             speech.onDictate?.();
           },
           fieldRef: composerField,
+          fieldPull: pullFromField ? {
+            ...dockPull(dock, assistantDetent),
+            onLift: () => { void dock.send({ type: "fieldLift", now: untimed }); },
+          } : undefined,
           value: subject === undefined ? seen.typed : request,
           onValueChange: type,
           placeholder: onComms ? "Ask Alpha" : assistantDetent === "Bar" && currentView === "Browser" ? "Ask about this page" : undefined,
           leading: onComms ? <CommsTarget runtime={runtime} placement="composer" /> : undefined,
-          closed: subject === undefined && !composer.can({ type: "edit", blank: false, long: false }),
+          closed: subject === undefined && !draftEditable,
           notice: notice === undefined || onComms ? undefined : {
             status: notice,
             saved: seen.saved,
