@@ -325,7 +325,7 @@ describe("Voice Bug 1 & Bug 3 journeys", () => {
     expect(world.ask.kept.get("c1")?.messages.at(-1)?.text).toBe(written.join(""));
 
     // spec/app/assistant/reply.md, "The agent's turn tag is never drawn, copied, quoted, emailed or spoken, and a reply still being written holds back what may become one"
-    const tagged = [[["Sure.\n[answer] Paris"], ["Sure.", "Paris"]], [["Paris. [answer]"], ["Paris."]], [["<promise> One sec."], ["One sec."]], [["[ans", "wer] Paris"], ["Paris"]]] as const;
+    const tagged = [[["Sure.\n[answer] Paris"], ["Sure.", "Paris"]], [["Paris. [answer]"], ["Paris."]], [["<promise> One sec."], ["One sec."]], [["[ans", "wer] Paris"], ["Paris"]], [["[answer", "](https://example.com) is a link."], ["answer is a link."]]] as const;
     for (const [index, [chunks, heard]] of tagged.entries()) {
       const before = world.voice.spoken.length;
       world.ask.nextReplyChunks = chunks;

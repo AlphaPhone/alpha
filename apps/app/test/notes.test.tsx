@@ -35,6 +35,14 @@ const rendered = (assert: () => unknown) => vi.waitFor(async () => {
 
 const control = (name: string) => rendered(() => expect(button(name)).toBeDefined());
 
+async function chooseNotesOption(menu: string, title: string) {
+  await control(menu);
+  await drawn(() => button(menu)?.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true })));
+  const option = () => [...document.querySelectorAll<HTMLElement>("[role=menuitem]")].find((entry) => entry.textContent?.trim() === title);
+  await rendered(() => expect(option()).toBeDefined());
+  await drawn(() => option()?.click());
+}
+
 async function openNotesFromHome(world: Scene) {
   const { alpha } = await open(world, only("home", "view:Notes"));
   const runtime = home.runtime(alpha);
@@ -80,12 +88,7 @@ describe("Notes", () => {
     const runtime = notes.runtime(alpha);
     await until(alpha, runtime, List, (state) => state.read.status === "Loaded");
 
-    await control("Notes options");
-    await drawn(() => button("Notes options")?.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true })));
-    const recentlyDeleted = () => [...document.querySelectorAll<HTMLElement>("[role=menuitem]")]
-      .find((entry) => entry.textContent?.trim() === "Recently deleted");
-    await rendered(() => expect(recentlyDeleted()).toBeDefined());
-    await drawn(() => recentlyDeleted()?.click());
+    await chooseNotesOption("Notes options", "Recently deleted");
     await until(alpha, runtime, Trash, (state) => state.showing && state.read.status === "Loaded" && state.entries.length === 1);
 
     const row = button(deleted.title);
@@ -114,6 +117,22 @@ describe("Notes", () => {
     expect(world.notes.notes).toContainEqual(deleted);
     expect(dialog()).toBeNull();
     expect(button(`Open ${deleted.title}`)).toBeDefined();
+
+    // spec/app/notes/editor.md, "Story: Delete the note I am writing"
+    await press(`Open ${deleted.title}`);
+    await until(alpha, runtime, Editor, (state) => state.showing && !state.deleting);
+    const version = world.notes.revision;
+    world.notes.deleteRequests = [];
+    world.notes.deleteAtRevision = false;
+    await chooseNotesOption("More", "Delete");
+    await until(alpha, runtime, Editor, (state) => state.showing && state.told === "WasRefused");
+    expect([world.notes.revision, world.notes.trash, world.notes.deleteRequests]).toEqual([version, [], []]);
+
+    world.notes.deleteAtRevision = true;
+    await chooseNotesOption("More", "Delete");
+    await until(alpha, runtime, Editor, (state) => !state.showing && !state.deleting);
+    expect([world.notes.revision, world.notes.trash.map(({ note }) => note.id), world.notes.deleteRequests])
+      .toEqual([version + 1, [deleted.id], [{ id: deleted.id, expectedRevision: version }]]);
   });
 
   it("Keeps editor changes in the resident agent (spec/app/notes/editor.md, \"Story: Write a note\")", async () => {

@@ -394,34 +394,40 @@ pure def lawOnlyTheShownReplyKeepsItsMarks(use: Use): bool = keepsMarks(use) iff
 
 eliza asks the model to begin a reply that runs no tool with a turn tag,
 `[answer]` or `[promise]`, and does not always take it out. Alpha takes
-the tag out of the model's text wherever it stands: at the start of a
-line, inside one or at its end, in square or angle brackets (`<promise>`),
-in any case, opening or closing, with the spaces after it, and inside a
-fence too, since it is never code. A reply still being written holds back
-an opening bracket at its end, or one followed by the start of a tag
-(`[ans`, `<pro`), until the next words show whether it is one; a finished
-reply keeps such an ending as written. The owner's own words are never
-read for it and keep every tag as written.
+the exact lowercase tag, `[answer]`, `[promise]`, `<answer>` or
+`<promise>`, out of the model's prose wherever it stands: at the start of
+a line, inside one or at its end, with the spaces after it. Anything else
+that looks like one is kept as written: another case (`Promise<Answer>`),
+a closing tag, any text inside a code fence or inline code, and a link's
+words (`[answer](https://example.com)`). A reply still being written
+holds back an opening bracket at its end, or one followed by the start of
+a tag (`[ans`, `<pro`), and a whole `[answer]` or `[promise]` at its end,
+which may still become a link's words, until the next words decide; a
+finished reply keeps such an ending as written. The owner's own words are
+never read for it and keep every tag as written.
 
 ```quint
 type Author = OwnerWrote | ModelWrote
-type TagRun = OtherWords | TurnTag | TurnTagSoFar
+type TagRun = OtherWords | TurnTag | TurnTagSoFar | TagAsCodeOrLink
 
 pure def keptRun(words: TagRun, author: Author, writing: bool): bool =
   author == OwnerWrote or match words {
     | OtherWords => true
     | TurnTag => false
     | TurnTagSoFar => not(writing)
+    | TagAsCodeOrLink => true
   }
 
 pure val authorValues = Set(OwnerWrote, ModelWrote)
-pure val wordsValues = Set(OtherWords, TurnTag, TurnTagSoFar)
+pure val wordsValues = Set(OtherWords, TurnTag, TurnTagSoFar, TagAsCodeOrLink)
 
 pure def lawTheModelsTurnTagIsNeverKept(writing: bool): bool = not(keptRun(TurnTag, ModelWrote, writing))
 
 pure def lawTheOwnersWordsAreKeptAsWritten(words: TagRun, writing: bool): bool = keptRun(words, OwnerWrote, writing)
 
 pure def lawATagStillBeingWrittenWaits(author: Author): bool = keptRun(TurnTagSoFar, author, true) iff author == OwnerWrote
+
+pure def lawCodeAndLinkWordsAreKept(author: Author, writing: bool): bool = keptRun(TagAsCodeOrLink, author, writing)
 
 pure def lawAFinishedReplyKeepsAnUnfinishedTag(author: Author): bool = keptRun(TurnTagSoFar, author, false)
 ```

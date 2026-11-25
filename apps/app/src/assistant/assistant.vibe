@@ -46,6 +46,7 @@ import { type Attached, type Board, type Line, Talk, talk } from "./talk.vibe"
 import { Views, carried, carriedAloud, delivery, handoffs, pageIn, preparedIn, resendWithoutMode } from "./views.vibe"
 import { attachmentAuthority, dropFiles, readFiles, rememberFiles, retireTranscript, sameBinding, stageFiles } from "./attachments.vibe"
 import { readMessage } from "./read-aloud.vibe"
+import { withoutTurnTags } from "./words.ts"
 import { type DraftAddress, exchangePhoneDraft, readPhoneDraft } from "./draft-device.vibe"
 
 service Turns {
@@ -78,7 +79,7 @@ const titled = Schema.Struct({ ...ConversationRecord.fields, title: Schema.Strin
 const listing = () => Schema.Struct({ conversations: Schema.Array(titled) })
 const made = () => Schema.Struct({ conversation: titled })
 const page = () => Schema.Struct({ messages: Schema.Array(Schema.Struct({ id: Schema.String, role: Schema.Literals(["user", "assistant"]), text: Schema.String, clientMessageId: Schema.optionalKey(Schema.String), failureKind: Schema.optionalKey(Schema.String), cloudCode: Schema.optionalKey(Schema.String) })) })
-const hits = () => Schema.Struct({ results: Schema.Array(Schema.Struct({ conversationId: Schema.NonEmptyString, roomId: Schema.NonEmptyString, messageId: Schema.String, text: Schema.String })) })
+const hits = () => Schema.Struct({ results: Schema.Array(Schema.Struct({ conversationId: Schema.NonEmptyString, roomId: Schema.NonEmptyString, messageId: Schema.String, role: Schema.Literals(["user", "assistant"]), text: Schema.String })) })
 
 // Eliza's pinned history contract projects a redacted body to this exact text.
 const privateHistoryNotice = "[Private information removed]"
@@ -948,7 +949,7 @@ function carryComposer(fx: Composer.Effect): Job<Composer.Event, Agent | KeyValu
   }
 }
 
-// spec/app/assistant/search.md, "Only the newest asking's hits are shown, a page at a time, after those already shown"
+// spec/app/assistant/search.md, "Only the newest asking's hits are shown, a page at a time, after those already shown"; spec/app/assistant/reply.md, "The agent's turn tag is never drawn, copied, quoted, emailed or spoken, and a reply still being written holds back what may become one"
 effect function found(words: string, from: number, ticket: number): Search.Event!!(Agent | Talk) {
   return effect {
     const { board } = try Talk
@@ -956,7 +957,7 @@ effect function found(words: string, from: number, ticket: number): Search.Event
     if (!(try ownsSeat(board, seat))) return { type: "found", ticket, ok: false, count: 0, further: false }
     const { results } = try ask(Agent, HttpClientRequest.get("/api/conversations/messages/search", { urlParams: { q: words, offset: String(from), limit: String(pageSize) } }), hits())
     if (!(try ownsSeat(board, seat))) return { type: "found", ticket, ok: false, count: 0, further: false }
-    const shown = results.map((one) => ({ conversation: board.numberOf({ id: one.conversationId, roomId: one.roomId } as ConversationRecord), message: board.messageNumber(one.messageId), text: one.text }))
+    const shown = results.map((one) => ({ conversation: board.numberOf({ id: one.conversationId, roomId: one.roomId } as ConversationRecord), message: board.messageNumber(one.messageId), text: one.role === "assistant" ? withoutTurnTags(one.text) : one.text }))
     board.change({ hits: [...(from === 0 ? [] : board.snapshot().hits.slice(0, from)), ...shown] })
     return { type: "found", ticket, ok: true, count: results.length, further: results.length === pageSize }
   } catch () => ({ type: "found", ticket, ok: false, count: 0, further: false })
