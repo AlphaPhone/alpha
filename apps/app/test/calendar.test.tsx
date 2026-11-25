@@ -178,6 +178,39 @@ describe("Calendar without a connected account", () => {
     await until(alpha, alpha.runtime, Alerts, (state) => state.entries.some((entry) => entry.id === selected && entry.attempt.outcome === "Refused"));
     expect(remindersStore.findItem(first.id)).toMatchObject({ revision: revision + 1, snoozedUntilMs: untilMs });
   });
+
+  it("Saves the Calendar Reminders form once without adding a calendar event (spec/app/calendar/editor.md, \"Story: Write an event\")", async () => {
+    const world = { ...morning(false), signedIn: false };
+    const eventCount = world.calendar.events.length;
+    const { alpha } = await open(world, only("view:Calendar"));
+    const runtime = calendar.runtime(alpha);
+    await openCalendar(alpha);
+    await until(alpha, runtime, View, (state) => state.front && state.anchor === world.today);
+    await until(alpha, alpha.runtime, Reminders, (state) => state.sync.status === "Loaded");
+
+    await press("New event");
+    await until(alpha, runtime, Editor, (state) => state.form === "NewEvent" && state.shown);
+    await press("Reminders");
+    await fill("Title", "Leave through the garden");
+    await fill("Reminder time", "10:15");
+    await press("Weekdays");
+    await press("None");
+    await fill("Notes", "Close the gate.");
+    expect(document.querySelector('[aria-label="Location"]')).toBeNull();
+    expect(remindersStore.snapshot().snapshot.items).toHaveLength(0);
+    await press("Save event");
+    await until(alpha, runtime, Editor, (state) => !state.shown && state.write.outcome === "Confirmed");
+    await until(alpha, alpha.runtime, Reminders, (state) => state.write.outcome === "Confirmed");
+    await until(alpha, runtime, View, (state) => state.reminders === 1);
+
+    expect(world.calendar.events).toHaveLength(eventCount);
+    expect(world.reminders.items).toHaveLength(1);
+    expect(world.reminders.items[0]).toMatchObject({
+      title: "Leave through the garden", notes: "Close the gate.", dueDate: "2026-11-24", dueMinute: 615, recurrence: "weekdays", alertMinutes: null,
+    });
+    await press(/^Leave through the garden,/);
+    expect(document.querySelector('[data-alpha-subview="calendar-detail"]')?.textContent).toContain("Due 10:15 AM");
+  });
 });
 
 it("Shows the newly verified Google grant when Calendar Settings reopens (spec/app/settings/index.md, \"Each page links to what another area owns there\")", async () => {

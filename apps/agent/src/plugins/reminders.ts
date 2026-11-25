@@ -456,8 +456,14 @@ export function remindersRoutes(store: AlphaAppsStore, runtime: AgentRuntimeLike
         const body = asRecord(input.body);
         const title = readString(body, "title");
         if (title === undefined) return { status: 400, body: { error: "invalid_reminder_title" } };
+        const id = readString(body, "id");
+        if (body.createOnly === true && id !== undefined) {
+          const snapshot = store.getReminders();
+          const existing = snapshot.items.find((item) => item.id === id);
+          if (existing !== undefined) return { status: 200, body: { item: existing, snapshot } };
+        }
         const created = store.createItem({
-          id: readString(body, "id"),
+          id,
           listId: readString(body, "listId"),
           title,
           notes: readRawString(body, "notes") ?? "",
