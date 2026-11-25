@@ -43,7 +43,7 @@ import { FileContext, documentObservation } from "./file-context.vibe"
 import { MediaReview, mediaReview } from "./media-review.vibe"
 import { agentWarmUp } from "./warm-up.vibe"
 import { type Attached, type Board, type DraftSeat, type Line, Talk, talk } from "./talk.vibe"
-import { Views, carried, carriedAloud, delivery, handoffs, preparedIn, resendWithoutMode } from "./views.vibe"
+import { Views, carried, carriedAloud, delivery, handoffs, pageIn, preparedIn, resendWithoutMode } from "./views.vibe"
 import { attachmentAuthority, dropFiles, readFiles, rememberFiles, retireTranscript, sameBinding, stageFiles } from "./attachments.vibe"
 import { readMessage } from "./read-aloud.vibe"
 import { withoutTurnTags } from "./words.ts"
@@ -534,6 +534,7 @@ function posted(ticket: number, told: boolean, context: Conversation.Context): S
     const finishing = Conversation.canFinish(try conversation.get(), ticket)
     if (result?.kind === "Replied" && finishing) {
       const prepared = told ? preparedIn(result.reply.actionResults, views.clientId) : undefined
+      const page = told ? pageIn(result.reply.actionResults, views.clientId) : undefined
       let continueFiles: Effect.Effect<void> | undefined
       if (result.reply.userMessageId !== undefined) {
         board.messageNumber(result.reply.userMessageId)
@@ -578,6 +579,7 @@ function posted(ticket: number, told: boolean, context: Conversation.Context): S
         }
       }
       if (continueFiles !== undefined) try views.hold(ticket, { asked, continueFiles })
+      else if (page !== undefined) try views.hold(ticket, { asked, page })
       else if (prepared !== undefined) try views.hold(ticket, { asked, handoff: prepared })
     }
     if (event.type === "refuse") board.drop(pageTicket, mine)

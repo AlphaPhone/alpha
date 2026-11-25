@@ -11,7 +11,7 @@ import * as Voice from "../../gen/app__voice.effect.vibe"
 import type { Field } from "../../gen/app__voice__dictation.ts"
 import { Agent, isCloudFundsRefusal } from "../platform/agent.vibe"
 import { Device } from "../platform/device.vibe"
-import { Views, delivery, preparedIn, resendWithoutMode } from "../assistant/views.vibe"
+import { Views, delivery, pageIn, preparedIn, resendWithoutMode } from "../assistant/views.vibe"
 import { filesOnlyHeaders, MediaReview, sameFiles, spokenText } from "../assistant/media-review.vibe"
 import { Talk, type Attached, type DraftSeat } from "../assistant/talk.vibe"
 import type { MessageSmsRequest } from "../messages/agent-sim.vibe"
@@ -666,10 +666,12 @@ function sendVoiceTurn(session: number, turn: number): Stream.Stream<Voice.Event
       : filesReport ?? (result?.kind === "Replied" ? result.reply.text : "")
     if (sms === undefined && !awaitingFiles && result?.kind === "Replied" && result.reply.failureKind === undefined) {
       const actions = result.reply.actionResults
+      const page = admittedScreen && views !== undefined ? pageIn(actions, views.clientId) : undefined
       const prepared = admittedScreen && views !== undefined ? preparedIn(actions, views.clientId) : undefined
-      if (views !== undefined && prepared !== undefined) {
+      const held = page !== undefined ? { asked, page } : prepared !== undefined ? { asked, handoff: prepared } : undefined
+      if (views !== undefined && held !== undefined) {
         const sameSource = effect { return (try atSource) && (try shell.get()).route === sourceRoute }
-        try views.spoken({ asked, handoff: prepared }, sameSource, (place) =>
+        try views.spoken(held, sameSource, (place) =>
           openRouteForVoice(placeOf(place === "Home" ? undefined : place), sourceRoute, session, turn, atSource, memory, voice, shell))
       } else if (!actions.some((action) => action.action === "VIEWS")) {
         const requested = requestedDestination(finalText)
