@@ -169,6 +169,14 @@ describe("Notes", () => {
     await until(alpha, runtime, Voice, (state) => state.showing && state.added > 0);
     expect(document.body.textContent).toContain("Four heights. Pill, input, half, full.");
     expect(document.body.textContent).toContain("Notifications stay as icons until unlock");
+    expect(button("Play recording")).toBeUndefined();
+
+    // spec/app/notes/voice.md, "Only the transcript the owner added leaves the note, and only what was shown is written to it"
+    const transcript = world.notes.notes.find((note) => note.id === "sync")?.format?.data.lines;
+    if (!Array.isArray(transcript)) throw new Error("The fixture needs a saved transcript");
+    const words = transcript.map((line) => typeof line === "object" && line !== null && "t" in line && typeof line.t === "string" ? line.t : "").join("\n");
+    await press("Copy text");
+    await rendered(async () => expect(await navigator.clipboard.readText()).toBe(words));
 
     // spec/app/notes/voice.md, "Ask Alpha about this transcript hands Ask Alpha the transcript the note holds"
     await until(alpha, runtime, Composer, (state) => state.slot === "Open");
@@ -246,7 +254,7 @@ describe("Notes", () => {
     ]);
 
     // spec/app/notes/voice.md, "Story: Leave a voice note"
-    await press("Play");
+    await press("Play recording");
     await drawn(() => vi.waitFor(() => expect(world.notes.playing).toEqual({ audioId: recordingId, noteId, offsetMs: 0 })));
     await hardware("home");
     await until(alpha, runtime, Voice, (state) => !state.showing && state.play.status === "Idle");
@@ -387,13 +395,14 @@ describe("Notes", () => {
     world.ask.nextActions = (metadata) => [prepared(String((metadata as { viewClientId?: unknown }).viewClientId), "notes", true)];
     await drawn(() => Promise.resolve(world.voice.emitLocal?.("liveCaptureTranscript", { captureId: world.voice.activeMicSession, final: { turnId: "spoken", text: "open my shopping list note", mode: "device" } })));
     const results = () => world.notes.views.filter((one) => one.path === "result").map((one) => one.body.result);
-    await drawn(() => vi.waitFor(() => expect(world.ask.said).toEqual(["open my shopping list note"])));
+    await rendered(() => expect(world.ask.said).toEqual(["open my shopping list note"]));
     expect(world.ask.metadata[0]).toMatchObject({ viewDelivery: "completed-action", voiceUi: { uiNotesEditor: "saved-note-v1" } });
-    await drawn(() => vi.waitFor(() => expect(results()).toHaveLength(1)));
-    expect(results()).toEqual([{ switched: true, shown: { kind: "saved-note", noteId: "shopping" } }]);
+    await rendered(() => expect(world.notes.views[0]).toMatchObject({ path: "claim", body: { viewId: "notes", targetProtocol: "saved-note-v1" } }));
     await rendered(async () => {
+      expect(results()).toEqual([{ switched: true, shown: { kind: "saved-note", noteId: "shopping" } }]);
+      const shell = await alpha.runtime.runPromise(Shell.use((machine) => machine.get()));
       const editor = await alpha.runtime.runPromise(Editor.use((machine) => machine.get()));
-      expect([editor.showing, editorTitle()]).toEqual([true, "shopping list"]);
+      expect([showing(shell, "Notes"), editor.showing, editorTitle()]).toEqual([true, true, "shopping list"]);
     });
   });
 });

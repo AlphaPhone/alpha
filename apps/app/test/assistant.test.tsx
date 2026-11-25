@@ -224,9 +224,29 @@ describe.each([["a browser", false], ["a phone", true]])("in %s", (_where, phone
   });
 
   // spec/app/assistant/search.md, "Story: Search my conversations"; spec/app/assistant/chats.md, "Story: Open a message that search found"
+  it("Hear a brief acknowledgment and still get the whole answer: the acknowledgment stays the label while tools run (spec/app/assistant/reply.md, \"Story: Hear a brief acknowledgment and still get the whole answer\")", async () => {
+    const world = { ...scene(), phone };
+    const { alpha, runtime } = await openAssistant(world);
+    await until(alpha, alpha.runtime, Prefs.Machine, (s) => s.document.read.status === "Loaded");
+    // spec/app/assistant/reply.md, "The planning label shows until the first text, and provisional text is shown but never spoken": once taken, the acknowledgment stays the label through a later tool label and status, until text arrives.
+    world.ask.acknowledgment = "Let me look";
+    world.ask.holdAfterTools = true;
+    write("What's on today?");
+    await until(alpha, runtime, Composer, (s) => s.draft.sync === "Kept");
+    await press("Send");
+    await vi.waitFor(() => expect(world.ask.turns.size).toBe(1));
+    await vi.waitFor(() => expect(document.body.textContent).toContain("Let me look"));
+    expect([document.body.textContent?.includes("Using Calendar"), document.body.textContent?.includes("Working")]).toEqual([false, false]);
+    await act(async () => { for (const release of [...world.ask.turns.values()]) release(); });
+    await until(alpha, runtime, Reply, (s) => s.status === "Settled" && s.final === "You said: What's on today?".length);
+    const said = await runtime.runPromise(Effect.flatMap(Reply, (machine) => machine.get()));
+    expect([said.acks, lines()]).toEqual([1, ["What's on today?", "You said: What's on today?"]]);
+    expect(document.body.textContent?.includes("Let me look")).toBe(false);
+  });
+
   it("Search my conversations, and open a hit where it was said (spec/app/assistant/search.md, \"Story: Search my conversations\")", async () => {
     const world = { ...scene(), phone };
-    world.ask.kept.set("c7", { roomId: "r7", title: "Lunch", messages: [{ id: "m1", role: "user", text: "Lunch on Friday?" }, { id: "m2", role: "assistant", text: "Friday at noon works." }, Object.assign({ id: "m3", role: "assistant" as const, text: "" }, { failureKind: "limit_reached" })] });
+    world.ask.kept.set("c7", { roomId: "r7", title: "Lunch", messages: [{ id: "m1", role: "user", text: "Lunch on Friday?" }, { id: "m2", role: "assistant", text: "Friday at noon works." }, Object.assign({ id: "m3", role: "assistant" as const, text: "" }, { failureKind: "limit_reached" }), Object.assign({ id: "m4", role: "assistant" as const, text: "" }, { failureKind: "insufficient_credits", cloudCode: "allowance_exhausted" })] });
     const { alpha, runtime } = await openAssistant(world, false);
 
     // spec/app/assistant/search.md, "Words are searched from the first hit, and empty words are not searched"
@@ -240,6 +260,9 @@ describe.each([["a browser", false], ["a phone", true]])("in %s", (_where, phone
     expect([lines().slice(0, 2), document.querySelector("section[aria-label='Results']")]).toEqual([["Lunch on Friday?", "Friday at noon works."], null]);
     // spec/app/assistant/reply.md, "A failed reply offers the fix the agent named, and a limit reached shows its live wait, never sending the message again": a reply read again from history says why it did not finish, and to wait a moment.
     expect(document.querySelector("[role=log]")?.textContent).toContain("Too many requests. Wait a moment, then try again");
+    // spec/app/assistant/reply.md, "A failure refused before any output replaces the streamed text; any other failure is added after it": a reply kept with Cloud's funds code, read again, shows the one out-of-funds line, never spent credits.
+    const reread = document.querySelector("[role=log]")?.textContent ?? "";
+    expect([reread.includes("You’re out of plan allowance and credits, so I couldn’t reply."), reread.includes("Out of credits")]).toEqual([true, false]);
 
     // spec/app/assistant/search.md, "Only the newest asking's hits are shown, a page at a time, after those already shown": a search that fails says so.
     world.ask.searchDown = true;

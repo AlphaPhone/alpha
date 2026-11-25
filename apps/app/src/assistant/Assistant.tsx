@@ -33,10 +33,11 @@ import { MailQuestions } from "../inbox/mail-context.vibe";
 import { home } from "../shell/shell.vibe";
 import { isCommsView } from "../shell/views.tsx";
 import { type MediaCard, MediaReview, namedReviewQuery } from "./media-review.vibe";
+import type { Agent } from "../platform/agent.vibe";
 import { Documents } from "../platform/documents.vibe";
 import { AttachmentSources } from "./AttachmentSources.tsx";
 import { askComms, freedom } from "./assistant.vibe";
-import { acceptedFiles, acceptedPhotos, chooseDocument, type FileTarget, insertFiles, previewFile, readChosenDocument, removeFile, retireTranscript, sameBinding } from "./attachments.vibe";
+import { acceptedFiles, acceptedPhotos, attachmentAuthority, chooseDocument, type FileTarget, insertFiles, previewFile, readChosenDocument, removeFile, retireTranscript, sameBinding } from "./attachments.vibe";
 import { chip, type MessageActions, useHistorySheets, useMessageRows } from "./history.tsx";
 import { ReplyFailure } from "./ReplyFailure.tsx";
 import { type Attached, type Line, Talk } from "./talk.vibe";
@@ -45,7 +46,7 @@ import { CommsBriefing } from "../phone/comms.vibe";
 import { displayNumber } from "../phone/words.ts";
 
 export interface AssistantProps {
-  runtime: ManagedRuntime.ManagedRuntime<ConversationMachine | AttachmentMachine | ChatsMachine | ComposerMachine | SearchMachine | ReplyMachine | DockMachine | ShellMachine | CommsMachine | CommsTargetServices | CommsBriefing | Talk | MailQuestions | LayersMachine | MediaReview | Documents, unknown>;
+  runtime: ManagedRuntime.ManagedRuntime<ConversationMachine | AttachmentMachine | ChatsMachine | ComposerMachine | SearchMachine | ReplyMachine | DockMachine | ShellMachine | CommsMachine | CommsTargetServices | CommsBriefing | Talk | MailQuestions | LayersMachine | MediaReview | Documents | Agent, unknown>;
   messageActions?: MessageActions;
   speech?: Pick<AssistantComposerProps, "onTalk" | "onDictate" | "showUnavailableTalk" | "voiceNotice"> & {
     voice?: (presentation: { compactDock: boolean; atBar: boolean }) => ReactNode;
@@ -199,10 +200,11 @@ interface DockHandleProps {
   dock: ReturnType<typeof useDock>;
   detent: Parameters<typeof dockOpen>[0];
   compact: boolean;
+  focusOnPointerOpen: boolean;
   field: RefObject<HTMLTextAreaElement | null>;
 }
 
-function DockHandle({ dock, detent, compact, field }: DockHandleProps) {
+function DockHandle({ dock, detent, compact, focusOnPointerOpen, field }: DockHandleProps) {
   const open = dockOpen(detent);
   return (
     <AssistantGrabber
@@ -215,7 +217,7 @@ function DockHandle({ dock, detent, compact, field }: DockHandleProps) {
       }}
       onLift={() => {
         void dock.send({ type: "lift", now: untimed });
-        if (!open && !compact) field.current?.focus();
+        if (!open && focusOnPointerOpen) field.current?.focus();
       }}
       onCancel={() => { void dock.send({ type: "shift", now: untimed }); }}
       onTap={({ keyboard }) => {
@@ -357,7 +359,8 @@ export function Assistant({ runtime, messageActions, speech, canReadAloud = fals
       if (sent._tag === "Failure") focusOnRevealRef.current = false;
     });
   };
-  const grabber = shell.state ? <DockHandle dock={dock} detent={assistantDetent} compact={compact} field={composerRef} /> : undefined;
+  const grabber = shell.state ? <DockHandle dock={dock} detent={assistantDetent} compact={compact}
+    focusOnPointerOpen={currentView !== undefined && !compact} field={composerRef} /> : undefined;
 
   return (
     <>
@@ -439,9 +442,15 @@ export function Assistant({ runtime, messageActions, speech, canReadAloud = fals
           onAttach: !onComms && composer.can({ type: "attach", count: 1 }) ? () => {
             const request = { type: "openPicker", room: maxFiles - attachmentCount(writing.editor) } as const;
             if (!attachments.can(request)) return;
-            fileTargetRef.current = { binding: writing.binding, slot: writing.read.ticket, revision: talking.context.revision };
-            openWithFocus(false);
-            void attachments.send(request);
+            void runtime.runPromise(attachmentAuthority()).then((authority) => {
+              if (authority === undefined) {
+                board.change({ attachmentNotice: "Could not verify the owner for these attachments. Try again." });
+                return;
+              }
+              fileTargetRef.current = { binding: writing.binding, slot: writing.read.ticket, revision: talking.context.revision, authority };
+              openWithFocus(false);
+              void attachments.send(request);
+            });
           } : undefined,
           onFocusField: assistantDetent === "Typing" ? undefined : () => openWithFocus(false),
           onHistory: history.browse,

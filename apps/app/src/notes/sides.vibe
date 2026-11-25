@@ -5,14 +5,17 @@ import * as Voice from "../../gen/app__notes__voice.effect.vibe"
 import type { Actor } from "../../gen/app__notes__note.effect.vibe"
 import { Machine as Notes } from "../../gen/app__notes.effect.vibe"
 import { Machine as Shell, showing } from "../../gen/app__shell.effect.vibe"
+import type { Machine as Toasts } from "../../gen/app__notices__toasts.effect.vibe"
 import { MediaHandoff } from "../assistant/attachments.vibe"
+import { type Said, say } from "../notices/toasts.vibe"
 import type { Agent } from "../platform/agent.vibe"
+import { Device } from "../platform/device.vibe"
 import { NoteDevice, transcriptWindowMs } from "../platform/noteDevice.vibe"
 import { NoteStore } from "../platform/notes.vibe"
 import { ownerAt } from "../platform/owner.vibe"
 import { type Job, answer, following, reacting, run, together } from "../runtime/reactor.vibe"
-import { NoteContent, audioIdOf, formatChanged, numberOf, savedVoice } from "./content.vibe"
-import { type NotesSelection, notesSelection } from "./selection.vibe"
+import { NoteContent, audioIdOf, formatChanged, numberOf, savedVoice, transcriptText } from "./content.vibe"
+import { type NotesSelection, type TranscriptSource, notesSelection, savedTranscriptRecord } from "./selection.vibe"
 
 module web {
   /** A linked page must still be its original HTTP(S) address. @throws {never} */
@@ -196,6 +199,16 @@ effect function askAbout(fx: Extract<Voice.Effect, { readonly tag: "AsksAlpha" }
     record: { kind: "canonical-note", id: selected.id, revision: selected.revision },
     title: note.title.trim() || "Voice note",
   }))
+}
+
+// spec/app/notes/voice.md, "Only the transcript the owner added leaves the note, and only what was shown is written to it"
+export effect function copyTranscript(source: TranscriptSource): void!!(NotesSelection | NoteStore | Toasts | Said) {
+  const note = try savedTranscriptRecord(source)
+  if (note === undefined) return
+  const text = transcriptText(note)
+  if (text.trim() === "") return
+  const copied = !text.includes("\0") && new TextEncoder().encode(text).length <= 65536 && (try (try Device).copyText(text))
+  if (showing(try (try Shell).get(), "Notes")) try say(copied ? "Text copied." : "Couldn’t copy text. Try again.", !copied)
 }
 
 /** The owner's request starts recognition for the exact recording still open. */
