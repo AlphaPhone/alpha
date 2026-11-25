@@ -32,7 +32,7 @@ export function alphaPhotos(scene: PhotosScene): Faked {
     | "thumbnails" | "beginEdit" | "previewEdit" | "saveEdit" | "cancelEdit" | "albums" | "openLibrarySettings";
   return plugin<Pick<PhotosPlugin, Used>, { libraryChanged: undefined }>((emit) => {
     scene.changed = () => { if (scene.watching) emit("libraryChanged", undefined); };
-    const listed = (rows: PhotosScene["rows"], thumbnails?: boolean) => rows.map(({ image, ...row }) => ({ ...row, image: thumbnails ? image : undefined }));
+    const listed = (rows: PhotosScene["rows"], thumbnails?: boolean) => rows.map(({ image, ...row }) => thumbnails ? { ...row, image } : row);
     const owned = () => scene.rows.filter((item) => item.owned);
     const session = "alpha-test-photo-edit";
     const preview = { sessionId: session, operationId: session, image: photo, width: 1, height: 1, reduced: false, maxEdge: 1024, filter: "none", canReplace: true };

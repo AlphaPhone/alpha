@@ -45,7 +45,13 @@ type CropBounds = { x: int, y: int, width: int, height: int }
 type Edit = { turns: int, cropped: bool, bounds: CropBounds, look: Look, start: int, end: int }
 type Refusal = NoRefusal | Animated | TooLarge | TooLong | NoRoom | NoEditor
 
+type Pan = { x: int, y: int }
 pure val maxZoom = 8
+pure val panUnits = 1000
+pure val centered: Pan = { x: 0, y: 0 }
+
+pure def validPan(pan: Pan): bool =
+  pan.x >= -panUnits and pan.x <= panUnits and pan.y >= -panUnits and pan.y <= panUnits
 
 pure val cropUnits = 10000
 pure val wholePhoto: CropBounds = { x: 0, y: 0, width: cropUnits, height: cropUnits }
@@ -76,8 +82,8 @@ type Effect =
 Whether the viewer is showing, whether it was opened from the lock screen
 and the captures it may then show; the item open (none is 0), who opened it
 and whether it was listed in Photos; its read, kind, length, revision and
-favourite; whether it was deleted while open; zoom, playback and the info
-sheet; the editor: the edit, its preview and whether that failed, why the
+favourite; whether it was deleted while open; zoom, pan, controls, playback
+and the info sheet; the editor: the edit, its preview and whether that failed, why the
 phone refused to edit, whether the original is to be replaced; the save,
 and the lookup of a copy whose outcome is not known. Only the save, its
 lookup and the count of saves are kept through a restart.
@@ -87,7 +93,7 @@ type Viewer = {
   visible: bool, secure: bool, scope: Set[int],
   open: int, openedBy: Actor, listed: bool, read: R::Read,
   kind: Kind, duration: int, revision: int, favourite: bool, gone: bool,
-  zoom: int, playing: bool, position: int, info: bool,
+  zoom: int, pan: Pan, chrome: bool, muted: bool, playing: bool, position: int, info: bool,
   editing: bool, cropping: bool, edit: Edit, preview: V::Review, unavailable: bool, refusal: Refusal, replace: bool,
   save: A::Attempt, attempts: int, lookup: R::Read, found: bool, restored: bool,
 }
@@ -98,7 +104,7 @@ pure val initial: Viewer = {
   visible: true, secure: false, scope: Set(),
   open: 0, openedBy: Owner, listed: false, read: R::unread,
   kind: Still, duration: 0, revision: 0, favourite: false, gone: false,
-  zoom: 1, playing: false, position: 0, info: false,
+  zoom: 1, pan: centered, chrome: true, muted: false, playing: false, position: 0, info: false,
   editing: false, cropping: false, edit: untouched(0), preview: V::unreviewed, unavailable: false, refusal: NoRefusal, replace: false,
   save: A::plan(0), attempts: 0, lookup: R::unread, found: false, restored: false,
 }
@@ -123,6 +129,7 @@ pure val onlyValues = Set(Set(), Set(1))
 pure val durationValues = Set(0, 3)
 pure val revisionValues = Set(1, 2)
 pure val levelValues = Set(0, 1, 8, 9)
+pure val panValues = Set(centered, { x: 500, y: -500 }, { x: 1001, y: 0 })
 pure val attemptValues = Set(1, 2, 3)
 pure val ticketValues = Set(1, 2, 3, 4)
 pure val startValues = Set(0, 1)
@@ -140,8 +147,8 @@ pure val weight_saved = 20
 ## Story: Look at a photo or video
 
 > As the owner, I want to open a photo or video, see it load or be told it
-> could not, zoom into a photo, play a video from where I choose, swipe to
-> the next one, and see its details.
+> could not, zoom and pan in a photo, show or hide the controls, play or mute
+> a video from where I choose, swipe to the next one, and see its details.
 
 ### An item opens from what Photos lists, and is read from the phone; from the lock screen only one of that session's captures opens
 
@@ -155,7 +162,7 @@ pure def reading(photo: int, v: Viewer): Done =
   val asked = R::ask(v.read)
   emit(List(Load({ ticket: asked.ticket, photo: photo })), {
     ...v, open: photo, read: asked, kind: Still, duration: 0, gone: false, favourite: false,
-    zoom: 1, playing: false, position: 0, info: false, edit: untouched(0), replace: false,
+    zoom: 1, pan: centered, chrome: true, muted: false, playing: false, position: 0, info: false, edit: untouched(0), replace: false,
   })
 
 pure def canOpenItem(s: Viewer, photo: int, listed: bool, secure: bool, only: Set[int], reviewing: bool, by: Actor): bool =
@@ -193,12 +200,13 @@ pure def reload(s: Viewer, by: Actor): Done = reading(s.open, s)
 ### While an item is being read, nothing of it plays, zooms, shows its info or is edited
 
 Discovered by the proof: without it, an item read anew could seem to keep
-the position, zoom or "replace the original" of the one before.
+the position, zoom, pan, hidden controls, mute or "replace the original" of the one before.
 
 ```quint
 pure def alwaysNothingOfAnItemBeingRead(s: Viewer): bool =
   s.read.status == R::Loading
-    implies (s.position == 0 and s.zoom == 1 and not(s.playing) and not(s.info) and not(s.editing) and not(s.replace))
+    implies (s.position == 0 and s.zoom == 1 and s.pan == centered and s.chrome and not(s.muted)
+      and not(s.playing) and not(s.info) and not(s.editing) and not(s.replace))
 ```
 
 ### The owner swipes to the next or previous item Photos lists, and on the lock screen only within its session
@@ -227,13 +235,34 @@ pure def alwaysTheLockScreenShowsOnlyItsSession(s: Viewer): bool =
 pure def canZoomTo(s: Viewer, level: int, by: Actor): bool =
   by == Owner and shown(s) and s.kind == Still and not(s.editing) and level >= 1 and level <= maxZoom
 
-pure def zoomTo(s: Viewer, level: int, by: Actor): Viewer = { ...s, zoom: level }
+pure def zoomTo(s: Viewer, level: int, by: Actor): Viewer =
+  { ...s, zoom: level, pan: if (level == 1) centered else s.pan }
+```
+
+### The owner pans a zoomed photo within its frame and shows or hides the controls from the media surface
+
+Each pan coordinate is a fraction of the distance the picture can move in
+that direction. Returning to the photo's own size centers it. Opening the
+editor or reading another item shows the controls again.
+
+```quint
+pure def canPanTo(s: Viewer, pan: Pan, by: Actor): bool =
+  by == Owner and shown(s) and s.kind == Still and not(s.editing) and s.zoom > 1 and validPan(pan)
+
+pure def panTo(s: Viewer, pan: Pan, by: Actor): Viewer = { ...s, pan: pan }
+
+pure def canToggleChrome(s: Viewer, by: Actor): bool =
+  by == Owner and shown(s) and not(s.editing) and not(s.info)
+
+pure def toggleChrome(s: Viewer, by: Actor): Viewer = { ...s, chrome: not(s.chrome) }
 ```
 
 ### A video plays and pauses, and its position stays within it, or within the part kept while it is trimmed
 
 The owner moves the position anywhere from the start to the end; the phone
-reports it as the video plays, and playing stops at the end.
+reports it as the video plays, and playing stops at the end. The viewer
+shows the elapsed time and total length. The owner can mute or unmute the
+video without changing its playback position.
 
 ```quint
 pure def canPlay(s: Viewer, by: Actor): bool =
@@ -244,6 +273,10 @@ pure def play(s: Viewer, by: Actor): Viewer = { ...s, playing: true }
 pure def canPause(s: Viewer, by: Actor): bool = by == Owner and s.playing
 
 pure def pause(s: Viewer, by: Actor): Viewer = { ...s, playing: false }
+
+pure def canToggleMute(s: Viewer, by: Actor): bool = by == Owner and shown(s) and s.kind == Clip
+
+pure def toggleMute(s: Viewer, by: Actor): Viewer = { ...s, muted: not(s.muted) }
 
 pure def canSeek(s: Viewer, position: int, by: Actor): bool =
   by == Owner and shown(s) and s.kind == Clip and position <= upTo(s)
@@ -270,7 +303,8 @@ pure def toggleInfo(s: Viewer, by: Actor): Viewer = { ...s, info: not(s.info) }
 
 ```quint
 pure def alwaysViewWithinBounds(s: Viewer): bool =
-  s.zoom >= 1 and s.zoom <= maxZoom and s.position >= 0 and s.position <= s.duration
+  s.zoom >= 1 and s.zoom <= maxZoom and validPan(s.pan) and (s.zoom == 1 implies s.pan == centered)
+    and s.position >= 0 and s.position <= s.duration and (s.muted implies s.kind == Clip)
     and ((s.playing or s.info or s.editing) implies shown(s))
     and (s.playing implies s.kind == Clip) and not(s.info and s.editing)
     and ((s.editing and s.kind == Clip) implies (s.edit.start <= s.position and s.position <= s.edit.end))
@@ -421,7 +455,7 @@ pure def startEdit(s: Viewer, by: Actor): Done =
   val fresh = untouched(s.duration)
   val revised = V::revise(s.preview)
   emit(List(Render({ revision: revised.revision, edit: fresh, cropSource: false })),
-    { ...s, editing: true, cropping: false, playing: false, info: false, zoom: 1, edit: fresh, preview: revised, replace: false, unavailable: false, refusal: NoRefusal })
+    { ...s, editing: true, cropping: false, playing: false, info: false, zoom: 1, pan: centered, chrome: true, edit: fresh, preview: revised, replace: false, unavailable: false, refusal: NoRefusal })
 
 pure def canCancelEdit(s: Viewer, by: Actor): bool = by == Owner and s.editing and not(s.cropping)
 
