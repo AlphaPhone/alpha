@@ -6,7 +6,7 @@ const states = {
   empty: { icon: <Inbox />, title: "Nothing here" },
   noResults: { icon: <SearchX />, title: "No matches" },
   signedOut: { icon: <LogIn />, title: "Sign in to read your mail", action: "Sign in" },
-  notConnected: { icon: <Mail />, title: "Not connected", action: "Connect Gmail" },
+  notConnected: { icon: <Mail />, title: "Connect Gmail", action: "Connect Gmail" },
   needsAccess: { icon: <Lock />, title: "Alpha cannot read this mail", action: "Give access" },
   unavailable: { icon: <Ban />, title: "Not available here" },
   offline: { icon: <WifiOff />, title: "Cannot reach Gmail", action: "Try again" },

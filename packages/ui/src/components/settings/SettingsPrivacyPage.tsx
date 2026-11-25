@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { Ear, KeyRound, ListChecks } from "lucide-react";
+import { Ear, ListChecks, SlidersHorizontal } from "lucide-react";
 import { ListGroup } from "../ListGroup.tsx";
 import { SettingsDeviceSwitch, type SettingsDeviceSwitchProps } from "./SettingsDeviceSwitch.tsx";
 import { SettingsNavRow } from "./SettingsNavRow.tsx";
@@ -50,11 +50,7 @@ export function SettingsPrivacyPage({ read, askFirst, saving, recovering, onAskF
   return (
     <SettingsPage title="Privacy" onBack={onBack}>
       <ListGroup>
-        <SettingsNavRow title="Permissions" icon={<ListChecks />} onOpen={onOpen && (() => onOpen("permissions"))} {...at(0)} />
-        <SettingsNavRow title="Set up Alpha access" icon={<KeyRound />} onOpen={onSetUpAccess} {...at(1)} />
-        <SettingsNavRow title="Listener" icon={<Ear />} onOpen={onHandOver && (() => onHandOver("listener"))} {...at(2)} />
-      </ListGroup>
-      <ListGroup>
+        <SettingsNavRow title="Permissions" icon={<SlidersHorizontal />} onOpen={onOpen && (() => onOpen("permissions"))} {...at(0)} />
         <SettingsDeviceSwitch setting="ask-first" read={read} checked={askFirst} saving={saving} recovering={recovering} onChange={onAskFirstChange} onRecover={onRecover} />
       </ListGroup>
       <ListGroup heading="Share with Alpha">
@@ -62,7 +58,13 @@ export function SettingsPrivacyPage({ read, askFirst, saving, recovering, onAskF
           <SettingsDeviceSwitch key={share} setting={share} read={read} checked={read === "loaded" && shares[share] === true} saving={saving} recovering={recovering} onChange={onShareChange && ((on) => onShareChange(share, on))} />
         ))}
       </ListGroup>
+      <ListGroup>
+        <SettingsNavRow title="Listener" icon={<Ear />} onOpen={onHandOver && (() => onHandOver("listener"))} {...at(2)} />
+      </ListGroup>
       {children}
+      <ListGroup>
+        <SettingsNavRow title="Access setup" icon={<ListChecks />} onOpen={onSetUpAccess} {...at(1)} />
+      </ListGroup>
     </SettingsPage>
   );
 }

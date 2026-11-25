@@ -7,6 +7,7 @@ import { type AddressInfo, createServer } from "node:net";
 import os from "node:os";
 import path from "node:path";
 import { pipeline } from "node:stream";
+import { Effect } from "effect";
 import { prepared } from "./checkout.ts";
 import { builtPack } from "./pack.ts";
 
@@ -105,11 +106,11 @@ interface Answer { readonly status: number; readonly text: string }
 function exchange(url: string, init: { method?: string; headers?: Record<string, string>; body?: unknown; within?: number } = {}): Promise<Answer> {
   return new Promise((done, fail) => {
     const body = init.body === undefined ? undefined : JSON.stringify(init.body);
-    const request = http.request(url, { method: init.method ?? (body === undefined ? "GET" : "POST"), headers: { ...(body === undefined ? {} : { "content-type": "application/json" }), ...init.headers } }, (response) => {
+    const request = http.request(url, { method: init.method ?? (body === undefined ? "GET" : "POST"), timeout: init.within, headers: { ...(body === undefined ? {} : { "content-type": "application/json" }), ...init.headers } }, (response) => {
       let text = "";
       response.setEncoding("utf8").on("data", (part: string) => { text += part; }).on("end", () => done({ status: response.statusCode ?? 0, text }));
     });
-    if (init.within !== undefined) request.setTimeout(init.within, () => request.destroy(new Error("no answer in time")));
+    if (init.within !== undefined) request.on("timeout", () => request.destroy(new Error("no answer in time")));
     request.on("error", fail).end(body);
   });
 }
@@ -119,7 +120,7 @@ async function answering(url: string, gone: () => string | undefined) {
   while (!(await exchange(url, { within: 2_000 }).then((answer) => answer.status === 200, () => false))) {
     const why = gone();
     if (why !== undefined) throw new Error(why);
-    await new Promise((done) => setTimeout(done, 100));
+    await Effect.runPromise(Effect.sleep(100));
   }
 }
 
@@ -394,13 +395,15 @@ const owner = { email: "owner@alpha.test", credits: 50_000_000 };
 
 /**
  * The cloud and the agent a dev server runs against: one signed-in, funded owner, whose model is the scripted one or
- * `real`. Their state is a directory of this run, gone with it, so nothing piles up between runs; `keep` names a
+ * `real`, and whose agent is the pack's with the phone's own character, so a real model is given the phone's system
+ * prompt. Their state is a directory of this run, gone with it, so nothing piles up between runs; `keep` names a
  * directory to keep the agent's in instead.
  */
 export async function startEliza(keep?: string, real?: RealModel) {
+  const { character } = await builtPack();
   const state = scratch();
   const cloud = await startCloud(state, [owner.email], owner.credits, real);
   const key = cloud.owners.get(owner.email)!;
-  const agent = await startAgent(keep ?? state, cloud, key, characterOf(owner.email), keep !== undefined);
+  const agent = await startAgent(keep ?? state, cloud, key, character, keep !== undefined);
   return { cloud, agent, key, stop: async () => { await agent.stop(); await cloud.stop(); fs.rmSync(state, { recursive: true, force: true }); } };
 }

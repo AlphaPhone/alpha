@@ -37,15 +37,11 @@ import type { Machine as Adding } from "../../gen/app__inbox__adding.effect.vibe
 import { type Beginning, Letters, begin, openGmailDraft } from "./composer.vibe";
 import { type Letter, Mail, revisionOf } from "./gmail.vibe";
 import { connectMailFrame, frameDocument, prepareMessage } from "./mail-html.ts";
-import type { Alpha } from "../runtime/area.tsx";
-import { AppBack } from "../shell/AppBack.tsx";
 import { AttachmentPreviews, canPreviewAttachment, canSaveAttachment } from "./attachment.vibe";
 
 export interface InboxProps {
   /** Provides the list, the message open and its marks, the changes, the shell, and Mail, which holds what Gmail said. */
   runtime: ManagedRuntime.ManagedRuntime<List | Shown | Marks | Changes | Writing | Adding | Incoming | Offering | Offers | Letters | Shell | Mail | Time | Preferences | Cloud | AttachmentPreviews, unknown>;
-  /** Alpha, for the shell's Back in Inbox's own header. */
-  alpha?: Alpha;
 }
 
 type Runtime = InboxProps["runtime"];
@@ -284,7 +280,7 @@ const sizeOf = (bytes: number) => (bytes >= 1_000_000 ? `${(bytes / 1_000_000).t
  * its event.
  * @model spec/app/inbox/index.md
  */
-export function Inbox({ runtime, alpha }: InboxProps) {
+export function Inbox({ runtime }: InboxProps) {
   const { state, cause, can, send } = useList(runtime);
   const message = useMessage(runtime);
   const changes = useTimed(runtime, useChanges);
@@ -380,7 +376,7 @@ export function Inbox({ runtime, alpha }: InboxProps) {
   return (
     <>
       <InboxListScreen
-        leading={alpha ? <AppBack alpha={alpha} /> : undefined}
+        onBack={shell.can({ type: "goBack" }) ? () => void shell.send({ type: "goBack" }) : undefined}
         account={account === 0 ? undefined : mailOf(runtime, (mail) => mail.email(account))}
         folder={folderNames[folder]}
         unavailable={!state.searchable}

@@ -45,7 +45,7 @@ async function forwarded(request: Request, url: URL, target: URL, env: EdgeEnv):
 }
 
 /** The web host Worker: its own health, and every other address of its origin answered by the API Worker, through its binding, as the web origin. */
-export const edgeWorker = {
+const edgeWorker = {
   async fetch(request: Request, env: EdgeEnv): Promise<Response> {
     const url = new URL(request.url)
     const { route, target } = edgeRouteOf(url, env)

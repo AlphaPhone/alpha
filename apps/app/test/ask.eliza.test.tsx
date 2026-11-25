@@ -8,7 +8,7 @@ import ask from "../src/ask/index.tsx";
 import { Agent } from "../src/platform/agent.vibe";
 import { Cloud } from "../src/platform/cloud.vibe";
 import { button, closeAll, fill, openOver, press, underAct, until } from "./alpha.tsx";
-import { owned } from "@repo/eliza-harness/owned";
+import { owned } from "@repo/eliza-harness";
 import { elizaWorld } from "./eliza/world.vibe";
 
 let mine: Awaited<ReturnType<typeof owned>>;
@@ -43,7 +43,10 @@ it("Talk to my agent, through eliza's agent and cloud (spec/app/ask/index.md, \"
   // spec/app/ask/index.md, "Only the turn under way is heard: its reply so far, then the whole reply, or that it did not finish"
   await until(alpha, asking, Ask, (s) => s.turn.outcome === "Confirmed");
   expect(lines()).toEqual(["Say hello.", "Hello from the cloud."]);
-  expect((await mine.asked()).at(-1)).toEqual([{ role: "system", content: expect.stringContaining(mine.system) }, { role: "user", content: expect.stringMatching(/^Say hello\.(\n|$)/) }]);
+  const textOf = (value: unknown) => (typeof value === "string" ? value : "");
+  const last = (await mine.asked()).at(-1);
+  expect([last?.length, last?.[0]?.role, textOf(last?.[0]?.content).includes(mine.system), last?.[1]?.role, /^Say hello\.(\n|$)/.test(textOf(last?.[1]?.content))])
+    .toEqual([2, "system", true, "user", true]);
   expect(await balance()).toBeLessThan(mine.granted);
 
   // spec/app/ask/index.md, "The owner stops the reply under way once, and the agent is asked to stop that conversation's turn"

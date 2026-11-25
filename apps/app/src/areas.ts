@@ -30,6 +30,7 @@ export const mounts: readonly Mount[] = [
   at("notice", () => import("./notices/Toasts.tsx")),
   at("assistant", () => import("./assistant/index.tsx")),
   at("view:Settings", () => import("./settings/index.tsx")),
+  at("overlay", () => import("./account/index.tsx")),
   at("view:Inbox", () => import("./inbox/index.tsx")),
   at("view:Calendar", () => import("./calendar/index.tsx")),
   at("view:Camera", () => import("./camera/index.tsx")),
@@ -49,8 +50,8 @@ export const mounts: readonly Mount[] = [
   at("phone/stage", () => import("./phone/stage.tsx")),
   at("settings/phone", () => import("./phone/settingsDetails.tsx")),
   at("overlay", () => import("./contacts/requestCard.tsx")),
-  at("home/cards", () => import("./phone/cards.tsx")),
   at("home/cards", () => import("./clock/cards.tsx")),
   at("settings/update", () => import("./update/index.tsx")),
   at("overlay", () => import("./update/overlay.tsx")),
+  at("view:Browser", () => import("./browser/index.tsx")),
 ];
