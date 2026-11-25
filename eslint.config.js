@@ -20,8 +20,13 @@ const imports = {
   patterns: [
     // A package, its subpaths and its family: zustand/middleware, redux-saga, @angular/core.
     { regex: `^(?:@(?:${scopes.join("|")})/|(?:${banned.join("|")})(?:[/-]|$))`, message: `Not part of the stack: ${stack}.` },
+    { regex: "^@elizaos/os/(?:build|image)(?:/|$)", message: "Import from @elizaos/os root barrel instead of subpath." },
   ],
 }
+const noNodeInBrowser = [
+  { regex: "^@elizaos/(?:os(?:/(?:build|image|browser(?!/address)|app-update|inference|android|aosp))?$|agent-host(?:/|$)|cloud-worker(?:/|$)|core-node(?:/|$)|plugin-workflow-worker(?:/|$))", message: "Browser code may only import browser-safe @elizaos barrels, never Node/host/worker packages." },
+  { regex: "^@repo/eliza-harness(?:/|$)", message: "Browser application code must not import @repo/eliza-harness." },
+]
 // AGENTS.md, "Hard rules": an interface keeps its state in the spec's Machine and leaves effects and time to the shell.
 // AGENTS.md, "This project": fakes and fixtures live in tests and development only, never in what a build ships.
 const noTests = { regex: "(^|/)test/", message: 'An application never imports its tests or their fakes: AGENTS.md, "This project".' }
@@ -191,9 +196,11 @@ export default withWorkspaceBarrels(defineConfig(
   },
   // The application and its components: no effect hooks and no timers.
   { files: ["apps/**/src/**/*.{ts,tsx}"], rules: { "no-restricted-imports": ["error", noEffects], "no-restricted-globals": ["error", ...timers, ...dialogs], "no-restricted-properties": ["error", ...timersOf] } },
+  { files: ["apps/app/src/**/*.{ts,tsx}"], rules: { "no-restricted-imports": ["error", { ...noEffects, patterns: [...noEffects.patterns, ...noNodeInBrowser] }] } },
   { files: ["apps/**/src/**/*.tsx"], rules: { "no-restricted-syntax": ["error", { selector: "JSXOpeningElement[name.name=/^(input|textarea)$/]", message: "Use Input, Textarea or Checkbox from @repo/ui." }, ...clocks] } },
   { files: ["apps/**/src/**/*.vibe"], rules: { "no-restricted-imports": ["error", { patterns: [...noReact.patterns, noTests] }] } },
-  { files: ["packages/ui/src/**/*.{ts,tsx}"], rules: { "no-restricted-imports": ["error", noEffects], "no-restricted-globals": ["error", ...timers], "no-restricted-properties": ["error", ...timersOf] } },
+  { files: ["apps/app/src/**/*.vibe"], rules: { "no-restricted-imports": ["error", { patterns: [...noReact.patterns, noTests, ...noNodeInBrowser] }] } },
+  { files: ["packages/ui/src/**/*.{ts,tsx}"], rules: { "no-restricted-imports": ["error", { ...noEffects, patterns: [...noEffects.patterns, ...noNodeInBrowser] }], "no-restricted-globals": ["error", ...timers], "no-restricted-properties": ["error", ...timersOf] } },
   { files: own, ignores: ["**/*.{vibe,vibex}"], languageOptions: { parser: guarded(tseslint.parser) } },
   { files: ["{apps,packages}/**/*.{vibe,vibex}"], languageOptions: { parser: guarded(vibelang) } },
   { files: own, plugins: { code }, rules: { "no-console": "error", "code/comments": ["error", { jsdoc: true, left: commented }], "code/effects": ["error", { left: scheduled }] } },

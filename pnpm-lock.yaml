@@ -395,6 +395,9 @@ importers:
       '@effect/vitest':
         specifier: 4.1.1
         version: 4.1.1(effect@4.1.1)(vitest@5.1.0)
+      '@repo/deployment':
+        specifier: workspace:*
+        version: link:../../packages/deployment
       '@repo/eliza-harness':
         specifier: workspace:*
         version: link:../../packages/eliza-harness

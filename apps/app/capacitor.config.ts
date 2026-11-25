@@ -1,6 +1,6 @@
 // spec/app/platform/index.md, "Story: Reach the phone's native capabilities"
 import type { CapacitorConfig } from "@capacitor/cli";
-import table from "../../packages/deployment/deployments.json" with { type: "json" };
+import table from "@repo/deployment/deployments.json" with { type: "json" };
 
 interface Hosted { readonly kind: "hosted"; readonly cloud: string; readonly appLinkHost: string }
 

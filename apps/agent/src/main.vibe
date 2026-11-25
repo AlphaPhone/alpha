@@ -3,7 +3,7 @@ import * as NodeRuntime from "@effect/platform-node/NodeRuntime"
 import * as NodeServices from "@effect/platform-node/NodeServices"
 import { readBundleManifest } from "@elizaos/agent/bundle"
 import { decodeLaunchDocument } from "@elizaos/agent/launch"
-import { defineRoutes } from "@elizaos/agent/routes"
+import { defineRoutes } from "@elizaos/agent"
 import { deployment } from "@repo/deployment"
 import { pinnedCheckout, pinnedPack } from "@repo/eliza-harness"
 import {
