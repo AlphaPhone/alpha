@@ -191,6 +191,29 @@ describe("Notes", () => {
     expect(saved()).toEqual(previouslyShown);
   });
 
+  it("Pins the open note from its own menu, as v121's note menu held Pin (spec/app/notes/index.md, \"Story: Organise my notes\")", async () => {
+    const world = scene();
+    const { alpha, runtime } = await openNotesFromHome(world);
+    await until(alpha, runtime, List, (state) => state.read.status === "Loaded");
+    // Rows carry no menu of their own, as v121's had none.
+    expect(button("Gift ideas · Priya options")).toBeUndefined();
+    await press("Open Gift ideas · Priya");
+    await until(alpha, runtime, Editor, (state) => state.showing && state.draft.sync === "Kept");
+    const pinned = () => (world.notes.notes.find((row) => row.id === "gifts")?.format?.data as { readonly pinned?: boolean } | undefined)?.pinned;
+    const choose = async (name: string) => {
+      await control("More");
+      await drawn(() => button("More")?.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true })));
+      const choice = () => [...document.querySelectorAll<HTMLElement>("[role=menuitem]")].find((item) => item.textContent?.trim() === name);
+      await rendered(() => expect(choice()?.getAttribute("aria-disabled")).toBeNull());
+      await drawn(() => choice()?.click());
+    };
+    await choose("Pin");
+    await rendered(() => expect(pinned()).toBe(true));
+    await until(alpha, runtime, List, (state) => state.read.status === "Loaded" && state.version === world.notes.revision + 1);
+    await choose("Unpin");
+    await rendered(() => expect(pinned()).toBe(false));
+  });
+
   it("Copies only the exact saved voice note after choosing Copy text (spec/app/notes/voice.md, \"Story: Share the text of a saved voice note\")", async () => {
     const world = scene();
     const { alpha, runtime } = await openNotesFromHome(world);
@@ -341,9 +364,9 @@ describe("Notes", () => {
     const editor = () => alpha.runtime.runPromise(Effect.flatMap(Editor, (e) => e.get()));
     const list = () => alpha.runtime.runPromise(Effect.flatMap(List, (l) => l.get()));
     const results = () => world.notes.views.filter((one) => one.path === "result").map((one) => one.body.result);
-    const ask = async (text: string, actions: boolean) => {
+    const ask = async (text: string, actions: boolean, viewId = "notes") => {
       world.ask.nextReplyChunks = ["Here it is."];
-      world.ask.nextActions = actions ? (metadata) => [prepared(String((metadata as { viewClientId?: unknown }).viewClientId), "notes", true)] : undefined;
+      world.ask.nextActions = actions ? (metadata) => [prepared(String((metadata as { viewClientId?: unknown }).viewClientId), viewId, viewId === "notes")] : undefined;
       const turn = (await runtime.runPromise(Effect.flatMap(Conversation, (c) => c.get()))).turn.send.id + 1;
       // spec/app/shell/index.md, "Ask Alpha rises to typing, a sheet or the full screen, never over the drawer": over an app the dock is compact, and Type opens the field.
       await rendered(() => expect(composerField()).not.toBeNull());
@@ -443,6 +466,20 @@ describe("Notes", () => {
     expect([results()[2], editorTitle()]).toEqual([{ switched: true, shown: { kind: "saved-note", noteId: "shopping" } }, "shopping list"]);
     // spec/app/notes/index.md, "The agent opens the one note the owner named, as the list last read it, once for the owner's current request, and is told whether it opened": a delivery succeeded only where the view switched.
     expect(world.notes.views.filter((one) => one.path === "result").map((one) => one.body.success)).toEqual([true, false, true]);
+
+    // spec/app/assistant/index.md, "A complete reply may open one view, once, while the screen it was asked from still shows": a reply that prepared another of Alpha's apps opens it in front, and the agent is told it switched.
+    const shell = () => alpha.runtime.runPromise(Effect.flatMap(Shell, (machine) => machine.get()));
+    await ask("open Calendar", true, "calendar");
+    await drawn(() => vi.waitFor(() => expect(results()).toHaveLength(4)));
+    expect(world.notes.views.at(-2)).toMatchObject({ path: "claim", body: { viewId: "calendar" } });
+    expect(world.notes.views.at(-2)?.body).not.toHaveProperty("targetProtocol");
+    expect([results()[3], showing(await shell(), "Calendar")]).toEqual([{ switched: true }, true]);
+    // spec/app/assistant/index.md, "A complete reply may take the owner Home, once, as it may open a view": a reply that prepared Home leaves every app, and Ask Alpha stays as it was.
+    const panel = (await shell()).assistant;
+    await ask("go home", true, "home");
+    await drawn(() => vi.waitFor(() => expect(results()).toHaveLength(5)));
+    expect(world.notes.views.at(-2)).toMatchObject({ path: "claim", body: { viewId: "home" } });
+    expect([results()[4], (await shell()).trail, (await shell()).assistant]).toEqual([{ switched: true }, [], panel]);
   });
 
   it("The agent opens the note I named aloud (spec/app/assistant/context.md, \"A spoken turn carries what a typed turn sent at that moment would, the view claim included\"; spec/app/notes/index.md, \"The agent opens the one note the owner named, as the list last read it, once for the owner's current request, and is told whether it opened\")", async () => {
