@@ -104,6 +104,7 @@ public class MainActivity extends BridgeActivity {
   Intent incoming = getIntent();
   BillingReturn.capture(incoming);
   if (incoming == null || !TEXT_ASK.equals(incoming.getAction())) HostedDigestDelivery.get().capture(incoming);
+  InboxNoticeDelivery.get(this).capture(incoming);
   MainActivity live = livePage.get();
   boolean frontStart = isFrontStart(getIntent());
   if (live != null && live != this && !live.isFinishing() && !live.isDestroyed()
@@ -125,6 +126,7 @@ public class MainActivity extends BridgeActivity {
   registerPlugin(AlphaFilesPlugin.class);
   registerPlugin(AlphaSelectedDocumentsPlugin.class);
   registerPlugin(AlphaInboxAttachmentsPlugin.class);
+  registerPlugin(AlphaInboxNoticesPlugin.class);
   registerPlugin(AlphaNotesPlugin.class);
   registerPlugin(AlphaAssistantDraftPlugin.class);
   registerPlugin(AlphaNoteDocumentsPlugin.class);
@@ -221,6 +223,7 @@ public class MainActivity extends BridgeActivity {
   composerVisit.incrementAndGet();
   super.onResume();
   HostedDigestDelivery.get().refreshNotices();
+  InboxNoticeDelivery.get(this).changed();
   if (livePage.get() == this) unansweredFrontStarts = 0;
  }
 
@@ -239,6 +242,7 @@ public class MainActivity extends BridgeActivity {
   composerVisit.incrementAndGet();
   super.onWindowFocusChanged(focused);
   if (focused && getBridge() != null) {
+   InboxNoticeDelivery.get(this).changed();
    getBridge().getWebView().evaluateJavascript("window.dispatchEvent(new Event('focus'))", null);
   }
  }
@@ -271,6 +275,7 @@ public class MainActivity extends BridgeActivity {
    getBridge().getWebView().evaluateJavascript("window.dispatchEvent(new Event('alpha-billing-return'))", null);
   }
   HostedDigestDelivery.get().capture(intent);
+  InboxNoticeDelivery.get(this).capture(intent);
   if (isFrontStart(intent)) {
    if (!handingOff) unansweredFrontStarts = 0;
    return;

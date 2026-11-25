@@ -33,7 +33,7 @@ import type { Machine as LayersMachine } from "../../gen/app__shell__layers.effe
 import { useMachine as useLayers } from "../../gen/app__shell__layers.react.ts";
 import { useMachine as useShell } from "../../gen/app__shell.react.ts";
 import { untimed } from "../runtime/reactor.vibe";
-import { MailQuestions } from "../inbox/mail-context.vibe";
+import { acceptMailReview, MailQuestions, type MailQuestion } from "../inbox/mail-context.vibe";
 import { home } from "../shell/shell.vibe";
 import { isCommsView } from "../shell/views.tsx";
 import { type MediaCard, MediaReview, namedReviewQuery, spokenText } from "./media-review.vibe";
@@ -423,6 +423,7 @@ export function Assistant({ runtime, messageActions, speech, canReadAloud = fals
   const mail = useMemo(() => runtime.runSync(MailQuestions), [runtime]);
   const mailStore = useMemo(() => ({ subscribe: (listener: () => void) => mail.subscribe(listener), snapshot: () => mail.snapshot() }), [mail]);
   const reviewed = useSyncExternalStore(mailStore.subscribe, mailStore.snapshot);
+  const acceptingMail = useRef<MailQuestion | undefined>(undefined);
   const sectionRef = useRef<HTMLElement>(null);
   const composerRef = useRef<HTMLTextAreaElement>(null);
   const focusOnRevealRef = useRef(false);
@@ -528,13 +529,29 @@ export function Assistant({ runtime, messageActions, speech, canReadAloud = fals
   const attachMail = () => {
     const question = mail.snapshot().question;
     const offer = { type: "offer", kind: "Mail", revision: writing.offeredAt + 1 } as const;
-    if (!question || !composer.can(offer)) return;
-    void composer.send(offer).then((outcome) => {
+    if (!question || acceptingMail.current || !composer.can(offer)) return;
+    acceptingMail.current = question;
+    void (async () => {
+      const accepted = await runtime.runPromise(acceptMailReview(question));
+      if (mail.snapshot().question !== question) return;
+      if (!accepted || !composer.can(offer)) {
+        mail.show({ failure: "changed" });
+        return;
+      }
+      const outcome = await composer.send(offer);
       if (outcome._tag !== "Success" || mail.snapshot().question !== question) return;
       mail.attach(question);
       if (!board.snapshot().typed.trim()) type("Summarize this email");
       composerRef.current?.focus();
+    })().finally(() => {
+      acceptingMail.current = undefined;
     });
+  };
+  const dismissMail = () => {
+    if (acceptingMail.current) return;
+    const notice = mail.snapshot().question?.notice;
+    mail.show({});
+    if (notice) void runtime.runPromise(notice.dismiss());
   };
   const send = () => {
     if (subject !== undefined) {
@@ -739,7 +756,7 @@ export function Assistant({ runtime, messageActions, speech, canReadAloud = fals
           onUnquote: composer.can({ type: "unquote" }) ? () => void composer.send({ type: "unquote" }) : undefined,
         }}
       />}
-      <MailReviewDialogs open={!onComms && open} review={reviewed} attach={attachMail} dismiss={() => mail.show({})} />
+      <MailReviewDialogs open={!onComms && open} review={reviewed} attach={attachMail} dismiss={dismissMail} />
       {history.sheets}
     </>
   );

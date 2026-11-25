@@ -6,6 +6,7 @@ import { externalStore } from "../runtime/store.ts"
 export interface MailQuestion {
   readonly review: ReviewedMailContext
   current(): { source: MailContextSource; destination: MailContextDestination }!unknown
+  readonly notice?: { accept(): boolean!!; dismiss(): void!! }
 }
 
 type MailReview = { readonly question?: MailQuestion; readonly failure?: "tooLarge" | "changed" }
@@ -37,6 +38,17 @@ export const mailQuestions = Layer.sync(MailQuestions, () => {
 export function sourceOf(grant: string, mail: MailMessage): MailContextSource {
   const { message, bodyText } = mail
   return { accountId: grant, messageId: message.id, revision: message.metadata.historyId ?? "", from: message.from, to: [...message.to, ...message.cc], subject: message.subject, bodyText }
+}
+
+// spec/app/inbox/notices.md, "Ask Alpha from a notice checks the same email again before spending the tap"
+export effect function acceptMailReview(item: MailQuestion): boolean!! {
+  const notice = item.notice
+  if (notice === undefined) return true
+  return effect {
+    const { source, destination } = try item.current()
+    try validateMailContext(item.review, source, destination)
+    return try notice.accept()
+  } catch () => false
 }
 
 /** Revalidate just before the resident receives the question. Email text remains a separate, untrusted input. */

@@ -16,7 +16,7 @@ import { button, closeAll, drawn, fill, hardware, later, only, open, press, unde
 import { Effect } from "effect";
 import { Letters, nothing } from "../src/inbox/composer.vibe";
 import { Mail } from "../src/inbox/gmail.vibe";
-import { letter } from "./fakes/inbox.ts";
+import { type InboxNoticeScene, letter } from "./fakes/inbox.ts";
 import { type Scene, scene } from "./fakes/scene.ts";
 
 underAct();
@@ -78,6 +78,44 @@ async function openInbox(world: Scene) {
   return opened;
 }
 
+it("Open or ask about the exact Android mail notice (spec/app/inbox/notices.md, \"Story: Hear about new mail\"; spec/app/inbox/notices.md, \"Story: Open my message from a notice\"; spec/app/inbox/notices.md, \"Ask Alpha from a notice checks the same email again before spending the tap\")", async () => {
+  const world = { ...scene(), phone: true };
+  const notices: InboxNoticeScene = { spent: [], released: [] };
+  world.inbox.notices = notices;
+  const { alpha } = await openInbox(world);
+  const runtime = inbox.runtime(alpha);
+  await drawn(() => vi.waitFor(() => expect(notices.selection?.grantId).toBe(world.inbox.google?.connection)));
+  const selection = notices.selection;
+  if (!selection || !notices.enter) throw new Error("No native mail watch");
+  const enter = notices.enter;
+  const tap = { ...selection, generation: "notice-generation" };
+  const first = world.inbox.mail.find(({ card }) => card.id === "g1");
+  const second = world.inbox.mail.find(({ card }) => card.id === "g3");
+  if (!first || !second) throw new Error("Missing mail for notification tap");
+
+  await drawn(() => enter({ ...tap, token: "obsolete", grantId: "retired-grant", messageId: first.card.id, threadId: first.card.threadId }));
+  expect(notices.spent).toEqual([]);
+  await drawn(() => enter({ ...tap, token: "ordinary", messageId: first.card.id, threadId: first.card.threadId }));
+  await until(alpha, runtime, Shown, (state) => state.body.status === "Loaded");
+  expect([title(), notices.spent, world.ask.said]).toEqual([first.card.subject, ["ordinary"], []]);
+
+  const ask = { ...tap, question: true, messageId: second.card.id, threadId: second.card.threadId };
+  const review = () => document.querySelector("[role=alertdialog]")?.textContent ?? "";
+  await drawn(() => enter({ ...ask, token: "dismissed" }));
+  await drawn(() => vi.waitFor(() => expect(review()).toContain(second.body)));
+  await confirm("Cancel");
+  await drawn(() => vi.waitFor(() => expect(notices.released).toEqual(["dismissed"])));
+  expect([notices.spent, world.ask.said]).toEqual([["ordinary"], []]);
+  await drawn(() => alpha.runtime.runPromise(Effect.flatMap(Shell, (shell) => shell.send({ type: "goBack" }))));
+  await until(alpha, alpha.runtime, Shell, (state) => state.assistant === "Bar" && showing(state, "Inbox"));
+
+  await drawn(() => enter({ ...ask, token: "reviewed" }));
+  await drawn(() => vi.waitFor(() => expect(review()).toContain(second.body)));
+  await confirm("Add to chat");
+  await drawn(() => vi.waitFor(() => expect(notices.spent).toEqual(["ordinary", "reviewed"])));
+  expect(world.ask.said).toEqual([]);
+}, 30_000);
+
 describe.each([["a browser", false], ["a phone", true]])("in %s", (_where, phone) => {
   it("See my mail (spec/app/inbox/index.md, \"Story: See my mail\"; spec/app/inbox/message.md, \"Story: Ask Alpha about a message\")", async () => {
     const world = { ...scene(), phone };
@@ -108,7 +146,8 @@ describe.each([["a browser", false], ["a phone", true]])("in %s", (_where, phone
     // spec/app/inbox/index.md, "Only a card with a positive attachment hint shows a paperclip"
     const attachmentBadge = (subject: string) => {
       const message = opens().find((open) => subjectOf(open) === subject);
-      return [Boolean(message?.querySelector("svg.lucide-paperclip")), message?.textContent?.includes("Has attachments.")];
+      const announced = [...(message?.querySelectorAll(".sr-only") ?? [])].some((label) => label.textContent === "Has attachments");
+      return [Boolean(message?.querySelector("svg.lucide-paperclip")), announced];
     };
     expect([attachmentBadge("Revised term sheet"), attachmentBadge("Dinner Friday?"), attachmentBadge("Standup notes")]).toEqual([[true, true], [false, false], [false, false]]);
     expect(world.inbox.attachmentReads).toEqual([]);
@@ -160,8 +199,8 @@ describe.each([["a browser", false], ["a phone", true]])("in %s", (_where, phone
       // spec/app/inbox/message.md, "Ask Alpha is handed the message on screen, once it has loaded, named by its account, number and history revision"
       await menu("Ask Alpha");
       await until(alpha, alpha.runtime, Shell, (s) => s.assistant === "Sheet");
-      await drawn(() => vi.waitFor(() => expect(document.querySelector("[role=dialog]")?.textContent).toContain("Share this email with Alpha?")));
-      expect([document.querySelector("[role=dialog]")?.textContent, world.ask.said]).toEqual([expect.stringContaining(termSheet.body), []]);
+      await drawn(() => vi.waitFor(() => expect(document.querySelector("[role=alertdialog]")?.textContent ?? "").toContain("Share this email with Alpha?")));
+      expect([document.querySelector("[role=alertdialog]")?.textContent, world.ask.said]).toEqual([expect.stringContaining(termSheet.body), []]);
       await confirm("Add to chat");
       await drawn(() => vi.waitFor(() => expect(document.querySelector('textarea[aria-label="Message Alpha"]')).not.toBeNull()));
       await fill("Message Alpha", "What changed in the term sheet?");

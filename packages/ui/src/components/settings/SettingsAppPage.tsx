@@ -2,6 +2,7 @@ import { Bell, CalendarDays, Link, ShieldCheck } from "lucide-react";
 import { Spinner } from "../Spinner.tsx";
 import { StatusDot } from "../StatusDot.tsx";
 import { ListGroup } from "../ListGroup.tsx";
+import { InboxWatchStatus, type InboxWatchStatusProps } from "../inbox/InboxWatchStatus.tsx";
 import { SettingsAccessRow } from "./SettingsAccessRow.tsx";
 import { SettingsAndroidRow } from "./SettingsAndroidRow.tsx";
 import { SettingsDeviceSwitch, type SettingsDeviceSwitchProps } from "./SettingsDeviceSwitch.tsx";
@@ -24,6 +25,8 @@ export type SettingsAppPageProps = SettingsAndroidProps & {
   read?: SettingsDeviceSwitchProps["read"];
   /** Whether Inbox loads images from the web, or the safe value when it could not be read. */
   images?: boolean;
+  /** What the phone reports about the Inbox notification channel and its watched account. */
+  inboxWatch?: InboxWatchStatusProps;
   /** A save of the device preferences is in flight. */
   saving?: boolean;
   /** A recovery of the device preferences is in flight. */
@@ -55,7 +58,7 @@ const calendarDetails = {
  * Google account, and for the others the accesses the app uses and the way into Android's permissions.
  * @model spec/app/settings/index.md
  */
-export function SettingsAppPage({ app, onPhone = true, calendarStatus, grants = {}, read = "loaded", images = false, saving, recovering, onImagesChange, onRecover, told, onBack, onHandOver, starting, onAndroid }: SettingsAppPageProps) {
+export function SettingsAppPage({ app, onPhone = true, calendarStatus, grants = {}, read = "loaded", images = false, inboxWatch, saving, recovering, onImagesChange, onRecover, told, onBack, onHandOver, starting, onAndroid }: SettingsAppPageProps) {
   const android = { starting, onAndroid };
   const deviceSettings = app !== "calendar" || onPhone;
   const detail = calendarStatus === undefined || calendarStatus === "checking" ? undefined : calendarDetails[calendarStatus];
@@ -69,6 +72,7 @@ export function SettingsAppPage({ app, onPhone = true, calendarStatus, grants = 
         <ListGroup>
           <SettingsNavRow title="Google & email" icon={<Link />} onOpen={onHandOver && (() => onHandOver("google-and-email"))} />
           <SettingsDeviceSwitch setting="images" read={read} checked={images} saving={saving} recovering={recovering} onChange={onImagesChange} onRecover={onRecover} />
+          {inboxWatch && <InboxWatchStatus {...inboxWatch} />}
         </ListGroup>
       ) : null}
       {app === "calendar" ? (

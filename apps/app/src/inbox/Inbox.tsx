@@ -247,8 +247,10 @@ function Opened({ runtime, list, onRefresh, onBegin }: { runtime: Runtime; list:
   const contents = loaded ? prepareMessage(read) : undefined;
   const link = state.link > 0 ? contents?.links.at(state.link - 1) : undefined;
   const original = read?.message;
+  const from = senderAddress(card?.from ?? "");
+  const replyTo = original?.replyTo;
   const answered = original === undefined || read === undefined ? undefined : {
-    id: original.id, from: original.from, others: [...original.to, ...original.cc], subject: original.subject,
+    id: original.id, from: original.from, replyTo, others: [...original.to, ...original.cc], subject: original.subject,
     body: read.bodyText, historyId: original.metadata.historyId, files,
   };
   return (
@@ -256,9 +258,10 @@ function Opened({ runtime, list, onRefresh, onBegin }: { runtime: Runtime; list:
       <InboxMessageScreen
         subject={card?.subject || "(no subject)"}
         sender={senderName(card?.from ?? "")}
-        address={senderAddress(card?.from ?? "")}
+        address={from}
         to={card?.to.join(", ") ?? ""}
         cc={card?.cc.join(", ") || undefined}
+        replyTo={replyTo && replyTo.toLowerCase() !== from.toLowerCase() ? replyTo : undefined}
         date={card ? arrived(card.receivedAt, today) : ""}
         fullDate={card ? arrivedFully(card.receivedAt) : undefined}
         place={state.position + 1}
