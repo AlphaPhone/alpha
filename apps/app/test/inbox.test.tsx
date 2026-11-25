@@ -26,6 +26,11 @@ afterEach(closeAll);
 const opens = () => [...document.querySelectorAll<HTMLButtonElement>("ul[aria-label='Email messages'] button")];
 const subjectOf = (button: HTMLButtonElement) => button.querySelector("[data-inbox-subject]")?.textContent;
 const rows = () => opens().map(subjectOf);
+const tile = (view: string) => drawn(() => {
+  const found = document.querySelector<HTMLButtonElement>(`[data-home-tile='view:${view}']`);
+  if (!found) throw new Error(`no tile ${view}`);
+  found.click();
+});
 const row = (subject: string) => drawn(() => {
   const found = opens().find((open) => subjectOf(open) === subject);
   if (!found) throw new Error(`no message ${subject}`);
@@ -165,7 +170,7 @@ it("Star and mark the mail I reviewed (spec/app/inbox/sending.md, \"Story: Chang
   await until(alpha, runtime, List, (state) => state.chosen.length === subjects.length);
   await menu("Star", "Mail options");
   await until(alpha, runtime, Changes, (state) => state.review.showing && state.kind === "Star");
-  expect([...(document.querySelector("[role=alertdialog] ul")?.querySelectorAll("li") ?? [])].map((one) => one.textContent)).toEqual(expect.arrayContaining(subjects));
+  expect([...(document.querySelector("[role=alertdialog] ul")?.querySelectorAll("li") ?? [])].map((one) => one.textContent)).toEqual(expect.arrayContaining([...subjects]));
   expect(world.inbox.changes).toEqual([]);
   await confirm("Yes");
   await until(alpha, runtime, Changes, (state) => state.attempt.outcome === "Confirmed");
@@ -194,7 +199,7 @@ it("Delete the reviewed phone drafts (spec/app/inbox/drafts.md, \"The owner can 
   for (const [at, subject] of ["Notes for Monday", "Dinner arrangements"].entries()) {
     await press("Compose");
     await until(alpha, runtime, Writing, (state) => state.open);
-    await write("Subject", subject);
+    await fill("Subject", subject);
     await later(alpha, 10);
     await until(alpha, runtime, Writing, (state) => state.stored && state.letter.revision >= 1 && !state.pending);
     await press("Back from draft");

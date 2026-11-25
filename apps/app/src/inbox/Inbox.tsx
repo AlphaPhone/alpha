@@ -437,7 +437,7 @@ export function Inbox({ runtime, alpha }: InboxProps & { alpha: Alpha }) {
   const shelfPicks: ShelfPick[] = localIds.filter((id) => deletableShelfDraft(composing, account, id))
     .map((id) => ({ draft: id, revision: held(composing.shelf, id).revision }));
   const chooseLocal = { type: "pickAllShelfDrafts", picks: shelfPicks } as const;
-  const clearLocal = { type: "pickAllShelfDrafts", picks: [] } as const;
+  const clearLocal = { type: "pickAllShelfDrafts" as const, picks: [] };
   const allLocalChosen = shelfPicks.every(({ draft, revision }) => shelf.picks.some((pick) => pick.draft === draft && pick.revision === revision));
   const shelved: InboxListRow[] = localIds.map((id) => {
     const words = runtime.runSync(Letters).words(id);
