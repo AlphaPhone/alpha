@@ -4,6 +4,7 @@ import * as Inbox from "../../gen/app__inbox.effect.vibe"
 import * as Message from "../../gen/app__inbox__message.effect.vibe"
 import * as Shell from "../../gen/app__shell.effect.vibe"
 import * as Drafts from "../../gen/app__inbox__drafts.effect.vibe"
+import { reviewStillNamesTheNotice } from "../../gen/app__inbox__notices.effect.vibe"
 import { Machine as Preferences } from "../../gen/app__settings__preferences.effect.vibe"
 import { Cloud } from "../platform/cloud.vibe"
 import { Device } from "../platform/device.vibe"
@@ -68,9 +69,12 @@ effect function openTap(tap: MailNoticeTap) {
     accept: () => effect {
       const current = background.pending() catch () => null
       const review = try reader.get()
-      if (!sameTap(tap, current) || !(try sameScope) || !Shell.showing(try shell.get(), "Inbox")
-        || review.account !== account || review.message !== number || review.body.ticket !== held.body.ticket
-        || review.body.status !== "Loaded" || review.revision !== held.revision) return false
+      if (!reviewStillNamesTheNotice({
+        tap: sameTap(tap, current),
+        account: (try sameScope) && review.account === account,
+        reader: Shell.showing(try shell.get(), "Inbox") && review.message === number && review.body.status === "Loaded",
+        revision: review.body.ticket === held.body.ticket && review.revision === held.revision,
+      })) return false
       return try contained(background.consume(tap.token), "accepting the exact Gmail notification")
     },
     dismiss: () => ignore(background.releaseQuestion(tap.token)),

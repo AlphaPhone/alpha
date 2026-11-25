@@ -66,8 +66,8 @@ final class InboxNoticeDelivery {
     };
    }
   }, new MailBackgroundDelivery.Scheduler() {
-   public void schedule(String generation) { InboxNoticeWorker.schedule(context, generation); }
-   public void cancel() { InboxNoticeWorker.cancel(context); }
+   public void schedule(String generation) { GmailDeliveryWorker.schedule(context, generation); }
+   public void cancel() { GmailDeliveryWorker.cancel(context); }
   }, poster, new MailBackgroundDelivery.Config(ORIGIN, "production", "google.gmail.triage", 4));
  }
 

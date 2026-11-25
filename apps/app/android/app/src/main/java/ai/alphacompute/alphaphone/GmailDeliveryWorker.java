@@ -3,6 +3,7 @@ package ai.alphacompute.alphaphone;
 
 import android.content.Context;
 import androidx.annotation.NonNull;
+import androidx.work.BackoffPolicy;
 import androidx.work.Constraints;
 import androidx.work.Data;
 import androidx.work.ExistingPeriodicWorkPolicy;
@@ -15,26 +16,29 @@ import androidx.work.Worker;
 import androidx.work.WorkerParameters;
 import java.util.concurrent.TimeUnit;
 
-public final class InboxNoticeWorker extends Worker {
- private static final String PERIODIC = "alpha-gmail-history";
- private static final String CATCHUP = "alpha-gmail-history-catchup";
+public final class GmailDeliveryWorker extends Worker {
+ private static final String PERIODIC = "alpha-gmail-periodic";
+ private static final String CATCHUP = "alpha-gmail-catchup";
  private static final String GENERATION = "generation";
 
- public InboxNoticeWorker(@NonNull Context context, @NonNull WorkerParameters parameters) { super(context, parameters); }
+ public GmailDeliveryWorker(@NonNull Context context, @NonNull WorkerParameters parameters) { super(context, parameters); }
 
  static void schedule(Context context, String generation) {
   var input = new Data.Builder().putString(GENERATION, generation).build();
   var constraint = new Constraints.Builder().setRequiredNetworkType(NetworkType.CONNECTED).build();
   var manager = WorkManager.getInstance(context);
   manager.enqueueUniquePeriodicWork(PERIODIC, ExistingPeriodicWorkPolicy.UPDATE,
-   new PeriodicWorkRequest.Builder(InboxNoticeWorker.class, 15, TimeUnit.MINUTES).setConstraints(constraint).setInputData(input).build());
+   new PeriodicWorkRequest.Builder(GmailDeliveryWorker.class, 15, TimeUnit.MINUTES).setConstraints(constraint)
+    .setInputData(input).setBackoffCriteria(BackoffPolicy.EXPONENTIAL, 30, TimeUnit.SECONDS).build());
   manager.enqueueUniqueWork(CATCHUP + ":" + generation, ExistingWorkPolicy.KEEP,
-   new OneTimeWorkRequest.Builder(InboxNoticeWorker.class).setConstraints(constraint).setInputData(input).addTag(CATCHUP).build());
+   new OneTimeWorkRequest.Builder(GmailDeliveryWorker.class).setConstraints(constraint).setInputData(input)
+    .addTag(CATCHUP).setBackoffCriteria(BackoffPolicy.EXPONENTIAL, 30, TimeUnit.SECONDS).build());
  }
 
  static void cancel(Context context) {
   var manager = WorkManager.getInstance(context);
   manager.cancelUniqueWork(PERIODIC);
+  manager.cancelUniqueWork(CATCHUP);
   manager.cancelAllWorkByTag(CATCHUP);
  }
 

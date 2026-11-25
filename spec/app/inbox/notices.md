@@ -289,3 +289,10 @@ checks the account, message, latest reviewed content, resident
 conversation and pending tap, then spends that tap once. Cancel releases
 the pending Ask action and leaves the notification available. The owner
 sends the resulting question from the usual Ask Alpha composer.
+
+```quint
+type NoticeReview = { tap: bool, account: bool, reader: bool, revision: bool }
+
+pure def reviewStillNamesTheNotice(review: NoticeReview): bool =
+  review.tap and review.account and review.reader and review.revision
+```
