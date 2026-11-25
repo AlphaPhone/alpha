@@ -8,7 +8,7 @@ import { Machine as Messages } from "../../gen/app__messages.effect.vibe"
 import { Machine as Shell, showing } from "../../gen/app__shell.effect.vibe"
 import type { FileReview } from "../files/agent.vibe"
 import type { MessageDraftTarget } from "../messages/agent.vibe"
-import { readAgentSms } from "../messages/agent-send.vibe"
+import { isText, readAgentSms } from "../messages/agent-send.vibe"
 import { notesOperation, notesOperationWords } from "../notes/device-actions.vibe"
 import { Agent, type Runtime } from "../platform/agent.vibe"
 import { Device, registered } from "../platform/device.vibe"
@@ -123,6 +123,7 @@ export interface MediaCard {
   readonly enrollmentId: string
   readonly title: string
   readonly detail: string
+  readonly action?: string
   readonly target?: MessageDraftTarget
   readonly files?: FileReview
 }
@@ -149,7 +150,7 @@ function operation(raw: unknown) {
     case "phone_call":
       return value.target.kind === "number" ? value : undefined
     case "sms_compose":
-      return "draft" in value && value.draft === true && value.target.kind === "number" && value.replyThreadId === undefined ? value : undefined
+      return "target" in value && value.target.kind === "number" && value.replyThreadId === undefined ? value : undefined
     case "camera_capture_photo":
     case "photos_filter":
     case "photos_open":
@@ -174,7 +175,7 @@ function operation(raw: unknown) {
   }
 }
 
-function words(value: NonNullable<ReturnType<typeof operation>>): { title: string; detail: string } {
+function words(value: NonNullable<ReturnType<typeof operation>>): { title: string; detail: string; action?: string } {
   switch (value.type) {
     case "notes_move":
     case "notes_folder_create":
@@ -185,7 +186,10 @@ function words(value: NonNullable<ReturnType<typeof operation>>): { title: strin
     case "sms_reply_selected": return { title: "Draft a reply in Messages", detail: value.body }
     case "messages_read_selected": return { title: "Share open messages", detail: "Share up to 20 recent messages from the open conversation with the agent." }
     case "sms_send": return { title: "Review this text on your phone", detail: `${value.recipients.join(", ")}\n${value.body}\nConfirm the text and SIM in Android to send it.` }
-    case "sms_compose": return { title: `Draft a text to ${"target" in value && value.target.kind === "number" ? value.target.number : "the recipient"}`, detail: value.body }
+    case "sms_compose": {
+      const to = "target" in value && value.target.kind === "number" ? value.target.number : "the recipient"
+      return isText(value) ? { title: `Send a text to ${to}`, detail: value.body, action: "Send" } : { title: `Draft a text to ${to}`, detail: value.body }
+    }
     case "camera_capture_photo": return { title: "Take a photo", detail: value.lens === undefined ? "Open the viewfinder to review the shot" : `Open the ${value.lens === "front" ? "front" : "rear"} camera to review the shot` }
     case "photos_filter": return { title: "Filter Photos", detail: value.text ?? "Show the requested photos in your library" }
     case "photos_open": return { title: "Open a photo", detail: "Show the requested item in Photos" }
@@ -273,8 +277,8 @@ effect function enrolled(epoch: number, owner: string, image: boolean, runtime: 
 }
 
 function completion(op: DeviceOperation, synced: boolean): string {
+  if (isText(op)) return synced ? "Android accepted the text request." : "Android accepted the text request. Agent receipt pending."
   switch (op.type) {
-    case "sms_send": return synced ? "Android accepted the text request." : "Android accepted the text request. Agent receipt pending."
     case "messages_read_selected": return synced ? "Shared the open messages with the agent." : "Open messages prepared. Agent receipt pending."
     case "photos_album_create":
     case "photos_share":
@@ -307,7 +311,7 @@ export const mediaReview = Layer.effect(MediaReview, effect {
     if (scope === undefined || !(try scope.active)) return { kind: "refused", code: NOT_DISPATCHED }
     return try executors.execute(operation, call, { current: () => runPromise(scope.active), ...(scope.target === undefined ? {} : { target: scope.target }), ...(scope.files === undefined ? {} : { files: scope.files }) })
   })
-  const readBack = (operation: DeviceOperation, call: ExecutorCall) => operation.type === "sms_send"
+  const readBack = (operation: DeviceOperation, call: ExecutorCall) => isText(operation)
     ? runPromise(readAgentSms(operation, call) |> Effect.provideService(%, Device, device) |> Effect.provideService(%, Telephony, telephony))
     : Promise.resolve(undefined)
   effect function messageTarget(): (MessageDraftTarget | undefined)!! {
@@ -373,7 +377,7 @@ export const mediaReview = Layer.effect(MediaReview, effect {
         const visible = operation(proposal.payload.operation)
         const labelled = visible === undefined ? { title: "Phone action", detail: "" } : words(visible)
         const unsettled = toSettle(proposal) && (try hasReceipt(opened, proposal))
-        const text = visible?.type === "sms_send"
+        const text = visible !== undefined && isText(visible)
         const recovered = text && unsettled ? try recoverText(opened, proposal) : undefined
         return { proposal: proposal.id, ...labelled, outcome: recovered ?? outcome, declinable: readyToDecline(proposal, at), unsettled: unsettled && !text }
       }, { concurrency: 4 })
@@ -392,7 +396,8 @@ export const mediaReview = Layer.effect(MediaReview, effect {
           return result !== undefined
         }
         if (!toSettle(found) || !(try hasReceipt(opened, found))) return false
-        if (operation(found.payload.operation)?.type === "sms_send") return (try recoverText(opened, found)) !== undefined
+        const shown = operation(found.payload.operation)
+        if (shown !== undefined && isText(shown)) return (try recoverText(opened, found)) !== undefined
         const result = tryPromise(() => opened.execute.confirmReview(found.id, action === "happened" ? "ReviewedApplied" : "ReviewedNotApplied")) catch () => "refused"
         return result === "sent"
       })

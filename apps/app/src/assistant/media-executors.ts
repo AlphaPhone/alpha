@@ -12,13 +12,13 @@ export async function executeMedia(alpha: Alpha, operation: DeviceOperation, cal
     const { phoneAction } = await import("../phone/agent.vibe");
     return alpha.runtime.runPromise(phoneAction(operation, authority.current));
   }
+  if (operation.type === "sms_send" || operation.type === "sms_compose") {
+    const { isText, reviewAgentSms } = await import("../messages/agent-send.vibe");
+    if (isText(operation)) return alpha.runtime.runPromise(reviewAgentSms(operation, call, authority.current));
+  }
   if (operation.type === "sms_reply_selected" || operation.type === "sms_compose") {
     const { messageAction } = await import("../messages/agent.vibe");
     return alpha.runtime.runPromise(messageAction(operation, authority.target, authority.current));
-  }
-  if (operation.type === "sms_send") {
-    const { reviewAgentSms } = await import("../messages/agent-send.vibe");
-    return alpha.runtime.runPromise(reviewAgentSms(operation, call, authority.current));
   }
   if (operation.type === "messages_read_selected") {
     const { shareSelectedMessage } = await import("../messages/agent.vibe");

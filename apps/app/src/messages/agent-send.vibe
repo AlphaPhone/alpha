@@ -1,36 +1,57 @@
-// spec/app/contacts/agent.md, "Only the owner approves, only what is shown as it is now, and only when the phone has ruled out an emergency call"; spec/app/messages/sending.md, "The journal read back settles an unknown outcome: sent, or never sent"
+// spec/app/contacts/agent.md, "Only the owner approves, only what is shown as it is now, and only when the phone has ruled out an emergency call"; spec/app/messages/sending.md, "The journal read back settles an unknown outcome: sent, or never sent"; spec/app/messages/sending.md, "Story: Send a message once"
 import { NOT_DISPATCHED, type ExecutorCall } from "@elizaos/agent/client"
-import type { DeviceOperation } from "@elizaos/agent/operations"
+import { readResult, type DeviceOperation } from "@elizaos/agent/operations"
 import { operationIdOf, type DirectSmsReview, type SmsSendResult } from "@elizaos/os/bridges/definitions/messages"
 import { normalizePhoneNumber } from "@elizaos/os/bridges/definitions/phone"
 import { Machine as Phone, clear } from "../../gen/app__phone.effect.vibe"
 import { Device } from "../platform/device.vibe"
 import { Telephony, TelephonyAbsent, TelephonyRefused, telephony } from "../platform/telephony.vibe"
+import { simOf } from "./composer.vibe"
 
 type Sms = Extract<DeviceOperation, { type: "sms_send" }>
+type Composed = Extract<DeviceOperation, { type: "sms_compose" }>
+/** A text the phone sends for the agent: an `sms_send` naming its recipients and SIM exactly, or an `sms_compose` to one number that asks for more than a draft. */
+type Text = Sms | (Composed & { readonly target: { readonly kind: "number"; readonly number: string } })
 const refused = { kind: "refused", code: NOT_DISPATCHED } as const
 
-function binding(op: Sms, call: ExecutorCall) {
+/** Whether `op` is a text the phone sends once the owner approves its card; an `sms_compose` with `draft` only fills the draft. */
+export function isText(op: DeviceOperation): op is Text {
+  if (op.type === "sms_send") return true
+  return op.type === "sms_compose" && "target" in op && op.target.kind === "number" && op.draft !== true && op.replyThreadId === undefined
+}
+
+function binding(op: Text, call: ExecutorCall, subscriptionId: number) {
   if (call.proposalId !== call.operationId || !Number.isSafeInteger(call.attemptId) || call.attemptId <= 0) return undefined
   const id = operationIdOf(call.operationId)
-  const recipients = op.recipients.map(normalizePhoneNumber)
-  if (id === null || recipients.some((number, at) => number !== op.recipients[at])) return undefined
+  const named = op.type === "sms_send" ? op.recipients : [op.target.number]
+  const recipients = named.map(normalizePhoneNumber)
+  if (id === null || recipients.some((number, at) => number === null || (op.type === "sms_send" && number !== named[at]))) return undefined
   const review: DirectSmsReview = {
-    recipients: recipients.filter((number) => number !== null), body: op.body, subscriptionId: op.subscriptionId,
+    recipients: recipients.filter((number) => number !== null), body: op.body, subscriptionId,
   }
   return { id, review }
 }
 
-function resultOf(receipt: SmsSendResult | undefined) {
+/** The text as the phone sends it: an `sms_send` on the SIM it names, and an `sms_compose` on the phone's SIM for texts. */
+effect function bound(op: Text, call: ExecutorCall): (ReturnType<typeof binding>)!!Telephony {
+  if (op.type === "sms_send") return binding(op, call, op.subscriptionId)
+  const sim = try simOf(null)
+  return sim === undefined ? undefined : binding(op, call, sim)
+}
+
+/** The phone's record as eliza reads the operation's result: the whole record for an `sms_send`, its status for an `sms_compose`. */
+function resultOf(op: Text, receipt: SmsSendResult | undefined) {
   if (receipt === undefined) return undefined
-  if (receipt.status === "submitted" || receipt.status === "sent" || receipt.status === "delivered") return { kind: "applied", result: receipt } as const
-  if (receipt.status === "denied" || receipt.status === "cancelled") return { ...refused, result: receipt }
+  const result = op.type === "sms_send" ? receipt : readResult(op, { kind: "sms-compose", status: receipt.status === "denied" ? "unavailable" : receipt.status })
+  if (result === undefined) return undefined
+  if (receipt.status === "submitted" || receipt.status === "sent" || receipt.status === "delivered") return { kind: "applied", result } as const
+  if (receipt.status === "denied" || receipt.status === "cancelled") return { ...refused, result }
   return undefined
 }
 
 /** A reviewed agent request uses the exact native SMS confirmation, never a fallback composer or a fresh send ID. */
-export effect function reviewAgentSms(op: Sms, call: ExecutorCall, current: () => Promise<boolean>) {
-  const wanted = binding(op, call)
+export effect function reviewAgentSms(op: Text, call: ExecutorCall, current: () => Promise<boolean>) {
+  const wanted = try bound(op, call)
   const device = try Device
   const phone = try Phone
   if (wanted === undefined || !(try device.capabilities()).image || !(try device.showing()) || !clear(try phone.get())) return refused
@@ -43,16 +64,16 @@ export effect function reviewAgentSms(op: Sms, call: ExecutorCall, current: () =
       (failure.tag === "BridgeUnavailable" || failure.tag === "InvalidMessageRequest" || failure.tag === "SmsSendNotAttempted"))) return null
     return undefined
   }
-  return receipt === null ? refused : resultOf(receipt)
+  return receipt === null ? refused : resultOf(op, receipt)
 }
 
 /** Recovery only reads the phone's receipt for the same body, recipients, operation ID and subscription. */
-export effect function readAgentSms(op: Sms, call: ExecutorCall): unknown!!(Device | Telephony) {
-  const wanted = binding(op, call)
+export effect function readAgentSms(op: Text, call: ExecutorCall): unknown!!(Device | Telephony) {
+  const wanted = try bound(op, call)
   const device = try Device
   if (wanted === undefined || !(try device.capabilities()).image || !(try device.showing())) return undefined
   const receipt = telephony("smsSendResult", (client) => client.messages.smsSendResult(wanted.review, wanted.id)) catch () => undefined
   if (!(try device.showing())) return undefined
-  const result = resultOf(receipt)
+  const result = resultOf(op, receipt)
   return result?.kind === "applied" ? { kind: "found", result: result.result } : result
 }
