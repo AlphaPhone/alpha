@@ -26,6 +26,11 @@ const choose = (name: string) => drawn(() => {
 });
 
 /** Type into the field a visible label wraps, as the builder's Name and Text are drawn. */
+const pressInReview = (name: string) => drawn(() => {
+  const found = [...document.querySelectorAll("[aria-label='Review workflow change'] button")].find((one) => one.textContent === name);
+  if (!(found instanceof HTMLButtonElement)) throw new Error(`no button ${name} in the review`);
+  found.click();
+});
 const write = (name: string, text: string) => drawn(() => {
   const label = [...document.querySelectorAll("label")].find((one) => one.firstChild?.textContent?.trim() === name);
   const found = label?.querySelector<HTMLInputElement | HTMLTextAreaElement>("input, textarea");
@@ -247,7 +252,8 @@ describe("Workflows", () => {
     await until(alpha, area, Listing, (state) => state.list.status === "Loaded");
     await press("Add to Workflows");
     await until(alpha, area, Listing, (state) => state.place.tag === "ListingAdd");
-    await press("Workflow");
+    await press("More options");
+    await press(/^Steps/);
     await until(alpha, area, Builder, (state) => state.offer.status === "Loaded");
 
     await write("Name", "Water the plants");
@@ -284,14 +290,14 @@ describe("Workflows", () => {
     await until(alpha, area, Definition, (state) => state.detail.status === "Loaded");
     await until(alpha, area, Sheet, (state) => state.history.status === "Loaded");
 
-    await press("Remove");
-    expect(document.querySelector("[role=alertdialog]")?.textContent).toContain("The schedule stops and the run history is kept.");
-    await pressOnTop("Cancel");
+    await press("Remove workflow");
+    expect(document.querySelector("[aria-label='Review workflow change']")?.textContent).toContain("Keeps history; stops future runs.");
+    await pressInReview("Cancel");
     await until(alpha, area, Definition, (state) => !state.review.showing);
     expect(world.workflows.changes).toEqual([]);
 
-    await press("Remove");
-    await pressOnTop("Remove");
+    await press("Remove workflow");
+    await pressInReview("Remove");
     await until(alpha, area, Definition, (state) => state.removed && state.detail.status === "Loaded" && !state.change.live);
     expect(world.workflows.changes).toEqual([{ operation: "remove", version: "monthly-statement-v3" }]);
     expect(button("Run now")).toBeUndefined();
@@ -306,9 +312,9 @@ describe("Workflows", () => {
 
     await choose("Monthly statement");
     await until(alpha, area, Definition, (state) => state.detail.status === "Loaded" && state.removed);
-    await press("Restore");
-    expect(document.querySelector("[role=alertdialog]")?.textContent).toContain("The workflow comes back turned off");
-    await pressOnTop("Restore");
+    await press("Restore workflow");
+    expect(document.querySelector("[aria-label='Review workflow change']")?.textContent).toContain("Restore paused; review before enabling.");
+    await pressInReview("Confirm restore");
     await until(alpha, area, Definition, (state) => !state.removed && state.detail.status === "Loaded" && !state.change.live);
     expect(world.workflows.changes).toEqual([
       { operation: "remove", version: "monthly-statement-v3" },

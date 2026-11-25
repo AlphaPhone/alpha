@@ -245,7 +245,7 @@ export function workflowRoutes(world: WorkflowsScene): Route[] {
           return Response.json({ acknowledged: result.cursor });
         });
       }
-      // spec/app/workflows/builder.md: the agent checks the reviewed spec, then saves it once per mutation.
+      // spec/app/workflows/builder.md, "Story: Save a workflow on the agent once"
       if (url.pathname === "/api/workflow/phone/validate") {
         return readJsonBody(request).then(async (body) => {
           if (body.catalogRevision !== catalog.catalogRevision || body.compilerRevision !== catalog.compilerRevision) return Response.json({}, { status: 409 });
