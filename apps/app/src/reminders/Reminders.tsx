@@ -25,7 +25,6 @@ import {
   Clock,
   Ellipsis,
   Inbox,
-  ListChecks,
   Plus,
   Repeat,
   SlidersHorizontal,
@@ -346,7 +345,7 @@ function RemindersOverview({
       <div className="flex items-center justify-between pt-1">
         <h2 className="text-sm font-semibold tracking-caps text-muted-foreground uppercase">My Lists</h2>
         <Button type="button" variant="ghost" size="sm" onClick={onNewList}>
-          <ListChecks aria-hidden className="size-4.5" />
+          <Plus aria-hidden className="size-4.5" />
           New list
         </Button>
       </div>
