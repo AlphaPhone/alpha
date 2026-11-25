@@ -13,7 +13,7 @@ import { type Job, answer, contained, hearing, reacting, run, started, together,
 import * as Drafts from "../../gen/app__inbox__drafts.effect.vibe"
 import type { Event as DraftEvent } from "../../gen/app__inbox__drafts.effect.vibe"
 import { type Attached, Letters } from "./composer.vibe"
-import { type Mail, type Proposal, operate, operationStoreVersion, relabel } from "./gmail.vibe"
+import { Mail, type Proposal, operate, operationStoreVersion, relabel } from "./gmail.vibe"
 import { ownerChanges } from "./mailbox.vibe"
 
 const labels = {

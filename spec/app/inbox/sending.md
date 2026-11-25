@@ -523,7 +523,7 @@ pure def checksSelection(kind: Kind): bool = kind == Star or kind == Unstar or k
 pure def stepLabelChangesUseTheReview(before: Operations, _after: Operations, out: List[Effect]): bool =
   out.every(e => match e {
     | Request(r) => checksSelection(r.kind) implies (
-        r.messages == before.messages and r.messages.size() > 0 and r.revision == before.review.shown and before.approvedBy == Owner
+        r.messages.subseteq(before.messages) and before.messages.subseteq(r.messages) and r.messages.size() > 0 and r.revision == before.review.shown and before.approvedBy == Owner
       )
     | _ => true
   })
