@@ -1283,7 +1283,7 @@ const opening = following(Composer.Machine, (composer) => (composer.slot === "Cl
 // spec/app/assistant/composer.md, "Edits are saved while no send is in hand and storage has not failed"
 const saving = following(Composer.Machine, (composer) => (Composer.canSave(composer) ? composer.draft.edits : undefined), Composer.Machine, (edits): Composer.Event | undefined => (edits === undefined ? undefined : { type: "save" }))
 
-// spec/app/assistant/composer.md, "Another conversation showing closes the slot and opens that conversation's, once nothing waits in this one"; spec/app/assistant/composer.md, "A message written before its conversation existed moves into the new one, then its old slot is cleared on the exact revision read"
+// spec/app/assistant/composer.md, "Another conversation showing closes the slot and opens that conversation's, once nothing waits in this one"; spec/app/assistant/composer.md, "A message written before its conversation existed moves into the new one, then its old slot is cleared on the exact revision read"; spec/app/assistant/composer.md, "A typed draft in a conversation that vanished moves into the new chat"
 const bound = started(effect {
   const chats = try Chats.Machine
   const composer = try Composer.Machine
@@ -1302,7 +1302,11 @@ const bound = started(effect {
     if (shown.chosen !== here) {
       board.change({ reply: "", label: "", failure: undefined })
       const moving = here === 0 && shown.chosen > 0 && (Composer.content(writing.editor) || Composer.attached(writing.editor) || writing.draft.sync !== "Kept")
-      const bound = try contained(composer.send(moving ? { type: "adopt", conversation: shown.chosen } : { type: "bind", conversation: shown.chosen }), "binding the composer")
+      const carrying = here > 0 && shown.chosen === 0 && !shown.ids.includes(here) && Composer.canCarry(writing)
+      const event: Composer.Event = moving ? { type: "adopt", conversation: shown.chosen }
+        : carrying ? { type: "carry" }
+        : { type: "bind", conversation: shown.chosen }
+      const bound = try contained(composer.send(event), "binding the composer")
       if (bound && sameBinding(board.snapshot().filesBinding, writing.binding)) {
         board.change(moving ? { filesBinding: { owner: writing.binding.owner, conversation: shown.chosen } } : { files: [], filesBinding: undefined, filesAuthority: undefined, attachmentNotice: "" })
       }

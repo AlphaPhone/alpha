@@ -350,6 +350,32 @@ pure def sometimesAMovedMessageClearsItsOldSlot(c: Composer): bool = c.clear.out
 pure def sometimesAChangedOldSlotIsKept(c: Composer): bool = c.clear.outcome == A::Refused
 ```
 
+### A typed draft in a conversation that vanished moves into the new chat
+
+When the conversation showing is no longer listed, a plain typed draft
+(with no attachments, quote or edit from that conversation) moves into the
+new chat's slot instead of being left behind.
+
+```quint
+pure def canCarry(c: Composer): bool =
+  c.binding.conversation > 0 and c.slot == Open and c.away == Free
+    and not(c.marked) and not(attached(c.editor)) and c.editor.text
+    and c.source == 0 and c.draft.sync != D::Saving and c.draft.sync != D::Conflicted
+    and c.clear.outcome != A::Sent
+
+pure def carry(c: Composer): Moved =
+  written(false, { ...c, binding: { ...c.binding, conversation: 0 },
+    draft: D::edit(D::blank), failing: false, unsettled: false })
+
+pure def stepACarriedDraftMovesToANewChat(before: Composer, via: str, after: Composer): bool =
+  via == "carry" implies
+    (before.binding.conversation > 0 and after.binding == { owner: before.binding.owner, conversation: 0 }
+      and after.editor == before.editor and after.editor.text)
+
+pure def sometimesACarriedDraftLandsInANewChat(c: Composer): bool =
+  c.binding.conversation == 0 and c.slot == Open and c.editor.text and c.draft.sync == D::Saving
+```
+
 ## Story: Choose between my text and the saved copy
 
 > As the owner, when the slot holds a copy I did not expect, I want to see
