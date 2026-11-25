@@ -167,7 +167,7 @@ export async function builtPack() {
     }
   };
   const manifest = read("bundle/manifest.json") as { workflowWorkerSha256?: string };
-  const policy = read("host/policy.json") as { actions: { allowed: string[] }; plugins: { load: string[] } };
+  const policy = read("host/policy.json") as { actions: { allowed: string[] }; plugins: { load: string[]; product?: string } };
   const clone = await packCheckout(policy.plugins.load.filter((name) => name.startsWith("@elizaos/plugin-")));
   const workflow = clone.packages.get("@elizaos/plugin-workflow");
   if (workflow === undefined || manifest.workflowWorkerSha256 === undefined) throw new Error("the agent pack pins no workflow worker");
@@ -175,7 +175,10 @@ export async function builtPack() {
   const { executable } = JSON.parse(fs.readFileSync(path.join(runtimeDir, "workflow-worker.json"), "utf8")) as { executable: string };
   return {
     bundle: path.join(packDist, "bundle/agent.mjs"),
-    policy: { actions: { allowed: policy.actions.allowed }, plugins: { load: policy.plugins.load } },
+    policy: {
+      actions: { allowed: policy.actions.allowed },
+      plugins: { load: policy.plugins.load, ...(policy.plugins.product ? { product: policy.plugins.product } : {}) },
+    },
     workflowWorker: { runtimeDir, executable, sha256: manifest.workflowWorkerSha256 },
   };
 }

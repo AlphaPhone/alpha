@@ -280,16 +280,29 @@ export function remindersRoutes(scene: RemindersScene, now: () => number): Route
       if (request.method === "POST" && sub === "complete") {
         const ts = now();
         scene.deleted.set(id, existing);
+        const nextDate = existing.dueDate !== null ? advanceDate(existing.dueDate, existing.recurrence) : null;
+        if (nextDate !== null) {
+          const advanced: FakeReminderItem = {
+            ...existing,
+            dueDate: nextDate,
+            subtasks: existing.subtasks.map((s) => ({ ...s, done: false })),
+            completed: false,
+            completedAtMs: null,
+            snoozedUntilMs: null,
+            notifiedAtMs: null,
+            revision: existing.revision + 1,
+            updatedAtMs: ts,
+          };
+          scene.items[index] = advanced;
+          scene.version += 1;
+          scene.updatedAtMs = ts;
+          return Response.json({ item: advanced, nextItem: advanced, snapshot: snapshotOf(scene) });
+        }
         const completed: FakeReminderItem = { ...existing, completed: true, completedAtMs: ts, snoozedUntilMs: null, revision: existing.revision + 1, updatedAtMs: ts };
         scene.items[index] = completed;
-        const nextDate = existing.dueDate !== null ? advanceDate(existing.dueDate, existing.recurrence) : null;
-        const nextItem: FakeReminderItem | null = nextDate === null
-          ? null
-          : { ...existing, id: `rem-${scene.nextId++}`, dueDate: nextDate, subtasks: existing.subtasks.map((s) => ({ ...s, done: false })), completed: false, completedAtMs: null, snoozedUntilMs: null, notifiedAtMs: null, agentTaskId: null, revision: 1, createdAtMs: ts, updatedAtMs: ts };
-        if (nextItem !== null) scene.items.push(nextItem);
         scene.version += 1;
         scene.updatedAtMs = ts;
-        return Response.json({ item: completed, nextItem, snapshot: snapshotOf(scene) });
+        return Response.json({ item: completed, nextItem: null, snapshot: snapshotOf(scene) });
       }
       if (request.method === "POST" && sub === "reopen") {
         const ts = now();
@@ -298,7 +311,11 @@ export function remindersRoutes(scene: RemindersScene, now: () => number): Route
       if (request.method === "POST" && sub === "snooze") {
         return readJsonBody(request).then((body) => {
           const ts = now();
-          const until = typeof body.untilMs === "number" ? body.untilMs : ts + (typeof body.minutes === "number" ? body.minutes : 10) * 60_000;
+          const until = typeof body.untilMs === "number"
+            ? body.untilMs
+            : typeof body.snoozedUntilMs === "number"
+              ? body.snoozedUntilMs
+              : ts + (typeof body.minutes === "number" ? body.minutes : 10) * 60_000;
           return commitItem(index, { ...existing, snoozedUntilMs: until, notifiedAtMs: null, revision: existing.revision + 1, updatedAtMs: ts }, ts);
         });
       }
