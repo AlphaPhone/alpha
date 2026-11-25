@@ -902,7 +902,7 @@ describe("Files on a phone", () => {
     const { alpha, chat, storage } = await withFilesReviewOnHome(world, review);
     const askFromHome = async (id: string, text: string) => {
       await until(alpha, alpha.runtime, Shell, (s) => s.trail.length === 0);
-      if (alpha.runtime.runSync(Shell.use((m) => m.get())).assistant !== "Sheet") await press("Open conversation");
+      if (alpha.runtime.runSync(Effect.flatMap(Shell, (m) => m.get())).assistant !== "Sheet") await press("Open conversation");
       await until(alpha, alpha.runtime, Shell, (s) => s.assistant === "Sheet");
       review.proposal.id = id;
       review.proposal.state = "pending";
