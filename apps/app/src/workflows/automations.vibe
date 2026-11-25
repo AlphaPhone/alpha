@@ -154,12 +154,12 @@ effect function change(id: number, wanted: Change, when: When, minutes: number):
         return { ...failed, applied: trigger.id === selected.id && trigger.enabled === enabled && trigger.revision > selected.record.revision }
       }
       if (wanted === "Remove") {
-        try ask(Agent, HttpClientRequest.del(path, { urlParams: { expectedRevision: String(selected.record.revision) } }), RemovedReply)
+        try ask(Agent, HttpClientRequest.delete(path, { urlParams: { expectedRevision: String(selected.record.revision) } }), RemovedReply)
         return { ...failed, applied: true }
       }
       if (wanted === "Fire") {
         const run = try ask(Agent, post(`${path}/execute`, {}), TriggerExecution)
-        const state = run.ok && run.result.status === "success" ? "Dispatched" : run.result.status === "skipped" ? "SkippedRun" : "DispatchFailed"
+        const state: Fired = run.ok && run.result.status === "success" ? "Dispatched" : run.result.status === "skipped" ? "SkippedRun" : "DispatchFailed"
         return { ...failed, fired: state, applied: state === "Dispatched" }
       }
       return failed

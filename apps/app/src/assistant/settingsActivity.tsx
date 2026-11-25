@@ -6,8 +6,11 @@ import { useMachine as useChats } from "../../gen/app__assistant__chats.react.ts
 import { useMachine as useComposer } from "../../gen/app__assistant__composer.react.ts";
 import { useMachine as useShell } from "../../gen/app__shell.react.ts";
 import { area } from "../runtime/area.tsx";
+import { together } from "../runtime/reactor.vibe";
+import { voicing } from "../voice/voice.vibe";
 import { type AssistantProps } from "./Assistant.tsx";
 import { assisting, freedom } from "./assistant.vibe";
+import { aloud } from "./read-aloud.vibe";
 
 function ConversationActions({ runtime }: AssistantProps) {
   const conversation = useConversation(runtime).state;
@@ -29,5 +32,5 @@ function ConversationActions({ runtime }: AssistantProps) {
   );
 }
 
-/** The owner can start an Ask Alpha conversation without leaving the Agent activity page. */
-export default area(assisting, ConversationActions);
+/** The owner can start an Ask Alpha conversation without leaving the Agent activity page; the conversation follows Talk and Read Aloud as it does in Ask Alpha. */
+export default area(together(assisting, voicing, aloud), ConversationActions);
