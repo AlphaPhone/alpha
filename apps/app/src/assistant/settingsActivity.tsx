@@ -16,7 +16,7 @@ import { Talk } from "./talk.vibe";
 
 /**
  * Where Alpha's earlier build kept the conversations: on Agent activity, New starts one and History lists the saved
- * ones, each restored into Ask Alpha with one press.
+ * ones, each restored into Ask Alpha with one press. As there, they are not offered while Alpha is answering.
  */
 function ConversationActions({ runtime }: AssistantProps) {
   const conversation = useConversation(runtime).state;
@@ -37,8 +37,10 @@ function ConversationActions({ runtime }: AssistantProps) {
     if (shell.can(open)) void shell.send(open);
   };
   const listed = listing && shown.list.status !== "Idle";
+  if (free.replying && !(listed && shown.list.status === "Failed")) return null;
   return (
     <ListGroup>
+      {free.replying ? null : <>
       <ListRow title="New" aria-label="New conversation" leading={<Plus />} disabled={!chats.can(start)} onClick={() => {
         void chats.send(start).then((result) => { if (result._tag === "Success") raise(); });
       }} />
@@ -55,10 +57,11 @@ function ConversationActions({ runtime }: AssistantProps) {
           }} />
         );
       }) : null}
+      </>}
       {listed && shown.list.status === "Failed" ? (
         <>
           <ListRow title="History" detail="Chats did not load" />
-          <ListRow title="Retry" aria-label="Retry saved conversations" leading={<RotateCw />} onClick={() => void chats.send({ type: "browse" })} />
+          {free.replying ? null : <ListRow title="Retry" aria-label="Retry saved conversations" leading={<RotateCw />} onClick={() => void chats.send({ type: "browse" })} />}
         </>
       ) : null}
     </ListGroup>
