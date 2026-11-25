@@ -162,6 +162,11 @@ describe("Contacts on an Alpha image", () => {
       found.click();
     });
     await until(alpha, alpha.runtime, Agent, (s) => s.stage === "Shown" && s.number === "+14155550100" && !s.addressed);
+    // The text card names the chosen contact beside the number, as v121 did.
+    await drawn(() => {
+      const heading = document.querySelector("[data-alpha-review] h2")?.textContent;
+      if (heading !== "To Maya Chen (+14155550100)") throw new Error(`the text card reads ${heading}`);
+    });
 
     // spec/app/contacts/agent.md, "Only the owner approves, only what is shown as it is now, and only when the phone has ruled out an emergency call"
     await press("Send this text");

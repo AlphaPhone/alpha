@@ -270,7 +270,7 @@ export function Maps({ runtime, alpha }: Shown<ScreenMachine | CreditsMachine | 
           {badgeOnly(state.link)
             ? <button type="button" aria-label="Google Maps" onClick={() => void credits.send({ type: "openInfo" })}><img src={googleMaps} alt="Google Maps" width={98} height={18} /></button>
             : <MapsRoundButton tone="float" size="sm" aria-label="Map credits" onClick={() => void credits.send({ type: "openInfo" })}><Info /></MapsRoundButton>}
-          {!badgeOnly(state.link) && <MapsCredits attribution={coverage?.available ? coverage.attribution : undefined} />}
+          {!badgeOnly(state.link) && <MapsCredits attribution={style.kind === "raster" && coverage?.available ? coverage.attribution : undefined} />}
         </div>
       )}
       {credits.state.infoOpen && (
@@ -546,7 +546,7 @@ function Guidance({ screen, state, seen, spot, kept, way }: { screen: Screen; st
   );
 }
 
-/** The credit links v121 floated on a white chip at the foot of the map: the provider's attribution, or OpenFreeMap's three links. */
+/** The credit links v121 floated on a white chip at the foot of the map, keyed on the map drawn: the provider's attribution on its tiles, or OpenFreeMap's three links on the open world map. */
 function MapsCredits({ attribution }: { attribution?: string }) {
   return (
     <p className="min-w-0 rounded-option bg-background px-2 py-0.5 text-xs leading-normal text-foreground shadow-md wrap-anywhere">

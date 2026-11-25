@@ -54,7 +54,7 @@ export function Review({ runtime }: ReviewProps) {
   const text = state.ask === "Text" && state.stage === "Shown";
   return (
     <Card role="dialog" data-alpha-review="" aria-label={asks[state.ask]} className={cn("fixed inset-x-4 bottom-24 z-40 flex flex-col gap-3 p-4", text && "gap-2 rounded-tile bg-background px-5 pt-5 pb-4")}>
-      <h2 className="font-semibold wrap-anywhere">{text ? `To ${state.number}` : asks[state.ask]}</h2>
+      <h2 className="font-semibold wrap-anywhere">{text ? (target === undefined ? `To ${state.number}` : `To ${target.name} (${state.number})`) : asks[state.ask]}</h2>
       {state.stage === "Choosing" && (
         <ListGroup aria-label={reachesANumber(state.ask) ? "Which number" : "Which contact"}>
           {reachesANumber(state.ask)
