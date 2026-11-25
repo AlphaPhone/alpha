@@ -268,8 +268,11 @@ describe.each([["a browser", false], ["a phone", true]])("in %s", (_where, phone
     expect([(document.querySelector("section[aria-label='Ask Alpha'] [role=log]")?.textContent ?? "").includes("You’re out of plan allowance and credits, so I couldn’t reply."), Boolean(button("Manage plan"))]).toEqual([true, true]);
     world.ask.refusal = undefined;
 
-    // spec/app/assistant/chats.md, "Older or newer messages are read around a message of the conversation showing"
-    await press("Earlier");
+    // spec/app/assistant/chats.md, "Older or newer messages are read around a message of the conversation showing": the
+    // transcript offers Earlier only while messages before the first one showing exist, so here, with the first message
+    // showing, the conversation is read around it directly.
+    expect(button("Earlier")).toBeUndefined();
+    await runtime.runPromise(Effect.flatMap(Chats, (chats) => chats.send({ type: "scroll", around: 1 })));
     await until(alpha, runtime, Chats, (s) => s.around > 0 && s.page.status === "Loaded");
     expect(lines().slice(0, 2)).toEqual(["Hello", "You said: Hello"]);
 

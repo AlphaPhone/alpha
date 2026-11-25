@@ -100,3 +100,12 @@
 { "method": "POST", "path": "/api/scheduled-tasks/{id}/skip" }
 { "method": "POST", "path": "/api/scheduled-tasks/{id}/reopen" }
 { "method": "POST", "path": "/api/scheduled-tasks/{id}/fire" }
+{ "method": "GET", "path": "/api/wallet" }
+{ "method": "POST", "path": "/api/wallet" }
+{ "method": "POST", "path": "/api/wallet/switch" }
+{ "method": "GET", "path": "/api/wallet/holdings" }
+{ "method": "GET", "path": "/api/wallet/activity" }
+{ "method": "GET", "path": "/api/wallet/requests" }
+{ "method": "POST", "path": "/api/wallet/requests" }
+{ "method": "POST", "path": "/api/wallet/requests/{id}/review" }
+{ "method": "POST", "path": "/api/wallet/requests/{id}/decide" }

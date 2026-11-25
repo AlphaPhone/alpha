@@ -360,7 +360,7 @@ export effect function begin(beginning: Beginning): boolean!!(Drafts.Machine | L
   const prefix = replying ? "Re: " : kind === "Forward" ? "Fwd: " : ""
   const subject = message === undefined || message.subject.toLowerCase().startsWith(prefix.toLowerCase()) ? message?.subject ?? "" : `${prefix}${message.subject}`
   const forward = kind === "Forward" && message !== undefined
-  const text = forward ? `\n\n---------- Forwarded message ----------\nFrom: ${message.from}\nSubject: ${message.subject}\n\n${message.body ?? ""}` : ""
+  const text = forward ? `\n\nForwarded message from ${message.from}\nSubject: ${message.subject}\n\n${message.body ?? ""}` : ""
   words.set(sent.value.state.letter.id, {
     ...nothing, subject, text, answers: replying ? message?.id : undefined, mode: kind === "Reply" ? "reply" : kind === "ReplyAll" ? "reply-all" : kind === "Forward" ? "forward" : "compose",
     to: replying ? [sender] : [], cc: kind === "ReplyAll" ? others : [],

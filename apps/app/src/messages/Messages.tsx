@@ -2,9 +2,9 @@
 import { MMS_ATTACHMENT_TYPES, MMS_MAX_BODY, MMS_MAX_RECIPIENTS } from "@elizaos/os-bridges";
 import type { MessageRow, ThreadRow } from "@elizaos/os-bridges";
 import { normalizePhoneNumber } from "@elizaos/os-bridges";
-import { Alert, Avatar, Banner, Button, Chip, ConfirmDialog, Input, Menu, MenuContent, MenuItem, MenuTrigger, SearchField, Spinner, Textarea } from "@repo/ui";
+import { Alert, Avatar, Banner, Button, Chip, Mark, Dialog, DialogContent, DialogDescription, DialogTitle, Input, Menu, MenuContent, MenuItem, MenuTrigger, SearchField, Textarea } from "@repo/ui";
 import { Effect, type Layer, type ManagedRuntime } from "effect";
-import { ArrowUp, Camera, ChevronDown, ChevronLeft, ChevronUp, CircleAlert, Copy, Image as PictureIcon, ImagePlus, Mic, Pencil, Phone as Call, Plus, RefreshCw, Search, Send, Sparkles, Square, Trash2, X } from "lucide-react";
+import { ArrowUp, Camera, ChevronDown, ChevronLeft, ChevronUp, CircleAlert, Copy, Image as PictureIcon, ImagePlus, Mic, Pencil, Phone as Call, Plus, RefreshCw, Search, Sparkles, Square, Trash2, X } from "lucide-react";
 import { memo, useCallback, useMemo, useRef, useState, useSyncExternalStore, type MouseEvent, type PointerEvent } from "react";
 import { clear } from "../../gen/app__phone.ts";
 import { useMachine as usePhone } from "../../gen/app__phone.react.ts";
@@ -33,6 +33,13 @@ export interface MessagesProps {
 type MessagesUI = ReturnType<typeof useMessages>;
 
 const header = "flex min-h-12 shrink-0 items-center gap-1 px-2";
+const accessPill = "min-h-13 rounded-group bg-foreground px-7 text-lg font-semibold text-background focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring disabled:opacity-50";
+const draftAction = "min-h-11 rounded-tile text-base focus-visible:outline-2 focus-visible:outline-ring";
+const notice = "mx-2 basis-full text-caption leading-detail text-muted-foreground";
+const textLink = "min-h-11 underline focus-visible:outline-2 focus-visible:outline-ring";
+const accessoryChip = "inline-flex min-h-11 items-center rounded-tile text-sm font-semibold focus-visible:outline-2 focus-visible:outline-ring disabled:opacity-50";
+const dialogAction = "min-h-11 px-3.5 text-base hover:bg-accent focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring active:bg-accent";
+const actionItem = "flex min-h-11 shrink-0 items-center gap-2 rounded-option px-3.5 text-sm font-semibold whitespace-nowrap transition-colors duration-fast hover:bg-accent focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring active:bg-accent";
 const contactRow = "flex min-h-15 w-full items-center gap-3 px-5 py-1.5 text-left hover:bg-accent focus-visible:outline-2 focus-visible:outline-ring";
 const messageURL = /\bhttps?:\/\/[^\s<>"']+/giu;
 const noMessages: ReadonlyArray<MessageRow> = [];
@@ -66,13 +73,14 @@ function clearChoice(runtime: MessagesProps["runtime"]) {
 export function Messages({ runtime, onBack, onOpenLink }: MessagesProps) {
   const messages = useMessages(runtime);
   const dock = useCommsDock(runtime);
+  const [view, setView] = useState<HTMLElement | null>(null);
   if (messages.cause) return <Alert variant="destructive" className="m-4">Alpha could not open Messages</Alert>;
   const { state } = messages;
   if (!state) return null;
   return (
-    <section data-alpha-messages data-sheet={dock.open ? "open" : "closed"} aria-label="Messages" className="group/messages flex h-full min-h-0 flex-col overflow-hidden data-[sheet=closed]:pt-2">
+    <section ref={setView} data-alpha-messages data-sheet={dock.open ? "open" : "closed"} aria-label="Messages" className="group/messages relative flex h-full min-h-0 flex-col overflow-hidden data-[sheet=closed]:pt-2">
       {state.pane === "Threads" && <Threads runtime={runtime} messages={messages} onBack={onBack} />}
-      {state.pane === "Conversation" && <Conversation key={state.thread} runtime={runtime} messages={messages} onOpenLink={onOpenLink} />}
+      {state.pane === "Conversation" && <Conversation key={state.thread} runtime={runtime} messages={messages} onOpenLink={onOpenLink} view={view} />}
       {state.pane === "Picker" && <Picker runtime={runtime} messages={messages} />}
     </section>
   );
@@ -101,57 +109,57 @@ function Threads({ runtime, messages: { state, can, send }, onBack }: MessagesPr
   return (
     <>
       {searching ? (
-        <header className={header} data-alpha-messages-search-header>
-          <Button variant="ghost" size="icon" aria-label="Back to messages" onClick={() => { search(""); setSearching(false); }}><ChevronLeft /></Button>
-          <div role="search" aria-label="Search messages" className="min-w-0 flex-1 pr-2">
-            <SearchField autoFocus aria-label="Search conversations" placeholder="Search conversations" value={sought} onValueChange={search} clearLabel="Clear search" />
+        <header className="flex h-13 shrink-0 items-center gap-0.5 px-2" data-alpha-messages-search-header>
+          <Button variant="ghost" size="icon" className="size-13 rounded-lg" aria-label="Back to messages" onClick={() => { search(""); setSearching(false); }}><ChevronLeft /></Button>
+          <div role="search" aria-label="Search messages" className="min-w-0 flex-1">
+            <SearchField autoFocus aria-label="Search conversations" placeholder="Search conversations" value={sought} onValueChange={search} clearLabel="Clear search" className="[&_button]:size-13 [&_button]:min-w-13 [&_button]:rounded-tile [&_input:focus-visible]:outline-none" />
           </div>
         </header>
       ) : (
         <header className="flex h-13 shrink-0 items-center gap-0.5 px-2 [&>button]:size-13" data-alpha-messages-header data-alpha-stage-header>
-          {onBack && <Button variant="ghost" size="icon" aria-label="Back to apps" onClick={onBack}><ChevronLeft /></Button>}
-          <h1 className="min-w-0 flex-1 truncate text-xl leading-tight font-semibold">Messages</h1>
-          {!smsNeeded(state) && <Button variant="ghost" size="icon" aria-label="Search messages" data-alpha-messages-search onClick={() => setSearching(true)}><Search /></Button>}
-          {can({ type: "newMessage" }) && <Button variant="ghost" size="icon" aria-label="New message" data-alpha-messages-new onClick={() => {
+          {onBack && <Button variant="ghost" size="icon" className="rounded-lg" aria-label="Back to apps" onClick={onBack}><ChevronLeft /></Button>}
+          <h1 className="min-w-0 flex-1 truncate text-xl font-semibold">Messages</h1>
+          {!smsNeeded(state) && <Button variant="ghost" size="icon" className="rounded-tile" aria-label="Search messages" data-alpha-messages-search onClick={() => setSearching(true)}><Search className="size-5" /></Button>}
+          {can({ type: "newMessage" }) && <Button variant="ghost" size="icon" className="rounded-tile" aria-label="New message" data-alpha-messages-new onClick={() => {
             runtime.runSync(Effect.flatMap(Inbox, (inbox) => inbox.set({ typed: "" })));
             void send({ type: "newMessage" });
-          }}><Pencil /></Button>}
+          }}><Pencil className="size-5" /></Button>}
         </header>
       )}
       {smsNeeded(state) && (can(allow) || can(settings)) && (
         <div className="grid flex-1 place-items-center px-4">
-          {can(allow) ? <Button data-alpha-messages-allow onClick={() => void send(allow)}>Allow SMS read access</Button> : <Button variant="outline" onClick={() => void send(settings)}>Open Settings for SMS access</Button>}
+          {can(allow) ? <button type="button" data-alpha-messages-allow className={accessPill} onClick={() => void send(allow)}>Allow SMS read access</button> : <button type="button" className={accessPill} onClick={() => void send(settings)}>Open Settings for SMS access</button>}
         </div>
       )}
       {!smsNeeded(state) && (
         <>
-          <div className="flex shrink-0 flex-wrap items-center gap-2 px-5 empty:hidden" role="group" aria-label="Filter conversations">
+          <div className="flex shrink-0 flex-wrap items-center gap-2 px-4 pb-2 empty:hidden" role="group" aria-label="Filter conversations">
             {state.chip === "UnreadThreads"
-              ? <Chip onClear={can(all) ? () => void send(all) : undefined} clearLabel="Show all conversations">Unread</Chip>
+              ? <Chip onClear={can(all) ? () => void send(all) : undefined} clearLabel="Show all conversations" className="[&>button_svg]:size-3.5">Unread</Chip>
               : searching && can(unread) && <Button size="sm" variant="ghost" onClick={() => void send(unread)}>Unread</Button>}
-            {!searching && state.sought && <Chip onClear={() => search("")} clearLabel="Clear the search">{sought}</Chip>}
+            {!searching && state.sought && <Chip onClear={() => search("")} clearLabel="Clear the search" className="[&>button_svg]:size-3.5">{sought}</Chip>}
           </div>
           <div data-alpha-messages-threads className="min-h-0 flex-1 touch-pan-y overflow-y-auto overscroll-contain py-1">
-            {state.list.status === "Loading" && state.threads === 0 && <div className="px-5 py-3"><Spinner label="Reading conversations" /></div>}
-            {threadsFailed(state) && <div className="p-4"><Banner variant="destructive" action={can({ type: "retryThreads" }) && <Button size="sm" variant="outline" onClick={() => void send({ type: "retryThreads" })}>Retry</Button>}>Conversations could not be read</Banner></div>}
+            {state.list.status === "Loading" && state.threads === 0 && <span role="status" className="sr-only">Reading conversations</span>}
+            {threadsFailed(state) && <p role="status" className="mx-4 my-2">Conversations could not be read {can({ type: "retryThreads" }) && <button type="button" className={textLink} onClick={() => void send({ type: "retryThreads" })}>Retry</button>}</p>}
             {noThreads(state) && <p role="status" className="px-5 py-3 text-muted-foreground">No conversations</p>}
             {noMatches(state) && <p role="status" className="px-5 py-3 text-muted-foreground">No matches</p>}
             {state.threads > 0 && (
               <ul aria-label="Conversations">
                 {threads.map((row) => {
                   const complete = "incomplete" in row ? undefined : row;
-                  const title = complete ? titleOf(complete.addresses, names) || "Conversation" : "Conversation";
+                  const title = complete ? titleOf(complete.addresses, names) || "Conversation" : "Conversation content unavailable";
                   return (
                     <li key={row.id}>
                       <button type="button" aria-label={title} aria-description={complete?.unread ? "Unread" : undefined} onClick={() => open(row)} className={`${contactRow} min-h-17 items-start py-2.5`}>
-                        <Avatar name={avatarName(title)} aria-hidden className="size-12 text-base" />
-                        <span className="min-w-0 flex-1">
+                        <Avatar name={avatarName(title)} aria-hidden className="size-12 text-md font-bold" />
+                        <span className="flex min-w-0 flex-1 flex-col gap-0.75">
                           <span className="flex items-center gap-1.5">
                             {complete?.unread && <span aria-hidden className="size-2 shrink-0 rounded-full bg-primary" />}
-                            <span className={`min-w-0 flex-1 truncate text-body leading-plain ${complete?.unread ? "font-bold" : "font-semibold"}`}>{title}</span>
+                            <span className={`min-w-0 flex-1 truncate text-md ${complete?.unread ? "font-bold" : "font-semibold"}`}>{title}</span>
                             <span className="shrink-0 text-sm text-muted-foreground">{shortWhen(row.date, now)}</span>
                           </span>
-                          <span className={`block truncate text-base ${complete?.unread ? "text-foreground" : "text-muted-foreground"}`}>{complete?.snippet ?? "Open in your messaging app"}</span>
+                          <span className={`block truncate text-base ${complete?.unread ? "text-foreground" : "text-muted-foreground"}`}>{complete?.snippet ?? "Use the system messaging app to view this conversation."}</span>
                         </span>
                       </button>
                     </li>
@@ -159,13 +167,13 @@ function Threads({ runtime, messages: { state, can, send }, onBack }: MessagesPr
                 })}
               </ul>
             )}
-            {can({ type: "olderThreads" }) && <div className="grid place-items-center py-2"><Button size="icon" variant="secondary" aria-label="Older conversations" onClick={() => void send({ type: "olderThreads" })}><ChevronDown /></Button></div>}
+            {can({ type: "olderThreads" }) && <div className="grid place-items-center py-2"><Button size="icon" variant="secondary" aria-label="Older conversations" onClick={() => void send({ type: "olderThreads" })}><ChevronDown className="size-5" /></Button></div>}
           </div>
         </>
       )}
       <CommsBar runtime={runtime} closed={smsNeeded(state) ? undefined : (ask, talk) => (
         <form className="flex min-w-0 flex-1 items-center gap-1" onSubmit={(event) => { event.preventDefault(); ask(sought.trim()); }}>
-          <Input data-alpha-composer aria-label="Search or ask" placeholder="Search or ask" value={sought} onChange={(event) => search(event.target.value)} className="min-w-0 flex-1 border-0 bg-transparent pl-2 shadow-none" />
+          <Input data-alpha-composer aria-label="Search or ask" placeholder="Search or ask" value={sought} onChange={(event) => search(event.target.value)} className="h-11 min-w-0 flex-1 rounded-none border-0 bg-transparent py-2.75 pr-0.5 pl-2 shadow-none focus-visible:outline-none" />
           {sought.trim() !== "" ? <Button size="icon" variant="ghost" type="submit" aria-label="Ask Alpha"><ArrowUp /></Button>
             : talk && <Button size="icon" variant="ghost" type="button" aria-label="Talk" onClick={talk}><Mic /></Button>}
         </form>
@@ -200,6 +208,15 @@ function MessageText({ text, onOpenLink }: { text: string; onOpenLink?: Messages
   return <>{parts}{text.slice(consumed)}</>;
 }
 
+/** Develop's picture mark beside a picture message's label: a frame with a hill line, stroked. */
+function PictureGlyph() {
+  return (
+    <svg aria-hidden viewBox="0 0 24 24" className="size-4 shrink-0" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
+      <path d="M4 5h16v14H4zM4 15l4-4 4 4 3-3 5 5" />
+    </svg>
+  );
+}
+
 interface BubbleActions {
   copy?: (() => void) | undefined;
   remove?: (() => void) | undefined;
@@ -211,7 +228,7 @@ const Bubble = memo(function Bubble({ row, now, choose, actions, onOpenLink }: {
   const complete = "incomplete" in row ? undefined : row;
   const outgoing = complete?.direction === "outgoing";
   const failed = complete?.status === "failed";
-  const status = failed ? "Not sent" : complete?.status === "pending" ? "Sending" : outgoing && (complete?.status === "delivered" || complete?.deliveryReport === "complete") ? "Delivered" : outgoing ? "Sent" : "";
+  const status = !complete || !outgoing ? "" : failed ? "Not sent" : complete.status === "pending" ? "Sending…" : complete.kind === "sms" && complete.deliveryReport === "complete" ? "Delivered" : complete.status === "sent" ? "Sent" : "";
   const select = (event: MouseEvent) => {
     if (event.target instanceof Element && event.target.closest("a")) return;
     if (document.getSelection()?.isCollapsed === false) return;
@@ -221,7 +238,7 @@ const Bubble = memo(function Bubble({ row, now, choose, actions, onOpenLink }: {
     const started = pointerRef.current;
     if (started && Math.hypot(event.clientX - started.x, event.clientY - started.y) > 12) pointerRef.current = null;
   };
-  const label = complete ? complete.body || "Picture message" : "A message Alpha cannot show";
+  const label = complete ? complete.body || "Picture message" : "Use the system messaging app to view this message.";
   return (
     <div className={`flex max-w-[min(17.5rem,100%)] flex-col ${outgoing ? "items-end self-end" : "items-start self-start"}`}>
       <div ref={triggerRef} data-alpha-message-id={row.id} data-alpha-sms-outgoing={outgoing} role="button" tabIndex={0} aria-label={`Message actions: ${label}`} aria-haspopup="menu" aria-expanded={Boolean(actions)}
@@ -247,24 +264,24 @@ const Bubble = memo(function Bubble({ row, now, choose, actions, onOpenLink }: {
             choose(row.id);
           }
         }}>
-        {!complete ? <p className="rounded-tile bg-muted px-4 py-2.5 text-base">{label}</p> : (
+        {!complete ? <p data-alpha-message-body className="rounded-tile bg-secondary px-4 py-2.75 text-body leading-detail text-muted-foreground">{label}</p> : (
           <>
-            {complete.attachments > 0 && <span className="flex items-center gap-1.5 text-sm text-muted-foreground"><PictureIcon className="size-4" aria-hidden />{complete.attachments === 1 ? "1 picture" : `${complete.attachments} pictures`}</span>}
-            {complete.body && <p data-alpha-message-body className={`rounded-tile px-4 py-2.75 text-body leading-field whitespace-pre-wrap wrap-anywhere ${outgoing ? "bg-foreground text-background" : "bg-secondary text-secondary-foreground"}`}><MessageText text={complete.body} onOpenLink={onOpenLink} /></p>}
+            {complete.attachments > 0 && <span className="flex items-center gap-1.5 text-caption text-muted-foreground"><PictureGlyph />{complete.attachments === 1 ? "Picture" : `${complete.attachments} pictures`}</span>}
+            {complete.body && <p data-alpha-message-body className={`rounded-tile px-4 py-2.75 text-body leading-detail whitespace-pre-wrap wrap-anywhere ${outgoing ? "bg-foreground text-background" : "bg-secondary text-secondary-foreground"}`}><MessageText text={complete.body} onOpenLink={onOpenLink} /></p>}
           </>
         )}
         <span data-alpha-message-meta title={new Date(row.date).toLocaleString()} className="px-1.5 text-2xs text-muted-foreground">{[stamp(row.date, now), status].filter(Boolean).join(" · ")}</span>
         {failed && <CircleAlert className="size-4 text-destructive" role="img" aria-label="Message failed" />}
       </div>
       {actions && (
-        <div data-alpha-sms-actions role="menu" aria-label="Message actions" className="flex flex-wrap items-center gap-1 py-1" onKeyDown={(event) => {
+        <div data-alpha-sms-actions role="menu" aria-label="Message actions" className="mt-2 flex max-w-full overflow-x-auto rounded-md bg-secondary p-1" onKeyDown={(event) => {
           if (event.key !== "Escape") return;
           event.stopPropagation();
           choose("");
           triggerRef.current?.focus();
         }}>
-          {actions.copy && <Button role="menuitem" autoFocus size="sm" variant="secondary" onClick={actions.copy}><Copy />Copy</Button>}
-          {actions.remove && <Button role="menuitem" autoFocus={!actions.copy} size="sm" variant="ghost" className="text-destructive" onClick={actions.remove}><Trash2 />Delete</Button>}
+          {actions.copy && <button type="button" role="menuitem" autoFocus className={`${actionItem} min-w-25`} onClick={actions.copy}><Copy aria-hidden className="size-4" />Copy</button>}
+          {actions.remove && <button type="button" role="menuitem" autoFocus={!actions.copy} className={`${actionItem} text-destructive`} onClick={actions.remove}><Trash2 aria-hidden className="size-4" />Delete</button>}
         </div>
       )}
     </div>
@@ -272,7 +289,7 @@ const Bubble = memo(function Bubble({ row, now, choose, actions, onOpenLink }: {
 });
 
 /** One conversation: provider rows, their actions, and the draft belonging to this exact thread. */
-function Conversation({ runtime, messages: { state, can, send }, onOpenLink }: MessagesProps & { messages: MessagesUI }) {
+function Conversation({ runtime, messages: { state, can, send }, onOpenLink, view }: MessagesProps & { messages: MessagesUI; view: HTMLElement | null }) {
   const phone = usePhone(runtime).state;
   const [selected, setSelected] = useState("");
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -304,7 +321,10 @@ function Conversation({ runtime, messages: { state, can, send }, onOpenLink }: M
   const title = titleOf(addresses, held.names) || "Conversation";
   const selectedRow = rows.find((row) => row.id === selected);
   const confirm = { type: "confirmDelete", clear: clear(phone) } as const;
-  const actions = selectedRow && !("incomplete" in selectedRow) && !state.confirming && content(state) ? {
+  const actions = selectedRow && !("incomplete" in selectedRow) && content(state) ? state.confirming ? {
+    copy: selectedRow.body ? () => undefined : undefined,
+    remove: () => undefined,
+  } : {
     copy: selectedRow.body && can({ type: "copy" }) ? () => { void send({ type: "copy" }); } : undefined,
     remove: state.smsApp && state.removal.outcome !== "Unknown" && can({ type: "askDelete" }) ? () => {
       const { id, kind, threadId, date } = selectedRow;
@@ -315,19 +335,19 @@ function Conversation({ runtime, messages: { state, can, send }, onOpenLink }: M
   return (
     <>
       <header className={`${header} pb-2`} data-alpha-navigation-header data-alpha-stage-header>
-        {can({ type: "back" }) && <Button variant="ghost" size="icon" aria-label="Back" onClick={() => { clearChoice(runtime); void send({ type: "back" }); }}><ChevronLeft /></Button>}
-        <Avatar name={avatarName(title)} aria-hidden size="sm" data-alpha-stage-avatar className="group-data-[sheet=closed]/messages:size-9" />
+        {(can({ type: "back" }) || state.confirming) && <Button variant="ghost" size="icon" aria-label="Back" onClick={() => { clearChoice(runtime); void send({ type: "back" }); }}><ChevronLeft /></Button>}
+        <Avatar name={avatarName(title)} aria-hidden size="sm" data-alpha-stage-avatar className="text-caption font-bold group-data-[sheet=closed]/messages:size-9" />
         <h1 data-alpha-messages-title className="min-w-0 flex-1 truncate pl-1.5 text-lg font-bold">{title}</h1>
-        {addresses.length === 1 && can({ type: "call" }) && <Button variant="ghost" size="icon" aria-label={`Call ${title}`} onClick={() => void send({ type: "call" })}><Call /></Button>}
+        {addresses.length === 1 && (can({ type: "call" }) || state.confirming) && <Button variant="ghost" size="icon" aria-label={`Call ${title}`} onClick={() => void send({ type: "call" })}><Call /></Button>}
       </header>
-      <div ref={viewport} data-alpha-messages-thread className="min-h-0 flex-1 touch-pan-y overflow-y-auto overscroll-contain px-4 pb-3" onScroll={(event) => {
+      <div ref={viewport} data-alpha-messages-thread className="min-h-0 flex-1 touch-pan-y overflow-y-auto overscroll-contain px-4 pb-3.5" onScroll={(event) => {
         const viewport = event.currentTarget;
         nearEndRef.current = viewport.scrollHeight - viewport.scrollTop - viewport.clientHeight < 64;
       }}>
         <div className="flex min-h-full flex-col gap-1.5">
-          {state.page.status === "Loading" && state.shown.rows === 0 && <Spinner label="Reading the conversation" />}
-          {state.page.status === "Failed" && <Banner variant="destructive">The conversation could not be read</Banner>}
-          {can({ type: "earlierMessages" }) && <Button className="self-center" size="icon" variant="secondary" aria-label="Earlier messages" onClick={() => void send({ type: "earlierMessages" })}><ChevronUp /></Button>}
+          {state.page.status === "Loading" && state.shown.rows === 0 && <span role="status" className="sr-only">Reading the conversation</span>}
+          {state.page.status === "Failed" && <p role="status" className="my-2">The conversation could not be read</p>}
+          {can({ type: "earlierMessages" }) && <Button className="self-center" size="icon" variant="secondary" aria-label="Older messages" onClick={() => void send({ type: "earlierMessages" })}><ChevronUp className="size-5" /></Button>}
           <div role="log" aria-label="Messages" className="mt-auto flex flex-col gap-1.5">
             {chronological.map((row) => <Bubble key={row.id} row={row} now={now} choose={choose} actions={row.id === selected && (actions?.copy || actions?.remove) ? actions : undefined} onOpenLink={onOpenLink} />)}
           </div>
@@ -335,10 +355,18 @@ function Conversation({ runtime, messages: { state, can, send }, onOpenLink }: M
           <div key={latest} ref={latest ? anchor : undefined} aria-hidden />
         </div>
       </div>
-      {state.removal.outcome === "Unknown" && <Banner variant="warn">Alpha cannot tell whether the message was deleted</Banner>}
-      {state.removal.outcome === "Refused" && held.deleteTarget && <Banner variant="destructive">The message was not deleted</Banner>}
-      <ConfirmDialog open={state.confirming} title="Delete message?" confirmLabel="Delete" destructive
-        onConfirm={() => void (selectedRow && !("incomplete" in selectedRow) && can(confirm) && send(confirm))} onCancel={() => void (can({ type: "keep" }) && send({ type: "keep" }))}>Delete this message from this phone?</ConfirmDialog>
+      {state.removal.outcome === "Unknown" && <p role="status" className={`${notice} px-3`}>Alpha cannot tell whether the message was deleted</p>}
+      {state.removal.outcome === "Refused" && held.deleteTarget && <p role="status" className={`${notice} px-3`}>The message was not deleted</p>}
+      <Dialog open={state.confirming} onOpenChange={(open) => { if (!open && can({ type: "keep" })) void send({ type: "keep" }); }}>
+        <DialogContent container={view ?? undefined} overlayClassName="absolute z-10 bg-foreground/13 dark:bg-background/13" role="alertdialog" className="absolute inset-x-0 z-20 w-70 max-w-9/10 gap-0 bg-background shadow-none">
+          <DialogTitle className="sr-only">Delete message?</DialogTitle>
+          <DialogDescription className="mt-0 mb-4 text-lg text-foreground">Delete this message from this phone?</DialogDescription>
+          <div className="flex justify-end gap-2">
+            <button type="button" className={dialogAction} onClick={() => void (can({ type: "keep" }) && send({ type: "keep" }))}>Cancel</button>
+            <button type="button" className={`${dialogAction} text-destructive`} onClick={() => void (selectedRow && !("incomplete" in selectedRow) && can(confirm) && send(confirm))}>Delete</button>
+          </div>
+        </DialogContent>
+      </Dialog>
       <Compose runtime={runtime} title={title} addresses={addresses} thread={state.thread} />
     </>
   );
@@ -414,15 +442,9 @@ function Compose({ runtime, title, addresses, thread }: MessagesProps & { title:
       {voice.can(stop) && <Button size="icon" aria-label="Stop recording" onClick={() => void voice.send(stop)}><Square fill="currentColor" /></Button>}
     </div>
   ) : (
-    <div data-alpha-composer data-alpha-messages-composer className="flex min-w-0 flex-1 items-end gap-1">
-      <Textarea className="max-h-[min(10.5rem,28dvh)] min-w-0 flex-1 overflow-y-auto border-0 bg-transparent pl-2 shadow-none" aria-label="Message" placeholder={`Text ${firstName(title)}`} rows={1} value={text} maxLength={MMS_MAX_BODY} readOnly={!editable}
-        ref={(element) => {
-          fieldRef.current = element;
-          if (element && focusRef.current) { focusRef.current = false; element.focus(); }
-        }}
-        onChange={(event) => write(event.target.value)} />
+    <div data-alpha-composer data-alpha-messages-composer className="flex min-w-0 flex-1 items-center gap-1">
       {(canPicture || canSuggest) && <Menu>
-        <MenuTrigger asChild><Button variant="ghost" size="icon" aria-label="Message actions"><Plus /></Button></MenuTrigger>
+        <MenuTrigger asChild><Button variant="ghost" size="icon" aria-label="Message attachments"><Plus /></Button></MenuTrigger>
         <MenuContent aria-label="Message actions" side="top" sideOffset={8}>
           {canPicture && <>
             <MenuItem onSelect={() => cameraInputRef.current?.click()}><Camera />Camera</MenuItem>
@@ -431,6 +453,12 @@ function Compose({ runtime, title, addresses, thread }: MessagesProps & { title:
           {canSuggest && <MenuItem onSelect={() => void send({ type: "suggest" })}><Sparkles />Let Alpha suggest a reply</MenuItem>}
         </MenuContent>
       </Menu>}
+      <Textarea className="max-h-[min(10.5rem,28dvh)] min-h-11 min-w-0 flex-1 overflow-y-auto rounded-none border-0 bg-transparent py-2.75 pr-0.5 pl-2 leading-field shadow-none focus-visible:outline-none" aria-label={`Text ${firstName(title)}`} placeholder={`Text ${firstName(title)}`} rows={1} value={text} maxLength={MMS_MAX_BODY} readOnly={!editable}
+        ref={(element) => {
+          fieldRef.current = element;
+          if (element && focusRef.current) { focusRef.current = false; element.focus(); }
+        }}
+        onChange={(event) => write(event.target.value)} />
       {([["Attach a picture", picturesInputRef, false], ["Take a picture", cameraInputRef, true]] as const).map(([label, input, camera]) => (
         <Input key={label} ref={input} hidden className="hidden" type="file" aria-label={label} multiple={!camera} capture={camera ? "environment" : undefined} accept={MMS_ATTACHMENT_TYPES.join(",")} disabled={!canPicture} onChange={(event) => {
           const files = [...(event.target.files ?? [])];
@@ -438,42 +466,45 @@ function Compose({ runtime, title, addresses, thread }: MessagesProps & { title:
           if (files.length > 0) void runtime.runPromise(attachAll(files));
         }} />
       ))}
+      {sendable && <Button size="icon" aria-label={sendLabel} data-alpha-bar-send onClick={submit}>{checking ? <RefreshCw /> : <ArrowUp />}</Button>}
       {editable && phone.telecom === "NoCall" && voice.can({ type: "openRecorder", target: "MessagesBar" }) && <Button variant="ghost" size="icon" aria-label={`Dictate a text to ${firstName(title)}`} onClick={() => void runtime.runPromise(dictateMessage(thread))}><Mic /></Button>}
-      {sendable && <Button size="icon" aria-label={sendLabel} data-alpha-bar-send onClick={submit}>{checking ? <RefreshCw /> : <Send />}</Button>}
     </div>
   );
   return (
     <>
       {draft && (
         <div data-alpha-draft-bubble={alpha ? "alpha" : "owner"} role="group" aria-label={alpha ? `Message draft to ${addressed}` : "Your draft, not sent"}
-          className="mx-3 flex max-h-[55%] min-h-0 shrink flex-col rounded-tile border border-dashed border-input bg-secondary px-4 pt-2">
-          <div className="min-h-0 overflow-y-auto">
-            <p className="text-sm font-semibold text-muted-foreground">{alpha ? `Alpha's draft · To ${addressed}` : "Your draft"}</p>
-            <p className="text-base whitespace-pre-wrap wrap-anywhere">{text}</p>
-          </div>
-          <div className="flex shrink-0 flex-wrap justify-end gap-1 py-1">
-            {can({ type: "undo" }) && <Button size="sm" variant="ghost" onClick={() => void send({ type: "undo" })}>Don't send</Button>}
-            {editable && <Button size="sm" variant="outline" data-alpha-draft-edit onClick={edit}>Edit</Button>}
-            {dock.open && <Button size="sm" data-alpha-draft-send disabled={!sendable} onClick={submit}>{sendLabel}</Button>}
+          className={`mx-3 my-2 flex max-h-[55%] max-w-[84%] min-h-0 shrink flex-col gap-2 self-end overflow-y-auto rounded-xl rounded-br-box border-[1.5px] border-dashed px-3.5 py-2.5 wrap-anywhere text-foreground ${alpha ? "border-alpha bg-background" : "border-muted-foreground bg-secondary"}`}>
+          <span aria-hidden className="flex items-center gap-1.5 text-xs text-muted-foreground">
+            {alpha && <span className="inline-flex size-4.5 shrink-0 items-center justify-center overflow-hidden rounded-full bg-alpha text-alpha-foreground"><Mark aria-hidden className="size-[118%]" /></span>}
+            {alpha ? `To ${addressed}` : "Your draft"}
+          </span>
+          <p className="text-body leading-detail whitespace-pre-wrap">{text}</p>
+          <div className="sticky bottom-0 flex shrink-0 flex-wrap justify-end gap-2 bg-inherit">
+            {can({ type: "undo" }) && <button type="button" className={`${draftAction} px-3`} onClick={() => void send({ type: "undo" })}>Don’t send</button>}
+            {editable && <button type="button" className={`${draftAction} px-4 inset-ring-[1.5px] inset-ring-muted-foreground`} data-alpha-draft-edit onClick={edit}>Edit</button>}
+            {dock.open && <button type="button" className={`${draftAction} bg-alpha px-4.5 font-semibold text-alpha-foreground disabled:opacity-50`} data-alpha-draft-send disabled={!sendable} onClick={submit}>{sendLabel}</button>}
           </div>
         </div>
       )}
-      <div ref={simControls} data-alpha-messages-accessories className="flex max-h-[34%] shrink-0 flex-wrap gap-1.5 overflow-y-auto px-3 empty:hidden">
+      <div ref={simControls} data-alpha-messages-accessories className="flex max-h-[34%] shrink-0 flex-wrap items-center gap-x-2 gap-y-1 overflow-y-auto px-3 text-caption text-muted-foreground empty:hidden">
         {state.slot.draft.sync === "Conflicted" && (
           <Banner variant="warn" action={<>
             {can({ type: "keepMine" }) && <Button size="sm" onClick={() => void send({ type: "keepMine" })}>Keep mine</Button>}
             {can({ type: "takeSaved" }) && <Button size="sm" variant="outline" onClick={() => void send({ type: "takeSaved" })}>Use the saved draft</Button>}
           </>}>Another draft was saved for this conversation</Banner>
         )}
-        {checking && <Banner variant="warn">Alpha is still waiting for the send result</Banner>}
-        {here && outgoing.denied && <Banner variant="destructive">The phone did not send the message</Banner>}
-        {here && outgoing.op.outcome === "Refused" && !outgoing.denied && outgoing.failed > 0 && <Banner variant="destructive">The message did not reach everyone</Banner>}
-        {here && sentAll(outgoing) && <p role="status" className="basis-full text-xs text-muted-foreground">{`${delivered(outgoing) ? "Delivered" : "Sent"} to ${title}`}</p>}
+        {checking && <p role="status" data-alpha-messages-notice className={notice}>Alpha is still waiting for the send result</p>}
+        {here && outgoing.denied && <p role="status" data-alpha-messages-notice className={notice}>The phone did not send the message</p>}
+        {here && outgoing.op.outcome === "Refused" && !outgoing.denied && outgoing.failed > 0 && <p role="status" data-alpha-messages-notice className={notice}>The message did not reach everyone</p>}
+        {here && (outgoing.denied || outgoing.op.outcome === "Refused" && outgoing.failed > 0) && <CircleAlert className="mx-2 size-4 text-destructive" role="img" aria-label="Message failed" />}
+        {here && sentAll(outgoing) && <p role="status" data-alpha-messages-notice className={notice}>{`${delivered(outgoing) ? "Delivered" : "Sent"} to ${title}`}</p>}
         {pictures.map((picture, at) => (
-          <Chip key={picture.name} onClear={can({ type: "detach" }) ? () => {
+          <button type="button" key={picture.name} aria-label={`Remove ${picture.name}`} disabled={!can({ type: "detach" })} className={`${accessoryChip} gap-1.5 bg-secondary px-3 font-normal text-foreground`} onClick={() => {
+            if (!can({ type: "detach" })) return;
             runtime.runSync(Effect.flatMap(Drafts, (drafts) => drafts.setPictures(pictures.filter((_, other) => other !== at))));
             void send({ type: "detach" });
-          } : undefined} clearLabel={`Remove ${picture.name}`}>{picture.name}</Chip>
+          }}>{picture.name}<X aria-hidden className="size-3.5" /></button>
         ))}
         {(subscriptions.length > 1 || selectedSim !== undefined && subscriptions.length === 1) && (
           <div className="flex flex-wrap gap-1.5" role="group" aria-label="SIM">
@@ -482,12 +513,12 @@ function Compose({ runtime, title, addresses, thread }: MessagesProps & { title:
               const canPick = can(pick);
               const samePosition = state.simInfo.grant === "Granted" && (state.sim === pick.sim || state.sims === 1);
               const picked = selectedSim !== undefined && sameSubscription(subscription, selectedSim);
-              return <Button key={subscription.id} size="sm" aria-pressed={picked} variant={picked ? "primary" : "secondary"} disabled={!canPick && !samePosition}
+              return <button type="button" key={subscription.id} aria-pressed={picked} disabled={!canPick && !samePosition} className={`${accessoryChip} px-3.5 ${picked ? "bg-foreground text-background" : "bg-secondary text-foreground"}`}
                 onClick={() => {
                   if (!canPick && !samePosition) return;
                   subscriptionChoice.pick(thread, subscription);
                   if (canPick) void send(pick);
-                }}>{`SIM ${subscription.slot + 1}`}</Button>;
+                }}>{subscription.displayName || `SIM ${subscription.slot + 1}`}</button>;
             })}
           </div>
         )}
@@ -496,11 +527,11 @@ function Compose({ runtime, title, addresses, thread }: MessagesProps & { title:
           if (need === "SimAccess" && state.sims <= 1) return null;
           const allow = { type: "allow", need } as const;
           const settings = { type: "goToSettings", need } as const;
-          if (can(allow)) return <Button key={need} size="sm" variant="outline" onClick={() => void send(allow)}>{`Allow ${right} access`}</Button>;
-          if (can(settings)) return <Button key={need} size="sm" variant="outline" onClick={() => void send(settings)}>{`Open Settings for ${right} access`}</Button>;
+          if (can(allow)) return <button type="button" key={need} className={textLink} onClick={() => void send(allow)}>{`Allow ${right} access`}</button>;
+          if (can(settings)) return <button type="button" key={need} className={textLink} onClick={() => void send(settings)}>{`Open Settings for ${right} access`}</button>;
           return null;
         })}
-        {can(handoff) && <Button size="sm" variant="outline" onClick={() => void send(handoff)}>{pictures.length > 0 ? "Review text in messaging app" : "Review in messaging app"}</Button>}
+        {can(handoff) && <button type="button" className={textLink} onClick={() => void send(handoff)}>{pictures.length > 0 ? "Review text in messaging app" : "Review in messaging app"}</button>}
       </div>
       <CommsBar runtime={runtime} person={person} closed={messageForm} />
     </>
@@ -536,10 +567,10 @@ function Picker({ runtime, messages: { state, can, send } }: MessagesProps & { m
       <header data-alpha-navigation-header className={`${header} pr-4 pb-2`}>
         {can({ type: "back" }) && <Button variant="ghost" size="icon" aria-label="Back" onClick={() => void send({ type: "back" })}><ChevronLeft /></Button>}
         <form className="min-w-0 flex-1" onSubmit={(event) => { event.preventDefault(); if (numbers.length > 0) open(numbers, true); }}>
-          <SearchField ref={inputRef} aria-label="To" placeholder="To" autoComplete="off" autoCapitalize="none" autoCorrect="off" spellCheck={false} maxLength={230}
-            data-alpha-messages-recipients value={typed} onValueChange={find} />
+          <Input ref={inputRef} type="text" aria-label="To" placeholder={browsing ? `Recipient ${to.slice(0, -1).filter(Boolean).length + 1}` : "To"} autoComplete="off" autoCapitalize="none" autoCorrect="off" spellCheck={false} maxLength={230}
+            data-alpha-messages-recipients value={typed} onChange={(event) => find(event.target.value)} className="h-11 rounded-tile border-0 px-4 focus-visible:outline-none" />
         </form>
-        <Button variant="ghost" size="icon" aria-label="Choose a contact" aria-expanded={browsing} onClick={() => { setBrowsing(!browsing); inputRef.current?.focus(); }}><Plus /></Button>
+        <Button variant="ghost" size="icon" aria-label={browsing ? "Close contact picker" : "Choose contacts"} aria-expanded={browsing} onClick={() => { setBrowsing(!browsing); inputRef.current?.focus(); }}><Plus /></Button>
       </header>
       {offer?.ticket === state.offeredPicture && (
         <div aria-label="Picture for this message" className="flex px-5 py-2">
@@ -550,10 +581,10 @@ function Picker({ runtime, messages: { state, can, send } }: MessagesProps & { m
       )}
       <div data-alpha-messages-picks className="min-h-0 flex-1 touch-pan-y overflow-y-auto overscroll-contain pb-2">
         {numbers.length > 0 && <div className="px-5 py-1"><Button variant="outline" onClick={() => open(numbers, true)}>{numbers.length === 1 ? `Text ${numbers[0]}` : `Text ${numbers.length} recipients`}</Button></div>}
-        {can(allow) && <div className="px-5 py-2"><Button variant="outline" onClick={() => void send(allow)}>Allow Contacts access</Button></div>}
-        {can(settings) && <div className="px-5 py-2"><Button variant="outline" onClick={() => void send(settings)}>Open Settings for Contacts access</Button></div>}
-        {state.picker.status === "Loading" && <div className="px-5"><Spinner label="Checking Contacts" /></div>}
-        {state.picker.status === "Failed" && can({ type: "findChoices" }) && <div className="px-5"><Banner variant="destructive" action={<Button size="sm" variant="outline" onClick={() => void send({ type: "findChoices" })}>Retry</Button>}>Contacts could not be read</Banner></div>}
+        {state.picker.status === "Loading" && <p role="status" className="mx-4 my-2 text-muted-foreground">Checking Contacts</p>}
+        {state.picker.status === "Failed" && can({ type: "findChoices" }) && <p role="status" className="mx-4 my-2 text-muted-foreground">Contacts could not be read <button type="button" className={textLink} onClick={() => void send({ type: "findChoices" })}>Retry</button></p>}
+        {can(allow) && <button type="button" className={`${textLink} mx-4`} onClick={() => void send(allow)}>Allow Contacts access</button>}
+        {can(settings) && <button type="button" className={`${textLink} mx-4`} onClick={() => void send(settings)}>Open Settings for Contacts access</button>}
         {state.choices > 0 && (
           <ul aria-label="Contacts" data-alpha-messages-contact-picker={browsing || undefined}>
             {held.choices.flatMap((contact) => contact.phones.map((phone) => (
@@ -562,15 +593,15 @@ function Picker({ runtime, messages: { state, can, send } }: MessagesProps & { m
                   if (to.length === 1) { open([phone], false); return; }
                   find([...to.slice(0, -1), phone].join(", "));
                 }}>
-                  <Avatar name={contact.name} aria-hidden className="size-11 text-base" />
-                  <span className="min-w-0 flex-1 truncate text-base font-semibold">{contact.name}</span>
-                  <span className="shrink-0 text-sm text-muted-foreground tabular-nums">{phone}</span>
+                  <Avatar name={contact.name} aria-hidden className="size-11 text-base font-bold" />
+                  <span className="min-w-0 flex-1 truncate text-md font-semibold">{contact.name}</span>
+                  <span className="shrink-0 text-sm text-muted-foreground tabular-nums">{displayNumber(phone)}</span>
                 </button>
               </li>
             )))}
           </ul>
         )}
-        {can({ type: "loadMoreChoices" }) && <div className="px-5 py-2"><Button variant="outline" size="sm" onClick={() => void send({ type: "loadMoreChoices" })}>More contacts</Button></div>}
+        {can({ type: "loadMoreChoices" }) && <button type="button" className={`${textLink} mx-4`} onClick={() => void send({ type: "loadMoreChoices" })}>More contacts</button>}
       </div>
       <CommsBar runtime={runtime} />
     </>

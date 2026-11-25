@@ -61,7 +61,7 @@ export function ClockPage({ runtime, container, restoreFocus }: ClockProps) {
   return <Dialog open>
     <DialogContent container={container} overlayClassName="absolute bg-transparent dark:bg-transparent"
       aria-label="Clock alarms" aria-labelledby={undefined} aria-describedby={undefined}
-      className="absolute inset-0 mx-0 max-w-none translate-y-0 gap-0 overflow-auto rounded-none bg-background px-6 pt-[max(var(--alpha-native-inset-top,0px),env(safe-area-inset-top))] pb-30 text-foreground shadow-none"
+      className="absolute inset-0 mx-0 max-h-none max-w-none translate-y-0 gap-0 overflow-auto rounded-none bg-background px-6 pt-[max(var(--alpha-native-inset-top,0px),env(safe-area-inset-top))] pb-30 text-foreground shadow-none"
       onInteractOutside={(event) => event.preventDefault()}
       onEscapeKeyDown={(event) => { event.preventDefault(); tell(close); }}
       onCloseAutoFocus={(event) => { event.preventDefault(); restoreFocus(); }}>
