@@ -8,6 +8,7 @@ import type { Route } from "./routes.ts";
 export interface Stored {
   card: MailCard;
   body: string;
+  threadBody?: string;
   html: string | null;
   files: MailMessage["attachments"];
   attachmentData?: Readonly<Record<string, Uint8Array<ArrayBuffer>>>;
@@ -46,6 +47,8 @@ export interface InboxScene {
   revoked: boolean;
   /** A reply the journey holds at the Gmail thread boundary. */
   threadReply?: Promise<void>;
+  threadPageSize?: number;
+  readonly threadReads: { offset: number; history: string | null }[];
   /** Every change asked of Gmail, as `<kind> <message>`, once it was dispatched. */
   readonly changes: string[];
   readonly pageReads: { query: string; cursor: string | null }[];
@@ -153,7 +156,7 @@ export function inboxScene(): InboxScene {
       letter(8, "Win a prize", ["SPAM"], "About Win a prize", "Prize Desk <win@prize.example>", today(7, 0, 2)),
       letter(9, "Notes from me", ["SENT"], "About Notes from me", "You <you@gmail.example>", today(17, 0, 2)),
     ],
-    history: 500, offline: false, revoked: false, changes: [], pageReads: [], bodyReads: [], attached: [], attachmentReads: [], savedAttachments: new Map(), drafts: new Map(), receiptReads: [],
+    history: 500, offline: false, revoked: false, changes: [], pageReads: [], bodyReads: [], threadReads: [], attached: [], attachmentReads: [], savedAttachments: new Map(), drafts: new Map(), receiptReads: [],
   };
 }
 
@@ -259,12 +262,13 @@ export function inboxRoutes(scene: InboxScene): Route[] {
       const historyId = String(scene.history);
       const expected = url.searchParams.get("historyId");
       const offset = Number(url.searchParams.get("offset") ?? "0");
+      scene.threadReads.push({ offset, history: expected });
       const thread = scene.mail.filter(({ card }) => card.threadId === threadId)
         .toSorted((left, right) => left.card.receivedAt.localeCompare(right.card.receivedAt));
       if (!thread.length) return refused(404, "not_found");
       if (expected !== null && expected !== historyId) return refused(409, "stale_revision");
-      const messages = thread.slice(offset, offset + 25).map((stored) => ({
-        message: stored.card, bodyText: stored.body, bodyHtml: stored.html,
+      const messages = thread.slice(offset, offset + (scene.threadPageSize ?? 25)).map((stored) => ({
+        message: stored.card, bodyText: stored.threadBody ?? stored.body, bodyHtml: stored.html,
         bodyHtmlStatus: stored.html === null ? "none" : "available", attachments: stored.files,
         historyId: stored.card.metadata.historyId,
       }));

@@ -44,10 +44,11 @@ import { connectMailFrame, frameDocument, prepareMessage } from "./mail-html.ts"
 import { AttachmentPreviews, canPreviewAttachment, canSaveAttachment } from "./attachment.vibe";
 import { InboxAttachmentFiles } from "../platform/inboxAttachments.vibe";
 import type { Telephony } from "../platform/telephony.vibe";
+import { ThreadPages } from "./thread.vibe";
 
 export interface InboxProps {
   /** Provides the list, the message open and its marks, the changes, the shell, Mail, which holds what Gmail said, and the phone's sign-in for mail. */
-  runtime: ManagedRuntime.ManagedRuntime<List | Shown | Marks | Changes | Writing | Adding | Incoming | ContactAddresses | Offering | Offers | Letters | Shell | Mail | Time | Preferences | Cloud | AttachmentPreviews | InboxAttachmentFiles | MailSignIn | Telephony, unknown>;
+  runtime: ManagedRuntime.ManagedRuntime<List | Shown | Marks | Changes | Writing | Adding | Incoming | ContactAddresses | Offering | Offers | Letters | Shell | Mail | Time | Preferences | Cloud | AttachmentPreviews | InboxAttachmentFiles | MailSignIn | Telephony | ThreadPages, unknown>;
 }
 
 type Runtime = InboxProps["runtime"];
@@ -256,6 +257,21 @@ function Opened({ runtime, list, onRefresh, onBegin }: { runtime: Runtime; list:
   const contents = loaded ? prepareMessage(read) : undefined;
   const link = state.link > 0 ? contents?.links.at(state.link - 1) : undefined;
   const original = read?.message;
+  // spec/app/inbox/message.md, "A thread control selects an exact position from the message and thread currently shown"
+  const conversation = loaded && state.thread > 1 && original
+    ? runtime.runSync(ThreadPages).get({ account: state.account, generation: mail.generation(state.account), threadId: original.threadId })
+    : undefined;
+  const threadPage = conversation?.pages[0];
+  const selectPosition = (position: number | null | undefined, paging: boolean) => {
+    if (position === null || position === undefined) return undefined;
+    const event = { type: "selectThreadPosition", ticket: state.body.ticket, access, thread: state.thread, position, paging, remote } as const;
+    return can(event) ? () => void send(event) : undefined;
+  };
+  const threadRows = threadPage?.messages.flatMap(({ message }, at) => {
+    if (message.id === original?.id) return [];
+    const position = threadPage.offset + at;
+    return [{ position, sender: senderName(message.from), date: arrived(message.receivedAt, today), snippet: message.snippet, onOpen: selectPosition(position, false) }];
+  });
   const from = senderAddress(card?.from ?? "");
   const replyTo = original && "replyTo" in original && typeof original.replyTo === "string" ? original.replyTo : undefined;
   const answered = original === undefined || read === undefined ? undefined : {
@@ -273,10 +289,11 @@ function Opened({ runtime, list, onRefresh, onBegin }: { runtime: Runtime; list:
         replyTo={replyTo && replyTo.toLowerCase() !== from.toLowerCase() ? replyTo : undefined}
         date={card ? arrived(card.receivedAt, today) : ""}
         fullDate={card ? arrivedFully(card.receivedAt) : undefined}
-        place={state.position + 1}
+        place={Math.max(1, state.position + 1)}
         count={Math.max(state.thread, 1)}
-        onOlder={can(earlier) ? () => void send(earlier) : undefined}
-        onNewer={can(newer) ? () => void send(newer) : undefined}
+        threadRows={threadRows}
+        onOlder={threadPage ? selectPosition(conversation?.earlier.get(threadPage.offset), true) : can(earlier) ? () => void send(earlier) : undefined}
+        onNewer={threadPage ? selectPosition(threadPage.nextOffset, true) : can(newer) ? () => void send(newer) : undefined}
         onClose={() => void send({ type: "close" })}
         reading={state.body.status === "Loading"}
         fault={fault}
