@@ -87,7 +87,7 @@ type Effect =
   | Tell({ request: int, ok: bool, items: List[F::Item] })
   | Perform({ ticket: int, work: C::Work, items: List[F::Item], name: str, folder: int, dest: int, replace: bool, downloads: bool })
   | ToTrash({ items: List[int], approval: int })
-  | Show({ item: F::Item, siblings: List[str] })
+  | Show({ item: F::Item, siblings: List[str], owner: bool })
   | Share({ ticket: int, channel: C::Dest, items: List[F::Item], approval: int })
   | Taken({ items: List[int] })
   | Receipt({ ticket: int, ran: bool, outcome: A::Outcome, done: int })
@@ -678,12 +678,16 @@ pure def alwaysResultsBelongToThePlaceShowing(s: Files): bool = s.search.hits.le
 
 ### The owner opens a file that is listed or found, with the names beside it, and Recent remembers it
 
+A format the phone can preview opens in Files. For a format without a
+preview, tapping the row opens Android's read-only chooser and holds no
+Recent grant. If the chooser cannot open, Files reports the refusal.
+
 ```quint
 pure def canView(s: Files, file: F::Item, by: Actor): bool =
   by == Owner and allowed(s) and s.open and file.kind != F::Folder and (s.items.includes(file) or s.search.hits.includes(file))
 
 pure def view(s: Files, file: F::Item, by: Actor): Moved =
-  { state: s, out: List(Show({ item: file, siblings: if (s.items.includes(file)) names(s) else List() })) }
+  { state: s, out: List(Show({ item: file, siblings: if (s.items.includes(file)) names(s) else List(), owner: true })) }
 ```
 
 ### A filter can find nothing and find files, and follow the owner to another place
@@ -765,7 +769,7 @@ pure def canAgentOpen(s: Files, request: int, file: F::Item, previewing: bool, g
 pure def agentOpen(s: Files, request: int, file: F::Item, previewing: bool, guarded: bool, by: Actor): Moved =
   val visible = if (s.search.searching) s.search.hits else s.items
   if (allowed(s) and s.open and not(s.trash) and not(guarded) and not(previewing) and file.kind != F::Folder and visible.includes(file))
-    { state: s, out: List(Show({ item: file, siblings: if (s.items.includes(file)) names(s) else List() }), Tell({ request: request, ok: true, items: List(file) })) }
+    { state: s, out: List(Show({ item: file, siblings: if (s.items.includes(file)) names(s) else List(), owner: false }), Tell({ request: request, ok: true, items: List(file) })) }
   else { state: s, out: List(Tell({ request: request, ok: false, items: List() })) }
 ```
 
@@ -791,7 +795,7 @@ pure def openReviewed(s: Files, request: int, file: F::Item, openedTrail: List[i
     and openedTrail.nthOr(0, 0) == file.volume and openedTrail.nthOr(openedTrail.length() - 1, 0) == file.id
     and s.volumes.some(v => v.id == file.volume)
   val opened = if (folder) entered(openedTrail, false, F::Other, { ...s, handed: false }) else
-    { state: s, out: List(Show({ item: file, siblings: if (s.items.includes(file)) names(s) else List() })) }
+    { state: s, out: List(Show({ item: file, siblings: if (s.items.includes(file)) names(s) else List(), owner: false })) }
   if (safe and file.id > 0 and (not(folder) or (resting and path)))
     { state: opened.state, out: opened.out.append(Tell({ request: request, ok: true, items: List(file) })) }
   else { state: s, out: List(Tell({ request: request, ok: false, items: List() })) }

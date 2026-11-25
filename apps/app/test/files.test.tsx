@@ -104,6 +104,18 @@ describe("Files on a phone", () => {
     await until(alpha, runtime, Browser, (s) => !s.inCategory && s.listing.status === "Loaded");
     expect(listed().sort()).toEqual(["beach.jpg", "lease.pdf"]);
 
+    // spec/app/files/index.md, "The owner opens a file that is listed or found, with the names beside it, and Recent remembers it": formats without a preview go directly to Android
+    world.files.stored.push({ volume: "primary", path: "Download/archive.zip", directory: false, mimeType: "application/zip", size: 100, modified: 3 });
+    await choose("Refresh");
+    await until(alpha, runtime, Browser, (s) => s.listing.status === "Loaded" && s.items.length === 3);
+    world.files.refusing.push("storageOpen");
+    await press("archive.zip");
+    await vi.waitFor(() => expect(document.body.textContent).toContain("Android could not open this file"));
+    world.files.refusing.pop();
+    await press("archive.zip");
+    await vi.waitFor(() => expect(world.files.opened).toEqual(["Download/archive.zip"]));
+    expect(document.querySelector('[aria-label="File actions"]')).toBeNull();
+
     // spec/app/files/index.md, "A place is called empty only after the phone read all of it; a reading cut short keeps what it read"
     world.files.listMost = 1;
     await choose("Browse storage");
@@ -402,12 +414,21 @@ describe("Files on a phone", () => {
     await vi.waitFor(() => expect(world.files.shared).toEqual([[notesSelection]]));
 
     const updated = world.files.stored.find((file) => file.path === "Documents/notes.txt");
-    if (updated) updated.modified = 11;
-    world.files.texts["Documents/notes.txt"] = "These are the revised notes";
+    if (updated === undefined) throw new Error("the fixture lost the previewed notes");
+    world.files.texts[updated.path] = "These are the revised notes";
+    world.files.stored.splice(world.files.stored.indexOf(updated), 1, {
+      ...updated, modified: 11, size: new TextEncoder().encode(world.files.texts[updated.path]).length,
+    });
     world.files.changed();
     await until(alpha, runtime, Shown, (s) => s.revision === 11 && s.content.status === "Loaded");
     expect(document.querySelector("pre")?.textContent).toBe("These are the revised notes");
 
+    // spec/app/files/preview.md, "Ask Alpha, Transcribe and Open elsewhere hand the file on and change nothing here"
+    world.files.texts[updated.path] = "These are the altered notes";
+    await choose("Ask Alpha", "File actions");
+    await vi.waitFor(() => expect(document.body.textContent).toContain("Alpha could not attach this file"));
+    expect(document.querySelector("pre")?.textContent).toBe("These are the revised notes");
+    world.files.texts[updated.path] = "These are the revised notes";
     await choose("Ask Alpha", "File actions");
     await until(alpha, alpha.runtime, Shell, (s) => s.assistant === "Sheet");
     await press("Remove notes.txt");
@@ -439,7 +460,7 @@ describe("Files on a phone", () => {
 
     // spec/app/files/preview.md, "A file that holds a verification code or another secret is never handed to Ask Alpha"
     world.files.stored.push({ volume: "primary", path: "Download/code.txt", directory: false, mimeType: "text/plain", size: 30, modified: 4 });
-    world.files.texts["Download/code.txt"] = "Your verification code is 482913";
+    world.files.texts["Download/code.txt"] = "A service API key must stay here";
     await choose("Refresh");
     await until(alpha, runtime, Browser, (s) => s.listing.status === "Loaded" && s.items.length === 3);
     await press("code.txt");
