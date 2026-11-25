@@ -158,7 +158,7 @@ export function Photos({ runtime, alpha }: PhotosProps) {
               onClick={() => { setSearching(false); talk({ type: "showTab", tab }); }}>{icon}{tab}</Button>)}
           </div>}
         {!inTrash && !selection && !album && state.tab === "Library" && allow && <Button variant="secondary" aria-label={allow.label} className="mx-4 mb-2 justify-start rounded-xl px-4" onClick={() => talk(allow.event)}>
-          <Image className="text-alpha" />Allow all<ChevronRight className="ml-auto size-4.5 text-muted-foreground" />
+          <Image className="text-alpha" />{allow.event.type === "openSettings" ? allow.label : "Allow all"}<ChevronRight className="ml-auto size-4.5 text-muted-foreground" />
         </Button>}
         {!inTrash && state.tab === "Library" && searching && <form className="mx-4 mb-2 flex shrink-0 gap-2" onSubmit={(event) => { event.preventDefault(); talk(narrow(query.trim() ? "Matching" : "Everything", query.trim())); setSearching(false); }}>
           <Input type="search" aria-label="Search photos" value={query} onChange={(event) => setQuery(event.currentTarget.value)} />
@@ -185,7 +185,7 @@ export function Photos({ runtime, alpha }: PhotosProps) {
           {binOwner(openBin) && <ListRow title="Recently deleted" leading={<Trash2 />} trailing={<span className="flex items-center gap-3 text-sm text-muted-foreground">{content.trashCount}<ChevronRight /></span>} className="mt-5" onClick={() => binTalk(openBin)} />}
         </div>}
         {!albumList && (rows.length > 0 || canMore) &&
-          <MediaGrid rows={rows} selection={selection ? new Set(selected) : undefined} grouped={!album && !inTrash} now={runtime.runSync(Time.use((time) => time.latest()))} open={open} start={!selection && canStart ? (number) => { void select(number); } : undefined}
+          <MediaGrid rows={rows} density={state.density} resize={(density) => { void library.send({ type: "setDensity", density }, "Owner"); }} selection={selection ? new Set(selected) : undefined} grouped={!album && !inTrash} now={runtime.runSync(Time.use((time) => time.latest()))} open={open} start={!selection && canStart ? (number) => { void select(number); } : undefined}
             more={canMore ? () => inTrash ? binTalk({ type: "loadMore" }) : talk({ type: "loadMore" }) : undefined} />}
         {status === "Loading" && <div role="status" aria-label="Loading photos" className="grid place-items-center p-5"><Spinner /></div>}
         {status === "Loaded" && !albumList && rows.length === 0 && <EmptyState className="m-4" icon={<Images />} title={inTrash ? "Recently deleted is empty" : state.filter !== "Everything" ? "No matches" : "No photos"} />}

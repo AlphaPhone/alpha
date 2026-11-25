@@ -1,7 +1,7 @@
 // spec/app/browser/index.md, "Story: Open, pick and close tabs"; spec/app/browser/address.md, "Story: Go where I typed"; spec/app/browser/address.md, "Story: Watch a page load"; spec/app/browser/address.md, "Story: Browse privately"
 import { Button, BrowserAddressBar, BrowserFindBar, BrowserBar, type BrowserMenuItem, BrowserMenu, BrowserNewTab, BrowserTabs, ConfirmDialog, PrivateMark } from "@repo/ui";
-import { ChevronLeft, Plus, RotateCw, Search, Square, Trash2 } from "lucide-react";
-import { Effect } from "effect";
+import { ChevronLeft, Download, Plus, RotateCw, Search, Square, Trash2 } from "lucide-react";
+import { Effect, Option } from "effect";
 import { useState } from "react";
 import { canAskErase, canCancelErase, canConfirmErase, canOpenTab } from "../../gen/app__browser.ts";
 import type { Browser as State } from "../../gen/app__browser.ts";
@@ -14,7 +14,7 @@ import { TabHost } from "../platform/browser.vibe";
 import type { Alpha, Resident } from "../runtime/area.tsx";
 import { AppBack } from "../shell/AppBack.tsx";
 import type { ManagedRuntime } from "effect";
-import { Pages, type PageRuntime, addressOf, idOf, inputOf, placed } from "./browser.vibe";
+import { Pages, type PageRuntime, addressOf, idOf, inputOf, openDownloads, placed } from "./browser.vibe";
 
 export interface BrowserProps {
   /** Provides the Browser's tabs and each tab's page, `browser` of browser.vibe, over the resident machines and the phone's tab host. */
@@ -65,12 +65,14 @@ function Tab({ runtime, alpha, tabs, page }: BrowserProps & { tabs: State; page:
   const tell = (event: Parameters<typeof browser.send>[0]) => (browser.can(event) ? () => void browser.send(event) : undefined);
   const others = tabs.open.filter((one) => one !== tab);
   const opening = (kind: "Normal" | "Private") => (canOpenTab(tabs, kind) ? () => { setTyped(""); void browser.send({ type: "openTab", kind }); } : undefined);
+  const hasDownloads = runtime.runSync(Effect.map(TabHost, (host) => Option.isSome(host.plugin)));
   const offered: (BrowserMenuItem | false)[] = [
     can({ type: "reload" }) && { label: "Reload", name: "Reload page", icon: <RotateCw />, onSelect: () => { void browser.send({ type: "uncover" }).then(() => send({ type: "reload" })); } },
     can({ type: "stop" }) && { label: "Stop", name: "Stop loading", icon: <Square />, onSelect: () => { void browser.send({ type: "uncover" }).then(() => send({ type: "stop" })); } },
     canOpenTab(tabs, "Normal") && { label: "New tab", icon: <Plus />, onSelect: () => opening("Normal")?.() },
     canOpenTab(tabs, "Private") && { label: "Private tab", name: "New private tab", icon: <PrivateMark aria-hidden />, onSelect: () => opening("Private")?.() },
     can({ type: "openFind" }) && { label: "Find", name: "Find in page", icon: <Search />, onSelect: () => { setFinding(""); void browser.send({ type: "uncover" }).then(() => send({ type: "openFind" })); } },
+    hasDownloads && { label: "Downloads", icon: <Download />, onSelect: () => void runtime.runPromise(openDownloads) },
     canAskErase(tabs) && { label: "Clear all", name: "Clear all browsing data", icon: <Trash2 />, onSelect: () => void browser.send({ type: "askErase" }) },
   ];
   const stood = runtime.runSync(Effect.flatMap(Pages, (pages) => pages.sought(tab)));
