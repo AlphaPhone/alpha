@@ -915,6 +915,34 @@ pure def sometimesTheAgentFiltered(s: Files): bool = S::finding(s.search) == S::
 > copy, share or delete them, one change at a time, a deletion only after I
 > confirmed what goes, and the agent's request only as I approved it.
 
+### A change the agent proposes while Files is not on screen shows a notice to open Files, and its card is built in Files, for Files as it then shows
+
+A share, move, deletion or new folder the agent proposes while Files is not
+on screen cannot be reviewed there, since the approvals area builds a Files
+card only from what Files shows. The request instead shows the notice
+"Open Files to review this action." with Decline only, as the earlier Alpha
+did, and nothing runs. When the owner opens Files, the area reads the request
+again. If it is still open, unexpired, from this enrollment and an answer to
+the latest message sent, the area builds its card afresh for Files as it now
+shows, and approving it holds to that screen as every card does. A request
+that is no longer open, or that Files cannot review, leaves no card. Alpha
+never opens Files for the request itself.
+
+```quint
+type ChangeCard = ChangeHidden | ChangeNotice | ChangeReviewed
+pure def changeCard(filesShown: bool, reviewable: bool, stillOpen: bool, latest: bool): ChangeCard =
+  if (not(stillOpen) or not(latest)) ChangeHidden
+  else if (not(filesShown)) ChangeNotice
+  else if (reviewable) ChangeReviewed
+  else ChangeHidden
+pure def lawOnlyFilesOnScreenBuildsTheCard(reviewable: bool, stillOpen: bool, latest: bool): bool =
+  changeCard(false, reviewable, stillOpen, latest) != ChangeReviewed
+pure def lawAStaleRequestLeavesNoCard(filesShown: bool, reviewable: bool): bool =
+  changeCard(filesShown, reviewable, false, true) == ChangeHidden and changeCard(filesShown, reviewable, true, false) == ChangeHidden
+pure def lawAnOpenLatestRequestAwayFromFilesShowsTheNotice(reviewable: bool): bool =
+  changeCard(false, reviewable, true, true) == ChangeNotice
+```
+
 ### The owner selects items of the place showing, all of them, or none, and a changed selection closes the sheets, telling the owner a share sheet sent nothing, and voids the delete confirmation
 
 ```quint
