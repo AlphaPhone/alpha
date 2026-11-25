@@ -251,10 +251,13 @@ describe.each([["a browser", false], ["a phone", true]])("in %s", (_where, phone
     expect([attachmentBadge("Revised term sheet"), attachmentBadge("Dinner Friday?"), attachmentBadge("Standup notes")]).toEqual([[true, true], [false, false], [false, false]]);
     expect(world.inbox.attachmentReads).toEqual([]);
 
-    // spec/app/inbox/index.md, "More messages are read with the page cursor, which is given up as its page is asked"
+    // spec/app/inbox/index.md, "Inbox reads ahead only from a fresh list on screen"; spec/app/inbox/index.md, "More messages are read with the page cursor, which is given up as its page is asked"
+    const nextPage = () => world.inbox.pageReads.filter(({ query, cursor }) => query === "in:inbox" && cursor === "p25");
+    await drawn(() => vi.waitFor(() => expect([nextPage().length, [...new Set(world.inbox.bodyReads)].sort()]).toEqual([1, ["g1", "g2"]])));
+    expect([rows().length, world.inbox.changes]).toEqual([25, []]);
     await press("Load more");
     await until(alpha, runtime, List, (s) => s.pages === 2);
-    expect([rows().length, Boolean(button("Load more"))]).toEqual([28, false]);
+    expect([rows().length, Boolean(button("Load more")), nextPage().length]).toEqual([28, false, 1]);
 
     // spec/app/inbox/index.md, "Choosing a folder or a search reads its first page"
     await press("Search email");
