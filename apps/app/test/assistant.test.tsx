@@ -275,6 +275,12 @@ describe.each([["a browser", false], ["a phone", true]])("in %s", (_where, phone
     await runtime.runPromise(Effect.flatMap(Chats, (chats) => chats.send({ type: "scroll", around: 1 })));
     await until(alpha, runtime, Chats, (s) => s.around > 0 && s.page.status === "Loaded");
     expect(lines().slice(0, 2)).toEqual(["Hello", "You said: Hello"]);
+    // spec/app/assistant/reply.md, "Out of funds is refused before any output, is never spoken, and offers only Manage plan": read again from history, the refused reply is the same one line, never "Out of credits".
+    const reopened = document.querySelector("[role=log] [data-alpha-message-id='m3a']");
+    const fundingLine = "You’re out of plan allowance and credits, so I couldn’t reply.";
+    const refusedRows = [...document.querySelectorAll("[role=log] article")].filter((line) => line.textContent?.includes(fundingLine));
+    const managePlan = [...(reopened?.querySelectorAll("button") ?? [])].some((control) => control.textContent === "Manage plan");
+    expect([reopened?.textContent?.includes(fundingLine), managePlan, refusedRows.length]).toEqual([true, true, 1]);
 
     // spec/app/assistant/composer.md, "A quoted message goes with the next send, until the owner removes the quote"
     onMessage("You said: Hello", "Reply");
@@ -392,7 +398,13 @@ describe.each([["a browser", false], ["a phone", true]])("in %s", (_where, phone
 
   it("Search my conversations, and open a hit where it was said (spec/app/assistant/search.md, \"Story: Search my conversations\")", async () => {
     const world = { ...scene(), phone };
-    world.ask.kept.set("c7", { roomId: "r7", title: "Lunch", messages: [{ id: "m1", role: "user", text: "Lunch on Friday?" }, { id: "m2", role: "assistant", text: "Friday at noon works." }, Object.assign({ id: "m3", role: "assistant" as const, text: "" }, { failureKind: "limit_reached" }), Object.assign({ id: "m4", role: "assistant" as const, text: "" }, { failureKind: "insufficient_credits", cloudCode: "allowance_exhausted" })] });
+    world.ask.kept.set("c7", { roomId: "r7", title: "Lunch", messages: [
+      { id: "m1", role: "user", text: "Lunch on Friday?" },
+      { id: "m2", role: "assistant", text: "Friday at noon works." },
+      { id: "m3", role: "assistant", text: "", failureKind: "limit_reached" },
+      { id: "m4", role: "assistant", text: "", failureKind: "insufficient_credits" },
+      { id: "m5", role: "assistant", text: "", failureKind: "insufficient_credits", cloudCode: "allowance_exhausted" },
+    ] });
     const { alpha, runtime } = await openAssistant(world, false);
 
     // spec/app/assistant/search.md, "Words are searched from the first hit, and empty words are not searched"
@@ -406,9 +418,9 @@ describe.each([["a browser", false], ["a phone", true]])("in %s", (_where, phone
     expect([lines().slice(0, 2), document.querySelector("section[aria-label='Results']")]).toEqual([["Lunch on Friday?", "Friday at noon works."], null]);
     // spec/app/assistant/reply.md, "A failed reply offers the fix the agent named, and a limit reached shows its live wait, never sending the message again": a reply read again from history says why it did not finish, and to wait a moment.
     expect(document.querySelector("[role=log]")?.textContent).toContain("Too many requests. Wait a moment, then try again");
-    // spec/app/assistant/reply.md, "A failure refused before any output replaces the streamed text; any other failure is added after it": a reply kept with Cloud's funds code, read again, shows the one out-of-funds line, never spent credits.
-    const reread = document.querySelector("[role=log]")?.textContent ?? "";
-    expect([reread.includes("You’re out of plan allowance and credits, so I couldn’t reply."), reread.includes("Out of credits")]).toEqual([true, false]);
+    // spec/app/assistant/reply.md, "Out of funds is refused before any output, is never spoken, and offers only Manage plan"; spec/app/assistant/reply.md, "A failure refused before any output replaces the streamed text; any other failure is added after it": spent credits stored without Cloud's code keep their own words, and only the reply stored with it reads as the one out-of-funds line.
+    const kept = [...document.querySelectorAll("[role=log] article")].map((line) => line.textContent ?? "");
+    expect([kept.filter((text) => text.includes("Out of credits")).length, kept.filter((text) => text.includes("You’re out of plan allowance and credits, so I couldn’t reply.")).length]).toEqual([1, 1]);
 
     // spec/app/assistant/search.md, "Only the newest asking's hits are shown, a page at a time, after those already shown": a search that fails says so.
     world.ask.searchDown = true;
