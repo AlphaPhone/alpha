@@ -5,6 +5,7 @@ import { Machine as Tabs } from "../gen/app__browser.effect.vibe";
 import { Machine as Browser } from "../gen/app__files.effect.vibe";
 import { Machine as Shown } from "../gen/app__files__preview.effect.vibe";
 import { Machine as Recent } from "../gen/app__files__recent.effect.vibe";
+import { everything } from "../gen/app__files__search.effect.vibe";
 import { Machine as Bin } from "../gen/app__files__trash.effect.vibe";
 import { Machine as Shell } from "../gen/app__shell.effect.vibe";
 import { Machine as Inbox } from "../gen/app__inbox.effect.vibe";
@@ -455,18 +456,27 @@ describe("Files on a phone", () => {
     await press("Download");
     await until(alpha, runtime, Browser, (s) => s.listing.status === "Loaded" && s.items.length === 2);
     const now = () => runtime.runSync(Browser.use((m) => m.get()));
-    const everything = { text: "", kind: "Other", anyKind: true } as const;
     // spec/app/files/index.md, "The phone offers Files to an agent that takes Files' operations, and naming files by their place among the results shown only beside them; a request the phone cannot take is never shown for approval"
     expect(await runtime.runPromise(offer)).toEqual({ operations: true, positions: true });
 
     // spec/app/files/index.md, "The agent reads a folder for itself, and only its newest reading is told to it; it is told it failed without access or on a protected screen"
     // spec/app/files/index.md, "The agent's reading and opening change nothing the owner is working on"
-    const read = await runtime.runPromise(agentRead(1, { volume: "primary", path: "Documents" }, { text: "NOTES", kind: "Other", anyKind: true }, false));
+    const read = await runtime.runPromise(agentRead(1, { volume: "primary", path: "Documents" }, { ...everything, text: "NOTES" }, false));
     expect([read.ok, read.items.map((item) => item.name), now().trail.length, now().items.length]).toEqual([true, ["notes.txt"], 2, 2]);
     expect((await runtime.runPromise(agentRead(2, { volume: "primary", path: "Documents" }, everything, true))).ok).toBe(false);
 
+    const dated = Date.parse("2026-03-04T12:00:00Z");
+    world.files.stored.push(
+      { volume: "primary", path: "Download/during.pdf", directory: false, mimeType: "application/pdf", size: 10, modified: dated },
+      { volume: "primary", path: "Download/earlier.pdf", directory: false, mimeType: "application/pdf", size: 10, modified: dated - 86_400_000 },
+      { volume: "primary", path: "Download/plain.pdf", directory: false, mimeType: "text/plain", size: 10, modified: dated },
+    );
+    const filter = { type: "files_filter", kind: "pdf", from: "2026-03-04T00:00:00Z", to: "2026-03-04T23:59:59Z" } as const;
+    const filteredByDate = await runtime.runPromise(fileAction(filter, { attemptId: 1, proposalId: "dated-pdfs", operationId: "dated-pdfs" }));
+    expect([filteredByDate?.kind, now().search.hits.map((item) => item.name)]).toEqual(["applied", ["during.pdf"]]);
+
     // spec/app/files/index.md, "The agent sets the owner's filter on Files on screen, and is told how many it found; otherwise it is told it failed"
-    const filtered = await runtime.runPromise(agentFilter(3, { text: "", kind: "Image", anyKind: false }, false));
+    const filtered = await runtime.runPromise(agentFilter(3, { ...everything, kind: "Image", anyKind: false }, false));
     expect([filtered.ok, filtered.items.map((item) => item.name), now().search.filter.kind]).toEqual([true, ["beach.jpg"], "Image"]);
     // spec/app/files/index.md, "A position names a result on screen, counting from one; a request naming a position that is not shown names nothing and leaves no card, and a card keeps the files it showed"
     const [first] = await runtime.runPromise(shownAt([1]));

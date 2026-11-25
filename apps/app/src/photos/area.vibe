@@ -10,6 +10,7 @@ export const back = effect {
   if ((try review.get()).stage === "Shown") return Exit.isSuccess(try exit(review.send({ type: "decline" }, "Owner")))
   const shown = try Viewer.Machine
   const view = try shown.get()
+  if (view.cropping) return Exit.isSuccess(try exit(shown.send({ type: "cancelCrop" }, "Owner")))
   if (view.editing) return Exit.isSuccess(try exit(shown.send({ type: "cancelEdit" }, "Owner")))
   if (view.info) return Exit.isSuccess(try exit(shown.send({ type: "toggleInfo" }, "Owner")))
   if (view.open !== 0) return Exit.isSuccess(try exit(shown.send({ type: "close" }, "Owner")))
