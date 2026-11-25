@@ -6,7 +6,7 @@ import { SettingsReading } from "./SettingsReading.tsx";
 import type { AndroidStart, AndroidTarget, Reading, SettingsAndroidProps } from "./vocabulary.ts";
 
 export type SettingsAndroidRowProps = SettingsAndroidProps &
-  Pick<ListRowProps, "autoFocus" | "onFocus"> & {
+  Pick<ListRowProps, "aria-label" | "autoFocus" | "onFocus"> & {
     /** The page of Android's settings the row opens. */
     target: AndroidTarget;
     /** For a channel's page, the channel it names. */
