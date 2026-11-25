@@ -7,10 +7,10 @@ item inherited from the earlier browser, successful permanent deletion
 requires both the local catalog receipt and removal of the reviewed earlier
 original. An interrupted deletion remains unconfirmed until read back. Recovering is a
 [run of changes](./changes.md) like any other change to photos. Deleting
-forever is prepared by the phone for exactly the items chosen, at most 500,
-Android's own limit, shown to the owner as "Delete photos forever", and done
-once, only if confirmed while nothing changed and before the confirmation
-expired. Recently deleted opens only while Photos has access to the library,
+forever is prepared by the phone for exactly the items chosen, shown to the owner as "Delete photos forever", and
+done once, only if confirmed while nothing changed and before the
+confirmation expired. A browser owner can also review the entire local bin,
+including items beyond the current page, before erasing it. Recently deleted opens only while Photos has access to the library,
 never from the lock screen, and Photos closes it when access is lost.
 
 ## Domain
@@ -40,6 +40,7 @@ type Effect =
   | Fetch({ ticket: int, page: bool })
   | Recover({ attempt: int, items: Set[int], basis: int, by: Actor })
   | Prepare({ ticket: int, items: Set[int] })
+  | PrepareEmpty({ ticket: int, revision: int })
   | DeletePrepared({ attempt: int, items: Set[int], by: Actor })
 ```
 
@@ -52,10 +53,11 @@ covers, its preparation, the owner's confirmation, whether it expired, and
 the deletion itself. Nothing is kept through a restart.
 
 ```quint
+type DeleteScope = Chosen | EntireBrowserBin
 type Bin = {
   open: bool, read: R::Read, paging: bool, more: bool, revision: int, rows: Set[int], selecting: bool, selected: Set[int],
   job: C::Run, prepared: Set[int], preparing: R::Read, confirm: V::Review, expired: bool, forever: A::Attempt,
-  attempts: int,
+  attempts: int, scope: DeleteScope,
 }
 
 type Done = { state: Bin, out: List[Effect] }
@@ -63,12 +65,15 @@ type Done = { state: Bin, out: List[Effect] }
 pure val initial: Bin = {
   open: false, read: R::unread, paging: false, more: false, revision: 0, rows: Set(), selecting: false, selected: Set(),
   job: C::initial, prepared: Set(), preparing: R::unread, confirm: V::unreviewed, expired: false, forever: A::plan(0),
-  attempts: 0,
+  attempts: 0, scope: Chosen,
 }
 
 pure def emit(out: List[Effect], t: Bin): Done = { state: t, out: out }
 
-pure def idle(t: Bin): bool = not(C::running(t.job)) and not(busy(t.forever)) and t.prepared.size() == 0
+pure def idle(t: Bin): bool = not(C::running(t.job)) and not(busy(t.forever)) and t.prepared.size() == 0 and t.scope == Chosen
+
+pure def dropping(s: Bin): Bin =
+  { ...s, prepared: Set(), confirm: V::dismiss(s.confirm), scope: Chosen }
 
 pure def fetching(page: bool, out: List[Effect], t: Bin): Done =
   val asked = R::ask(t.read)
@@ -95,6 +100,8 @@ pure val weight_selectAll = 3
 pure val weight_recoverSelected = 4
 pure val weight_sendNext = 4
 pure val weight_recovered = 4
+pure val weight_prepareEmpty = 5
+pure val weight_emptyReadied = 5
 ```
 
 ## Story: See what I deleted
@@ -119,13 +126,13 @@ pure def canLeave(s: Bin, by: Actor): bool = (by == Owner or by == Phone) and s.
 
 pure def leave(s: Bin, by: Actor): Bin =
   {
-    ...s, open: false, rows: Set(), more: false, selecting: false, selected: Set(), prepared: Set(),
-    confirm: V::dismiss(s.confirm), job: C::cancel(s.job),
+    ...dropping(s), open: false, rows: Set(), more: false, selecting: false, selected: Set(),
+    job: C::cancel(s.job),
   }
 
 pure def alwaysNothingShownWhenClosed(s: Bin): bool =
   not(s.open) implies (s.rows.size() == 0 and not(s.more) and not(s.selecting) and s.prepared.size() == 0
-    and not(s.confirm.showing) and s.job.left.size() == 0)
+    and not(s.confirm.showing) and s.job.left.size() == 0 and s.scope == Chosen)
 ```
 
 ### Only the newest read's answer is shown; a further page joins what is listed, and a deletion prepared for an item no longer listed is void
@@ -141,7 +148,9 @@ pure def listed(s: Bin, ticket: int, ok: bool, rows: Set[int], revision: int, mo
   if (not(ok)) emit(List(), answered)
   else if (s.paging and revision != s.revision) listing(List(), answered)
   else emit(List(), { ...answered, rows: whole, more: more, revision: revision, selected: s.selected.intersect(whole),
-    confirm: if (s.prepared.subseteq(whole)) s.confirm else V::revise(s.confirm) })
+    confirm: if (s.scope == Chosen and s.prepared.subseteq(whole)) s.confirm
+      else if (s.scope == EntireBrowserBin and revision == s.revision and whole.subseteq(s.prepared)) s.confirm
+      else V::revise(s.confirm) })
 
 pure def stepAPageKeepsWhatWasListed(before: Bin, via: str, after: Bin): bool =
   (via == "listed" and before.paging and after.read.status == R::Loaded) implies before.rows.subseteq(after.rows)
@@ -162,7 +171,9 @@ Android's own Photos, another app, or Android's trash expiring an item.
 ```quint
 pure def canTrashChanged(s: Bin, by: Actor): bool = by == Phone and s.open
 
-pure def trashChanged(s: Bin, by: Actor): Done = listing(List(), { ...s, confirm: V::revise(s.confirm) })
+pure def trashChanged(s: Bin, by: Actor): Done =
+  if (s.scope == EntireBrowserBin and s.preparing.status == R::Loading) listing(List(), dropping(s))
+  else listing(List(), { ...s, confirm: V::revise(s.confirm) })
 ```
 
 ### Recently deleted can be empty, fail to be read, or hold more than one page
@@ -182,6 +193,9 @@ pure def sometimesPaged(s: Bin): bool = s.paging and s.read.status == R::Loaded 
 
 ### A selection holds only items listed, and is empty outside selection mode
 
+Select all takes every item listed. Deselect all clears those items and
+keeps selection mode open.
+
 ```quint
 pure def alwaysSelectionIsListed(s: Bin): bool =
   s.selected.subseteq(s.rows) and (not(s.selecting) implies s.selected.size() == 0)
@@ -197,7 +211,8 @@ pure def toggle(s: Bin, photo: int, by: Actor): Bin =
 
 pure def canSelectAll(s: Bin, by: Actor): bool = by == Owner and s.selecting
 
-pure def selectAll(s: Bin, by: Actor): Bin = { ...s, selected: s.rows }
+pure def selectAll(s: Bin, by: Actor): Bin =
+  { ...s, selected: if (s.rows.subseteq(s.selected)) Set() else s.rows }
 
 pure def canEndSelect(s: Bin, by: Actor): bool = by == Owner and s.selecting
 
@@ -259,8 +274,8 @@ pure def sometimesRecoveryUnknown(s: Bin): bool = s.job.change == C::Restore and
 ## Story: Delete photos forever
 
 > As the owner, I want photos deleted forever only when I confirm exactly
-> the ones I chose, once, and never when something changed in between or
-> the confirmation is old.
+> the ones I chose, or the whole bin in my browser, once, and never when
+> something changed in between or the confirmation is old.
 
 ### Deleting forever first asks the phone to prepare the deletion of exactly the selection, of at most 500 items
 
@@ -275,6 +290,32 @@ pure def deleteForever(s: Bin, by: Actor): Done =
     { ...s, prepared: s.selected, preparing: asked, selecting: false, selected: Set(), expired: false })
 ```
 
+### Empty prepares the complete browser bin and names the exact items that will go, including items on later pages
+
+The owner can review the whole bin only in a browser. The phone answers
+with the exact trashed items it read under that request. Back, a change to
+the bin or a failed read withdraws the request. An empty bin has nothing
+to confirm.
+
+```quint
+pure def canPrepareEmpty(s: Bin, browserBin: bool, by: Actor): bool =
+  by == Owner and browserBin and s.open and not(s.selecting) and s.rows.size() > 0 and idle(s) and s.read.status == R::Loaded
+
+pure def prepareEmpty(s: Bin, browserBin: bool, by: Actor): Done =
+  val reading = R::ask(s.preparing)
+  emit(List(PrepareEmpty({ ticket: reading.ticket, revision: s.revision })),
+    { ...s, scope: EntireBrowserBin, preparing: reading, expired: false })
+
+pure def canEmptyReadied(s: Bin, ticket: int, by: Actor): bool =
+  by == Phone and s.open and s.scope == EntireBrowserBin and R::canAnswer(s.preparing, ticket)
+
+pure def emptyReadied(s: Bin, ticket: int, ok: bool, items: Set[int], revision: int, by: Actor): Bin =
+  val current = ok and items.size() > 0 and s.rows.subseteq(items) and s.revision == revision and s.read.status == R::Loaded
+  val answered = { ...s, preparing: R::answer(s.preparing, current) }
+  if (current) { ...answered, prepared: items, confirm: V::present(V::revise(s.confirm)), expired: false }
+  else dropping(answered)
+```
+
 ### Once prepared, "Delete photos forever" shows the owner what will go
 
 A preparation that fails, or one for items no longer in Recently deleted,
@@ -287,16 +328,16 @@ to delete items no longer listed.
 
 ```quint
 pure def canReadied(s: Bin, ticket: int, by: Actor): bool =
-  by == Phone and s.open and s.prepared.size() > 0 and R::canAnswer(s.preparing, ticket)
+  by == Phone and s.open and s.scope == Chosen and s.prepared.size() > 0 and R::canAnswer(s.preparing, ticket)
 
 pure def readied(s: Bin, ticket: int, ok: bool, by: Actor): Bin =
   val answered = { ...s, preparing: R::answer(s.preparing, ok) }
   if (ok and s.prepared.subseteq(s.rows)) { ...answered, confirm: V::present(V::revise(s.confirm)) }
   else { ...answered, prepared: Set() }
 
-pure def canCancelForever(s: Bin, by: Actor): bool = by == Owner and s.prepared.size() > 0 and not(busy(s.forever))
+pure def canCancelForever(s: Bin, by: Actor): bool = by == Owner and (s.prepared.size() > 0 or s.scope == EntireBrowserBin) and not(busy(s.forever))
 
-pure def cancelForever(s: Bin, by: Actor): Bin = { ...s, prepared: Set(), confirm: V::dismiss(s.confirm) }
+pure def cancelForever(s: Bin, by: Actor): Bin = dropping(s)
 ```
 
 ### A confirmation not given in time expires, and says to review the trash again
@@ -306,7 +347,7 @@ The phone says when Android's prepared deletion is no longer valid.
 ```quint
 pure def canForeverExpired(s: Bin, by: Actor): bool = by == Phone and s.prepared.size() > 0 and not(busy(s.forever))
 
-pure def foreverExpired(s: Bin, by: Actor): Bin = { ...s, prepared: Set(), confirm: V::dismiss(s.confirm), expired: true }
+pure def foreverExpired(s: Bin, by: Actor): Bin = { ...dropping(s), expired: true }
 ```
 
 ### The deletion is carried out once, only when the owner confirms it while nothing changed since it was shown
@@ -318,7 +359,7 @@ pure def canConfirmForever(s: Bin, by: Actor): bool =
 pure def confirmForever(s: Bin, by: Actor): Done =
   val n = s.attempts + 1
   emit(List(DeletePrepared({ attempt: n, items: s.prepared, by: by })),
-    { ...s, forever: A::dispatch(A::record(A::plan(n))), attempts: n, prepared: Set(), confirm: V::confirm(s.confirm) })
+    { ...s, forever: A::dispatch(A::record(A::plan(n))), attempts: n, scope: Chosen, prepared: Set(), confirm: V::confirm(s.confirm) })
 
 pure def canDeletedForever(s: Bin, attempt: int, by: Actor): bool = by == Phone and A::canConclude(s.forever, attempt)
 
@@ -336,8 +377,10 @@ confirmation could seem to make it current again.
 ```quint
 pure def alwaysConfirmationIsPrepared(s: Bin): bool =
   (s.confirm.showing implies (s.prepared.size() > 0 and s.preparing.status == R::Loaded and not(busy(s.forever))))
-    and (V::canConfirm(s.confirm) implies s.prepared.subseteq(s.rows))
-    and (s.prepared.size() > 0 implies (not(s.selecting) and s.prepared.size() <= C::maxRequest and not(busy(s.forever))))
+    and (V::canConfirm(s.confirm) implies (if (s.scope == Chosen) s.prepared.subseteq(s.rows) else s.rows.subseteq(s.prepared)))
+    and ((s.prepared.size() > 0 or s.scope == EntireBrowserBin) implies (s.open and not(s.selecting) and not(busy(s.forever))))
+    and (s.scope == Chosen implies s.prepared.size() <= C::maxRequest)
+    and (s.scope == EntireBrowserBin implies (s.preparing.status == R::Loading or s.prepared.size() > 0))
     and s.confirm.shown <= s.confirm.revision and (s.expired implies s.prepared.size() == 0)
 ```
 
@@ -348,10 +391,13 @@ pure def stepDeletesOnlyWhatWasConfirmed(before: Bin, via: str, after: Bin, out:
   out.every(e => match e {
     | DeletePrepared(d) =>
         via == "confirmForever" and V::canConfirm(before.confirm) and not(busy(before.forever)) and d.by == Owner
-          and d.items.size() > 0 and d.items.subseteq(before.prepared) and before.prepared.subseteq(d.items) and d.items.subseteq(before.rows)
+          and d.items.size() > 0 and d.items.subseteq(before.prepared) and before.prepared.subseteq(d.items)
+          and (if (before.scope == Chosen) d.items.subseteq(before.rows) else before.rows.subseteq(d.items))
     | Recover(r) =>
         via == "sendNext" and r.by == Owner and r.items.size() > 0 and r.items.subseteq(before.job.left) and r.basis == before.job.basis
     | Prepare(p) => via == "deleteForever" and p.items.size() > 0 and p.items.subseteq(before.rows)
+    | PrepareEmpty(p) => via == "prepareEmpty" and p.ticket == after.preparing.ticket and p.revision == before.revision
+        and after.scope == EntireBrowserBin
     | _ => true
   })
     and ((not(C::running(before.job)) and C::running(after.job))
@@ -367,6 +413,8 @@ pure def sometimesConfirming(s: Bin): bool = V::canConfirm(s.confirm) and s.prep
 pure def sometimesVoided(s: Bin): bool = s.confirm.showing and not(V::canConfirm(s.confirm))
 
 pure def sometimesExpired(s: Bin): bool = s.expired and s.open
+pure def sometimesConfirmingEntireBin(s: Bin): bool =
+  s.scope == EntireBrowserBin and V::canConfirm(s.confirm) and not(s.prepared.subseteq(s.rows))
 ```
 
 ### Photos can be deleted forever, and a deletion's outcome be unknown

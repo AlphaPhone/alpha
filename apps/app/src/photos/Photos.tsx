@@ -33,13 +33,15 @@ interface Tool {
   readonly icon: ReactNode;
   readonly label: string;
   readonly run: () => void;
+  readonly disabled?: boolean;
+  readonly ariaLabel?: string;
 }
 
 /** v121's selection bar: a line on top, each action an icon over its name, 24px higher than the Ask Alpha dock clearance alone, as v121 placed it. */
 function ToolBar({ tools }: { tools: readonly Tool[] }) {
   return (
     <div role="toolbar" aria-label="Selection actions" className={cn("mb-6 flex shrink-0 items-start justify-around border-t border-border bg-background px-3 pt-2.5", dockClearance)}>
-      {tools.map(({ icon, label, run }) => <button key={label} type="button" className="flex min-h-12 min-w-16 flex-col items-center gap-0.75 text-xs text-foreground focus-visible:outline-focus focus-visible:outline-offset-focus [&_svg]:size-5.5" onClick={run}>{icon}{label}</button>)}
+      {tools.map(({ icon, label, run, disabled }) => <button key={label} type="button" disabled={disabled} className="flex min-h-12 min-w-16 flex-col items-center gap-0.75 text-xs text-foreground focus-visible:outline-focus focus-visible:outline-offset-focus disabled:opacity-35 [&_svg]:size-5.5" onClick={run}>{icon}{label}</button>)}
     </div>
   );
 }
@@ -180,7 +182,8 @@ export function Photos({ runtime, alpha }: PhotosProps) {
   const backToCamera = viewer.state !== undefined && shell.state !== undefined && returnsToCamera(viewer.state, shell.state);
   const starred = new Set(state.starred);
   const favourites = selected.length > 0 && selected.every((number) => starred.has(number));
-  const title = selection ? `${selected.length} selected` : inTrash ? "Recently deleted" : album?.title ?? (albumList ? "Albums" : "Photos");
+  const allSelected = ids.length > 0 && selected.length === ids.length;
+  const title = selection ? selected.length === 0 ? "Select items" : `${selected.length} selected` : inTrash ? "Recently deleted" : album?.title ?? (albumList ? "Albums" : "Photos");
   const owner = (event: Event) => library.can(event, "Owner");
   const binOwner = (event: TrashEvent) => trash.can(event, "Owner");
   const talk = (event: Event) => { if (owner(event)) void library.send(event, "Owner"); };
@@ -216,11 +219,14 @@ export function Photos({ runtime, alpha }: PhotosProps) {
   };
   const actions: Tool[] = [];
   const menu: Tool[] = [];
+  const browser = !native();
+  const emptyBin = { type: "prepareEmpty", browserBin: browser } as const;
   function add(label: string, event: Event, icon: ReactNode, group = actions) {
-    if (owner(event)) group.push({ icon, label, run: () => talk(event) });
+    const allowed = owner(event);
+    if (allowed || group === actions && selection) group.push({ icon, label, run: () => talk(event), disabled: !allowed });
   }
-  function binAdd(label: string, event: TrashEvent, icon: ReactNode, group = actions) {
-    if (binOwner(event)) group.push({ icon, label, run: () => binTalk(event) });
+  function binAdd(label: string, event: TrashEvent, icon: ReactNode) {
+    actions.push({ icon, label, run: () => binTalk(event), disabled: !binOwner(event) });
   }
   if (selection && inTrash) {
     binAdd("Recover", { type: "recoverSelected" }, <ChevronLeft />);
@@ -233,12 +239,12 @@ export function Photos({ runtime, alpha }: PhotosProps) {
     add("Delete", { type: "trashSelected" }, <Trash2 />);
   } else {
     if (canStart) menu.push({ label: "Select", icon: <ListChecks />, run: start });
+    if (inTrash && binOwner(emptyBin)) menu.push({ label: "Empty", ariaLabel: "Delete all forever", icon: <Trash2 />, run: () => binTalk(emptyBin) });
     if (albumList && owner({ type: "newAlbum" })) menu.push({ label: "New album", icon: <Plus />, run: () => { setName(""); talk({ type: "newAlbum" }); } });
     if (album?.owned && owner({ type: "renameAlbum" })) menu.push({ label: "Rename album", icon: <Pencil />, run: () => { setName(album.title); talk({ type: "renameAlbum" }); } });
     if (album?.owned) add("Delete album", { type: "deleteAlbum" }, <Trash2 />, menu);
   }
   const canScan = scan.state !== undefined && scan.can({ type: "startImage", frame: scan.state.images + 1 }, "Phone");
-  const browser = !native();
   const chooseImage = { type: "openImageChoice", browser } satisfies Event;
   if (!inTrash && opened === 0 && browser && (state.choosingImage || owner(chooseImage))) {
     menu.push({ label: "Choose image", icon: <Image />, run: () => talk(chooseImage) });
@@ -259,9 +265,9 @@ export function Photos({ runtime, alpha }: PhotosProps) {
   const header = <AppHeader title={title} detail={Boolean(selection) || inTrash || album !== undefined} className="shrink-0"
     leading={<Button variant="ghost" size="icon" aria-label={selection ? "Cancel selection" : inTrash || album ? "Back to albums" : "Back to apps"}
       onClick={() => selection ? cancelSelection() : void alpha.back()}>{selection ? <X /> : <ChevronLeft />}</Button>}>
-    {selection && (inTrash ? binOwner({ type: "selectAll" }) : owner({ type: "selectAll" })) && <Button variant="ghost" className="h-11 px-3 text-body font-semibold whitespace-nowrap text-primary hover:text-primary" onClick={() => inTrash ? binTalk({ type: "selectAll" }) : talk({ type: "selectAll" })}>Select all</Button>}
+    {selection && (inTrash ? binOwner({ type: "selectAll" }) : owner({ type: "selectAll" })) && <Button variant="ghost" className="h-11 px-3 text-body font-semibold whitespace-nowrap text-primary hover:text-primary" onClick={() => inTrash ? binTalk({ type: "selectAll" }) : talk({ type: "selectAll" })}>{allSelected ? "Deselect all" : "Select all"}</Button>}
     {!selection && (menu.length > 0 || scanFromMenu) && <Menu><MenuTrigger asChild><Button variant="ghost" size="icon" ref={toolsRef} aria-label="Photos tools"><Ellipsis /></Button></MenuTrigger>
-      <MenuContent>{menu.map(({ icon, label, run }) => <MenuItem key={label} onSelect={run}>{icon}{label}</MenuItem>)}
+      <MenuContent>{menu.map(({ icon, label, run, ariaLabel }) => <MenuItem key={label} aria-label={ariaLabel} onSelect={run}>{icon}{label}</MenuItem>)}
         {scanFromMenu && <MenuItem onSelect={openScanPicker}><Image />Scan image text</MenuItem>}
       </MenuContent></Menu>}
   </AppHeader>;
@@ -289,7 +295,7 @@ export function Photos({ runtime, alpha }: PhotosProps) {
           <Image className="text-alpha" />{allow.event.type === "openSettings" ? allow.label : "Allow all"}<ChevronRight className="ml-auto size-4.5 text-muted-foreground" />
         </Button>}
         {!inTrash && state.filter !== "Everything" && owner(narrow("Everything")) &&
-          <div className="mx-4 mb-2 self-start"><Chip clearLabel="Clear filter" onClear={() => talk(narrow("Everything"))}>{state.query || state.filter}</Chip></div>}
+          <div className="mx-4 mb-2 self-start"><Chip clearLabel="Clear filter" onClear={() => talk(narrow("Everything"))}>{state.query || state.filter} {rows.length}{state.more && "+"}</Chip></div>}
         {albumList && <div className="min-h-0 flex-1 touch-pan-y overflow-y-auto px-4 pb-28" data-alpha-app-scroll="photos">
           <div className="grid grid-cols-2 gap-x-3 gap-y-4 pt-2">
             {state.albums.map((number) => {
@@ -356,7 +362,7 @@ export function Photos({ runtime, alpha }: PhotosProps) {
         loading={!owner({ type: "confirmDelete" })} onConfirm={() => talk({ type: "confirmDelete" })} onCancel={() => talk({ type: "closeDialog" })} />
       <ConfirmDialog open={bin.confirm.showing} title="Delete photos forever" destructive confirmLabel="Delete forever"
         onConfirm={() => binTalk(binOwner({ type: "confirmForever" }) ? { type: "confirmForever" } : { type: "cancelForever" })} onCancel={() => binTalk({ type: "cancelForever" })}>
-        {binOwner({ type: "confirmForever" }) ? `${bin.prepared.length} items` : "The selection changed. Review Recently deleted again."}
+        {binOwner({ type: "confirmForever" }) ? `${bin.prepared.length} ${bin.prepared.length === 1 ? "item" : "items"}` : "The selection changed. Review Recently deleted again."}
       </ConfirmDialog>
     </section>
   );

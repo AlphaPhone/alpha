@@ -19,10 +19,10 @@ import type { FixturePicture } from "./fakes/photos.ts";
 underAct();
 afterEach(closeAll);
 
-const photoAction = async (label: string) => {
+const photoAction = async (label: string, menuLabel = "Photo actions") => {
   await drawn(() => {
-    const menu = button("Photo actions");
-    if (!menu) throw new Error("No Photo actions menu");
+    const menu = button(menuLabel);
+    if (!menu) throw new Error(`No ${menuLabel} menu`);
     menu.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true }));
   });
   await drawn(() => {
@@ -32,7 +32,7 @@ const photoAction = async (label: string) => {
   });
 };
 
-it("Allow Photos and browse the library (spec/app/photos/index.md, \"Story: Give Photos access\"; spec/app/photos/index.md, \"Story: Browse the library\"; spec/app/photos/viewer.md, \"Story: Look at a photo or video\"; spec/app/photos/viewer.md, \"Story: Edit a photo or trim a video\")", async () => {
+it("Allow Photos and browse the library (spec/app/photos/index.md, \"Story: Give Photos access\"; spec/app/photos/index.md, \"Story: Browse the library\"; spec/app/photos/index.md, \"Story: Select photos\"; spec/app/photos/viewer.md, \"Story: Look at a photo or video\"; spec/app/photos/viewer.md, \"Story: Edit a photo or trim a video\")", async () => {
   const world = { ...scene(), phone: true, now: 1795400000000 + 86_400_000 + 240_000 };
   const { alpha } = await open(world, only("home", "view:Photos", "notice"));
   await press("Photos");
@@ -52,6 +52,14 @@ it("Allow Photos and browse the library (spec/app/photos/index.md, \"Story: Give
   expect(headingOf(new Date(2026, 11, 28, 9).getTime(), new Date(2027, 0, 10, 12).getTime())).toBe("Mon, Dec 28, 2026");
   expect(headingOf(new Date(2025, 9, 20, 9).getTime(), localNoon)).toBe("October 2025");
   expect(headingOf(new Date(2026, 9, 15, 9).getTime(), localNoon, true)).toBe("Thu, Oct 15, 2026");
+
+  await photoAction("Select", "Photos tools");
+  await press("Select all");
+  await until(alpha, runtime, Library, (state) => state.selecting && state.selected.length === 3);
+  await press("Deselect all");
+  await until(alpha, runtime, Library, (state) => state.selecting && state.selected.length === 0);
+  await drawn(() => expect(button("Delete")?.disabled).toBe(true));
+  await press("Cancel selection");
 
   await press("Park.jpg");
   await until(alpha, runtime, Viewer, (state) => state.read.status === "Loaded");
