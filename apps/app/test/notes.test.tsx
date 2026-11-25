@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { Machine as Conversation } from "../gen/app__assistant.effect.vibe";
 import { Machine as Composer } from "../gen/app__assistant__composer.effect.vibe";
 import { Machine as Editor, waiting } from "../gen/app__notes__editor.effect.vibe";
+import { Machine as Trash } from "../gen/app__notes__trash.effect.vibe";
 import { Machine as Voice } from "../gen/app__notes__voice.effect.vibe";
 import { Machine as List, nothing, writing as listWriting } from "../gen/app__notes.effect.vibe";
 import { Machine as Talk } from "../gen/app__voice.effect.vibe";
@@ -15,7 +16,7 @@ import { agentOpen } from "../src/notes/agent.vibe";
 import { numberOf } from "../src/notes/content.vibe";
 import notes from "../src/notes/index.tsx";
 import { untimed } from "../src/runtime/reactor.vibe";
-import { closeAll, drawn, fill, only, open, press, underAct, until } from "./alpha.tsx";
+import { button, closeAll, drawn, fill, only, open, press, underAct, until } from "./alpha.tsx";
 import { note, prepared } from "./fakes/notes.ts";
 import { scene } from "./fakes/scene.ts";
 
@@ -45,6 +46,57 @@ describe("Notes", () => {
     world.notes.failing = false;
     await press("Reconnect");
     await until(alpha, runtime, List, (s) => s.read.status === "Loaded" && s.rows.length === 6);
+  });
+
+  it("Reviews a deleted note in a sheet and recovers it (spec/app/notes/trash.md, \"Story: Delete a note and get it back\")", async () => {
+    const world = scene();
+    world.now = Date.now();
+    const deleted = world.notes.notes.pop();
+    if (deleted === undefined) throw new Error("The fixture needs a note to recover");
+    world.notes.trash.push({ note: deleted, deletedAt: new Date(world.now - 60_000).toISOString() });
+
+    const { alpha } = await open(world, only("view:Notes"));
+    await drawn(() => alpha.runtime.runPromise(Effect.flatMap(Shell, (shell) => shell.send({ type: "openView", view: "Notes" }))));
+    const runtime = notes.runtime(alpha);
+    await until(alpha, runtime, List, (state) => state.read.status === "Loaded");
+
+    await drawn(() => {
+      button("Notes options")?.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+    });
+    await drawn(() => {
+      const option = [...document.querySelectorAll<HTMLElement>("[role=menuitem]")]
+        .find((entry) => entry.textContent?.trim() === "Recently deleted");
+      if (option === undefined) throw new Error("no Recently deleted option");
+      option.click();
+    });
+    await until(alpha, runtime, Trash, (state) => state.showing && state.read.status === "Loaded" && state.entries.length === 1);
+
+    const row = button(deleted.title);
+    expect(row?.closest("ul")?.getAttribute("aria-label")).toBe("Recently deleted notes");
+    expect(row?.getAttribute("aria-description")).toMatch(/^Deleted /);
+    expect(button("Recover")).toBeUndefined();
+
+    await press(deleted.title);
+    await until(alpha, runtime, Trash, (state) => state.opened !== 0);
+    const dialog = () => document.querySelector("[role=dialog]");
+    expect(dialog()?.querySelector("h2")?.textContent).toBe(deleted.title);
+    expect(dialog()?.querySelector("p")?.textContent).toMatch(/^Deleted /);
+
+    await press("Delete now");
+    await until(alpha, runtime, Trash, (state) => state.question === "AskErase");
+    expect(dialog()?.querySelector("h2")?.textContent).toBe(`Delete “${deleted.title}”?`);
+    await press("Cancel");
+    await until(alpha, runtime, Trash, (state) => state.question === "NoQuestion" && state.opened !== 0);
+    expect(dialog()?.querySelector("h2")?.textContent).toBe(deleted.title);
+    expect(world.notes.trash).toHaveLength(1);
+
+    await press("Recover");
+    await until(alpha, runtime, Trash, (state) => state.entries.length === 0 && !state.showing);
+    await until(alpha, runtime, List, (state) => state.read.status === "Loaded" && state.rows.length === 6);
+    expect(world.notes.trash).toEqual([]);
+    expect(world.notes.notes).toContainEqual(deleted);
+    expect(dialog()).toBeNull();
+    expect(button(`Open ${deleted.title}`)).toBeDefined();
   });
 
   it("Keeps editor changes in the resident agent (spec/app/notes/editor.md, \"Story: Write a note\")", async () => {

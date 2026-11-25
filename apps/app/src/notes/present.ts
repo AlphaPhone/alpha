@@ -3,6 +3,11 @@ import { projectAuthoredNoteContent } from "@elizaos/plugin-notes/format";
 import type { StickyNote } from "@elizaos/plugin-notes/types";
 import { moment } from "./content.vibe";
 
+/** The title shown when listing or opening a note. */
+export function titleOf(note: StickyNote): string {
+  return note.title.trim() || "Untitled";
+}
+
 /** Seconds as the owner reads a recording's length. */
 export function clock(seconds: number): string {
   const whole = Math.max(0, Math.round(seconds));
