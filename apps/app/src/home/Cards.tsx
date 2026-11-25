@@ -62,9 +62,9 @@ export function useDayCards(runtime: ManagedRuntime.ManagedRuntime<Machine | Res
       const next = first.overdue ? Cards.following(items, now)[0] : undefined;
       return <HomeAgendaCard key="agenda" aria-label={first.overdue ? `Open overdue reminder: ${lead.title}` : `Open calendar event: ${lead.title}`} item={lead} overdue={first.overdue} next={next && shown(next)} notCurrent={Cards.agendaCard(state, now, told) === "NotUpdated"} {...open("AgendaCard")} />;
     },
-    MessagesCard: () => <HomeCallsCard key="messages" app="Messages" lines={told.messages} {...waitingOf("Messages", given.messagesWaiting, Date.now())} {...open("MessagesCard")} onClick={() => void runtime.runPromise(openUnread())} />,
-    PhoneCard: () => <HomeCallsCard key="phone" app="Phone" lines={told.phone} {...waitingOf("Phone", given.phoneWaiting, Date.now())} {...open("PhoneCard")} onClick={() => void runtime.runPromise(openCalls())} />,
-    MailCard: () => <HomeMailCard key="mail" unread={told.mail.unread} more={given.mailRead?.more} status={mailFoot(given.mailRead, Date.now())} lines={told.mail.rows} notCurrent={Cards.mailCard(told.mail) === "NotUpdated"} {...open("MailCard")} />,
+    MessagesCard: () => <HomeCallsCard key="messages" app="Messages" lines={told.messages} {...waitingOf("Messages", given.messagesWaiting, now)} {...open("MessagesCard")} onClick={() => void runtime.runPromise(openUnread())} />,
+    PhoneCard: () => <HomeCallsCard key="phone" app="Phone" lines={told.phone} {...waitingOf("Phone", given.phoneWaiting, now)} {...open("PhoneCard")} onClick={() => void runtime.runPromise(openCalls())} />,
+    MailCard: () => <HomeMailCard key="mail" unread={told.mail.unread} more={given.mailRead?.more} status={mailFoot(given.mailRead, now)} lines={told.mail.rows} notCurrent={Cards.mailCard(told.mail) === "NotUpdated"} {...open("MailCard")} />,
     BriefOfToday: () => given.brief && (
       <HomeBriefCard key="brief" outcome={given.brief.outcome} summary={given.brief.outcome === "Finished" ? given.brief.summary : undefined} when={clock(given.brief.at)} {...open("BriefOfToday")} />
     ),

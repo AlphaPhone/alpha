@@ -88,7 +88,7 @@ describe("Ask Alpha dock", () => {
     const finger = (type: string, target: Element | null | undefined, clientY: number) =>
       target?.dispatchEvent(new PointerEvent(type, { bubbles: true, clientY, pointerId: 3, pointerType: "touch", isPrimary: true }));
 
-    // A drag that starts on the bar's field, not on the handle, carries Ask Alpha up to the full screen, though the field lets go of the touch it held as the bar takes it.
+    // spec/app/assistant/dock.md, "Story: Drag Ask Alpha where I want it": a drag that starts on the bar's field carries Ask Alpha to the full screen, though the field lets go of the touch it held as the bar takes it
     finger("pointerdown", field, 800);
     finger("pointermove", field, 790);
     finger("lostpointercapture", field, 790);
@@ -96,7 +96,7 @@ describe("Ask Alpha dock", () => {
     finger("pointerup", field, 60);
     await runtime.runPromise(Effect.flatMap(Shell, (m) => Stream.runHead(Stream.filter(m.changes, (s) => s.assistant === "Full"))));
 
-    // A press on the bar that does not move is still a tap: it takes nothing from the field.
+    // spec/app/assistant/dock.md, "A gesture asks the shell to raise Ask Alpha, to go back a step or two, or nothing; a press that did not move is a tap on its control": a press on the bar that does not move leaves Ask Alpha on the bar
     for (let step = 0; step < 3 && (await runtime.runPromise(Effect.flatMap(Shell, (m) => m.get()))).assistant !== "Bar"; step++) {
       await runtime.runPromise(Effect.flatMap(Shell, (m) => m.send({ type: "goBack" })));
     }
