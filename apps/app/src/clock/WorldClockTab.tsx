@@ -39,7 +39,7 @@ export function WorldClockTab({ runtime }: WorldClockTabProps) {
 
   return (
     <section aria-label="World Clock" className="flex flex-col gap-4">
-      <Card className="items-center gap-1 py-6">
+      <Card className="items-center gap-1 py-6 rounded-tile border-0 bg-secondary">
         <span className="text-xs font-semibold tracking-caps text-muted-foreground uppercase">Local time</span>
         <div className="flex items-baseline gap-2">
           <span className="text-4xl font-light tabular-nums text-foreground">{hero?.time ?? "--:--:--"}</span>
@@ -58,7 +58,7 @@ export function WorldClockTab({ runtime }: WorldClockTabProps) {
           disabled={!view.can({ type: "openSheet", sheet: { tag: "AddCity" } })}
           onClick={() => void view.send({ type: "openSheet", sheet: { tag: "AddCity" } })}
         >
-          <Plus aria-hidden className="size-4" />
+          <Plus aria-hidden className="size-4.5" />
           Add city
         </Button>
       </div>
@@ -78,7 +78,7 @@ export function WorldClockTab({ runtime }: WorldClockTabProps) {
             const prevId = index > 0 ? cities[index - 1] : undefined;
             const nextId = index + 1 < cities.length ? cities[index + 1] : undefined;
             return (
-              <Card key={entry.id} className="gap-2 py-3">
+              <Card key={entry.id} className="gap-2 py-3 rounded-tile border-0 bg-secondary">
                 <div className="flex items-center justify-between gap-3">
                   <div className="flex min-w-0 flex-1 flex-col">
                     <span className="truncate text-base font-semibold text-foreground">{entry.city}</span>
