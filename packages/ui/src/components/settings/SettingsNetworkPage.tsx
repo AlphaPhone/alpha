@@ -62,7 +62,7 @@ const unsecured = (security: SettingsNetworkSecurity) => security === "open" || 
  * @model spec/app/settings/network.md
  */
 export function SettingsNetworkPage({ online, reading = false, scan, scanning = false, networks, joined, joining = false, fits, onJoin, onRescan, told, onBack, starting, onAndroid }: SettingsNetworkPageProps) {
-  const [chosen, choose] = useState<SettingsNearbyNetwork | undefined>(undefined);
+  const [chosen, setChosen] = useState<SettingsNearbyNetwork | undefined>(undefined);
   const [passphrase, setPassphrase] = useState("");
   const said = scans[scan];
   const android = { starting, onAndroid };
@@ -84,7 +84,7 @@ export function SettingsNetworkPage({ online, reading = false, scan, scanning = 
             detail={securities[network.security]}
             selected={chosen?.name === network.name}
             onClick={() => {
-              choose(network);
+              setChosen(network);
               setPassphrase("");
             }}
           />
@@ -98,7 +98,7 @@ export function SettingsNetworkPage({ online, reading = false, scan, scanning = 
             if (!ready) return;
             onJoin(chosen, passphrase);
             setPassphrase("");
-            choose(undefined);
+            setChosen(undefined);
           }}
         >
           {unsecured(chosen.security) ? null : (

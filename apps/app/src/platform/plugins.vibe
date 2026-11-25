@@ -5,6 +5,7 @@ import { type LauncherUpdates, browserLauncherUpdates, phoneLauncherUpdates } fr
 import { type SystemSettings, browserSystemSettings, phoneSystemSettings } from "./systemSettings.vibe"
 import { type WiFi, browserWiFi, phoneWiFi } from "./wifi.vibe"
 import { type PhoneCalendar, browserCalendar, phoneCalendar } from "./calendar.vibe"
+import { type PhoneReminders, browserReminders, phoneReminders } from "./reminders.vibe"
 import { type CameraPort, browserCamera, phoneCamera } from "./camera.vibe"
 import { type PhotosPort, browserPhotos, phonePhotos } from "./photos.vibe"
 import { type Files, browserFiles, phoneFiles } from "./files.vibe"
@@ -14,6 +15,7 @@ import { type Telephony, browserTelephony, phoneTelephony } from "./telephony.vi
 import { type VoiceBridge, browserVoiceBridge, phoneVoiceBridge } from "./voice.vibe"
 import { type Documents, browserDocuments, phoneDocuments } from "./documents.vibe"
 import { type Navigation, browserNavigation, phoneNavigation } from "./navigation.vibe"
+import { type TabHost, browserTabHost, phoneTabHost } from "./browser.vibe"
 
 export type Plugins =
   | never
@@ -23,6 +25,7 @@ export type Plugins =
   | CarrierSetup
   | LauncherUpdates
   | PhoneCalendar
+  | PhoneReminders
   | CameraPort
   | PhotosPort
   | Files
@@ -32,6 +35,7 @@ export type Plugins =
   | VoiceBridge
   | Documents
   | Navigation
+  | TabHost
 
 export const phonePlugins = Layer.mergeAll(
   Layer.empty,
@@ -41,6 +45,7 @@ export const phonePlugins = Layer.mergeAll(
   phoneCarrierSetup,
   phoneLauncherUpdates,
   phoneCalendar,
+  phoneReminders,
   phoneFiles,
   phoneCamera,
   phonePhotos,
@@ -50,6 +55,7 @@ export const phonePlugins = Layer.mergeAll(
   phoneVoiceBridge,
   phoneDocuments,
   phoneNavigation,
+  phoneTabHost,
 )
 
 export const browserPlugins = Layer.mergeAll(
@@ -60,6 +66,7 @@ export const browserPlugins = Layer.mergeAll(
   browserCarrierSetup,
   browserLauncherUpdates,
   browserCalendar,
+  browserReminders,
   browserFiles,
   browserCamera,
   browserPhotos,
@@ -69,4 +76,5 @@ export const browserPlugins = Layer.mergeAll(
   browserVoiceBridge,
   browserDocuments,
   browserNavigation,
+  browserTabHost,
 )

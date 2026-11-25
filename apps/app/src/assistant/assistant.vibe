@@ -9,8 +9,14 @@ import { zoneOf } from "../../gen/app__assistant__context.effect.vibe"
 import * as Reply from "../../gen/app__assistant__reply.effect.vibe"
 import * as Pages from "../../gen/app__settings.effect.vibe"
 import * as Search from "../../gen/app__assistant__search.effect.vibe"
+import * as Alarms from "../../gen/app__clock__alarms.effect.vibe"
+import * as Timers from "../../gen/app__clock__timers.effect.vibe"
+import * as World from "../../gen/app__clock__world.effect.vibe"
+import * as Reminders from "../../gen/app__reminders.effect.vibe"
 import * as Comms from "../../gen/app__phone__comms.effect.vibe"
 import { Machine as Shell, canReturnCommsView } from "../../gen/app__shell.effect.vibe"
+import { syncClockNow } from "../clock/sync.vibe"
+import { syncRemindersNow } from "../reminders/reminders.vibe"
 import { stepping } from "../shell/shell.vibe"
 import { Agent } from "../platform/agent.vibe"
 import { CommsPrompts, type CommsPrompt, commsViewOf } from "../phone/comms.vibe"
@@ -18,6 +24,7 @@ import { ask, outcomeOf } from "../platform/remote.vibe"
 import { Attempts } from "../runtime/attempts.vibe"
 import { MailQuestions, withMail } from "../inbox/mail-context.vibe"
 import { type Job, answer, contained, following, hearing, reacting, run, started, stream, tell, together, untimed } from "../runtime/reactor.vibe"
+import type { Time } from "../runtime/time.vibe"
 import { MediaReview, mediaReview } from "./media-review.vibe"
 import { storeAttachments } from "./attachments.vibe"
 import { type Board, type Line, Talk, talk } from "./talk.vibe"
@@ -136,10 +143,28 @@ function observed(told: boolean, context: Conversation.Context) {
   }, { optionalFields: true })
 }
 
+effect function syncAlphaApps(): void!!(Agent | KeyValueStore.KeyValueStore | Time) {
+  const ctx = try Effect.context<never>()
+  const alarms = Context.getOption(ctx, Alarms.Machine)
+  const timers = Context.getOption(ctx, Timers.Machine)
+  const world = Context.getOption(ctx, World.Machine)
+  if (Option.isSome(alarms) && Option.isSome(timers) && Option.isSome(world)) {
+    try ignore(Effect.provide(syncClockNow(), Layer.mergeAll(
+      Layer.succeed(Alarms.Machine, alarms.value),
+      Layer.succeed(Timers.Machine, timers.value),
+      Layer.succeed(World.Machine, world.value),
+    )))
+  }
+  const reminders = Context.getOption(ctx, Reminders.Machine)
+  if (Option.isSome(reminders)) {
+    try ignore(Effect.provide(syncRemindersNow(), Layer.succeed(Reminders.Machine, reminders.value)))
+  }
+}
+
 // spec/app/assistant/index.md, "Every message asked is posted exactly once, under a new ticket, whoever gave the text, with the screen showing and never a sensitive one"; spec/app/assistant/index.md, "The first word of a reply shows that the agent has the message, and a withdrawal that came too late stops it there"
 // spec/app/assistant/composer.md, "A quoted message goes with the next send, until the owner removes the quote"
-function posted(ticket: number, told: boolean, context: Conversation.Context): Stream.Stream<Conversation.Event, never, Turns | Talk | Chats.Machine | Conversation.Machine | Reply.Machine | Composer.Machine | Comms.Machine | MailQuestions | MediaReview> {
-  return Stream.callback<Conversation.Event, never, Turns | Talk | Chats.Machine | Conversation.Machine | Reply.Machine | Composer.Machine | Comms.Machine | MailQuestions | MediaReview>((queue) => effect {
+function posted(ticket: number, told: boolean, context: Conversation.Context): Stream.Stream<Conversation.Event, never, Agent | KeyValueStore.KeyValueStore | Time | Turns | Talk | Chats.Machine | Conversation.Machine | Reply.Machine | Composer.Machine | Comms.Machine | MailQuestions | MediaReview> {
+  return Stream.callback<Conversation.Event, never, Agent | KeyValueStore.KeyValueStore | Time | Turns | Talk | Chats.Machine | Conversation.Machine | Reply.Machine | Composer.Machine | Comms.Machine | MailQuestions | MediaReview>((queue) => effect {
     const { controller } = try Turns
     const { board } = try Talk
     const reply = try Reply.Machine
@@ -218,6 +243,7 @@ function posted(ticket: number, told: boolean, context: Conversation.Context): S
     if (result?.kind === "Replied" && finishing) {
       if (result.reply.userMessageId !== undefined) board.rename(mine, result.reply.userMessageId)
       board.append({ id: result.reply.messageId, mine: false, text: result.reply.text })
+      try syncAlphaApps()
       if (enrolled !== undefined && result.reply.userMessageId !== undefined) {
         const media = try review.pending(enrolled, result.reply.userMessageId, chats.chosen, context.revision, messageTarget)
         if ((try (try Conversation.Machine).get()).context.revision === context.revision && (try (try Chats.Machine).get()).chosen === chats.chosen) board.change({ media })
@@ -276,7 +302,7 @@ effect function uploaded(ticket: number, attachments: number): Conversation.Even
   return { type: "uploaded", ticket, ok }
 }
 
-function carryTurn(fx: Conversation.Effect): Job<Conversation.Event, Agent | Turns | Talk | Chats.Machine | Composer.Machine | Conversation.Machine | Reply.Machine | Comms.Machine | Shell | MailQuestions | MediaReview, []> {
+function carryTurn(fx: Conversation.Effect): Job<Conversation.Event, Agent | KeyValueStore.KeyValueStore | Time | Turns | Talk | Chats.Machine | Composer.Machine | Conversation.Machine | Reply.Machine | Comms.Machine | Shell | MailQuestions | MediaReview, []> {
   return match (fx) {
     when { tag: "CheckSupport", let support }: answer("support", supported(support), { type: "supported", ticket: support, ok: false, takes: false });
     when { tag: "Upload", let ticket, let attachments }: answer("upload", uploaded(ticket, attachments), { type: "uploaded", ticket, ok: false });

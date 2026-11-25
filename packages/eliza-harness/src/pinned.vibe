@@ -1,5 +1,5 @@
 import { checkout, ready } from "./checkout.ts"
-import { packCheckout, packRoot, stagePackEntry, type Pack } from "./pack.ts"
+import { packCheckout, packRoot, stagePackEntry, type Pack, type ProductPackage } from "./pack.ts"
 
 /** The pinned eliza checkout is not built where `eliza.lock.json` says it is: `pnpm eliza` builds it. */
 export error NotBuilt { commit: string; dir: string }
@@ -16,10 +16,10 @@ export effect function pinnedCheckout() {
 }
 
 /** The pack's private clone of the pinned eliza with `plugins` built, made where it is not yet, and its entry package written with `source`. */
-export effect function pinnedPack(plugins: readonly string[], source: string) {
+export effect function pinnedPack(plugins: readonly string[], source: string, product?: ProductPackage) {
   const { commit } = checkout()
   const failed = (cause: unknown) => new PackNotPrepared({ commit, dir: packRoot(commit), reason: String(cause) })
   const pack: Pack = try tryPromise({ try: () => packCheckout(plugins), catch: failed })
-  const entry = try Effect.try({ try: () => stagePackEntry(pack, source), catch: failed })
+  const entry = try Effect.try({ try: () => stagePackEntry(pack, source, product), catch: failed })
   return { commit: pack.commit, dir: pack.root, entry }
 }

@@ -25,17 +25,18 @@ export const ownerChanges = Stream.unwrap(effect {
 effect function checked(ticket: number): Event!!(Cloud | Mail | Inbox.Machine | KeyValueStore.KeyValueStore) {
   const list = try Inbox.Machine
   const ledger = try Mail
-  const reply = connections() catch (cause) => cause
+  const reply = effect { return { accounts: try connections() } }
+    catch (cause) => ({ signedOut: protocolFailure(cause)?.status === 401 })
   if (!Inbox.canAccountsAnswered(try list.get(), ticket)) return { type: "accountsAnswered", ticket, ok: false, connected: [] }
-  if (!Array.isArray(reply)) {
-    if (protocolFailure(reply)?.status === 401) {
+  if ("signedOut" in reply) {
+    if (reply.signedOut) {
       try ledger.forget()
       try ignore((try KeyValueStore.KeyValueStore).remove(owner))
       return { type: "sessionChanged", signedIn: false }
     }
     return { type: "accountsAnswered", ticket, ok: false, connected: [] }
   }
-  return { type: "accountsAnswered", ticket, ok: true, connected: [...(try ledger.connected(reply))] }
+  return { type: "accountsAnswered", ticket, ok: true, connected: [...(try ledger.connected(reply.accounts))] }
 }
 
 const failed = (ticket: number, failure: Inbox.Failure): Event => ({

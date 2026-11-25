@@ -2,6 +2,7 @@ import { elizaCamera } from "./camera.ts";
 import { elizaCalendar } from "./calendar.ts";
 import { alphaMapsTransport, elizaLocation } from "./maps.ts";
 import { type Faked, elizaAgent, elizaCloud, elizaSecureStore, present } from "./phone.ts";
+import { elizaReminders } from "./reminders.ts";
 import type { Answering } from "./routes.ts";
 import { elizaFiles, selectedDocuments } from "./files.ts";
 import { alphaPhotos } from "./photos.ts";
@@ -10,6 +11,7 @@ import { alphaCarrierSetup, elizaReset, elizaSystem, elizaWiFi } from "./setting
 import { telephonyPlugins } from "./telephony.ts";
 import { alphaDevice } from "./update.ts";
 import { alphaConnection } from "./platform.ts";
+import { alphaBrowser } from "./browser.ts";
 import { alphaVoiceCloud, elizaCloudSpeech, elizaSignIn } from "./voice.ts";
 
 export function plugins(world: Scene, services: { readonly agent: Answering; readonly cloud: Answering }): Record<string, Faked> {
@@ -18,6 +20,7 @@ export function plugins(world: Scene, services: { readonly agent: Answering; rea
     ElizaCloud: elizaCloud(services.cloud, () => world.signedIn),
     ElizaSecureStore: elizaSecureStore(world.secrets, world.slots),
     ElizaCalendar: elizaCalendar(world.calendar),
+    ElizaReminders: elizaReminders(world.reminders, () => world.now),
     ElizaCamera: elizaCamera(world.camera),
     ElizaFiles: elizaFiles(world.files),
     AlphaPhotos: alphaPhotos(world.photos),
@@ -35,5 +38,6 @@ export function plugins(world: Scene, services: { readonly agent: Answering; rea
     ...(world.voice.onDevice ? { AlphaVoiceCloud: alphaVoiceCloud(world.voice) } : {}),
     ElizaCloudSpeech: elizaCloudSpeech(world.voice),
     ElizaSignIn: elizaSignIn(world.voice, () => world.signedIn),
+    AlphaBrowser: alphaBrowser(world.browser),
   };
 }

@@ -98,7 +98,7 @@ const questionAbout = (account: number, message: number, revision: number) => ef
     if (!status.available) throw new MailContextRefused({ reason: "unselected" })
     return { ownerId: owner.id, agentId: "alpha-resident", sessionId: String(status.epoch), origin: "alpha-resident" }
   }
-  const opened = effect {
+  effect {
     const cached = ledger.body(initial.body.ticket)
     if (!grant || !cached || !(try live)) throw new MailContextRefused({ reason: "changed" })
     const reread = Effect.provideService(Effect.provideService(body(account, message), Cloud, cloud), Mail, ledger)
@@ -117,7 +117,6 @@ const questionAbout = (account: number, message: number, revision: number) => ef
     }
     questions.show({ question: { review, current } })
   } catch (cause) => questions.show({ failure: cause instanceof MailContextRefused && cause.reason === "too-large" ? "tooLarge" : "changed" })
-  try opened
   try ignore(shell.send({ type: "raise", detent: "Sheet" }))
 }
 
