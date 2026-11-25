@@ -32,9 +32,17 @@ do next.
   `font-display`, are a contact's name and initials at the top of their card. `text-lead` is the street of the next turn,
   `text-title` a document's name over its preview, and `text-figure` and `text-figure-sm` a route's time.
   `leading-row` sets `text-body` as a note's or a routine's title in a list.
+  `text-badge` is a video's length over a thumbnail and `text-tile-name` an album's name under its cover.
+  `text-headline` is an open voice or link note's title and `text-quote` a clip kept from a page.
+  `text-tab-count` in a `rounded-tab-count` outline is the Browser's count of open tabs.
+  In Calendar, `text-fine` is an invitation's time, `text-prose` an event's notes and `text-date` a day
+  chip's date; an event's page is titled `text-display` and its form `text-display-sm`. `leading-plain` is
+  the browser's own line height for Public Sans, for a line whose box the design measures.
 - **Shape.** `radius` is a card; `rounded-group` a group of rows; `rounded-panel` a notice or a search bar; `rounded-home-card` is a Home overview card;
   `rounded-drawer-icon` rounds an installed app icon; `rounded-option` is a row of a floating menu and
-  `rounded-box` the box of a list row's selection check. `rounded-tile` is an app tile, a menu and a dialog;
+  `rounded-box` the box of a list row's selection check; `rounded-chip` is a choice chip and an invitation
+  row, `rounded-action` a labelled action button; `rounded-segment` is a segmented control and
+  `rounded-segment-option` the option chosen in it. `rounded-tile` is an app tile, a menu and a dialog;
   `rounded-sheet` the top of a bottom sheet, `rounded-chat` the top of the Ask Alpha sheet; `rounded-full` a
   button and a chip, `rounded-dock` the Ask Alpha bar.
   Everything pressed is at least 44px in both directions.
@@ -113,13 +121,22 @@ this prose into tokens. To change the design, describe it, and have the change w
 | `rounded.panel` | 1.5rem |
 | `rounded.dock` | 1.9375rem |
 | `rounded.chat` | 1.875rem |
+| `rounded.tab-count` | 0.4375rem |
+| `rounded.action` | 1.125rem |
+| `rounded.chip` | 1.5rem |
+| `rounded.segment` | 0.9375rem |
+| `rounded.segment-option` | 0.6875rem |
 | `font.sans` | "Public Sans", system-ui, -apple-system, "Segoe UI", sans-serif |
 | `font.display` | Denton, Fraunces, Georgia, serif |
 | `font.mono` | ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas, monospace |
 | `text.2xs.size` | 0.6875rem |
 | `text.2xs.leading` | 1.4 |
+| `text.badge.size` | 0.71875rem |
+| `text.badge.leading` | 1.2 |
 | `text.xs.size` | 0.75rem |
 | `text.xs.leading` | 1.175 |
+| `text.fine.size` | 0.78125rem |
+| `text.fine.leading` | 1.2 |
 | `text.label.size` | 0.75rem |
 | `text.label.leading` | 1.1667 |
 | `text.meta.size` | 0.8125rem |
@@ -132,14 +149,20 @@ this prose into tokens. To change the design, describe it, and have the change w
 | `text.sm.leading` | 1.175 |
 | `text.subject.size` | 0.90625rem |
 | `text.subject.leading` | 1.2 |
+| `text.tile-name.size` | 0.9375rem |
+| `text.tile-name.leading` | 1.35 |
 | `text.base.size` | 0.9375rem |
 | `text.base.leading` | 1.175 |
+| `text.prose.size` | 0.96875rem |
+| `text.prose.leading` | 1.55 |
 | `text.body.size` | 1rem |
 | `text.body.leading` | 1.6 |
 | `text.md.size` | 1rem |
 | `text.md.leading` | 1.175 |
 | `text.lg.size` | 1.0625rem |
 | `text.lg.leading` | 1.175 |
+| `text.date.size` | 1.125rem |
+| `text.date.leading` | 1.2 |
 | `text.lead.size` | 1.1875rem |
 | `text.lead.leading` | 1.2 |
 | `text.xl.size` | 1.25rem |
@@ -154,6 +177,11 @@ this prose into tokens. To change the design, describe it, and have the change w
 | `text.4xl.tracking` | -0.01em |
 | `text.figure.size` | 2.75rem |
 | `text.figure.leading` | 1 |
+| `text.headline.size` | 2.125rem |
+| `text.headline.leading` | 1.08 |
+| `text.headline.tracking` | -0.01em |
+| `text.quote.size` | 1.3125rem |
+| `text.quote.leading` | 1.35 |
 | `text.home-display.size` | 1.625rem |
 | `text.home-display.leading` | 1.1 |
 | `text.title.size` | 1.75rem |
@@ -174,6 +202,14 @@ this prose into tokens. To change the design, describe it, and have the change w
 | `text.contact-name.tracking` | -0.01em |
 | `text.contact-initials.size` | 2.625rem |
 | `text.contact-initials.leading` | 1 |
+| `text.tab-count.size` | 0.71875rem |
+| `text.tab-count.leading` | 1.175 |
+| `text.display-sm.size` | 2.125rem |
+| `text.display-sm.leading` | 1.35 |
+| `text.display-sm.tracking` | -0.01em |
+| `text.display.size` | 2.375rem |
+| `text.display.leading` | 1.05 |
+| `text.display.tracking` | -0.01em |
 | `weight.light` | 300 |
 | `weight.normal` | 400 |
 | `weight.medium` | 500 |
@@ -187,6 +223,7 @@ this prose into tokens. To change the design, describe it, and have the change w
 | `leading.relaxed` | 1.6 |
 | `leading.field` | 1.375 |
 | `leading.chat` | 1.5 |
+| `leading.plain` | 1.18 |
 | `tracking.tight` | -0.01em |
 | `tracking.caps` | 0.14em |
 | `z.10` | 10 |

@@ -85,19 +85,18 @@ describe("Home on a phone", () => {
     ];
     const { alpha } = await open(world);
     const homes = home.runtime(alpha);
-    const agenda = () => [...document.querySelectorAll("button")].find((found) => /^Open (calendar event|overdue reminder)/.test(found.getAttribute("aria-label") ?? ""));
+    const agenda = () => [...document.querySelectorAll("button")].find((found) => /^(Next|Overdue reminder)/.test(found.textContent ?? ""));
 
     // spec/app/home/cards.md, "When Home shows, when Alpha comes back to the front, and when the local day turns while Home shows, Home asks again for every calendar it has not read today"; spec/app/home/cards.md, "The card leads with an overdue reminder, then the item that begins first; of two alike, the first read"
     await until(alpha, homes, Cards.Machine, (c) => c.calendar.source === "Ready" && c.calendar.items.length === 2);
-    expect(agenda()?.getAttribute("aria-label")).toMatch(/^Open calendar event: Dentist/);
+    expect(agenda()?.textContent).toMatch(/^NextDentist/);
 
     // spec/app/home/cards.md, "The agenda draws on both calendars and the reminders saved on the phone, leaving out a calendar Calendar hides and a reminder already done"
     await drawn(() => fromAreas.hidden([2]));
-    expect(agenda()?.getAttribute("aria-label")).toMatch(/^Open calendar event: Standup/);
+    expect(agenda()?.textContent).toMatch(/^NextStandup/);
     await drawn(() => fromAreas.reminders([{ due: day + 7 * hour, overdue: true, done: false, title: "Call the bank" }, { due: day, overdue: true, done: true, title: "Paid rent" }]));
     // spec/app/home/cards.md, "Under an overdue reminder the card also names the next item that is not overdue, so the reminder never hides it"
-    expect(agenda()?.getAttribute("aria-label")).toMatch(/^Open overdue reminder: Call the bank/);
-    expect(agenda()?.textContent).toContain("Standup");
+    expect(agenda()?.textContent).toMatch(/^Overdue reminderCall the bank.*Standup/);
 
     // spec/app/home/cards.md, "A card opens its app: the agenda Calendar, Messages and Phone their own, mail Inbox, the brief and Workflows Workflows; the agenda asks its calendar again if the last read did not succeed"
     await drawn(() => agenda()?.click());
@@ -168,8 +167,8 @@ describe("Home on a phone", () => {
     expect([toast(), world.launcher.opened.length]).toEqual(["Couldn't open Clock. It's turned off.", 2]);
 
     // spec/app/home/index.md, "A failed reading that takes an installed tile off Home says so"; spec/app/home/index.md, "Home shows a tile only while its app is on this phone; a tile whose app has gone keeps its place and comes back with the app"
-    const clock = world.launcher.apps[0]!;
-    world.launcher.apps = world.launcher.apps.slice(1);
+    const [clock, ...rest] = world.launcher.apps;
+    world.launcher.apps = rest;
     world.launcher.changed();
     await until(alpha, homes, Home.Machine, (h) => !h.installed.apps.includes("org.fixture.clock/org.fixture.clock.Main") && h.installed.read.status === "Loaded");
     expect(tiles()).not.toContain("app:org.fixture.clock/org.fixture.clock.Main");

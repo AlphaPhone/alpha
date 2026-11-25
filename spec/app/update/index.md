@@ -534,6 +534,16 @@ pure def alwaysDeferralsAreBounded(s: Updates): bool = s.deferrals >= 0 and s.de
 
 ```quint
 pure def sometimesWaitingToRetry(s: Updates): bool = s.deferrals > 0 and not(s.installing)
+
+pure val eval_witness_sometimesWaitingToRetry = (
+  ("observePhone", 1, 1, Supported),
+  ("show", true),
+  ("observeActivity", quiet),
+  "checkNow",
+  ("answer", 1, Answered({ index: false, releases: List(good(1, 2)), manifest: 7 }), 0),
+  ("startAutomatically", 0),
+  ("endInstall", Deferred, 0)
+)
 ```
 
 ### Every check and every install ends, so Settings never waits on one for ever

@@ -8,6 +8,8 @@
 //   apps entry test/drivers, *.schema, *.contract  none yet in apps/app: an area that writes one needs no change here
 //   root @vitest/browser                    loaded by Vitest's browser mode, beside @vitest/browser-playwright
 //   root @repo/design-system                read as files by vibestack/design/test/design.test.ts
+//   root android                            called by .github/workflows/release.yml as `pnpm --filter @repo/app android`, pending the Android build script
+//   apps adb, openssl                       the system's own, run by apps/app/scripts/release.ts and its tests for pilot updates, readback and key custody
 //   tailwindcss (ui, design-system, studio, apps)  resolved by @tailwindcss/vite and the lint plugin from CSS
 //   entry *.schema, *.contract              imported by the tests vibestack/testing/generate.ts writes under .cache/
 //   design-system eslint, eslint-plugin-better-tailwindcss, typescript-eslint  loaded by name in vibestack/design/test/design.test.ts
@@ -43,6 +45,9 @@ export default {
         "lemmascript",
         "@vitest/browser",
         "@repo/design-system"
+      ],
+      "ignoreBinaries": [
+        "android"
       ]
     },
     "packages/ui": {
@@ -66,8 +71,8 @@ export default {
     },
     "packages/eliza-harness": {
       "entry": [
+        "src/index.ts",
         "src/no-bun.vibe",
-        "src/pinned.vibe",
         "test/**/*.test.{ts,vibe}"
       ],
       "project": [
@@ -144,6 +149,10 @@ export default {
       ],
       "ignoreDependencies": [
         "tailwindcss"
+      ],
+      "ignoreBinaries": [
+        "adb",
+        "openssl"
       ]
     }
   }

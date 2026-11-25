@@ -115,7 +115,6 @@ function mmsReview(send: Outgoing, sim: number): MmsReview {
 
 effect function receiptOf(send: Outgoing, sim: number, operation: OperationId): (SmsSendStatus | undefined)!!Telephony {
   if (usingMms(send.to.length, send.pictured)) {
-    // Picture bytes are visit-only. A process restart may keep the operation without enough data to bind its result.
     if (send.pictured && send.pictures.length === 0) return undefined
     const receipt = telephony("mmsSendResult", (c) => c.messages.mmsSendResult(mmsReview(send, sim), operation)) catch () => undefined
     return receipt?.status

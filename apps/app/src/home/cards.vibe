@@ -30,13 +30,15 @@ const titles = new Map<string, string>()
 const listeners = new Set<() => void>()
 let version = 0
 
+function subscribeNamed(this: void, listener: () => void): () => void {
+  listeners.add(listener)
+  return () => { listeners.delete(listener) }
+}
+
 /** The titles of the items read, as an external store the card reads without an effect. */
 export const named = {
   snapshot: (): number => version,
-  subscribe(listener: () => void): () => void {
-    listeners.add(listener)
-    return () => { listeners.delete(listener) }
-  },
+  subscribe: subscribeNamed,
   title: (origin: Origin, id: number): string => titles.get(`${origin}:${id}`) ?? "",
 }
 

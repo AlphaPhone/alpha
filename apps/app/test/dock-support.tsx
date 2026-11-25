@@ -6,12 +6,13 @@ import { Machine as Composer } from "../gen/app__assistant__composer.effect.vibe
 import { Machine as Shell } from "../gen/app__shell.effect.vibe";
 import { Assistant } from "../src/assistant/Assistant.tsx";
 import { assisting } from "../src/assistant/assistant.vibe";
+import { MediaHandoff } from "../src/assistant/attachments.vibe";
 import { MediaExecutors } from "../src/assistant/media-review.vibe";
 import { agentAt } from "../src/platform/agent.vibe";
 import { cloudAt } from "../src/platform/cloud.vibe";
 import { pagePlatform } from "../src/platform/platform.vibe";
 import { resident } from "../src/resident.vibe";
-import { whole } from "../src/runtime/reactor.vibe";
+import { together, whole } from "../src/runtime/reactor.vibe";
 
 const closers: (() => Promise<void>)[] = [];
 
@@ -35,9 +36,12 @@ export async function mountDock({ view = "Browser", withToast = false, flush }: 
       return Effect.succeed(HttpClientResponse.fromWeb(request, new Response(JSON.stringify(body), { headers: { "content-type": "application/json" } })));
     }),
   );
-  const platform = pagePlatform(Layer.provide(agentAt("http://agent.test"), client), Layer.provide(cloudAt("http://cloud.test"), client));
-  const executors = Layer.succeed(MediaExecutors, { execute: () => Effect.succeed(undefined) });
-  const runtime = ManagedRuntime.make(Layer.provideMerge(whole(assisting), Layer.provideMerge(resident, Layer.merge(platform, executors))));
+  const platform = Layer.mergeAll(
+    pagePlatform(Layer.provide(agentAt("http://agent.test"), client), Layer.provide(cloudAt("http://cloud.test"), client)),
+    Layer.succeed(MediaHandoff, { attach: () => Effect.succeed(false) }),
+    Layer.succeed(MediaExecutors, { execute: () => Effect.succeed(undefined) }),
+  );
+  const runtime = ManagedRuntime.make(Layer.provideMerge(whole(together(resident, assisting)), platform));
   const host = document.body.appendChild(document.createElement("div"));
   const reactRoot = createRoot(host);
   await run(async () => {

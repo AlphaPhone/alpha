@@ -22,7 +22,7 @@ export const views = {
 export const viewOrder = Object.keys(views) as View[];
 
 const commsViews = new Set<View>(["Phone", "Messages", "Contacts"]);
-const ownHeader = new Set<View>(["Camera", "Photos", "Files", "Maps", "Notes", "Settings", "Workflows", ...commsViews]);
+const ownHeader = new Set<View>(["Browser", "Calendar", "Camera", "Photos", "Files", "Maps", "Notes", "Settings", "Workflows", ...commsViews]);
 
 /** Whether the app shares the conversation stage with Ask Alpha. */
 export const isCommsView = (view: View | undefined) => view !== undefined && commsViews.has(view);

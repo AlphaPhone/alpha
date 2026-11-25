@@ -1,5 +1,5 @@
 // spec/app/assistant/index.md, "Story: Ask Alpha something"; spec/app/assistant/index.md, "Story: Stop a reply"
-import { ConversationRecord, TurnController, encodeTurnContext, learnPeer, notLearned, sendsOptionalFields, statusRead, type TurnReply, type TurnResult } from "@elizaos/agent/client"
+import { ConversationRecord, TurnController, encodeTurnContext, learnPeer, notLearned, sendsOptionalFields, statusRead, type LocationObservation, type TurnReply, type TurnResult } from "@elizaos/agent/client"
 import * as KeyValueStore from "effect/persistence/KeyValueStore"
 import * as Conversation from "../../gen/app__assistant.effect.vibe"
 import * as Chats from "../../gen/app__assistant__chats.effect.vibe"
@@ -16,9 +16,9 @@ import * as World from "../../gen/app__clock__world.effect.vibe"
 import * as Reminders from "../../gen/app__reminders.effect.vibe"
 import * as Comms from "../../gen/app__phone__comms.effect.vibe"
 import { Machine as Shell, canReturnCommsView } from "../../gen/app__shell.effect.vibe"
+import { Machine as Layers } from "../../gen/app__shell__layers.effect.vibe"
 import { syncClockNow } from "../clock/sync.vibe"
 import { syncRemindersNow } from "../reminders/reminders.vibe"
-import { stepping } from "../shell/shell.vibe"
 import { Agent } from "../platform/agent.vibe"
 import { Location } from "../platform/location.vibe"
 import { CommsPrompts, type CommsPrompt, commsViewOf } from "../phone/comms.vibe"
@@ -96,12 +96,10 @@ export function isCloudFundsRefusal(result: TurnResult | undefined): boolean {
 function replied(turn: number, result: TurnResult | undefined): Reply.Event {
   const failed = (said: TurnReply | undefined, code: string): Reply.Event => ({ type: "failed", turn, kind: failures[said?.failureKind ?? code] ?? "OtherFailure" })
   if (result === undefined) return { type: "failed", turn, kind: "OtherFailure" }
-  return match (result) {
-    when { kind: "Replied", let reply }: reply.failureKind === undefined ? (reply.text === "" ? { type: "decline", turn } : { type: "done", turn, units: reply.text.length }) : failed(reply, reply.failureKind);
-    when { kind: "AgentFailed", let code }: isCloudFundsRefusal(result) ? { type: "failed", turn, kind: "OutOfFunds" } : failed(result.reply, code);
-    when { kind: "StoppedByOwner" }: { type: "stop", turn };
-    default: { type: "failed", turn, kind: "OtherFailure" };
-  }
+  if (result.kind === "Replied") return result.reply.failureKind === undefined ? (result.reply.text === "" ? { type: "decline", turn } : { type: "done", turn, units: result.reply.text.length }) : failed(result.reply, result.reply.failureKind)
+  if (result.kind === "AgentFailed") return isCloudFundsRefusal(result) || result.code === "allowance_exhausted" ? { type: "failed", turn, kind: "OutOfFunds" } : failed(result.reply, result.code)
+  if (result.kind === "StoppedByOwner") return { type: "stop", turn }
+  return { type: "failed", turn, kind: "OtherFailure" }
 }
 
 function fixOf(result: TurnResult | undefined): Reply.Fix {
@@ -119,16 +117,8 @@ module web {
   export function zone(): string {
     return Intl.DateTimeFormat().resolvedOptions().timeZone
   }
-  /** @throws {never} */
-  export function serializer(): { queue: (work: () => Promise<unknown>) => void; drain: () => Promise<unknown> } {
-    let tail: Promise<unknown> = Promise.resolve()
-    return {
-      queue: (work) => { tail = tail.then(work) },
-      drain: () => tail,
-    }
-  }
 }
-import { serializer, zone } from web
+import { zone } from web
 
 function viewOf(showing: Conversation.Showing): string {
   return match (showing) {
@@ -138,7 +128,7 @@ function viewOf(showing: Conversation.Showing): string {
 }
 
 // spec/app/assistant/index.md, "The agent is told the view, the time zone, the day only from Calendar, and whether something is selected"; spec/app/assistant/context.md, "The day and the location go only to a peer that takes them, and a sensitive screen sends no optional field"; spec/app/assistant/context.md, "The time zone told is the one the phone's interface shows, else the one the screen reported, else the one the agent was launched with, else the host's"
-function observed(told: boolean, context: Conversation.Context, location: Located | undefined) {
+function observed(told: boolean, context: Conversation.Context, location: LocationObservation | undefined) {
   if (!told) return undefined
   return encodeTurnContext({
     observation: {
@@ -148,27 +138,23 @@ function observed(told: boolean, context: Conversation.Context, location: Locate
   }, { optionalFields: true })
 }
 
-/** A position as a turn tells it: degrees, meters, and when it was taken. */
-interface Located {
-  readonly latitude: number
-  readonly longitude: number
-  readonly accuracyMeters: number
-  readonly capturedAt: number
-}
-
-// spec/app/assistant/context.md, "A turn carries the location only while the owner allows it, from a screen that is not sensitive, to a peer that declares it, and only a GPS fix at most thirty minutes old or a network answer that still stands"; spec/app/assistant/context.md, "The day and the location go only to a peer that takes them, and a sensitive screen sends no optional field"
-/** What the locator holds for a turn, never waiting for a position: Android's permission is told first, and a new read starts behind the turn. */
-effect function whereabouts(sensitive: boolean, told: boolean): (Located | undefined)!!(Locator.Machine | Location | Time | Talk) {
+// spec/app/assistant/context.md, "A turn carries the location only while the owner allows it, from a screen that is not sensitive, to a peer that declares it, and only a GPS fix at most thirty minutes old or a network answer that still stands"; spec/app/assistant/context.md, "The day and the location go only to a peer that takes them, and a sensitive screen sends no optional field"; spec/app/settings/preferences.md, "Alpha shares the phone's location or the Browser page open with a chat turn, and changes Gmail or Calendar, only when the phone read that the owner allowed it"
+/** What the locator holds for a turn, never waiting for a position: the owner's setting and Android's permission are told first, and a new read starts behind the turn. */
+effect function whereabouts(sensitive: boolean, told: boolean): (LocationObservation | undefined)!!(Locator.Machine | Prefs.Machine | Location | Time | Talk) {
   const locator = try Locator.Machine
   const { board } = try Talk
+  const allowed = Prefs.allows(try (try Prefs.Machine).get(), "AgentLocation")
+  try contained(locator.send({ type: "toggle", on: allowed }), "telling Location for Alpha")
+  if (!allowed) return undefined
   const grant = try (try Location).permission()
   try contained(locator.send({ type: "permit", granted: grant === "precise" || grant === "approximate" }), "telling Android's permission")
   const state = try locator.get()
   const now = try (try Time).now()
-  const position = board.position
+  const position = board.positionFor(state.gps.ticket)
   try contained(locator.send({ type: "read", now: untimed }), "reading the position")
   if (position === undefined || !Locator.sendsLocation(state, now, !sensitive, told) || !Locator.gpsCurrent(state, now)) return undefined
-  return { latitude: position.lat / 1e6, longitude: position.lng / 1e6, accuracyMeters: position.accuracy, capturedAt: position.taken }
+  const accuracy = position.accuracy >= 0 && position.accuracy <= 1_000_000 ? { accuracyMeters: position.accuracy } : {}
+  return { latitude: position.lat / 1e6, longitude: position.lng / 1e6, ...accuracy, capturedAt: Math.trunc(position.taken) }
 }
 
 effect function syncAlphaApps(): void!!(Agent | KeyValueStore.KeyValueStore | Time) {
@@ -191,13 +177,16 @@ effect function syncAlphaApps(): void!!(Agent | KeyValueStore.KeyValueStore | Ti
 
 // spec/app/assistant/index.md, "Every message asked is posted exactly once, under a new ticket, whoever gave the text, with the screen showing and never a sensitive one"; spec/app/assistant/index.md, "The first word of a reply shows that the agent has the message, and a withdrawal that came too late stops it there"
 // spec/app/assistant/composer.md, "A quoted message goes with the next send, until the owner removes the quote"
-function posted(ticket: number, told: boolean, context: Conversation.Context): Stream.Stream<Conversation.Event, never, Agent | KeyValueStore.KeyValueStore | Time | Turns | Talk | Chats.Machine | Conversation.Machine | Reply.Machine | Composer.Machine | Comms.Machine | MailQuestions | MediaReview | Locator.Machine | Location> {
-  return Stream.callback<Conversation.Event, never, Agent | KeyValueStore.KeyValueStore | Time | Turns | Talk | Chats.Machine | Conversation.Machine | Reply.Machine | Composer.Machine | Comms.Machine | MailQuestions | MediaReview | Locator.Machine | Location>((queue) => effect {
+function posted(ticket: number, told: boolean, context: Conversation.Context): Stream.Stream<Conversation.Event, never, Agent | KeyValueStore.KeyValueStore | Time | Turns | Talk | Chats.Machine | Conversation.Machine | Reply.Machine | Composer.Machine | Locator.Machine | Prefs.Machine | Location | Comms.Machine | MailQuestions | MediaReview> {
+  return Stream.callback<Conversation.Event, never, Agent | KeyValueStore.KeyValueStore | Time | Turns | Talk | Chats.Machine | Conversation.Machine | Reply.Machine | Composer.Machine | Locator.Machine | Prefs.Machine | Location | Comms.Machine | MailQuestions | MediaReview>((queue) => effect {
     const { controller } = try Turns
     const { board } = try Talk
     const reply = try Reply.Machine
-    const shown = serializer()
-    const show = (event: Reply.Event) => { shown.queue(() => runPromise(ignore(reply.send(event)))) }
+    let shown: Promise<unknown> | undefined
+    const show = (event: Reply.Event) => {
+      const next = () => runPromise(ignore(reply.send(event)))
+      shown = shown === undefined ? next() : shown.then(next)
+    }
     const chats = try (try Chats.Machine).get()
     const known = board.known(chats.chosen)
     const request = board.postingRequest
@@ -215,7 +204,7 @@ function posted(ticket: number, told: boolean, context: Conversation.Context): S
     const mine: Line = { id: `sent ${ticket}`, mine: true, text, ...(quoted === undefined ? {} : { quote: quoted.text }), ...(files.length === 0 ? {} : { files: files.map(({ id, name, mimeType }) => ({ id, name, mimeType })) }) }
     let heard = false
     try ignore(reply.send({ type: "begin", turn: ticket }))
-    board.change({ label: "", failure: undefined })
+    board.change({ reply: "", label: "", failure: undefined })
     const preview = (written: string, provisional: boolean) => {
       if (!heard) Queue.offerUnsafe(queue, { type: "hear", ticket })
       heard = true
@@ -236,6 +225,7 @@ function posted(ticket: number, told: boolean, context: Conversation.Context): S
     }
     const review = try MediaReview
     const enrolled = context.sensitive ? undefined : try review.session()
+    const messageTarget = enrolled === undefined ? undefined : try review.messageTarget()
     board.change({ media: [], mediaNote: "" })
     const location = try whereabouts(context.sensitive, told)
     const metadata = { ...observed(told, context, location), ...(quoted === undefined ? {} : { replyToMessageId: quoted.id }) }
@@ -255,12 +245,13 @@ function posted(ticket: number, told: boolean, context: Conversation.Context): S
     board.lastSentWire = outgoing
     board.lastSentId = ""
     const result = tryPromise(() => controller.send({ text: outgoing, ...(files.length === 0 ? {} : { images: files.map(({ name, mimeType, data }) => ({ name, mimeType, data })) }), ...(Object.keys(metadata).length === 0 ? {} : { metadata }) }, { stream: hooks, ...(enrolled === undefined ? {} : { headers: enrolled.headers }) })) catch () => undefined
-    board.change({ reply: "", label: "" })
     board.lastSentId = result !== undefined && "clientMessageId" in result ? result.clientMessageId : ""
     const ending = replied(ticket, result)
-    if (ending.type === "failed") board.change({ failure: { kind: ending.kind, fix: fixOf(result), waitMs: waitOf(result) } })
+    const keepStreamed = ending.type === "stop" || (ending.type === "failed" && !Reply.refusedBeforeOutput(ending.kind))
+    board.change({ ...(keepStreamed ? {} : { reply: "" }), label: "", ...(ending.type === "failed" ? { failure: { kind: ending.kind, fix: fixOf(result), waitMs: waitOf(result) } } : {}) })
     show(ending)
-    try promise(() => shown.drain())
+    const pendingShow = shown
+    if (pendingShow !== undefined) try promise(() => pendingShow)
     const event = ended(ticket, heard, result)
     if (request !== undefined && (heard || event.type === "finish")) {
       const comms = try Comms.Machine
@@ -269,15 +260,11 @@ function posted(ticket: number, told: boolean, context: Conversation.Context): S
     }
     const finishing = Conversation.canFinish(try (try Conversation.Machine).get(), ticket)
     if (result?.kind === "Replied" && finishing) {
-      if (result.reply.userMessageId !== undefined) {
-        board.messageNumber(result.reply.userMessageId)
-        board.rename(mine, result.reply.userMessageId)
-      }
-      board.messageNumber(result.reply.messageId)
+      if (result.reply.userMessageId !== undefined) board.confirm(mine, result.reply.userMessageId)
       board.append({ id: result.reply.messageId, mine: false, text: result.reply.text })
       try syncAlphaApps()
       if (enrolled !== undefined && result.reply.userMessageId !== undefined) {
-        const media = try review.pending(enrolled, result.reply.userMessageId, chats.chosen, context.revision)
+        const media = try review.pending(enrolled, result.reply.userMessageId, chats.chosen, context.revision, messageTarget)
         if ((try (try Conversation.Machine).get()).context.revision === context.revision && (try (try Chats.Machine).get()).chosen === chats.chosen) board.change({ media })
       }
     }
@@ -334,7 +321,7 @@ effect function uploaded(ticket: number, attachments: number): Conversation.Even
   return { type: "uploaded", ticket, ok }
 }
 
-function carryTurn(fx: Conversation.Effect): Job<Conversation.Event, Agent | KeyValueStore.KeyValueStore | Time | Turns | Talk | Chats.Machine | Composer.Machine | Conversation.Machine | Reply.Machine | Comms.Machine | Shell | MailQuestions | MediaReview | Locator.Machine | Location, []> {
+function carryTurn(fx: Conversation.Effect): Job<Conversation.Event, Agent | KeyValueStore.KeyValueStore | Time | Turns | Talk | Chats.Machine | Composer.Machine | Conversation.Machine | Reply.Machine | Comms.Machine | Shell | MailQuestions | MediaReview | Locator.Machine | Prefs.Machine | Location, []> {
   return match (fx) {
     when { tag: "CheckSupport", let support }: answer("support", supported(support), { type: "supported", ticket: support, ok: false, takes: false });
     when { tag: "Upload", let ticket, let attachments }: answer("upload", uploaded(ticket, attachments), { type: "uploaded", ticket, ok: false });
@@ -365,15 +352,27 @@ function carryTurn(fx: Conversation.Effect): Job<Conversation.Event, Agent | Key
 const freshMs = Locator.reuseMs - 60000
 
 // spec/app/assistant/context.md, "Rough location is enough: a GPS read happens at most every five minutes, and an empty or failed one waits two minutes"
-/** One rough position from the phone, kept on the board where it is fresh, under the read's ticket. */
-effect function fixedAt(ticket: number): Locator.Event!!(Location | Time | Talk) {
+/** One rough position from the phone, kept on the board only if the locator accepts its ticket. */
+effect function readFix(ticket: number): void!!(Locator.Machine | Location | Time | Talk) {
+  const locator = try Locator.Machine
   const { board } = try Talk
   const found = try (try Location).fix()
   const now = try (try Time).now()
-  const taken = Option.isSome(found) ? Math.min(now, found.value.taken) : now
-  if (Option.isNone(found) || now - taken > freshMs) return { type: "fixed", ticket, ok: false, taken: now, now }
-  board.position = found.value
-  return { type: "fixed", ticket, ok: true, taken, now }
+  if (Option.isNone(found)) {
+    try contained(locator.send({ type: "fixed", ticket, ok: false, taken: untimed, now: untimed }), "reporting no position")
+    return
+  }
+  const sighting = found.value
+  const taken = Math.min(now, Math.trunc(sighting.taken))
+  const valid = Number.isFinite(sighting.lat) && Number.isFinite(sighting.lng)
+    && Math.abs(sighting.lat) <= 90_000_000 && Math.abs(sighting.lng) <= 180_000_000
+    && taken >= 0 && now - taken <= freshMs
+  if (!valid) {
+    try contained(locator.send({ type: "fixed", ticket, ok: false, taken: untimed, now: untimed }), "reporting no position")
+    return
+  }
+  const accepted = try contained(locator.send({ type: "fixed", ticket, ok: true, taken, now: untimed }), "recording the position")
+  if (accepted && (try locator.get()).gpsAt >= 0) board.rememberPosition(ticket, sighting)
 }
 
 // spec/app/assistant/context.md, "The network is looked up only when GPS has nothing current, and its answer is reused before it is asked again"
@@ -383,21 +382,23 @@ effect function lookedAt(ticket: number): Locator.Event!!Time {
   return { type: "looked", ticket, ok: false, taken: now, now }
 }
 
-function carryLocator(fx: Locator.Effect): Job<Locator.Event, Location | Time | Talk, []> {
+function carryLocator(fx: Locator.Effect): Job<Locator.Event, Locator.Machine | Location | Time | Talk, []> {
   return match (fx) {
-    when { tag: "ReadFix", let ticket }: answer("fix", fixedAt(ticket), { type: "fixed", ticket, ok: false, taken: untimed, now: untimed });
+    when { tag: "ReadFix", let ticket }: run("fix", readFix(ticket));
     when { tag: "LookUp", let ticket }: answer("lookup", lookedAt(ticket), { type: "looked", ticket, ok: false, taken: untimed, now: untimed });
   }
 }
 
 // spec/app/assistant/context.md, "Turning Location for Alpha off, or Android taking the permission away, forgets every fix and answer, and leaves what was being read behind"; spec/app/settings/preferences.md, "Alpha shares the phone's location or the Browser page open with a chat turn, and changes Gmail or Calendar, only when the phone read that the owner allowed it"
-const allowing = following(Prefs.Machine, (prefs) => (prefs.document.read.status === "Loading" ? undefined : Prefs.allows(prefs, "AgentLocation")), Locator.Machine, (on): Locator.Event | undefined => (on === undefined ? undefined : { type: "toggle", on }))
+const allowing = following(Prefs.Machine, (prefs) => Prefs.allows(prefs, "AgentLocation"), Locator.Machine, (on): Locator.Event => ({ type: "toggle", on }))
 
 // spec/app/assistant/context.md, "Nothing is kept or read without the owner's leave"
 const forgetting = started(effect {
   const locator = try Locator.Machine
   const { board } = try Talk
-  try Stream.runForEach(locator.changes, (state) => sync(() => { if (state.gpsAt < 0) board.position = undefined }))
+  try Stream.runForEach(locator.changes, () => effect {
+    if ((try locator.get()).gpsAt < 0) board.forgetPosition()
+  })
 }, "forgetting the position")
 
 // spec/app/assistant/chats.md, "The newest list says which conversations there are, and a conversation no longer listed stops showing"
@@ -418,7 +419,7 @@ effect function paged(conversation: number, around: number, ticket: number): Cha
     if (known === undefined) return { type: "paged", ticket, ok: false, messages: 0 }
     const pivot = around > 0 ? board.messageId(around) : undefined
     const { messages } = try ask(Agent, HttpClientRequest.get(`/api/conversations/${encodeURIComponent(known.record.id)}/messages`, { urlParams: pivot === undefined ? {} : { around: pivot } }), page())
-    const next = new Map(board.snapshot().pages)
+    const next = new Map<number, ReadonlyArray<Line>>(board.snapshot().pages)
     next.set(ticket, messages.map((one) => ({
       id: one.id, mine: one.role === "user", text: one.text, ...(one.failureKind === undefined ? {} : { failure: failures[one.failureKind] ?? "OtherFailure" }),
     })))
@@ -428,7 +429,8 @@ effect function paged(conversation: number, around: number, ticket: number): Cha
   } catch () => ({ type: "paged", ticket, ok: false, messages: 0 })
 }
 
-effect function making(ticket: number, request: HttpClientRequest.HttpClientRequest): Chats.Event!!(Agent | Talk | Attempts | Chats.Machine) {
+/** A conversation the agent made, under the number Alpha gives it, or how its making ended where it was not. */
+effect function making(ticket: number, request: HttpClientRequest.HttpClientRequest): Chats.Event!!(Agent | Talk | Chats.Machine) {
   const chats = try (try Chats.Machine).get()
   return effect {
     const { board } = try Talk
@@ -604,6 +606,7 @@ const bound = started(effect {
   try Stream.runForEach(Stream.zipLatest(Stream.zipLatest(chats.changes, composer.changes), conversation.changes), effect ([[shown, writing], talking]) => {
     const here = writing.binding.conversation
     if (shown.chosen !== here) {
+      board.change({ reply: "", label: "", failure: undefined })
       const moving = here === 0 && shown.chosen > 0 && (writing.editor.text || Composer.attached(writing.editor) || writing.draft.sync !== "Kept")
       const bound = try contained(composer.send(moving ? { type: "adopt", conversation: shown.chosen } : { type: "bind", conversation: shown.chosen }), "binding the composer")
       if (bound && !moving && board.snapshot().files.length > 0) board.change({ files: [] })
@@ -682,7 +685,20 @@ function carryDock(fx: Dock.Effect): Job<Dock.Event, Shell, []> {
 }
 
 // spec/app/assistant/dock.md, "Ask Alpha put away forgets the height its sheet was left at"
-const resting = following(Shell, (shell) => shell.assistant === "Bar", Dock.Machine, (bar): Dock.Event | undefined => (bar ? { type: "putAway", now: untimed } : undefined))
+const rested = following(Shell, (shown) => shown.assistant === "Bar", Dock.Machine, (bar): Dock.Event | undefined => (bar ? { type: "putAway", now: untimed } : undefined))
+
+// spec/app/assistant/index.md, "Back closes a review, then search, then a quote or an edit, one at a time; with none of them open Back is the shell's"; spec/app/shell/layers.md, "A screen says when it has a step of its own to take Back, and when it has none left; its page stays usable"
+const steppingBack = started(effect {
+  const search = try Search.Machine
+  const composer = try Composer.Machine
+  const layers = try Layers
+  let offered = false
+  try Stream.runForEach(Stream.zipLatest(search.changes, composer.changes), effect ([finding, writing]) => {
+    const has = finding.open || writing.editor.quote > 0
+    if (has === offered) return
+    if (try contained(layers.send({ type: has ? "offerStep" : "withdrawStep", place: "assistant" }), "offering Back")) offered = has
+  })
+}, "offering Back")
 
 // spec/app/assistant/index.md, "Back closes a review, then search, then a quote or an edit, one at a time; with none of them open Back is the shell's"
 export const assistantBack = effect {
@@ -717,8 +733,7 @@ export const assisting = Layer.provideMerge(
     reacting(Reply, {}),
     reacting(Dock, { carry: carryDock }),
     reacting(Locator, { carry: carryLocator }),
-    stepping("assistant", Search.Machine, (search) => search.open),
-    reached, looked, left, opening, saving, bound, requested, submitted, resting, allowing, forgetting,
+    reached, looked, left, opening, saving, bound, requested, submitted, allowing, forgetting, rested, steppingBack,
   ),
   Layer.merge(Layer.fresh(turns), talk),
 )

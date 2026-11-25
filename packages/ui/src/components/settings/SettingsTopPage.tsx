@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { Code, Info, LayoutGrid, Mic, Settings, ShieldCheck, SlidersHorizontal, UserRound, RefreshCw } from "lucide-react";
+import { Code, Info, LayoutGrid, Mic, RefreshCw, Settings, Shield, UserRound } from "lucide-react";
 import { ListGroup } from "../ListGroup.tsx";
 import { StatusDot } from "../StatusDot.tsx";
 import { SettingsAndroidRow } from "./SettingsAndroidRow.tsx";
@@ -27,8 +27,8 @@ export type SettingsTopPageProps = SettingsAndroidProps &
   };
 
 const links: SettingsPageLink[] = [
-  { page: "general", title: "General", icon: <SlidersHorizontal /> },
-  { page: "privacy", title: "Privacy", icon: <ShieldCheck /> },
+  { page: "general", title: "General", icon: <Settings /> },
+  { page: "privacy", title: "Privacy", icon: <Shield /> },
   { page: "apps", title: "Apps", icon: <LayoutGrid /> },
   { page: "about", title: "About", icon: <Info /> },
 ];
@@ -50,12 +50,18 @@ export function SettingsTopPage({ developer = false, micMayBeOn = false, told, o
         </ListGroup>
       ) : null}
       <ListGroup>
-        <SettingsNavRow title="Account and plan" icon={<UserRound />} onOpen={onHandOver && (() => onHandOver("account-and-plan"))} {...at(1)} />
+        <SettingsNavRow title="Account" icon={<UserRound />} onOpen={onHandOver && (() => onHandOver("account-and-plan"))} {...at(1)} />
       </ListGroup>
-      <ListGroup>
-        <SettingsPageLinks links={links} first={2} onOpen={onOpen} place={place} onPlace={onPlace} />
-        {developer ? <SettingsNavRow title="Developer" icon={<Code />} onOpen={onOpen && (() => onOpen("developer"))} {...at(6)} /> : null}
-      </ListGroup>
+      {links.map((link, index) => (
+        <ListGroup key={link.page}>
+          <SettingsPageLinks links={[link]} first={2 + index} onOpen={onOpen} place={place} onPlace={onPlace} />
+        </ListGroup>
+      ))}
+      {developer ? (
+        <ListGroup>
+          <SettingsNavRow title="Developer" icon={<Code />} onOpen={onOpen && (() => onOpen("developer"))} {...at(6)} />
+        </ListGroup>
+      ) : null}
       <ListGroup>
         <SettingsAndroidRow target="android-home" title="Android settings" icon={<Settings />} {...android} {...at(7)} />
         <SettingsAndroidRow target="accounts-sync" title="Accounts and sync" icon={<RefreshCw />} {...android} {...at(8)} />
