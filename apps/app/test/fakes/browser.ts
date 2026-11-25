@@ -329,7 +329,10 @@ export function alphaBrowser(world: BrowserScene): Faked {
         draw();
         return Promise.resolve({ closed });
       },
-      clearSiteData: ({ url }) => Promise.resolve({ site: new URL(url).host }),
+      clearSiteData: ({ url }) => {
+        world.calls.push("clearSiteData");
+        return Promise.resolve({ site: new URL(url).host });
+      },
       readingSupport: () => Promise.resolve({ available: false }),
       reviewQuestion: () => Promise.reject(rejection("Reading unavailable")),
       reviewReading: () => Promise.reject(rejection("Reading unavailable")),

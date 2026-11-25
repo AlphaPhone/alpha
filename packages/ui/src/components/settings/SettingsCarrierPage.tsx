@@ -1,6 +1,5 @@
-import { Copy, SlidersHorizontal } from "lucide-react";
+import { SlidersHorizontal } from "lucide-react";
 import { Banner } from "../Banner.tsx";
-import { Button } from "../Button.tsx";
 import { ListGroup } from "../ListGroup.tsx";
 import { ListRow } from "../ListRow.tsx";
 import { Spinner } from "../Spinner.tsx";
@@ -78,12 +77,9 @@ export function SettingsCarrierPage({ fields, reading = false, failed = false, s
       {[...groups].map(([heading, rows]) => (
         <ListGroup key={heading ?? "identifiers"} heading={heading}>
           {rows.map(({ name, value, identifier, missing: why }) => (
-            <ListRow
-              key={name}
-              title={name}
-              detail={value ?? (why ? missing[why] : undefined)}
-              trailing={identifier && value !== undefined && onCopy && (copyable?.(value) ?? true) ? <Button size="icon" variant="ghost" aria-label={`Copy ${name}`} onClick={() => onCopy(value)}><Copy /></Button> : undefined}
-            />
+            identifier && value !== undefined && onCopy && (copyable?.(value) ?? true)
+              ? <SettingsNavRow key={name} title={name} aria-label={`Copy ${name}`} icon={<SlidersHorizontal />} detail={value} value="Copy" onOpen={() => onCopy(value)} />
+              : <SettingsFactRow key={name} title={name} reading={value !== undefined ? { word: "reported", value } : why ? { word: "reported", value: missing[why] } : undefined} />
           ))}
         </ListGroup>
       ))}

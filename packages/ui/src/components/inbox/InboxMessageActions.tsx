@@ -39,13 +39,13 @@ export function InboxMessageActions({ compact = false, unread = false, onReply, 
         <Menu>
           <MenuTrigger asChild><Button variant={compact ? "ghost" : "secondary"} size="icon" aria-label="More actions" className={compact ? "ml-auto size-11! min-w-11!" : "ml-auto"}><Ellipsis /></Button></MenuTrigger>
           <MenuContent className={compact ? "min-w-52" : undefined}>
-            {compact && onReply ? <MenuItem onSelect={onReply}><Reply />Reply</MenuItem> : null}
-            {onReplyAll ? <MenuItem onSelect={onReplyAll}><Reply />Reply all</MenuItem> : null}
-            {onForward ? <MenuItem onSelect={onForward}><Forward />Forward</MenuItem> : null}
+            {compact && onReply ? <MenuItem onSelect={onReply}><Reply className="size-5.5" />Reply</MenuItem> : null}
+            {onReplyAll ? <MenuItem onSelect={onReplyAll}><Reply className="size-5.5" />Reply all</MenuItem> : null}
+            {onForward ? <MenuItem onSelect={onForward}><Forward className="size-5.5" />Forward</MenuItem> : null}
             {compact && onAskAlpha ? <MenuItem onSelect={onAskAlpha}><Mark aria-hidden role="presentation" />Ask Alpha</MenuItem> : null}
-            {onToggleRead ? <MenuItem onSelect={onToggleRead}><Mail />{unread ? "Mark read" : "Mark unread"}</MenuItem> : null}
-            {onArchive ? <MenuItem onSelect={onArchive}><Archive />Archive</MenuItem> : null}
-            {onTrash ? <MenuItem onSelect={onTrash}><Trash2 />Move to Trash</MenuItem> : null}
+            {onToggleRead ? <MenuItem onSelect={onToggleRead}><Mail className="size-5.5" />{unread ? "Mark read" : "Mark unread"}</MenuItem> : null}
+            {onArchive ? <MenuItem onSelect={onArchive}><Archive className="size-5.5" />Archive</MenuItem> : null}
+            {onTrash ? <MenuItem onSelect={onTrash}><Trash2 className="size-5.5" />Move to Trash</MenuItem> : null}
           </MenuContent>
         </Menu>
       ) : null}

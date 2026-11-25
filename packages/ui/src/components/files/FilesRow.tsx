@@ -31,7 +31,7 @@ export function FilesRow({ name, detail, icon, count, layout = "row", size = "it
     return (
       <button type="button" aria-pressed={chosen} className={cn(focusRing, "relative flex w-full flex-col rounded-drawer-icon px-1.5 pt-1.5 pb-2.5 text-left active:bg-accent disabled:opacity-40 aria-pressed:bg-secondary", className)} {...props}>
         <span aria-hidden className="flex aspect-square items-center justify-center rounded-md bg-secondary text-foreground [&_svg]:size-7">{icon}</span>
-        <span className="mx-0.5 mt-1.5 line-clamp-2 text-meta leading-snug break-words">{name}</span>
+        <span className="mx-0.5 mt-1.5 line-clamp-2 text-meta leading-row break-words">{name}</span>
         {mark}
       </button>
     );

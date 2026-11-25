@@ -104,14 +104,14 @@ export function InboxListScreen({
         <Menu>
           <MenuTrigger asChild><Button variant="ghost" size="icon" aria-label="Mail options"><Ellipsis /></Button></MenuTrigger>
           <MenuContent className="min-w-52">
-            <MenuItem onSelect={onFinishSelection ?? onStartSelection}><Check />{onFinishSelection ? "Finish selection" : "Select emails"}</MenuItem>
+            <MenuItem onSelect={onFinishSelection ?? onStartSelection}><Check className="size-5.5" />{onFinishSelection ? "Finish selection" : "Select emails"}</MenuItem>
             {onFinishSelection ? (
               <>
-                <MenuItem disabled={!onChooseAll && !onClearSelection} onSelect={onChooseAll ?? onClearSelection}><Check />{onChooseAll || !onClearSelection ? "Select all shown" : "Deselect all"}</MenuItem>
+                <MenuItem disabled={!onChooseAll && !onClearSelection} onSelect={onChooseAll ?? onClearSelection}><Check className="size-5.5" />{onChooseAll || !onClearSelection ? "Select all shown" : "Deselect all"}</MenuItem>
                 {folder === "archived" || folder === "trashed"
-                  ? <MenuItem disabled={!onRestore} onSelect={onRestore}><Archive />{folder === "trashed" ? "Restore from Trash" : "Restore to Inbox"}</MenuItem>
-                  : <MenuItem disabled={!onArchive} onSelect={onArchive}><Archive />Archive</MenuItem>}
-                {folder === "trashed" ? null : <MenuItem disabled={!onTrash} onSelect={onTrash}><Trash2 />Move to Trash</MenuItem>}
+                  ? <MenuItem disabled={!onRestore} onSelect={onRestore}><Archive className="size-5.5" />{folder === "trashed" ? "Restore from Trash" : "Restore to Inbox"}</MenuItem>
+                  : <MenuItem disabled={!onArchive} onSelect={onArchive}><Archive className="size-5.5" />Archive</MenuItem>}
+                {folder === "trashed" ? null : <MenuItem disabled={!onTrash} onSelect={onTrash}><Trash2 className="size-5.5" />Move to Trash</MenuItem>}
               </>
             ) : null}
           </MenuContent>
