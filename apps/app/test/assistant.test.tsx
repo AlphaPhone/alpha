@@ -14,7 +14,7 @@ import { Machine as Shell } from "../gen/app__shell.effect.vibe";
 import type { Mount } from "../src/areas.ts";
 import assistant from "../src/assistant/index.tsx";
 import { untimed } from "../src/runtime/reactor.vibe";
-import { button, closeAll, drawn, fill, hardware, later, open, press, pressOnTop, seen, underAct, until } from "./alpha.tsx";
+import { button, chatAction, closeAll, drawn, fill, hardware, later, open, press, pressOnTop, seen, underAct, until } from "./alpha.tsx";
 import { draftKey } from "./fakes/ask.ts";
 import { scene } from "./fakes/scene.ts";
 
@@ -51,20 +51,6 @@ function onMessage(text: string, item: string) {
   });
 }
 
-/** Choose `item` from the chat actions beside the composer, as the owner does with the keyboard. */
-function chatAction(item: string) {
-  act(() => {
-    const trigger = document.querySelector("button[aria-label='Chat actions']");
-    if (!(trigger instanceof HTMLButtonElement)) throw new Error("no chat actions");
-    trigger.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
-  });
-  act(() => {
-    const chosen = [...document.querySelectorAll("[role=menuitem]")].find((one) => one.textContent === item);
-    if (!(chosen instanceof HTMLElement)) throw new Error(`no chat action ${item}`);
-    chosen.click();
-  });
-}
-
 const chatsSheet = () => [...document.querySelectorAll("[role='dialog']")].find((dialog) =>
   document.getElementById(dialog.getAttribute("aria-labelledby") ?? "")?.textContent === "Chats");
 
@@ -90,6 +76,12 @@ async function openAssistant(world: ReturnType<typeof scene>, ready = true) {
   await until(alpha, runtime, Composer, (s) => s.slot === "Open");
   if (ready) await until(alpha, runtime, Conversation, (s) => s.ready);
   return { alpha, runtime };
+}
+
+async function openAssistantWithPreferences(world: ReturnType<typeof scene>) {
+  const opening = await openAssistant(world);
+  await until(opening.alpha, opening.alpha.runtime, Prefs.Machine, (s) => s.document.read.status === "Loaded");
+  return opening;
 }
 
 /** The location carried on the observation of `metadata`, if any. */
@@ -184,8 +176,7 @@ describe.each([["a browser", false], ["a phone", true]])("in %s", (_where, phone
   it("Ask Alpha something, in a conversation made for it (spec/app/assistant/index.md, \"Story: Ask Alpha something\")", async () => {
     const world = { ...scene(), phone };
     // spec/app/assistant/composer.md, "The slot is opened when the composer is shown, and opened again after it could not be read"
-    const { alpha, runtime } = await openAssistant(world);
-    await until(alpha, alpha.runtime, Prefs.Machine, (s) => s.document.read.status === "Loaded");
+    const { alpha, runtime } = await openAssistantWithPreferences(world);
 
     // spec/app/assistant/composer.md, "A message written before its conversation existed moves into the new one, then its old slot is cleared on the exact revision read"
     world.ask.metadata = [];
@@ -326,6 +317,12 @@ describe.each([["a browser", false], ["a phone", true]])("in %s", (_where, phone
       expect(locationIn(world.ask.metadata?.at(-1))).toBe(undefined);
     }
 
+    // spec/app/assistant/reply.md, "A recognized tool block outside a fence becomes its card; inside a fence every line stays code": a tool call written out as text is hidden from Alpha's words, never from the owner's.
+    const written = "Open Maps <tool_call>\n<function=phone_use() {}</function>\n</tool_call>";
+    write(written);
+    await press("Send");
+    await until(alpha, runtime, Conversation, (s) => s.turn.send.id === (phone ? 8 : 5) && s.turn.reply === "Complete");
+    expect(lines().slice(-2)).toEqual([written, "You said: Open Maps"]);
     // spec/app/assistant/reply.md, "Prose is drawn with its Markdown: bold, italics, code, headings, lists and quotes; a link is a link only to an https address, and HTML reads as text"
     const marked = "**Limes** tonight?\n> Ask [Ana](https://ana.example/) <b>now</b>\n- [one](javascript:alert(1))";
     write(marked);
@@ -370,8 +367,7 @@ describe.each([["a browser", false], ["a phone", true]])("in %s", (_where, phone
   // spec/app/assistant/search.md, "Story: Search my conversations"; spec/app/assistant/chats.md, "Story: Open a message that search found"
   it("Hear a brief acknowledgment and still get the whole answer: the acknowledgment stays the label while tools run (spec/app/assistant/reply.md, \"Story: Hear a brief acknowledgment and still get the whole answer\")", async () => {
     const world = { ...scene(), phone };
-    const { alpha, runtime } = await openAssistant(world);
-    await until(alpha, alpha.runtime, Prefs.Machine, (s) => s.document.read.status === "Loaded");
+    const { alpha, runtime } = await openAssistantWithPreferences(world);
     // spec/app/assistant/reply.md, "The planning label shows until the first text, and provisional text is shown but never spoken": once taken, the acknowledgment stays the label through a later tool label and status, until text arrives.
     world.ask.acknowledgment = "Let me look";
     world.ask.holdAfterTools = true;
@@ -528,6 +524,24 @@ describe.each([["a browser", false], ["a phone", true]])("in %s", (_where, phone
     expect([(await shellState()).assistant, composerText(), lines()]).toEqual([detent, "Ideas for dinner", ["Dinner at eight?"]]);
     write("");
     await third.close();
+
+    // spec/app/assistant/chats.md, "Older or newer messages are read around a message of the conversation showing"
+    world.ask.kept.set("c8", { roomId: "r8", title: "Dinner", messages: Array.from({ length: 205 }, (_, at) => ({
+      id: `history-${at + 1}`, role: "user", text: `History ${at + 1}`,
+    })) });
+    const long = await open(world, mounts);
+    runtime = assistant.runtime(long.alpha);
+    await until(long.alpha, runtime, Chats, (s) => s.page.status === "Loaded");
+    await press("Open conversation");
+    await until(long.alpha, runtime, Shell, (s) => s.assistant === "Sheet");
+    expect([lines().length, lines()[0], lines().at(-1), button("Later")]).toEqual([200, "History 6", "History 205", undefined]);
+    await press("Earlier");
+    await until(long.alpha, runtime, Chats, (s) => s.around > 0 && s.page.status === "Loaded");
+    expect([lines()[0], lines().at(-1), button("Earlier")]).toEqual(["History 1", "History 106", undefined]);
+    await press("Later");
+    await until(long.alpha, runtime, Chats, (s) => s.page.status === "Loaded" && s.around > 1);
+    expect([lines()[0], lines().at(-1), Boolean(button("Earlier")), button("Later")]).toEqual(["History 6", "History 205", true, undefined]);
+    await long.close();
 
     world.ask.kept.clear();
     const fourth = await open(world, mounts);

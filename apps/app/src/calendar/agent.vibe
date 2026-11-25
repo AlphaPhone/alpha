@@ -1,10 +1,10 @@
 // spec/app/calendar/agent.md, "Story: Let the agent read my calendar"; spec/app/calendar/agent.md, "Story: Approve what the agent changes"; spec/app/calendar/agent.md, "Story: Know what the agent's change did"; spec/app/calendar/agent.md, "Story: Read where a Calendar request stands"
 import * as KeyValueStore from "effect/persistence/KeyValueStore"
 import * as Changes from "../../gen/app__calendar__agent.effect.vibe"
-import type { Actor, Effect as Out, Event, Query } from "../../gen/app__calendar__agent.effect.vibe"
+import type { Actor, Effect as Out, Event } from "../../gen/app__calendar__agent.effect.vibe"
 import { Agent } from "../platform/agent.vibe"
 import { ask, attemptedWith } from "../platform/remote.vibe"
-import { Attempts } from "../runtime/attempts.vibe"
+import { type Attempts } from "../runtime/attempts.vibe"
 import { type Job, answer, contained, following, reacting, run, started, together } from "../runtime/reactor.vibe"
 import * as View from "../../gen/app__calendar.effect.vibe"
 import { refreshes } from "../../gen/app__calendar__agent.ts"
@@ -41,7 +41,7 @@ function week(now: number) {
 }
 
 // spec/app/calendar/agent.md, "The agent reads events or free time directly, at any moment, and only the newest answer counts"
-effect function read(ticket: number, query: Query): Event!!(Agent | Time) {
+effect function read(ticket: number): Event!!(Agent | Time) {
   const window = week(try (try Time).now())
   const answered = ask(Agent, HttpClientRequest.get(`${base}/feed`, { urlParams: window }), Answered) catch () => undefined
   return { type: "feedAnswered", ticket, ok: answered !== undefined && answered.state !== "unavailable" }
@@ -88,7 +88,7 @@ const world: Actor = "World"
 
 function carry(fx: Out): Job<Event, Agent | Time, [by: Actor]> {
   return match (fx) {
-    when { tag: "Ask", let ticket, let query }: answer("ask", read(ticket, query), { type: "feedAnswered", ticket, ok: false }, world);
+    when { tag: "Ask", let ticket }: answer("ask", read(ticket), { type: "feedAnswered", ticket, ok: false }, world);
     when { tag: "Send" }: answer(`send ${fx.attempt}`, send(fx), { type: "sent", attempt: fx.attempt, confirmed: false, known: false }, world);
     when { tag: "Reject", let filing }: run(`reject ${filing}`, reject(filing), world);
     when { tag: "ReadBack", let ticket, let filing }: answer("read back", readBack(ticket, filing), { type: "readBackFailed", ticket }, world);

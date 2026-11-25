@@ -1,8 +1,8 @@
 // spec/app/reminders/index.md, "Creating, renaming and deleting custom lists protects the default Reminders list and keeps every item in a valid list"
+import type { ReminderListColor, ReminderListIcon, ReminderListRecord } from "@repo/launcher-records";
 import { Button, Dialog, DialogContent, DialogDescription, DialogTitle, Input, Label, cn } from "@repo/ui";
 import { useState } from "react";
 import type { DeleteMode } from "../../gen/app__reminders.ts";
-import type { ReminderListColor, ReminderListIcon, ReminderListRecord } from "./store.ts";
 import { LIST_COLORS, LIST_ICONS, ListIcon, listColorBadgeClass, listColorLabel, listIconLabel } from "./visuals.tsx";
 
 /** Dialog for creating or renaming a custom reminder list with color and icon choices. */

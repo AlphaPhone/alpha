@@ -1,5 +1,5 @@
 import type { ComponentProps, ReactNode } from "react";
-import { ChevronDown, ChevronLeft, Maximize2, Minimize2 } from "lucide-react";
+import { ChevronDown, ChevronLeft, Maximize2, Minimize2, X } from "lucide-react";
 import { cn, focusRing } from "../../lib/cn.ts";
 import { Button } from "../Button.tsx";
 import { Mark } from "../Mark.tsx";
@@ -16,8 +16,9 @@ export type AssistantChatHeaderProps = Omit<ComponentProps<"header">, "title" | 
   grabber?: ReactNode;
   /** Goes Home: the back mark and Alpha's mark at the start. */
   onHome?: () => void;
-  /** Lowers Ask Alpha a step. */
+  /** Lowers Ask Alpha or returns from the phone's assistant entry. */
   onClose?: () => void;
+  returnOnClose?: boolean;
   /** The conversation is full height. Its resize action shrinks it to the sheet. */
   expanded?: boolean;
   /** Expands the sheet, or shrinks the full screen back to the sheet. */
@@ -29,14 +30,14 @@ export type AssistantChatHeaderProps = Omit<ComponentProps<"header">, "title" | 
  * fill the screen or lower Ask Alpha.
  * @model spec/app/assistant/chats.md
  */
-export function AssistantChatHeader({ title, context, subtitle, grabber, onHome, onClose, expanded = false, onResize, className, ...props }: AssistantChatHeaderProps) {
+export function AssistantChatHeader({ title, context, subtitle, grabber, onHome, onClose, returnOnClose = false, expanded = false, onResize, className, ...props }: AssistantChatHeaderProps) {
   const told = context && (context.sensitive || context.selected) ? context : undefined;
   return (
     <header className={cn("grid shrink-0 grid-cols-[minmax(0,1fr)_2.75rem_minmax(0,1fr)] items-center px-3 pb-1", className)} {...props}>
       <div className="flex min-w-0 items-center gap-0.5">
         <button
           type="button"
-          aria-label="Go Home"
+          aria-label={returnOnClose ? "Back to the previous app" : "Go Home"}
           aria-description={title}
           disabled={!onHome}
           onClick={onHome}
@@ -55,7 +56,7 @@ export function AssistantChatHeader({ title, context, subtitle, grabber, onHome,
             {expanded ? <Minimize2 className="size-4.5" /> : <Maximize2 className="size-4.5" />}
           </Button>
         ) : null}
-        {onClose ? <Button variant="ghost" size="icon" aria-label="Minimize chat" className="hover:bg-transparent" onClick={onClose}><ChevronDown className="size-5" /></Button> : null}
+        {onClose ? <Button variant="ghost" size="icon" aria-label={returnOnClose ? "Close Ask Alpha" : "Minimize chat"} className="hover:bg-transparent" onClick={onClose}>{returnOnClose ? <X className="size-5" /> : <ChevronDown className="size-5" />}</Button> : null}
       </div>
     </header>
   );

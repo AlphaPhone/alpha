@@ -1,0 +1,113 @@
+// spec/app/notes/voiceDeletion.md, "Story: Finish deleting a voice note for good"; spec/app/notes/voiceDeletion.md, "A canonical pending receipt can be taken up in this run"
+import * as KeyValueStore from "effect/persistence/KeyValueStore"
+import * as Recovery from "../../gen/app__notes__voiceDeletion.effect.vibe"
+import { Machine as Notes } from "../../gen/app__notes.effect.vibe"
+import * as Trash from "../../gen/app__notes__trash.effect.vibe"
+import type { Actor } from "../../gen/app__notes__note.effect.vibe"
+import { Machine as Shell, showing } from "../../gen/app__shell.effect.vibe"
+import { Agent } from "../platform/agent.vibe"
+import { Device } from "../platform/device.vibe"
+import { NoteDevice } from "../platform/noteDevice.vibe"
+import { NoteStore } from "../platform/notes.vibe"
+import { ownerAt } from "../platform/owner.vibe"
+import { type Job, answer, reacting, run, started, together } from "../runtime/reactor.vibe"
+import { numberOf } from "./content.vibe"
+
+export { Recovery }
+
+const phone: Actor = "Phone"
+const marker = (owner: number, operation: string) => `alpha/notes-recording-cleanup/${owner}/${operation}`
+type Scope = Agent | NoteDevice | NoteStore | Recovery.Machine | KeyValueStore.KeyValueStore
+
+effect function finish(change: Extract<Recovery.Effect, { readonly tag: "FinishesCanonical" }>): Recovery.Event!!Scope {
+  const { owner, note, recording, operation, ticket, keep } = change
+  const unknown: Recovery.Event = { type: "planDone", ticket, ok: false, known: false }
+  const identity = ownerAt() catch () => ""
+  if (identity === "" || numberOf("owner", identity) !== owner) return unknown
+  const machine = try Recovery.Machine
+  const current = try machine.get()
+  if (!Recovery.canPlanDone(current, ticket, phone) || current.row.operation !== operation) return unknown
+  if (keep) {
+    const shelf = try KeyValueStore.KeyValueStore
+    const key = marker(owner, operation)
+    const kept = effect { try shelf.set(key, "held"); return (try shelf.get(key)) === "held" } catch () => false
+    return { type: "planDone", ticket, ok: kept, known: kept }
+  }
+  const pending = (try NoteStore).cleanup() catch () => undefined
+  const receipt = pending?.find((one) => one.operationId === operation && numberOf("note", one.noteId) === note
+    && numberOf("recording", one.audioId) === recording)
+  if (receipt === undefined || (ownerAt() catch () => "") !== identity) return unknown
+  const device = try NoteDevice
+  const ok = (try device.purge(receipt)) && (ownerAt() catch () => "") === identity
+  return { type: "planDone", ticket, ok, known: ok }
+}
+
+function carry(out: Recovery.Effect): Job<Recovery.Event, Scope, [Actor]> {
+  switch (out.tag) {
+    case "FinishesCanonical":
+      return answer("finish recording cleanup", finish(out), { type: "planDone", ticket: out.ticket, ok: false, known: false }, phone)
+    case "Defers":
+      return run("defer recording cleanup", effect {
+        if (out.operation === "") return
+        const shelf = try KeyValueStore.KeyValueStore
+        shelf.set(marker(out.owner, out.operation), "review") catch () => undefined
+      }, phone)
+    case "Inspects": {
+      const unread: Recovery.Event = { type: "inspected", ticket: out.ticket, ok: false, fate: "Altered", known: false,
+        owned: false, held: false, receipt: "Unreadable", shared: true }
+      return answer("inspect earlier recording", succeed(unread), unread, phone)
+    }
+    case "Settles": {
+      const lost: Recovery.Event = { type: "planDone", ticket: out.ticket, ok: false, known: false }
+      return answer("settle earlier recording", succeed(lost), lost, phone)
+    }
+  }
+}
+
+effect function take(owner: number): void!!Scope {
+  if (!(try NoteDevice).available || owner === 0) return
+  const identity = ownerAt() catch () => ""
+  if (identity === "" || numberOf("owner", identity) !== owner) return
+  const pending = (try NoteStore).cleanup() catch () => undefined
+  if (pending === undefined || (ownerAt() catch () => "") !== identity) return
+  const machine = try Recovery.Machine
+  const shelf = try KeyValueStore.KeyValueStore
+  let review: Recovery.Event | undefined
+  for (const receipt of pending) {
+    const kept = shelf.get(marker(owner, receipt.operationId)) catch () => "review"
+    if (kept === "held") continue
+    const event: Recovery.Event = { type: "foundCanonical", operation: receipt.operationId,
+      note: numberOf("note", receipt.noteId), recording: numberOf("recording", receipt.audioId), deferred: kept !== undefined }
+    if (kept === undefined) {
+      review = event
+      break
+    }
+    review ??= event
+  }
+  if (review === undefined || (try machine.get()).owner !== owner) return
+  const admitted = machine.send(review, phone) catch () => undefined
+  if (admitted !== undefined) try ignore(machine.send({ type: "claim", free: true }, phone))
+}
+
+const wake = started(effect {
+  const page = try Device
+  const shell = try Shell
+  const notes = try Notes
+  const trash = try Trash.Machine
+  const recovery = try Recovery.Machine
+  const life = (try Agent).life
+  const initial = Stream.fromEffect(effect { return life.status() catch () => undefined })
+  const connection = Stream.concat(initial, Stream.catch(life.changes, () => Stream.empty))
+  const epoch = Stream.changes(Stream.map(connection, (state) => state?.available === true && state.state === "running" ? state.epoch : 0))
+  const front = Stream.changes(Stream.concat(Stream.fromEffect(page.showing()), page.visible))
+  const shown = Stream.changes(Stream.map(shell.changes, (state) => showing(state, "Notes")))
+  const reads = Stream.changes(Stream.map(notes.changes, (state) => state.read.status === "Loaded" ? state.read.ticket : 0))
+  const idle = Stream.changes(Stream.map(trash.changes, (state) => !Trash.busy(state)))
+  const free = Stream.changes(Stream.map(recovery.changes, (state) => state.stage === "Free" ? state.owner : 0))
+  const ready = Stream.zipLatest(Stream.zipLatest(shown, front), Stream.zipLatest(reads, Stream.zipLatest(idle, free)))
+  try Stream.runForEach(Stream.zipLatest(ready, epoch), effect ([[[open, visible], [read, [quiet, owner]]], serving]) => {
+    if (open && visible && read > 0 && quiet && owner > 0 && serving > 0 && !Trash.busy(try trash.get())) try take(owner)
+  })
+}, "finish pending Notes recordings")
+
+export const voiceDeletion = together(reacting(Recovery, { open: [{ type: "restart" }, phone], carry }), wake)

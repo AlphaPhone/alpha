@@ -74,7 +74,7 @@ export function SettingsActivityPage({ connection, actions, reading = false, fai
         <ListGroup>
           <ListRow
             title="Phone actions"
-            aria-label={reading ? "Loading phone actions" : "Refresh actions"}
+            aria-label={reading ? "Loading phone actions" : "Refresh phone actions"}
             leading={<RotateCw />}
             trailing={reading ? <Spinner size="sm" label="Working" /> : undefined}
             onClick={reading ? undefined : onRefresh}

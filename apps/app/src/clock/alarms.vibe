@@ -1,4 +1,5 @@
 // spec/app/clock/alarms.md, "Story: Manage my alarms"; spec/app/clock/alarms.md, "Story: Ring, snooze, dismiss, and recover alarms"
+import type { ClockSound } from "@repo/launcher-records"
 import * as KeyValueStore from "effect/persistence/KeyValueStore"
 import * as Alarms from "../../gen/app__clock__alarms.effect.vibe"
 import type { Alarm, Event } from "../../gen/app__clock__alarms.effect.vibe"
@@ -6,7 +7,7 @@ import type * as Toasts from "../../gen/app__notices__toasts.effect.vibe"
 import { type Said, offer, withdraw } from "../notices/toasts.vibe"
 import { contained, due, reacting, started, together, untimed } from "../runtime/reactor.vibe"
 import { Time } from "../runtime/time.vibe"
-import { type AlarmSound, clockRecords } from "./records.ts"
+import { clockRecords } from "./records.ts"
 import { detectHour24, nextAlarmFireAt } from "./time.ts"
 
 const metaStoreKey = "alpha/app/clock/meta@1"
@@ -23,7 +24,7 @@ export interface AlarmDraft {
   readonly minute: number
   readonly daysMask: number
   readonly label: string
-  readonly sound: AlarmSound
+  readonly sound: ClockSound
   readonly snoozeMinutes: number
   readonly vibrate: boolean
 }

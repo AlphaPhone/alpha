@@ -1,6 +1,7 @@
 // spec/app/platform/index.md, "Story: Reach the phone's native capabilities"; spec/app/shell/index.md, "Phone and Messages exist only on an Alpha image, and Contacts only where that image admits it"
 package ai.alphacompute.alphaphone;
 
+import android.app.Activity;
 import android.app.ActivityManager;
 import android.app.role.RoleManager;
 import android.content.Intent;
@@ -28,6 +29,10 @@ public class MainActivity extends BridgeActivity {
  private static final String FRONT_START = "alpha.frontStart";
  private static final String FRONT_TOKEN = UUID.randomUUID().toString();
  private static final int MAX_UNANSWERED_FRONT_STARTS = 3;
+ private static final String TEXT_ASK = "ai.alphacompute.alphaphone.TEXT_ASK";
+ private static final String TEXT_ASK_NONCE = "alpha.textAsk";
+ private static int nextTextAsk;
+ private static OfferedAsk offeringAsk;
  private static WeakReference<MainActivity> livePage = new WeakReference<>(null);
  private static boolean handoffUnavailable;
  private static int unansweredFrontStarts;
@@ -36,6 +41,52 @@ public class MainActivity extends BridgeActivity {
  private boolean telephonyAdmitted;
  private final AtomicLong composerVisit = new AtomicLong();
  private InsetsState insets;
+ private TextAsk textAsk;
+ private int closedTextAsk;
+
+ private record TextAsk(int ticket, boolean returnExternally) {}
+ private record OfferedAsk(String nonce, TextAsk visit) {}
+
+ static void openTextAsk(Activity source) {
+  MainActivity live = livePage.get();
+  boolean alreadyVisible = live != null && !live.isFinishing() && !live.isDestroyed()
+    && live.getLifecycle().getCurrentState().isAtLeast(androidx.lifecycle.Lifecycle.State.STARTED);
+  int ticket = ++nextTextAsk;
+  if (ticket <= 0) return;
+  OfferedAsk offer = new OfferedAsk(UUID.randomUUID().toString(), new TextAsk(ticket, !alreadyVisible));
+  offeringAsk = offer;
+  Intent target = new Intent(source, MainActivity.class).setAction(TEXT_ASK)
+    .putExtra(TEXT_ASK_NONCE, offer.nonce()).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_NO_ANIMATION);
+  try { source.startActivity(target); }
+  catch (RuntimeException unavailable) { if (offeringAsk == offer) offeringAsk = null; }
+ }
+
+ private boolean receiveTextAsk(Intent intent) {
+  if (intent == null || !TEXT_ASK.equals(intent.getAction())) return false;
+  OfferedAsk offered = offeringAsk;
+  if (offered == null) return true;
+  try {
+   if (!offered.nonce().equals(intent.getStringExtra(TEXT_ASK_NONCE))) return true;
+   offeringAsk = null;
+   if (AlphaAssistActivity.unlocked(this) && textAsk == null) textAsk = offered.visit();
+   if (textAsk != null && getBridge() != null) getBridge().triggerWindowJSEvent("alpha-text-ask");
+  } catch (RuntimeException foreignExtras) { return true; }
+  return true;
+ }
+
+ int textAskTicket() {
+  return textAsk != null && AlphaAssistActivity.unlocked(this) && hasWindowFocus() && !isFinishing() && !isDestroyed()
+    ? textAsk.ticket() : 0;
+ }
+
+ boolean closeTextAsk(int ticket) {
+  if (ticket <= 0) return false;
+  if (textAsk == null) return ticket == closedTextAsk;
+  if (ticket != textAskTicket() || (textAsk.returnExternally() && !moveTaskToBack(true))) return false;
+  closedTextAsk = ticket;
+  textAsk = null;
+  return true;
+ }
 
  private record InsetsState(int top, int bottom, boolean keyboard) {
   void publish(WebView page) {
@@ -50,8 +101,10 @@ public class MainActivity extends BridgeActivity {
 
  @Override public void onCreate(Bundle state) {
   SplashScreen.installSplashScreen(this);
-  BillingReturn.capture(getIntent());
-  HostedDigestDelivery.get().capture(getIntent());
+  Intent incoming = getIntent();
+  BillingReturn.capture(incoming);
+  if (incoming == null || !TEXT_ASK.equals(incoming.getAction())) HostedDigestDelivery.get().capture(incoming);
+  InboxNoticeDelivery.get(this).capture(incoming);
   MainActivity live = livePage.get();
   boolean frontStart = isFrontStart(getIntent());
   if (live != null && live != this && !live.isFinishing() && !live.isDestroyed()
@@ -62,6 +115,7 @@ public class MainActivity extends BridgeActivity {
    handoffTo(live, frontStart);
    return;
   }
+  if (receiveTextAsk(incoming)) setIntent(new Intent(this, MainActivity.class));
   homeTask = state == null ? isHomeTaskStart(getIntent()) : state.getBoolean(HOME_TASK, isHomeTaskStart(getIntent()));
   if (isHome(getIntent())) SmsNoticeOpenRequest.clear();
   registerPlugin(ai.eliza.os.agent.AgentPlugin.class);
@@ -72,6 +126,7 @@ public class MainActivity extends BridgeActivity {
   registerPlugin(AlphaFilesPlugin.class);
   registerPlugin(AlphaSelectedDocumentsPlugin.class);
   registerPlugin(AlphaInboxAttachmentsPlugin.class);
+  registerPlugin(AlphaInboxNoticesPlugin.class);
   registerPlugin(AlphaNotesPlugin.class);
   registerPlugin(AlphaAssistantDraftPlugin.class);
   registerPlugin(AlphaNoteDocumentsPlugin.class);
@@ -168,6 +223,7 @@ public class MainActivity extends BridgeActivity {
   composerVisit.incrementAndGet();
   super.onResume();
   HostedDigestDelivery.get().refreshNotices();
+  InboxNoticeDelivery.get(this).changed();
   if (livePage.get() == this) unansweredFrontStarts = 0;
  }
 
@@ -186,6 +242,7 @@ public class MainActivity extends BridgeActivity {
   composerVisit.incrementAndGet();
   super.onWindowFocusChanged(focused);
   if (focused && getBridge() != null) {
+   InboxNoticeDelivery.get(this).changed();
    getBridge().getWebView().evaluateJavascript("window.dispatchEvent(new Event('focus'))", null);
   }
  }
@@ -213,16 +270,19 @@ public class MainActivity extends BridgeActivity {
  }
 
  @Override protected void onNewIntent(Intent intent) {
+  if (receiveTextAsk(intent)) return;
   if (BillingReturn.capture(intent) && getBridge() != null) {
    getBridge().getWebView().evaluateJavascript("window.dispatchEvent(new Event('alpha-billing-return'))", null);
   }
   HostedDigestDelivery.get().capture(intent);
+  InboxNoticeDelivery.get(this).capture(intent);
   if (isFrontStart(intent)) {
    if (!handingOff) unansweredFrontStarts = 0;
    return;
   }
   boolean home = isHome(intent);
   if (home) {
+   textAsk = null;
    composerVisit.incrementAndGet();
    SmsNoticeOpenRequest.clear();
   }

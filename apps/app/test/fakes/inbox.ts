@@ -1,6 +1,7 @@
 // spec/app/inbox/index.md, "Story: See my mail"
 import type { createCloudClient, GoogleStatus, MailCard, MailMessage, MailOperation, MailSearch } from "@elizaos/cloud";
-import type { OpaqueMailAttachment } from "@elizaos/plugin-inbox-client";
+import type { MailBackgroundSelection, MailBackgroundStatus, MailNoticeTap, OpaqueMailAttachment } from "@elizaos/plugin-inbox-client";
+import { type Faked, rejection } from "./phone.ts";
 import type { Route } from "./routes.ts";
 
 /** A message of the fake mailbox: eliza's card of it, and what reading it whole gives. */
@@ -51,7 +52,54 @@ export interface InboxScene {
   readonly attached: string[];
   readonly attachmentReads: string[];
   readonly savedAttachments: Map<string, string>;
+  loseSendReply?: boolean;
+  loseDraftReply?: boolean;
+  readonly receiptReads: string[];
+  notices?: InboxNoticeScene;
 }
+
+export interface InboxNoticeScene {
+  selection?: MailBackgroundSelection;
+  pending?: MailNoticeTap;
+  enter?: (tap: MailNoticeTap) => void;
+  readonly spent: string[];
+  readonly released: string[];
+}
+
+/** What the native Gmail worker gives Capacitor after it has checked the tapped notice. */
+export const alphaInboxNotices = (scene: InboxNoticeScene): Faked => (emit) => {
+  const status = (): MailBackgroundStatus => scene.selection
+    ? { status: "watching-new-mail", notificationsAllowed: true, grantId: scene.selection.grantId, lastSyncAt: 1 }
+    : { status: "disabled", notificationsAllowed: true };
+  scene.enter = (tap) => {
+    scene.pending = tap;
+    emit("changed", {});
+  };
+  return {
+    configure: async (selection: MailBackgroundSelection) => { scene.selection = selection; emit("changed", {}); return status(); },
+    withdraw: async ({ grantId }: { grantId?: string }) => {
+      if (grantId === undefined || scene.selection?.grantId === grantId) {
+        scene.selection = undefined;
+        scene.pending = undefined;
+        emit("changed", {});
+      }
+    },
+    status: async () => status(),
+    pending: async () => scene.pending ?? {},
+    consume: async ({ token }: { token: string }) => {
+      if (scene.pending?.token !== token) throw rejection("Gmail tap changed");
+      scene.spent.push(token);
+      scene.pending = undefined;
+    },
+    releaseQuestion: async ({ token }: { token: string }) => {
+      if (scene.pending?.question && scene.pending.token === token) {
+        scene.released.push(token);
+        scene.pending = undefined;
+      }
+    },
+    notificationSettings: async () => undefined,
+  };
+};
 
 /** Android's save picker in the fake phone, with its selected documents kept as exact copies. */
 export const alphaInboxAttachments = (scene: InboxScene) => () => ({
@@ -86,14 +134,15 @@ function today(hour: number, minute: number, days = 0): number {
 
 /** A file a message carries, as Gmail reads it. */
 const file = (partId: string, name: string, size: number): Stored["files"][number] => ({ partId, name, mimeType: "application/pdf", size, supported: true });
+const withFiles = (message: Stored, files: Stored["files"]): Stored => ({ ...message, card: { ...message.card, hasAttachments: true }, files });
 
 /** Develop's fixture mailbox: seven messages in Inbox, newest unread first, one in Spam and one sent. */
 export function inboxScene(): InboxScene {
   return {
     google: { email: "you@gmail.example", connection: "grant-1", capabilities: everything },
     mail: [
-      { ...letter(1, "Revised term sheet", ["INBOX", "UNREAD"], "Hi,\n\nAttached is the revised term sheet. We moved on the pro-rata and tightened the board language as discussed.\n\nNeed your eyes by Friday so we can get it to counsel. Happy to walk through it on our 4:30.\n\nJordan", "Jordan Park <jordan@northpoint.example>", today(13, 12)), files: [file("1", "Term sheet v3.pdf", 212_000)] },
-      { ...letter(2, "Notes for the 3:00 review", ["INBOX", "UNREAD"], "Notes for this afternoon attached. Pages 6 to 9 are the new onboarding flow, that's where I'd love your call.\n\nMaya", "Maya Chen <maya@lumen.example>", today(12, 48)), files: [file("1", "Design review notes.pdf", 1_100_000)] },
+      withFiles(letter(1, "Revised term sheet", ["INBOX", "UNREAD"], "Hi,\n\nAttached is the revised term sheet. We moved on the pro-rata and tightened the board language as discussed.\n\nNeed your eyes by Friday so we can get it to counsel. Happy to walk through it on our 4:30.\n\nJordan", "Jordan Park <jordan@northpoint.example>", today(13, 12)), [file("1", "Term sheet v3.pdf", 212_000)]),
+      withFiles(letter(2, "Notes for the 3:00 review", ["INBOX", "UNREAD"], "Notes for this afternoon attached. Pages 6 to 9 are the new onboarding flow, that's where I'd love your call.\n\nMaya", "Maya Chen <maya@lumen.example>", today(12, 48)), [file("1", "Design review notes.pdf", 1_100_000)]),
       letter(3, "Dinner Friday?", ["INBOX", "UNREAD"], "We're doing tacos at ours on Friday around 7. Bring nothing but yourself. Sam's coming too.\n\nL", "Lena Ruiz <lena@ruiz.example>", today(9, 30)),
       letter(4, "Standup notes", ["INBOX"], "Quick notes from standup:\n\n- Build 0.9 goes to beta testers Thursday\n- Redaction eval is green on all devices\n- Maya owns the onboarding copy\n\nSam", "Sam Okafor <sam@okafor.example>", today(9, 48)),
       letter(5, "Reservation confirmed · Oct 2", ["INBOX"], "Your reservation for 8 × H200 on October 2, 09:00 to 21:00 PT is confirmed.\n\nReference GR-20417.", "GPU Reserve <no-reply@gpureserve.example>", today(9, 5)),
@@ -102,7 +151,7 @@ export function inboxScene(): InboxScene {
       letter(8, "Win a prize", ["SPAM"], "About Win a prize", "Prize Desk <win@prize.example>", today(7, 0, 2)),
       letter(9, "Notes from me", ["SENT"], "About Notes from me", "You <you@gmail.example>", today(17, 0, 2)),
     ],
-    history: 500, offline: false, revoked: false, changes: [], attached: [], attachmentReads: [], savedAttachments: new Map(), drafts: new Map(),
+    history: 500, offline: false, revoked: false, changes: [], attached: [], attachmentReads: [], savedAttachments: new Map(), drafts: new Map(), receiptReads: [],
   };
 }
 
@@ -146,7 +195,8 @@ function operation(requestId: string, kind: MailOperation["receipt"]["kind"], st
 /** What a dispatched label change does to the mailbox. */
 function relabel(stored: Stored, kind: string) {
   const without = (label: string) => stored.card.labels.filter((one) => one !== label);
-  const labels = kind === "mark-read" ? without("UNREAD") : kind === "mark-unread" ? [...stored.card.labels, "UNREAD"]
+  const labels = kind === "mark-read" ? without("UNREAD") : kind === "mark-unread" ? [...without("UNREAD"), "UNREAD"]
+    : kind === "star" ? [...without("STARRED"), "STARRED"] : kind === "unstar" ? without("STARRED")
     : kind === "archive" ? without("INBOX") : kind === "trash" ? [...without("INBOX"), "TRASH"]
     : kind === "unarchive" ? [...without("INBOX"), "INBOX"] : kind === "untrash" ? [...without("TRASH").filter((one) => one !== "INBOX"), "INBOX"] : stored.card.labels;
   stored.card = { ...stored.card, labels, isUnread: labels.includes("UNREAD") };
@@ -154,6 +204,7 @@ function relabel(stored: Stored, kind: string) {
 
 export function inboxRoutes(scene: InboxScene): Route[] {
   const asked = new Map<string, Proposal>();
+  const receipts = new Map<string, MailOperation>();
   const forwarded = (source: Delivery["forwardAttachments"]) => {
     if (source === undefined) return [];
     const original = scene.mail.find(({ card }) => card.id === source.messageId && card.metadata.historyId === source.historyId);
@@ -184,7 +235,7 @@ export function inboxRoutes(scene: InboxScene): Route[] {
       const from = Number((url.searchParams.get("pageToken") ?? "p0").slice(1));
       const found = scene.mail.filter((stored) => matches(stored, url.searchParams.get("query") ?? ""));
       const page: MailSearch = {
-        messages: found.slice(from, from + size).map((stored) => stored.card), nextPageToken: from + size < found.length ? `p${from + size}` : null,
+        messages: found.slice(from, from + size).map((stored) => ({ ...stored.card, hasAttachments: stored.files.length > 0 })), nextPageToken: from + size < found.length ? `p${from + size}` : null,
         syncedAt: "2026-11-01T00:00:00Z", mailboxHistoryId: String(scene.history), supportsSpamTrash: true,
       };
       return Response.json(page);
@@ -267,8 +318,19 @@ export function inboxRoutes(scene: InboxScene): Route[] {
         scene.changes.push(`send ${to.join(",")} ${proposal.subject}`);
         scene.attached.push(...(proposal.attachments ?? []).map((file) => file.name), ...parts.map(({ file }) => file.name));
         scene.mail.push({ ...letter(scene.mail.length + 100, proposal.subject, ["SENT"], proposal.bodyText), card: { ...letter(scene.mail.length + 100, proposal.subject, ["SENT"]).card, to } });
-        return Response.json(operation(requestId, "send", "succeeded"));
+        const confirmed = operation(requestId, "send", "succeeded");
+        receipts.set(requestId, confirmed);
+        if (!scene.loseSendReply) return Response.json(confirmed);
+        scene.loseSendReply = false;
+        return Response.json(operation(requestId, "send", "outcome-unknown"));
       });
+    },
+    (request, url) => {
+      const requestId = new RegExp(`^${operations}/([^/]+)$`, "u").exec(url.pathname)?.[1];
+      if (request.method !== "GET" || requestId === undefined) return;
+      scene.receiptReads.push(requestId);
+      const found = url.searchParams.get("grantId") === scene.google?.connection ? receipts.get(requestId) : undefined;
+      return found ? Response.json(found) : refused(404, "not_found");
     },
     (request, url) => {
       const requestId = new RegExp(`^${operations}/([^/]+)/dispatch$`, "u").exec(url.pathname)?.[1];
@@ -276,11 +338,18 @@ export function inboxRoutes(scene: InboxScene): Route[] {
       if (request.method !== "POST" || requestId === undefined || (kind !== "draft-create" && kind !== "draft-replace" && kind !== "draft-delete")) return;
       return request.json().then(({ proposal }: { proposal: { to?: string[]; cc?: string[]; bcc?: string[]; subject?: string; bodyText?: string; mode?: string; draftId?: string; attachments?: unknown[] } }) => {
         scene.changes.push(`${kind} ${proposal.subject ?? proposal.draftId ?? ""}`);
-        const done = operation(requestId, kind, "succeeded");
         const draftId = proposal.draftId ?? `d${scene.changes.length}`;
+        const answer = (providerResult: Record<string, unknown>) => {
+          const done = operation(requestId, kind, "succeeded");
+          const confirmed = { ...done, receipt: { ...done.receipt, providerResult } };
+          receipts.set(requestId, confirmed);
+          if (!scene.loseDraftReply) return Response.json(confirmed);
+          scene.loseDraftReply = false;
+          return Response.json(operation(requestId, kind, "outcome-unknown"));
+        };
         if (kind === "draft-delete") {
           scene.drafts.delete(draftId);
-          return Response.json(done);
+          return answer({ draftId, deleted: true });
         }
         const messageId = `m${draftId}`;
         const providerDigest = (kind === "draft-create" ? "b" : "c").repeat(64);
@@ -288,7 +357,7 @@ export function inboxRoutes(scene: InboxScene): Route[] {
           id: draftId, messageId, providerDigest,
           content: { to: proposal.to ?? [], cc: proposal.cc ?? [], bcc: proposal.bcc ?? [], subject: proposal.subject ?? "", bodyText: proposal.bodyText ?? "", plainText: true, threaded: proposal.mode !== "compose", attachmentCount: proposal.attachments?.length ?? 0 },
         });
-        return Response.json({ ...done, receipt: { ...done.receipt, providerResult: { draftId, messageId, providerDigest } } });
+        return answer({ draftId, messageId, providerDigest });
       });
     },
     (request, url) => {

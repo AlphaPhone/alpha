@@ -1,8 +1,8 @@
 // spec/app/contacts/index.md, "Story: Browse my contacts"; spec/app/contacts/index.md, "Story: Give Alpha access to my contacts"; spec/app/contacts/index.md, "Story: Look at one contact"; spec/app/contacts/index.md, "Story: Add or change a contact"; spec/app/contacts/index.md, "Story: Delete a contact"; spec/app/contacts/index.md, "Story: Know what happened to my change"
-import { Alert, AppHeader, Avatar, Banner, Button, Chip, Input, ListGroup, ListRow, SearchField, Tabs, TabsContent, Textarea, cn } from "@repo/ui";
+import { Alert, AppHeader, AssistantChatActions, Avatar, Banner, Button, Chip, Input, ListGroup, ListRow, SearchField, Tabs, TabsContent, Textarea, cn } from "@repo/ui";
 import { Effect, type ManagedRuntime } from "effect";
 import { CONTACT_MAX_ADDRESS, CONTACT_MAX_NAME, CONTACT_MAX_NOTES, CONTACT_MAX_NUMBER, type ContactDetail } from "@elizaos/os-bridges";
-import { Check, ChevronDown, ChevronLeft, Mail, MessageSquare, Minus, Pencil, Phone as Call, Plus, Search, Trash2, X, createLucideIcon } from "lucide-react";
+import { Check, ChevronDown, ChevronLeft, MessageSquare, Minus, Pencil, Plus, Search, Trash2, X, createLucideIcon } from "lucide-react";
 import { useMemo, useRef } from "react";
 import type { Machine as ContactsMachine } from "../../gen/app__contacts.effect.vibe";
 import { accessNeeded, listFailed, listedEmpty, maxEach, noMatches, pending, refused, shown, uncertain } from "../../gen/app__contacts.ts";
@@ -13,6 +13,7 @@ import { useMachine as usePhone } from "../../gen/app__phone.react.ts";
 import type { Machine as VoicemailMachine } from "../../gen/app__phone__voicemail.effect.vibe";
 import { useMachine as useVoicemail } from "../../gen/app__phone__voicemail.react.ts";
 import { useMachine as useShell } from "../../gen/app__shell.react.ts";
+import { contactChatActionsId, searchFromContact } from "../assistant/contact-search.ts";
 import { returnPhoneTab } from "../phone/back.vibe";
 import { PhoneTabs } from "../phone/PhoneTabs.tsx";
 import { callerInitials, displayNumber } from "../phone/words.ts";
@@ -105,6 +106,7 @@ export function Contacts({ runtime, alpha }: ContactsProps & { alpha: Alpha }) {
     <AppHeader title="Contacts" className={cn("mt-0.5 shrink-0", filtered && "[&>h1]:flex-none")} leading={<AppBack alpha={alpha} />}>{chip}{actions}</AppHeader>
   );
   const allow = "my-6 min-h-13 rounded-full bg-foreground px-7 text-lg font-semibold text-background hover:bg-foreground/90 active:bg-foreground/80";
+  const route = shell.state?.route;
   const content = (
     <section aria-label="Contacts" className="flex flex-1 flex-col">
       {!state.opened && !phoneTabs && header}
@@ -119,17 +121,13 @@ export function Contacts({ runtime, alpha }: ContactsProps & { alpha: Alpha }) {
       )}
       {state.opened ? <Card runtime={runtime} safe={safe} /> : (
         <>
-          {searching && <div className="flex gap-2 px-4" role="group" aria-label="Show">
-            <Button size="sm" variant={state.chip === "Everyone" ? "primary" : "outline"} aria-pressed={state.chip === "Everyone"} onClick={() => void (can({ type: "pick", chip: "Everyone" }) && send({ type: "pick", chip: "Everyone" }))}>All</Button>
-            <Button size="sm" variant={state.chip === "Favourites" ? "primary" : "outline"} aria-pressed={state.chip === "Favourites"} onClick={() => void (can({ type: "pick", chip: "Favourites" }) && send({ type: "pick", chip: "Favourites" }))}>Favourites</Button>
-          </div>}
           {can({ type: "loadMore" }) && <div className="flex shrink-0 justify-center"><Button variant="secondary" size="icon" aria-label="More contacts" onClick={() => void send({ type: "loadMore" })}><ChevronDown className="size-5" /></Button></div>}
           {state.list.status === "Loading" && state.rows === 0 && <p role="status" className="sr-only">Reading contacts</p>}
           {listFailed(state) && <Banner variant="destructive" action={can({ type: "refresh" }) && <Button size="sm" variant="outline" onClick={() => void send({ type: "refresh" })}>Retry</Button>}>Contacts could not be read</Banner>}
           {(listedEmpty(state) || noMatches(state)) && <p role="status" className="flex min-h-45 items-center justify-center p-6 text-center text-base leading-normal text-muted-foreground">{noMatches(state) ? "No contacts found" : "No contacts yet"}</p>}
           {state.rows > 0 && (
             <ListGroup aria-label="Contacts" surface="plain">
-              {!state.sought && favourites.length > 0 && <div className="flex touch-pan-x gap-1.5 overflow-x-auto px-3.5 pt-2 pb-2.5" role="group" aria-label="Favourites">
+              {!searching && !state.sought && favourites.length > 0 && <div className="flex touch-pan-x gap-1.5 overflow-x-auto px-3.5 pt-2 pb-2.5" role="group" aria-label="Favourites">
                 {favourites.map((row) => (
                   <Button key={row.id} variant="ghost" aria-label={`Open favourite ${row.name}`} className="h-auto w-18 flex-col gap-1.75 rounded-tile p-0" disabled={!can({ type: "openContact", contact: row.id })} onClick={() => open(row.id)}>
                     <Avatar name={row.name} className="size-15 text-lg font-bold" />
@@ -151,6 +149,7 @@ export function Contacts({ runtime, alpha }: ContactsProps & { alpha: Alpha }) {
       )}
       <CommsBar runtime={runtime}
         person={state.opened && held.card !== undefined ? { label: held.card.displayName, initials: callerInitials(held.card.displayName) } : undefined}
+        actions={state.opened && shown(state) && route !== undefined ? <AssistantChatActions placement="contact" triggerId={contactChatActionsId(route, state.contact)} onSearch={() => searchFromContact(alpha, route, state.contact)} /> : undefined}
         filter={!state.opened && can({ type: "search", typed: true }) ? { value: filtered ? "" : query, onChange: (typed) => (typed !== "" || !filtered) && search(typed), maxLength: 128 } : undefined} />
     </section>
   );
@@ -164,6 +163,8 @@ export function Contacts({ runtime, alpha }: ContactsProps & { alpha: Alpha }) {
 }
 
 /** The notes glyph of a contact's card, as Alpha's phone draws it. */
+const PhoneGlyph = createLucideIcon({ name: "ContactPhone", node: [["path", { key: "phone", d: "M4 4h4l2 5-2 2 5 5 2-2 5 2v4C10 22 2 14 4 4" }]] });
+const MailGlyph = createLucideIcon({ name: "ContactMail", node: [["path", { key: "mail", d: "M3 5h18v14H3zM3 5l9 7 9-7" }]] });
 const NotesGlyph = createLucideIcon({ name: "NotesGlyph", node: [["path", { key: "page", d: "M4 3h16v18H4zM8 7h8M8 11h8M8 15h5" }]] });
 
 /** One contact as the phone holds it now; compact while Alpha's sheet is open over it. */
@@ -220,18 +221,18 @@ function Card({ runtime, safe }: ContactsProps & { safe: boolean }) {
           </>}
           {card.phoneNumbers.length > 0 && <div className={cn("flex", compact ? "flex-wrap justify-start gap-2.5 pr-4 pb-2 pl-15" : "flex-wrap justify-center gap-3.5 px-4 pt-5.5 pb-1")} role="group" aria-label="Contact actions">
             {[...new Set(card.phoneNumbers.map(({ number }) => number))].flatMap((number) => [
-              can({ type: "reach", how: "Call" }) && <Button key={`call ${number}`} variant="secondary" size="icon" className={compact ? "size-11" : "size-15"} aria-label={`Call ${number}`} onClick={() => reach("Call", number)}><Call /></Button>,
+              can({ type: "reach", how: "Call" }) && <Button key={`call ${number}`} variant="secondary" size="icon" className={compact ? "size-11" : "size-15"} aria-label={`Call ${number}`} onClick={() => reach("Call", number)}><PhoneGlyph /></Button>,
               can({ type: "reach", how: "Message" }) && <Button key={`message ${number}`} variant="secondary" size="icon" className={compact ? "size-11" : "size-15"} aria-label={`Message ${number}`} onClick={() => reach("Message", number)}><MessageSquare /></Button>,
             ])}
           </div>}
           <div aria-label="Contact details" role="group" className="mx-4 mt-9 rounded-group bg-secondary py-1.5 select-text">
             {card.phoneNumbers.map((phone, at) => (
               // eslint-disable-next-line @eslint-react/no-array-index-key -- The phone can return a duplicated number at distinct positions.
-              <div key={`${phone.number}-${at}`} className={field}><Call aria-hidden className="size-5 shrink-0 text-muted-foreground" /><span className={value}>{displayNumber(phone.number)}</span><span className={sub}>{phoneLabel(phone.type)}</span></div>
+              <div key={`${phone.number}-${at}`} className={field}><PhoneGlyph aria-hidden className="size-5 shrink-0 text-muted-foreground" /><span className={value}>{displayNumber(phone.number)}</span><span className={sub}>{phoneLabel(phone.type)}</span></div>
             ))}
             {card.emailAddresses.map((email, at) => (
               // eslint-disable-next-line @eslint-react/no-array-index-key -- The phone can return a duplicated address at distinct positions.
-              <div key={`${email.address}-${at}`} className={field}><Mail aria-hidden className="size-5 shrink-0 text-muted-foreground" /><span className={value}>{email.address}</span><span className={sub}>{emailLabel(email.type)}</span></div>
+              <div key={`${email.address}-${at}`} className={field}><MailGlyph aria-hidden className="size-5 shrink-0 text-muted-foreground" /><span className={value}>{email.address}</span><span className={sub}>{emailLabel(email.type)}</span></div>
             ))}
             {card.notes && <div className={field}><NotesGlyph aria-hidden className="size-5 shrink-0 text-muted-foreground" /><span className={cn(value, "whitespace-pre-wrap")}>{card.notes}</span><span className={sub}>Notes</span></div>}
           </div>
@@ -276,7 +277,7 @@ function ContactValues({ kind, values, base, locked, change }: ContactValuesProp
         return (
           // eslint-disable-next-line @eslint-react/no-array-index-key -- The editor keeps focus on the slot when its value changes.
           <div key={at} className="flex min-h-14 items-center gap-2 rounded-tile bg-secondary pr-1.5 pl-4.5">
-            <Input className="h-14 border-0 bg-transparent px-0 text-lg shadow-none focus-visible:outline-none" type={phone ? "tel" : "email"} autoComplete="off" disabled={locked}
+            <Input className="h-14.5 border-0 bg-transparent px-0.5 py-px text-lg shadow-none focus-visible:outline-none" type={phone ? "tel" : "email"} autoComplete="off" disabled={locked}
               maxLength={phone ? CONTACT_MAX_NUMBER : CONTACT_MAX_ADDRESS} aria-label={label} placeholder={label} value={value}
               onChange={(event) => change(values.map((one, index) => index === at ? event.target.value : one))} />
             {(value !== "" || values.length > 1) && <Button type="button" size="icon" variant="ghost" disabled={locked} className="text-muted-foreground"
@@ -306,7 +307,7 @@ function Editor({ runtime }: ContactsProps) {
     void send(event);
   };
   const title = state.form === "Adding" ? "New contact" : "Edit contact";
-  const add = "min-h-11 flex-[1_1_140px] rounded-lg p-2 text-sm font-normal text-muted-foreground";
+  const add = "h-11 flex-[1_1_140px] justify-start rounded-lg p-2 text-sm font-normal text-muted-foreground";
   return (
     <div className="flex min-h-0 flex-1 flex-col">
       <form aria-label={title} noValidate className="flex min-h-0 flex-1 flex-col pt-[max(3.25rem,calc(env(safe-area-inset-top)+0.5rem))]" onSubmit={(event) => {
@@ -326,7 +327,7 @@ function Editor({ runtime }: ContactsProps) {
           <Input className={nameField} aria-label="Last name" placeholder="Last name" autoCapitalize="words" autoComplete="off" maxLength={CONTACT_MAX_NAME} disabled={locked} value={form.familyName} onChange={(event) => update({ ...form, familyName: event.target.value }, "Names")} />
           <ContactValues kind="Phone" locked={locked} base={editBase} values={form.phones} change={(phones) => update({ ...form, phones }, "Phones")} />
           <ContactValues kind="Email" locked={locked} base={editBase} values={form.emails} change={(emails) => update({ ...form, emails }, "Emails")} />
-          {state.sheet.notable ? <Textarea className="min-h-24 rounded-tile border-0 bg-secondary px-4.5 py-3.5 text-lg leading-normal focus-visible:outline-none" aria-label="Notes" placeholder="Notes" maxLength={CONTACT_MAX_NOTES} disabled={locked} value={form.notes} onChange={(event) => update({ ...form, notes: event.target.value }, "Notes")} />
+          {state.sheet.notable ? <Textarea className="field-sizing-fixed min-h-24 resize-y rounded-tile border-0 bg-secondary px-4.5 py-3.5 text-lg leading-normal focus-visible:outline-none" rows={3} autoComplete="off" aria-label="Notes" placeholder="Notes" maxLength={CONTACT_MAX_NOTES} disabled={locked} value={form.notes} onChange={(event) => update({ ...form, notes: event.target.value }, "Notes")} />
             : <p data-alpha-contact-notes-unavailable="" className="rounded-tile bg-secondary px-4.5 py-3.5 text-base leading-normal text-muted-foreground">Notes can’t be edited here. Use Android Contacts to change them.</p>}
           <div className="flex flex-wrap gap-2.5">
             {form.phones.length < maxEach && <Button type="button" variant="ghost" disabled={locked} className={add} onClick={() => update({ ...form, phones: [...form.phones, ""] }, "Phones")}>Add another phone</Button>}

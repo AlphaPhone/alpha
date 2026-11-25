@@ -15,6 +15,8 @@ export interface VoiceScene {
   permission: "granted" | "denied" | "prompt";
   grantOnRequest: boolean;
   localReady: boolean;
+  recognitionReady?: boolean;
+  recognitionProbeGate?: () => Promise<void>;
   liveCaptureAvailable: boolean;
   nativeTransport: boolean;
   transcriptionFailures: number;
@@ -56,9 +58,12 @@ export interface VoiceScene {
   readonly speakerGainRequests: boolean[];
   readonly speakerMutedAtPlayback: boolean[];
   readonly spoken: SpokenSentence[];
+  readonly spokenPages: { readonly readingToken: string; readonly ownerId: string; readonly sessionId: string; readonly requestId: string }[];
+  holdPagePlayback?: boolean;
   activeMicSession: string | undefined;
   emitLocal?: (event: string, data: unknown) => void;
   emitCloud?: (event: CloudStreamEvent) => void;
+  startupSignIn?: Partial<Pick<ElizaSignInPlugin, "startEmail" | "startPhone" | "startGoogle" | "verify" | "resend" | "cancel" | "sendFactorCode" | "status">>;
   /** The phone's sign-in settling on the account whose key is `credentialId` now, as `ElizaSignInPlugin.java` tells it. */
   signedInHere?: () => void;
 }
@@ -99,6 +104,7 @@ export function voiceScene(): VoiceScene {
     speakerGainRequests: [],
     speakerMutedAtPlayback: [],
     spoken: [],
+    spokenPages: [],
     played: [],
     activeMicSession: undefined,
   };
@@ -108,6 +114,7 @@ export function alphaVoiceCloud(voice: VoiceScene): Faked {
   return (emit) => {
     voice.emitLocal = emit;
     let playbackSeq = 0;
+    let pagePlaybackId: string | undefined;
     const texts = new Map<string, string>();
     let recordingSeq = 0;
     let activeRecording: string | undefined;
@@ -130,10 +137,11 @@ export function alphaVoiceCloud(voice: VoiceScene): Faked {
         voice.warmSpeechOutputCalls += 1;
         return Promise.resolve({ warmed: true });
       },
-      localSpeechStatus: async () => {
+      localSpeechStatus: async ({ ttsOnly }: { ttsOnly?: boolean }) => {
         voice.localSpeechStatusCalls += 1;
         if (voice.probeGate !== undefined) await voice.probeGate();
-        return { ready: voice.localReady, ttsReady: voice.localReady };
+        if (!ttsOnly) await voice.recognitionProbeGate?.();
+        return { ready: ttsOnly ? voice.localReady : (voice.recognitionReady ?? voice.localReady), ttsReady: voice.localReady };
       },
       holdSpeechEngine: () => {
         voice.holdEngineCalls += 1;
@@ -167,10 +175,17 @@ export function alphaVoiceCloud(voice: VoiceScene): Faked {
         await voice.synthesisGate?.();
         return { playbackId };
       },
+      synthesizeLocalBrowserReading: (reading: VoiceScene["spokenPages"][number]) => {
+        const { readingToken, ownerId, sessionId, requestId } = reading;
+        voice.spokenPages.push({ readingToken, ownerId, sessionId, requestId });
+        pagePlaybackId = `pb-${++playbackSeq}`;
+        return Promise.resolve({ execution: "device", playbackId: pagePlaybackId });
+      },
       play: ({ playbackId }: { playbackId: string }) => {
         voice.speakerMutedAtPlayback.push(voice.speakerMuted);
         voice.played.push({ text: texts.get(playbackId) ?? "", at: Date.now() });
         const hold = voice.playbackHold;
+        if (voice.holdPagePlayback && playbackId === pagePlaybackId) return Promise.resolve({});
         if (hold === undefined) emit("playbackEnded", { playbackId });
         else void hold().then(() => emit("playbackEnded", { playbackId }));
         return Promise.resolve({});
@@ -295,6 +310,7 @@ export function elizaSignIn(voice: VoiceScene, signedIn: () => boolean, lease: M
           ? { signedIn: true, userId: "user-1", organizationId: "org-1", credentialId: voice.credentialId, keyExpiresAt: 4_102_444_800_000 }
           : { signedIn: false },
       }),
+      ...voice.startupSignIn,
     };
   });
 }

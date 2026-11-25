@@ -40,7 +40,11 @@ owner" or "the user". The model also described example.com from memory when
 asked to summarize "this page" on Home, where no page goes with the turn, so
 the prompt tells the agent that it sees a web page only in the latest
 message's Browser page, and with none to say that no page is open rather
-than describe one. Asked "Go home." from Notes, with Home declared as a
+than describe one. With a page that had little text, the model filled in
+what it knew of the site, calling example.com a reserved placeholder domain
+when the page said nothing of it, so the prompt also tells the agent to answer
+from the page's title, address and text alone and to say when a page has
+little on it. Asked "Go home." from Notes, with Home declared as a
 view, the model most often planned directions to a saved Home place or asked
 which was meant, where the old phone went to its home screen. So the prompt
 tells the agent that the phone's screens are its views and Home is the home
@@ -163,6 +167,43 @@ pure def sameNames(a: List[str], b: List[str]): bool =
 pure def refusedActions(registered: List[str]): List[str] = registered.select(a => not(allowedActions.includes(a)))
 pure def policyAdmitted(allowed: List[str], refused: List[str], loaded: List[str], product: str, registered: List[str]): bool =
   sameNames(allowed, allowedActions) and sameNames(refused, refusedActions(registered)) and loaded == loadList and product == productPluginName
+```
+
+### A reminder with a due time keeps one scheduled task, and the task follows what the owner does to the reminder
+
+The old phone fired a reminder through the agent's own scheduler, so a
+dated, open reminder in Alpha's Reminders keeps one owner-visible
+personal-assistant task, and a reminder the owner asks for in chat is that
+task. Whatever the owner does to the reminder, in the Reminders app or in
+chat, its task follows: deleting it, or taking its due time away, dismisses
+the task, so it never comes back; completing it completes the task, and
+completing a repeating one moves the task to its next due time; reopening
+it reopens the task; and a new due time moves the task, so it
+fires only at the new time. A reviewed Calendar reopen with No alert keeps the
+due time and dismisses its prior task without starting another. Other dated,
+open reminders with no task get one, and a reminder whose task the
+owner dismisses in chat is deleted.
+A task that cannot follow, such as one completed too long ago to reopen,
+is dismissed and the reminder gets a new one. A change whose task stays
+where it was is reported as not done, so neither the owner nor the model
+is told it worked, and a reminder whose task stays is not deleted.
+
+```quint
+type TaskStep = MakeTask | DismissTask | CompleteTask | ReopenTask | MoveTask
+pure def taskSteps(kept: bool, dated: bool, completed: bool, wasCompleted: bool, retimed: bool, hasTask: bool): List[TaskStep] =
+  if (not(hasTask)) (if (kept and dated and not(completed)) List(MakeTask) else List())
+  else if (not(kept) or not(dated)) List(DismissTask)
+  else if (completed) (if (wasCompleted) List() else List(CompleteTask))
+  else if (wasCompleted) (if (retimed) List(ReopenTask, MoveTask) else List(ReopenTask))
+  else if (retimed) List(MoveTask)
+  else List()
+pure def lawADeletedReminderLeavesNoTask(dated: bool, completed: bool, wasCompleted: bool, retimed: bool): bool =
+  taskSteps(false, dated, completed, wasCompleted, retimed, true) == List(DismissTask)
+pure def lawAMovedOpenReminderFiresOnlyAtItsNewTime(wasCompleted: bool): bool =
+  taskSteps(true, true, false, wasCompleted, true, true).includes(MoveTask)
+    and not(taskSteps(true, true, false, wasCompleted, true, true).includes(MakeTask))
+pure def lawCompletingCompletesTheTask(retimed: bool): bool =
+  taskSteps(true, true, true, false, retimed, true) == List(CompleteTask)
 ```
 
 ### A proposed device step goes through eliza's device-action module, and the phone says which steps it takes
@@ -331,7 +372,6 @@ pure val pageRoutes: List[Route] = List(
   { method: Post, path: "/api/notes/interact", stream: false },
   { method: Post, path: "/api/notes/trash/erase", stream: false },
   { method: Get, path: "/api/notes/trash/recordings", stream: false },
-  { method: Post, path: "/api/notes/trash/recordings/complete", stream: false },
   { method: Get, path: "/api/workflow/status", stream: false },
   { method: Get, path: "/api/workflow/hosted/loops", stream: false },
   { method: Post, path: "/api/workflow/hosted/loops", stream: false },
@@ -342,6 +382,7 @@ pure val pageRoutes: List[Route] = List(
   { method: Get, path: "/api/workflow/workflows/{id}/executions", stream: false },
   { method: Get, path: "/api/workflow/executions/{id}", stream: false },
   { method: Get, path: "/api/workflow/executions/{id}/approvals", stream: false },
+  { method: Get, path: "/api/workflow/executions/{id}/phone-review", stream: false },
   { method: Post, path: "/api/workflow/executions/{id}/approvals/{nodeId}/{iteration}", stream: false },
   { method: Post, path: "/api/workflow/workflows/{id}/activate", stream: false },
   { method: Post, path: "/api/workflow/workflows/{id}/deactivate", stream: false },
@@ -424,7 +465,22 @@ pure val nativeDigestRoutes: List[Route] = List(
   { method: Get, path: "/api/workflow/hosted/results", stream: false },
   { method: Post, path: nativeDigestAck, stream: false },
 )
-pure val nativeRoutes = nativeSpeechRoutes.concat(nativeDigestRoutes)
+```
+
+### Only the phone's native channel can verify that a reviewed recording was erased
+
+Android names the pending receipt and its serving owner, agent and epoch.
+Only the native route can ask to prepare that exact receipt or confirm it
+from the phone's durable removal evidence. In either phase the resident
+requires its current reserved receipt with no saved references. The Notes
+service clears the receipt only after receiving its proof in that request.
+The page can read pending receipts. It cannot complete them.
+
+```quint
+pure val nativeNotesCleanup = "/api/alpha-runtime/notes-recording-cleanup"
+pure val nativeNotesCleanupLimit = 2048
+pure val nativeRecordingRoutes: List[Route] = List({ method: Post, path: nativeNotesCleanup, stream: false })
+pure val nativeRoutes = nativeSpeechRoutes.concat(nativeDigestRoutes).concat(nativeRecordingRoutes)
 pure def nativeRoutesAdmitted(listed: List[Route]): bool =
   listed.length() == nativeRoutes.length() and listed.every(route => nativeRoutes.includes(route))
     and nativeRoutes.every(route => listed.includes(route))
@@ -433,21 +489,34 @@ pure def nativeRoutesAdmitted(listed: List[Route]): bool =
 ### The page names the query values each gated route can receive
 
 Search sends its words, offset and twenty results per page. A conversation
-can request the window around a message. Home's agenda and Calendar send
-the start and end of their window, and Calendar may send a time zone.
+can request the window around a message. To see if an older message exists
+beyond that window, Ask Alpha requests one row before the first message's
+timestamp and identifier. The timestamp is a canonical nonnegative
+decimal, the cursor identifier has the same form as the window's message
+identifier, and when supplied the history limit is one. The latest and
+centered pages can omit the limit. Home's agenda and Calendar send the
+start and end of their window, and Calendar may send a time zone.
 Calendar asks for up to fifty pending approvals. Workflows lists the owner's
 visible tasks, reads a result page for its
 client, and supplies the exact reviewed revision when removing a trigger.
+Reminders says, when it deletes a custom list, whether the list's reminders
+move to the default list or go with it.
 
 ```quint
 type QueryKind = AnyQuery | PatternQuery | FixedQuery
 type RequestQuery = { method: Method, path: str, key: str, kind: QueryKind, value: str, example: str }
 
+pure val historyQueryPath = "/api/conversations/{id}/messages"
+pure val historyMessageId = "[A-Za-z0-9_-]{1,128}"
+
 pure val pageQueries: List[RequestQuery] = List(
   { method: Get, path: "/api/conversations/messages/search", key: "q", kind: AnyQuery, value: "", example: "project notes + plan" },
   { method: Get, path: "/api/conversations/messages/search", key: "offset", kind: PatternQuery, value: "0|[1-9][0-9]{0,15}", example: "0" },
   { method: Get, path: "/api/conversations/messages/search", key: "limit", kind: FixedQuery, value: "20", example: "20" },
-  { method: Get, path: "/api/conversations/{id}/messages", key: "around", kind: PatternQuery, value: "[A-Za-z0-9_-]{1,128}", example: "test-message" },
+  { method: Get, path: historyQueryPath, key: "around", kind: PatternQuery, value: historyMessageId, example: "test-message" },
+  { method: Get, path: historyQueryPath, key: "before", kind: PatternQuery, value: "0|[1-9][0-9]{0,15}", example: "1795478400000" },
+  { method: Get, path: historyQueryPath, key: "beforeId", kind: PatternQuery, value: historyMessageId, example: "test-message" },
+  { method: Get, path: historyQueryPath, key: "limit", kind: PatternQuery, value: "1", example: "1" },
   { method: Get, path: "/api/lifeops/calendar/feed", key: "timeMin", kind: AnyQuery, value: "", example: "2026-11-24T00:00:00.000Z" },
   { method: Get, path: "/api/lifeops/calendar/feed", key: "timeMax", kind: AnyQuery, value: "", example: "2026-11-25T00:00:00.000Z" },
   { method: Get, path: "/api/lifeops/calendar/feed", key: "timeZone", kind: AnyQuery, value: "", example: "America/New_York" },
@@ -456,6 +525,7 @@ pure val pageQueries: List[RequestQuery] = List(
   { method: Get, path: "/api/scheduled-tasks", key: "ownerVisibleOnly", kind: FixedQuery, value: "1", example: "1" },
   { method: Get, path: "/api/workflow/hosted/results", key: "clientId", kind: PatternQuery, value: "[A-Za-z0-9][A-Za-z0-9_-]{0,127}", example: "build-probe" },
   { method: Delete, path: "/api/triggers/{id}", key: "expectedRevision", kind: PatternQuery, value: "[1-9][0-9]{0,15}", example: "1" },
+  { method: Delete, path: "/api/alpha/reminders/lists/{id}", key: "mode", kind: PatternQuery, value: "reassign|cascade", example: "reassign" },
 )
 pure val nativeDigestQueries = pageQueries.select(q => q.method == Get and q.path == "/api/workflow/hosted/results")
 ```
@@ -585,15 +655,13 @@ eliza's plugins find some device services by name, which Alpha's entry is to
 supply (`spec/agent/plugins/profile.md` in eliza, "Host runtime services
 register with storage before every listed plugin, never under an agent
 service's name, and a pinned worker is the workflow-worker service"):
-`workflow-device`, the enrolled phone's steps inside a workflow;
-`workflow-native-digests`, the reviewed native sources of a digest; and
-Maps' saved places, kept under the agent's state. The pack's entry is
-written inside the pinned clone and cannot carry Alpha's code until eliza's
-bundle builder admits a package outside its source root, so these stay
-unavailable: a workflow step on the device, a native digest source and a
-saved place each answer that the phone cannot do it yet.
+`workflow-device` uses eliza's workflow offer and waits for the receipt from
+the exact enrolled phone. The pack keeps Android's decision, claim and
+receipt protocol even when a run is already approved in Workflows. Native
+digest sources and Maps' saved places still answer that the phone cannot
+do them.
 
 ```quint
-pure val awaitingHostServices: Set[str] = Set("workflow-device", "workflow-native-digests", "maps-saved-places")
+pure val awaitingHostServices: Set[str] = Set("workflow-native-digests", "maps-saved-places")
 pure def serviceAvailable(service: str): bool = not(awaitingHostServices.contains(service))
 ```

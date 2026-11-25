@@ -2,6 +2,7 @@
 import type { TelephonyCallLogEntry } from "@elizaos/os-bridges";
 import { Alert, Button, Chip, Input, Spinner, Tabs, TabsContent, cn, focusRing } from "@repo/ui";
 import { Effect, type ManagedRuntime } from "effect";
+import { Phone as Handset } from "lucide-react";
 import { memo, useCallback, useRef } from "react";
 import { Machine as PhoneMachine, type Tab } from "../../gen/app__phone.effect.vibe";
 import { dialable, historyFailed, logNeeded, noCalls, noMatchingCalls } from "../../gen/app__phone.ts";
@@ -18,7 +19,7 @@ import { CommsBar, type CommsServices } from "./CommsBar.tsx";
 import { CallAvatar } from "./CallAvatar.tsx";
 import { PhoneTabs } from "./PhoneTabs.tsx";
 import { VoicemailTab } from "./VoicemailTab.tsx";
-import { CallIn, CallOut, EraseDigit, Handset } from "./icons.ts";
+import { CallIn, CallOut, EraseDigit } from "./icons.ts";
 
 export interface PhoneProps {
   runtime: ManagedRuntime.ManagedRuntime<PhoneMachine | VoicemailMachine | Dialer | Voicemails | Player | CommsServices | Time, unknown>;
@@ -130,8 +131,6 @@ export function Phone({ runtime, alpha }: PhoneProps) {
           {state.chip === "MissedCalls" && can({ type: "pickChip", chip: "AllCalls" }) && <div className="px-4 pb-2"><Chip clearLabel="Show all calls" onClear={() => void send({ type: "pickChip", chip: "AllCalls" })}>Missed</Chip></div>}
           {rows.length > 0 && <div role="group" aria-label="Recent calls">{rows.map((row, index) => <RecentRow key={row.id} row={row}
             now={now} enabled={can({ type: "dialRecent", number: row.number })} call={dialRecent} first={index === 0} />)}</div>}
-          {state.chip === "AllCalls" && state.recents.status === "Loaded" && rows.length > 0 && can({ type: "pickChip", chip: "MissedCalls" }) &&
-            <div className="px-4 py-2"><Button variant="ghost" size="sm" className="text-muted-foreground" onClick={() => void send({ type: "pickChip", chip: "MissedCalls" })}>Missed</Button></div>}
         </TabsContent>
         <TabsContent value="Keypad" data-alpha-phone-keypad="" className="min-h-0 flex-1 overflow-y-auto rounded-none">
           <div className="mx-auto flex min-h-full max-w-103 flex-col pb-3.5 [--dial-key:clamp(3rem,18.93vw,4.875rem)]">

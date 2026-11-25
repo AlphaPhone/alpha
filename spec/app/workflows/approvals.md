@@ -28,24 +28,28 @@ import attempt as A from "../../kit/attempt"
 type Approval = NoApproval | Waiting | Deciding | Approved | Denied | NotApplied | Unsettled | Expired
 type Opening = NotOpening | Checking | Ready | Gone | OtherAgent | Lapsed | Unreadable
 type Answer = Unanswered | WasApproved | WasDenied
+type DevicePhase = DeviceIdle | DeviceShown | DeviceSending | DeviceAnswered | DeviceUnconfirmed
+type DeviceReview = { number: int, runNumber: int, until: int, phase: DevicePhase }
 type Effect =
   | WantNotice({ runId: int, digest: int })
   | DropNotice({ runId: int, digest: int })
   | Decide({ id: int, runId: int, digest: int, approve: bool })
   | ReadApproval({ ticket: int, runId: int, digest: int, owner: int })
+  | SendDeviceDecision({ number: int, runNumber: int, approved: bool })
 type Approvals = {
   owner: int, runId: int, digest: int, expires: int, now: int,
   approval: Approval, approve: bool, decision: A::Attempt, decided: int,
   asking: V::Review, noticed: bool, sheet: bool,
-  check: R::Read, opened: Opening, tapRun: int, tapDigest: int,
+  check: R::Read, opened: Opening, tapRun: int, tapDigest: int, device: DeviceReview,
 }
 type Moved = { state: Approvals, out: List[Effect] }
 
+pure val noDevice: DeviceReview = { number: 0, runNumber: 0, until: 0, phase: DeviceIdle }
 pure val initial: Approvals = {
   owner: 0, runId: 0, digest: 0, expires: 0, now: 0,
   approval: NoApproval, approve: false, decision: A::plan(0), decided: 0,
   asking: V::unreviewed, noticed: false, sheet: false,
-  check: R::unread, opened: NotOpening, tapRun: 0, tapDigest: 0,
+  check: R::unread, opened: NotOpening, tapRun: 0, tapDigest: 0, device: noDevice,
 }
 
 pure val ticketValues = Set(1, 2, 3)
@@ -271,7 +275,7 @@ pure def sometimesALostDecisionIsSettled(a: Approvals): bool = a.decision.outcom
 
 ```quint
 pure def restart(a: Approvals): Approvals = {
-  ...a, sheet: false, asking: V::dismiss(a.asking), check: { ...a.check, status: R::Idle }, opened: NotOpening,
+  ...a, sheet: false, asking: V::dismiss(a.asking), check: { ...a.check, status: R::Idle }, opened: NotOpening, device: { ...noDevice, number: a.device.number },
   decision: if (a.decision.outcome == A::Sent) A::conclude(a.decision, false, false) else a.decision,
   approval: if (a.approval == Deciding) Unsettled else a.approval,
 }
@@ -284,6 +288,7 @@ pure def canOwnerChanged(a: Approvals, owner: int): bool = owner != a.owner and 
 
 pure def ownerChanged(a: Approvals, owner: int): Moved =
   { state: { ...initial, owner: owner, now: a.now, check: { ...a.check, status: R::Idle },
+      device: { ...noDevice, number: a.device.number },
       decision: if (a.decision.outcome == A::Sent) A::conclude(a.decision, false, false) else a.decision },
     out: drop(a) }
 ```
@@ -292,4 +297,66 @@ pure def ownerChanged(a: Approvals, owner: int): Moved =
 
 ```quint
 pure def sometimesADecisionIsUnsettled(a: Approvals): bool = a.approval == Unsettled and not(a.sheet)
+```
+
+
+## Story: Confirm exactly what this workflow does on my phone
+
+> As the owner, I want the run to show the selected notes or calendar
+> scope, or the exact new note, before I let the enrolled phone do it.
+
+### The run shows one exact device offer until it changes or expires
+
+The agent first records its workflow approval. The device's own proposal
+then names the run, version, step and saved specification. Alpha checks
+these and the current enrollment against the agent's run before showing
+the device review. Only a tap while the same review is visible may send a
+decision. Leaving that run or changing owners dismisses it.
+
+```quint
+pure val numberValues = Set(1, 2, 3)
+pure val runNumberValues = Set(1, 2)
+pure val untilValues = Set(1, 4, 9)
+
+pure def canPresentDevice(a: Approvals, number: int, runNumber: int, until: int, now: int): bool =
+  a.owner > 0 and runNumber > 0 and number > a.device.number and until > now and now >= a.now and
+    a.device.phase != DeviceSending
+
+pure def presentDevice(a: Approvals, number: int, runNumber: int, until: int, now: int): Approvals =
+  { ...a, now: now, device: { number: number, runNumber: runNumber, until: until, phase: DeviceShown } }
+
+pure def canRetireDevice(a: Approvals, number: int): bool = a.device.phase != DeviceIdle and a.device.number == number
+
+pure def retireDevice(a: Approvals, number: int): Approvals =
+  { ...a, device: { ...noDevice, number: number } }
+
+pure def canDecideDevice(a: Approvals, number: int, runNumber: int, approved: bool, now: int): bool =
+  a.device.number == number and a.device.runNumber == runNumber and a.device.phase == DeviceShown and
+    now >= a.now and now < a.device.until
+
+pure def decideDevice(a: Approvals, number: int, runNumber: int, approved: bool, now: int): Moved =
+  { state: { ...a, now: now, device: { ...a.device, phase: DeviceSending } },
+    out: List(SendDeviceDecision({ number: number, runNumber: runNumber, approved: approved })) }
+
+pure def canDeviceAnswered(a: Approvals, number: int): bool =
+  a.device.number == number and a.device.phase == DeviceSending
+
+pure def deviceAnswered(a: Approvals, number: int, acknowledged: bool): Approvals =
+  { ...a, device: { ...a.device, phase: if (acknowledged) DeviceAnswered else DeviceUnconfirmed } }
+
+pure def canExpireDevice(a: Approvals, number: int, now: int): bool =
+  a.device.number == number and a.device.phase == DeviceShown and now >= a.device.until and now >= a.now
+
+pure def expireDevice(a: Approvals, number: int, now: int): Approvals =
+  { ...retireDevice(a, number), now: now }
+
+pure def alwaysDeviceReviewNamesItsRun(a: Approvals): bool =
+  a.device.phase != DeviceIdle implies (a.device.number > 0 and a.device.runNumber > 0 and a.owner > 0)
+
+pure def stepDeviceSendUsesTheExactReview(before: Approvals, via: str, after: Approvals): bool =
+  (after.device.phase == DeviceSending and before.device.phase != DeviceSending) implies
+    (via == "decideDevice" and before.device.phase == DeviceShown and before.device.number == after.device.number and
+      before.device.runNumber == after.device.runNumber and after.now < before.device.until)
+
+pure def sometimesADeviceDecisionIsAnswered(a: Approvals): bool = a.device.phase == DeviceAnswered
 ```

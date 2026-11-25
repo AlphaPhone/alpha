@@ -296,13 +296,18 @@ The shell reads the reply a line at a time and knows whether it is inside
 a fence of three or more backticks or tildes. A recognized block is Maps
 markup, a map choice, a workflow block, a Calendar approval of exactly its
 approve and reject lines, or a calendar or email result. Any other bracket
-tag is never a card: outside a fence it reads as text. A form block and a
-broken workflow block are hidden, never shown raw; nothing else is dropped,
-so the prose after a card is kept.
+tag is never a card: outside a fence it reads as text. A form block, a
+broken workflow block and a tool call the model wrote out as text in prose
+(from `<tool_call>` or `<function=` to its closing tag, never inside inline
+code) are hidden, never shown,
+copied or spoken raw. A call still open is held back while the reply
+streams, like any unclosed block, and a finished reply keeps it as text.
+Nothing else is dropped, so the prose after a card is kept, and a reply
+left with nothing to show leaves no bubble.
 
 ```quint
 type CardOf = MapsCard | CalendarCard | EmailCard | WorkflowCard | ChoiceCard | BrowserCard
-type Line = Prose | FenceMark | Block({ card: CardOf }) | UnknownTag | FormBlock | BrokenBlock
+type Line = Prose | FenceMark | Block({ card: CardOf }) | UnknownTag | FormBlock | BrokenBlock | ToolCallBlock
 type Piece = Text | Code | Card({ card: CardOf }) | Hidden
 
 pure def piece(line: Line, fenced: bool): Piece =
@@ -311,12 +316,13 @@ pure def piece(line: Line, fenced: bool): Piece =
     | Block(b) => Card({ card: b.card })
     | FormBlock => Hidden
     | BrokenBlock => Hidden
+    | ToolCallBlock => Hidden
     | _ => Text
   }
 
 pure def isCard(p: Piece): bool = match p { | Card(c) => true | _ => false }
 
-pure val lineValues = Set(Prose, FenceMark, UnknownTag, FormBlock, BrokenBlock, Block({ card: MapsCard }), Block({ card: CalendarCard }))
+pure val lineValues = Set(Prose, FenceMark, UnknownTag, FormBlock, BrokenBlock, ToolCallBlock, Block({ card: MapsCard }), Block({ card: CalendarCard }))
 
 pure def lawAFencedLineIsNeverACard(line: Line): bool = not(isCard(piece(line, true)))
 
@@ -325,6 +331,8 @@ pure def lawAnUnknownTagIsNeverACard(fenced: bool): bool = not(isCard(piece(Unkn
 pure def lawABlockOutsideAFenceIsItsCard(card: CardOf): bool = piece(Block({ card: card }), false) == Card({ card: card })
 
 pure def lawProseIsAlwaysShown(fenced: bool): bool = piece(Prose, fenced) != Hidden
+
+pure def lawAWrittenToolCallIsNeverShown(line: Line): bool = line == ToolCallBlock implies piece(line, false) == Hidden
 ```
 
 ### At most five reply notices of at most 500 units reach the conversation, and only the latest system notice stays, until a real reply follows it

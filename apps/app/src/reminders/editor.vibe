@@ -1,17 +1,11 @@
 // spec/app/reminders/editor.md, "Story: Create and edit a reminder safely"
+import type { ReminderItemRecord, ReminderPriority, ReminderRecurrence, ReminderSubtaskRecord } from "@repo/launcher-records"
 import * as KeyValueStore from "effect/persistence/KeyValueStore"
 import * as Editor from "../../gen/app__reminders__editor.effect.vibe"
 import { contained, reacting, started, together } from "../runtime/reactor.vibe"
 import { externalStore } from "../runtime/store.ts"
-import type { ReminderRecurrence } from "./recurrence.ts"
 import { civilDayFromString } from "./recurrence.ts"
-import {
-  DEFAULT_LIST_ID,
-  type ReminderItemRecord,
-  type ReminderPriority,
-  type ReminderSubtaskRecord,
-  remindersStore,
-} from "./store.ts"
+import { DEFAULT_LIST_ID, remindersStore } from "./store.ts"
 
 /** Editable field payload kept beside the verified Editor draft machine. */
 export interface ReminderEditorFields {

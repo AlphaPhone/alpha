@@ -1,15 +1,17 @@
 // spec/app/home/cards.md, "Story: The agenda card"; spec/app/home/cards.md, "Story: The other cards"; spec/app/home/cards.md, "Story: Open my day from a card"
 import { HomeAgendaCard, type HomeAgendaItem, type HomeAgendaNext, HomeBriefCard, HomeCallsCard, HomeMailCard, HomeWorkflowsCard } from "@repo/ui";
-import type { ManagedRuntime } from "effect";
+import { Effect, type ManagedRuntime } from "effect";
 import { type ReactNode, useSyncExternalStore } from "react";
 import * as Cards from "../../gen/app__home__cards.ts";
 import type { Machine } from "../../gen/app__home__cards.effect.vibe";
 import { useMachine } from "../../gen/app__home__cards.react.ts";
+import { dayStart } from "../calendar/time.ts";
 import { openCalls, openUnread } from "../phone/reports.vibe";
 import { shortWhen } from "../phone/words.ts";
 import type { Resident } from "../runtime/area.tsx";
 import { useTimed } from "../runtime/react.ts";
 import { untimed } from "../runtime/reactor.vibe";
+import { Time } from "../runtime/time.vibe";
 import { fromAreas, named, others } from "./cards.vibe";
 
 const where: Readonly<Record<Cards.Origin, string>> = { PhoneCalendar: "Calendar", AgentCalendar: "Alpha", Reminder: "Reminder" };
@@ -42,7 +44,7 @@ function following(item: Cards.Item, now: number): HomeAgendaNext {
 /** Why the lead item may not be up to date: its calendar's last read failed, or it was read on an earlier day. */
 function readLineOf(state: Cards.Cards, item: Cards.Item, now: number): string {
   const feeds = item.origin === "PhoneCalendar" ? [state.calendar] : item.origin === "AgentCalendar" ? [state.agent] : [state.calendar, state.agent];
-  const behind = feeds.find((feed) => feed.source !== "Unanswered" && (feed.source !== "Ready" || feed.day < Cards.dayOf(now)));
+  const behind = feeds.find((feed) => feed.source !== "Unanswered" && (feed.source !== "Ready" || feed.day < state.today));
   if (behind === undefined) return "";
   return behind.source === "Ready" ? `Not updated since ${whenLabel(behind.since, now)}` : "Open Calendar to retry";
 }
@@ -57,7 +59,8 @@ export function useDayCards(runtime: ManagedRuntime.ManagedRuntime<Machine | Res
   const given = useSyncExternalStore(fromAreas.subscribe, fromAreas.snapshot, fromAreas.snapshot);
   if (!state) return [];
   const told = others(given, image);
-  const now = Math.max(state.calendar.since, state.agent.since, state.today * Cards.dayLength);
+  const now = Math.max(state.calendar.since, state.agent.since, dayStart(state.today));
+  const latest = Math.max(now, runtime.runSync(Effect.flatMap(Time, (time) => time.latest())));
   const open = (kind: Cards.Kind) => ({
     disabled: !can({ type: "openCard", kind, now }),
     onClick: () => void send({ type: "openCard", kind, now: untimed }),
@@ -88,18 +91,18 @@ export function useDayCards(runtime: ManagedRuntime.ManagedRuntime<Machine | Res
     },
     MessagesCard: () => (
       <HomeCallsCard key="messages" app="Messages" aria-label={`Open Messages, ${given.waiting.messages || told.messages.length} unread`}
-        summary={String(given.waiting.messages || told.messages.length)} status={given.waiting.messagesAt > 0 ? shortWhen(given.waiting.messagesAt, now) : ""}
+        summary={String(given.waiting.messages || told.messages.length)} status={given.waiting.messagesAt > 0 ? shortWhen(given.waiting.messagesAt, latest) : ""}
         lines={told.messages} {...open("MessagesCard")} onClick={() => void runtime.runPromise(openUnread())} />
     ),
     PhoneCard: () => (
       <HomeCallsCard key="phone" app="Phone" aria-label={given.waiting.phoneSaid ? `Open Phone, ${given.waiting.phoneSaid}` : "Open Phone"}
-        summary={String(given.waiting.phone || told.phone.length)} status={given.waiting.phoneAt > 0 ? shortWhen(given.waiting.phoneAt, now) : ""}
+        summary={String(given.waiting.phone || told.phone.length)} status={given.waiting.phoneAt > 0 ? shortWhen(given.waiting.phoneAt, latest) : ""}
         lines={told.phone} {...open("PhoneCard")} onClick={() => void runtime.runPromise(openCalls())} />
     ),
     MailCard: () => <HomeMailCard key="mail" aria-label={`Open Inbox, ${told.mail.unread}${given.mailMore ? "+" : ""} unread`} unread={told.mail.unread} more={given.mailMore} lines={told.mail.rows} status={given.mailStatus || (Cards.mailCard(told.mail) === "NotUpdated" ? "Not up to date" : "")} {...open("MailCard")} />,
     BriefOfToday: () => given.brief && (
       <HomeBriefCard key="brief" outcome={given.brief.outcome} summary={given.brief.summary}
-        status={`Your agent · ${given.brief.outcome === "Finished" ? "Ran" : "Failed"} ${whenLabel(given.brief.at, now)}`} {...open("BriefOfToday")} />
+        status={`Your agent · ${given.brief.outcome === "Finished" ? "Ran" : "Failed"} ${whenLabel(given.brief.at, latest)}`} {...open("BriefOfToday")} />
     ),
     WorkflowsCard: () => <HomeWorkflowsCard key="workflows" lines={Cards.flowRows(told.flows)} more={Cards.moreFlows(told.flows)} freshness={told.flows.freshness} {...open("WorkflowsCard")} />,
   };

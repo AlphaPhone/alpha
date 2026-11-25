@@ -1,13 +1,13 @@
-// spec/app/inbox/index.md, "Story: See my mail"; spec/app/inbox/message.md, "Story: Read a message"; spec/app/inbox/marking.md, "Story: Mark mail read or unread"; spec/app/inbox/sending.md, "Story: Archive or trash mail, with Undo"
+// spec/app/inbox/index.md, "Story: See my mail"; spec/app/inbox/index.md, "Only a card with a positive attachment hint shows a paperclip"; spec/app/inbox/message.md, "Story: Read a message"; spec/app/inbox/marking.md, "Story: Mark mail read or unread"; spec/app/inbox/sending.md, "Story: Archive or trash mail, with Undo"
 import {
-  Alert, Button, InboxAccountList, InboxAttachmentReview, InboxChangeReview, InboxChangeToast, type InboxFolder,
+  Alert, Button, InboxAccountList, type InboxAttachmentPreview, InboxAttachmentReview, InboxChangeReview, InboxChangeToast, type InboxFolder,
   InboxLinkReview, type InboxListRow, InboxListScreen, type InboxListStateKind, InboxMessageScreen, type InboxMessageFaultKind, InboxNotice,
   type InboxNoticeKind, ToastRegion,
 } from "@repo/ui";
 import type { MailCard, MailMessage } from "@elizaos/cloud";
 import { Effect, type ManagedRuntime } from "effect";
 import { type ReactNode, useCallback, useMemo, useState } from "react";
-import { type Folder, type Mailbox, accessOf, readable, searchableIn } from "../../gen/app__inbox.ts";
+import { type Folder, type Mailbox, accessOf, readable, searchableIn, showsAttachment } from "../../gen/app__inbox.ts";
 import type { Machine as List } from "../../gen/app__inbox.effect.vibe";
 import { useMachine as useList } from "../../gen/app__inbox.react.ts";
 import type { Machine as Marks } from "../../gen/app__inbox__marking.effect.vibe";
@@ -17,7 +17,7 @@ import type { Machine as Shown } from "../../gen/app__inbox__message.effect.vibe
 import { imagesLoad } from "../../gen/app__inbox__message.ts";
 import { useMachine as useMessage } from "../../gen/app__inbox__message.react.ts";
 import type { Machine as Changes } from "../../gen/app__inbox__sending.effect.vibe";
-import { type Kind, type Operations, aside } from "../../gen/app__inbox__sending.ts";
+import { type Kind, type Operations, aside, checksSelection } from "../../gen/app__inbox__sending.ts";
 import { useMachine as useChanges } from "../../gen/app__inbox__sending.react.ts";
 import type { Machine as Writing } from "../../gen/app__inbox__drafts.effect.vibe";
 import { useMachine as useDrafts } from "../../gen/app__inbox__drafts.react.ts";
@@ -33,7 +33,7 @@ import { Time } from "../runtime/time.vibe";
 import { Compose, FileOffer, Suggested } from "./Compose.tsx";
 import type { Offers } from "./suggestion.vibe";
 import type { Machine as Offering } from "../../gen/app__inbox__suggestion.effect.vibe";
-import type { Incoming } from "./adding.vibe";
+import type { ContactAddresses, Incoming } from "./adding.vibe";
 import type { Machine as Adding } from "../../gen/app__inbox__adding.effect.vibe";
 import { type Beginning, Letters, begin, openGmailDraft } from "./composer.vibe";
 import { type Letter, Mail, revisionOf } from "./gmail.vibe";
@@ -41,10 +41,11 @@ import { MailSignIn } from "./mailbox.vibe";
 import { connectMailFrame, frameDocument, prepareMessage } from "./mail-html.ts";
 import { AttachmentPreviews, canPreviewAttachment, canSaveAttachment } from "./attachment.vibe";
 import { InboxAttachmentFiles } from "../platform/inboxAttachments.vibe";
+import type { Telephony } from "../platform/telephony.vibe";
 
 export interface InboxProps {
   /** Provides the list, the message open and its marks, the changes, the shell, Mail, which holds what Gmail said, and the phone's sign-in for mail. */
-  runtime: ManagedRuntime.ManagedRuntime<List | Shown | Marks | Changes | Writing | Adding | Incoming | Offering | Offers | Letters | Shell | Mail | Time | Preferences | Cloud | AttachmentPreviews | InboxAttachmentFiles | MailSignIn, unknown>;
+  runtime: ManagedRuntime.ManagedRuntime<List | Shown | Marks | Changes | Writing | Adding | Incoming | ContactAddresses | Offering | Offers | Letters | Shell | Mail | Time | Preferences | Cloud | AttachmentPreviews | InboxAttachmentFiles | MailSignIn | Telephony, unknown>;
 }
 
 type Runtime = InboxProps["runtime"];
@@ -58,19 +59,24 @@ const faultNames = { Unreachable: "unreachable", Stale: "changed", Moved: "conve
 
 const markNotices = { Busy: "markBusy", NotMarked: "markFailed", Unconfirmed: "markUnconfirmed" } as const satisfies Record<string, InboxNoticeKind>;
 
-const operationNames = { Archive: "archive", Trash: "trash", Unarchive: "unarchive", Untrash: "untrash" } as const satisfies Partial<Record<Kind, string>>;
+const operationNames = {
+  Archive: "archive", Trash: "trash", Unarchive: "unarchive", Untrash: "untrash",
+  Star: "star", Unstar: "unstar", MarkRead: "markRead", MarkUnread: "markUnread",
+} as const satisfies Partial<Record<Kind, string>>;
 type Change = keyof typeof operationNames;
 const isChange = (kind: Kind): kind is Change => kind in operationNames;
 
 /** What Mail holds, read at the state the screen shows. */
-const mailOf = <A,>(runtime: Runtime, read: (mail: Mail["Service"]) => A): A => runtime.runSync(Mail.use((mail) => Effect.sync(() => read(mail))));
+const mailOf = <A,>(runtime: Runtime, read: (mail: Mail["Service"]) => A): A => read(runtime.runSync(Mail));
+
+const mailTime = new Intl.DateTimeFormat(undefined, { hour: "numeric", minute: "2-digit" });
+const mailDate = new Intl.DateTimeFormat(undefined, { month: "short", day: "numeric" });
 
 /** When a message arrived, as the list words it: a time on Alpha's day, else a date. */
-function arrived(receivedAt: string, today: number): string {
+function arrived(receivedAt: string, today: string): string {
   const at = new Date(receivedAt);
   if (Number.isNaN(at.getTime())) return "";
-  const sameDay = new Date(today).toDateString() === at.toDateString();
-  return sameDay ? at.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }) : at.toLocaleDateString([], { month: "short", day: "numeric" });
+  return (at.toDateString() === today ? mailTime : mailDate).format(at);
 }
 
 /** When a message arrived in full, as its details word it: weekday, date, time with seconds, and time zone. */
@@ -136,7 +142,7 @@ function ChangeReview({ runtime, list, cards }: { runtime: Runtime; list: Mailbo
         messages={state.messages.map((message) => ({ id: String(message), sender: senderName(cards(message)?.from ?? ""), subject: cards(message)?.subject ?? "" }))}
         changed={state.changed}
         onConfirm={can(confirm, "Owner") ? () => void send(confirm, "Owner").then(() => {
-          if (listed.can({ type: "held" })) void listed.send({ type: "held" });
+          if (!checksSelection(state.kind) && listed.can({ type: "held" })) void listed.send({ type: "held" });
         }) : undefined}
         onCancel={() => void send({ type: "cancel" }, "Owner")}
       />
@@ -149,21 +155,29 @@ function toastOf(state: Operations, operation: (typeof operationNames)[Change], 
   const count = state.messages.length;
   if (onUndo) return <InboxChangeToast operation={operation} count={count} phase={state.attempt.outcome === "Confirmed" ? "done" : "holding"} onUndo={onUndo} />;
   if (!state.noticed) return <div onClick={onDismiss}><InboxChangeToast operation={operation} count={count} phase="unknown" /></div>;
-  if (state.attempt.outcome === "Refused") return <InboxChangeToast operation={operation} count={count} phase={state.history >= 1 ? "outOfDate" : "refused"} />;
+  if (state.attempt.outcome === "Refused") return <InboxChangeToast operation={operation} count={count} phase={state.kind === "Unarchive" || state.kind === "Untrash" ? "outOfDate" : "refused"} />;
   return null;
 }
 
 /** The body of a message with nothing able to run, its remote images only once they may load, and its links each reviewed. */
 function Body({ read, images, onReview }: { read: MailMessage; images: boolean; onReview: (link: number) => void }) {
-  const { formatted, links } = prepareMessage(read);
-  const document = useMemo(() => formatted ? frameDocument(formatted, images) : undefined, [formatted, images]);
+  const { formatted, links, document } = useMemo(() => {
+    const prepared = prepareMessage(read);
+    return { ...prepared, document: prepared.formatted ? frameDocument(prepared.formatted, images) : undefined };
+  }, [read, images]);
   const frame = useCallback((node: HTMLIFrameElement | null) => node ? connectMailFrame(node, onReview) : undefined, [onReview]);
   const additional = links.flatMap((link, at) => formatted?.inline.has(link.url) ? [] : [{ ...link, at: at + 1 }]);
   const list = (
-    <ul aria-label="Links" className="flex flex-col items-start gap-1">
+    <ul aria-label="Links" className={formatted ? "flex flex-col items-start gap-1" : "mt-5 flex flex-col items-start gap-1"}>
       {additional.map((link) => (
         <li key={link.url} className="min-w-0 max-w-full text-sm [overflow-wrap:anywhere]">
-          {link.secure ? <Button variant="ghost" className="h-auto whitespace-normal text-left text-primary" onClick={() => onReview(link.at)}>{link.label}</Button> : link.label}
+          {link.secure ? (
+            <Button variant="ghost" size="sm" aria-label={link.mismatch ? link.label : link.url}
+              className="h-auto min-h-11 min-w-0 justify-start rounded-sm px-0 text-left font-normal whitespace-normal text-primary hover:bg-transparent active:bg-transparent"
+              onClick={() => onReview(link.at)}>
+              {link.mismatch ? link.label : URL.parse(link.url)?.hostname ?? link.label}
+            </Button>
+          ) : link.label}
         </li>
       ))}
     </ul>
@@ -184,7 +198,7 @@ function Opened({ runtime, list, onRefresh, onBegin }: { runtime: Runtime; list:
   const marking = useMarks(runtime);
   const changes = useTimed(runtime, useChanges);
   const remote = usePreferences(runtime).state?.images ?? false;
-  const today = runtime.runSync(Time.use((time) => time.latest()));
+  const today = new Date(runtime.runSync(Effect.flatMap(Time, (time) => time.latest()))).toDateString();
   const read = state ? mailOf(runtime, (mail) => mail.body(state.body.ticket)) : undefined;
   const reviewLink = useCallback((at: number) => {
     const link = read === undefined ? undefined : prepareMessage(read).links.at(at - 1);
@@ -213,7 +227,7 @@ function Opened({ runtime, list, onRefresh, onBegin }: { runtime: Runtime; list:
   const told = marking.state?.told;
   const notice = told !== undefined && told in markNotices ? markNotices[told as keyof typeof markNotices] : undefined;
   const files = loaded ? read.attachments : [];
-  const destination = runtime.runSync(InboxAttachmentFiles.use(({ destination }) => Effect.succeed(destination)));
+  const destination = runtime.runSync(InboxAttachmentFiles).destination;
   const unsure = (attachment: number) => state.unsure.some((held) => held.account === state.account && held.message === state.message && held.attachment === attachment);
   const reviewing = (attachment: number, handling: "Opening" | "Saving") => {
     const event = { type: "reviewAttachment", attachment, handling } as const;
@@ -221,14 +235,28 @@ function Opened({ runtime, list, onRefresh, onBegin }: { runtime: Runtime; list:
   };
   const file = files.at(state.attachment - 1);
   const outcome = state.file.outcome;
-  const preview = file && state.handling === "Opening" && outcome === "Confirmed"
-    ? runtime.runSync(AttachmentPreviews.use((previews) => Effect.sync(() => previews.read(state.file.id))))
+  const attachment = file && state.handling === "Opening" && outcome === "Confirmed"
+    ? runtime.runSync(AttachmentPreviews).read(state.file.id)
     : undefined;
+  const turn = (page: number) => {
+    const event = { type: "pdfPage", access, page } as const;
+    return can(event) ? () => void send(event) : undefined;
+  };
+  const pdf = state.pdf;
+  const preview: InboxAttachmentPreview | undefined = attachment?.kind !== "pdf" ? attachment : {
+    kind: "pdf", digest: attachment.digest, page: pdf.page, pages: pdf.pages,
+    drawing: pdf.drawing.status === "Loading" ? { kind: "loading" }
+      : pdf.drawing.status === "Loaded" && attachment.page === pdf.page ? { kind: "rendered", url: attachment.url }
+        : { kind: "failed", onRetry: turn(pdf.page) },
+    onPrevious: turn(pdf.page - 1), onNext: turn(pdf.page + 1),
+  };
   const contents = loaded ? prepareMessage(read) : undefined;
   const link = state.link > 0 ? contents?.links.at(state.link - 1) : undefined;
   const original = read?.message;
+  const from = senderAddress(card?.from ?? "");
+  const replyTo = original && "replyTo" in original && typeof original.replyTo === "string" ? original.replyTo : undefined;
   const answered = original === undefined || read === undefined ? undefined : {
-    id: original.id, from: original.from, others: [...original.to, ...original.cc], subject: original.subject,
+    id: original.id, from: original.from, replyTo, others: [...original.to, ...original.cc], subject: original.subject,
     body: read.bodyText, historyId: original.metadata.historyId, files,
   };
   return (
@@ -236,9 +264,10 @@ function Opened({ runtime, list, onRefresh, onBegin }: { runtime: Runtime; list:
       <InboxMessageScreen
         subject={card?.subject || "(no subject)"}
         sender={senderName(card?.from ?? "")}
-        address={senderAddress(card?.from ?? "")}
+        address={from}
         to={card?.to.join(", ") ?? ""}
         cc={card?.cc.join(", ") || undefined}
+        replyTo={replyTo && replyTo.toLowerCase() !== from.toLowerCase() ? replyTo : undefined}
         date={card ? arrived(card.receivedAt, today) : ""}
         fullDate={card ? arrivedFully(card.receivedAt) : undefined}
         place={state.position + 1}
@@ -325,7 +354,7 @@ export function Inbox({ runtime, alpha }: InboxProps & { alpha: Alpha }) {
   const review = <ChangeReview runtime={runtime} list={state} cards={cards} />;
   if (message.state.message !== 0) return <>{<Opened runtime={runtime} list={state} onRefresh={refresh} onBegin={onBegin} />}{review}</>;
   const settings = shell.can({ type: "openView", view: "Settings" }) ? () => void shell.send({ type: "openView", view: "Settings" }) : undefined;
-  const signIn = settings ? () => void runtime.runPromise(MailSignIn.use((mail) => mail.signIn(settings))) : undefined;
+  const signIn = settings ? () => void runtime.runPromise(Effect.flatMap(MailSignIn, (mail) => mail.signIn(settings))) : undefined;
   const hidden = new Set(changes.state ? aside(changes.state) : []);
   const letters = mailOf(runtime, (mail) => mail.shown(state)).filter(({ message: number }) => !hidden.has(number));
   const { account, folder, query } = state.selected;
@@ -336,7 +365,7 @@ export function Inbox({ runtime, alpha }: InboxProps & { alpha: Alpha }) {
   const selecting = !draftsFolder && selection === folderKey && !searching && readable(state) && !state.saved && state.pages > 0;
   const chosenMessages = new Set(state.chosen);
   const access = accessOf(state, account);
-  const today = runtime.runSync(Time.use((time) => time.latest()));
+  const today = new Date(runtime.runSync(Effect.flatMap(Time, (time) => time.latest()))).toDateString();
   const checking = state.accounts.status === "Loading";
   const row = ({ message: number, card, draftId }: Letter): InboxListRow => {
     const open = { type: "open", access, account, message: number, remote } as const;
@@ -358,7 +387,7 @@ export function Inbox({ runtime, alpha }: InboxProps & { alpha: Alpha }) {
         : folder === "Sent" ? `To: ${card.to.length ? card.to.join(", ") : "(no recipients)"}` : senderName(card.from),
       initial: draftsFolder ? "D" : folder === "Sent" ? (card.to[0] ?? "?").slice(0, 1).toUpperCase() : undefined,
       subject: card.subject || "(no subject)", snippet: card.snippet,
-      time: arrived(card.receivedAt, today), unread: card.isUnread, chosen, selecting,
+      time: arrived(card.receivedAt, today), unread: card.isUnread, attachment: showsAttachment(card.hasAttachments === true), chosen, selecting,
       onOpen: editing ?? (opening ? () => void message.send(opening) : undefined),
       onChosenChange: selecting && can(toggle) ? () => void send(toggle) : undefined,
       onSwipe: canArchive ? () => void send(swipe).then((applied) => {
@@ -396,7 +425,7 @@ export function Inbox({ runtime, alpha }: InboxProps & { alpha: Alpha }) {
   };
   // spec/app/inbox/shelf.md, "Story: Keep drafts set aside"
   const shelved: InboxListRow[] = drafts.state.shelf.shelved.map((id) => {
-    const words = runtime.runSync(Letters.use((all) => Effect.sync(() => all.words(id))));
+    const words = runtime.runSync(Letters).words(id);
     const resume = { type: "resume", draft: id } as const;
     return {
       id: `shelf:${id}`, sender: "Draft", initial: "D", subject: words.subject || "(No subject)", snippet: words.text.slice(0, 160), time: "Draft",
@@ -454,6 +483,10 @@ export function Inbox({ runtime, alpha }: InboxProps & { alpha: Alpha }) {
         onArchive={state.selected.folder === "Archived" ? undefined : chosenChange("Archive")}
         onTrash={state.selected.folder === "Trashed" ? undefined : chosenChange("Trash")}
         onRestore={state.selected.folder === "Archived" ? chosenChange("Unarchive") : state.selected.folder === "Trashed" ? chosenChange("Untrash") : undefined}
+        labelChanges={accessOf(state, account).grant.modify}
+        onStar={chosenChange(state.selected.folder === "Starred" ? "Unstar" : "Star")}
+        onMarkRead={chosenChange("MarkRead")}
+        onMarkUnread={chosenChange("MarkUnread")}
         onRefresh={refresh}
         onCompose={onBegin({ kind: "Fresh", account })}
         accounts={accounts}

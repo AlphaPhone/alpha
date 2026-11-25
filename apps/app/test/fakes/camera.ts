@@ -10,6 +10,7 @@ export interface CameraScene {
   preview: CameraPreviewOptions | undefined;
   startGate: Promise<unknown>;
   recordingGate?: Promise<void>;
+  galleryVolume?: string;
   volumeShutter: boolean;
   readonly photos: PhotoCaptureOptions[];
   readonly modes: string[];
@@ -87,10 +88,11 @@ export function elizaCamera(world: CameraScene): Faked {
       }
       world.photos.push(options);
       if (!options.saveToGallery) return { base64: boardingPass, format: "jpeg", width: options.width ?? 3000, height: options.height ?? 4000 };
-      const id = `image-${world.photos.length}`;
+      const row = world.photos.length;
+      const id = world.galleryVolume === undefined ? `image-${row}` : `m:${world.galleryVolume}:i:${row}`;
       return {
         thumbnail: boardingPass, format: "jpeg", width: 1280, height: 720,
-        path: `content://media/external/images/media/${world.photos.length}`, libraryId: id,
+        path: `content://media/${world.galleryVolume ?? "external"}/images/media/${row}`, libraryId: id,
       };
     },
     async startRecording() {

@@ -56,10 +56,14 @@ effect function action(fx: Extract<Trash.Effect, { readonly tag: "Does" }>): Tra
           !saved.state.trash?.some((row) => row.note.id === note.id)) return lost
         return done
       }
-      case "Recover":
-        if (entry === undefined) return failed
-        try store.recover(entry.note.id, snapshot.revision)
+      case "Recover": {
+        if (entry === undefined || (ownerAt() catch () => "") !== identity) return failed
+        const saved = try store.recover(entry.note.id, snapshot.revision)
+        if ((ownerAt() catch () => "") !== identity || saved.target?.id !== entry.note.id ||
+          saved.state.revision !== revision || saved.state.trash?.some((row) => row.note.id === entry.note.id) ||
+          !saved.state.notes.some((row) => row.id === entry.note.id)) return lost
         return done
+      }
       case "Erase":
         if (entry === undefined) return failed
         try store.erase({ scope: "entry", id: entry.note.id, deletedAt: entry.deletedAt, expectedRevision: snapshot.revision })
@@ -81,27 +85,27 @@ effect function action(fx: Extract<Trash.Effect, { readonly tag: "Does" }>): Tra
   } catch (error) => error.known && act !== "Sweep" ? failed : lost
 }
 
-/** Whether every recording went, and whether the phone could tell: an unread store or an unanswered acknowledgement leaves it unknown. */
+/** Each confirmed recording was erased by Android and acknowledged by the same resident. */
 effect function cleanRecorded(ids: ReadonlyArray<number>): { readonly ok: boolean; readonly known: boolean }!!(Agent | NoteStore | NoteDevice) {
   const unknown = { ok: false, known: false }
   const identity = ownerAt() catch () => ""
   if (identity === "") return unknown
-  const store = try NoteStore
-  const snapshot = store.read() catch () => undefined
-  const receipts = store.cleanup() catch () => undefined
-  if (snapshot === undefined || receipts === undefined || (ownerAt() catch () => "") !== identity) return unknown
-  const device = try NoteDevice
-  const retained = new Set([...snapshot.notes, ...(snapshot.trash ?? []).map((entry) => entry.note)].map(audioIdOf))
-  let ok = true
-  let known = true
-  for (const receipt of receipts) {
-    if (!ids.includes(numberOf("recording", receipt.audioId))) continue
-    if (retained.has(receipt.audioId) || !(try device.purge(receipt))) { ok = false; continue }
-    const acknowledged = store.cleaned(receipt) catch () => undefined
-    if (acknowledged === undefined) known = false
-    ok = ok && acknowledged === true
+  const pending = (try NoteStore).cleanup() catch () => undefined
+  if (pending === undefined) return unknown
+  const wanted = new Set(ids)
+  const receipts = new Map<number, (typeof pending)[number]>()
+  for (const receipt of pending) {
+    const number = numberOf("recording", receipt.audioId)
+    if (!wanted.has(number)) continue
+    if (receipts.has(number)) return unknown
+    receipts.set(number, receipt)
   }
-  return { ok, known }
+  if (receipts.size !== wanted.size) return unknown
+  const device = try NoteDevice
+  for (const receipt of receipts.values()) {
+    if ((ownerAt() catch () => "") !== identity || !(try device.purge(receipt))) return unknown
+  }
+  return (ownerAt() catch () => "") === identity ? { ok: true, known: true } : unknown
 }
 
 function carry(fx: Trash.Effect): Job<Trash.Event, Agent | NoteStore | NoteDevice | NoteContent | Trash.Machine | KeyValueStore.KeyValueStore | Notes | Editor, [Actor]> {

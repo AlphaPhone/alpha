@@ -22,7 +22,7 @@ type Fire = (event: Event) => void;
 
 /** The zoom chips: the level in tenths and its fixed label; only 1 carries the ×. */
 const stops = [[5, ".5"], [10, "1×"], [20, "2"], [50, "5"]] as const;
-const notices = { Quiet: "", NotTaken: "Not saved", NothingRecorded: "Not saved", NotSaved: "Save unconfirmed" } satisfies Record<Said, string>;
+const notices = { Quiet: "", NotTaken: "Not saved", NothingRecorded: "Not saved", NotSaved: "Save unconfirmed", LightUnchanged: "Camera light did not change" } satisfies Record<Said, string>;
 
 /**
  * Camera's portrait bands, as Alpha's earlier build placed them on a 915px screen: header 0 to 52, viewfinder from 96,
@@ -137,6 +137,7 @@ function Viewfinder({ state, native, sheet, zoom, focusAt, bind }: {
         playsInline
         aria-hidden
         className={cn("pointer-events-none absolute inset-0 size-full object-cover", state.lens === "Front" && "-scale-x-100", native && "invisible")}
+        style={native ? undefined : { scale: state.zoom / 10 }}
       />
       <span aria-hidden className={cn("pointer-events-none absolute top-1/2 -left-[4%] block w-[108%] -translate-y-1/2", state.wide && state.mode === "Photo" ? "aspect-9/16" : "aspect-3/4")}>
         {state.grid && ready(state) && (
@@ -274,8 +275,13 @@ export function Camera({ runtime, alpha }: Shown<Runtime>) {
   };
   const click = () => void runtime.runPromiseExit(shutter());
   const photoShutter = can({ type: "shutter" }) || can({ type: "cancelDelay" });
-  const flashLabel = !video ? (state.flashAuto ? "Flash auto" : state.flash ? "Flash on" : "Flash off") : state.flash ? "Light on" : "Light off";
-  const Flash = state.flash || state.flashAuto ? Zap : ZapOff;
+  const light = { type: port.nativePreview ? "toggleFlash" : "toggleTorch" } as const;
+  const canLight = can(light);
+  const writingLight = !port.nativePreview && state.torch.write !== 0;
+  const lit = port.nativePreview ? state.flash : state.torch.lit;
+  const autoFlash = port.nativePreview && state.flashAuto;
+  const flashLabel = autoFlash ? "Flash auto" : !video ? (lit ? "Flash on" : "Flash off") : lit ? "Light on" : "Light off";
+  const Flash = lit || autoFlash ? Zap : ZapOff;
   const videoShutter = state.film.stage === "Running" || can({ type: "startRecording", sound: true });
   const timer = can({ type: "cycleDelay" });
 
@@ -325,10 +331,10 @@ export function Camera({ runtime, alpha }: Shown<Runtime>) {
           </button>
         )}
         {can({ type: "toggleGrid" }) && <button type="button" className={headerButton} aria-label="Framing grid" aria-pressed={state.grid} onClick={() => fire({ type: "toggleGrid" })}><Grid3x3 className="size-5.5" aria-hidden /></button>}
-        {lens?.flash && can({ type: "toggleFlash" }) && (
-          <button type="button" className={headerButton} aria-label={flashLabel} onClick={() => fire({ type: "toggleFlash" })}>
+        {lens?.flash && (canLight || writingLight) && (
+          <button type="button" className={headerButton} aria-label={flashLabel} aria-busy={writingLight} disabled={!canLight} onClick={() => fire(light)}>
             <Flash className="size-5.5" aria-hidden />
-            {state.flashAuto && <span aria-hidden className="absolute right-0.5 bottom-0.5 text-camera-badge font-bold">A</span>}
+            {autoFlash && <span aria-hidden className="absolute right-0.5 bottom-0.5 text-camera-badge font-bold">A</span>}
           </button>
         )}
         {can({ type: "scanDocument" }) && <button type="button" className={headerButton} aria-label="Scan document" onClick={() => fire({ type: "scanDocument" })}><FileScan className="size-5.5" aria-hidden /></button>}

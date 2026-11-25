@@ -1,4 +1,5 @@
 // @vitest-environment happy-dom
+import type { ClockSnapshot } from "@repo/launcher-records";
 import { type Context, Effect, Layer, ManagedRuntime, Stream } from "effect";
 import { HttpClient, HttpClientError, HttpClientResponse } from "effect/http";
 import { TestClock } from "effect/testing";
@@ -16,7 +17,7 @@ import clockArea from "../src/clock/index.tsx";
 import { Clock } from "../src/clock/Clock.tsx";
 import { ClockAlertOverlay } from "../src/clock/ClockAlertOverlay.tsx";
 import { ClockHomeCard } from "../src/clock/ClockHomeCard.tsx";
-import { type ClockSnapshot, clockRecords } from "../src/clock/records.ts";
+import { clockRecords } from "../src/clock/records.ts";
 import { clockResident, syncClockNow } from "../src/clock/sync.vibe";
 import { stopwatch } from "../src/clock/stopwatch.vibe";
 import { clockScreenTick } from "../src/clock/ticker.vibe";

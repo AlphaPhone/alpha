@@ -8,7 +8,7 @@ import { useMachine } from "../../gen/app__workflows__automations.react.ts";
 import type { Machine } from "../../gen/app__workflows__automations.effect.vibe";
 import type { Preset, When } from "../../gen/app__workflows__schedule.ts";
 import type { Resident, Shown } from "../runtime/area.tsx";
-import { AutomationWords, editAutomation, promptEditEvent, reviewAutomation, rowOffers } from "./automations.vibe";
+import { AutomationWords, editAutomation, promptEditEvent, reviewAutomation, reviewPromptPower, rowOffers } from "./automations.vibe";
 import type { Prompt } from "./api.vibe";
 import type { WorkflowRow } from "./list.vibe";
 
@@ -74,6 +74,8 @@ function eventFor(wanted: Change): Event {
 }
 
 function reviewLabel(action: Change): string {
+  if (action === "Enable") return "Enable";
+  if (action === "Disable") return "Pause";
   return actions.find(([kind]) => kind === action)?.[1] ?? (action === "Edit" ? "Save changes" : "Save automation");
 }
 
@@ -82,14 +84,15 @@ export function automationSource(row: WorkflowRow): string {
   return sources[row.kind];
 }
 
-/** The header switch that turns a prompt on or off, at once. */
+/** The header switch opens a review for the current prompt and schedule. */
 export function AutomationPower({ runtime, row, owner }: AutomationProps & { readonly row: WorkflowRow }) {
   const model = useMachine(runtime);
   const state = model.state;
   if (!state || state.owner !== owner || state.row !== row.number || row.kind !== "Prompt" || !state.present) return null;
-  const toggle = eventFor(state.on ? "Disable" : "Enable");
-  return <Switch checked={state.on} aria-label={`Turn ${row.title} on or off`} disabled={!model.can(toggle)}
-    className="ml-3" onCheckedChange={() => { if (model.can(toggle)) void model.send(toggle); }} />;
+  const toggle = { type: "reviewChange", wanted: state.on ? "Disable" : "Enable" } as const;
+  const current = runtime.runSync(Effect.flatMap(AutomationWords, (content) => content.current(owner, row.number, state.list.ticket)));
+  return <Switch checked={state.on} aria-label={`Turn ${row.title} on or off`} disabled={current === undefined || !model.can(toggle)}
+    className="ml-3" onCheckedChange={() => void runtime.runPromiseExit(reviewPromptPower(owner, row.number))} />;
 }
 
 /** Prompt and scheduled-task controls over the current owner and row. */
@@ -111,6 +114,8 @@ export function Automation({ runtime, row, owner }: AutomationProps) {
     ? savedSchedule(draft.source.prompt) : editedSchedule(state.when, time, draft.zone);
   const reviewEdit = state.proposed === "Edit" || state.proposed === "Create";
   const reviewedTitle = reviewEdit ? draft.title : row?.title ?? draft.title;
+  const reviewedPower = state.review.showing && (state.proposed === "Enable" || state.proposed === "Disable")
+    ? runtime.runSync(Effect.flatMap(AutomationWords, (content) => content.powerReview())) : undefined;
   return (
     <section aria-label={row === undefined ? "Automation" : "Automation controls"} className="flex flex-col gap-3">
       {row === undefined && !editing && model.can({ type: "openEditor", kind: "PromptTask", zone: 0 }) && (
@@ -166,7 +171,10 @@ export function Automation({ runtime, row, owner }: AutomationProps) {
       {state.change.attempt.outcome === "Refused" && state.fired === "NotFired" && <Alert variant="warn">The agent didn’t apply the change.</Alert>}
       {row !== undefined && !reviewEdit && state.review.showing && (
         <div role="group" aria-label="Review workflow action" className="mt-6 border-t border-border pt-4">
-          <p className="leading-chat font-semibold">{state.proposed === "Remove" ? `${menuLabel(row, "Remove")}?` : `${reviewLabel(state.proposed)}?`}</p>
+          <p className="leading-chat font-semibold">{reviewedPower ? `${reviewLabel(state.proposed)} “${reviewedPower.name}”?`
+            : state.proposed === "Remove" ? `${menuLabel(row, "Remove")}?` : `${reviewLabel(state.proposed)}?`}</p>
+          {reviewedPower && <p className="mt-2 text-meta text-muted-foreground">{reviewedPower.enabled
+            ? "The prompt can run on its schedule while your phone is on." : "The prompt stops running on its schedule."}</p>}
           <div className="mt-6 flex flex-wrap gap-2.5">
             <button type="button" onClick={() => send({ type: "confirmChange" })}
               className={cn(focusRing, "min-h-11 rounded-full bg-primary px-4.5 py-2.5 text-base text-primary-foreground")}>Confirm {state.proposed === "Remove" ? menuLabel(row, "Remove") : reviewLabel(state.proposed)}</button>

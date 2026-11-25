@@ -15,11 +15,13 @@ export type AssistantTranscriptProps = Omit<ComponentProps<"div">, "children"> &
   messages: readonly TranscriptMessage[];
   /** Arms a hold on recorded message text. */
   holdMessage?: MessageHold;
+  /** Facts from the current screen shown in the transcript without Alpha's signature. */
+  briefing?: ReactNode;
   /** The reply being written or its failure, after recorded messages. */
   liveMessages?: readonly TranscriptMessage[];
   interim?: ReactNode;
   /** The page being read, with the message that a history or search request opened it around. */
-  position?: { page: string; around?: string };
+  position?: { page: string; around?: string; earlier?: string; later?: string };
   /** Whether the transcript is laid out in the open conversation. */
   visible?: boolean;
   /** Whether the page of messages is being read, was read, or could not be. */
@@ -64,7 +66,7 @@ const MessageRows = memo(function MessageRows({ messages, hold }: { messages: re
  * hit opens around the message requested.
  * @model spec/app/assistant/chats.md
  */
-export function AssistantTranscript({ messages, holdMessage, liveMessages, interim, position, visible = true, status = "loaded", turn, onRetry, onEarlier, onLater, onReturnToOriginal, className, onScroll, ...props }: AssistantTranscriptProps) {
+export function AssistantTranscript({ messages, holdMessage, briefing, liveMessages, interim, position, visible = true, status = "loaded", turn, onRetry, onEarlier, onLater, onReturnToOriginal, className, onScroll, ...props }: AssistantTranscriptProps) {
   const scrollRef = useRef<TranscriptScroll>({ follows: true });
   const page = position?.page;
   const around = position?.around;
@@ -102,11 +104,12 @@ export function AssistantTranscript({ messages, holdMessage, liveMessages, inter
     if (status === "failed") return <EmptyState title="Messages did not load">{onRetry ? <Button variant="secondary" onClick={onRetry}>Try again</Button> : null}</EmptyState>;
     return (
       <>
-        {onEarlier ? <Button variant="ghost" size="sm" className="self-center" onClick={(event) => pageFrom(event.currentTarget, messages[0]?.id, onEarlier)}><ChevronUp aria-hidden />Earlier</Button> : null}
+        {onEarlier ? <Button variant="ghost" size="sm" className="self-center" onClick={(event) => pageFrom(event.currentTarget, position?.earlier ?? messages[0]?.id, onEarlier)}><ChevronUp aria-hidden />Earlier</Button> : null}
         <MessageRows messages={messages} hold={holdMessage} />
+        {briefing}
         {liveMessages?.length ? <MessageRows messages={liveMessages} /> : null}
         {interim}
-        {onLater ? <Button variant="ghost" size="sm" className="self-center" onClick={(event) => pageFrom(event.currentTarget, messages.at(-1)?.id, onLater)}><ChevronDown aria-hidden />Later</Button> : null}
+        {onLater ? <Button variant="ghost" size="sm" className="self-center" onClick={(event) => pageFrom(event.currentTarget, position?.later ?? messages.at(-1)?.id, onLater)}><ChevronDown aria-hidden />Later</Button> : null}
         {turn ? <AssistantTurnNote {...turn} /> : null}
       </>
     );

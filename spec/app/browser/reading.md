@@ -88,77 +88,112 @@ pure def lawOnlyTheCommittedPageInFrontIsHanded(onBrowser: bool, allowed: bool, 
   handed(onBrowser, allowed, front, found) != NoPage implies (onBrowser and allowed and front == Committed)
 ```
 
-## Story: Hear the page read aloud
+## Story: Review an excerpt to ask about
 
-> As the owner, I want the page read aloud after I have seen what will be
-> read, and to stop it whenever I like.
+> As the owner, I want to choose Ask Alpha in Browser, edit my question and
+> the page excerpt, and add that text to Ask Alpha so I can review it there
+> before sending.
 
-### Reading aloud is idle, reading the page, under review, blocked, unavailable or sent
+### A page reading is idle, reading the page, under review, blocked, unavailable or handed over
 
-The review shows an excerpt: nothing yet, or the page's text.
+The same place in Browser holds an Ask Alpha review or a Read aloud review.
+The review shows an excerpt: nothing yet, or text the owner can see and edit.
 
 ```quint
 type Phase = Idle | Reading | Reviewing | Blocked | Unavailable | Sent
+type Purpose = Ask | Aloud | OnPhone
 type Excerpt = Empty | PageText
-type Effect = Extract({ ticket: int }) | Speak({ excerpt: Excerpt }) | Cancel({ ticket: int })
-type Reader = { phase: Phase, extract: R::Read, review: V::Review, excerpt: Excerpt }
+type Effect = Extract({ ticket: int, purpose: Purpose }) | Speak({ ticket: int, excerpt: Excerpt }) | Draft({ ticket: int }) | Cancel({ ticket: int })
+type Reader = { phase: Phase, purpose: Purpose, extract: R::Read, review: V::Review, excerpt: Excerpt, question: bool }
 type Step = { state: Reader, out: List[Effect] }
 
-pure val initial: Reader = { phase: Idle, extract: R::unread, review: V::unreviewed, excerpt: Empty }
+pure val initial: Reader = { phase: Idle, purpose: Aloud, extract: R::unread, review: V::unreviewed, excerpt: Empty, question: false }
 
-pure def busy(r: Reader): bool = r.phase == Reading or r.phase == Reviewing
+pure def busy(r: Reader): bool = r.phase == Reading or r.phase == Reviewing or (r.phase == Sent and r.purpose != Ask)
 
 pure val ticketValues = Set(1, 2)
 ```
 
-### Reading aloud reads a committed HTTPS page privately
+### An explicit reading starts from the current committed HTTPS page
 
 Where this phone's WebView cannot read a page privately, reading aloud says
-"Page reading unavailable".
+why and names Android System WebView. The Browser checks the installed
+WebView when it opens, shows an unavailable note in the menu after a
+definite refusal and checks before starting an explicit reading. The owner can choose an explicit review on the
+normal or private tab in front. A private tab never supplies the automatic
+page context for an ordinary question. On Android the phone checks the
+selected document before releasing an excerpt to Alpha's editor. In a web
+browser the current HTTPS frame may provide its requested
+address for a public read without credentials. The frame still has no secure
+connection mark, and a blocked or stopped frame cannot start a read.
 
 ```quint
-pure def canRequest(r: Reader, secure: bool, supported: bool): bool = not(busy(r))
+pure def canRequest(r: Reader, purpose: Purpose, secure: bool, supported: bool): bool = not(busy(r))
 
-pure def request(r: Reader, secure: bool, supported: bool): Step =
-  val fresh = { ...r, excerpt: Empty }
+pure def request(r: Reader, purpose: Purpose, secure: bool, supported: bool): Step =
+  val fresh = { ...r, purpose: purpose, excerpt: Empty, question: false }
   val asked = R::ask(r.extract)
   if (not(secure) or not(supported)) { state: { ...fresh, phase: Unavailable }, out: List() }
-  else { state: { ...fresh, phase: Reading, extract: asked }, out: List(Extract({ ticket: asked.ticket })) }
+  else { state: { ...fresh, phase: Reading, extract: asked }, out: List(Extract({ ticket: asked.ticket, purpose: purpose })) }
 ```
 
 ### The latest reading gives the page's excerpt to review, or finds the page may be sensitive and refuses it, or fails
 
-```quint
-pure def canExtracted(r: Reader, ticket: int, ok: bool, sensitive: bool): bool = r.phase == Reading and R::canAnswer(r.extract, ticket)
+An unreadable public page can open Ask Alpha with an empty field for an
+excerpt the owner pastes. A sensitive page never opens a review.
 
-pure def extracted(r: Reader, ticket: int, ok: bool, sensitive: bool): Reader =
-  val answered = { ...r, extract: R::answer(r.extract, ok and not(sensitive)) }
-  if (sensitive) { ...answered, phase: Blocked, excerpt: Empty }
-  else if (not(ok)) { ...answered, phase: Unavailable, excerpt: Empty }
-  else { ...answered, phase: Reviewing, excerpt: PageText, review: V::present(V::revise(r.review)) }
+```quint
+pure def canExtracted(r: Reader, ticket: int, found: Found): bool = r.phase == Reading and R::canAnswer(r.extract, ticket)
+
+pure def extracted(r: Reader, ticket: int, found: Found): Reader =
+  val reviewable = found == Visible or (r.purpose != OnPhone and found == Unreadable)
+  val answered = { ...r, extract: R::answer(r.extract, reviewable) }
+  if (found == Sensitive) { ...answered, phase: Blocked, excerpt: Empty }
+  else if (not(reviewable)) { ...answered, phase: Unavailable, excerpt: Empty }
+  else { ...answered, phase: Reviewing, question: r.purpose == Ask, excerpt: if (found == Visible) PageText else Empty, review: V::present(V::revise(r.review)) }
 ```
 
-### Confirming hands the excerpt as shown to the voice area to be read aloud
-
-Nothing empty is sent.
+### An edit shows the changed question or excerpt in the same review
 
 ```quint
-pure def sendable(r: Reader): bool = r.excerpt == PageText
+pure def canEdit(r: Reader, question: bool, excerpt: Excerpt): bool = r.phase == Reviewing or (r.purpose == Aloud and r.phase == Reading)
 
-pure def canConfirm(r: Reader): bool = r.phase == Reviewing and V::canConfirm(r.review) and sendable(r)
+pure def edit(r: Reader, question: bool, excerpt: Excerpt): Reader =
+  if (r.phase == Reading) { ...r, review: V::revise(r.review) }
+  else { ...r, question: question, excerpt: excerpt, review: V::present(V::revise(r.review)) }
 
-pure def confirm(r: Reader): Step =
-  { state: { ...r, phase: Sent, review: V::confirm(r.review) }, out: List(Speak({ excerpt: r.excerpt })) }
+pure def canBlock(r: Reader): bool = r.purpose == Aloud and r.phase == Reviewing
+
+pure def block(r: Reader): Reader =
+  { ...r, phase: Blocked, excerpt: Empty, review: V::dismiss(V::revise(r.review)) }
+```
+
+### Confirming hands over the reviewed words as shown
+
+Nothing empty or sensitive is handed over. Ask Alpha receives only the
+edited question and excerpt, into the same draft where the review began.
+If that draft changed during review, Alpha leaves the draft as the owner
+left it. Add to chat opens the draft and never sends a message.
+
+```quint
+pure def sendable(r: Reader): bool = r.excerpt == PageText and (r.purpose != Ask or r.question)
+
+pure def canConfirm(r: Reader, safe: bool): bool = r.phase == Reviewing and V::canConfirm(r.review) and sendable(r) and safe
+
+pure def confirm(r: Reader, safe: bool): Step =
+  { state: { ...r, phase: Sent, review: V::confirm(r.review) },
+    out: if (r.purpose == Ask) List(Draft({ ticket: r.extract.ticket })) else List(Speak({ ticket: r.extract.ticket, excerpt: r.excerpt })),
+  }
 ```
 
 ### Cancel, Back, Alpha going to the background and the page loading something else all end the reading, and sending nothing
 
 ```quint
-pure def canCancel(r: Reader): bool = busy(r)
+pure def canCancel(r: Reader): bool = busy(r) or (r.purpose == Aloud and (r.phase == Blocked or r.phase == Unavailable))
 
 pure def cancel(r: Reader): Step =
   {
-    state: { ...r, phase: Idle, excerpt: Empty, extract: { ...r.extract, status: R::Idle }, review: V::dismiss(V::revise(r.review)) },
+    state: { ...r, phase: Idle, excerpt: Empty, question: false, extract: { ...r.extract, status: R::Idle }, review: V::dismiss(V::revise(r.review)) },
     out: if (r.phase == Reading) List(Cancel({ ticket: r.extract.ticket })) else List(),
   }
 
@@ -171,7 +206,8 @@ pure def pageChanged(r: Reader): Step =
 ```quint
 pure def stepOnlyTheReviewedExcerptLeaves(before: Reader, via: str, after: Reader, out: List[Effect]): bool =
   out.every(e => match e {
-    | Speak(p) => via == "confirm" and V::canConfirm(before.review) and p.excerpt == before.excerpt and sendable(before)
+    | Speak(p) => via == "confirm" and before.purpose != Ask and V::canConfirm(before.review) and p.ticket == before.extract.ticket and p.excerpt == before.excerpt and sendable(before)
+    | Draft(p) => via == "confirm" and before.purpose == Ask and V::canConfirm(before.review) and p.ticket == before.extract.ticket and sendable(before)
     | _ => true
   })
 ```
@@ -190,8 +226,21 @@ pure def alwaysNothingHeldOutsideAReview(r: Reader): bool =
 ```quint
 pure def lawTheNextPageIsJudgedAfresh(ticket: int): bool =
   val blocked = { ...initial, phase: Blocked, extract: { status: R::Loaded, ticket: ticket } }
-  canRequest(pageChanged(blocked).state, true, true)
+  canRequest(pageChanged(blocked).state, Aloud, true, true)
 ```
+
+## Story: Hear the page read aloud
+
+> As the owner, I want the page read aloud after I have seen what will be
+> read, and to stop it whenever I like.
+
+The web Browser shows the public excerpt in an editor with Read locally,
+Stop reading and Close. A page the enclosing browser cannot read can be
+filled by pasting an excerpt. On Android, choosing Read aloud asks the
+native tab to release a single-use approval to on-device speech. The
+page's text stays in the Android tab until that approval is consumed.
+The phone's playback dialog shows Stop reading, and leaving the bound page
+or changing the resident owner stops that reading.
 
 ### A page can be read aloud, blocked, or unavailable
 
@@ -199,7 +248,9 @@ The Browser starts nothing it would have to stop: playback, its queue and
 Stop belong to the voice area.
 
 ```quint
-pure def sometimesReadAloud(r: Reader): bool = r.phase == Sent and r.excerpt == PageText
+pure def sometimesReadAloud(r: Reader): bool = r.phase == Sent and r.purpose != Ask and r.excerpt == PageText
+
+pure def sometimesDraftAQuestion(r: Reader): bool = r.phase == Sent and r.purpose == Ask and r.excerpt == PageText
 
 pure def sometimesBlocked(r: Reader): bool = r.phase == Blocked
 

@@ -3,6 +3,7 @@ import { ConversationRecord, TurnController, encodeTurnContext, learnPeer, notLe
 import * as KeyValueStore from "effect/persistence/KeyValueStore"
 import * as Conversation from "../../gen/app__assistant.effect.vibe"
 import * as Attachments from "../../gen/app__assistant__attachments.effect.vibe"
+import { picker } from "./attachment-picker.vibe"
 import * as Chats from "../../gen/app__assistant__chats.effect.vibe"
 import * as Composer from "../../gen/app__assistant__composer.effect.vibe"
 import * as Dock from "../../gen/app__assistant__dock.effect.vibe"
@@ -14,6 +15,7 @@ import * as Search from "../../gen/app__assistant__search.effect.vibe"
 import * as Alarms from "../../gen/app__clock__alarms.effect.vibe"
 import * as Timers from "../../gen/app__clock__timers.effect.vibe"
 import * as World from "../../gen/app__clock__world.effect.vibe"
+import * as Contacts from "../../gen/app__contacts.effect.vibe"
 import * as Reminders from "../../gen/app__reminders.effect.vibe"
 import * as Comms from "../../gen/app__phone__comms.effect.vibe"
 import * as Voice from "../../gen/app__voice.effect.vibe"
@@ -30,7 +32,7 @@ import { syncRemindersNow } from "../reminders/reminders.vibe"
 import { Agent, isCloudFundsRefusal } from "../platform/agent.vibe"
 import { Device, native } from "../platform/device.vibe"
 import { Location } from "../platform/location.vibe"
-import { type PageInFront, TabHost, pageInFront } from "../platform/browser.vibe"
+import { type PageInFront, type TabHost, pageInFront } from "../platform/browser.vibe"
 import type { VoiceBridge } from "../platform/voice.vibe"
 import { Refused, ask, outcomeOf } from "../platform/remote.vibe"
 import { Attempts, fresh } from "../runtime/attempts.vibe"
@@ -42,7 +44,7 @@ import { type SpokenChatContext, type SpokenChatLease, VoiceWords } from "../voi
 import { FileContext, documentObservation } from "./file-context.vibe"
 import { MediaReview, mediaReview } from "./media-review.vibe"
 import { agentWarmUp } from "./warm-up.vibe"
-import { type Attached, type Board, type DraftSeat, type Line, Talk, talk } from "./talk.vibe"
+import { type Attached, type Board, type DraftSeat, type HistoryBounds, type Line, Talk, talk } from "./talk.vibe"
 import { Views, carried, carriedAloud, delivery, handoffs, pageIn, preparedIn, resendWithoutMode } from "./views.vibe"
 import { attachmentAuthority, dropFiles, readFiles, rememberFiles, retireTranscript, sameBinding, stageFiles } from "./attachments.vibe"
 import { readMessage } from "./read-aloud.vibe"
@@ -79,10 +81,16 @@ const turns = Layer.effect(Turns, effect {
 const titled = Schema.Struct({ ...ConversationRecord.fields, title: Schema.String })
 const listing = () => Schema.Struct({ conversations: Schema.Array(titled) })
 const made = () => Schema.Struct({ conversation: titled })
-const page = () => Schema.Struct({ messages: Schema.Array(Schema.Struct({ id: Schema.String, role: Schema.Literals(["user", "assistant"]), text: Schema.String, clientMessageId: Schema.optionalKey(Schema.String), failureKind: Schema.optionalKey(Schema.String), cloudCode: Schema.optionalKey(Schema.String) })) })
+const page = () => Schema.Struct({
+  messages: Schema.Array(Schema.Struct({ id: Schema.NonEmptyString, role: Schema.Literals(["user", "assistant"]), text: Schema.String,
+    timestamp: Schema.optionalKey(Schema.Int.check(Schema.isGreaterThanOrEqualTo(0))), clientMessageId: Schema.optionalKey(Schema.String),
+    failureKind: Schema.optionalKey(Schema.String), cloudCode: Schema.optionalKey(Schema.String) })),
+  hasMore: Schema.optionalKey(Schema.Boolean), hasEarlier: Schema.optionalKey(Schema.Boolean), hasLater: Schema.optionalKey(Schema.Boolean),
+})
+const pageEdge = () => Schema.Struct({ messages: Schema.Array(Schema.Struct({ id: Schema.NonEmptyString })) })
 const hits = () => Schema.Struct({ results: Schema.Array(Schema.Struct({ conversationId: Schema.NonEmptyString, roomId: Schema.NonEmptyString, messageId: Schema.String, role: Schema.Literals(["user", "assistant"]), text: Schema.String })) })
 
-// Eliza's pinned history contract projects a redacted body to this exact text.
+/** Eliza's pinned history contract projects a redacted body to this exact text. */
 const privateHistoryNotice = "[Private information removed]"
 
 const slotted = Schema.fromJsonString(Schema.Struct({ revision: Schema.Int, text: Schema.String, sending: Schema.Boolean }))
@@ -816,6 +824,36 @@ effect function newest(page: number, conversation: number): Chats.Event!!(Agent 
   return read.type === "listed" ? { type: "latest", page, ok: read.ok, ids: read.ids, conversation, ...free } : read
 }
 
+// The pinned resident returns at most this many rows on either side of an around anchor.
+const historyRadius = 100
+
+/** Prove the edges of a centered window, where a full side alone cannot say anything about the row past it. */
+effect function historyBounds(path: string, pivot: string | undefined, answer: ReturnType<typeof page>["Type"], current: boolean!!(Agent | Chats.Machine)): HistoryBounds!!(Agent | Chats.Machine) {
+  const { messages, hasMore, hasEarlier, hasLater } = answer
+  const first = messages[0]
+  const last = messages.at(-1)
+  if (first === undefined || last === undefined) return {}
+  if (pivot === undefined) return (hasEarlier ?? hasMore) === true ? { earlier: first.id } : {}
+  const center = messages.findIndex((one) => one.id === pivot)
+  if (center < 0) return {}
+  const older = effect {
+    if (hasEarlier !== undefined) return hasEarlier
+    if (center < historyRadius || first.timestamp === undefined || !(try current)) return false
+    const before = String(first.timestamp)
+    const edge = ask(Agent, HttpClientRequest.get(path, { urlParams: { before, beforeId: first.id, limit: "1" } }), pageEdge()) catch () => undefined
+    return edge?.messages.length === 1
+  }
+  const newer = effect {
+    if (hasLater !== undefined) return hasLater
+    if (messages.length - center - 1 < historyRadius || !(try current)) return false
+    const edge = ask(Agent, HttpClientRequest.get(path, { urlParams: { around: last.id } }), pageEdge()) catch () => undefined
+    const at = edge?.messages.findIndex((one) => one.id === last.id) ?? -1
+    return edge !== undefined && at >= 0 && at < edge.messages.length - 1
+  }
+  const [earlier, later] = try Effect.all([older, newer], { concurrency: "unbounded" })
+  return { ...(earlier ? { earlier: first.id } : {}), ...(later ? { later: last.id } : {}) }
+}
+
 // spec/app/assistant/chats.md, "A page of the conversation showing is taken only from the newest asking"; spec/app/assistant/chats.md, "Older or newer messages are read around a message of the conversation showing"; spec/app/assistant/chats.md, "A read of the latest messages answered 404 asks the agent's list whether the conversation is still there"; spec/app/assistant/reply.md, "A failure refused before any output replaces the streamed text; any other failure is added after it"; spec/app/assistant/reply.md, "Out of funds is refused before any output, is never spoken, and offers only Manage plan"
 /** A page of the conversation showing, each message numbered as Alpha first saw it: the page counts up to its highest number, which a scroll names. A 404 to a read of the latest messages is told as such, for the agent's list to decide. */
 effect function paged(conversation: number, around: number, ticket: number): Chats.Event!!(Agent | Talk | Chats.Machine | Attachments.Machine | Composer.Machine) {
@@ -828,7 +866,16 @@ effect function paged(conversation: number, around: number, ticket: number): Cha
     const owner = (try composer.get()).binding.owner
     const authority = seat?.authority
     const pivot = around > 0 ? board.messageId(around) : undefined
-    const { messages } = try ask(Agent, HttpClientRequest.get(`/api/conversations/${encodeURIComponent(known.record.id)}/messages`, { urlParams: pivot === undefined ? {} : { around: pivot } }), page())
+    if (around > 0 && pivot === undefined) return { type: "paged", ticket, ok: false, messages: 0 }
+    const path = `/api/conversations/${encodeURIComponent(known.record.id)}/messages`
+    const answer = try ask(Agent, HttpClientRequest.get(path, { urlParams: pivot === undefined ? {} : { around: pivot } }), page())
+    const { messages } = answer
+    if (pivot !== undefined && !messages.some((one) => one.id === pivot)) return { type: "paged", ticket, ok: false, messages: 0 }
+    const edgeCurrent = effect {
+      const live = try (try Chats.Machine).get()
+      return live.chosen === conversation && live.page.ticket === ticket && (try ownsSeat(board, seat))
+    }
+    const bounds = try historyBounds(path, pivot, answer, edgeCurrent)
     const redacted = new Set(messages.filter((one) => one.text === privateHistoryNotice).map((one) => one.id))
     const keys = messages.flatMap((one) => {
       const key = one.clientMessageId
@@ -854,7 +901,7 @@ effect function paged(conversation: number, around: number, ticket: number): Cha
         ...(attachments === undefined ? {} : { attachments }),
       }
     })
-    const preview = board.takeHistory(ticket, conversation, recorded, redacted)
+    const preview = board.takeHistory(ticket, conversation, recorded, redacted, bounds)
     if (preview !== undefined) {
       const picker = try Attachments.Machine
       try ignore(picker.send({ type: "closePreview" }, (state) => state.preview === preview && board.snapshot().preview === undefined))
@@ -1052,13 +1099,17 @@ function carryComposer(fx: Composer.Effect): Job<Composer.Event, Agent | KeyValu
 }
 
 // spec/app/assistant/search.md, "Only the newest asking's hits are shown, a page at a time, after those already shown"; spec/app/assistant/reply.md, "The agent's turn tag is never drawn, copied, quoted, emailed or spoken, and a reply still being written holds back what may become one"
-effect function found(words: string, from: number, ticket: number): Search.Event!!(Agent | Talk) {
+effect function found(words: string, from: number, ticket: number): Search.Event!!(Agent | Talk | Search.Machine | Shell | Contacts.Machine) {
   return effect {
     const { board } = try Talk
     const seat = board.draftSeat
     if (!(try ownsSeat(board, seat))) return { type: "found", ticket, ok: false, count: 0, further: false }
     const { results } = try ask(Agent, HttpClientRequest.get("/api/conversations/messages/search", { urlParams: { q: words, offset: String(from), limit: String(pageSize) } }), hits())
     if (!(try ownsSeat(board, seat))) return { type: "found", ticket, ok: false, count: 0, further: false }
+    const searching = try (try Search.Machine).get()
+    if (!Search.canFound(searching, ticket, results.length) || searching.origin.tag === "ContactDock" && !(try contactSearchCurrent(searching.origin))) {
+      return { type: "found", ticket, ok: false, count: 0, further: false }
+    }
     const shown = results.map((one) => ({ conversation: board.numberOf({ id: one.conversationId, roomId: one.roomId } as ConversationRecord), message: board.messageNumber(one.messageId), text: one.role === "assistant" ? withoutTurnTags(one.text) : one.text }))
     board.change({ hits: [...(from === 0 ? [] : board.snapshot().hits.slice(0, from)), ...shown] })
     return { type: "found", ticket, ok: true, count: results.length, further: results.length === pageSize }
@@ -1066,16 +1117,24 @@ effect function found(words: string, from: number, ticket: number): Search.Event
 }
 
 // spec/app/assistant/search.md, "Opening a hit closes search and opens its conversation around its message, and another conversation only while the turn and the composer are free"
-effect function opened(conversation: number, message: number): void!!(Chats.Machine | Conversation.Machine | Composer.Machine) {
+effect function opened(conversation: number, message: number, origin: Search.Origin): void!!(Chats.Machine | Conversation.Machine | Composer.Machine | Shell | Contacts.Machine) {
   const chats = try Chats.Machine
   const free = freedom(try (try Conversation.Machine).get(), try (try Composer.Machine).get(), (try chats.get()).chosen)
-  try contained(chats.send({ type: "openHit", conversation, message, ...free }), "opening a hit")
+  const hit = { type: "openHit", conversation, message, ...free } as const
+  if (!Chats.enabled(try chats.get(), hit)) return
+  if (origin.tag === "ContactDock") {
+    if (!(try contactSearchCurrent(origin))) return
+    const shell = try Shell
+    const raised = shell.send({ type: "raise", detent: "Full" }, (where) => where.route === origin.route && where.assistant === "Bar") catch () => undefined
+    if (raised === undefined || (try shell.get()).route !== raised.route) return
+  }
+  try contained(chats.send(hit), "opening a hit")
 }
 
-function carrySearch(fx: Search.Effect): Job<Search.Event, Agent | Talk | Chats.Machine | Conversation.Machine | Composer.Machine, []> {
+function carrySearch(fx: Search.Effect): Job<Search.Event, Agent | Talk | Search.Machine | Chats.Machine | Conversation.Machine | Composer.Machine | Shell | Contacts.Machine, []> {
   return match (fx) {
     when { tag: "Find", let words, let from, let ticket }: answer("find", found(words, from, ticket), { type: "found", ticket, ok: false, count: 0, further: false });
-    when { tag: "Open", let conversation, let message }: run("open", opened(conversation, message));
+    when { tag: "Open", let conversation, let message, let origin }: run("open", opened(conversation, message, origin));
   }
 }
 
@@ -1293,12 +1352,18 @@ function carryDock(fx: Dock.Effect): Job<Dock.Event, Shell, []> {
 // spec/app/assistant/dock.md, "Ask Alpha put away forgets the height its sheet was left at"
 const rested = following(Shell, (shown) => shown.assistant === "Bar", Dock.Machine, (bar): Dock.Event | undefined => (bar ? { type: "putAway", now: untimed } : undefined))
 
-// spec/app/assistant/dock.md, "A keyboard closed while typing puts Ask Alpha back on the bar"
-const keyboardRest = applying(Canvas, (canvas) => canvas.released, effect (releases) => {
-  if (releases === 0) return
+// spec/app/assistant/dock.md, "A keyboard closed while typing puts Ask Alpha back on the bar": a closed keyboard and a field left for elsewhere rest it one at a time, so the second finds the bar and never takes a second step Back
+const resting = Semaphore.makeUnsafe(1)
+export const restTyping = resting.withPermits(1)(effect {
   const shell = try Shell
   const current = try shell.get()
   if (Dock.keyboardClosed(current.assistant).length > 0) try contained(shell.send({ type: "goBack" }), "resting Ask Alpha after typing")
+})
+
+// spec/app/assistant/dock.md, "A keyboard closed while typing puts Ask Alpha back on the bar"
+const keyboardRest = applying(Canvas, (canvas) => canvas.released, effect (releases) => {
+  if (releases === 0) return
+  try restTyping
 })
 
 // spec/app/assistant/index.md, "Back closes a review, then search, then a quote or an edit, one at a time; with none of them open Back is the shell's"; spec/app/shell/layers.md, "A screen says when it has a step of its own to take Back, and when it has none left; its page stays usable"
@@ -1331,6 +1396,41 @@ export effect function openChatSearch(route: number): void!!(Shell | Search.Mach
     try ignore((try Chats.Machine).send({ type: "browse" }))
   }
 }
+
+type ContactSearch = Extract<Search.Origin, { tag: "ContactDock" }>
+
+effect function contactSearchCurrent(origin: ContactSearch): boolean!!(Shell | Contacts.Machine) {
+  const where = try (try Shell).get()
+  const card = try (try Contacts.Machine).get()
+  return where.route === origin.route && where.assistant === "Bar" && showing(where, "Contacts")
+    && card.front && Contacts.shown(card) && card.contact === origin.person && card.form === "Shut"
+}
+
+// spec/app/assistant/search.md, "Search from a closed Contact remembers the card that opened it"
+export effect function openContactChatSearch(route: number, person: string): void!!(Shell | Contacts.Machine | Search.Machine | Chats.Machine) {
+  const origin = { tag: "ContactDock", route, person } as const
+  if (!(try contactSearchCurrent(origin))) return
+  const search = try Search.Machine
+  if (try contained(search.send({ type: "openContactSearch", route, person }), "opening chat search over the contact")) {
+    if (!(try contactSearchCurrent(origin))) {
+      try contained(search.send({ type: "closeSearch" }, (finding) => finding.open && finding.origin.tag === "ContactDock" && finding.origin.route === route && finding.origin.person === person), "leaving the contact's search")
+      return
+    }
+    try ignore((try Chats.Machine).send({ type: "browse" }))
+  }
+}
+
+const retireContactSearch = started(effect {
+  const shell = try Shell
+  const contacts = try Contacts.Machine
+  const search = try Search.Machine
+  try Stream.runForEach(Stream.zipLatest(shell.changes, contacts.changes), effect () => {
+    const finding = try search.get()
+    if (finding.open && finding.origin.tag === "ContactDock" && !(try contactSearchCurrent(finding.origin))) {
+      try contained(search.send({ type: "closeSearch" }), "leaving the contact's search")
+    }
+  })
+}, "retiring search after leaving its contact")
 
 // spec/app/assistant/index.md, "Back closes a review, then search, then a quote or an edit, one at a time; with none of them open Back is the shell's"
 export const assistantBack = effect {
@@ -1375,9 +1475,9 @@ export const assisting = Layer.provideMerge(
     reacting(Search, { carry: carrySearch }),
     reacting(Reply, {}),
     reacting(Dock, { carry: carryDock }),
-    Attachments.machine(),
+    picker,
     reacting(Locator, { carry: carryLocator }),
-    reached, looked, opening, saving, bound, requested, reviewedInFiles, submitted, allowing, forgetting, rested, keyboardRest, steppingBack, carried, carriedAloud, agentWarmUp,
+    reached, looked, opening, saving, bound, requested, reviewedInFiles, submitted, allowing, forgetting, rested, keyboardRest, steppingBack, retireContactSearch, carried, carriedAloud, agentWarmUp,
   ),
   Layer.mergeAll(Layer.fresh(turns), talk, handoffs),
 )

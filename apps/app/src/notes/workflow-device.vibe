@@ -1,0 +1,72 @@
+// spec/app/workflows/steps.md, "Story: Describe a step"; spec/app/notes/agent.md, "Story: Let the agent find and read my notes"
+import { NOT_DISPATCHED, type DeviceOperation, type ExecutorCall } from "@elizaos/agent"
+import { noteLimits, projectNoteForModel, reconstructNoteContent, sameJson, type StickyNote } from "@elizaos/plugin-notes-client"
+import { validateWorkflowReadResult, type WorkflowNoteRow, type WorkflowNotesReadOperation, type WorkflowReadResult } from "@elizaos/plugin-workflow-client"
+import { Machine as Notes } from "../../gen/app__notes.effect.vibe"
+import type { Agent } from "../platform/agent.vibe"
+import { NoteStore } from "../platform/notes.vibe"
+import { ownerAt } from "../platform/owner.vibe"
+
+type Authority = () => Promise<boolean>
+type NotesRead = Extract<WorkflowReadResult, { readonly kind: "notes" }>
+type CreateNote = Extract<DeviceOperation, { readonly type: "create_note" }>
+type Needs = Agent | NoteStore
+
+const refused = { kind: "refused", code: NOT_DISPATCHED } as const
+const applied = { kind: "applied" } as const
+
+export type WorkflowNoteWrite = typeof applied | typeof refused
+
+effect function owned(owner: string, current: Authority): boolean!!Agent {
+  return owner !== "" && (ownerAt() catch () => "") === owner && (tryPromise(() => current()) catch () => false)
+}
+
+function exactRows(operation: WorkflowNotesReadOperation, notes: readonly StickyNote[]): WorkflowNoteRow[] | undefined {
+  const rows: WorkflowNoteRow[] = []
+  for (const { id, revision } of operation.notes) {
+    const matches = notes.filter((note) => note.id === id)
+    const note = matches[0]
+    if (matches.length !== 1 || note === undefined) return undefined
+    const { title, body } = projectNoteForModel(note)
+    rows.push({ id, revision, title, text: body })
+  }
+  return rows
+}
+
+/** Prepare the selected records for the local review or the claimed read. Its caller owns the workflow review. */
+export effect function selectedWorkflowNotes(operation: WorkflowNotesReadOperation, current: Authority): (NotesRead | undefined)!!Needs {
+  const owner = ownerAt() catch () => ""
+  if (!(try owned(owner, current))) return undefined
+  const store = try NoteStore
+  const before = store.read() catch () => undefined
+  if (before === undefined) return undefined
+  const rows = exactRows(operation, before.notes)
+  if (rows === undefined) return undefined
+  const validated = validateWorkflowReadResult(operation, { kind: "notes", notes: rows }) catch () => undefined
+  if (validated?.kind !== "notes" || !(try owned(owner, current))) return undefined
+  const after = store.read() catch () => undefined
+  if (after === undefined || !sameJson(exactRows(operation, after.notes), validated.notes)) return undefined
+  return (try owned(owner, current)) ? validated : undefined
+}
+
+/** Save the exact reviewed text once, using the device claim's operation ID as the Notes creation identity. */
+export effect function createWorkflowNote(operation: CreateNote, call: ExecutorCall, current: Authority): (WorkflowNoteWrite | undefined)!!(Needs | Notes) {
+  const { title, body } = operation
+  const separator = body === "" ? "" : "\n"
+  const content = reconstructNoteContent({ title, body, bodySeparator: separator })
+  if (title.trim() === "" || title.includes("\n") || title.length > noteLimits.title || separator.length + body.length > noteLimits.body
+    || content.length > noteLimits.content || content.includes("\0") || !content.isWellFormed()
+    || call.operationId === "" || call.operationId.length > noteLimits.creationId) return refused
+  const owner = ownerAt() catch () => ""
+  if (!(try owned(owner, current))) return refused
+  const store = try NoteStore
+  return effect {
+    const saved = try store.create({ creationId: call.operationId, content, format: { kind: "text", data: {} } })
+    const note = saved.note
+    if (note === undefined || !saved.state.notes.some((one) => one.id === note.id) || !(try owned(owner, current))) return undefined
+    const projected = projectNoteForModel(note)
+    if (projected.title !== title || projected.body !== body || note.format?.kind !== "text") return undefined
+    try ignore((try Notes).send({ type: "storeChanged" }, "Phone"))
+    return applied
+  } catch (error) => error.known ? refused : undefined
+}

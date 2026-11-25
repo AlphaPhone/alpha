@@ -21,7 +21,7 @@ import { heading } from "./parse.ts";
 import { precomputeSimulations, prepareSimulationReceipts } from "./formal.ts";
 import { exec, run as tool, toolCpuSeconds } from "./run.ts";
 import { pendingSpecs, showPending, writeLedger } from "./review.ts";
-import { filesUnder, packageScripts, testInputs, testReceipt, writeWhole } from "./util.ts";
+import { fileCitations, filesUnder, packageScripts, testInputs, testReceipt, writeWhole } from "./util.ts";
 import { profile } from "./testing/profile.ts";
 import { installChromium } from "./chromium.ts";
 import { hostedCachedFixture, isolatedInstalls } from "./selftests/install.ts";
@@ -2586,6 +2586,8 @@ function eachCheck() {
     assert.ok(elsewhere.said("tests", /^pass/), elsewhere.text);
     fs.writeFileSync(path.join(root, "package.json"), manifest({}));
     const cite = (heading: string) => `// spec/index.md, ${JSON.stringify(heading)}\n`;
+    const quoted = 'A pending "Use my location" ends when Maps closes';
+    assert.deepEqual(fileCitations("src/maps.vibe", cite(quoted)), [{ at: "src/maps.vibe:1", spec: "spec/index.md", heading: quoted }]);
     const cites = ["Story: Check out", "Only a non-empty draft can be submitted", "Refunds are instant"].map(cite).join("");
     fs.mkdirSync(path.join(root, "test/journeys"), { recursive: true });
     fs.writeFileSync(path.join(root, "test/journeys/checkout.test.ts"), `import { assert, it } from "@effect/vitest";\nimport { noted } from "../../src/notes.vibe";\n\n${cites}it("a journey", () => assert.ok(noted));\n`);
@@ -3392,6 +3394,7 @@ function eachCheck() {
     fs.mkdirSync(installed, { recursive: true });
     const unpacked = await exec("tar", ["-xzf", archive, "--strip-components", "1", "-C", installed], copy);
     assert.equal(unpacked.status, 0, unpacked.stdout + unpacked.stderr);
+    assert.equal(read("vibestack/LICENSE", installed), read("vibestack/LICENSE"));
     assert.deepEqual(pageFiles(path.join(installed, "dist/studio/dist/page")), currentPage);
     assert.deepEqual(fs.readdirSync(installed, { recursive: true, encoding: "utf8" }).filter((file) => file.split(path.sep).includes("examples")), [], "an application's toolchain carries no example to check");
     fs.mkdirSync(path.join(installed, "node_modules"));
@@ -4873,6 +4876,8 @@ test("the lint refuses, in a project's own code, a comment that is neither a cit
     "  export function readEmpty() {}",
     "  /** @throws { } */",
     "  export function readWhitespace() {}",
+    "  /** Describes a declaration. @throws {Error} on failure. */",
+    "  export function readDocumented() {}",
     "}",
   ]), ["6 code/comments", "8 code/comments", "11 code/comments", "13 code/comments"]);
   const hiding = [["useEffect(() => {}, []); // eslint-disable-line"], ["/* eslint-disable */", "// a note"], ["/* eslint-disable code/comments, code/effects -- it must */", "setTimeout(() => {}, 1);"], ["/* eslint code/comments: off, no-console: off */", `console.log("seen");`], ["// eslint-disable-next-line no-console -- it must", `console.log("seen");`]];

@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// spec/app/image/index.md, "Story: Stage Alpha into an image"; spec/agent/index.md, "Story: Build the pack only from the pinned eliza"; spec/agent/index.md, "The launch names the pack's pinned workflow worker"
+// spec/app/image/index.md, "Story: Stage Alpha into an image"; spec/agent/index.md, "Story: Build the pack only from the pinned eliza"; spec/agent/index.md, "The launch names the pack's pinned workflow worker, and the agent refuses any other with its configuration code"
 import { createHash } from "node:crypto";
 import { execFileSync, spawnSync } from "node:child_process";
 import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
@@ -7,7 +7,7 @@ import { tmpdir } from "node:os";
 import { dirname, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import * as NodeServices from "@effect/platform-node/NodeServices";
-import { generateAndroidHost, stageRuntimePayload } from "@elizaos/os";
+import { generateAndroidHost, parseApkSignerDigest, stageRuntimePayload } from "@elizaos/os";
 import { packPrepared, prepared } from "@repo/eliza-harness";
 import { Effect, Layer } from "effect";
 import { FetchHttpClient } from "effect/http";
@@ -22,6 +22,10 @@ const agentPack = join(root, "apps/agent");
 const variant = "launcher";
 const abis = ["arm64-v8a", "x86_64"] as const;
 const voiceAssets = "assets/paradee-voice/v1/";
+const nodeLicence = "assets/agent/notices/node/LICENSE";
+const nodeLicenceBySource = new Map([
+  ["a7f6204ff63b6a2cd274d48903285abb86ed53a99070e532d4c2fd787457d9e6", "8e603aa87c70d36e497004f0dec63111511cb61b7d65ace12e10ea791599286c"],
+]);
 const mockSwitches = ["ELIZA_DEV_ALLOW_TEST_MOCKS", "VITE_ELIZA_DEV_ALLOW_TEST_MOCKS", "ALPHA_FAKES"];
 const signingNames = ["ELIZAOS_KEYSTORE_PATH", "ELIZAOS_KEYSTORE_PASSWORD", "ELIZAOS_KEY_ALIAS", "ELIZAOS_KEY_PASSWORD"];
 const usage = "Usage: node scripts/android.ts <inputs|pack|stage|web|host|build [--release]|verify|audit DIR>";
@@ -167,7 +171,7 @@ export async function stageRuntime(): Promise<string> {
   const bundle = packBundle();
   const entry = join(bundle, "agent.mjs");
   if (!existsSync(entry) || !existsSync(join(bundle, "manifest.json"))) throw new Error("The agent pack is not built: node scripts/android.ts pack");
-  const digest = sha256(readFileSync(entry)).slice(0, 16);
+  const digest = `${prepared().commit}-${sha256(readFileSync(entry)).slice(0, 16)}`;
   const runtimes = join(android, "runtime");
   const output = join(runtimes, digest);
   if (!existsSync(join(output, "android/app/src/main/assets/agent/inventory.json"))) {
@@ -351,7 +355,7 @@ interface Row {
   readonly sha256: string;
   readonly bytes: number;
   readonly signed: boolean;
-  readonly signer: string | null;
+  readonly signerSha256: string | null;
   readonly debuggable: boolean;
   readonly versionCode: number;
   readonly versionName: string;
@@ -359,8 +363,29 @@ interface Row {
   readonly testMocks: false;
   readonly bundleAudit: "passed";
   readonly runtime: "PACKAGED";
+  readonly runtimeNotices: boolean;
   readonly distributable: boolean;
   readonly blockers: readonly string[];
+}
+
+/** Checks inventoried APK bytes against the locked Node source's license and the pinned binary for each packaged ABI. */
+function recordedRuntimeNotices({ entries, listed, packagedAbis }: {
+  readonly entries: readonly string[];
+  readonly listed: readonly Record<string, unknown>[];
+  readonly packagedAbis: readonly string[];
+}): boolean {
+  const notices = listed.filter((row) => row.path === nodeLicence);
+  if (notices.length !== 1 || entries.filter((entry) => entry === nodeLicence).length !== 1) return false;
+  const lock = record(readJson(join(prepared().root, "packages/os/aosp/runtime/node.lock.json")));
+  const expected = typeof lock.sourceSha256 === "string" ? nodeLicenceBySource.get(lock.sourceSha256) : undefined;
+  if (expected === undefined || notices[0]?.sha256 !== expected || !Array.isArray(lock.entries)) return false;
+  const pinned = lock.entries.map(record);
+  return packagedAbis.every((abi) => {
+    const binaries = listed.filter((row) => row.path === `lib/${abi}/libeliza_node.so`);
+    const candidates = pinned.filter((row) => row.abi === abi);
+    const binaryDigest = candidates[0]?.sha256;
+    return binaries.length === 1 && candidates.length === 1 && typeof binaryDigest === "string" && binaries[0]?.sha256 === binaryDigest;
+  });
 }
 
 /** One APK, checked: identity, version, payload, page audit and classes. Throws on the first broken rule. */
@@ -412,6 +437,7 @@ export function checkApk(file: string, mode: "debug" | "release", env: NodeJS.Pr
     if (!entries.includes(path)) throw new Error(`${name} lacks its inventoried ${path}`);
     if (sha256(read(path)) !== row.sha256) throw new Error(`${name}'s ${path} differs from its inventory`);
   }
+  const runtimeNotices = recordedRuntimeNotices({ entries, listed, packagedAbis: wantedAbis });
   for (const data of ["host.json", "character.json", "policy.json"]) if (!entries.includes(`assets/agent/${data}`)) throw new Error(`${name} carries no agent ${data}`);
   const pluginManifest = "assets/capacitor.plugins.json";
   if (!entries.includes(pluginManifest)) throw new Error(`${name} lacks the Capacitor plugin discovery manifest`);
@@ -432,12 +458,13 @@ export function checkApk(file: string, mode: "debug" | "release", env: NodeJS.Pr
   const missing = REQUIRED_CLASSES.filter((descriptor) => !classes.includes(`Class descriptor  : '${descriptor}'`));
   if (missing.length > 0) throw new Error(`${name} lacks ${missing.join(", ")}`);
   const signed = !name.endsWith("-unsigned.apk");
-  const signer = signed ? /Signer #1 certificate SHA-256 digest: ([0-9a-f]{64})/.exec(execFileSync(buildTool("apksigner", env), ["verify", "--print-certs", file], { encoding: "utf8" }))?.[1] ?? null : null;
-  if (signed && signer === null) throw new Error(`${name} has no verifiable signer`);
-  const blockers = [...(mode === "debug" ? ["debug build"] : []), ...(signed ? [] : ["unsigned release"])];
+  const signerSha256 = signed ? parseApkSignerDigest(execFileSync(buildTool("apksigner", env), ["verify", "--print-certs", file], { encoding: "utf8" })) ?? null : null;
+  if (signed && signerSha256 === null) throw new Error(`${name} has no single verifiable signer`);
+  const blockers = [...(mode === "debug" ? ["debug build"] : []), ...(signed ? [] : ["unsigned release"]),
+    ...(runtimeNotices ? [] : ["Node runtime notices missing or unverified"])];
   return {
-    mode, variant, flavor: variant, file: name, name, sha256: sha256(bytes), bytes: bytes.byteLength, signed, signer, debuggable, versionCode, versionName: packageLine[3] ?? "",
-    abis: abiList, testMocks: false, bundleAudit: "passed", runtime: "PACKAGED", distributable: mode === "release" && signed, blockers,
+    mode, variant, flavor: variant, file: name, name, sha256: sha256(bytes), bytes: bytes.byteLength, signed, signerSha256, debuggable, versionCode, versionName: packageLine[3] ?? "",
+    abis: abiList, testMocks: false, bundleAudit: "passed", runtime: "PACKAGED", runtimeNotices, distributable: blockers.length === 0, blockers,
   };
 }
 
@@ -457,7 +484,7 @@ export function verify(env: NodeJS.ProcessEnv = environment()) {
     results,
   };
   writeJson(join(artifacts, "apk-manifest.json"), manifest);
-  for (const row of results) console.log(`${row.mode} ${row.file} versionCode ${row.versionCode} ${row.abis.join(",")} ${row.signed ? `signed ${row.signer}` : "unsigned"}, page audit passed, runtime packaged`);
+  for (const row of results) console.log(`${row.mode} ${row.file} versionCode ${row.versionCode} ${row.abis.join(",")} ${row.signed ? `signed ${row.signerSha256}` : "unsigned"}, page audit passed, runtime packaged, Node notices ${row.runtimeNotices ? "verified" : "unverified"}`);
   return manifest;
 }
 

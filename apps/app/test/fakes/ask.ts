@@ -180,7 +180,20 @@ export function askRoutes(scene: AskScene): Route[] {
       if (scene.pagesDown) return Response.json({ error: "starting" }, { status: 503 });
       if (scene.pagesMissing) return Response.json({ error: "unknown_conversation" }, { status: 404 });
       const one = scene.kept.get(id);
-      return one === undefined ? Response.json({ error: "unknown_conversation" }, { status: 404 }) : Response.json({ messages: one.messages.map((message) => ({ ...message, timestamp: 0 })) });
+      if (one === undefined) return Response.json({ error: "unknown_conversation" }, { status: 404 });
+      const messages = one.messages.map((message, at) => ({ ...message, timestamp: at + 1 }));
+      const around = url.searchParams.get("around");
+      if (around !== null) {
+        const pivot = messages.findIndex((message) => message.id === around);
+        return pivot < 0 ? Response.json({ error: "unknown_message" }, { status: 404 })
+          : Response.json({ messages: messages.slice(Math.max(0, pivot - 100), pivot + 101) });
+      }
+      const before = url.searchParams.get("before");
+      if (before === null) return Response.json({ messages: messages.slice(-200), hasMore: messages.length > 200 });
+      const beforeId = url.searchParams.get("beforeId");
+      const older = messages.filter(({ timestamp, id }) => timestamp < Number(before) || (timestamp === Number(before) && beforeId !== null && id < beforeId));
+      const limit = Math.min(50, Math.max(1, Number(url.searchParams.get("limit") ?? 50)));
+      return Response.json({ messages: older.slice(-limit), hasMore: older.length > limit });
     },
     (request, url) => {
       if (request.method !== "GET" || url.pathname !== "/api/conversations/messages/search") return;

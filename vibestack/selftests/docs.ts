@@ -131,8 +131,10 @@ describe("the documents name what exists", () => {
     assert.deepEqual(ranBy(examplesSource, examplesTitle), ["selftest:examples"]);
     assert.deepEqual(toolTitles.map((title) => [title, ranBy(toolSource, title)]),
       toolTitles.map((title) => [title, [inShards[title] ?? "selftest:tools:rest"]]));
-    const jobs = [...read(".github/workflows/ci.yml").matchAll(/^ +tasks: (.+)$/gm)].flatMap(([, tasks]) => tasks.split(" "));
+    const ci = read(".github/workflows/ci.yml");
+    const jobs = [...ci.matchAll(/^ +tasks: (.+)$/gm)].flatMap(([, tasks]) => tasks.split(" "));
     assert.deepEqual(jobs.sort(), listed("verify").sort(), "CI's jobs run the tasks of pnpm verify between them, each once");
+    assert.match(ci, /- if: matrix\.name == 'verify'\n +run: pnpm eliza\n[\s\S]+?- id: verify-tasks\b/);
     const release = read(".github/workflows/release.yml");
     assert.match(scripts.prepare, /^node vibestack\/spec\.ts gen --install --skip-gen-on-pack \/\/#build(?: |$)/);
     if (/^ +- run: pnpm selftest --only --concurrency=1$/m.test(release)) {
@@ -144,7 +146,7 @@ describe("the documents name what exists", () => {
     }
     const fuzz = read(".github/workflows/fuzz.yml");
     const nightly = fuzz.match(/^  vibestack-nightly-check:\n((?: {4}.*\n|\n)*)/m)?.[1] ?? "";
-    assert.match(nightly, /^ +- run: pnpm all check --continue -- --nightly$/m);
+    assert.match(nightly, /^ +- run: pnpm eliza\n[\s\S]*?^ +- run: pnpm all check --continue -- --nightly$/m);
     assert.deepEqual(fuzz.match(/^ +shard: \[(.+)\]$/m)?.[1].split(", "), shards.map((task) => task.split(":")[2]), "the nightly run names every shard");
     const [first, ...others] = shards.map((task) => JSON.parse(read("turbo.json")).tasks[`//#${task}`].dependsOn);
     assert.deepEqual(others, others.map(() => first), "the shards wait for the same integration prerequisites");
@@ -259,7 +261,7 @@ describe("the documents name what exists", () => {
       }),
     }, {
       notWaiting: ["//#build", "//#lint:css", "//#selftest:docs", "//#selftest:examples", "@repo/design-system#build", "@repo/ui#typecheck", "vibestack-studio#build", "vibestack-studio#dev", "vibestack-studio#test", "vibestack-studio#typecheck"],
-      analyzeWaitsFor: ["//#gen", "@repo/design-system#build", "@repo/ui#gen", "vibestack-studio#gen"],
+      analyzeWaitsFor: ["//#gen", "@repo/design-system#build", "@repo/eliza-harness#build", "@repo/ui#gen", "vibestack-studio#gen"],
       lintWaitsFor: vibeDeclared, devWaitsFor: tasks.get("vibestack-studio#build")!.dependencies.toSorted(), prose: [[], true, true], readme: [["//#selftest:docs", "//#selftest:tools:rest"], false], selftest: [[], false, true],
       fixture: { studio: ["vibestack-studio#test"], build: false, selftest: true },
       frameworkTest: { build: false, test: true },

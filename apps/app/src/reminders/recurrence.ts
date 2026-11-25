@@ -1,9 +1,8 @@
 // spec/app/reminders/recurrence.md, "Story: Repeat reminders cleanly across months and leap years"
+import type { ReminderRecurrence } from "@repo/launcher-records";
 import { type CivilDate, type Repeat, nextOccurrence, validDate } from "../../gen/app__reminders__recurrence.ts";
 
 /** Wire recurrence rule shared between Reminders UI and the resident agent. */
-export type ReminderRecurrence = "none" | "daily" | "weekdays" | "weekly" | "monthly" | "yearly";
-
 const wireToSpec: Readonly<Record<ReminderRecurrence, Repeat>> = {
   none: "NoRepeat",
   daily: "Daily",
@@ -93,7 +92,7 @@ export function quickDatePresets(nowMs: number): { readonly today: string; reado
   };
 }
 
-/** Compute the snooze target instant for 10m, 1h, or tomorrow 9:00 AM relative to `nowMs`. */
+/** Compute the snooze target instant for 10m, 1h, or tomorrow 9:00 AM relative to `nowMs`. @throws {never} */
 export function snoozeTargetMs(nowMs: number, preset: "10m" | "1h" | "tomorrow"): number {
   if (preset === "10m") return nowMs + 10 * 60_000;
   if (preset === "1h") return nowMs + 60 * 60_000;

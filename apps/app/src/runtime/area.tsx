@@ -1,3 +1,5 @@
+import type { Machine as SignInMachine } from "../../gen/app__account__signIn.effect.vibe";
+import type { StartupSignIn } from "../startup/signIn.vibe";
 import type { Effect, Layer, ManagedRuntime } from "effect";
 import type { ComponentType, ReactNode } from "react";
 import type { Place } from "../areas.ts";
@@ -9,11 +11,12 @@ import type { resident } from "../resident.vibe";
 import type { Whole } from "./reactor.vibe";
 
 /** What the root runtime gives every area: the platform and the resident machines. */
-export type Resident = Platform | MediaHandoff | AgentPages | BrowserDownloadsHandoff | InboxBrowserLinks | ScanExports | Layer.Success<typeof resident>;
+export type Resident = Platform | MediaHandoff | AgentPages | BrowserDownloadsHandoff | InboxBrowserLinks | ScanExports | SignInMachine | StartupSignIn | Layer.Success<typeof resident>;
 
 /** Alpha as boot.tsx opened it. */
 export interface Alpha {
   /** The root runtime: the platform and every resident machine, from launch to exit. */
+  readonly requiresSignIn: boolean;
   readonly runtime: ManagedRuntime.ManagedRuntime<Resident, unknown>;
   /** A runtime of an area's own machines over the root's, made once and kept until Alpha is disposed. */
   over<I, E>(layer: Layer.Layer<I, E, Resident | NoInfer<I> | Whole>): ManagedRuntime.ManagedRuntime<I | Resident, unknown>;

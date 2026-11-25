@@ -1,6 +1,7 @@
 import { Effect, Layer } from "effect";
 import { type ReactElement, Suspense, lazy } from "react";
-import { MediaHandoff, stageAttachment, stageTranscript } from "./assistant/attachments.vibe";
+import { captureReviewedDraft, MediaHandoff, stageAttachment, stageTranscript } from "./assistant/attachments.vibe";
+import { readPage, stopPage } from "./assistant/read-aloud.vibe";
 import { executeMedia } from "./assistant/media-executors.ts";
 import { FileContext } from "./assistant/file-context.vibe";
 import { Machine as Shell, showing } from "../gen/app__shell.effect.vibe";
@@ -15,10 +16,12 @@ import { resident } from "./resident.vibe";
 import type { Alpha } from "./runtime/area.tsx";
 import { Contained } from "./runtime/contained.tsx";
 import { rooted } from "./runtime/root.vibe";
+import { startupSignIn, StartupSignIn } from "./startup/signIn.vibe";
+import * as Access from "../gen/app__startup__access.effect.vibe";
 import { back, taking } from "./shell/shell.vibe";
 
 /** Alpha over `platform`: one root runtime of the resident machines, and each screen of `mounts` at its place, loaded when it is first drawn, and contained: one that throws or cannot be loaded stops alone. */
-export function boot(platform: Layer.Layer<Platform>, mounts: readonly Mount[] = every): Alpha {
+export function boot(platform: Layer.Layer<Platform>, mounts: readonly Mount[] = every, requireNativeSignIn = false): Alpha {
   const media = Layer.succeed(MediaHandoff, {
     attach: (file, current, suggestion) => Effect.promise(async () => {
       const { default: assistant } = await import("./assistant/index.tsx");
@@ -28,6 +31,18 @@ export function boot(platform: Layer.Layer<Platform>, mounts: readonly Mount[] =
       const { default: assistant } = await import("./assistant/index.tsx");
       return assistant.runtime(alpha).runPromise(stageTranscript(transcript));
     }).pipe(Effect.catchCause(() => Effect.succeed(false))),
+    reviewedDraft: () => Effect.promise(async () => {
+      const { default: assistant } = await import("./assistant/index.tsx");
+      return assistant.runtime(alpha).runPromise(captureReviewedDraft());
+    }).pipe(Effect.catchCause(() => Effect.succeed(undefined))),
+    offerPageSpeech: (speech) => Effect.promise(async () => {
+      const { default: assistant } = await import("./assistant/index.tsx");
+      return assistant.runtime(alpha).runPromise(readPage(speech));
+    }).pipe(Effect.catchCause(() => Effect.succeed(false))),
+    stopPageSpeech: (item) => Effect.promise(async () => {
+      const { default: assistant } = await import("./assistant/index.tsx");
+      return assistant.runtime(alpha).runPromise(stopPage(item));
+    }).pipe(Effect.ignoreCause),
   });
   const executors = Layer.succeed(MediaExecutors, {
     filesContext: () => Effect.tryPromise(async () => {
@@ -89,16 +104,26 @@ export function boot(platform: Layer.Layer<Platform>, mounts: readonly Mount[] =
       await files.runtime(alpha).runPromise(retainScanExport(selection));
     }).pipe(Effect.orElseSucceed(() => undefined)),
   });
-  const root = rooted(Layer.provideMerge(resident, Layer.mergeAll(platform, media, executors, fileContext, downloads, agentPages, inboxLinks, scans)));
+  const root = rooted(Layer.provideMerge(Layer.provideMerge(startupSignIn(requireNativeSignIn), resident), Layer.mergeAll(platform, media, executors, fileContext, downloads, agentPages, inboxLinks, scans)));
   const placed = new Map<Place, ReactElement[]>();
   const alpha: Alpha = {
     runtime: root.runtime,
     over: (layer) => root.over(layer),
     slot: (place) => placed.get(place),
     back: () => root.runtime.runPromiseExit(back()),
+    requiresSignIn: requireNativeSignIn,
     taking: (place, took) => void root.runtime.runPromiseExit(taking(place, took)),
     dispose: root.dispose,
   };
+  if (requireNativeSignIn) alpha.taking("startup/sign-in", () => root.runtime.runPromise(StartupSignIn.use((signIn) => Effect.gen(function* () {
+    if (yield* signIn.active()) {
+      yield* signIn.back();
+      return true;
+    }
+    if (!(yield* signIn.confirmedAccount())) return false;
+    const access = yield* Access.Machine.use((permissions) => permissions.get());
+    return !access.covered && (!access.begun || !Access.completed(access));
+  }))));
   const stopped = (place: string, cause: unknown) => void root.runtime.runPromiseExit(Effect.logError(`the screen at ${place} stopped`, cause));
   for (const mount of mounts) {
     const Screen = mount.first?.open(alpha, mount.at) ?? lazy(async () => ({ default: (await mount.load()).default.open(alpha, mount.at) }));

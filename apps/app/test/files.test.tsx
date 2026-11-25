@@ -25,7 +25,7 @@ import files from "../src/files/index.tsx";
 import { called } from "../src/platform/files.vibe";
 import { button, closeAll, drawn, fill, hardware, later, only, open, press, pressOnTop, seen, underAct, until } from "./alpha.tsx";
 import { scene } from "./fakes/scene.ts";
-import { textReview } from "./fakes/text-review.ts";
+import { textReview, type TextReviewScene } from "./fakes/text-review.ts";
 
 underAct();
 afterEach(closeAll);
@@ -70,6 +70,32 @@ async function onFiles(world = { ...scene(), phone: true }, ...otherPlaces: Plac
   const runtime = files.runtime(alpha);
   if (homeTile("Files")) await openFromHome("Files");
   return { ...running, world, runtime };
+}
+
+async function onDownloads() {
+  const running = await onFiles();
+  const { alpha, runtime } = running;
+  await until(alpha, runtime, Browser, (s) => s.storage.status === "Loaded");
+  await press("Internal storage");
+  await press("Download");
+  await until(alpha, runtime, Browser, (s) => s.listing.status === "Loaded" && s.items.length === 2);
+  return running;
+}
+
+async function withFilesReviewOnHome(world: ReturnType<typeof scene>, review: TextReviewScene) {
+  world.telephony.textReview = review;
+  const { alpha } = await open(world, only("home", "view:Files", "assistant", "notice"));
+  const chat = assistant.runtime(alpha);
+  const storage = files.runtime(alpha);
+  await until(alpha, alpha.runtime, Preferences, (s) => s.document.read.status === "Loaded" && !s.askFirst);
+  await until(alpha, chat, Conversation, (s) => s.ready);
+  return { alpha, chat, storage };
+}
+
+async function sendChat(text: string) {
+  await fill("Message Alpha", text);
+  await vi.waitFor(() => expect(button("Send")?.disabled).toBe(false));
+  await press("Send");
 }
 
 describe("Files on a phone", () => {
@@ -147,6 +173,53 @@ describe("Files on a phone", () => {
     expect([world.files.watching, Boolean(button("Internal storage"))]).toEqual([undefined, true]);
   });
 
+  it('Selects a Files row with a stationary touch and lets drag or cancellation leave it alone (spec/app/files/index.md, "The owner selects items of the place showing, all of them, or none, and a changed selection closes the sheets, telling the owner a share sheet sent nothing, and voids the delete confirmation")', async () => {
+    const { alpha, runtime } = await onFiles();
+    await until(alpha, runtime, Browser, (state) => state.storage.status === "Loaded");
+    await press("Internal storage");
+    await until(alpha, runtime, Browser, (state) => state.listing.status === "Loaded");
+    await openRow("Download");
+    await until(alpha, runtime, Browser, (state) => state.listing.status === "Loaded" && state.trail.length === 2);
+
+    const picked = () => runtime.runSync(Effect.flatMap(Browser, (machine) => machine.get())).picked;
+    const touch = (type: string, clientX = 30) => drawn(() => {
+      const row = button("lease.pdf");
+      if (!row) throw new Error("The listed file is missing");
+      row.dispatchEvent(new PointerEvent(type, { bubbles: true, isPrimary: true, button: 0, pointerId: 1, pointerType: "touch", clientX, clientY: 20 }));
+    });
+    await touch("pointerdown");
+    await touch("pointermove", 70);
+    await later(alpha, 500);
+    expect(picked()).toEqual([]);
+    await touch("pointerup", 70);
+
+    await touch("pointerdown");
+    await touch("pointercancel");
+    await later(alpha, 500);
+    expect(picked()).toEqual([]);
+
+    await touch("pointerdown");
+    await later(alpha, 499);
+    expect(picked()).toEqual([]);
+    await later(alpha, 1);
+    await until(alpha, runtime, Browser, (state) => state.picked.length === 1);
+    await drawn(() => button("lease.pdf")?.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true })));
+    await touch("pointerup");
+    await drawn(() => button("lease.pdf")?.dispatchEvent(new MouseEvent("click", { bubbles: true, detail: 1 })));
+    expect(picked()).toHaveLength(1);
+    expect(button("lease.pdf")?.getAttribute("aria-pressed")).toBe("true");
+
+    await press("Cancel");
+    await until(alpha, runtime, Browser, (state) => state.picked.length === 0);
+    const checkbox = button("Select beach.jpg");
+    if (!checkbox) throw new Error("The keyboard selection control is missing");
+    await drawn(() => checkbox.focus());
+    expect(document.activeElement).toBe(checkbox);
+    await drawn(() => checkbox.dispatchEvent(new MouseEvent("click", { bubbles: true, detail: 0 })));
+    await until(alpha, runtime, Browser, (state) => state.picked.length === 1);
+    expect(button("beach.jpg")?.getAttribute("aria-pressed")).toBe("true");
+  });
+
   it("Browse my storage from the Browser's Show in Files, and go back (spec/app/files/index.md, \"Story: Browse my storage\"; spec/app/browser/downloads.md, \"Story: Download a file\")", async () => {
     const { alpha, runtime, world } = await onFiles({ ...scene(), phone: true, image: true }, "view:Browser");
     await until(alpha, runtime, Browser, (s) => s.storage.status === "Loaded");
@@ -218,11 +291,7 @@ describe("Files on a phone", () => {
   });
 
   it("Arrange and filter what I see (spec/app/files/index.md, \"Story: Arrange and filter what I see\"; spec/app/files/search.md, \"Story: Filter what I see\")", async () => {
-    const { alpha, runtime, world } = await onFiles();
-    await until(alpha, runtime, Browser, (s) => s.storage.status === "Loaded");
-    await press("Internal storage");
-    await press("Download");
-    await until(alpha, runtime, Browser, (s) => s.listing.status === "Loaded" && s.items.length === 2);
+    const { alpha, runtime, world } = await onDownloads();
     // spec/app/files/index.md, "The owner chooses a grid or a list, and a sort; choosing the same sort again reverses it"
     await choose("Name A–Z");
     expect(listed()).toEqual(["beach.jpg", "lease.pdf"]);
@@ -269,11 +338,12 @@ describe("Files on a phone", () => {
   });
 
   it("Change my files (spec/app/files/index.md, \"Story: Change my files\"; spec/app/files/change.md, \"Story: Change my files\"; spec/app/files/destination.md, \"Story: Choose a destination\"; spec/app/files/change.md, \"Story: Share what I selected\")", async () => {
-    const { alpha, runtime, world } = await onFiles();
-    await until(alpha, runtime, Browser, (s) => s.storage.status === "Loaded");
-    await press("Internal storage");
-    await press("Download");
-    await until(alpha, runtime, Browser, (s) => s.listing.status === "Loaded" && s.items.length === 2);
+    const { alpha, runtime, world } = await onDownloads();
+    const openDocumentsInDestination = async () => {
+      await until(alpha, runtime, Browser, (s) => s.sheet.reading.status === "Loaded");
+      await pressOnTop("Open Documents");
+      await until(alpha, runtime, Browser, (s) => s.sheet.reading.status === "Loaded" && s.sheet.trail.length === 2);
+    };
 
     // spec/app/files/index.md, "A change starts from the selection, of the folder showing, into a destination only as the Move to sheet last read it, as Changes allows it"
     await select("lease.pdf");
@@ -285,9 +355,7 @@ describe("Files on a phone", () => {
     await until(alpha, runtime, Browser, (s) => s.sheet.trail.length === 0);
     expect([buttonOnTop("Open Internal storage")?.disabled, buttonOnTop("Open SD card")?.disabled]).toEqual([false, true]);
     await pressOnTop("Open Internal storage");
-    await until(alpha, runtime, Browser, (s) => s.sheet.reading.status === "Loaded");
-    await pressOnTop("Open Documents");
-    await until(alpha, runtime, Browser, (s) => s.sheet.reading.status === "Loaded" && s.sheet.trail.length === 2);
+    await openDocumentsInDestination();
     // spec/app/files/index.md, "A new folder in the destination picker uses the parent as shown and opens the new folder in that picker"
     await pressOnTop("New folder");
     await fill("Name", "Filed copies");
@@ -319,9 +387,7 @@ describe("Files on a phone", () => {
       await select("beach.jpg");
       await press("Copy");
       await pressOnTop("Parent folder");
-      await until(alpha, runtime, Browser, (s) => s.sheet.reading.status === "Loaded");
-      await pressOnTop("Open Documents");
-      await until(alpha, runtime, Browser, (s) => s.sheet.reading.status === "Loaded" && s.sheet.trail.length === 2);
+      await openDocumentsInDestination();
       await pressOnTop("Copy here");
       if (runtime.runSync(Effect.flatMap(Browser, (m) => m.get())).change.clash.showing) await press("Replace");
       await until(alpha, runtime, Browser, (s) => s.change.work === "CopyTo" && s.change.attempt.outcome === "Confirmed" && s.listing.status === "Loaded");
@@ -575,11 +641,7 @@ describe("Files on a phone", () => {
   });
 
   it("Let the agent read my files (spec/app/files/index.md, \"Story: Let the agent read my files\")", async () => {
-    const { alpha, runtime, world } = await onFiles();
-    await until(alpha, runtime, Browser, (s) => s.storage.status === "Loaded");
-    await press("Internal storage");
-    await press("Download");
-    await until(alpha, runtime, Browser, (s) => s.listing.status === "Loaded" && s.items.length === 2);
+    const { alpha, runtime, world } = await onDownloads();
     const now = () => runtime.runSync(Effect.flatMap(Browser, (machine) => machine.get()));
     // spec/app/files/index.md, "The phone offers Files to an agent that takes Files' operations, and naming files by their place among the results shown only beside them; a request the phone cannot take is never shown for approval"
     expect(await runtime.runPromise(offer)).toEqual({ operations: true, positions: true });
@@ -742,9 +804,7 @@ describe("Files on a phone", () => {
         return proposed === "Nothing" ? [] : [{ action: "PROPOSE_DEVICE_ACTION", data: { proposalId: id, state: "pending", executed: false, approvalRequired: proposed === "Review",
           ...(proposed === "Direct" ? { awaitingDeviceExecution: true, directRequest: true } : { awaitingUserInput: true }) } }];
       };
-      await fill("Message Alpha", text);
-      await vi.waitFor(() => expect(button("Send")?.disabled).toBe(false));
-      await press("Send");
+      await sendChat(text);
       await until(alpha, chat, Conversation, (s) => review.pendingReads > reads && s.turn.reply === "Complete");
     };
     const before = runtime.runSync(Browser.use((m) => m.get()));
@@ -798,12 +858,7 @@ describe("Files on a phone", () => {
     const allPdfs = { type: "files_filter", kind: "pdf" } as const;
     const firstShown = { type: "files_open", shown: 1 } as const;
     const review = textReview(world.notes.owner, "home-filter", filter);
-    world.telephony.textReview = review;
-    const { alpha } = await open(world, only("home", "view:Files", "assistant", "notice"));
-    const chat = assistant.runtime(alpha);
-    const storage = files.runtime(alpha);
-    await until(alpha, alpha.runtime, Preferences, (s) => s.document.read.status === "Loaded" && !s.askFirst);
-    await until(alpha, chat, Conversation, (s) => s.ready);
+    const { alpha, chat, storage } = await withFilesReviewOnHome(world, review);
     await openFromHome("Files");
     await until(alpha, storage, Browser, (s) => s.open && s.storage.status === "Loaded");
     await press("Internal storage");
@@ -829,9 +884,7 @@ describe("Files on a phone", () => {
         review.proposal.payload.requestMessageId = `m${world.ask.said.length}u`;
         return [{ action: "PROPOSE_DEVICE_ACTION", data: { proposalId: id, state: "pending", executed: false, approvalRequired: false, awaitingDeviceExecution: true, directRequest: true } }];
       };
-      await fill("Message Alpha", text);
-      await vi.waitFor(() => expect(button("Send")?.disabled).toBe(false));
-      await press("Send");
+      await sendChat(text);
     };
 
     await fromHome();
@@ -893,15 +946,10 @@ describe("Files on a phone", () => {
     const world = { ...scene(), phone: true, image: true };
     const move = { type: "files_move", paths: ["Download/lease.pdf"], dest: "Documents" } as const;
     const review = textReview(world.notes.owner, "move-lease", move);
-    world.telephony.textReview = review;
-    const { alpha } = await open(world, only("home", "view:Files", "assistant", "notice"));
-    const chat = assistant.runtime(alpha);
-    const storage = files.runtime(alpha);
-    await until(alpha, alpha.runtime, Preferences, (s) => s.document.read.status === "Loaded" && !s.askFirst);
-    await until(alpha, chat, Conversation, (s) => s.ready);
+    const { alpha, chat, storage } = await withFilesReviewOnHome(world, review);
     const askFromHome = async (id: string, text: string) => {
       await until(alpha, alpha.runtime, Shell, (s) => s.trail.length === 0);
-      if (alpha.runtime.runSync(Shell.use((m) => m.get())).assistant !== "Sheet") await press("Open conversation");
+      if (alpha.runtime.runSync(Effect.flatMap(Shell, (m) => m.get())).assistant !== "Sheet") await press("Open conversation");
       await until(alpha, alpha.runtime, Shell, (s) => s.assistant === "Sheet");
       review.proposal.id = id;
       review.proposal.state = "pending";
@@ -912,9 +960,7 @@ describe("Files on a phone", () => {
         review.proposal.payload.requestMessageId = `m${world.ask.said.length}u`;
         return [{ action: "PROPOSE_DEVICE_ACTION", data: { proposalId: id, state: "pending", executed: false, approvalRequired: true, awaitingUserInput: true } }];
       };
-      await fill("Message Alpha", text);
-      await vi.waitFor(() => expect(button("Send")?.disabled).toBe(false));
-      await press("Send");
+      await sendChat(text);
       await until(alpha, chat, Conversation, (s) => review.pendingReads > reads && s.turn.reply === "Complete");
     };
     const openFiles = async () => {
@@ -1005,11 +1051,7 @@ describe("Files on a phone", () => {
   });
 
   it("Delete into the Trash and bring it back (spec/app/files/trash.md, \"Story: Delete into the Trash\"; spec/app/files/trash.md, \"Story: See what is in the Trash\"; spec/app/files/trash.md, \"Story: Bring something back\"; spec/app/files/trash.md, \"Story: Erase for good\")", async () => {
-    const { alpha, runtime, world } = await onFiles();
-    await until(alpha, runtime, Browser, (s) => s.storage.status === "Loaded");
-    await press("Internal storage");
-    await press("Download");
-    await until(alpha, runtime, Browser, (s) => s.listing.status === "Loaded" && s.items.length === 2);
+    const { alpha, runtime, world } = await onDownloads();
 
     // spec/app/files/index.md, "Deleting shows what goes to the Trash, and only a confirmation of the selection as shown hands it over"
     await select("lease.pdf");

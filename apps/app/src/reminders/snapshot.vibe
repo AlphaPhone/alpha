@@ -1,0 +1,30 @@
+// spec/app/reminders/index.md, "Story: Sync with the resident agent and recover across restarts"
+import type { RemindersSnapshot } from "@repo/launcher-records"
+import * as KeyValueStore from "effect/persistence/KeyValueStore"
+import { fromAreas } from "../home/cards.vibe"
+import { dueInstantMs } from "./recurrence.ts"
+import { isItemOverdue, remindersStore } from "./store.ts"
+
+/** The on-device copy of the resident reminder document. */
+export const snapshotKey = "alpha.reminders.snapshot@1"
+
+/** Update the Home agenda with visible dated reminders. */
+export function pushToHomeAgenda(snapshot: RemindersSnapshot, hiddenIds: ReadonlySet<string>, nowMs: number): void {
+  const dated = snapshot.items
+    .filter((item) => !hiddenIds.has(item.id) && item.dueDate !== null)
+    .map((item) => ({
+      due: dueInstantMs(item.dueDate, item.dueMinute) ?? nowMs,
+      overdue: isItemOverdue(item, nowMs),
+      done: item.completed,
+      title: item.title,
+    }))
+  fromAreas.reminders(dated)
+}
+
+/** Update the reminder document and notify its visible projections. */
+export effect function persistReminderSnapshot(snapshot: RemindersSnapshot, nowMs: number): void!!KeyValueStore.KeyValueStore {
+  const view = remindersStore.replace(snapshot)
+  const encoded = Effect.try(() => JSON.stringify(view.snapshot)) catch () => undefined
+  if (encoded !== undefined) try ignore((try KeyValueStore.KeyValueStore).set(snapshotKey, encoded))
+  pushToHomeAgenda(view.snapshot, view.hiddenIds, nowMs)
+}

@@ -110,6 +110,7 @@ lemma look_ensures(c: Cards, now: int)
   ensures (inv(c) ==> canLook(c, now) ==> alwaysNoReadIsFromALaterDay(look(c, now).state))
   ensures (inv(c) ==> canLook(c, now) ==> alwaysAnAnswerIsRemembered(look(c, now).state))
   ensures (inv(c) ==> canLook(c, now) ==> stepALookLeavesNoCalendarUnread(c, "look", look(c, now).state))
+  ensures (inv(c) ==> canLook(c, now) ==> stepANewDayIsReadForItself(c, "look", look(c, now).state))
   ensures (inv(c) ==> canLook(c, now) ==> stepReadsAreTicketed(c, "look", look(c, now).state, look(c, now).out))
   ensures (inv(c) ==> canLook(c, now) ==> stepTicketsOnlyRise(c, "look", look(c, now).state))
   ensures (inv(c) ==> canLook(c, now) ==> stepATapOpensOneApp(c, "look", look(c, now).state, look(c, now).out))
@@ -122,16 +123,35 @@ lemma look_ensures(c: Cards, now: int)
   }
 }
 
-lemma openCard_ensures(c: Cards, kind: Kind, now: int)
-  ensures (inv(c) ==> canOpenCard(c, now) ==> alwaysEachCalendarHoldsOnlyWhatItAnswered(openCard(c, kind, now).state))
-  ensures (inv(c) ==> canOpenCard(c, now) ==> alwaysNoReadIsFromALaterDay(openCard(c, kind, now).state))
-  ensures (inv(c) ==> canOpenCard(c, now) ==> alwaysAnAnswerIsRemembered(openCard(c, kind, now).state))
-  ensures (inv(c) ==> canOpenCard(c, now) ==> stepALookLeavesNoCalendarUnread(c, "openCard", openCard(c, kind, now).state))
-  ensures (inv(c) ==> canOpenCard(c, now) ==> stepReadsAreTicketed(c, "openCard", openCard(c, kind, now).state, openCard(c, kind, now).out))
-  ensures (inv(c) ==> canOpenCard(c, now) ==> stepTicketsOnlyRise(c, "openCard", openCard(c, kind, now).state))
-  ensures (inv(c) ==> canOpenCard(c, now) ==> stepATapOpensOneApp(c, "openCard", openCard(c, kind, now).state, openCard(c, kind, now).out))
+lemma dayBegins_ensures(c: Cards, now: int, day: int)
+  ensures (inv(c) ==> canDayBegins(c, day) ==> alwaysEachCalendarHoldsOnlyWhatItAnswered(dayBegins(c, now, day).state))
+  ensures (inv(c) ==> canDayBegins(c, day) ==> alwaysNoReadIsFromALaterDay(dayBegins(c, now, day).state))
+  ensures (inv(c) ==> canDayBegins(c, day) ==> alwaysAnAnswerIsRemembered(dayBegins(c, now, day).state))
+  ensures (inv(c) ==> canDayBegins(c, day) ==> stepALookLeavesNoCalendarUnread(c, "dayBegins", dayBegins(c, now, day).state))
+  ensures (inv(c) ==> canDayBegins(c, day) ==> stepANewDayIsReadForItself(c, "dayBegins", dayBegins(c, now, day).state))
+  ensures (inv(c) ==> canDayBegins(c, day) ==> stepReadsAreTicketed(c, "dayBegins", dayBegins(c, now, day).state, dayBegins(c, now, day).out))
+  ensures (inv(c) ==> canDayBegins(c, day) ==> stepTicketsOnlyRise(c, "dayBegins", dayBegins(c, now, day).state))
+  ensures (inv(c) ==> canDayBegins(c, day) ==> stepATapOpensOneApp(c, "dayBegins", dayBegins(c, now, day).state, dayBegins(c, now, day).out))
 {
-  if inv(c) && canOpenCard(c, now) {
+  if inv(c) && canDayBegins(c, day) {
+    var after := dayBegins(c, now, day);
+    TapView(c, "dayBegins", after.state, after.out);
+    assert forall i :: 0 <= i < |after.out| ==> !after.out[i].Go?;
+    ProofLib.FilterNone((e: Effect) => e.Go?, after.out);
+  }
+}
+
+lemma openCard_ensures(c: Cards, kind: Kind, now: int)
+  ensures (inv(c) ==> alwaysEachCalendarHoldsOnlyWhatItAnswered(openCard(c, kind, now).state))
+  ensures (inv(c) ==> alwaysNoReadIsFromALaterDay(openCard(c, kind, now).state))
+  ensures (inv(c) ==> alwaysAnAnswerIsRemembered(openCard(c, kind, now).state))
+  ensures (inv(c) ==> stepALookLeavesNoCalendarUnread(c, "openCard", openCard(c, kind, now).state))
+  ensures (inv(c) ==> stepANewDayIsReadForItself(c, "openCard", openCard(c, kind, now).state))
+  ensures (inv(c) ==> stepReadsAreTicketed(c, "openCard", openCard(c, kind, now).state, openCard(c, kind, now).out))
+  ensures (inv(c) ==> stepTicketsOnlyRise(c, "openCard", openCard(c, kind, now).state))
+  ensures (inv(c) ==> stepATapOpensOneApp(c, "openCard", openCard(c, kind, now).state, openCard(c, kind, now).out))
+{
+  if inv(c) {
     var after := openCard(c, kind, now);
     TapView(c, "openCard", after.state, after.out);
     var rest := after.out[1..];

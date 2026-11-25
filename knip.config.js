@@ -16,6 +16,13 @@
 //   cloud wrangler                          run as an executable by apps/cloud/src/operator.vibe
 import vibelang from "vibelang/knip"
 
+const app = {
+  entry: ["test/**/*.test.{ts,tsx,vibe}", "test/drivers/*.ts", "src/**/*.{schema,contract}.{ts,vibe}"],
+  project: ["src/**/*.{ts,tsx,vibe,vibex,css}", "test/**/*.{ts,tsx,vibe,vibex}"],
+  ignoreDependencies: ["tailwindcss"],
+  ignoreBinaries: ["adb", "openssl"],
+}
+
 export default {
   compilers: { vibe: vibelang, vibex: vibelang },
   "ignore": [
@@ -52,7 +59,8 @@ export default {
     },
     "packages/ui": {
       "entry": [
-        "src/**/*.{meta,stories}.tsx"
+        "src/**/*.{meta,stories}.tsx",
+        "generated/stories/*.stories.tsx"
       ],
       "project": [
         "**/*.{ts,tsx,vibe,vibex,css}"
@@ -72,6 +80,7 @@ export default {
     "packages/eliza-harness": {
       "entry": [
         "src/index.ts",
+        "src/providers/cli.ts",
         "scripts/no-bun.ts",
         "test/**/*.test.{ts,vibe}"
       ],
@@ -141,23 +150,10 @@ export default {
         "tailwindcss"
       ]
     },
-    "apps/*": {
-      "entry": [
-        "test/**/*.test.{ts,tsx,vibe}",
-        "test/drivers/*.ts",
-        "src/**/*.{schema,contract}.{ts,vibe}"
-      ],
-      "project": [
-        "src/**/*.{ts,tsx,vibe,vibex,css}",
-        "test/**/*.{ts,tsx,vibe,vibex}"
-      ],
-      "ignoreDependencies": [
-        "tailwindcss"
-      ],
-      "ignoreBinaries": [
-        "adb",
-        "openssl"
-      ]
+    "apps/*": app,
+    "apps/app": {
+      ...app,
+      ignoreDependencies: [...app.ignoreDependencies, "@capacitor/android", "@tesseract.js-data/eng", "tesseract.js", "tesseract.js-core"]
     }
   }
 }

@@ -53,15 +53,19 @@ pure def there(apps: Set[str], shell: S::Shell, tile: Tile): bool =
 ### Home's defaults use the product's Home order, and Home holds at most 4096 tiles
 
 ```quint
+pure val homeCatalog: List[S::View] = List(
+  S::Phone, S::Messages, S::Inbox, S::Calendar, S::Browser, S::Camera, S::Photos,
+  S::Maps, S::Notes, S::Contacts, S::Files, S::Workflows, S::Settings, S::Wallet)
+
 pure val homeOrder: List[S::View] = List(
   S::Phone, S::Messages, S::Inbox, S::Calendar, S::Browser, S::Camera, S::Photos,
-  S::Maps, S::Notes, S::Contacts, S::Files, S::Workflows, S::Wallet, S::Settings)
+  S::Maps, S::Notes, S::Contacts, S::Files, S::Workflows, S::Settings)
 
 pure val defaults: List[Tile] = List(
   Own({ view: S::Phone }), Own({ view: S::Messages }), Own({ view: S::Inbox }), Own({ view: S::Calendar }),
   Own({ view: S::Browser }), Own({ view: S::Camera }), Own({ view: S::Photos }), Own({ view: S::Maps }),
   Own({ view: S::Notes }), Own({ view: S::Contacts }), Own({ view: S::Files }), Own({ view: S::Workflows }),
-  Own({ view: S::Wallet }), Own({ view: S::Settings }))
+  Own({ view: S::Settings }))
 
 pure val maxTiles = 4096
 
@@ -76,6 +80,11 @@ pure val noTile: Tile = Installed({ app: "" })
 pure def lawTheDefaultsAreHomeOrder(i: int): bool =
   defaults.length() == homeOrder.length()
     and ((0 <= i and i < homeOrder.length()) implies shows(defaults.nthOr(i, noTile), homeOrder.nthOr(i, S::Phone)))
+
+pure def lawTheCatalogOffersEveryDefaultAndWallet(i: int): bool =
+  homeCatalog.length() == homeOrder.length() + 1
+    and homeCatalog.nthOr(homeOrder.length(), S::Phone) == S::Wallet
+    and ((0 <= i and i < homeOrder.length()) implies homeCatalog.nthOr(i, S::Phone) == homeOrder.nthOr(i, S::Phone))
 ```
 
 ### What the simulator tries
