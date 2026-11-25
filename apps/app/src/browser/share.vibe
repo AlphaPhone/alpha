@@ -9,7 +9,7 @@ import { TabHost, hosted } from "../platform/browser.vibe"
 import { type FrameRequest } from "../platform/browserWeb.vibe"
 import { Device } from "../platform/device.vibe"
 import { type Job, answer, contained, following, reacting, started, together } from "../runtime/reactor.vibe"
-import { Pages, idOf, pageOf } from "./browser.vibe"
+import { Pages, browserInFront, idOf, pageOf } from "./browser.vibe"
 
 module page {
   /** Whether the Browser's document is in the foreground. @throws {never} */
@@ -58,7 +58,7 @@ effect function currentPage(binding: ViewedPage): boolean!!(Shell | Tabs | TabHo
   const selector = try (try Tabs).get()
   const host = try TabHost
   const id = idOf(selector.selected)
-  if (binding.id !== id || !foreground() || !showing(try (try Shell).get(), "Browser")) return false
+  if (binding.id !== id || !foreground() || !(try browserInFront())) return false
   if ("load" in binding) {
     const page = try pageOf(selector.selected)
     return page.phase === "Shown" && page.load === binding.load &&
@@ -71,7 +71,7 @@ effect function currentPage(binding: ViewedPage): boolean!!(Shell | Tabs | TabHo
 export effect function offerShare(dest: "System" | "Copy") {
   const tabs = try Tabs
   const selected = try tabs.get()
-  if (selected.layer !== "Menu" || !showing(try (try Shell).get(), "Browser") || !foreground()) return
+  if (selected.layer !== "Menu" || !(try browserInFront()) || !foreground()) return
   const share = try Share.Machine
   const host = try TabHost
   const id = idOf(selected.selected)
@@ -107,7 +107,7 @@ effect function delivered(panel: number, dest: "System" | "Copy") {
   const machine = try Share.Machine
   if (!Share.canDelivered(try machine.get(), panel, false, false)) return absent(panel)
   if (!(try currentPage(link))) {
-    if (foreground() && showing(try (try Shell).get(), "Browser")) try say("The page changed before sharing. Try again.", true)
+    if (foreground() && (try browserInFront())) try say("The page changed before sharing. Try again.", true)
     return absent(panel)
   }
   const host = try TabHost

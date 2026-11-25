@@ -9,6 +9,21 @@ export service WorkflowsApi {
   readonly request: WorkflowRequest
 }
 
+/** Read and keep the reply only while the same owner still holds the request. */
+export function checkedWorkflowRequest(request: WorkflowRequest, current: boolean!!): WorkflowRequest {
+  return effect (path, body) => {
+    if (!(try current)) throw workflowHttpError(0, {})
+    const received = try request(path, body)
+    if (!(try current)) throw workflowHttpError(0, {})
+    return received
+  }
+}
+
+/** A ready model can send the change it has queued. */
+export function sendChangeWhenReady(ready: boolean): { readonly type: "sendChange" } | undefined {
+  return ready ? { type: "sendChange" } : undefined
+}
+
 export const workflowsApi = Layer.effect(WorkflowsApi, effect {
   const { runtime } = try Agent
   const inFlight = new Map<string, Promise<unknown>>()

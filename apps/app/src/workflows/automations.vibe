@@ -8,7 +8,7 @@ import { ownerAt } from "../platform/owner.vibe"
 import { Garbled, Refused, ask, outcomeOf } from "../platform/remote.vibe"
 import { Attempts } from "../runtime/attempts.vibe"
 import { type Job, answer, applying, following, reacting, together } from "../runtime/reactor.vibe"
-import { Prompt, type PromptTiming, ScheduledTask } from "./api.vibe"
+import { Prompt, type PromptTiming, ScheduledTask, sendChangeWhenReady } from "./api.vibe"
 import { type WorkflowRow, Rows, refresh } from "./list.vibe"
 
 type EditSource =
@@ -281,8 +281,7 @@ const choosing = applying(Listing.Machine, (state) => ({ owner: state.owner, row
     if (status !== "Loading" && (try machine.get()).row === row) try ignore(machine.send({ type: "readAutomations" }))
   })
 
-const sending = following(Model.Machine, (state) => Model.canSendChange(state), Model.Machine,
-  (ready): Event | undefined => ready ? { type: "sendChange" } : undefined)
+const sending = following(Model.Machine, Model.canSendChange, Model.Machine, sendChangeWhenReady)
 
 export effect function editAutomation(owner: number, row: number): void!!(Model.Machine | AutomationWords) {
   const machine = try Model.Machine

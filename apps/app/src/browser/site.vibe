@@ -2,11 +2,11 @@
 import { Machine as Tabs } from "../../gen/app__browser.effect.vibe"
 import * as Site from "../../gen/app__browser__site.effect.vibe"
 import type { Machine as Toasts } from "../../gen/app__notices__toasts.effect.vibe"
-import { Machine as Shell, showing } from "../../gen/app__shell.effect.vibe"
+import type { Machine as Shell } from "../../gen/app__shell.effect.vibe"
 import { type Said, say } from "../notices/toasts.vibe"
 import { TabHost, hosted } from "../platform/browser.vibe"
 import { answer, contained, reacting, run } from "../runtime/reactor.vibe"
-import { idOf } from "./browser.vibe"
+import { browserInFront, idOf } from "./browser.vibe"
 
 type Clearing = { readonly ticket: number; readonly id: string; readonly url: string; readonly host: string }
 
@@ -53,7 +53,7 @@ export effect function siteShown(): ({ host: string; id: string; url: string } |
 
 /** Clear what the site shown keeps, once the owner reviewed it: its cookies, stored data and the answers given to it. */
 export effect function clearSiteShown(): boolean!!(Site.Machine | SiteRows | Tabs | TabHost | Shell | Toasts | Said) {
-  if (!showing(try (try Shell).get(), "Browser")) return false
+  if (!(try browserInFront())) return false
   const shown = try siteShown()
   if (shown === undefined) {
     try say("Load a website before clearing its data.", true)

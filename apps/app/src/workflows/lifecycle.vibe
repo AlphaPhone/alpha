@@ -7,7 +7,7 @@ import type { Change, Effect as Out, Event } from "../../gen/app__workflows.effe
 import type { Agent } from "../platform/agent.vibe"
 import { ownerAt } from "../platform/owner.vibe"
 import { type Job, answer, applying, following, reacting, together } from "../runtime/reactor.vibe"
-import { WorkflowsApi } from "./api.vibe"
+import { sendChangeWhenReady, WorkflowsApi } from "./api.vibe"
 import { Rows, refresh } from "./list.vibe"
 
 interface Definition {
@@ -82,13 +82,18 @@ const declined = (failure: unknown) =>
   failure instanceof WorkflowActivationRejected || failure instanceof WorkflowPauseRejected || failure instanceof WorkflowLifecycleRejected
   || failure instanceof WorkflowMetadataRejected || (failure instanceof WorkflowHttpError && [400, 401, 403, 404, 409, 422].includes(failure.status))
 
-effect function changed(id: number, change: Change, version: number, name: number): Event!!Needs {
+effect function changeContext() {
   const machine = try Model.Machine
   const definition = try DefinitionWords
   const rows = try Rows
   const store = try KeyValueStore.KeyValueStore
   const { workflow } = try WorkflowsApi
   const state = try machine.get()
+  return { definition, rows, store, workflow, state }
+}
+
+effect function changed(id: number, change: Change, version: number, name: number): Event!!Needs {
+  const { definition, rows, store, workflow, state } = try changeContext()
   const scope = ownerAt() catch () => ""
   const exact = try definition.read(state.target)
   if (exact?.version !== version || !(try rows.sameOwner(scope, state.owner))) return { type: "changeAnswered", id, applied: false }
@@ -121,12 +126,7 @@ effect function changed(id: number, change: Change, version: number, name: numbe
 }
 
 effect function checked(ticket: number, id: number): Event!!Needs {
-  const machine = try Model.Machine
-  const definition = try DefinitionWords
-  const rows = try Rows
-  const store = try KeyValueStore.KeyValueStore
-  const { workflow } = try WorkflowsApi
-  const state = try machine.get()
+  const { definition, rows, store, workflow, state } = try changeContext()
   const failed: Event = { type: "changeChecked", ticket, ok: false, found: false, version: Math.max(1, state.version) }
   const exact = try definition.read(state.target)
   const scope = ownerAt() catch () => ""
@@ -179,8 +179,7 @@ const focus = applying(
   },
 )
 
-const sending = following(Model.Machine, (state) => Model.canSendChange(state), Model.Machine,
-  (ready): Event | undefined => ready ? { type: "sendChange" } : undefined)
+const sending = following(Model.Machine, Model.canSendChange, Model.Machine, sendChangeWhenReady)
 
 export effect function reviewName(row: number, proposed: string, unfinished: boolean, interrupted: boolean): void!!(Model.Machine | DefinitionWords) {
   const machine = try Model.Machine
