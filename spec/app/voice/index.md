@@ -1068,6 +1068,14 @@ pure def canEdit(v: Voice, words: bool): bool = D::canEdit(v.recorder, words)
 pure def edit(v: Voice, words: bool): Voice = { ...v, recorder: D::edit(v.recorder, words) }
 ```
 
+### Ask Alpha can review typed words for the clip that recognition could not transcribe
+
+```quint
+pure def canTypeTranscript(v: Voice, ticket: int): bool = D::canTypeTranscript(v.recorder, ticket)
+
+pure def typeTranscript(v: Voice, ticket: int): Voice = { ...v, recorder: D::typeTranscript(v.recorder, ticket) }
+```
+
 ### Using the transcript fills the field dictation started in, and dictation never sends
 
 A messaging bar's dictation fills that bar, never Ask Alpha. The fill names

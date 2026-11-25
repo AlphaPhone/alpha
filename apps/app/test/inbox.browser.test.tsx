@@ -6,7 +6,20 @@ import "../src/main.css";
 
 afterEach(closeAll);
 
-it("Review an attachment and save the copy in Files (spec/app/inbox/message.md, \"An attachment is reviewed before it is opened or saved, and one use is in flight at a time\"; spec/app/inbox/message.md, \"An attachment use ends as its own answer says, or unknown\")", async () => {
+function twoPagePdf(): Uint8Array<ArrayBuffer> {
+  const pages = [120, 160].map((width) => `<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ${width} 200] >>`);
+  const objects = ["<< /Type /Catalog /Pages 2 0 R >>", "<< /Type /Pages /Kids [3 0 R 4 0 R] /Count 2 >>", ...pages];
+  let document = "%PDF-1.4\n";
+  const offsets = objects.map((object, index) => {
+    const offset = document.length;
+    document += `${index + 1} 0 obj\n${object}\nendobj\n`;
+    return offset;
+  });
+  const xref = offsets.map((offset) => `${String(offset).padStart(10, "0")} 00000 n \n`).join("");
+  return new TextEncoder().encode(`${document}xref\n0 5\n0000000000 65535 f \n${xref}trailer\n<< /Root 1 0 R /Size 5 >>\nstartxref\n${document.length}\n%%EOF\n`);
+}
+
+it("Review an attachment and save the copy in Files (spec/app/inbox/message.md, \"An attachment is reviewed before it is opened or saved, and one use is in flight at a time\"; spec/app/inbox/message.md, \"An attachment use ends as its own answer says, or unknown\"; spec/app/inbox/message.md, \"A reviewed PDF turns one page at a time under a new draw ticket, and shows only the page drawn for that review\")", async () => {
   await page.viewport(390, 844);
   const world = scene();
   const message = world.inbox.mail.find(({ card }) => card.id === "g1");
@@ -14,8 +27,12 @@ it("Review an attachment and save the copy in Files (spec/app/inbox/message.md, 
   const name = `Inbox receipt ${crypto.randomUUID().slice(0, 8)}.png`;
   const raw = atob("iVBORw0KGgoAAAANSUhEUgAAABgAAAAYCAIAAABvFaqvAAAAH0lEQVR4nGMwTz1AFcQwatCoQaMGjRo0atCoQQNvEADDgg8uFeV++AAAAABJRU5ErkJggg==");
   const bytes = Uint8Array.from(raw, (character) => character.charCodeAt(0));
-  message.files = [{ partId: "1", name, mimeType: "image/png", size: bytes.length, supported: true }];
-  message.attachmentData = { "1": bytes };
+  const pdf = twoPagePdf();
+  message.files = [
+    { partId: "1", name, mimeType: "image/png", size: bytes.length, supported: true },
+    { partId: "2", name: "Meeting notes.pdf", mimeType: "application/pdf", size: pdf.length, supported: true },
+  ];
+  message.attachmentData = { "1": bytes, "2": pdf };
 
   await open(world, only("home", "view:Inbox", "view:Files", "assistant"));
   await page.getByRole("button", { name: "Inbox", exact: true }).click();
@@ -42,10 +59,25 @@ it("Review an attachment and save the copy in Files (spec/app/inbox/message.md, 
   await expect.element(saving.getByRole("status")).toHaveTextContent("Saved to Files");
   await saving.getByRole("button", { name: "Close", exact: true }).click();
 
+  await page.getByRole("button", { name: /^Open Meeting notes\.pdf/ }).click();
+  await opening.getByRole("button", { name: "Open", exact: true }).click();
+  const pdfReview = page.getByRole("dialog", { name: "Meeting notes.pdf" });
+  await expect.element(pdfReview.getByRole("img", { name: "Page 1 of 2" })).toHaveAttribute("src", /^blob:/u);
+  await pdfReview.getByRole("button", { name: "Next page" }).click();
+  const second = pdfReview.getByRole("img", { name: "Page 2 of 2" });
+  await expect.element(second).toHaveAttribute("src", /^blob:/u);
+  const secondUrl = second.element().getAttribute("src");
+  expect(secondUrl).toBeTruthy();
+  await expect.element(pdfReview.getByRole("button", { name: "Next page" })).toBeDisabled();
+  await pdfReview.getByRole("button", { name: "Previous page" }).click();
+  await expect.element(pdfReview.getByRole("img", { name: "Page 1 of 2" })).toHaveAttribute("src", /^blob:/u);
+  await pdfReview.getByRole("button", { name: "Close", exact: true }).click();
+  expect(secondUrl && await fetch(secondUrl).then(() => false, () => true)).toBe(true);
+
   await page.getByRole("button", { name: "Back to the list", exact: true }).click();
   await page.getByRole("button", { name: "Back to apps", exact: true }).click();
   await page.getByRole("button", { name: "Files", exact: true }).click();
   await page.getByRole("button", { name: "Internal storage", exact: true }).click();
   await expect.element(page.getByText(name, { exact: true })).toBeVisible();
-  expect(world.inbox.attachmentReads).toEqual(["g1/1", "g1/1"]);
+  expect(world.inbox.attachmentReads).toEqual(["g1/1", "g1/1", "g1/2"]);
 });
