@@ -1,4 +1,5 @@
 // @vitest-environment happy-dom
+import { Effect } from "effect";
 import { afterEach, expect, it } from "vitest";
 import { Machine as Library } from "../gen/app__photos.effect.vibe";
 import { Machine as Viewer } from "../gen/app__photos__viewer.effect.vibe";
@@ -125,7 +126,11 @@ it('Offer the original photo for Inbox to review (spec/app/photos/viewer.md, "St
   source.mutationRevision = source.revision;
   world.photos.selectedPicture = () => Promise.resolve({ name: source.name, mimeType: "image/png", size: source.size, dataBase64 });
   const { alpha } = await open(world, only("home", "view:Photos", "view:Inbox", "notice"));
-  await press("Inbox");
+  await drawn(() => {
+    const inboxTile = document.querySelector<HTMLButtonElement>("[data-home-tile='view:Inbox']");
+    if (!inboxTile) throw new Error("No Inbox home tile");
+    inboxTile.click();
+  });
   const letters = inbox.runtime(alpha);
   await until(alpha, letters, Inbox, (state) => state.list.status === "Loaded" && state.selected.account !== 0);
   await hardware("back");
@@ -136,7 +141,7 @@ it('Offer the original photo for Inbox to review (spec/app/photos/viewer.md, "St
   await until(alpha, runtime, Viewer, (state) => state.read.status === "Loaded");
   await photoAction("Email");
   await until(alpha, letters, Adding, (state) => state.thing !== 0);
-  expect(letters.runSync(Incoming.use((incoming) => incoming.file()))).toEqual({
+  expect(letters.runSync(Incoming.use((incoming) => Effect.sync(() => incoming.file())))).toEqual({
     source: "Photos", attached: { name: source.name, mimeType: "image/png", size: source.size, data: dataBase64 },
   });
   expect([world.inbox.changes, world.inbox.attached, world.inbox.drafts.size]).toEqual([[], [], 0]);

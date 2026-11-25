@@ -26,7 +26,6 @@ type Names = "photos_filter" | "photos_open" | "photos_album_create" | "photos_s
 type Operation = Extract<DeviceOperation, { type: Names }>
 type Receipt = OperationResultOf<Names>
 
-const columns: Assistant.Field[] = ["Identity", "Revision", "ItemKind", "Taken", "Dimensions"]
 const changes = { trash: "Trash", share: "Share", favorite: "Favorite", unfavorite: "Unfavorite" } as const
 
 /** Only the public metadata admitted by the pinned agent contract. */

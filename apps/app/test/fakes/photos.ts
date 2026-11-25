@@ -8,7 +8,7 @@ function row(id: number, name: string, owned: boolean) {
   return { id: `m:external_primary:i:${id}`, name, owned, kind: "image", image: photo, date: 1795400000000 + id * 60_000, width: 1, height: 1, size: 68, revision: `rev-image-${id}` };
 }
 
-type FixtureRow = ReturnType<typeof row> & { duration?: number; path?: string; mutationRevision?: string };
+type FixtureRow = ReturnType<typeof row> & { duration?: number; path?: string; mutationRevision?: string; favorite?: boolean };
 type ListedRow = Omit<FixtureRow, "owned"> & { owned?: boolean };
 
 function ownedKey(row: Pick<FixtureRow, "id" | "kind">): string {
@@ -33,6 +33,7 @@ export interface PhotosScene {
   readonly saves: string[];
   readonly editLookups: string[];
   selectedPicture?: (picture: Reviewed) => Promise<FixturePicture>;
+  changeMany?: PhotosPlugin["changeMany"];
 }
 
 export function photosScene(): PhotosScene {
@@ -46,7 +47,7 @@ export function photosScene(): PhotosScene {
 /** The native Photos plugin fixture talks to the real Eliza media bridge. */
 export function alphaPhotos(scene: PhotosScene): Faked {
   type Used = "libraryAccess" | "requestLibraryAccess" | "watchLibrary" | "list" | "listPermitted" | "read" | "readPermitted"
-    | "thumbnails" | "beginEdit" | "previewEdit" | "saveEdit" | "editResult" | "cancelEdit" | "albums" | "openLibrarySettings";
+    | "thumbnails" | "beginEdit" | "previewEdit" | "saveEdit" | "editResult" | "cancelEdit" | "albums" | "openLibrarySettings" | "changeMany";
   type Originals = { readMessagePicture(input: Reviewed): Promise<FixturePicture>; readEmailPicture(input: Reviewed): Promise<FixturePicture> };
   return plugin<Pick<PhotosPlugin, Used> & Originals, { libraryChanged: undefined }>((emit) => {
     scene.changed = () => { if (scene.watching) emit("libraryChanged", undefined); };
@@ -115,6 +116,7 @@ export function alphaPhotos(scene: PhotosScene): Faked {
           ? { status: "saved", operationId, id: saved.id, revision: saved.revision, replaced: false }
           : { status: "not-started" });
       },
+      changeMany: (input) => scene.changeMany?.(input) ?? Promise.reject(new Error("No matching photo change")),
       cancelEdit: () => Promise.resolve(),
       albums: () => Promise.resolve({ items: [] }),
       openLibrarySettings: () => Promise.resolve(undefined),

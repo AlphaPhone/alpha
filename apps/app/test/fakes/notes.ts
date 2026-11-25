@@ -10,9 +10,11 @@ export interface NotesScene {
   notes: StickyNote[];
   revision: number;
   owner: string;
+  ownerIdentity: string;
   trash: NonNullable<NotesSnapshot["trash"]>;
   creations: Map<string, string>;
   readonly audio: Map<string, { readonly noteId: string; readonly durationMs: number }>;
+  playing?: { readonly audioId: string; readonly noteId: string; readonly offsetMs: number };
   /** Whether a read of the store fails, as an agent without its notes answers. */
   failing: boolean;
   /** Whether a write to the store fails while reads still answer, as an agent that cannot change its notes answers. */
@@ -48,6 +50,7 @@ export function notesScene(now = Date.now()): NotesScene {
     refusing: false,
     views: [],
     owner: "agent-owner",
+    ownerIdentity: "cloud-owner",
     trash: [],
     creations: new Map(),
     audio: new Map(),
@@ -91,16 +94,31 @@ export function notesScene(now = Date.now()): NotesScene {
 
 /** The retained Notes recordings as the Android host reports them. */
 export function alphaNotes(scene: NotesScene): Faked {
-  return () => ({
-    permission: () => Promise.resolve({ grant: "granted" }),
-    status: () => Promise.resolve({ state: "idle" }),
-    consumeOpen: () => Promise.resolve({ open: false }),
-    previousExists: () => Promise.resolve({ present: false }),
-    describe: ({ audioId }: { audioId: string }) => {
-      const recording = scene.audio.get(audioId);
-      return recording === undefined ? Promise.reject(rejection("No such recording")) : Promise.resolve({ ...recording, audioId });
-    },
-  });
+  return () => {
+    let finish: ((result: { ok: boolean }) => void) | undefined;
+    return {
+      permission: () => Promise.resolve({ grant: "granted" }),
+      status: () => Promise.resolve({ state: "idle" }),
+      consumeOpen: () => Promise.resolve({ open: false }),
+      previousExists: () => Promise.resolve({ present: false }),
+      describe: ({ audioId }: { audioId: string }) => {
+        const recording = scene.audio.get(audioId);
+        return recording === undefined ? Promise.reject(rejection("No such recording")) : Promise.resolve({ ...recording, audioId });
+      },
+      play: ({ audioId, noteId, offsetMs }: NonNullable<NotesScene["playing"]>) => {
+        if (scene.audio.get(audioId)?.noteId !== noteId) return Promise.resolve({ ok: false });
+        finish?.({ ok: false });
+        scene.playing = { audioId, noteId, offsetMs };
+        return new Promise<{ ok: boolean }>((resolve) => { finish = resolve; });
+      },
+      halt: () => {
+        delete scene.playing;
+        finish?.({ ok: true });
+        finish = undefined;
+        return Promise.resolve({ ok: true });
+      },
+    };
+  };
 }
 
 const Interact = Schema.Struct({
@@ -184,6 +202,10 @@ export function notesRoutes(scene: NotesScene): Route[] {
     (request, url) => {
       if (request.method === "GET" && url.pathname === "/api/auth/me") {
         return Response.json({ identity: { kind: "owner", id: scene.owner }, access: { role: "OWNER", mode: "local" } });
+      }
+      if (request.method === "GET" && url.pathname === "/api/client-devices/capabilities") {
+        return Response.json({ protocol: 1, agentId: scene.owner, identityId: scene.ownerIdentity,
+          deviceActions: { protocol: 1, capabilities: [] } });
       }
       if (request.method === "GET" && url.pathname === "/api/notes/state") {
         return scene.failing ? refused(503) : Response.json({ success: true, data: snapshot(scene) });

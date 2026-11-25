@@ -1,8 +1,8 @@
-// spec/app/voice/index.md, "Story: Hold a spoken conversation"; spec/app/voice/index.md, "Story: Pause for a phone call"; spec/app/voice/index.md, "A failed conversation ends quietly: why it failed is kept only until voice returns to idle, and nothing is shown"
+// spec/app/voice/index.md, "Story: Hold a spoken conversation"; spec/app/voice/index.md, "Story: Pause for a phone call"; spec/app/voice/index.md, "A failed conversation ends quietly: why it failed is kept only until voice returns to idle, and nothing is shown"; spec/app/voice/index.md, "Speaker mute is offered after the current speech bridge confirms gain control"
 import { Button, ConfirmDialog, cn } from "@repo/ui";
 import type { ManagedRuntime } from "effect";
 import type { ReactNode } from "react";
-import { Keyboard, Mic, MicOff, Square, VolumeX } from "lucide-react";
+import { Keyboard, Mic, MicOff, Square, Volume2, VolumeX } from "lucide-react";
 import type { Machine as Shell } from "../../gen/app__shell.effect.vibe";
 import { useMachine as useShell } from "../../gen/app__shell.react.ts";
 import type { Machine } from "../../gen/app__voice.effect.vibe";
@@ -37,6 +37,9 @@ export function TalkControls({ runtime, trailing, compact = false }: TalkControl
   const busy = state.phase === "Starting" || state.phase === "Stopping";
   const phase = state.muted ? "Muted" : state.phase;
   const canMute = can(mute);
+  const speakerMuted = state.speaker === "SpeakerOff" || state.speaker === "SpeakerUnmuting";
+  const speakerConfirmed = speakerMuted || state.speaker === "SpeakerOn" || state.speaker === "SpeakerMuting";
+  const setSpeaker = { type: "setSpeakerMuted", muted: !speakerMuted } as const;
   const activity = busy ? <span aria-hidden="true" className="size-4.5 shrink-0 rounded-full border-2 border-border border-t-alpha motion-safe:animate-spin" style={{ animationDuration: "900ms" }} /> :
     <VoiceWaveform phase={phase} compact={compact} />;
   return (
@@ -50,7 +53,11 @@ export function TalkControls({ runtime, trailing, compact = false }: TalkControl
         {!compact && can(type) && <Button variant="ghost" size="icon" aria-label="Switch to keyboard" onClick={() => void send(type)}><Keyboard /></Button>}
         {!compact && <div className="flex min-w-0 flex-1 items-center px-2">{activity}</div>}
         <p role="status" className="sr-only">{state.muted ? "Microphone muted" : announced[state.phase]}</p>
-        {can({ type: "interrupt" }) && <Button variant="ghost" size="icon" aria-label="Stop speaking" onClick={() => void send({ type: "interrupt" })}><VolumeX /></Button>}
+        {(!compact || !speakerConfirmed) && can({ type: "interrupt" }) && <Button variant="ghost" size="icon" aria-label="Stop speaking" onClick={() => void send({ type: "interrupt" })}><VolumeX /></Button>}
+        {speakerConfirmed && <Button variant="ghost" size="icon" disabled={!can(setSpeaker)} aria-pressed={speakerMuted}
+          aria-label={speakerMuted ? "Unmute speaker" : "Mute speaker"} onClick={() => void send(setSpeaker)}>
+          {speakerMuted ? <VolumeX /> : <Volume2 />}
+        </Button>}
         {(compact || canMute) && <Button variant="ghost" size="icon" disabled={!canMute} aria-pressed={state.muted} aria-label={state.muted ? "Unmute microphone" : "Mute microphone"} onClick={() => void send(mute)}>
           {state.muted ? <MicOff /> : <Mic />}
         </Button>}

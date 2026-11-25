@@ -105,7 +105,7 @@ export function VoiceNoteView({ title, meta, time = "", playing = false, summary
         <div className="mt-6.5 flex flex-col gap-1">
           {lines.map((line, index) => (
             <div key={`${line.at} ${line.text}`} className="flex items-start gap-2 py-2.5">
-              <button type="button" aria-label={`Play from ${line.at}`} disabled={!onSeek} onClick={() => onSeek?.(index)} className={cn(focusRing, "flex min-h-12 w-12 flex-none items-center justify-center rounded-lg")}>
+              <button type="button" aria-label={`Play from ${line.at} ${line.initials}`.trim()} disabled={!onSeek} onClick={() => onSeek?.(index)} className={cn(focusRing, "flex min-h-12 w-12 flex-none items-center justify-center rounded-lg")}>
                 <span className={cn("flex size-7.5 shrink-0 items-center justify-center rounded-full text-2xs font-bold whitespace-nowrap", line.own ? "bg-primary text-primary-foreground" : "bg-accent text-foreground")}>{line.initials}</span>
               </button>
               <div className="min-w-0 grow">

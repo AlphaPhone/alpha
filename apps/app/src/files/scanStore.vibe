@@ -26,6 +26,8 @@ export interface ScanSaved {
 
 module web {
   import type { PdfReceipt, ScanImage, ScanSaved, StoredPage } from "./scanStore.vibe"
+  // eslint-disable-next-line boundaries/no-unknown-dependencies -- Vite resolves the worker loader to this directory’s scan PDF worker.
+  import Draw from "./scanPdf.worker.ts?worker"
   import { admittedTextLayer } from "@elizaos/plugin-files-client"
   import { scannedLinks } from "@elizaos/plugin-files-client"
   import { registerPlugin } from "@capacitor/core"
@@ -147,7 +149,7 @@ module web {
   }
 
   export async function drawPdf(images: ReadonlyArray<Blob>, signal: AbortSignal): Promise<{ pdf: Blob } | { problem: "TooLarge" | "NotDrawn" }> {
-    const worker = new Worker(new URL("./scanPdf.worker.ts", import.meta.url), { type: "module" })
+    const worker = new Draw()
     try {
       return await new Promise((resolve, reject) => {
         if (signal.aborted) { reject(signal.reason); return }

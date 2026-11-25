@@ -88,6 +88,7 @@ export interface PhoneReport {
 export service SystemSettings {
   /** What the phone reports now; what it could not read is left out, never guessed. */
   report(include?: { readonly autofill: boolean }): PhoneReport!!
+  boot(): number!!
   /** Whether Android could check one permission under review. */
   access(access: Access): Option.Option<{ readonly grant: Grant; readonly on: boolean }>!!
   /** Android's dialog for the Home role; returns when it closes. Whether Alpha holds the role is read again, never taken from the dialog. */
@@ -147,6 +148,7 @@ function filesGrantOf(access: FilesAccess | undefined): Grant | undefined {
 
 const HostFacts = Schema.Struct({
   androidRelease: Schema.optionalKey(Schema.NonEmptyString),
+  bootCount: Schema.optionalKey(Schema.Int.check(Schema.isGreaterThanOrEqualTo(0))),
   permissions: Schema.optionalKey(Schema.Struct({
     Camera: Schema.optionalKey(Schema.Boolean),
     Microphone: Schema.optionalKey(Schema.Boolean),
@@ -325,6 +327,7 @@ effect function opening(target: Target, channel: string): Opened!! {
 /** The phone, through eliza's clients of its plugins. */
 export const phoneSystemSettings = Layer.succeed(SystemSettings, {
   report: phoneReport,
+  boot: () => Effect.map(hostFacts(), (facts) => Option.map(facts, (found) => found.bootCount === undefined ? 0 : found.bootCount + 1).pipe(Option.getOrElse(() => 0))),
   access: phoneAccess,
   requestHome: () => ignore(tryPromise(async () => (await systemOf()).requestRole({ role: "home" }))),
   open: opening,
@@ -335,6 +338,7 @@ export const phoneSystemSettings = Layer.succeed(SystemSettings, {
 /** A browser: none of the phone's facts, roles, pages or log. */
 export const browserSystemSettings = Layer.succeed(SystemSettings, {
   report: browserReport,
+  boot: () => succeed(0),
   access: browserAccess,
   requestHome: () => Effect.void,
   open: () => succeed<Opened>("NotAtAll"),

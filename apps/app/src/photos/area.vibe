@@ -21,6 +21,9 @@ export const back = effect {
   if (view.cropping) return Exit.isSuccess(try exit(shown.send({ type: "cancelCrop" }, "Owner")))
   if (view.editing) return Exit.isSuccess(try exit(shown.send({ type: "cancelEdit" }, "Owner")))
   if (view.info) return Exit.isSuccess(try exit(shown.send({ type: "toggleInfo" }, "Owner")))
+  const controller = try Library.Machine
+  const state = try controller.get()
+  if (state.cameraAlbum !== 0) return Exit.isSuccess(try exit(controller.send({ type: "closeDialog" }, "Owner")))
   if (view.open !== 0) {
     if (returnsToCamera(view, try (try Shell.Machine).get())) return false
     return Exit.isSuccess(try exit(shown.send({ type: "close" }, "Owner")))
@@ -32,8 +35,6 @@ export const back = effect {
       : bin.selecting ? { type: "endSelect" } : { type: "leave" }
     return Exit.isSuccess(try exit(trashed.send(event, "Owner")))
   }
-  const controller = try Library.Machine
-  const state = try controller.get()
   if (state.choosingImage) return Exit.isSuccess(try exit(controller.send({ type: "closeImageChoice", choice: state.imageChoice }, "Owner")))
   const event: Library.Event = state.shelf.dialog !== "NoDialog" ? { type: "closeDialog" }
     : state.selecting ? { type: "endSelect" }

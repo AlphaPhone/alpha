@@ -370,6 +370,10 @@ function carryVoice(fx: Voice.Effect): Job<Voice.Event, Agent | Device | Layers.
       const opened = effect { try (try VoiceBridge).openMic(session, network); return true } catch () => false
       return opened ? { type: "micOpened", session } : { type: "micFailed", session }
     }, { type: "micFailed", session });
+    when { tag: "SetSpeakerOutput", let session, let speakerTicket, let muted }: answer(`speaker ${session}:${speakerTicket}`, effect {
+      const confirmed = try (try VoiceBridge).setSpeakerMuted(session, muted)
+      return { type: "speakerSet", session, speakerTicket, muted, confirmed }
+    }, { type: "speakerSet", session, speakerTicket, muted, confirmed: false });
     when { tag: "CloseMicrophone", let session }: answer("mic", effect {
       const closed = effect { try (try VoiceBridge).closeMic(session); return true } catch () => false
       return closed ? { type: "micClosed", session } : { type: "micCloseFailed", session }

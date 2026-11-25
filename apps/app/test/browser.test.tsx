@@ -51,6 +51,10 @@ describe("The Browser on a phone", () => {
     expect(suggestions()?.textContent).not.toContain("/on-device-agents");
     await press("Cancel editing");
     await press("Menu");
+    await until(alpha, runtime, Library, (s) => s.read.status === "Loaded");
+    await press("Bookmark");
+    await until(alpha, runtime, Library, (s) => s.notice === "NotSecure");
+    expect(world.browser.bookmarks.map((one) => one.url)).toEqual(["https://enclave.example/keys-in-hardware"]);
     await press("Library, bookmarks and history");
     await until(alpha, runtime, Library, (s) => s.read.status === "Loaded");
     await libraryTab("History");
@@ -63,6 +67,26 @@ describe("The Browser on a phone", () => {
     const page = runtime.runSync(Effect.flatMap(Pages, (pages) => pages.of(tab)));
     await until(alpha, page, Page, (s) => s.phase === "Shown");
     expect([...world.browser.tabs.values()].map((one) => one.history[one.at])).toEqual(["https://enclave.example/keys-in-hardware"]);
+
+    await press("Menu");
+    await press("Bookmarked");
+    await until(alpha, runtime, Library, (s) => s.job === "Idle" && s.marks === 0);
+    await until(alpha, runtime, Tabs, (s) => s.layer === "Uncovered");
+    expect(world.browser.bookmarks).toEqual([]);
+    await press("Menu");
+    await press("Bookmark");
+    await until(alpha, runtime, Library, (s) => s.job === "Idle" && s.marks === 1);
+    await until(alpha, runtime, Tabs, (s) => s.layer === "Uncovered");
+    expect(world.browser.bookmarks.map((one) => one.url)).toEqual(["https://enclave.example/keys-in-hardware"]);
+
+    await press("Menu");
+    await press("Library, bookmarks and history");
+    await until(alpha, runtime, Library, (s) => s.read.status === "Loaded");
+    const remove = [...document.querySelectorAll("button")].find((row) => row.getAttribute("aria-label")?.startsWith("Remove bookmark "));
+    if (!remove) throw new Error("bookmark removal control is missing");
+    await drawn(() => remove.click());
+    await until(alpha, runtime, Library, (s) => s.job === "Idle" && s.marks === 0);
+    expect(world.browser.bookmarks).toEqual([]);
   });
 
   it("Open a page and watch it load (spec/app/browser/address.md, \"Story: Go where I typed\"; spec/app/browser/address.md, \"Story: Watch a page load\"; spec/app/browser/address.md, \"Story: Find in page\")", async () => {
