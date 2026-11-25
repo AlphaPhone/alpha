@@ -7,6 +7,7 @@ import { Machine as Strip } from "../gen/app__phone__call.effect.vibe";
 import { Machine as Voicemail } from "../gen/app__phone__voicemail.effect.vibe";
 import { Machine as Agent } from "../gen/app__contacts__agent.effect.vibe";
 import { propose } from "../src/contacts/requests.vibe";
+import { phoneAction } from "../src/phone/agent.vibe";
 import { button, closeAll, hardware, open, press, underAct, until } from "./alpha.tsx";
 import { scene } from "./fakes/scene.ts";
 
@@ -84,6 +85,31 @@ describe("Phone on an Alpha image", () => {
     await until(alpha, alpha.runtime, Phone, (s) => !s.front && s.rows === 0);
   });
 
+  it(`Opens the reviewed keypad without dialing (spec/app/phone/index.md, "A number handed to Phone opens the keypad with it filled in, and never dials")`, async () => {
+    const world = image();
+    const { alpha } = await open(world);
+    await until(alpha, alpha.runtime, Shell, (s) => s.image);
+    const operation = { type: "phone_keypad", number: "+14155550100" } as const;
+    await act(async () => {
+      expect(await alpha.runtime.runPromise(phoneAction(operation, () => Promise.resolve(true)))).toEqual({
+        kind: "applied", result: { kind: "phone-keypad", status: "opened" },
+      });
+    });
+    await until(alpha, alpha.runtime, Phone, (s) => s.front && s.tab === "Keypad" && s.digits === 12);
+    expect([world.telephony.placed, world.telephony.dialed]).toEqual([[], []]);
+  });
+
+  it(`Does not dispatch an expired call approval (spec/app/contacts/agent.md, "Only the owner approves, only what is shown as it is now, and only when the phone has ruled out an emergency call")`, async () => {
+    const world = image();
+    const { alpha } = await open(world);
+    await until(alpha, alpha.runtime, Shell, (s) => s.image);
+    const operation = { type: "phone_call", target: { kind: "number", number: "+14155550100" } } as const;
+    await act(async () => {
+      expect(await alpha.runtime.runPromise(phoneAction(operation, () => Promise.resolve(false)))).toMatchObject({ kind: "refused" });
+    });
+    expect([world.telephony.placed, world.telephony.dialed]).toEqual([[], []]);
+  });
+
   it("Gates ordinary calls on Android's carrier and emergency readings (spec/app/phone/index.md, \"Story: Know when a call is live\")", async () => {
     const world = image();
     const { alpha } = await open(world);
@@ -93,14 +119,14 @@ describe("Phone on an Alpha image", () => {
     expect(button("Call Maya Chen")?.disabled).toBe(false);
 
     world.telephony.mobileService = false;
-    await act(async () => world.telephony.report());
+    act(() => world.telephony.report());
     await until(alpha, alpha.runtime, Phone, (s) => !s.carrier);
     expect(button("Call Maya Chen")?.disabled).toBe(true);
 
     world.telephony.mobileService = true;
     world.telephony.live = [{ id: "possible-emergency", state: "active", connectedAt: world.now }];
     world.telephony.emergency = null;
-    await act(async () => world.telephony.report());
+    act(() => world.telephony.report());
     await until(alpha, alpha.runtime, Phone, (s) => s.carrier && s.telecom === "MaybeEmergencyCall");
     expect(button("Call Maya Chen")?.disabled).toBe(true);
     expect([world.telephony.placed, world.telephony.dialed]).toEqual([[], []]);
@@ -146,7 +172,7 @@ describe("Phone on an Alpha image", () => {
     await until(alpha, alpha.runtime, Voicemail, (s) => s.list.status === "Loaded" && s.items === 1 && s.unheard === 1);
 
     // spec/app/phone/voicemail.md, "Opening a voicemail asks for its audio under a new ticket"
-    await act(async () => {
+    act(() => {
       const row = document.querySelector<HTMLButtonElement>("button[aria-expanded='false'][aria-label^='Voicemail from']");
       if (!row) throw new Error("no voicemail to open");
       row.click();
@@ -180,7 +206,7 @@ describe("Phone on an Alpha image", () => {
     await until(alpha, alpha.runtime, Phone, (s) => s.front && s.voicemail);
     await tab("Voicemail");
     await until(alpha, alpha.runtime, Voicemail, (s) => s.list.status === "Loaded" && s.items === 1);
-    await act(async () => {
+    act(() => {
       const row = document.querySelector<HTMLButtonElement>("button[aria-expanded='false'][aria-label^='Voicemail from']");
       if (!row) throw new Error("no voicemail to open");
       row.click();

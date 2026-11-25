@@ -5,8 +5,8 @@ import * as Cards from "../gen/app__home__cards.effect.vibe";
 import { Machine as Shell } from "../gen/app__shell.effect.vibe";
 import { Machine as Toasts } from "../gen/app__notices__toasts.effect.vibe";
 import home from "../src/home/index.tsx";
-import { button, closeAll, drawn, hardware, later, open, press, underAct, until } from "./alpha.tsx";
-import { scene } from "./fakes/scene.ts";
+import { button, closeAll, drawn, hardware, later, open, press, seen, underAct, until } from "./alpha.tsx";
+import { scene, type Scene } from "./fakes/scene.ts";
 import { savedKey, written } from "../src/home/saved.vibe";
 import { waiting } from "../src/home/waiting.vibe";
 import { fromAreas } from "../src/home/cards.vibe";
@@ -16,20 +16,24 @@ afterEach(closeAll);
 
 const tiles = () => [...document.querySelectorAll("nav[aria-label='Apps on Home'] [data-home-tile]")].map((tile) => tile.getAttribute("data-home-tile"));
 const tileButton = (id: string) => document.querySelector<HTMLButtonElement>(`[data-home-tile="${id}"]`);
-const drawerButton = (name: string) => [...document.querySelectorAll<HTMLButtonElement>("section button, [data-apps-drawer] button, button")].filter((found) => !found.hasAttribute("data-home-tile")).find((found) => (found.getAttribute("aria-label") ?? found.textContent) === name);
 const toast = () => document.querySelector("[role=status]")?.textContent;
 const held = (name: string) => button(name)?.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true }));
-const pulled = () => drawn(() => {
+const pointer = (type: string, clientX: number, clientY: number) => new PointerEvent(type, { bubbles: true, isPrimary: true, pointerId: 1, button: 0, clientX, clientY });
+const pulled = (startY = 68, dx = 0) => drawn(() => {
   const zone = document.querySelector("h1")?.parentElement;
-  zone?.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true, isPrimary: true, clientX: 100, clientY: 10 }));
-  zone?.dispatchEvent(new PointerEvent("pointerup", { bubbles: true, isPrimary: true, clientX: 100, clientY: 120 }));
+  zone?.dispatchEvent(pointer("pointerdown", 100, startY));
+  zone?.dispatchEvent(pointer("pointerup", 100 + dx, startY + 80));
 });
 const alphaApps = ["view:Inbox", "view:Calendar", "view:Clock", "view:Reminders", "view:Browser", "view:Camera", "view:Photos", "view:Maps", "view:Notes", "view:Files", "view:Workflows", "view:Settings"];
+const holdingHome = (world: Scene) => {
+  world.settings.roles = world.settings.roles.map((role) => role.role === "home" ? { ...role, held: true, holders: ["ai.alphacompute.alphaphone"] } : role);
+  return world;
+};
 
 describe("Home on a phone", () => {
   // spec/app/home/index.md, "Story: Start Home"; spec/app/home/index.md, "Story: Keep my apps on Home"; spec/app/home/index.md, "Story: Edit Home"
   it("Start Home, keep my apps on it and edit it (spec/app/home/index.md, \"Story: Start Home\"; spec/app/home/index.md, \"Story: Keep my apps on Home\"; spec/app/home/index.md, \"Story: Edit Home\")", async () => {
-    const world = { ...scene(), phone: true };
+    const world = holdingHome({ ...scene(), phone: true });
     const first = await open(world);
     const { alpha } = first;
     const homes = home.runtime(alpha);
@@ -43,8 +47,14 @@ describe("Home on a phone", () => {
     expect([button("Inbox3 unread") !== undefined, button("Notes") !== undefined]).toEqual([true, true]);
 
     // spec/app/home/index.md, "A long press on bare Home starts editing, only on the phone and once the tiles are read"
-    held("Notes");
+    await drawn(() => button("Notes")?.dispatchEvent(pointer("pointerdown", 80, 330)));
+    await drawn(() => button("Notes")?.dispatchEvent(pointer("pointermove", 80, 352)));
+    await later(alpha, 450);
+    expect((await homes.runPromise(Home.Machine.use((m) => m.get()))).editing).toBe(false);
+    await drawn(() => button("Notes")?.dispatchEvent(pointer("pointerdown", 80, 330)));
+    await later(alpha, 450);
     await until(alpha, homes, Home.Machine, (h) => h.editing);
+    await drawn(() => button("Notes")?.dispatchEvent(pointer("pointerup", 80, 330)));
     expect(button("Inbox") !== undefined).toBe(true);
 
     // spec/app/home/index.md, "A tile on Home is removed or moved only while Home is being edited"; spec/app/home/index.md, "Every change is sent whole to be saved under its number, and nothing else is ever saved"
@@ -70,6 +80,13 @@ describe("Home on a phone", () => {
     const second = await open(world);
     await until(second.alpha, home.runtime(second.alpha), Home.Machine, (h) => h.tiles.load.status === "Loaded" && h.tiles.load.ticket === 2);
     expect(tiles().at(-1)).toBe("view:Notes");
+
+    // spec/app/home/tiles.md, "What was saved comes back as it was saved, an empty Home included; with no record Home shows its defaults"
+    await second.close();
+    localStorage.setItem(savedKey, "{invalid");
+    const recovered = await open(world);
+    await until(recovered.alpha, home.runtime(recovered.alpha), Home.Machine, (h) => h.tiles.load.status === "Failed");
+    expect([tiles(), localStorage.getItem(savedKey)]).toEqual([alphaApps, "{invalid"]);
   });
 
   // spec/app/home/cards.md, "Story: See my day at a glance"; spec/app/home/cards.md, "Story: The agenda card"; spec/app/home/cards.md, "Story: Open my day from a card"
@@ -180,11 +197,16 @@ describe("Home on a phone", () => {
 
   // spec/app/home/index.md, "Story: Pull down for notifications"
   it("Pull down for notifications (spec/app/home/index.md, \"Story: Pull down for notifications\")", async () => {
-    const world = { ...scene(), phone: true };
+    const world = holdingHome({ ...scene(), phone: true });
     world.launcher.shade = "silent";
     const { alpha } = await open(world);
     const homes = home.runtime(alpha);
     await until(alpha, homes, Home.Machine, (h) => h.host === "AsLauncher" && h.tiles.load.status === "Loaded");
+
+    // spec/app/shell/gestures.md, "A pull opens the shade only when it is clearly downward, one and a half times its sideways travel, starts below the 44-point status band, on Home itself and not in a field, with no keyboard up and nothing under the finger scrolled from its top"
+    await pulled(10);
+    await pulled(68, 70);
+    expect(world.launcher.shades).toBe(0);
 
     // spec/app/home/index.md, "When Android has not answered in time the wait ends; Alpha says nothing of an app, and says Android did not answer about the shade"
     await pulled();
@@ -198,6 +220,13 @@ describe("Home on a phone", () => {
     world.launcher.shade = "opened";
     await pulled();
     await until(alpha, homes, Home.Machine, (h) => h.handoff.attempt.outcome === "Confirmed");
+    expect(world.launcher.shades).toBe(2);
+
+    // spec/app/home/index.md, "Alpha is told when it becomes, or stops being, the phone's launcher"
+    world.settings.roles = world.settings.roles.map((role) => role.role === "home" ? { ...role, held: false, holders: ["com.android.launcher3"] } : role);
+    await seen(true);
+    await until(alpha, homes, Home.Machine, (h) => h.host === "AsApp");
+    await pulled();
     expect(world.launcher.shades).toBe(2);
   });
 });

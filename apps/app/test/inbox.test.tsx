@@ -63,8 +63,16 @@ const search = (text: string) => fill("Search mail", text).then(() => document.q
 describe.each([["a browser", false], ["a phone", true]])("in %s", (_where, phone) => {
   it("See my mail (spec/app/inbox/index.md, \"Story: See my mail\")", async () => {
     const world = { ...scene(), phone };
-    for (let at = 5; at <= 30; at += 1) world.inbox.mail.push(letter(at, `Newsletter ${at}`, ["INBOX"]));
-    const earlierLunch = letter(0, "Earlier lunch plan", ["SENT"], "Could you make it Friday?");
+    const attachmentText = '<strong data-attachment-fixture>Review agenda</strong>';
+    for (let at = 10; at <= 30; at += 1) world.inbox.mail.push(letter(at, `Newsletter ${at}`, ["INBOX"]));
+    const termSheet = world.inbox.mail.find(({ card }) => card.id === "g1");
+    if (!termSheet) throw new Error("Missing term sheet fixture");
+    termSheet.body += "\n\nThe data room is at https://northpoint.test/room";
+    termSheet.files = [...termSheet.files, {
+      partId: "2", name: "agenda.txt", mimeType: "text/plain", size: new TextEncoder().encode(attachmentText).byteLength, supported: true,
+    }];
+    termSheet.attachmentText = { "2": attachmentText };
+    const earlierLunch = letter(0, "Earlier lunch plan", ["SENT"], "Could you make it Friday?", undefined, Date.parse(termSheet.card.receivedAt) - 3_600_000);
     world.inbox.mail.push({ ...earlierLunch, card: { ...earlierLunch.card, threadId: "t1" } });
     const first = await open(world);
     const { alpha } = first;
@@ -74,7 +82,7 @@ describe.each([["a browser", false], ["a phone", true]])("in %s", (_where, phone
     await tile("Inbox");
     await until(alpha, runtime, List, (s) => s.list.status === "Loaded" && s.pages === 1);
     step("1");
-    expect([rows().slice(0, 2), rows().length]).toEqual([["Lunch on Friday", "Your tax return"], 25]);
+    expect([rows().slice(0, 2), rows().length]).toEqual([["Revised term sheet", "Notes for the 3:00 review"], 25]);
 
     // spec/app/inbox/index.md, "More messages are read with the page cursor, which is given up as its page is asked"
     await press("Load more");
@@ -84,10 +92,10 @@ describe.each([["a browser", false], ["a phone", true]])("in %s", (_where, phone
 
     // spec/app/inbox/index.md, "Choosing a folder or a search reads its first page"
     await press("Search email");
-    await search("tax");
-    await until(alpha, runtime, List, (s) => s.selected.query === "tax" && s.list.status === "Loaded");
+    await search("tacos");
+    await until(alpha, runtime, List, (s) => s.selected.query === "tacos" && s.list.status === "Loaded");
     step("3");
-    expect(rows()).toEqual(["Your tax return"]);
+    expect(rows()).toEqual(["Dinner Friday?"]);
 
     // spec/app/inbox/index.md, "Back from a search shows its folder without the search, before Back leaves Inbox"
     await hardware("back");
@@ -102,31 +110,42 @@ describe.each([["a browser", false], ["a phone", true]])("in %s", (_where, phone
     step("5");
 
     // spec/app/inbox/message.md, "A message opens at its newest place in the thread, only while the grant of its account allows reading"; spec/app/inbox/marking.md, "Opening an unread message marks it read once in a session, silently, and never again, even when it is not known to have worked"
-    await row("Lunch on Friday");
+    await row("Revised term sheet");
     await until(alpha, runtime, Shown, (s) => s.body.status === "Loaded");
     step("6");
     await later(alpha, 1000);
     await until(alpha, runtime, Marks, (s) => s.attempt.outcome === "Confirmed");
     step("7");
-    expect([title(), world.inbox.changes]).toEqual(["Lunch on Friday", ["mark-read g1"]]);
+    expect([title(), world.inbox.changes]).toEqual(["Revised term sheet", ["mark-read g1"]]);
 
     // spec/app/inbox/message.md, "Previous and next move one place through the thread"
-    await action("Previous message");
+    await action("Earlier messages");
     await until(alpha, runtime, Shown, (s) => s.body.status === "Loaded" && s.position === 0);
     expect([title(), told()]).toEqual(["Earlier lunch plan", expect.stringContaining("Could you make it Friday?")]);
-    await action("Next message");
+    await action("More messages");
     await until(alpha, runtime, Shown, (s) => s.body.status === "Loaded" && s.position === 1);
-    expect(title()).toBe("Lunch on Friday");
+    expect(title()).toBe("Revised term sheet");
 
     // spec/app/inbox/message.md, "Only an https link without credentials in it can be reviewed and opened; any other link stays text"
     const visited = vi.spyOn(window, "open").mockReturnValue(null);
-    await press("https://cafe.test/menu");
+    await press("https://northpoint.test/room");
     await until(alpha, runtime, Shown, (s) => s.link === 1);
     step("8");
     await confirm("Open");
     await until(alpha, runtime, Shown, (s) => s.link === 0);
     step("9");
-    expect(visited).toHaveBeenCalledWith("https://cafe.test/menu", "_blank", "noopener,noreferrer");
+    expect(visited).toHaveBeenCalledWith("https://northpoint.test/room", "_blank", "noopener,noreferrer");
+
+    // spec/app/inbox/message.md, "An attachment is reviewed before it is opened or saved, and one use is in flight at a time"
+    await action("Open agenda.txt");
+    await until(alpha, runtime, Shown, (s) => s.attachment === 2);
+    expect([world.inbox.attachmentReads, document.querySelector("[aria-label='Attachment contents']")]).toEqual([[], null]);
+    await confirm("Open");
+    await until(alpha, runtime, Shown, (s) => s.file.outcome === "Confirmed");
+    const preview = document.querySelector("[aria-label='Attachment contents']");
+    expect([world.inbox.attachmentReads, preview?.textContent, preview?.querySelector("strong")]).toEqual([["g1/2"], attachmentText, null]);
+    await confirm("Close");
+    await until(alpha, runtime, Shown, (s) => s.attachment === 0);
 
     // spec/app/inbox/marking.md, "The owner marks a message read or unread; while another mark is in flight the owner is told it is still in progress, and a message whose last mark was unconfirmed is marked again only after the list was read afresh"
     await menu("Mark as unread");
@@ -138,40 +157,40 @@ describe.each([["a browser", false], ["a phone", true]])("in %s", (_where, phone
     step("11");
 
     // spec/app/inbox/sending.md, "Archive and Trash are held for the undo window, and only the owner's Undo before it ends sends nothing"
-    await choose("Your tax return");
+    await choose("Standup notes");
     await action("Archive");
-    await confirm("Archive");
+    await confirm("Yes");
     await until(alpha, runtime, Changes, (s) => s.undo.holding === "Held");
     step("12");
-    expect([rows().includes("Your tax return"), (await alpha.runtime.runPromise(List.use((list) => list.get()))).chosen]).toEqual([false, []]);
+    expect([rows().includes("Standup notes"), (await alpha.runtime.runPromise(List.use((list) => list.get()))).chosen]).toEqual([false, []]);
     await later(alpha, 4_000);
     await press("Undo");
     await until(alpha, runtime, Changes, (s) => s.undo.holding === "Undone");
     step("13");
-    expect([rows().includes("Your tax return"), world.inbox.changes]).toEqual([true, ["mark-read g1", "mark-unread g1"]]);
+    expect([rows().includes("Standup notes"), world.inbox.changes]).toEqual([true, ["mark-read g1", "mark-unread g1"]]);
 
     // spec/app/inbox/sending.md, "A recorded operation sends its one request, for its own account under that account's grant now, exactly as reviewed: a draft while it is at the revision shown and its hand-over is written to the phone, archive and Trash once the undo window has passed"
-    await choose("Your tax return");
+    await choose("Standup notes");
     await action("Archive");
-    await confirm("Archive");
+    await confirm("Yes");
     await later(alpha, 10_000);
     await until(alpha, runtime, Changes, (s) => s.attempt.outcome === "Confirmed");
     step("14");
     await until(alpha, runtime, List, (s) => s.list.status === "Loaded");
     step("15");
-    expect([rows().includes("Your tax return"), world.inbox.changes.at(-1)]).toEqual([false, "archive g2"]);
+    expect([rows().includes("Standup notes"), world.inbox.changes.at(-1)]).toEqual([false, "archive g4"]);
 
     // spec/app/inbox/sending.md, "A restore is reviewed for messages chosen in Archived or Trash, or right after the change went out, bound to the message's history revision; Gmail refuses it as out of date when the message changed since"
     await drawn(() => [...document.querySelectorAll("[role=toolbar] button, nav button, button")].find((found) => found.textContent === "Archive" && !found.hasAttribute("aria-label"))?.dispatchEvent(new MouseEvent("click", { bubbles: true })));
     await until(alpha, runtime, List, (s) => s.selected.folder === "Archived" && s.list.status === "Loaded");
-    await choose("Your tax return");
+    await choose("Standup notes");
     await press("Move back");
-    await confirm("Move back");
+    await confirm("Yes");
     await until(alpha, runtime, Changes, (s) => s.kind === "Unarchive" && s.attempt.outcome === "Confirmed");
-    expect(world.inbox.changes.at(-1)).toBe("unarchive g2");
+    expect(world.inbox.changes.at(-1)).toBe("unarchive g4");
     await press("Inbox");
     await until(alpha, runtime, List, (s) => s.selected.folder === "Incoming" && s.list.status === "Loaded");
-    expect(rows().includes("Your tax return")).toBe(true);
+    expect(rows().includes("Standup notes")).toBe(true);
 
     // spec/app/inbox/index.md, "A read that fails offline or for another reason keeps what was on screen and the count, and says why"
     world.inbox.offline = true;
@@ -227,7 +246,7 @@ it("Send a draft I reviewed (spec/app/inbox/sending.md, \"Story: Send a draft I 
   await until(alpha, runtime, List, (s) => s.list.status === "Loaded" && s.pages === 1);
 
   // spec/app/inbox/drafts.md, "A new message, a reply, a reply to all or a forward begins as [one draft](./letter.md) says; a reply to a message with no usable address is refused and the owner told"
-  await row("Your tax return");
+  await row("Standup notes");
   await until(alpha, runtime, Shown, (s) => s.body.status === "Loaded");
   await menu("Reply");
   await until(alpha, runtime, Writing, (s) => s.open && s.letter.kind === "Reply" && s.letter.recipients === 1);
@@ -248,15 +267,15 @@ it("Send a draft I reviewed (spec/app/inbox/sending.md, \"Story: Send a draft I 
   expect((document.querySelector("textarea[aria-label=Message]") as HTMLTextAreaElement | null)?.value).toBe("Thanks, it is all in order.\n\nSee you on Friday.");
 
   // spec/app/inbox/sending.md, "Story: Save my draft to Gmail, or delete it there, knowingly"
-  await menu("Save to Gmail");
+  await menu("Save to Gmail", "Draft actions");
   await until(alpha, runtime, Changes, (s) => s.review.showing && s.kind === "SaveDraft");
   await confirm("Save");
   await until(alpha, runtime, Changes, (s) => s.kind === "SaveDraft" && s.attempt.outcome === "Confirmed");
   await until(alpha, runtime, Writing, (s) => s.letter.gmail !== 0);
-  expect(world.inbox.changes).toEqual(["draft-create Re: Your tax return"]);
+  expect(world.inbox.changes).toEqual(["draft-create Re: Standup notes"]);
 
   // spec/app/inbox/adding.md, "A file is attached to the draft open only once the picker gives one that fits within the room its account leaves; one too large, unreadable or without room is refused and said so"
-  await press("Attach a file");
+  await press("Attach file");
   await drawn(() => {
     const picker = document.querySelector("input[type=file]");
     if (!(picker instanceof HTMLInputElement)) throw new Error("no file picker");
@@ -269,21 +288,21 @@ it("Send a draft I reviewed (spec/app/inbox/sending.md, \"Story: Send a draft I 
   await until(alpha, runtime, Writing, (s) => s.stored && !s.pending && s.write.status === "Loaded");
 
   // spec/app/inbox/drafts.md, "Before a draft with a Gmail copy is saved over it, and whenever the draft is unsure of that copy, Gmail's copy is read, one read at a time, while its account may be read"
-  await menu("Check Gmail copy");
+  await menu("Check Gmail copy", "Draft actions");
   await until(alpha, runtime, Writing, (s) => s.lookup.status === "Loaded" && s.letter.verified === s.letter.revision && !s.pending && s.write.status === "Loaded");
-  await menu("Save to Gmail");
+  await menu("Save to Gmail", "Draft actions");
   await until(alpha, runtime, Changes, (s) => s.review.showing && s.kind === "ReplaceDraft");
   await confirm("Cancel");
   await until(alpha, runtime, Changes, (s) => !s.review.showing);
 
   // spec/app/inbox/sending.md, "Only the owner confirms, only the review of the thing as it is now, while the account's grant allows it and, for a send, it has a valid recipient"
-  await press("Send");
+  await press("Send email");
   await until(alpha, runtime, Changes, (s) => s.review.showing && s.kind === "Send");
   expect(document.querySelector('[role=dialog] [aria-label="Message"]')?.textContent).toBe("Thanks, it is all in order.\n\nSee you on Friday.");
-  expect(world.inbox.changes).toEqual(["draft-create Re: Your tax return"]);
+  expect(world.inbox.changes).toEqual(["draft-create Re: Standup notes"]);
   await confirm("Send");
   await until(alpha, runtime, Changes, (s) => s.attempt.outcome === "Confirmed");
-  expect([world.inbox.changes.at(-1), world.inbox.attached]).toEqual(["send s2@mail.test Re: Your tax return", ["receipt.txt"]]);
+  expect([world.inbox.changes.at(-1), world.inbox.attached]).toEqual(["send sam@okafor.example Re: Standup notes", ["receipt.txt"]]);
 
   // spec/app/inbox/drafts.md, "Once its send is confirmed, a draft unchanged since the revision sent is forgotten; one edited after it, or whose write is in flight, is kept and marked as sent"
   await until(alpha, runtime, Writing, (s) => !s.open && s.shelf.shelved.length === 0);
@@ -301,7 +320,7 @@ it("Send a draft I reviewed (spec/app/inbox/sending.md, \"Story: Send a draft I 
   await row("A remote draft");
   await until(alpha, runtime, Writing, (s) => s.open && s.letter.kind === "Saved" && s.letter.recipients === 1 && s.stored);
   expect(document.querySelector<HTMLTextAreaElement>('textarea[aria-label="Message"]')?.value).toBe("Already in Gmail.");
-  await menu("Discard");
+  await menu("Discard", "Draft actions");
   await confirm("Discard");
   await until(alpha, runtime, Writing, (s) => !s.open);
   expect(world.inbox.drafts.has("plain-remote")).toBe(true);
@@ -310,7 +329,7 @@ it("Send a draft I reviewed (spec/app/inbox/sending.md, \"Story: Send a draft I 
 
   await press("Compose");
   await until(alpha, runtime, Writing, (s) => s.open);
-  await fill("Add to To", "unfinished@");
+  await fill("To", "unfinished@");
   await write("Message", "Keep these words.");
   await hardware("back");
   await until(alpha, runtime, Writing, (s) => !s.open && s.shelf.shelved.length === 1);
@@ -323,7 +342,7 @@ it("Send a draft I reviewed (spec/app/inbox/sending.md, \"Story: Send a draft I 
   await press("Keep these words.No recipient");
   await until(again.alpha, restored, Writing, (s) => s.open);
   expect([
-    document.querySelector<HTMLInputElement>('input[aria-label="Add to To"]')?.value,
+    document.querySelector<HTMLInputElement>('input[aria-label="To"]')?.value,
     document.querySelector<HTMLTextAreaElement>('textarea[aria-label="Message"]')?.value,
     world.inbox.changes.length,
   ]).toEqual(["unfinished@", "Keep these words.", 2]);
@@ -392,7 +411,7 @@ it("Find out whether a send went (spec/app/inbox/drafts.md, \"Story: Find out wh
 
 it("Stay safe with what a message carries (spec/app/inbox/message.md, \"Story: Stay safe with what a message carries\"; spec/app/inbox/message.md, \"Story: Read a saved message offline\")", async () => {
   const world = { ...scene(), phone: false };
-  const tax = world.inbox.mail.find((stored) => stored.card.subject === "Your tax return");
+  const tax = world.inbox.mail.find((stored) => stored.card.subject === "Standup notes");
   if (tax) {
     tax.html = "<p>Your refund is on its way.</p><img src=\"https://track.test/pixel.png\">";
     tax.files = [{ partId: "3", name: "statement.pdf", mimeType: "application/pdf", size: 2_000, supported: true }];
@@ -402,7 +421,7 @@ it("Stay safe with what a message carries (spec/app/inbox/message.md, \"Story: S
   const policy = () => document.querySelector("iframe[title='Formatted email']")?.getAttribute("srcdoc") ?? "";
   await press("Inbox");
   await until(first.alpha, runtime, List, (s) => s.list.status === "Loaded");
-  await row("Your tax return");
+  await row("Standup notes");
   await until(first.alpha, runtime, Shown, (s) => s.body.status === "Loaded");
 
   // spec/app/inbox/message.md, "Remote images load only after Show images, or when the owner turned on loading them in Settings"
@@ -426,7 +445,7 @@ it("Stay safe with what a message carries (spec/app/inbox/message.md, \"Story: S
   const again = inbox.runtime(second.alpha);
   await press("Inbox");
   await until(second.alpha, again, List, (s) => s.saved && s.accounts.status === "Loading");
-  await row("Your tax return");
+  await row("Standup notes");
   await until(second.alpha, again, Shown, (s) => s.fromPhone && s.message !== 0);
   expect([told(), policy(), button("Show images"), button("Open statement.pdf")]).toEqual([expect.stringContaining("Saved copy"), "", undefined, undefined]);
 

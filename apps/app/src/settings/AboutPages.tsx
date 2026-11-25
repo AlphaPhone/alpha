@@ -39,6 +39,7 @@ export function Licences({ runtime, common }: AboutProps) {
       <SettingsLicenceDetail
         name={open.name}
         licence={`${open.license} · ${open.version}`}
+        source={open.source}
         flags={(open.flags ?? []).map((flag) => flags[flag] ?? flag)}
         text={open.text}
         onBack={() => void send({ type: "closeLicence" })}
@@ -49,10 +50,12 @@ export function Licences({ runtime, common }: AboutProps) {
   return (
     <SettingsLicencesPage
       onBack={common.onBack}
+      place={common.place}
+      onPlace={common.onPlace}
       load={status === "Loaded" ? "loaded" : status === "Failed" ? "failed" : "loading"}
       found={state.found}
       query={state.query}
-      licences={shown.map((notice) => ({ name: notice.name, licence: notice.license }))}
+      licences={shown.map((notice) => ({ name: notice.name, licence: notice.license, version: notice.version, source: notice.source }))}
       onQuery={(query) => {
         const search = { type: "search", query, shown: notices.filter((notice) => matches(notice, query)).length } as const;
         if (can(search)) void send(search);

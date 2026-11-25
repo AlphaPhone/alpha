@@ -18,8 +18,7 @@ own is the [Home role](./roles.md).
 ### Facts hold the newest asking, which facts and accesses its answer reported, the roles, and Set as Home in flight
 
 One asking reads every fact. The phone reports the facts it could read,
-each with the value it read, and the grant of each access it could read; who holds the Home and Assistant
-roles, and whether this build can be the Home app, come with the roles.
+each with the value it read, the grant of each access it could read, and its alert channels by their Android identity. Alpha's version and Android's version are independent facts. Media, ring and alarm volume are read separately from Do Not Disturb. Notification collection reports the device’s current access state without collecting a notification. Who holds the Home and Assistant roles, and whether this build can be the Home app, come with the roles.
 Nothing here is kept: after a restart every row waits for a fresh answer.
 
 ```quint
@@ -27,14 +26,15 @@ import read as R from "../../kit/read"
 import permission as P from "../../kit/permission"
 import timed as T from "./timed"
 
-type Fact = Wifi | Bluetooth | MobileData | Battery | Sound | Alerts | DeviceLocation | Storage | Roles | Versions
+type Fact = Wifi | Bluetooth | MobileData | Battery | Sound | Alerts | DeviceLocation | Storage | Roles | Versions | AndroidVersion | MediaVolume | RingVolume | AlarmVolume | CollectionStatus
 type Reading = { fact: Fact, value: str }
+type Alert = { id: str, name: str, blocked: bool }
 type Access = CameraAccess | MicrophoneAccess | LocationAccess | CalendarAccess | PhotosAccess | FilesAccess | NotificationsAccess
 type AccessGrant = { access: Access, grant: P::Grant }
 type Holder = NotAlpha | AnotherApp | Alpha | NoSuchRole
 
 type Facts = {
-  read: T::Timed, taken: int, reported: List[Reading], grants: List[AccessGrant],
+  read: T::Timed, taken: int, reported: List[Reading], grants: List[AccessGrant], alerts: List[Alert],
   home: Holder, assistant: Holder, launcher: bool,
   request: T::Timed, readAtRequest: int,
 }
@@ -43,14 +43,14 @@ type Effect = ReadPhone({ ticket: int }) | RequestHome({ request: int })
 type Asked = { state: Facts, out: List[Effect] }
 
 pure val initial: Facts = {
-  read: T::unasked, taken: 0, reported: List(), grants: List(),
+  read: T::unasked, taken: 0, reported: List(), grants: List(), alerts: List(),
   home: NotAlpha, assistant: NotAlpha, launcher: false,
   request: T::unasked, readAtRequest: 0,
 }
 
 pure def has(reported: List[Reading], fact: Fact): bool = reported.some(r => r.fact == fact)
 
-pure def shownAny(s: Facts): bool = s.reported.length() > 0 or s.grants.length() > 0
+pure def shownAny(s: Facts): bool = s.reported.length() > 0 or s.grants.length() > 0 or s.alerts.length() > 0
 ```
 
 ### Opening Settings and Refresh read the phone; Alpha coming back to the front reads it again if Settings is showing
@@ -80,7 +80,7 @@ pure def resume(s: Facts, at: int, showing: bool): Asked =
 pure def canLeave(s: Facts): bool = T::busy(s.read) or shownAny(s)
 
 pure def leave(s: Facts): Facts =
-  { ...s, read: T::retire(s.read), reported: List(), grants: List(), home: NotAlpha, assistant: NotAlpha, launcher: false }
+  { ...s, read: T::retire(s.read), reported: List(), grants: List(), alerts: List(), home: NotAlpha, assistant: NotAlpha, launcher: false }
 ```
 
 ### The phone is read only on opening, Refresh, coming back while Settings shows, or when a Home request ends
@@ -93,8 +93,7 @@ pure def stepReadOnlyWhenAsked(before: Facts, via: str, after: Facts): bool =
 
 ### Only the newest asking's answer is taken, and it replaces everything shown
 
-A fact or access the phone did not report is unavailable, whatever an
-earlier answer said. An answer that reports nothing leaves the read failed.
+A fact or access the phone did not report is unavailable, and only the alert channels in the answer are shown. An answer that reports nothing leaves the read failed.
 Roles the phone did not report are never shown as held.
 
 ```quint
@@ -115,12 +114,14 @@ pure val grantsValues = Set(
   List({ access: LocationAccess, grant: P::Limited }),
 )
 
+pure val alertsValues = Set(List(), List({ id: "reminders", name: "Reminders", blocked: false }))
+
 pure def canAnswered(s: Facts, ticket: int): bool = T::canAnswer(s.read, ticket)
 
-pure def answered(s: Facts, ticket: int, reported: List[Reading], grants: List[AccessGrant], home: Holder, assistant: Holder, launcher: bool): Facts =
+pure def answered(s: Facts, ticket: int, reported: List[Reading], grants: List[AccessGrant], alerts: List[Alert], home: Holder, assistant: Holder, launcher: bool): Facts =
   val roles = has(reported, Roles)
   {
-    ...s, read: T::answer(s.read, reported.length() > 0 or grants.length() > 0), taken: ticket, reported: reported, grants: grants,
+    ...s, read: T::answer(s.read, reported.length() > 0 or grants.length() > 0 or alerts.length() > 0), taken: ticket, reported: reported, grants: grants, alerts: alerts,
     home: if (roles) home else NotAlpha, assistant: if (roles) assistant else NotAlpha, launcher: roles and launcher,
   }
 ```
@@ -135,7 +136,7 @@ pure val nowValues = Set(0, 4000, 20000, 40000, 80000)
 pure def canAbandon(s: Facts, now: int): bool = T::canGiveUp(s.read, now)
 
 pure def abandon(s: Facts, now: int): Facts =
-  { ...s, read: T::answer(s.read, false), taken: s.read.read.ticket, reported: List(), grants: List(), home: NotAlpha, assistant: NotAlpha, launcher: false }
+  { ...s, read: T::answer(s.read, false), taken: s.read.read.ticket, reported: List(), grants: List(), alerts: List(), home: NotAlpha, assistant: NotAlpha, launcher: false }
 ```
 
 ### Every read of the phone ends, answered, abandoned or retired, so no row waits for ever
@@ -208,7 +209,7 @@ Asking again, and asking for the Home role, change nothing on screen.
 
 ```quint
 pure def sameShown(before: Facts, after: Facts): bool =
-  after.taken == before.taken and after.reported == before.reported and after.grants == before.grants
+  after.taken == before.taken and after.reported == before.reported and after.grants == before.grants and after.alerts == before.alerts
     and after.home == before.home and after.assistant == before.assistant and after.launcher == before.launcher
 
 pure def stepOnlyAnAnswerChangesWhatIsShown(before: Facts, via: str, after: Facts): bool =

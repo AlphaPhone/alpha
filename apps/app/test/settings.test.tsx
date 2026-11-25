@@ -11,16 +11,20 @@ import * as Prefs from "../gen/app__settings__preferences.effect.vibe";
 import * as Reset from "../gen/app__settings__reset.effect.vibe";
 import * as Pages from "../gen/app__settings.effect.vibe";
 import { Machine as Shell } from "../gen/app__shell.effect.vibe";
+import * as Layers from "../gen/app__shell__layers.effect.vibe";
 import settings from "../src/settings/index.tsx";
-import { button, closeAll, fill, hardware, later, open, press, seen, underAct, until } from "./alpha.tsx";
+import { button, closeAll, fill, hardware, later, only, open as openAlpha, press, seen, underAct, until } from "./alpha.tsx";
+import { account } from "./fakes/cloud.ts";
 import { notices } from "./fakes/settings.ts";
-import { scene } from "./fakes/scene.ts";
+import { type Scene, scene } from "./fakes/scene.ts";
 
 underAct();
 afterEach(closeAll);
 
 const shipped = vi.fn(() => Promise.resolve(Response.json(notices)));
 vi.stubGlobal("fetch", ((input: RequestInfo | URL, init?: RequestInit) => (String(input).endsWith("licenses/third-party-notices.json") ? shipped() : fetch(input, init))) as typeof fetch);
+
+const open = (world: Scene) => openAlpha(world, only("home", "view:Settings", "settings/phone", "settings/activity", "overlay"));
 
 /** The row, switch or choice whose title is `title`, as a person reads it: a row's title, never its value beside it. */
 const titled = (title: string) => [...document.querySelectorAll<HTMLElement>("button, label")].find((found) => found.querySelector("span > span")?.textContent === title);
@@ -66,6 +70,23 @@ describe("Settings", () => {
     await hardware("back");
     expect(await page(alpha)).toBe("General");
     await hardware("back");
+    // spec/app/settings/index.md, "Each page links to what another area owns there": the Account sheet reads the signed-in account and Back returns to Settings.
+    await press("Account");
+    await until(alpha, alpha.runtime, Layers.Machine, (state) => Layers.listed(state, "account"));
+    await vi.waitFor(() => expect(document.querySelector('[role="dialog"]')?.textContent).toContain(account.email));
+    await hardware("back");
+    await until(alpha, alpha.runtime, Layers.Machine, (state) => !Layers.listed(state, "account"));
+    expect(await page(alpha)).toBe("Top");
+
+    world.signedIn = false;
+    await press("Account");
+    await until(alpha, alpha.runtime, Layers.Machine, (state) => Layers.listed(state, "account"));
+    await vi.waitFor(() => expect(document.querySelector('[role="dialog"]')?.textContent).toContain("Sign-in required"));
+    expect(document.querySelector('[role="dialog"]')?.textContent).not.toContain(account.email);
+    await press("Close Account");
+    await until(alpha, alpha.runtime, Layers.Machine, (state) => !Layers.listed(state, "account"));
+    world.signedIn = true;
+
     // spec/app/settings/index.md, "Each page links to what another area owns there": Agent activity offers the conversations, which the shell opens over the app.
     await press("About");
     await press("Agent activity");
@@ -82,11 +103,12 @@ describe("Settings", () => {
     await until(alpha, machines, Facts.Machine, (s) => s.read.read.status === "Loaded");
     const shown = await machines.runPromise(Facts.Machine.use((facts) => facts.get()));
     // spec/app/settings/facts.md, "Only the newest asking's answer is taken, and it replaces everything shown": what the phone did not report is unavailable, never guessed.
-    expect([Facts.word(shown, "Wifi"), Facts.word(shown, "Bluetooth"), Facts.word(shown, "Versions"), Facts.accessWord(shown, "LocationAccess"), Facts.accessWord(shown, "CameraAccess")])
-      .toEqual(["Reported", "Unavailable", "Reported", "Approximate", "AccessUnavailable"]);
+    expect([Facts.word(shown, "Wifi"), Facts.word(shown, "Bluetooth"), Facts.word(shown, "Versions"), Facts.word(shown, "AndroidVersion"), Facts.accessWord(shown, "LocationAccess"), Facts.accessWord(shown, "CameraAccess"), Facts.accessWord(shown, "MicrophoneAccess")])
+      .toEqual(["Reported", "Unavailable", "Reported", "Reported", "Approximate", "AccessUnavailable", "Off"]);
     // spec/app/settings/facts.md, "A read not answered within ten seconds is abandoned, and every fact is then unavailable"
     let answer = () => {};
     world.settings.gate = new Promise<void>((done) => { answer = done; });
+    await press("General");
     await press("Refresh");
     await until(alpha, machines, Facts.Machine, (s) => s.read.read.status === "Loading");
     await later(alpha, 10_000);
@@ -131,7 +153,9 @@ describe("Settings", () => {
       await press("Notifications");
       await tap("Alpha's alerts");
       await until(alpha, machines, Android.Machine, (s) => s.target === "AlphaAlerts" && s.start.read.status === "Loaded");
-      expect(world.settings.opened).toEqual(["wifi", "mobile", "app-info ai.alphacompute.alphaphone"]);
+      await tap("Reminders");
+      await until(alpha, machines, Android.Machine, (s) => s.target === "AlertChannel" && s.start.read.status === "Loaded");
+      expect(world.settings.opened).toEqual(["wifi", "mobile", "notifications", "channel opaque-reminders"]);
     });
   });
 
@@ -146,7 +170,7 @@ describe("Settings", () => {
     await press("General");
     await press("Display");
     // spec/app/settings/preferences.md, "A choice shows at once and is kept on the phone, one at a time, with ten seconds to be kept"
-    await tap("Light");
+    await press("Light");
     await until(first.alpha, first.alpha.runtime, Prefs.Machine, (s) => s.kept === "Light" && s.keeping.read.status === "Loaded");
     // spec/app/settings/preferences.md, "Legible text is turned on or off by the owner and kept with the appearance, the same way"
     await tap("Legible text");
@@ -164,10 +188,12 @@ describe("Settings", () => {
   it("Decide whether Alpha asks before it acts (spec/app/settings/preferences.md, \"Story: Decide whether Alpha asks before it acts\")", async () => {
     // spec/app/settings/preferences.md, "What the phone could not read is taken as asking first, loading no images and sharing nothing"
     localStorage.setItem("alpha.preferences", "{ not json");
-    const { alpha } = await settingsOpen();
+    const { alpha, world } = await settingsOpen();
     await until(alpha, alpha.runtime, Prefs.Machine, (s) => s.document.read.status === "Failed");
     const unread = await alpha.runtime.runPromise(Prefs.Machine.use((prefs) => prefs.get()));
     expect([Prefs.asksBeforeActing(unread, "WebAction"), Prefs.allows(unread, "BrowserPage")]).toEqual([true, false]);
+    // spec/app/settings/preferences.md, "The agent is launched allowed to change Gmail and Calendar exactly as the phone last read or saved, allowed neither once it could not read them, and Alpha says nothing of it before the first answer"
+    await vi.waitFor(() => expect(world.settings.consents).toEqual([{ gmailChanges: false, calendarEdits: false }]));
     // spec/app/settings/preferences.md, "When the device preferences cannot be read, the owner can recover them: the phone resets them to its defaults, and they are read again"
     await press("Privacy");
     await tap("Recover device settings");
@@ -180,6 +206,11 @@ describe("Settings", () => {
     await tap("Browser page");
     await until(alpha, alpha.runtime, Prefs.Machine, (s) => s.saving.read.status === "Loaded" && !Prefs.allows(s, "BrowserPage"));
     expect(JSON.parse(localStorage.getItem("alpha.preferences") ?? "{}")).toEqual({ askFirst: true, images: true, shares: ["AgentLocation", "GmailChanges", "CalendarEdits"] });
+    await tap("Gmail changes");
+    await until(alpha, alpha.runtime, Prefs.Machine, (s) => s.saving.read.status === "Loaded" && !Prefs.allows(s, "GmailChanges"));
+    await vi.waitFor(() => expect(world.settings.consents).toEqual([
+      { gmailChanges: false, calendarEdits: false }, { gmailChanges: true, calendarEdits: true }, { gmailChanges: false, calendarEdits: true },
+    ]));
   });
 
   it("A phone updated from the previous Alpha keeps its choices (spec/app/settings/preferences.md, \"The device preferences are read when Alpha starts, when Settings opens, and when Alpha comes back while Settings shows, with ten seconds to answer, never while a change or a recovery is in flight\")", async () => {
@@ -194,10 +225,10 @@ describe("Settings", () => {
   it("Read the licences (spec/app/settings/licences.md, \"Story: Read the licences\")", async () => {
     const { alpha, machines } = await settingsOpen();
     await press("About");
-    await press("Licences");
+    await press("Licenses");
     await until(alpha, machines, Licences.Machine, (s) => s.load.read.status === "Loaded" && s.found === 3);
     // spec/app/settings/licences.md, "Searching narrows the loaded list to the licences that match, from its top, and an empty search shows them all"
-    await fill("Search licences", "mpl");
+    await fill("Search licenses", "mpl");
     await until(alpha, machines, Licences.Machine, (s) => s.query === "mpl" && s.shown === 1);
     // spec/app/settings/licences.md, "Back from a licence returns to the same search"
     await tap("mediabunny");
@@ -206,7 +237,7 @@ describe("Settings", () => {
     await until(alpha, machines, Licences.Machine, (s) => s.licence < 0 && s.query === "mpl");
     // spec/app/settings/licences.md, "Opening the page clears the search, and loads the licences unless they are loading or loaded with some found"
     await hardware("back");
-    await press("Licences");
+    await press("Licenses");
     await until(alpha, machines, Licences.Machine, (s) => s.query === "" && s.shown === 3);
     expect(shipped).toHaveBeenCalledTimes(1);
   });
@@ -277,7 +308,7 @@ describe("Settings", () => {
   });
 
   it("Read what my carrier needs to activate a SIM (spec/app/settings/carrier.md, \"Story: Read what my carrier needs to activate a SIM\")", async () => {
-    const { alpha, machines } = await settingsOpen();
+    const { alpha, machines, world } = await settingsOpen();
     await press("General");
     await press("Carrier & SIM setup");
     await until(alpha, machines, Carrier.Machine, (s) => s.showing);
@@ -290,8 +321,14 @@ describe("Settings", () => {
     await until(alpha, machines, Carrier.Machine, (s) => s.eid.status === "Returned");
     // spec/app/settings/carrier.md, "Copy puts one identifier Android returned on the clipboard, one copy at a time, and the page says whether it was copied"
     expect([Boolean(button("Copy IMEI 1")), Boolean(button("Copy IMEI 2")), Boolean(button("Copy ICCID"))]).toEqual([true, false, false]);
+    await press("Copy IMEI 1");
+    await until(alpha, machines, Carrier.Machine, (s) => s.copied === "CopiedIt");
+    expect(world.settings.copied).toEqual(["356938035643809"]);
     await seen(false);
     await until(alpha, machines, Carrier.Machine, (s) => s.fields.length === 0 && !s.showing);
     await seen(true);
+    await until(alpha, machines, Carrier.Machine, (s) => s.showing && s.read.read.status === "Idle" && s.fields.length === 0);
+    await press("Show identifiers");
+    await until(alpha, machines, Carrier.Machine, (s) => s.read.read.status === "Loaded" && s.fields.length > 0);
   });
 });

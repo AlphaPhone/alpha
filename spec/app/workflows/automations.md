@@ -42,7 +42,7 @@ type Effect =
   | AskAgent({ id: int, change: Change, kind: Kind, when: S::When, text: int, target: int, minutes: int })
   | ReadChangeRecord({ ticket: int, id: int })
 type Automations = {
-  owner: int, list: R::Read, complete: bool, count: int, issues: int,
+  owner: int, row: int, list: R::Read, complete: bool, count: int, issues: int,
   present: bool, on: bool, status: Status, issue: bool, rowKind: Kind,
   editing: bool, kind: Kind, when: S::When, text: int, target: int,
   review: V::Review, proposed: Change, minutes: int,
@@ -55,7 +55,7 @@ pure val maxSnooze = 1440
 pure val nothingAsked: Asked = { kind: PromptTask, when: S::daily(0), text: 0, target: 0, minutes: 0 }
 
 pure val initial: Automations = {
-  owner: 0, list: R::unread, complete: false, count: 0, issues: 0,
+  owner: 0, row: 0, list: R::unread, complete: false, count: 0, issues: 0,
   present: false, on: false, status: Scheduled, issue: false, rowKind: PromptTask,
   editing: false, kind: PromptTask, when: S::daily(0), text: 0, target: 0,
   review: V::unreviewed, proposed: Create, minutes: 10,
@@ -75,6 +75,18 @@ pure val charsValues = Set(0, 12, 2001)
 pure val minutesValues = Set(0, 15, 1441)
 pure val workflowValues = Set(0, 1)
 pure val ownerValues = Set(0, 1, 2)
+pure val rowValues = Set(0, 1, 2)
+```
+
+### Changing the focused row closes its editor and actions when no change is kept
+
+```quint
+pure def canFocusRow(a: Automations, row: int): bool = a.owner >= 1 and row >= 0 and row != a.row and Q::canFile(a.change)
+
+pure def focusRow(a: Automations, row: int): Automations = {
+  ...a, row: row, list: { ...a.list, status: R::Idle }, present: false, on: false, issue: false,
+  editing: false, review: V::dismiss(V::revise(a.review)),
+}
 ```
 
 ### The list is read for the owner signed in, once at a time, and only its newest answer is taken

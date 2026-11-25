@@ -50,10 +50,7 @@ pure def canRecordingStarted(r: Recorder, ticket: int): bool = r.stage == Starti
 pure def recordingStarted(r: Recorder, ticket: int): Recorder = { ...r, stage: Recording }
 ```
 
-### A refused or missing microphone returns the recorder to ready and says why
-
-Denied is offered "Open app settings"; no microphone asks to connect one.
-Nothing was recorded.
+### A refused or missing microphone returns the recorder to ready, and nothing was recorded
 
 ```quint
 pure def canRecordingFailed(r: Recorder, ticket: int, failure: Failure): bool =
@@ -138,15 +135,17 @@ pure def alwaysAClipIsKeptOnlyAfterRecording(r: Recorder): bool =
 pure def alwaysWordsOnlyInReview(r: Recorder): bool = r.words implies r.stage == Review
 ```
 
-### A failure is shown where the owner can act on it
+### A microphone failure ends dictation quietly and a failed transcription keeps its clip
 
-A microphone failure waits in ready; a transcription failure waits with its
-clip; a kept clip is there only because its transcription failed.
+A microphone failure waits in ready until voice closes the recorder. The
+field keeps what was written. A transcription failure keeps the clip for
+retry or discard. The recorder shows actions for the clip without an error
+notice.
 
 ```quint
 pure def micFailure(f: Failure): bool = f == Denied or f == NoMicrophone
 
-pure def alwaysAFailureWaitsForTheOwner(r: Recorder): bool =
+pure def alwaysAFailureWaitsInItsStage(r: Recorder): bool =
   (micFailure(r.failure) implies r.stage == Ready)
     and (r.stage == Recorded iff (r.failure != NoFailure and not(micFailure(r.failure))))
 ```

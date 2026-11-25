@@ -3,10 +3,17 @@ import * as Android from "../../gen/app__settings__android.effect.vibe"
 import * as Facts from "../../gen/app__settings__facts.effect.vibe"
 import * as Pages from "../../gen/app__settings.effect.vibe"
 import { Machine as Shell, showing } from "../../gen/app__shell.effect.vibe"
+import { type Machine as AccessReview } from "../../gen/app__startup__access.effect.vibe"
+import { type Machine as Toasts } from "../../gen/app__notices__toasts.effect.vibe"
+import { type Said } from "../notices/toasts.vibe"
+import { type Cloud } from "../platform/cloud.vibe"
+import type { Machine as Layers } from "../../gen/app__shell__layers.effect.vibe"
+import { openAccount } from "../account/profile.vibe"
 import { Device, native } from "../platform/device.vibe"
 import { SystemSettings } from "../platform/systemSettings.vibe"
-import { type Job, answer, due, following, hearing, reacting, run, stop, together, untimed } from "../runtime/reactor.vibe"
+import { type Job, answer, due, following, hearing, reacting, run, together, untimed } from "../runtime/reactor.vibe"
 import { Time } from "../runtime/time.vibe"
+import { openReview } from "../startup/settingsAccess.vibe"
 import { development } from "./build.ts"
 
 const settingsShowing = (shell: Parameters<typeof showing>[0]) => showing(shell, "Settings")
@@ -19,15 +26,17 @@ const admitting = effect {
 }
 
 // spec/app/settings/index.md, "Each page links to what another area owns there": what the shell can open is opened; the other neighbours draw on the places Settings offers them.
-function handed(fx: Pages.Effect): Job<Pages.Event, Shell | Device, []> {
+function handed(fx: Pages.Effect): Job<Pages.Event, Shell | Layers | Device | Pages.Machine | AccessReview | Cloud | Toasts | Said, []> {
   return match (fx) {
     when { tag: "Handed", let neighbour }: run(`hand ${neighbour}`, effect {
       const shell = try Shell
+      if (neighbour === "AccountAndPlan") try openAccount()
       if (neighbour === "GoogleAndEmail") try ignore(shell.send({ type: "openView", view: "Inbox" }))
       if (neighbour === "CalendarAccount" || neighbour === "CalendarBackups") try ignore(shell.send({ type: "openView", view: "Calendar" }))
       if (neighbour === "Conversations") try ignore(shell.send({ type: "raise", detent: "Full" }))
     });
-    when { tag: "ReviewAccess" }: stop("access");
+    when { tag: "ReviewAccess", let access }: run("access review", openReview(access));
+    when { tag: "ReviewAllAccess" }: run("access review", openReview(undefined));
   }
 }
 
@@ -41,7 +50,7 @@ export const pages = together(
 // spec/app/settings/facts.md, "Only the newest asking's answer is taken, and it replaces everything shown"
 effect function readPhone(ticket: number): Facts.Event!!SystemSettings {
   const report = try (try SystemSettings).report()
-  return { type: "answered", ticket, reported: [...report.readings], grants: [...report.grants], home: report.home, assistant: report.assistant, launcher: report.launcher }
+  return { type: "answered", ticket, reported: [...report.readings], grants: [...report.grants], alerts: [...report.alerts], home: report.home, assistant: report.assistant, launcher: report.launcher }
 }
 
 // spec/app/settings/facts.md, "When Android's dialog closes, the phone is read again if Settings is showing, and the role shown is what that read reports"; spec/app/settings/facts.md, "A Home request not ended within a minute is given up, never taken as granted, and the phone is read again if Settings is showing"
@@ -94,7 +103,7 @@ const factsResumed = hearing(
 )
 
 // spec/app/settings/android.md, "Android says whether it opened that page, a nearby one, or none"
-effect function opened(start: number, target: Android.Target, channel: number): Android.Event!!SystemSettings {
+effect function opened(start: number, target: Android.Target, channel: string): Android.Event!!SystemSettings {
   return { type: "androidAnswered", start, opened: try (try SystemSettings).open(target, channel) }
 }
 

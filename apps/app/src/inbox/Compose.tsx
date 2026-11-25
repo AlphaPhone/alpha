@@ -267,6 +267,7 @@ export function Suggested({ runtime }: { runtime: ComposeProps["runtime"] }) {
   const letter = state.target !== "ToDraft" ? undefined : composer.open && composer.letter.id === state.draft ? composer.letter : held(composer.shelf, state.draft);
   const revision = letter?.revision ?? 0;
   const text = runtime.runSync(Offers.use((offers) => Effect.sync(() => offers.text(state.text))));
+  const account = runtime.runSync(Mail.use((mail) => Effect.sync(() => mail.email(letter?.account ?? state.account))));
   const before = letter === undefined ? "" : runtime.runSync(Letters.use((all) => Effect.sync(() => all.words(letter.id).text)));
   const review = { type: "review", revision } as const;
   // spec/app/inbox/suggestion.md, "Only the owner puts it in, once, as it was last shown, into the draft as it still is, adding or replacing as the owner chooses; text that does not fit is refused whole and the offer stays"
@@ -283,6 +284,7 @@ export function Suggested({ runtime }: { runtime: ComposeProps["runtime"] }) {
       text={text}
       from={state.from === "Agent" ? "alpha" : "owner"}
       source={runtime.runSync(Offers.use((offers) => Effect.sync(() => offers.source(state.text))))}
+      account={account}
       target={targets[state.target]}
       tooLong={state.blocked}
       onAdd={state.target === "ToDraft" ? using(true) : using(false)}

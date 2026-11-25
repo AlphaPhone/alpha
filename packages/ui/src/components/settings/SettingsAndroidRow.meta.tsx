@@ -12,7 +12,7 @@ export const meta: ComponentMeta<SettingsAndroidRowProps> = {
   examples: {
     Starting: { starting: { target: "wifi-networks" } },
     "Another starting": { starting: { target: "bluetooth-devices" } },
-    Channel: { target: "alert-channel", channel: 2, title: "Reminders", icon: <Bell />, reading: undefined },
+    Channel: { target: "alert-channel", channel: "reminders", title: "Reminders", icon: <Bell />, reading: undefined },
     "Not pressable": { onAndroid: undefined },
   },
   play: {
@@ -24,7 +24,7 @@ export const meta: ComponentMeta<SettingsAndroidRowProps> = {
     Channel: async ({ canvasElement }: { canvasElement: HTMLElement }) => {
       onAndroid.mockClear();
       await userEvent.click(within(canvasElement).getByRole("button", { name: /Reminders/ }));
-      await expect(onAndroid.mock.calls).toEqual([[{ target: "alert-channel", channel: 2 }]]);
+      await expect(onAndroid.mock.calls).toEqual([[{ target: "alert-channel", channel: "reminders" }]]);
     },
     Starting: async ({ canvasElement }: { canvasElement: HTMLElement }) => {
       onAndroid.mockClear();

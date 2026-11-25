@@ -1,0 +1,25 @@
+name: no Bun
+
+on:
+  pull_request:
+    branches: [vibestack-develop]
+  push:
+    branches: [vibestack-develop]
+
+permissions:
+  contents: read
+
+jobs:
+  no-bun:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: .nvmrc
+          package-manager-cache: false
+      - uses: pnpm/action-setup@v6
+      - run: pnpm no-bun

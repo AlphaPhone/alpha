@@ -1,4 +1,4 @@
-// spec/app/browser/index.md, "Story: Open, pick and close tabs"; spec/app/browser/index.md, "Story: Keep my tabs through a restart"; spec/app/browser/index.md, "Story: Save the session"; spec/app/browser/address.md, "Story: Go where I typed"; spec/app/browser/address.md, "Story: Watch a page load"
+// spec/app/browser/address.md, "Story: Find in page"; spec/app/browser/index.md, "Story: Open, pick and close tabs"; spec/app/browser/index.md, "Story: Keep my tabs through a restart"; spec/app/browser/index.md, "Story: Save the session"; spec/app/browser/address.md, "Story: Go where I typed"; spec/app/browser/address.md, "Story: Watch a page load"
 import type * as KeyValueStore from "effect/persistence/KeyValueStore"
 import { browsingSnapshot, restoreBrowsing } from "@elizaos/os/bridges/browsing-session"
 import * as Tabs from "../../gen/app__browser.effect.vibe"
@@ -8,7 +8,7 @@ import type { Effect as PageOut, Event as PageEvent, Page } from "../../gen/app_
 import { Machine as Shell, showing } from "../../gen/app__shell.effect.vibe"
 import { TabHost, hosted } from "../platform/browser.vibe"
 import type { Install } from "../runtime/attempts.vibe"
-import { type Job, Whole, answer, due, reacting, run, started, stream, together, untimed, whole } from "../runtime/reactor.vibe"
+import { type Job, Whole, answer, contained, due, reacting, run, started, stream, together, untimed, whole } from "../runtime/reactor.vibe"
 import type { Time } from "../runtime/time.vibe"
 
 module page {
@@ -51,8 +51,13 @@ module page {
     if (search) return `https://www.google.com/search?q=${encodeURIComponent(text)}`
     return /^https?:\/\//i.test(text) ? text : `https://${text}`
   }
+  /** A URL the owner tapped in Messages, with an ordinary web scheme and no credentials. @throws {never} */
+  export function messageHref(value: string): string | undefined {
+    const address = URL.parse(value)
+    return address && address.hostname && (address.protocol === "http:" || address.protocol === "https:") && !address.username && !address.password ? address.href : undefined
+  }
 }
-import { addressOf, inputOf, placeOfPage, secure } from page
+import { addressOf, inputOf, messageHref, placeOfPage, secure } from page
 export { addressOf, inputOf }
 
 /** The native tab of a tab number: numbers are never used twice, so neither is an id. */
@@ -71,6 +76,10 @@ export service Pages {
   /** Where the next load of `tab` that opens an address goes. */
   aim(tab: number, address: string): void!!
   aimed(tab: number): Option.Option<string>!!
+  /** What the owner is finding in `tab`'s page, and where among its matches the tab host last stood. */
+  seek(tab: number, text: string): void!!
+  sought(tab: number): { readonly text: string; readonly index: number }!!
+  stood(tab: number, index: number): void!!
   end(tab: number): void!!
 }
 
@@ -169,9 +178,12 @@ function carryPage(tab: number) {
     when { tag: "Go", let load, let way }: stream(`go ${tab}`, Stream.fromEffect(went(tab, load, way)) |> Stream.filter(%, (event) => event.type === "failed"), { type: "failed", load });
     when { tag: "Halt" }: run(`halt ${tab}`, ignore(hosted("command", (plugin, session) => plugin.command({ session, id: idOf(tab), command: "stop" }))));
     when { tag: "Visit" }: run(`visit ${tab}`, tellTabs({ type: "touch", tab }));
-    when { tag: "Find" }: run(`find ${tab}`, Effect.void);
-    when { tag: "FindNext" }: run(`find ${tab}`, Effect.void);
-    when { tag: "ClearFind" }: run(`find ${tab}`, Effect.void);
+    when { tag: "Find" }: run(`find ${tab}`, ignore(effect {
+      const { text } = try (try Pages).sought(tab)
+      try hosted("find", (plugin, session) => plugin.find({ session, id: idOf(tab), query: text }))
+    }));
+    when { tag: "FindNext", let forward }: run(`find next ${tab}`, ignore(hosted("findNext", (plugin, session) => plugin.findNext({ session, id: idOf(tab), forward }))));
+    when { tag: "ClearFind" }: run(`find ${tab}`, ignore(hosted("clearFind", (plugin, session) => plugin.clearFind({ session, id: idOf(tab) }))));
   }
 }
 
@@ -180,6 +192,7 @@ const pages = Layer.effect(Pages, effect {
   const area = try Whole
   const made = new Map<number, PageRuntime>()
   const aims = new Map<number, string>()
+  const finds = new Map<number, { text: string; index: number }>()
   return {
     effect of(tab: number): PageRuntime!! {
       const known = made.get(tab)
@@ -194,10 +207,14 @@ const pages = Layer.effect(Pages, effect {
     },
     aim: (tab: number, address: string) => sync(() => { aims.set(tab, address) }),
     aimed: (tab: number) => sync(() => Option.fromNullishOr(aims.get(tab))),
+    seek: (tab: number, text: string) => sync(() => { finds.set(tab, { text, index: 0 }) }),
+    sought: (tab: number) => sync(() => finds.get(tab) ?? { text: "", index: 0 }),
+    stood: (tab: number, index: number) => sync(() => { finds.set(tab, { text: finds.get(tab)?.text ?? "", index }) }),
     effect end(tab: number): void!! {
       const runtime = made.get(tab)
       made.delete(tab)
       aims.delete(tab)
+      finds.delete(tab)
       if (runtime !== undefined) try promise(() => runtime.dispose())
     },
   }
@@ -218,6 +235,15 @@ const told = started(effect {
     if (said.kind === "closed") {
       const id = host.session.applyClosed(said.raw)
       if (id !== undefined) try tellTabs({ type: "nativeLost", tab: tabOf(id) })
+      return
+    }
+    if (said.kind === "found") {
+      const s = try (try Tabs.Machine).get()
+      const outcome = host.session.findResult(said.raw, idOf(s.selected))
+      if (outcome === undefined || outcome.cleared) return
+      try (try Pages).stood(s.selected, outcome.index)
+      const p = try pageOf(s.selected)
+      if (outcome.done && p.find.status === "Loading") try tellPage(s.selected, { type: "found", ticket: p.find.ticket, count: outcome.count })
       return
     }
     if (said.kind !== "state") return
@@ -268,6 +294,29 @@ export const placed: void!!(Tabs.Machine | Shell | TabHost) = effect {
 
 /** The Browser's tabs, kept across restarts, and each tab's page, carried out through the phone's tab host. */
 export const browser = Layer.provideMerge(together(tabs, told, shown), pages)
+
+// spec/app/messages/index.md, "Only the newest read of the open conversation is shown, and it marks the shown messages read only where Alpha is the phone's SMS app"; spec/app/browser/index.md, "Story: Open, pick and close tabs"
+/** A link the owner tapped in Messages opens in one selected normal Browser tab through the address machine. */
+export effect function openMessageLink(href: string): boolean!!(Tabs.Machine | Pages | Shell | TabHost) {
+  const address = messageHref(href)
+  const shell = try Shell
+  if (address === undefined || Option.isNone((try TabHost).plugin) || !showing(try shell.get(), "Messages")) return false
+  const input = inputOf(address)
+  if (Address.verdict(input) !== "Open") return false
+  if (!(try contained(shell.send({ type: "openView", view: "Browser" }), "opening a Message link"))) return false
+  const tabs = try Tabs.Machine
+  const steady = try race(Stream.runHead(Stream.filter(tabs.changes, Tabs.steady)), Effect.as(sleep(2500), Option.none()))
+  if (Option.isNone(steady) || !showing(try shell.get(), "Browser")) return false
+  const before = try tabs.get()
+  if (!Tabs.canOpenTab(before, "Normal") || !(try tellTabs({ type: "openTab", kind: "Normal" }))) return false
+  const tab = before.issued + 1
+  if ((try tabs.get()).selected !== tab) return false
+  const page = try pageOf(tab)
+  if (!Address.canSubmit(page, input)) return false
+  try (try Pages).aim(tab, address)
+  if (!(try tellPage(tab, { type: "submit", i: input }))) return false
+  return try tellTabs({ type: "uncover" })
+}
 
 // spec/app/browser/index.md, "One layer at a time covers the page, and Back uncovers it"; spec/app/browser/address.md, "Back and forward move through the tab's own pages"
 /** Back inside the Browser: the layer over the page, then the tab's own page before. Whether it took one. */
