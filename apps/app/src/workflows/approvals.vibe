@@ -16,6 +16,7 @@ import { Time } from "../runtime/time.vibe"
 import { WorkflowsApi } from "./api.vibe"
 import { HistoryWordsPort, type RunVisibility, workflowsVisible } from "./history.vibe"
 import { Rows } from "./list.vibe"
+import { ApprovalPresentation, ApprovalTaps, approvalNoticesAvailable, approvalPresentation, currentTap, offerApprovalNotice, sameApprovalTap, settleApprovalTap, withdrawApprovalNotice } from "./native-approval.vibe"
 
 interface Pending {
   readonly number: number
@@ -75,7 +76,7 @@ const kept = Layer.sync(ApprovalWords, () => {
   }
 })
 
-type Needs = Agent | WorkflowsApi | ApprovalWords | Rows | Time | Sheet | RunVisibility
+type Needs = ApprovalPresentation | Model.Machine | Agent | WorkflowsApi | ApprovalWords | Rows | Time | Sheet | RunVisibility
 type DeviceNeeds = Needs | MediaReview | Layers | NoteStore
 
 effect function activeRun(owner: number, run: number, scope: string): boolean!!(Needs | Layers) {
@@ -192,14 +193,35 @@ effect function checked(ticket: number, runId: number, digest: number, owner: nu
     answered, expires: found?.expiresAt ?? 0, now: untimed }
 }
 
+effect function notice(runId: number, digest: number): void!!Needs {
+  if (!approvalNoticesAvailable()) return
+  const attempted = try (try ApprovalWords).get()
+  if (attempted?.runId !== runId || attempted.number !== digest) return
+  const scope = ownerAt() catch () => ""
+  const approval = try Model.Machine
+  const rows = try Rows
+  const { workflow } = try WorkflowsApi
+  const current = effect {
+    const state = try approval.get()
+    if (state.owner !== attempted.owner || state.runId !== runId || state.digest !== digest || !state.noticed ||
+      !(try rows.sameOwner(scope, attempted.owner)) || !(try workflowsVisible())) return false
+    return (ownerAt() catch () => "") === scope
+  }
+  if (!(try current)) return
+  const receipt = workflow.approvals(attempted.run) catch () => null
+  if (receipt === null || receipt.finished || receipt.cancellationRequested) return
+  const exact = receipt.approvals.find((entry) => entry.status === "pending" && sameAsking(attempted.approval, entry))
+  if (exact !== undefined) try offerApprovalNotice(digest, attempted.run, exact, current)
+}
+
 function carry(fx: Out): Job<Event, DeviceNeeds, []> {
   return match (fx) {
     when { tag: "Decide", let id, let runId, let digest, let approve }: answer("approval decision", decided(id, runId, digest, approve), { type: "restart" });
     when { tag: "ReadApproval", let ticket, let runId, let digest, let owner }: answer("approval receipt",
       checked(ticket, runId, digest, owner), { type: "approvalRead", ticket, ok: false, owner, waiting: false, answered: "Unanswered", expires: 0, now: untimed });
     when { tag: "SendDeviceDecision", let number, let runNumber, let approved }: answer("device decision", decidedDevice(number, runNumber, approved), { type: "deviceAnswered", number, acknowledged: false });
-    when { tag: "WantNotice" }: run("approval notification", succeed(undefined));
-    when { tag: "DropNotice" }: run("approval notification", succeed(undefined));
+    when { tag: "WantNotice", let runId, let digest }: run(`offer approval ${digest}`, notice(runId, digest));
+    when { tag: "DropNotice", let digest }: run(`withdraw approval ${digest}`, withdrawApprovalNotice(digest));
   }
 }
 
@@ -234,7 +256,24 @@ const watching = applying(Sheet, (state) => ({ owner: state.owner, runId: state.
     if (live.digest !== pending.number) try ignore(approvals.send({
       type: "approvalAsked", owner, runId, digest: pending.number, expires: approval.expiresAt, running: !open.raw.finished, now: untimed,
     }))
+    const tap = try (try ApprovalTaps).get()
+    if (tap !== undefined && sameApprovalTap(tap, approval)) {
+      if (live.tapDigest !== pending.number && (try currentTap(tap))) {
+        try ignore(approvals.send({ type: "noticeOpened", runId, digest: pending.number }))
+      }
+      return
+    }
     try ignore(approvals.send({ type: "openApproval", now: untimed }))
+  })
+
+// spec/app/workflows/approvals.md, "The sheet opens from a tap only when the agent says the approval still waits for this owner"
+const handledTap = applying(Model.Machine, (state) => ({ opened: state.opened, runId: state.tapRun, digest: state.tapDigest }),
+  effect ({ opened, runId, digest }) => {
+    if (opened !== "Ready" || !(try workflowsVisible())) return
+    const exact = try (try ApprovalWords).get()
+    const tap = try (try ApprovalTaps).get()
+    if (exact?.number !== digest || exact.runId !== runId || tap === undefined || !sameApprovalTap(tap, exact.approval)) return
+    try settleApprovalTap(tap)
   })
 
 export const approvals = together(
@@ -243,5 +282,7 @@ export const approvals = together(
     ...(state.device.phase === "DeviceShown" ? [due<Event, []>("device review expires", state.device.until, { type: "expireDevice", number: state.device.number, now: untimed })] : []),
   ] }),
   kept,
+  approvalPresentation,
   watching,
+  handledTap,
 )
