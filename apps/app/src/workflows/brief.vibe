@@ -1,5 +1,6 @@
 // spec/app/digests/index.md, "Home shows the newest kept result of the owner that ran, finished or failed, through a restart; a result that did not run never replaces it, and a page of another owner never reaches it"
-import { digestInbox, latestRetainedBrief } from "@elizaos/plugin-workflow-client"
+import * as KeyValueStore from "effect/persistence/KeyValueStore"
+import { type DigestResult, type HostedDigestProtocol, digestInbox, latestRetainedBrief } from "@elizaos/plugin-workflow-client"
 import { Machine as Shell } from "../../gen/app__shell.effect.vibe"
 import { Machine as WorkflowList } from "../../gen/app__workflows__list.effect.vibe"
 import { fromAreas, type ToldBrief } from "../home/cards.vibe"
@@ -13,17 +14,37 @@ export function digestScope(owner: string): string {
   return `alpha/workflows/digests/${encodeURIComponent(owner)}`
 }
 
-/** A notice within Alpha to re-read durable results after the digest inbox has settled a round. */
+interface DigestRead {
+  readonly rows: readonly DigestResult[] | undefined
+  readonly current: boolean
+}
+
+/** One inbox writer for Workflows and visible-browser checks. Home only reads the committed history. */
 export service DigestHistory {
   readonly changes: Stream.Stream<void>
-  changed(): void!!
+  read(owner: string): (readonly DigestResult[] | undefined)!!
+  sync(owner: string, protocol: HostedDigestProtocol): DigestRead!!
 }
 
 const history = Layer.effect(DigestHistory, effect {
   const changed = try PubSub.sliding<void>(1)
+  const round = (try Semaphore.make(1)).withPermits(1)
+  const store = try KeyValueStore.KeyValueStore
+  const inboxFor = (owner: string) => Effect.provideService(digestInbox(digestScope(owner)), KeyValueStore.KeyValueStore, store)
+  let generation = 0
   return {
     changes: Stream.fromPubSub(changed),
-    changed: () => sync(() => { PubSub.publishUnsafe(changed, undefined) }),
+    read: (owner: string) => round(effect {
+      const inbox = try inboxFor(owner)
+      return inbox.history() catch () => undefined
+    }),
+    sync: (owner: string, protocol: HostedDigestProtocol) => round(effect {
+      const inbox = try inboxFor(owner)
+      const fresh = inbox.sync(protocol, ++generation) catch () => undefined
+      const rows = fresh ?? (inbox.history() catch () => undefined)
+      try sync(() => { PubSub.publishUnsafe(changed, undefined) })
+      return { rows, current: fresh !== undefined }
+    }),
   }
 })
 
@@ -52,8 +73,7 @@ const brief = started(effect {
       fromAreas.brief(undefined)
     }
     if (scope === undefined) return
-    const inbox = try digestInbox(scope)
-    const saved = inbox.history() catch () => undefined
+    const saved = try history.read(identity)
     if (saved === undefined || (ownerAt() catch () => "") !== identity || (try list.get()).owner !== owner) return
     const latest = latestRetainedBrief(saved)
     const current: ToldBrief | undefined = latest === undefined ? undefined
