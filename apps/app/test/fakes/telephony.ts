@@ -12,7 +12,7 @@ import { type TextReviewScene, textReviewEnrollment } from "./text-review.ts";
 /** A call in the phone's log. */
 export interface LoggedCall { id: number; number: string; name: string | null; date: number; type: "incoming" | "outgoing" | "missed"; seconds?: number }
 /** A voicemail the carrier delivered. */
-export interface HeldVoicemail { id: number; number: string; date: number; heard: boolean; deleted: boolean; seconds?: number; name?: string; transcript?: string }
+export interface HeldVoicemail { id: number; number: string; date: number; heard: boolean; deleted: boolean; seconds?: number; name?: string; transcript?: string; deletionWitness?: string }
 /** A text in the phone's SMS provider: received into the inbox, or sent from it. */
 export interface Text { id: number; thread: number; address: string; box: "inbox" | "sent"; date: number; body: string; read: boolean; pictures?: number }
 /** A contact in the address book. */
@@ -243,10 +243,11 @@ function telephony(world: TelephonyScene): Faked {
         lines: [{ subscriptionId: 1, slot: 0, displayName: "Carrier", carrierName: "Carrier", number: "+14155550199", countryIso: "us", networkType: "5g", roaming: false, signalLevel: 3, embedded: false, iccid: null, imei: null }],
       }),
       voicemailStatus: () => Promise.resolve({ access: true, state: world.carrier }),
-      listVoicemail: ({ limit }) => Promise.resolve({
+      listVoicemail: ({ limit, withDeletionWitness }) => Promise.resolve({
         state: world.carrier,
         voicemails: world.carrier === "unsupported" ? [] : world.voicemails.filter((one) => !one.deleted).slice(0, limit).map((one) => ({
           id: String(one.id), number: one.number, cachedName: one.name ?? null, date: one.date, durationSeconds: one.seconds ?? 24, isNew: !one.heard, hasAudio: true, carrierTranscript: one.transcript ?? null,
+          ...(withDeletionWitness && one.deletionWitness !== undefined ? { deletionWitness: one.deletionWitness } : {}),
         })),
       }),
       fetchVoicemailAudio: () => Promise.resolve({ status: "ready" }),
@@ -258,12 +259,13 @@ function telephony(world: TelephonyScene): Faked {
         one.heard = true;
         return Promise.resolve({ status: "marked" });
       },
-      deleteVoicemail: ({ id }) => {
+      deleteVoicemail: ({ id, witness }) => {
         world.deletionAttempts.push(`voicemail:${id}`);
         const one = voicemail(id);
         if (one === undefined) return Promise.resolve({ status: "not-found" });
+        if (witness !== undefined && witness !== one.deletionWitness) return Promise.resolve({ status: "stale" });
         one.deleted = !world.holdVoicemailDeletion;
-        const staged = { id: `staged-${world.staged.length + 1}`, kind: "voicemail", target: { id }, phase: world.holdVoicemailDeletion ? "queued" : "deleted", deadline: { expiresAt: 1_800_000_000_000 } };
+        const staged = { id: `staged-${world.staged.length + 1}`, kind: "voicemail", target: { id, ...(witness === undefined ? {} : { witness }) }, phase: world.holdVoicemailDeletion ? "queued" : "deleted", deadline: { expiresAt: 1_800_000_000_000 } };
         world.staged.push(staged);
         return deletionResponse({ status: "queued", deletion: staged });
       },

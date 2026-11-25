@@ -53,6 +53,7 @@ export interface VoicemailTarget {
   readonly list: number
   readonly opening: number
   readonly transcript: number
+  readonly witness: string | undefined
   readonly result: VoicemailDetail
 }
 
@@ -81,12 +82,12 @@ export effect function selectedVoicemail(): (VoicemailTarget | undefined)!!Voice
   const result = readResult<"voicemail_read_selected">(voicemailRead, text !== ""
     ? { ...recorded, transcriptState: "ready", engine: carrier !== "" ? "carrier" : "device", transcript: text }
     : { ...recorded, transcriptState, engine: null, transcript: null })
-  return result?.status === "read" ? { id: row.id, list: state.list.ticket, opening: state.audio.ticket, transcript: state.transcript.ticket, result } : undefined
+  return result?.status === "read" ? { id: row.id, list: state.list.ticket, opening: state.audio.ticket, transcript: state.transcript.ticket, witness: row.deletionWitness, result } : undefined
 }
 
 export function sameVoicemail(one: VoicemailTarget | undefined, other: VoicemailTarget | undefined): boolean {
   return one !== undefined && other !== undefined && one.id === other.id && one.list === other.list && one.opening === other.opening
-    && one.transcript === other.transcript && JSON.stringify(one.result) === JSON.stringify(other.result)
+    && one.transcript === other.transcript && one.witness === other.witness && JSON.stringify(one.result) === JSON.stringify(other.result)
 }
 
 /** Share only the same visible cached voicemail, under the current explicit review. */

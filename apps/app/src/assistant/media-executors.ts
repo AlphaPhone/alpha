@@ -26,6 +26,11 @@ export async function executeMedia(alpha: Alpha, operation: DeviceOperation, cal
     const { shareSelectedVoicemail } = await import("../contacts/reads.vibe");
     return alpha.runtime.runPromise(shareSelectedVoicemail(authority.voicemail, authority.current));
   }
+  if (operation.type === "voicemail_delete_selected") {
+    if (authority.voicemailDeletion === undefined) return refused;
+    const { deleteReviewedVoicemail } = await import("../phone/agent.vibe");
+    return alpha.runtime.runPromise(deleteReviewedVoicemail(authority.voicemailDeletion, authority.current));
+  }
   if (operation.type === "sms_latest_sender") {
     const { shareLatestSender } = await import("../contacts/reads.vibe");
     return alpha.runtime.runPromise(shareLatestSender(operation, authority.current));
