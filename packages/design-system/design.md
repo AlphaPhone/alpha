@@ -32,13 +32,16 @@ do next.
   `font-display`, are a contact's name and initials at the top of their card. `text-lead` is the street of the next turn,
   `text-title` a document's name over its preview, and `text-figure` and `text-figure-sm` a route's time.
   `leading-row` sets `text-body` as a note's or a routine's title in a list.
+  `text-headline` is an open voice or link note's title and `text-quote` a clip kept from a page.
+  `text-tab-count` in a `rounded-tab-count` outline is the Browser's count of open tabs.
 - **Shape.** `radius` is a card; `rounded-group` a group of rows; `rounded-panel` a notice or a search bar; `rounded-home-card` is a Home overview card;
   `rounded-drawer-icon` rounds an installed app icon; `rounded-option` is a row of a floating menu and
   `rounded-box` the box of a list row's selection check. `rounded-tile` is an app tile, a menu and a dialog;
-  `rounded-sheet` the top of a bottom sheet; `rounded-full` a button, a chip and the Ask Alpha bar.
+  `rounded-sheet` the top of a bottom sheet, `rounded-chat` the top of the Ask Alpha sheet; `rounded-full` a
+  button and a chip, `rounded-dock` the Ask Alpha bar.
   Everything pressed is at least 44px in both directions.
-- **Elevation.** `shadow-sm` lifts a control, `shadow-menu` a menu, `shadow-md` a dialog or a notice, `shadow-lg` the Ask Alpha
-  bar, `shadow-sheet` a bottom sheet.
+- **Elevation.** `shadow-sm` lifts a control, `shadow-menu` a menu, `shadow-md` a dialog or a notice, `shadow-lg` a raised card,
+  `shadow-dock` the floating Ask Alpha bar (`shadow-dock-dark` on black), `shadow-sheet` a bottom sheet.
 - **Layers.** `z-dock` is the Ask Alpha bar, `z-sheet` the conversation and bottom sheets, `z-dialog` a
   dialog, `z-toast` a notice, `z-voice` the voice overlay. `z-10`, `z-20` and `z-50` order things inside one view.
 - **Motion.** `fast` for press, `base` for most changes, `slow` for entering and leaving, on
@@ -110,6 +113,9 @@ this prose into tokens. To change the design, describe it, and have the change w
 | `rounded.box` | 0.375rem |
 | `rounded.group` | 1.625rem |
 | `rounded.panel` | 1.5rem |
+| `rounded.dock` | 1.9375rem |
+| `rounded.chat` | 1.875rem |
+| `rounded.tab-count` | 0.4375rem |
 | `font.sans` | "Public Sans", system-ui, -apple-system, "Segoe UI", sans-serif |
 | `font.display` | Denton, Fraunces, Georgia, serif |
 | `font.mono` | ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas, monospace |
@@ -151,6 +157,11 @@ this prose into tokens. To change the design, describe it, and have the change w
 | `text.4xl.tracking` | -0.01em |
 | `text.figure.size` | 2.75rem |
 | `text.figure.leading` | 1 |
+| `text.headline.size` | 2.125rem |
+| `text.headline.leading` | 1.08 |
+| `text.headline.tracking` | -0.01em |
+| `text.quote.size` | 1.3125rem |
+| `text.quote.leading` | 1.35 |
 | `text.home-display.size` | 1.625rem |
 | `text.home-display.leading` | 1.1 |
 | `text.title.size` | 1.75rem |
@@ -171,6 +182,8 @@ this prose into tokens. To change the design, describe it, and have the change w
 | `text.contact-name.tracking` | -0.01em |
 | `text.contact-initials.size` | 2.625rem |
 | `text.contact-initials.leading` | 1 |
+| `text.tab-count.size` | 0.71875rem |
+| `text.tab-count.leading` | 1.175 |
 | `weight.light` | 300 |
 | `weight.normal` | 400 |
 | `weight.medium` | 500 |
@@ -182,6 +195,8 @@ this prose into tokens. To change the design, describe it, and have the change w
 | `leading.row` | 1.3 |
 | `leading.normal` | 1.4 |
 | `leading.relaxed` | 1.6 |
+| `leading.field` | 1.375 |
+| `leading.chat` | 1.5 |
 | `tracking.tight` | -0.01em |
 | `tracking.caps` | 0.14em |
 | `z.10` | 10 |
@@ -199,6 +214,8 @@ this prose into tokens. To change the design, describe it, and have the change w
 | `shadow.lg` | 0 12px 34px oklch(0 0 0 / 0.16) |
 | `shadow.sheet` | 0 -10px 40px oklch(0 0 0 / 0.12) |
 | `shadow.menu` | 0 4px 20px oklch(0 0 0 / 0.12) |
+| `shadow.dock` | 0 14px 40px oklch(0 0 0 / 0.12) |
+| `shadow.dock-dark` | 0 14px 40px oklch(0 0 0 / 0.45) |
 | `keyframes.rise` | from{opacity:0;transform:translateY(1.75rem)}to{opacity:1;transform:none} |
 | `keyframes.drop` | from{opacity:0;transform:translateY(-2.25rem)}to{opacity:1;transform:none} |
 | `keyframes.fade` | from{opacity:0}to{opacity:1} |

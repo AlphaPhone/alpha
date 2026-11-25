@@ -1,0 +1,281 @@
+// spec/app/browser/index.md, "Story: Open, pick and close tabs"; spec/app/browser/index.md, "Story: Keep my tabs through a restart"; spec/app/browser/index.md, "Story: Save the session"; spec/app/browser/address.md, "Story: Go where I typed"; spec/app/browser/address.md, "Story: Watch a page load"
+import type * as KeyValueStore from "effect/persistence/KeyValueStore"
+import { browsingSnapshot, restoreBrowsing } from "@elizaos/os/bridges/browsing-session"
+import * as Tabs from "../../gen/app__browser.effect.vibe"
+import type { Browser, Effect as TabsOut, Event as TabsEvent } from "../../gen/app__browser.effect.vibe"
+import * as Address from "../../gen/app__browser__address.effect.vibe"
+import type { Effect as PageOut, Event as PageEvent, Page } from "../../gen/app__browser__address.effect.vibe"
+import { Machine as Shell, showing } from "../../gen/app__shell.effect.vibe"
+import { TabHost, hosted } from "../platform/browser.vibe"
+import type { Install } from "../runtime/attempts.vibe"
+import { type Job, Whole, answer, due, reacting, run, started, stream, together, untimed, whole } from "../runtime/reactor.vibe"
+import type { Time } from "../runtime/time.vibe"
+
+module page {
+  import { isSecureWebAddress } from "@elizaos/os/browser/address"
+  import type { Input } from "../../gen/app__browser__address.ts"
+
+  /** Whether `href` came over HTTPS with a host. @throws {never} */
+  export function secure(href: string): boolean {
+    return isSecureWebAddress(href)
+  }
+  /** Where the Browser draws a tab's page now, in the page's own pixels, or none while nothing marks the place. @throws {never} */
+  export function placeOfPage(): { x: number; y: number; width: number; height: number } | undefined {
+    if (typeof document === "undefined") return undefined
+    const place = document.querySelector<HTMLElement>("[data-alpha-browser-page]")
+    if (place === null) return undefined
+    const { left, top, width, height } = place.getBoundingClientRect()
+    return width > 0 && height > 0 ? { x: left, y: top, width, height } : undefined
+  }
+  /** The facts of what was typed that the address bar's rules read. @throws {never} */
+  export function inputOf(typed: string): Input {
+    const text = typed.trim()
+    const web = /^https?:\/\//i.test(text)
+    const rest = text.replace(/^https?:\/\//i, "")
+    const authority = rest.split(/[/?#]/)[0] ?? ""
+    return {
+      blank: text === "",
+      tooLong: text.length > 8192,
+      userInfo: authority.includes("@") && (web || !/\s/.test(text)) && !/^[^\s@]+@[^\s@]+\.[^\s@/]+$/.test(text),
+      web,
+      spaced: /\s/.test(text),
+      colon: /^[A-Za-z][\w-]*:(?!\d)/.test(text) && !web,
+      host: /^(localhost|\[[\da-f:.]+\]|[^\s/:@.]+(\.[^\s/:@.]+)+)(:\d+)?([/?#]\S*)?$/i.test(rest) && !/^[\d.:]+$/.test(rest),
+      numeric: /^[\d.:]+$/.test(text),
+      mail: /^[^\s@/]+@[^\s@/]+\.[^\s@/]+$/.test(text),
+    }
+  }
+  /** The address the tab host opens for what was typed: the web address it names, or a search for it. @throws {never} */
+  export function addressOf(typed: string, search: boolean): string {
+    const text = typed.trim()
+    if (search) return `https://www.google.com/search?q=${encodeURIComponent(text)}`
+    return /^https?:\/\//i.test(text) ? text : `https://${text}`
+  }
+}
+import { addressOf, inputOf, placeOfPage, secure } from page
+export { addressOf, inputOf }
+
+/** The native tab of a tab number: numbers are never used twice, so neither is an id. */
+export const idOf = (tab: number): string => `tab${tab}`
+const tabOf = (id: string): number => (/^tab(\d+)$/.test(id) ? Number(id.slice(3)) : 0)
+
+/** A tab's page: its own machine, made when the tab is first asked for and ended with the tab. */
+export type PageRuntime = ManagedRuntime.ManagedRuntime<Address.Machine | Time, unknown>
+
+/**
+ * Each open tab's page: its machine, the address its next load opens, and what the tab host last said of it, which
+ * `TabHost`'s session holds by the tab's id.
+ */
+export service Pages {
+  of(tab: number): PageRuntime!!
+  /** Where the next load of `tab` that opens an address goes. */
+  aim(tab: number, address: string): void!!
+  aimed(tab: number): Option.Option<string>!!
+  end(tab: number): void!!
+}
+
+effect function pageOf(tab: number): Page!!Pages {
+  const runtime = try (try Pages).of(tab)
+  return try promise(() => runtime.runPromise(Address.Machine.use((machine) => machine.get())))
+}
+
+effect function tellPage(tab: number, event: PageEvent): boolean!!Pages {
+  const runtime = try (try Pages).of(tab)
+  return try promise(() => runtime.runPromiseExit(Address.Machine.use((machine) => machine.send(event))).then((ended) => Exit.isSuccess(ended)))
+}
+
+effect function tellTabs(event: TabsEvent): boolean!!Tabs.Machine {
+  return try ((try Tabs.Machine).send(event) |> Effect.as(%, true) |> Effect.orElseSucceed(%, () => false))
+}
+
+// spec/app/browser/index.md, "A tab gets its native tab when it is the one shown and loads a page, and loses it if Android cannot make one"
+effect function made(tab: number, kind: Tabs.Kind): void!!(TabHost | Tabs.Machine) {
+  const host = try TabHost
+  const id = idOf(tab)
+  const plugin = host.plugin
+  const ok = Option.isSome(plugin) && try promise(() => host.session.ensure(id, kind === "Private", () => plugin.value.create({ session: host.session.session, id, private: kind === "Private" })).then(() => true, () => false))
+  if (!ok) try tellTabs({ type: "nativeLost", tab })
+}
+
+// spec/app/browser/index.md, "A launch reads the saved session, and may ask again after a failed read"; spec/app/browser/index.md, "The saved tabs replace an untouched launch tab, or join the open tabs when they all fit"
+effect function restoredFrom(ticket: number): TabsEvent!!(TabHost | Pages | Tabs.Machine) {
+  return effect {
+    const saved = try hosted("browsingState", (plugin, session) => plugin.browsingState({ session }))
+    const s = try (try Tabs.Machine).get()
+    const back = restoreBrowsing(saved, { visits: [] }, s.untouched)
+    for (const row of back.restored) {
+      const tab = tabOf(row.id)
+      if (s.kept.includes(tab)) try (try Pages).aim(tab, row.url)
+    }
+    const cur = tabOf(back.cur ?? "")
+    return { type: "restored", ticket, ok: true, shown: s.kept.includes(cur) ? cur : (s.kept[0] ?? 0) }
+  } catch () => ({ type: "restored", ticket, ok: false, shown: 0 })
+}
+
+// spec/app/browser/index.md, "A stale session is written once it has been read, one write at a time, and never while browsing data is being cleared"
+effect function written(write: number): TabsEvent!!(TabHost | Tabs.Machine) {
+  return effect {
+    const host = try TabHost
+    const s = try (try Tabs.Machine).get()
+    const snapshot = browsingSnapshot(
+      { tabs: s.open.map((tab) => ({ id: idOf(tab), priv: s.privates.includes(tab) })), visits: [], cur: idOf(s.selected) },
+      (id) => host.session.info(id),
+    )
+    try hosted("saveBrowsingState", (plugin, session) => plugin.saveBrowsingState({ session, ...snapshot }))
+    return { type: "saved", ticket: write, ok: true, now: untimed }
+  } catch () => ({ type: "saved", ticket: write, ok: false, now: untimed })
+}
+
+function carryTabs(fx: TabsOut): Job<TabsEvent, TabHost | Pages | Tabs.Machine, []> {
+  return match (fx) {
+    when { tag: "Restore", let ticket }: answer("restore", restoredFrom(ticket), { type: "restored", ticket, ok: false, shown: 0 });
+    when { tag: "Create", let tab, let kind }: run(`create ${tab}`, made(tab, kind));
+    when { tag: "Close", let tab }: run(`close ${tab}`, effect {
+      const host = try TabHost
+      try ignore(hosted("close", (plugin, session) => plugin.close({ session, id: idOf(tab) })))
+      host.session.forget([idOf(tab)])
+      try (try Pages).end(tab)
+    });
+    when { tag: "Save", let write }: answer("save", written(write), { type: "saved", ticket: write, ok: false, now: untimed });
+    when { tag: "Erase" }: answer("erase", hosted("clearBrowsingData", (plugin, session) => plugin.clearBrowsingData({ session })) |> Effect.as(%, { type: "erased", ok: true } as TabsEvent) |> Effect.orElseSucceed(%, () => ({ type: "erased", ok: false }) as TabsEvent), { type: "erased", ok: false });
+    when { tag: "Halt" }: run("halt", Effect.void);
+  }
+}
+
+// spec/app/browser/address.md, "Submitting text opens it, searches for it or says why not, and blank text is not submitted"; spec/app/browser/address.md, "Back and forward move through the tab's own pages"; spec/app/browser/address.md, "Reload loads a shown, failed or stopped page again"
+effect function went(tab: number, load: number, way: Address.Way): PageEvent!!(TabHost | Pages | Tabs.Machine) {
+  const failed: PageEvent = { type: "failed", load }
+  return effect {
+    const s = try (try Tabs.Machine).get()
+    if (!s.native.includes(tab)) try tellTabs({ type: "load", tab })
+    try made(tab, Tabs.kindOf(s, tab))
+    const id = idOf(tab)
+    const host = try TabHost
+    if (way === "Address" || way === "Query") {
+      const aimed = try (try Pages).aimed(tab)
+      if (Option.isNone(aimed)) return failed
+      host.session.beginNavigation(id, aimed.value)
+      try hosted("navigate", (plugin, session) => plugin.navigate({ session, id, url: aimed.value }))
+    } else {
+      const command = way === "Again" ? "reload" : way === "Backward" ? "back" : "forward"
+      try hosted("command", (plugin, session) => plugin.command({ session, id, command }))
+    }
+    return { type: "started" }
+  } catch () => failed
+}
+
+function carryPage(tab: number) {
+  return (fx: PageOut): Job<PageEvent, TabHost | Pages | Tabs.Machine, []> => match (fx) {
+    when { tag: "Go", let load, let way }: stream(`go ${tab}`, Stream.fromEffect(went(tab, load, way)) |> Stream.filter(%, (event) => event.type === "failed"), { type: "failed", load });
+    when { tag: "Halt" }: run(`halt ${tab}`, ignore(hosted("command", (plugin, session) => plugin.command({ session, id: idOf(tab), command: "stop" }))));
+    when { tag: "Visit" }: run(`visit ${tab}`, tellTabs({ type: "touch", tab }));
+    when { tag: "Find" }: run(`find ${tab}`, Effect.void);
+    when { tag: "FindNext" }: run(`find ${tab}`, Effect.void);
+    when { tag: "ClearFind" }: run(`find ${tab}`, Effect.void);
+  }
+}
+
+/** Each tab's page machine, made over the Browser's own runtime once it is whole, so its loads go through the tab host. */
+const pages = Layer.effect(Pages, effect {
+  const area = try Whole
+  const made = new Map<number, PageRuntime>()
+  const aims = new Map<number, string>()
+  return {
+    effect of(tab: number): PageRuntime!! {
+      const known = made.get(tab)
+      if (known !== undefined) return known
+      const context = try area.context
+      const found = Context.getOption(context as Context.Context<Tabs.Machine>, Tabs.Machine)
+      const privateTab = Option.isSome(found) && (try found.value.get()).privates.includes(tab)
+      const machine = whole(reacting(Address, { carry: carryPage(tab), ...(privateTab ? { open: [{ type: "bePrivate" }] as const } : {}) }))
+      const runtime: PageRuntime = ManagedRuntime.make(Layer.provideMerge(machine, Layer.succeedContext(context as Context.Context<KeyValueStore.KeyValueStore | Time | Install | TabHost | Pages | Tabs.Machine>)))
+      made.set(tab, runtime)
+      return runtime
+    },
+    aim: (tab: number, address: string) => sync(() => { aims.set(tab, address) }),
+    aimed: (tab: number) => sync(() => Option.fromNullishOr(aims.get(tab))),
+    effect end(tab: number): void!! {
+      const runtime = made.get(tab)
+      made.delete(tab)
+      aims.delete(tab)
+      if (runtime !== undefined) try promise(() => runtime.dispose())
+    },
+  }
+})
+
+// spec/app/browser/index.md, "A stale session is written once it has been read, one write at a time, and never while browsing data is being cleared"; spec/app/browser/index.md, "A write that lands becomes the saved session, and one that fails waits longer each time, up to a minute"
+const tabs = reacting(Tabs, {
+  keep: 1,
+  open: [{ type: "restart" }],
+  carry: carryTabs,
+  timers: (s: Browser) => (s.stale && s.hydrated && !s.writing && s.erasing !== "Running" ? [due("save", s.retryAt, { type: "save", now: untimed } as TabsEvent)] : []),
+})
+
+// spec/app/browser/address.md, "Only the latest load of the page commits it or fails it"; spec/app/browser/address.md, "A page can go on to another page by itself, through a link or a redirect"; spec/app/browser/index.md, "A tab gets its native tab when it is the one shown and loads a page, and loses it if Android cannot make one"
+const told = started(effect {
+  const host = try TabHost
+  try Stream.runForEach(host.told, effect (said) => {
+    if (said.kind === "closed") {
+      const id = host.session.applyClosed(said.raw)
+      if (id !== undefined) try tellTabs({ type: "nativeLost", tab: tabOf(id) })
+      return
+    }
+    if (said.kind !== "state") return
+    const change = host.session.applyState(said.raw)
+    if (change === undefined) return
+    const tab = tabOf(change.id)
+    const p = try pageOf(tab)
+    const { info } = change
+    if (p.phase === "Shown" && info.loading === true && change.documentChanged) try tellPage(tab, { type: "followed" })
+    const now = try pageOf(tab)
+    if (now.phase !== "Loading") return
+    if ((info.error ?? "") !== "") try tellPage(tab, { type: "failed", load: now.load })
+    else if (info.loading !== true && change.committedPage) try tellPage(tab, { type: "committed", load: now.load, secure: secure(info.url ?? "") })
+  })
+}, "the tab host")
+
+// spec/app/browser/index.md, "A launch reads the saved session, and may ask again after a failed read"; spec/app/browser/index.md, "A tab gets its native tab when it is the one shown and loads a page, and loses it if Android cannot make one"
+const shown = started(effect {
+  const shell = try Shell
+  const machine = try Tabs.Machine
+  const host = try TabHost
+  try Stream.runForEach(Stream.zipLatest(Stream.map(shell.changes, (s) => showing(s, "Browser")), machine.changes), effect ([open, s]) => {
+    if (open && Tabs.canAskRestore(s)) try tellTabs({ type: "askRestore" })
+    const aimed = try (try Pages).aimed(s.selected)
+    if (open && Tabs.steady(s) && !s.native.includes(s.selected) && Option.isSome(aimed)) {
+      const p = try pageOf(s.selected)
+      if (p.phase === "Blank") try tellPage(s.selected, { type: "submit", i: inputOf(aimed.value) })
+    }
+    try present(open && Tabs.pageShown(s) ? s.selected : 0, host)
+  })
+}, "showing the page")
+
+effect function present(tab: number, host: TabHost.Shape): void!! {
+  const place = placeOfPage()
+  const plugin = host.plugin
+  if (Option.isNone(plugin)) return
+  try ignore(tryPromise(() => tab === 0 || place === undefined
+    ? plugin.value.present({ session: host.session.session, id: null })
+    : plugin.value.present({ session: host.session.session, id: idOf(tab), ...place })))
+}
+
+/** Draw the page shown where the Browser marks its place, once that place is drawn. */
+export const placed: void!!(Tabs.Machine | Shell | TabHost) = effect {
+  const s = try (try Tabs.Machine).get()
+  const open = showing(try (try Shell).get(), "Browser")
+  try present(open && Tabs.pageShown(s) ? s.selected : 0, try TabHost)
+}
+
+/** The Browser's tabs, kept across restarts, and each tab's page, carried out through the phone's tab host. */
+export const browser = Layer.provideMerge(together(tabs, told, shown), pages)
+
+// spec/app/browser/index.md, "One layer at a time covers the page, and Back uncovers it"; spec/app/browser/address.md, "Back and forward move through the tab's own pages"
+/** Back inside the Browser: the layer over the page, then the tab's own page before. Whether it took one. */
+export const back: boolean!!(Tabs.Machine | Pages) = effect {
+  const machine = try Tabs.Machine
+  const s = try machine.get()
+  if (Tabs.canUncover(s)) return try tellTabs({ type: "uncover" })
+  const p = try pageOf(s.selected)
+  if (Address.canGoBack(p)) return try tellPage(s.selected, { type: "goBack" })
+  return false
+}

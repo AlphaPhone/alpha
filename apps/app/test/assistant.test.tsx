@@ -23,7 +23,7 @@ afterEach(closeAll);
 /** Ask Alpha in full, alone at its place: the journeys draw no other screen. */
 const mounts: Mount[] = [{ at: "assistant", load: () => import("../src/assistant/index.tsx") }];
 
-const lines = () => [...document.querySelectorAll("section[aria-label='Ask Alpha'] [role=log] article")].map((line) => line.querySelector("span")?.textContent);
+const lines = () => [...document.querySelectorAll("section[aria-label='Ask Alpha'] [role=log] article")].map((line) => line.querySelector("span:not([aria-hidden])")?.textContent);
 const rows = (list: string) => document.querySelector(`section[aria-label='${list}'] > div`)?.children.length ?? 0;
 
 /** Write `text` in the composer, as the owner types it. */
@@ -50,14 +50,22 @@ function onMessage(text: string, item: string) {
   });
 }
 
-/** Open the list of conversations, from the conversation's name. */
-function chatsList() {
+/** Choose `item` from the chat actions beside the composer, as the owner does with the keyboard. */
+function chatAction(item: string) {
   act(() => {
-    const found = [...document.querySelectorAll("button")].find((one) => one.getAttribute("aria-label")?.startsWith("Chats, "));
-    if (!(found instanceof HTMLButtonElement)) throw new Error("no chats control");
-    found.click();
+    const trigger = document.querySelector("button[aria-label='Chat actions']");
+    if (!(trigger instanceof HTMLButtonElement)) throw new Error("no chat actions");
+    trigger.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+  });
+  act(() => {
+    const chosen = [...document.querySelectorAll("[role=menuitem]")].find((one) => one.textContent === item);
+    if (!(chosen instanceof HTMLElement)) throw new Error(`no chat action ${item}`);
+    chosen.click();
   });
 }
+
+/** Open the list of conversations, from the chat actions. */
+const chatsList = () => chatAction("Chat history");
 
 /** Click the row of the list named `list` whose text starts with `text`. */
 function row(list: string, text: string) {
@@ -216,7 +224,7 @@ describe.each([["a browser", false], ["a phone", true]])("in %s", (_where, phone
     const { alpha, runtime } = await openAssistant(world, false);
 
     // spec/app/assistant/search.md, "Words are searched from the first hit, and empty words are not searched"
-    await press("Search chats");
+    await chatAction("Search chat");
     await fill("Search chats", "friday");
     await until(alpha, runtime, Search, (s) => s.hits.status === "Loaded" && s.words === "friday");
     expect(rows("Results")).toBe(2);
@@ -229,7 +237,7 @@ describe.each([["a browser", false], ["a phone", true]])("in %s", (_where, phone
 
     // spec/app/assistant/search.md, "Only the newest asking's hits are shown, a page at a time, after those already shown": a search that fails says so.
     world.ask.searchDown = true;
-    await press("Search chats");
+    await chatAction("Search chat");
     await fill("Search chats", "noon");
     await until(alpha, runtime, Search, (s) => s.hits.status === "Failed");
     expect(document.body.textContent).toContain("Search did not finish");

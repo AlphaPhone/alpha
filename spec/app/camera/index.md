@@ -151,7 +151,7 @@ pure def answering(d: Done, before: Camera): Done =
 ```quint
 pure val levelValues = Set(4, 5, 10, 20, 100)
 pure val pieceValues = Set(41943040, 73400320)
-pure val totalBytesValues = Set(1, 41943040, 104857600)
+pure val totalValues = Set(1, 41943040, 104857600)
 pure val nowValues = Set(0, 150000, 300000, 450000)
 pure val atValues = Set(0, 150000)
 pure val ticketValues = Set(1, 2, 3, 4, 5, 6, 7, 8)
@@ -718,11 +718,11 @@ pure def canChunk(s: Camera, piece: int, by: Actor): bool = by == Phone and F::c
 
 pure def chunk(s: Camera, piece: int, now: int, by: Actor): Done = filming(F::chunk(s.film, piece, now), now, s)
 
-pure def canRecordingSize(s: Camera, totalBytes: int, by: Actor): bool =
-  by == Phone and totalBytes > s.film.bytes and totalBytes <= F::maxBytes and F::canChunk(s.film, totalBytes - s.film.bytes)
+pure def canRecordingSize(s: Camera, total: int, by: Actor): bool =
+  by == Phone and total > s.film.bytes and total <= F::maxBytes and F::canChunk(s.film, total - s.film.bytes)
 
-pure def recordingSize(s: Camera, totalBytes: int, now: int, by: Actor): Done =
-  chunk(s, totalBytes - s.film.bytes, now, by)
+pure def recordingSize(s: Camera, total: int, now: int, by: Actor): Done =
+  chunk(s, total - s.film.bytes, now, by)
 
 pure def canStopRecording(s: Camera, by: Actor): bool = by == Owner and F::canStop(s.film)
 

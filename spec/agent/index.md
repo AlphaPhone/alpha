@@ -159,6 +159,7 @@ type Method = Get | Post | Put | Patch | Delete
 type Route = { method: Method, path: str, stream: bool }
 pure val pageRoutes: List[Route] = List(
   { method: Get, path: "/api/health", stream: false },
+  { method: Get, path: "/api/status", stream: false },
   { method: Post, path: "/api/conversations", stream: false },
   { method: Get, path: "/api/conversations", stream: false },
   { method: Get, path: "/api/conversations/messages/search", stream: false },

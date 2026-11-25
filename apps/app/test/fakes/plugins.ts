@@ -11,6 +11,8 @@ import type { Scene } from "./scene.ts";
 import { alphaCarrierSetup, elizaReset, elizaSystem, elizaWiFi } from "./settings.ts";
 import { telephonyPlugins } from "./telephony.ts";
 import { alphaDevice } from "./update.ts";
+import { alphaConnection } from "./platform.ts";
+import { alphaBrowser } from "./browser.ts";
 import { alphaVoiceCloud, elizaCloudSpeech, elizaSignIn } from "./voice.ts";
 
 /**
@@ -41,5 +43,6 @@ export function plugins(world: Scene, services: { readonly agent: Answering; rea
     ...(world.voice.onDevice ? { AlphaVoiceCloud: alphaVoiceCloud(world.voice) } : {}),
     ElizaCloudSpeech: elizaCloudSpeech(world.voice),
     ElizaSignIn: elizaSignIn(world.voice, () => world.signedIn),
+    AlphaBrowser: alphaBrowser(world.browser),
   };
 }
