@@ -208,7 +208,7 @@ function Tab({ runtime, alpha, tabs, page }: BrowserProps & { tabs: State; page:
       )}
       {tabs.layer === "Menu" && <BrowserMenu items={offered.filter((item) => item !== false)} onClose={() => void browser.send({ type: "uncover" })} />}
       {tabs.layer === "Library" && <Library runtime={runtime} onBack={() => void browser.send({ type: "uncover" })} onOpen={submit} />}
-      {libraryNotice && <p role="status" className="pointer-events-none absolute right-4 bottom-36 left-4 z-50 rounded-full bg-card px-5 py-3 text-center text-base shadow-menu">{libraryNotice}</p>}
+      {libraryNotice && <p role="status" className="pointer-events-none absolute top-16 right-4 left-4 z-50 rounded-full bg-card px-5 py-3 text-center text-base shadow-menu">{libraryNotice}</p>}
       {tabs.layer === "Switcher" && (
         <BrowserTabs
           leading={<Button variant="ghost" size="icon" aria-label="Back to page" onClick={() => void browser.send({ type: "uncover" })}><ChevronLeft /></Button>}
