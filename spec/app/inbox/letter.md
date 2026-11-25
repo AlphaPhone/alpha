@@ -219,13 +219,16 @@ pure def lawALostSaveIsNotRepeated(edits: int, base: int): bool =
 
 ### A confirmed send marks the revision it carried; an unknown one is remembered with its revision; a draft marked with the revision it now has reads "Already sent", one edited after it "Earlier version sent"
 
+A send the earlier Alpha could not confirm is remembered with its
+revision and no attempt of this Alpha's.
+
 ```quint
 pure def markedSent(l: Letter, revision: int): Letter = { ...l, sent: revision, sending: 0, doubt: noDoubt }
 
 pure def doubted(l: Letter, attempt: int, revision: int): Letter =
   { ...l, sending: 0, doubt: { attempt: attempt, revision: revision } }
 
-pure def mayHaveGone(l: Letter): bool = l.sent >= 1 or l.doubt.attempt != 0
+pure def mayHaveGone(l: Letter): bool = l.sent >= 1 or l.doubt != noDoubt
 
 pure def forgettable(l: Letter, revision: int): bool = l.revision == revision and l.draft.sync != D::Saving
 
@@ -243,6 +246,35 @@ pure def notSent(l: Letter): Letter = { ...l, doubt: noDoubt }
 pure def lawAFoundSendChangesTheDraft(revision: int, attempt: int): bool =
   val l = foundSent(doubted({ ...blank, revision: revision }, attempt, revision))
   l.revision == revision + 1 and l.sent == revision and l.doubt == noDoubt
+```
+
+### A draft the earlier Alpha kept comes over as one not sent, one sent as it is, an earlier version of one sent, or one whose send the earlier Alpha could not confirm, which may have gone
+
+It keeps its account, how it began, its recipients, its attachments and
+its Gmail copy, and has edits not yet saved to Gmail. A forward whose
+original attachments the earlier Alpha would have fetched from Gmail
+comes over as text only. Only one known not to have been sent can be
+sent without the owner choosing to send it again.
+
+```quint
+type Before = NotSent | SentAsIs | SentEarlier | MaybeSent
+
+pure def earlier(id: int, session: int, kind: Kind, account: int, recipients: int, invalid: int, files: int, megabytes: int, textOnly: bool, copy: int, before: Before): Letter =
+  val l = {
+    ...blank, id: id, session: session, kind: kind, account: account, recipients: recipients, invalid: invalid,
+    attachments: files, mib: megabytes, textOnly: textOnly, gmail: copy, revision: if (before == SentEarlier) 2 else 1,
+    draft: { ...D::blank, sync: D::Edited, edits: 1, base: if (copy != 0) 1 else 0 },
+  }
+  if (before == SentAsIs or before == SentEarlier) { ...l, sent: 1 }
+  else if (before == MaybeSent) { ...l, doubt: { attempt: 0, revision: 1 } }
+  else l
+
+pure def lawOnlyAnEarlierDraftKnownUnsentIsFreeToSend(kind: Kind, copy: int, before: Before): bool =
+  mayHaveGone(earlier(1, 1, kind, 1, 1, 0, 0, 0, false, copy, before)) iff before != NotSent
+
+pure def lawAnEarlierSentVersionIsMarkedAsSuch(before: Before): bool =
+  val l = earlier(1, 1, Fresh, 1, 1, 0, 0, 0, false, 0, before)
+  (before == SentAsIs implies l.sent == l.revision) and (before == SentEarlier implies (l.sent >= 1 and l.sent < l.revision))
 ```
 
 ### A send found leaves alone the operation the draft was handed to meanwhile

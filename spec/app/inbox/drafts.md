@@ -787,3 +787,97 @@ pure def sometimesADraftIsResumed(s: Composer): bool = s.open and s.stored and s
 
 pure def sometimesDiscardingIsAsked(s: Composer): bool = s.discarding
 ```
+
+## Story: Keep the drafts the earlier Alpha kept
+
+> As the owner, I want every email I had not sent in the earlier Alpha,
+> open or set aside, to be on my shelf after the update, and an email
+> whose send was under way when the phone updated never to go out twice
+> without my choosing.
+
+The earlier Alpha kept, for each Gmail account of the signed-in cloud
+owner (the cloud environment, user and organization, with the account's
+grant), in encrypted slots of its connection plugin: the draft open in
+its composer (`inbox-drafts:v1:<owner>`), the edits to it not yet saved
+there (`inbox-drafts:v1:unsaved:<digest>`), its shelf
+(`inbox-drafts:v1:shelf:<digest>`), and the one operation reviewed from
+it (`inbox-operation:v1:<digest>`). This Alpha keeps each draft in the
+composer and its words under `alpha/inbox/letters`, and moves them as
+[adoption](../platform/adoption.md) says, each draft by its earlier
+number, once Inbox knows the owner and the accounts. A slot it cannot
+read, or that holds another owner's drafts, stays where it is. The drafts
+Alpha suggested in a conversation of the earlier agent
+(`inbox-drafts:v1:chat:<digest>`) are named by that conversation, which
+is kept unread with the earlier agent's store, so they stay where they
+are until that store is brought in.
+
+### An earlier operation that never left the phone is dropped; a send whose receipt says it went marks its draft sent, one refused leaves it unsent, and any other leaves it marked as possibly sent
+
+A receipt the earlier Alpha saved settles it; otherwise the cloud is
+asked once more for the receipt of its request, and no earlier request
+is ever sent again. A draft sent with other words than it holds now is
+an earlier version of the email sent. A record is cleared once it is
+settled, once it is known never to have left, or once the draft of an
+unsettled send is on the shelf marked as possibly sent; any other stays
+where it is, to be read again.
+
+```quint
+type Phase = Preparing | Reviewing | Dispatching | Observed
+type Receipt = NoReceipt | Prepared | Dispatched | OutcomeUnknown | Succeeded | Rejected
+
+pure def receiptSettles(r: Receipt): bool = r == Succeeded or r == Rejected
+
+pure def leftThePhone(phase: Phase): bool = phase == Dispatching or phase == Observed
+
+pure def beforeOf(phase: Phase, receipt: Receipt, asSent: bool): L::Before =
+  if (not(leftThePhone(phase)) or receipt == Rejected) L::NotSent
+  else if (receipt == Succeeded) (if (asSent) L::SentAsIs else L::SentEarlier)
+  else L::MaybeSent
+
+pure def recordCleared(phase: Phase, receipt: Receipt, send: bool, draftAside: bool): bool =
+  not(leftThePhone(phase)) or receiptSettles(receipt) or (send and draftAside)
+
+pure def lawWhatMayHaveLeftIsNeverCalledUnsent(phase: Phase, receipt: Receipt, asSent: bool): bool =
+  (leftThePhone(phase) and not(receiptSettles(receipt))) implies beforeOf(phase, receipt, asSent) == L::MaybeSent
+
+pure def lawAnUnsettledRecordStaysUntilItsDraftCarriesIt(phase: Phase, receipt: Receipt, send: bool): bool =
+  (leftThePhone(phase) and not(receiptSettles(receipt))) implies not(recordCleared(phase, receipt, send, false))
+```
+
+### A draft the earlier Alpha kept is set aside on the shelf as a whole draft of its account, while there is room, never opened, handed to anything or put in place of another
+
+It comes over as [one draft](./letter.md) says, under the next number;
+one whose Gmail copy another draft holds stays where it was.
+
+```quint
+pure val megabytesValues = Set(0, 2)
+pure val copyValues = Set(0, 1)
+
+pure def copyTaken(s: Composer, copy: int): bool =
+  copy != 0 and ((s.open and s.letter.gmail == copy) or s.shelf.shelved.exists(k => S::held(s.shelf, k).gmail == copy))
+
+pure def canAdopt(s: Composer, account: int, kind: L::Kind, recipients: int, invalid: int, files: int, megabytes: int, textOnly: bool, copy: int, before: L::Before): bool =
+  ready(s) and account != 0 and kind != L::Saved and 0 <= invalid and invalid <= recipients
+    and files >= 0 and megabytes >= 0 and (files == 0 implies megabytes == 0) and copy >= 0
+    and not(copyTaken(s, copy)) and S::hasRoom(s.shelf)
+
+pure def adopt(s: Composer, account: int, kind: L::Kind, recipients: int, invalid: int, files: int, megabytes: int, textOnly: bool, copy: int, before: L::Before): Written =
+  val l = L::earlier(s.made + 1, s.session, kind, account, recipients, invalid, files, megabytes, textOnly, copy, before)
+  { state: { ...s, made: s.made + 1, shelf: S::place(s.shelf, l) }, out: List(KeepAside({ session: s.session, draft: l.id, revision: l.revision })) }
+
+pure def stepAnEarlierDraftIsOnlySetAside(before: Composer, via: str, after: Composer, out: List[Effect]): bool =
+  via == "adopt" implies (
+    after.open == before.open and after.letter == before.letter and after.made == before.made + 1
+      and after.shelf.shelved.subseteq(before.shelf.shelved.union(Set(after.made)))
+      and before.shelf.shelved.union(Set(after.made)).subseteq(after.shelf.shelved)
+      and S::held(after.shelf, after.made).sending == 0
+      and out.every(e => match e { | KeepAside(k) => k.draft == after.made | _ => false })
+  )
+```
+
+### An earlier draft can wait on the shelf marked as possibly sent
+
+```quint
+pure def sometimesAnEarlierDraftMayHaveBeenSent(s: Composer): bool =
+  s.shelf.shelved.exists(k => S::held(s.shelf, k).doubt.attempt == 0 and S::held(s.shelf, k).doubt.revision != 0)
+```

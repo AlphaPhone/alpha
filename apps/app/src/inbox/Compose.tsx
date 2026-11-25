@@ -156,7 +156,7 @@ export function Compose({ runtime, list }: ComposeProps) {
         clash={clash}
         onRestoreMine={copy?.seen && can({ type: "restoreMine" }, "Owner") ? () => void runtime.runPromise(restoreMyEdits()) : undefined}
         onUseSaved={latest && can(latest, "Owner") ? () => void runtime.runPromise(useLatestSavedDraft()) : undefined}
-        sent={letter.sent === 0 ? "none" : letter.sent === letter.revision ? "already" : "earlier"}
+        sent={letter.sent !== 0 ? (letter.sent === letter.revision ? "already" : "earlier") : letter.doubt.attempt === 0 && letter.doubt.revision !== 0 ? "maybe" : "none"}
         onKeepAgain={can({ type: "keepAgain" }, "World") ? () => void send({ type: "keepAgain" }, "World") : undefined}
         onSend={ops.can(sending, "Owner") ? () => void ops.send(sending, "Owner") : undefined}
         onSaveToGmail={ops.can(saving, "Owner") ? () => void ops.send(saving, "Owner") : undefined}

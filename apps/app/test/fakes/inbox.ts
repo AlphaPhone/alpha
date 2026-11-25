@@ -44,6 +44,8 @@ export interface InboxScene {
   /** The name of every file a dispatched send carried. */
   readonly attached: string[];
   readonly attachmentReads: string[];
+  /** How Gmail stands on a request the earlier Alpha sent, by its request id; one not here is unknown to the cloud. */
+  readonly receipts: Map<string, MailOperation["receipt"]["state"]>;
 }
 
 const everything: GoogleStatus["grantedCapabilities"] = ["google.basic_identity", "google.gmail.triage", "google.gmail.send", "google.gmail.manage"];
@@ -86,7 +88,7 @@ export function inboxScene(): InboxScene {
       letter(8, "Win a prize", ["SPAM"], "About Win a prize", "Prize Desk <win@prize.example>", today(7, 0, 2)),
       letter(9, "Notes from me", ["SENT"], "About Notes from me", "You <you@gmail.example>", today(17, 0, 2)),
     ],
-    history: 500, offline: false, revoked: false, changes: [], attached: [], attachmentReads: [], drafts: new Map(),
+    history: 500, offline: false, revoked: false, changes: [], attached: [], attachmentReads: [], receipts: new Map(), drafts: new Map(),
   };
 }
 
@@ -214,6 +216,13 @@ export function inboxRoutes(scene: InboxScene): Route[] {
       return crypto.subtle.digest("SHA-256", bytes).then((digest) => Response.json({
         version: 1, messageId, historyId, ...file, dataBase64, sha256: Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join(""),
       }));
+    },
+    (request, url) => {
+      const requestId = new RegExp(`^${operations}/([^/]+)$`, "u").exec(url.pathname)?.[1];
+      const state = requestId === undefined ? undefined : scene.receipts.get(requestId);
+      if (request.method !== "GET" || requestId === undefined) return;
+      if (url.searchParams.get("grantId") !== scene.google?.connection || state === undefined) return refused(404, "not_found");
+      return Response.json(operation(requestId, "send", state));
     },
     (request, url) => {
       if (request.method !== "POST" || url.pathname !== operations) return;
