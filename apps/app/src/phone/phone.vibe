@@ -96,15 +96,17 @@ effect function matchNumber(ticket: number): Event!!(Telephony | Dialer) {
   return { type: "numberMatched", ticket, found: found !== undefined }
 }
 
-effect function classify(number: PhoneNumber): DialNumberKind!!Telephony {
-  const kind = telephony("classifyDialNumber", (c) => c.classifyDialNumber(number)) catch () => "unknown" as const
+/** Android's classification of the canonical number, when available. */
+export effect function classifyDialNumber(number: string): DialNumberKind!!Telephony {
+  const normalized = normalizePhoneNumber(number)
+  if (normalized === null) return "NumberUnknown"
+  const kind = telephony("classifyDialNumber", (c) => c.classifyDialNumber(normalized)) catch () => "unknown" as const
   return kind === "emergency" ? "EmergencyNumber" : kind === "ordinary" ? "OrdinaryNumber" : "NumberUnknown"
 }
 
 // spec/app/phone/index.md, "Only the current number's Android emergency classification is used"
 effect function classifyInput(ticket: number): Event!!(Telephony | Dialer) {
-  const number = normalizePhoneNumber((try (try Dialer).get()).digits)
-  const kind = number === null ? "NumberUnknown" : try classify(number)
+  const kind = try classifyDialNumber((try (try Dialer).get()).digits)
   return { type: "numberClassified", ticket, kind }
 }
 
@@ -142,7 +144,7 @@ effect function handoff(ticket: number, typed: boolean, tapped: string): Event!!
   const store = try Dialer
   const number = normalizePhoneNumber(typed ? (try store.get()).digits : tapped)
   if (number === null || !Phone.canDialLost(try (try Phone.Machine).get(), ticket)) return dialAnswered(ticket, false)
-  const kind = try classify(number)
+  const kind = try classifyDialNumber(number)
   const mode = try handoffMode(ticket, kind)
   if (mode === "DialBlocked") return dialAnswered(ticket, false)
   if (mode === "SystemDial") return try dialScreen(ticket, number)

@@ -1,11 +1,12 @@
 // @vitest-environment happy-dom
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { Machine as Listing } from "../gen/app__workflows__list.effect.vibe";
 import { Machine as Definition } from "../gen/app__workflows.effect.vibe";
 import { Machine as Runs } from "../gen/app__workflows__runs.effect.vibe";
 import { Machine as Sheet } from "../gen/app__workflows__sheet.effect.vibe";
+import { Machine as Clock } from "../gen/app__workflows__clock.effect.vibe";
 import workflows from "../src/workflows/index.tsx";
-import { closeAll, drawn, open, press, pressOnTop, underAct, until } from "./alpha.tsx";
+import { button, closeAll, drawn, open, press, pressOnTop, underAct, until } from "./alpha.tsx";
 import { scene } from "./fakes/scene.ts";
 
 underAct();
@@ -43,6 +44,39 @@ describe("Workflows", () => {
     await pressOnTop("Refresh list");
     await until(alpha, area, Listing, (state) => state.list.status === "Loaded" && !state.complete);
     expect(visible("Monthly statement", "Desk check", "Retired brief")).toEqual(["Retired brief"]);
+  });
+
+  it('Reviews a Clock request within its Alarms page and restores focus to the list (spec/app/workflows/clock.md, "Story: Review, then hand over to Clock")', async () => {
+    const world = scene();
+    world.phone = true;
+    const { alpha } = await open(world);
+    await press("Workflows");
+    const area = workflows.runtime(alpha);
+    await until(alpha, area, Listing, (state) => state.list.status === "Loaded");
+
+    const opener = button("Clock alarms");
+    expect(opener?.textContent).toBe("Alarms");
+    await press("Clock alarms");
+    await until(alpha, area, Clock, (state) => state.open && state.history.status === "Loaded");
+
+    const alarm = document.querySelector('[role="dialog"][aria-label="Clock alarms"]');
+    expect(alarm?.querySelector("h2")?.textContent).toBe("Alarms");
+    expect(alarm?.querySelector('input[aria-label="Alarm time"]')).toBeInstanceOf(HTMLInputElement);
+    await vi.waitFor(() => expect(document.activeElement).toBe(button("Close Clock")));
+
+    await pressOnTop("Snooze");
+    expect(alarm?.querySelector('input[aria-label="Snooze minutes"]')).toBeInstanceOf(HTMLInputElement);
+    await pressOnTop("Review Clock request");
+    expect(alarm?.querySelector('[aria-label="Clock review"]')?.textContent).toContain("Snooze: 10 min requested");
+    expect(alarm?.querySelector('[aria-label="Confirm Clock request"]')?.textContent).toBe("Open Clock");
+
+    await pressOnTop("Cancel Clock review");
+    expect(alarm?.querySelector('[aria-label="Clock review"]')).toBeNull();
+    await pressOnTop("Close Clock");
+    await vi.waitFor(() => {
+      expect(document.body.contains(alarm)).toBe(false);
+      expect(document.activeElement).toBe(opener);
+    });
   });
 
   it('Runs the reviewed version and opens its output (spec/app/workflows/runs.md, "Story: Run a workflow now"; spec/app/workflows/sheet.md, "Story: Read a run\'s sheet")', async () => {

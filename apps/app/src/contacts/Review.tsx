@@ -7,12 +7,12 @@ import { useMachine as useAgent } from "../../gen/app__contacts__agent.react.ts"
 import type { Machine as PhoneMachine } from "../../gen/app__phone.effect.vibe";
 import { clear } from "../../gen/app__phone.ts";
 import { useMachine as usePhone } from "../../gen/app__phone.react.ts";
-import { judge } from "../phone/words.ts";
-import { type Lines, Requested, afterOf, choicesOf, linesOf, unchangedBy } from "./requests.vibe";
+import type { Telephony } from "../platform/telephony.vibe";
+import { type Lines, Requested, afterOf, chooseNumber, choicesOf, linesOf, unchangedBy } from "./requests.vibe";
 
 export interface ReviewProps {
   /** Provides the agent's requests, Phone's machine, for whether a call may be an emergency call, and what the phone found for the request. */
-  runtime: ManagedRuntime.ManagedRuntime<AgentMachine | PhoneMachine | Requested, unknown>;
+  runtime: ManagedRuntime.ManagedRuntime<AgentMachine | PhoneMachine | Requested | Telephony, unknown>;
 }
 
 const asks = { Dial: "Call", Text: "Text", AddContact: "Add contact", ChangeContact: "Change contact", DeleteContact: "Delete contact" } as const;
@@ -58,8 +58,9 @@ export function Review({ runtime }: ReviewProps) {
         <ListGroup aria-label={reachesANumber(state.ask) ? "Which number" : "Which contact"}>
           {reachesANumber(state.ask)
             ? choicesOf(held.matches).map(({ contact, number }) => {
-                const choose = { type: "choose", number, contact: contact.id, emergency: judge(number.replace(/[^\d+]/g, "")) === "Emergency", unchanged: false } as const;
-                return <ListRow key={`${contact.id} ${number}`} title={contact.name} detail={number} disabled={!can(choose, "Owner")} onClick={() => void send(choose, "Owner")} />;
+                const choose = { type: "choose", number, contact: contact.id, emergency: false, unchanged: false } as const;
+                return <ListRow key={`${contact.id} ${number}`} title={contact.name} detail={number} disabled={!can(choose, "Owner")}
+                  onClick={() => void runtime.runPromise(chooseNumber(state, held, contact.id, number))} />;
               })
             : held.matches.map((contact) => {
                 const choose = { type: "choose", number: "", contact: contact.id, emergency: false, unchanged: unchangedBy(held.operation, contact) } as const;

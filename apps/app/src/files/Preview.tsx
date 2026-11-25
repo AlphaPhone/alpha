@@ -2,7 +2,7 @@
 import { Alert, Button, Dialog, DialogContent, DialogTitle, FilesRow, Input, Menu, MenuContent, MenuItem, MenuTrigger, Spinner } from "@repo/ui";
 import { Effect, Option, type ManagedRuntime } from "effect";
 import { useState } from "react";
-import { ChevronLeft, ChevronRight, Ellipsis, ExternalLink, FileText, FolderInput, Info, Mail, Pause, Pencil, Play, Share2, Sparkles, Trash2, X } from "lucide-react";
+import { ChevronLeft, ChevronRight, Ellipsis, ExternalLink, FileText, FolderInput, Info, Mail, MessageCircle, Pause, Pencil, Play, Share2, Sparkles, Trash2, X } from "lucide-react";
 import type { Machine as Browser } from "../../gen/app__files.effect.vibe";
 import { previewActionReady } from "../../gen/app__files.ts";
 import { useMachine as useFiles } from "../../gen/app__files.react.ts";
@@ -18,7 +18,7 @@ import { useMachine as useInbox } from "../../gen/app__inbox.react.ts";
 import type { Machine as Drafts } from "../../gen/app__inbox__drafts.effect.vibe";
 import { useMachine as useDrafts } from "../../gen/app__inbox__drafts.react.ts";
 import { Handles } from "./handles.vibe";
-import { Opened, emailAccount } from "./preview.vibe";
+import { Opened, emailAccount, pictureFits } from "./preview.vibe";
 
 export interface PreviewProps {
   /** Provides the preview and Recent machines, and what the viewer read, of preview.vibe. */
@@ -51,7 +51,8 @@ export function Preview({ runtime }: PreviewProps) {
   const mine = content.viewer === state.viewer && loaded(state);
   const grant = recent.state.shown.key === state.item ? recent.state.shown.grant : 0;
   const file = Option.getOrUndefined(runtime.runSync(Effect.flatMap(Opened, (opened) => opened.grant(grant))));
-  const name = file?.name ?? Option.getOrUndefined(runtime.runSync(Effect.flatMap(Handles, (handles) => handles.label(state.item)))) ?? "File";
+  const lapsedName = !usable(state) ? runtime.runSync(Effect.flatMap(Opened, (opened) => opened.nameAt(state.item))) : undefined;
+  const name = file?.name ?? lapsedName ?? Option.getOrUndefined(runtime.runSync(Effect.flatMap(Handles, (handles) => handles.label(state.item)))) ?? "File";
   const mediaProps = {
     "aria-label": name,
     preload: "metadata",
@@ -67,13 +68,19 @@ export function Preview({ runtime }: PreviewProps) {
   const openElsewhere = owner({ type: "openElsewhere" });
   const forget = owner({ type: "forget" });
   const share = file !== undefined && owner({ type: "shareFile" });
+  const picture = { type: "useInMessages", fitsPicture: pictureFits(file) } as const;
   const showDetails = file !== undefined && usable(state);
   const detailsOpen = showDetails && details?.viewer === state.viewer && details.revision === state.revision;
   const ownFile = file !== undefined && recent.state.shown.origin === "InFolder" && files.state !== undefined && previewActionReady(files.state);
   const move = { type: "actOnStoredFile", operation: "MoveFile", name: "", stored: ownFile } as const;
   const trash = { type: "actOnStoredFile", operation: "TrashFile", name: "", stored: ownFile } as const;
-  const editName = { type: "actOnStoredFile", operation: "RenameFile", name: rename?.name.trim() ?? "", stored: ownFile } as const;
-  const renaming = ownFile && rename?.viewer === state.viewer && rename.revision === state.revision;
+  const pickedRename = !ownFile && recent.state.shown.origin === "Picked" && file?.canRename === true;
+  const nextName = rename?.name.trim() ?? "";
+  const editName = pickedRename
+    ? { type: "renamePicked", name: nextName, renameable: true } as const
+    : { type: "actOnStoredFile", operation: "RenameFile", name: nextName, stored: ownFile } as const;
+  const validName = (proposed: string) => proposed.length > 0 && proposed.length <= 255 && proposed !== "." && proposed !== ".." && /^[^/\\\u0000-\u001f\u007f]+$/u.test(proposed);
+  const renaming = (ownFile || pickedRename) && rename?.viewer === state.viewer && rename.revision === state.revision;
   const showRename = owner({ ...editName, name: "/" });
   const place = file?.storage;
   const location = place === undefined ? undefined : [place.label, ...place.path.split("/").slice(0, -1)].join(" › ");
@@ -88,12 +95,13 @@ export function Preview({ runtime }: PreviewProps) {
         <div className="flex min-h-13 shrink-0 items-center gap-0.5 px-2 pt-[env(safe-area-inset-top)] [&_button]:size-13">
           {owner({ type: "close" }) && <Button variant="ghost" size="icon" aria-label="Close" onClick={() => tell({ type: "close" })}><ChevronLeft /></Button>}
           <div className="flex-1" />
-          {(askAlpha || openElsewhere || forget || email || share || showDetails || showRename || owner(move) || owner(trash)) && (
+          {(askAlpha || openElsewhere || forget || email || owner(picture) || share || showDetails || showRename || owner(move) || owner(trash)) && (
             <Menu>
               <MenuTrigger asChild><Button variant="ghost" size="icon" aria-label="File actions"><Ellipsis /></Button></MenuTrigger>
               <MenuContent>
                 {askAlpha && <MenuItem onSelect={() => tell({ type: "askAlpha" })}><Sparkles />Ask Alpha</MenuItem>}
                 {email && <MenuItem onSelect={() => tell(offer)}><Mail />Use in email</MenuItem>}
+                {owner(picture) && <MenuItem onSelect={() => tell(picture)}><MessageCircle />Use in Messages</MenuItem>}
                 {share && <MenuItem onSelect={() => tell({ type: "shareFile" })}><Share2 />Share</MenuItem>}
                 {openElsewhere && <MenuItem onSelect={() => tell({ type: "openElsewhere" })}><ExternalLink />Open elsewhere</MenuItem>}
                 {showDetails && <MenuItem onSelect={() => setDetails({ viewer: state.viewer, revision: state.revision })}><Info />Details</MenuItem>}
@@ -132,12 +140,12 @@ export function Preview({ runtime }: PreviewProps) {
             <DialogTitle>Rename</DialogTitle>
             <form className="flex flex-col gap-3" onSubmit={(event) => {
               event.preventDefault();
-              if (!owner(editName) || editName.name === name) return;
+              if (!owner(editName) || !validName(editName.name) || editName.name === name) return;
               tell(editName);
               setRename(undefined);
             }}>
               <Input aria-label="Name" value={rename?.name ?? ""} onChange={(event) => setRename(rename && { ...rename, name: event.target.value })} />
-              <Button type="submit" disabled={!owner(editName) || editName.name === name}>Rename</Button>
+              <Button type="submit" disabled={!owner(editName) || !validName(editName.name) || editName.name === name}>Rename</Button>
             </form>
           </DialogContent>
         </Dialog>
@@ -170,7 +178,8 @@ export function RecentFiles({ runtime }: PreviewProps) {
       <h2 id="files-recent" className="mx-2 mt-3.5 mb-1 text-meta font-semibold text-muted-foreground">Recent</h2>
       {state.rows.map((row) => {
         const reopen = { type: "reopen", row } as const;
-        const name = nameOf(runtime, row.grant) ?? Option.getOrElse(runtime.runSync(Effect.flatMap(Handles, (handles) => handles.label(row.key))), () => "A file to select again");
+        const remembered = row.origin === "Picked" ? runtime.runSync(Effect.flatMap(Opened, (opened) => opened.nameAt(row.key))) : undefined;
+        const name = nameOf(runtime, row.grant) ?? remembered ?? Option.getOrElse(runtime.runSync(Effect.flatMap(Handles, (handles) => handles.label(row.key))), () => "A file to select again");
         const reselect = { type: "openPicker", replacing: row.key } as const;
         const action = row.grant === 0 ? reselect : reopen;
         return <FilesRow key={`${row.origin} ${row.key}`} size="place" name={name} aria-label={row.grant === 0 ? `Select again: ${name}` : name} icon={<FileText />} detail={row.grant === 0 ? "Select it again to open it" : undefined} disabled={!can(action, "Owner")} onClick={() => void send(action, "Owner")} />;

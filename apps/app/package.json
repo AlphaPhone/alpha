@@ -33,6 +33,7 @@
     "dompurify": "3.4.17",
     "effect": "4.1.1",
     "lucide-react": "catalog:",
+    "pdfjs-dist": "6.3.289",
     "react": "catalog:",
     "react-dom": "catalog:",
     "tesseract.js": "7.0.0",
