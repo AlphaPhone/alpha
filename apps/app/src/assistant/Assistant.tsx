@@ -94,6 +94,7 @@ const detached = { mail: "Mail", transcript: "Transcript", shown: "Shown" } as c
 const barHeight = 102;
 const emptyLines: readonly Line[] = [];
 const settings = { type: "openView", view: "Settings" } as const;
+const maps = { type: "openView", view: "Maps" } as const;
 const back = { type: "goBack" } as const;
 
 function DeviceReview({ runtime, card }: { runtime: AssistantProps["runtime"]; card: MediaCard }) {
@@ -266,11 +267,13 @@ export function Assistant({ runtime, messageActions, speech, canReadAloud = fals
   const onSettings = useCallback(() => {
     if (settingsAction) void runtime.runPromiseExit(Effect.flatMap(ShellMachine, (machine) => machine.send(settingsAction)));
   }, [runtime, settingsAction]);
+  const onOpenMaps = useCallback(() => void runtime.runPromiseExit(Effect.flatMap(ShellMachine, (machine) => machine.send(maps))), [runtime]);
   const messages = useMessageRows({
     runtime, board, lines, chats: shown, writing, ...free, actions: messageActions, canReadAloud,
     settled: Boolean(talking && !inFlight(talking.turn) && !pending(talking)),
     onSettings: settingsAction ? onSettings : undefined,
     onPreview: canPreview ? preview : undefined,
+    onOpenMaps: shell.can(maps) ? onOpenMaps : undefined,
   });
   if (conversation.cause || chats.cause || composer.cause || reply.cause) return <Alert variant="destructive" className="m-4">Alpha could not open Ask Alpha</Alert>;
   if (!talking || !shown || !writing || !finding) return null;
