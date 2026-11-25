@@ -21,8 +21,16 @@ export type CommsServices = CommsMachine | BarMachine | ShellMachine | PhoneMach
 type DockRuntime = ManagedRuntime.ManagedRuntime<CommsServices, unknown>;
 const holdMovement = 10;
 
+interface QueryFilter {
+  value: string;
+  onChange: (query: string) => void;
+  maxLength?: number;
+}
+
 export interface CommsBarProps {
   runtime: DockRuntime;
+  /** A visible list's own search, kept by the area while the sheet is closed. */
+  filter?: QueryFilter;
   /** What the owner can write or do while the sheet is closed. */
   closed?: ReactNode | ((ask: (query: string) => void, talk: (() => void) | undefined) => ReactNode);
   /** The person this view is about. */
@@ -45,7 +53,7 @@ export function useCommsDock(runtime: ManagedRuntime.ManagedRuntime<ShellMachine
  * The owner side of the dock. While the sheet is open, Ask Alpha supplies the only composer.
  * @model spec/app/phone/comms.md
  */
-export function CommsBar({ runtime, closed, person }: CommsBarProps) {
+export function CommsBar({ runtime, closed, filter, person }: CommsBarProps) {
   const comms = useComms(runtime);
   const bar = useBar(runtime);
   const shell = useShell(runtime);
@@ -107,30 +115,33 @@ export function CommsBar({ runtime, closed, person }: CommsBarProps) {
           if (event.detail === 0 || !skipTapRef.current) void open();
           skipTapRef.current = false;
         }}><Mark className="size-[118%]" aria-hidden /></Button>
-      {typeof closed === "function" ? closed((query) => void open(query), ending ? undefined : talk) : closed ?? <CommsQuery runtime={runtime} phone={phone && !ending} placeholder={placeholder} onAsk={(query) => void open(query)} onTalk={ending ? undefined : talk} />}
+      {typeof closed === "function" ? closed((query) => void open(query), ending ? undefined : talk) : closed ?? <CommsQuery runtime={runtime} phone={phone && !ending} filter={ending ? undefined : filter} placeholder={placeholder} onAsk={(query) => void open(query)} onTalk={ending ? undefined : talk} />}
       {ending && <Button variant="destructive" size="icon" className="size-11 shrink-0" aria-label="End call" onClick={() => void bar.send(end)}><PhoneOff /></Button>}
     </div>
   );
 }
 
-function CommsQuery({ runtime, phone, placeholder, onAsk, onTalk }: { runtime: DockRuntime; phone: boolean; placeholder: string; onAsk: (query: string) => void; onTalk: (() => void) | undefined }) {
+function CommsQuery({ runtime, phone, filter, placeholder, onAsk, onTalk }: { runtime: DockRuntime; phone: boolean; filter?: QueryFilter | undefined; placeholder: string; onAsk: (query: string) => void; onTalk: (() => void) | undefined }) {
   const machine = usePhone(runtime);
-  const filtering = phone && machine.can({ type: "search", typed: true });
   const [draft, setDraft] = useState("");
-  const query = filtering ? runtime.runSync(Effect.flatMap(Dialer, (dialer) => dialer.get())).sought : draft;
+  const phoneFilter: QueryFilter | undefined = phone && machine.can({ type: "search", typed: true }) ? {
+    value: runtime.runSync(Effect.flatMap(Dialer, (dialer) => dialer.get())).sought,
+    onChange: (sought) => {
+      runtime.runSync(Effect.flatMap(Dialer, (dialer) => dialer.set({ sought, filterLabel: "" })));
+      const search = { type: "search", typed: sought.trim() !== "" } as const;
+      if (machine.can(search)) void machine.send(search);
+    },
+  } : undefined;
+  const owned = filter ?? phoneFilter;
+  const query = owned?.value ?? draft;
   return (
     <form className="flex min-w-0 flex-1 items-center gap-1 px-1" onSubmit={(event) => {
       event.preventDefault();
       const value = new FormData(event.currentTarget).get("query");
       if (typeof value === "string") onAsk(value.trim());
     }}>
-      <Input key={filtering ? "search" : "ask"} name="query" data-alpha-composer="" aria-label={placeholder} placeholder={placeholder} value={query}
-        onChange={filtering ? (event) => {
-          const sought = event.target.value;
-          runtime.runSync(Effect.flatMap(Dialer, (dialer) => dialer.set({ sought, filterLabel: "" })));
-          const search = { type: "search", typed: sought.trim() !== "" } as const;
-          if (machine.can(search)) void machine.send(search);
-        } : (event) => setDraft(event.target.value)}
+      <Input key={owned ? "search" : "ask"} name="query" data-alpha-composer="" aria-label={placeholder} placeholder={placeholder}
+        value={query} maxLength={owned?.maxLength} onChange={(event) => (owned?.onChange ?? setDraft)(event.currentTarget.value)}
         className="min-w-0 flex-1 border-0 bg-transparent shadow-none" />
       {query.trim() === "" && onTalk
         ? <Button size="icon" variant="ghost" type="button" aria-label="Talk" onClick={onTalk}><Mic /></Button>
