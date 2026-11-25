@@ -18,7 +18,7 @@ own is the [Home role](./roles.md).
 ### Facts hold the newest asking, which facts and accesses its answer reported, the roles, and Set as Home in flight
 
 One asking reads every fact. The phone reports the facts it could read,
-each with the value it read, the grant of each access it could read, and its alert channels by their Android identity. Alpha's version and Android's version are independent facts. Media, ring and alarm volume are read separately from Do Not Disturb. Opening Passwords reads autofill support and Android’s chosen provider alongside the phone’s other facts. Notification collection reports the device’s current access state without collecting a notification. Who holds the Home and Assistant roles, and whether this build can be the Home app, come with the roles.
+each with the value it read, the grant of each access it could read, and its alert channels by their Android identity. Alpha's version and Android's version are independent facts. Alpha's version is the one its package reports, or, in a browser or where the package names none, the one this build was made as, as Alpha's earlier build showed it. Media, ring and alarm volume are read separately from Do Not Disturb. Opening Passwords reads autofill support and Android’s chosen provider alongside the phone’s other facts. Notification collection reports the device’s current access state without collecting a notification. Who holds the Home and Assistant roles, and whether this build can be the Home app, come with the roles.
 Nothing here is kept: after a restart every row waits for a fresh answer.
 
 ```quint
@@ -58,7 +58,10 @@ pure def shownAny(s: Facts): bool = s.reported.length() > 0 or s.grants.length()
 Each asking takes the next ticket and has ten seconds to be answered. What
 the last answer reported stays on screen until the new one arrives. The
 shell says whether Settings is showing when Alpha comes back; the owner may
-have changed something in Android's settings meanwhile.
+have changed something in Android's settings meanwhile. Refresh is a
+developer control, offered only where the Developer page is
+([Settings](./index.md)); elsewhere the phone is read on opening and on
+coming back, as Alpha's earlier build read it.
 
 ```quint
 pure val readLimit = 10000

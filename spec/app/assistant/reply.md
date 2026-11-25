@@ -322,6 +322,52 @@ pure def lawNoMoreThanFiveNotices(count: int): bool = keptNotices(count) >= 0 an
 pure def lawAReplyAfterASystemNoticeHidesIt(latest: bool): bool = not(systemNoticeShown(latest, true))
 ```
 
+## Story: Read a reply as it was written
+
+> As the owner, I want Alpha's bold words, lists, quotes, code and links
+> drawn the way they read, never as raw asterisks and angle brackets, and
+> only its plain words when I copy, quote, email or hear it.
+
+### Prose is drawn with its Markdown: bold, italics, code, headings, lists and quotes; a link is a link only to an https address, and HTML reads as text
+
+The marks are the model's, read from its words; a mark left open reads as
+written. A heading is drawn as a bold line. A link opens through the
+phone's own link path, and a link to any other kind of address shows only
+its words.
+
+```quint
+type Mark = Strong | Emphasis | InlineCode | HeadingLine | ListItem | QuoteLine | CodeBlock | Link({ https: bool }) | Html
+type Drawn = Styled | Linked | AsText
+
+pure def drawn(mark: Mark): Drawn = match mark {
+  | Link(l) => if (l.https) Linked else AsText
+  | Html => AsText
+  | _ => Styled
+}
+
+pure val markValues = Set(Strong, Emphasis, InlineCode, HeadingLine, ListItem, QuoteLine, CodeBlock, Link({ https: true }), Link({ https: false }), Html)
+
+pure def lawOnlyAnHttpsLinkIsALink(mark: Mark): bool = drawn(mark) == Linked iff mark == Link({ https: true })
+
+pure def lawHtmlIsNeverDrawn(mark: Mark): bool = mark == Html implies drawn(mark) == AsText
+```
+
+### Copy, quote, read aloud, use in email and Talk take the reply's plain words, without its marks
+
+Copied, quoted and emailed words keep a list item's number or bullet and a
+link's address after its words; read aloud and Talk say a list item's
+number and only a link's words.
+
+```quint
+type Use = Shown | Copied | Quoted | ReadAloud | Emailed | Spoken
+
+pure def keepsMarks(use: Use): bool = use == Shown
+
+pure val useValues = Set(Shown, Copied, Quoted, ReadAloud, Emailed, Spoken)
+
+pure def lawOnlyTheShownReplyKeepsItsMarks(use: Use): bool = keepsMarks(use) iff use == Shown
+```
+
 ## Story: Know what my agent changed
 
 > As the owner, I want to see what an action in a reply actually did, once,
