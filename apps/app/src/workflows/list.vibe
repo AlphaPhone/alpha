@@ -11,13 +11,15 @@ import { Device } from "../platform/device.vibe"
 import { type ResidentOwner, launchOwnerOf, ownerAt, residentOwnerKey } from "../platform/owner.vibe"
 import { type Job, answer, applying, reacting, started, together } from "../runtime/reactor.vibe"
 import { WorkflowsApi, type Prompt, type ScheduledTask, readPrompts, readSchedules, workflowsApi } from "./api.vibe"
+import { cronWords, onceWords } from "./when.ts"
 
 type Routine = { readonly kind: "Routine"; readonly record: RemoteWorkflow }
 type PromptRow = { readonly kind: "Prompt"; readonly record: Prompt }
 type TaskRow = { readonly kind: "Reminder" | "Schedule"; readonly record: ScheduledTask }
 type RowContent = Routine | PromptRow | TaskRow
 
-type UnnumberedRow = RowContent & { readonly id: string; readonly title: string; readonly summary: string; readonly on: boolean; readonly removed: boolean }
+/** `line` is the row's line under its title: when it runs, or where it comes from. */
+type UnnumberedRow = RowContent & { readonly id: string; readonly title: string; readonly summary: string; readonly line: string; readonly on: boolean; readonly removed: boolean }
 export type WorkflowRow = UnnumberedRow & { readonly number: number }
 
 type Source = "Workflows" | "Removed workflows" | "Prompts" | "Scheduled tasks"
@@ -84,18 +86,33 @@ const rows = Layer.sync(Rows, () => {
 })
 
 function routineRow(record: RemoteWorkflow): UnnumberedRow {
-  return { kind: "Routine", record, id: record.id, title: record.name, summary: record.description, on: record.active, removed: record.removed }
+  return { kind: "Routine", record, id: record.id, title: record.name, summary: record.description, line: record.removed ? "Workflow" : "automation", on: record.active, removed: record.removed }
 }
 
-function promptRow(record: Prompt): UnnumberedRow {
-  return { kind: "Prompt", record, id: record.id, title: record.displayName, summary: record.instructions, on: record.enabled, removed: false }
+function promptWhen(record: Prompt, now: number): string {
+  switch (record.triggerType) {
+    case "cron": return cronWords(record.cronExpression, record.timezone, now)
+    case "once": return onceWords(record.scheduledAtIso)
+    case "event": return `On ${record.eventKind}`
+  }
+}
+
+function promptRow(record: Prompt, now: number): UnnumberedRow {
+  return { kind: "Prompt", record, id: record.id, title: record.displayName, summary: record.instructions, line: promptWhen(record, now), on: record.enabled, removed: false }
+}
+
+function taskWhen(record: ScheduledTask, now: number): string {
+  const { trigger } = record
+  if (trigger.kind === "once") return onceWords(trigger.atIso)
+  if (trigger.kind === "cron") return cronWords(trigger.expression ?? "", trigger.tz === undefined || trigger.tz === "owner_local" ? "" : trigger.tz, now)
+  return "Manual"
 }
 
 /** A scheduled task's row, named as the agent named it ("Morning check-in", a routine's or reminder's title), never by its kind's identifier. */
-function taskRow(record: ScheduledTask): UnnumberedRow {
+function taskRow(record: ScheduledTask, now: number): UnnumberedRow {
   const kind = record.kind === "personal-assistant.reminder" ? "Reminder" : "Schedule"
   const on = record.trigger.kind !== "manual" && ["scheduled", "fired", "acknowledged"].includes(record.state.status)
-  return { kind, record, id: record.taskId, title: record.promptInstructions.trim() || "Scheduled task", summary: "", on, removed: false }
+  return { kind, record, id: record.taskId, title: record.promptInstructions.trim() || "Scheduled task", summary: "", line: taskWhen(record, now), on, removed: false }
 }
 
 /** What the list says could not be read: removed workflows only under Removed, the one standing whose rows they would be. */
@@ -131,11 +148,12 @@ effect function read(ticket: number, owner: number): Event!!(WorkflowsApi | Agen
   if (received.prompts === undefined) problems.push("Prompts")
   if (received.schedules === undefined) problems.push("Scheduled tasks")
   if (problems.length === 4) return failed
+  const now = try Clock.currentTimeMillis
   const found = [
     ...(received.workflows ?? []).filter((record) => !record.removed).map(routineRow),
     ...(received.removed ?? []).map(routineRow),
-    ...(received.prompts ?? []).map(promptRow),
-    ...(received.schedules ?? []).map(taskRow),
+    ...(received.prompts ?? []).map((record) => promptRow(record, now)),
+    ...(received.schedules ?? []).map((record) => taskRow(record, now)),
   ]
   try kept.store(owner, found, problems)
   return { type: "listRead", ticket, ok: true, count: found.length, complete: problems.length === 0 }

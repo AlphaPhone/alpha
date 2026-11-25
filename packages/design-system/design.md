@@ -38,9 +38,9 @@ do next.
   `text-title` a document's name over its preview and Notes' Recently deleted header on the launcher, and `text-figure` and `text-figure-sm` a route's time, `text-figure-lg` the distance to Maps guidance's next turn.
   `leading-row` sets `text-body` as a note's or a routine's title in a list, and `leading-transcript` a transcript read back, such as a voicemail's.
   `text-badge` is a video's length over a thumbnail and `text-tile-name` an album's name under its cover.
-  `text-headline` is an open voice or link note's title and `text-quote` a clip kept from a page.
+  `text-headline` is an open voice or link note's title and `text-quote` a clip kept from a page; `text-panel-title` heads a panel that covers Ask Alpha, such as its chat search.
   On Camera, `text-camera-badge` is the timer and flash badge, `text-camera-countdown` the self-timer digit and
-  `leading-detail` the line under its access notice.
+  `leading-detail` the line under its access notice. `text-review-title` heads the scanner's dialogs.
   `text-tab-count` in a `rounded-tab-count` outline is the Browser's count of open tabs.
   In Calendar, `text-fine` is an invitation's time, `text-prose` an event's notes and `text-date` a day
   chip's date; an event's page is titled `text-display` and its form `text-display-sm`. `leading-plain` is
@@ -51,7 +51,7 @@ do next.
   `rounded-drawer-icon` rounds an installed app icon; `rounded-option` is a row of a floating menu and
   `rounded-box` the box of a list row's selection check; `rounded-chip` is a choice chip and an invitation
   row, `rounded-action` a labelled action button; `rounded-segment` is a segmented control and
-  `rounded-segment-option` the option chosen in it; `rounded-camera-stop` is Camera's stop square and focus target; `rounded-list-icon` the icon box at the start of a list row. `rounded-tile` is an app tile, a menu and a dialog;
+  `rounded-segment-option` the option chosen in it; `rounded-frame` is Camera's stop square and focus target and a scanned frame's preview; `rounded-list-icon` the icon box at the start of a list row. `rounded-tile` is an app tile, a menu and a dialog;
   `rounded-sheet` the top of a bottom sheet, `rounded-chat` the top of the Ask Alpha sheet; `rounded-full` a
   button and a chip, `rounded-dock` the Ask Alpha bar and `rounded-dock-compact` its compact controls; `rounded-bar` is the foot bar of Maps guidance.
   Everything pressed is at least 44px in both directions.
@@ -154,7 +154,7 @@ this prose into tokens. To change the design, describe it, and have the change w
 | `rounded.chip` | 1.5rem |
 | `rounded.segment` | 0.9375rem |
 | `rounded.segment-option` | 0.6875rem |
-| `rounded.camera-stop` | 0.5rem |
+| `rounded.frame` | 0.5rem |
 | `rounded.bar` | 2rem |
 | `rounded.list-icon` | 0.875rem |
 | `font.sans` | "Public Sans", system-ui, -apple-system, "Segoe UI", sans-serif |
@@ -217,6 +217,8 @@ this prose into tokens. To change the design, describe it, and have the change w
 | `text.quote.leading` | 1.35 |
 | `text.surface.size` | 1.625rem |
 | `text.surface.leading` | 1.15 |
+| `text.panel-title.size` | 1.375rem |
+| `text.panel-title.leading` | 1.2 |
 | `text.home-display.size` | 1.625rem |
 | `text.home-display.leading` | 1.1 |
 | `text.title.size` | 1.75rem |
@@ -250,6 +252,9 @@ this prose into tokens. To change the design, describe it, and have the change w
 | `text.camera-badge.leading` | 1 |
 | `text.camera-countdown.size` | 6rem |
 | `text.camera-countdown.leading` | 1.175 |
+| `text.review-title.size` | 1.875rem |
+| `text.review-title.leading` | 1.15 |
+| `text.review-title.tracking` | -0.02em |
 | `weight.light` | 300 |
 | `weight.normal` | 400 |
 | `weight.medium` | 500 |
@@ -292,6 +297,8 @@ this prose into tokens. To change the design, describe it, and have the change w
 | `shadow.lift-dark` | 0 -20px 60px oklch(0 0 0 / 0.45) |
 | `shadow.menu` | 0 4px 20px oklch(0 0 0 / 0.12) |
 | `shadow.menu-dark` | 0 4px 20px oklch(0 0 0 / 0.45) |
+| `shadow.panel` | 0 20px 50px oklch(0 0 0 / 0.12) |
+| `shadow.panel-dark` | 0 20px 50px oklch(0 0 0 / 0.45) |
 | `shadow.dock` | 0 14px 40px oklch(0 0 0 / 0.12) |
 | `shadow.dock-dark` | 0 14px 40px oklch(0 0 0 / 0.45) |
 | `shadow.dock-compact` | 0 12px 34px oklch(0 0 0 / 0.12) |

@@ -150,7 +150,7 @@ function Viewfinder({ state, native, sheet, zoom, focusAt, bind }: {
           key={state.focus}
           role="status"
           aria-label={state.confirmed === state.focus ? "Camera focus applied" : "Focus target"}
-          className="pointer-events-none absolute z-10 size-10.5 -translate-1/2 rounded-camera-stop border-2 border-camera-focus shadow-focus-target"
+          className="pointer-events-none absolute z-10 size-10.5 -translate-1/2 rounded-frame border-2 border-camera-focus shadow-focus-target"
           style={{ left: `${target.x * 100}%`, top: `${target.y * 100}%` }}
         />
       )}
@@ -386,7 +386,7 @@ export function Camera({ runtime, alpha }: Shown<Runtime>) {
           onClick={click}
           className={cn("flex size-20 shrink-0 items-center justify-center rounded-full ring-4 ring-foreground ring-inset", focusRing)}
         >
-          <span aria-hidden className={cn("transition-all duration-base ease-standard motion-reduce:transition-none", inProgress ? "size-7.5 rounded-camera-stop bg-record-shutter" : cn("size-15.5 rounded-full", video ? "bg-record-shutter" : "bg-foreground"))} />
+          <span aria-hidden className={cn("transition-all duration-base ease-standard motion-reduce:transition-none", inProgress ? "size-7.5 rounded-frame bg-record-shutter" : cn("size-15.5 rounded-full", video ? "bg-record-shutter" : "bg-foreground"))} />
         </button>
         <span aria-hidden className="size-13" />
       </div>

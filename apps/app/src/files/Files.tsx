@@ -277,8 +277,8 @@ export function Files({ runtime, alpha }: FilesProps) {
           {change.stale && <Alert variant="info">The selection changed, so nothing was shared</Alert>}
           {looked !== "NoFilter" && (
             <div className="flex flex-col gap-2">
-              <div className="px-2"><Chip onClear={owner({ type: "clearFilter" }) ? () => tell({ type: "clearFilter" }) : undefined} clearLabel="Clear the filter">
-                {[state.search.filter.anyKind ? "" : kinds.find(([one]) => one === state.search.filter.kind)?.[1] ?? "", state.search.filter.text === "" ? "" : `“${state.search.filter.text}”`, dateRange(state.search.filter)].filter(Boolean).join(" · ") || "Everything"}
+              <div className="px-2"><Chip onClear={owner({ type: "clearFilter" }) ? () => tell({ type: "clearFilter" }) : undefined} clearLabel="Clear the filter" className="h-9 max-w-full gap-1.5 pr-1 pl-3.5 text-sm font-semibold">
+                {[state.search.filter.text === "" ? "" : `“${state.search.filter.text}”`, state.search.filter.anyKind ? "" : kinds.find(([one]) => one === state.search.filter.kind)?.[1] ?? "", dateRange(state.search.filter), looked === "Found" ? `${state.search.hits.length}${state.search.complete ? "" : "+"}` : ""].filter(Boolean).join(" · ") || "Everything"}
               </Chip></div>
               {looked === "Looking" && <p role="status" className="px-6 py-2 text-sm text-muted-foreground">Searching…</p>}
               {looked === "Nothing" && <EmptyState icon={<Search className="size-10" />} title="No files match." className={filesEmpty} />}
@@ -296,7 +296,7 @@ export function Files({ runtime, alpha }: FilesProps) {
               )}
             </div>
           )}
-          {atTop ? (
+          {atTop ? looked === "NoFilter" && (
             <>
               <FilesHome state={state} label={label} owner={owner} tell={tell} refresh={refresh} />
               <RecentFiles runtime={runtime} />

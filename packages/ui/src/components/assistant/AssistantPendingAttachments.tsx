@@ -15,7 +15,7 @@ export type AssistantPendingAttachmentsProps = {
 export function AssistantPendingAttachments({ attachments, limit, onRemove, onPreview }: AssistantPendingAttachmentsProps) {
   const files = attachments.filter((attachment) => attachment.kind === "file" || attachment.kind === "image").length;
   return (
-    <div role="group" aria-label="Attached" className="flex flex-wrap items-center gap-2">
+    <div role="group" aria-label="Attached" className="flex flex-wrap items-center gap-1.5 px-3 py-1">
       {attachments.map((attachment) => (
         <AssistantAttachmentChip
           key={attachment.id}

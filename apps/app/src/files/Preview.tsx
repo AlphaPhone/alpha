@@ -1,6 +1,6 @@
 // spec/app/files/preview.md, "Story: Look at a file"; spec/app/files/preview.md, "Story: Act on the file I am looking at"; spec/app/files/preview.md, "Story: Get a file back when access was lost"; spec/app/files/recent.md, "Story: Find what I opened lately"; spec/app/files/preview.md, "The caption and Details show facts for the exact document held"
 import { validName } from "@elizaos/plugin-files-client";
-import { Alert, Button, Dialog, DialogContent, DialogTitle, FilesRow, Input, Menu, MenuContent, MenuItem, MenuTrigger, Spinner } from "@repo/ui";
+import { Alert, Button, Dialog, DialogContent, DialogTitle, FilesCard, filesCardCancel, FilesRow, Input, Menu, MenuContent, MenuItem, MenuTrigger, Spinner } from "@repo/ui";
 import { Effect, Option, type ManagedRuntime } from "effect";
 import { useState } from "react";
 import { ChevronLeft, ChevronRight, Ellipsis, ExternalLink, FileText, FolderInput, Info, Mail, MessageCircle, Pause, Pencil, Play, Share2, Sparkles, Trash2, X } from "lucide-react";
@@ -25,6 +25,8 @@ import { Opened, emailAccount, pictureFits } from "./preview.vibe";
 /** Develop's File actions: a 220px panel under the header, ringed, with 44px rows and 20px icons. */
 const actionsPanel = "w-55 min-w-0 rounded-tile p-1.5 ring-1 ring-border shadow-popup dark:shadow-popup-dark";
 const actionRow = "min-h-11 rounded-lg px-3.5 py-2 [&_svg]:size-5";
+const fully = new Intl.DateTimeFormat(undefined, { year: "numeric", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
+
 export interface PreviewProps {
   /** Provides the preview and Recent machines, and what the viewer read, of preview.vibe. */
   runtime: ManagedRuntime.ManagedRuntime<Machine | Browser | RecentMachine | Opened | Handles | Shell | Inbox | Drafts, unknown>;
@@ -100,6 +102,11 @@ export function Preview({ runtime, today }: PreviewProps) {
   const destination = inbox.state && drafts.state ? emailAccount(inbox.state, drafts.state) : undefined;
   const offer = { type: "useInEmail", account: destination?.account ?? 0 } as const;
   const email = file !== undefined && destination !== undefined && owner(offer);
+  const submitRename = () => {
+    if (!(owner(editName) && validName(editName.name) && editName.name !== name)) return;
+    tell(editName);
+    setRename(undefined);
+  };
   return (
     <Dialog open onOpenChange={(open) => { if (!open && owner({ type: "close" })) tell({ type: "close" }); }}>
       <DialogContent aria-label="Preview" aria-describedby={undefined} className="inset-x-0 top-0 flex h-dvh max-h-none w-full max-w-none translate-y-0 flex-col gap-0 overflow-hidden rounded-none border-0 bg-background p-0 text-foreground shadow-none sm:pointer-fine:max-w-103">
@@ -146,31 +153,34 @@ export function Preview({ runtime, today }: PreviewProps) {
           )}
           {owner({ type: "selectAgain" }) && <Button size="sm" className="mt-3" onClick={() => tell({ type: "selectAgain" })}>Select again</Button>}
         </div>
-        <Dialog open={renaming} onOpenChange={(open) => { if (!open) setRename(undefined); }}>
-          <DialogContent closeLabel="Cancel rename">
-            <DialogTitle>Rename</DialogTitle>
-            <form className="flex flex-col gap-3" onSubmit={(event) => {
-              event.preventDefault();
-              if (!owner(editName) || !validName(editName.name) || editName.name === name) return;
-              tell(editName);
-              setRename(undefined);
-            }}>
-              <Input aria-label="Name" value={rename?.name ?? ""} onChange={(event) => setRename(rename && { ...rename, name: event.target.value })} />
-              <Button type="submit" disabled={!owner(editName) || !validName(editName.name) || editName.name === name}>Rename</Button>
-            </form>
-          </DialogContent>
-        </Dialog>
-        <Dialog open={detailsOpen} onOpenChange={(open) => { if (!open) setDetails(undefined); }}>
-          <DialogContent closeLabel="Close details">
-            <DialogTitle>{name}</DialogTitle>
-            <dl aria-label="File details" className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1 text-sm">
-              <dt>Type</dt><dd>{kind}</dd>
-              {bytes !== undefined && <><dt>Size</dt><dd>{new Intl.NumberFormat().format(bytes)} bytes</dd></>}
-              {modified !== undefined && <><dt>Modified</dt><dd><time dateTime={modified.toISOString()}>{modified.toLocaleString()}</time></dd></>}
-              {location !== undefined && <><dt>Location</dt><dd>{location}</dd></>}
-            </dl>
-          </DialogContent>
-        </Dialog>
+        <FilesCard
+          open={renaming}
+          onOpenChange={(open) => { if (!open) setRename(undefined); }}
+          title="Rename"
+          cancelLabel="Cancel"
+          confirmLabel="Rename"
+          confirmDisabled={!(owner(editName) && validName(editName.name) && editName.name !== name)}
+          onConfirm={submitRename}
+        >
+          <form onSubmit={(event) => { event.preventDefault(); submitRename(); }}>
+            <Input
+              aria-label="Name"
+              value={rename?.name ?? ""}
+              onFocus={(event) => { const dot = event.target.value.lastIndexOf("."); event.target.setSelectionRange(0, dot > 0 ? dot : event.target.value.length); }}
+              onChange={(event) => setRename(rename && { ...rename, name: event.target.value })}
+              className="rounded-md"
+            />
+          </form>
+        </FilesCard>
+        <FilesCard open={detailsOpen} onOpenChange={(open) => { if (!open) setDetails(undefined); }} title={name}>
+          <dl aria-label="File details" className="mt-2 grid grid-cols-[auto_minmax(0,1fr)] gap-x-4 gap-y-2.5 text-base">
+            <dt className="text-muted-foreground">Type</dt><dd className="wrap-anywhere">{kind}</dd>
+            {bytes !== undefined && <><dt className="text-muted-foreground">Size</dt><dd className="wrap-anywhere">{bytes >= 1024 ? `${sized(bytes)} (${bytes.toLocaleString()} bytes)` : sized(bytes)}</dd></>}
+            {modified !== undefined && <><dt className="text-muted-foreground">Modified</dt><dd className="wrap-anywhere"><time dateTime={modified.toISOString()}>{fully.format(modified)}</time></dd></>}
+            {location !== undefined && <><dt className="text-muted-foreground">Location</dt><dd className="wrap-anywhere">{location}</dd></>}
+          </dl>
+          <div className="mt-4.5 flex justify-end"><button type="button" aria-label="Close details" className={filesCardCancel} onClick={() => setDetails(undefined)}>Close</button></div>
+        </FilesCard>
       </DialogContent>
     </Dialog>
   );
