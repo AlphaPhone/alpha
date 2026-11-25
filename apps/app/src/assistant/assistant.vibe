@@ -476,8 +476,8 @@ function posted(ticket: number, told: boolean, context: Conversation.Context): S
           && (try history.get()).chosen === chats.chosen) board.change({ media })
       }
       if (continueFiles !== undefined) try views.hold(ticket, { asked, continueFiles })
-      else if (prepared !== undefined) try views.hold(ticket, { asked, handoff: prepared })
       else if (page !== undefined) try views.hold(ticket, { asked, page })
+      else if (prepared !== undefined) try views.hold(ticket, { asked, handoff: prepared })
     }
     if (event.type === "refuse") board.drop(pageTicket, mine)
     Queue.offerUnsafe(queue, event)
