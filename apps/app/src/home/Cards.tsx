@@ -43,8 +43,9 @@ export function useDayCards(runtime: ManagedRuntime.ManagedRuntime<Machine | Res
       const items = Cards.candidates(state, told);
       const first = Cards.lead(items, now)[0];
       if (first === undefined) return null;
+      const lead = shown(first);
       const next = first.overdue ? Cards.following(items, now)[0] : undefined;
-      return <HomeAgendaCard key="agenda" item={shown(first)} overdue={first.overdue} next={next && shown(next)} notCurrent={Cards.agendaCard(state, now, told) === "NotUpdated"} {...open("AgendaCard")} />;
+      return <HomeAgendaCard key="agenda" aria-label={first.overdue ? `Open overdue reminder: ${lead.title}` : `Open calendar event: ${lead.title}`} item={lead} overdue={first.overdue} next={next && shown(next)} notCurrent={Cards.agendaCard(state, now, told) === "NotUpdated"} {...open("AgendaCard")} />;
     },
     MessagesCard: () => <HomeCallsCard key="messages" app="Messages" lines={told.messages} {...open("MessagesCard")} onClick={() => void runtime.runPromise(openUnread())} />,
     PhoneCard: () => <HomeCallsCard key="phone" app="Phone" lines={told.phone} {...open("PhoneCard")} onClick={() => void runtime.runPromise(openCalls())} />,

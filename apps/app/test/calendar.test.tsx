@@ -110,7 +110,7 @@ describe.each([["a browser", false], ["a phone", true]])("in %s", (_where, phone
     await tap("Team lunch");
     await until(alpha, runtime, View, (s) => s.open !== 0 && s.place && !s.video && s.web && !s.local);
     expect([Boolean(button("Open Cafe in Maps")), Boolean(button("Join video call")), Boolean(button("Open in Google Calendar")), Boolean(button("Open in Android Calendar"))]).toEqual([true, false, true, false]);
-    expect(["Organizer", "Invited"].map((word) => Boolean(document.body.textContent?.includes(word)))).toEqual([true, true]);
+    expect([Boolean(document.body.textContent?.includes("Organizer")), Boolean(document.querySelector("[aria-label='You']"))]).toEqual([true, false]);
     await hardware("back");
     await until(alpha, runtime, View, (s) => s.open === 0);
     expect((await alpha.runtime.runPromise(Shell.use((shell) => shell.get()))).trail).toEqual(["Calendar"]);
