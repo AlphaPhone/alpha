@@ -586,6 +586,22 @@ describe.each([["a browser", false], ["a phone", true]])("in %s", (_where, phone
     await until(fifth.alpha, runtime, Chats, (s) => s.list.status === "Loaded");
     const after = await chats();
     expect([after.chosen, after.ids.includes(made)]).toEqual([made, true]);
+
+    // spec/app/assistant/composer.md, "A typed draft in a conversation that vanished moves into the new chat"
+    const carried = "Carry this draft into the new chat";
+    write(carried);
+    await until(fifth.alpha, runtime, Composer, (s) => s.binding.conversation === made && s.editor.text && s.draft.sync === "Kept");
+    world.ask.kept.clear();
+    await chatsList();
+    await until(fifth.alpha, runtime, Chats, (s) => s.chosen === 0 && s.ids.length === 0 && s.list.status === "Loaded");
+    await until(fifth.alpha, runtime, Composer, (s) => s.binding.conversation === 0 && s.slot === "Open" && s.editor.text && s.draft.sync === "Kept");
+    await hardware("back");
+    await drawn(() => vi.waitFor(() => expect(chatsSheet()).toBeUndefined()));
+    expect(composerText()).toBe(carried);
+    await press("Send");
+    await until(fifth.alpha, runtime, Chats, (s) => s.chosen > 0 && s.page.status === "Loaded");
+    await until(fifth.alpha, runtime, Conversation, (s) => s.turn.reply === "Complete");
+    expect(world.ask.said.at(-1)).toBe(carried);
   });
 
   // spec/app/assistant/index.md, "Story: Stop a reply"
