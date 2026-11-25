@@ -1,7 +1,6 @@
 // spec/app/workflows/index.md, "Story: Change a workflow"
-import { Effect } from "effect";
 import { Alert, Button, ConfirmDialog, Input, Switch } from "@repo/ui";
-import { useState } from "react";
+import { useState, useSyncExternalStore } from "react";
 import { useMachine } from "../../gen/app__workflows.react.ts";
 import { type Change, type Event } from "../../gen/app__workflows.ts";
 import type { Machine } from "../../gen/app__workflows.effect.vibe";
@@ -33,6 +32,8 @@ function reviewCopy(change: Change, outcomeUnknown: boolean, name: string) {
 /** Workflow changes at the exact version the owner read, with confirmations before reviewed changes. */
 export function Lifecycle({ runtime, row, owner, title, unfinished, interrupted }: LifecycleProps) {
   const model = useMachine(runtime);
+  const definition = runtime.runSync(DefinitionWords);
+  const snapshot = useSyncExternalStore(definition.subscribe, definition.snapshot, definition.snapshot);
   const state = model.state;
   const [name, setName] = useState<string>();
   if (state === undefined || state.owner !== owner || state.target !== row || !state.open) return null;
@@ -40,15 +41,15 @@ export function Lifecycle({ runtime, row, owner, title, unfinished, interrupted 
   const request = (wanted: Change): Event => ({ type: "reviewChange", wanted, unfinished, interrupted });
   const flip: Event = { type: "flip", wanted: state.active ? "TurnOff" : "TurnOn" };
   const power = state.scheduled && !state.active ? request("TurnOn") : flip;
-  const confirmation: Event = { type: "confirmChange", unfinished };
-  const reviewNameText = state.review.showing && state.proposed === "Rename"
-    ? runtime.runSync(Effect.flatMap(DefinitionWords, (definition) => definition.name(row)))
+  const confirmation: Event = state.change.offered ? { type: "confirmResend" } : { type: "confirmChange", unfinished };
+  const reviewNameText = state.review.showing && state.proposed === "Rename" && snapshot.edit?.row === row
+    ? snapshot.edit.name
     : "";
   return (
     <section aria-label="Workflow controls" className="flex flex-col gap-3">
       {state.detail.status === "Failed" && (
         <Alert role="status" variant="warn">The workflow couldn’t be opened.
-          <Button variant="secondary" size="sm" onClick={() => send({ type: "readWorkflow" })}>Retry</Button>
+          {model.can({ type: "readWorkflow" }) && <Button variant="secondary" size="sm" onClick={() => send({ type: "readWorkflow" })}>Retry</Button>}
         </Alert>
       )}
       {state.detail.status === "Loaded" && !state.removed && (
@@ -85,6 +86,9 @@ export function Lifecycle({ runtime, row, owner, title, unfinished, interrupted 
           <Button variant="secondary" size="sm" onClick={() => send({ type: "checkChange" })}>Check change</Button>
         </Alert>
       )}
+      {model.can({ type: "reviewResend" }) && (
+        <Button variant="secondary" onClick={() => send({ type: "reviewResend" })}>Review the same change</Button>
+      )}
       {model.can({ type: "letGo" }) && (
         <Button variant="secondary" onClick={() => send({ type: "letGo" })}>Allow a different change</Button>
       )}
@@ -92,9 +96,11 @@ export function Lifecycle({ runtime, row, owner, title, unfinished, interrupted 
         <p role="status" className="text-sm text-muted-foreground">Your agent didn’t apply the change.</p>
       )}
       <ConfirmDialog open={state.review.showing} title={`${labels[state.proposed]} “${title}”?`}
-        confirmLabel={labels[state.proposed]} destructive={state.proposed === "Remove"}
+        confirmLabel={state.change.offered ? "Send again" : labels[state.proposed]} destructive={state.proposed === "Remove"}
         onConfirm={() => send(confirmation)} onCancel={() => send({ type: "cancelReview" })}>
-        {reviewCopy(state.proposed, state.unknownShown, reviewNameText)}
+        {state.change.offered
+          ? `Alpha will send the same change again. ${reviewCopy(state.proposed, state.unknownShown, reviewNameText)}`
+          : reviewCopy(state.proposed, state.unknownShown, reviewNameText)}
       </ConfirmDialog>
     </section>
   );

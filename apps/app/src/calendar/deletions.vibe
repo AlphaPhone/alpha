@@ -1,21 +1,82 @@
 // spec/app/calendar/deletions.md, "Story: Undo a deletion before it is sent"
+import * as View from "../../gen/app__calendar.effect.vibe"
 import * as Held from "../../gen/app__calendar__deletions.effect.vibe"
 import type { Effect as Out, Event } from "../../gen/app__calendar__deletions.effect.vibe"
 import * as Editor from "../../gen/app__calendar__editor.effect.vibe"
 import * as Shell from "../../gen/app__shell.effect.vibe"
 import * as Notices from "../../gen/app__notices__toasts.effect.vibe"
-import { type Due, type Job, due, following, hearing, reacting, tell, together } from "../runtime/reactor.vibe"
-import { shown } from "./shown.ts"
+import { type Said, offer, say, withdraw } from "../notices/toasts.vibe"
+import { type Due, Job, contained, due, following, hearing, reacting, started, together, untimed } from "../runtime/reactor.vibe"
+import { Shown } from "./stores.vibe"
+import { civilDay } from "./time.ts"
+
+const undoArea = "Calendar"
+
+/** Scoped per-runtime metadata tracking released deletion revisions and the active Undo toast id. */
+export service DeletionMeta {
+  remember(id: number, revision: number, version: string): void
+  of(id: number): { readonly revision: number; readonly version: string } | undefined
+  forget(id: number): void
+  offered(): number
+  setOffered(id: number): void
+  clear(): void
+}
+
+const deletionMeta = Layer.effect(DeletionMeta, effect {
+  const sent = new Map<number, { readonly revision: number; readonly version: string }>()
+  let activeOffer = 0
+  try Effect.addFinalizer(() => sync(() => { sent.clear(); activeOffer = 0 }))
+  return {
+    remember(id: number, revision: number, version: string) { sent.set(id, { revision, version }) },
+    of: (id: number) => sent.get(id),
+    forget(id: number) { sent.delete(id) },
+    offered: () => activeOffer,
+    setOffered(id: number) { activeOffer = id },
+    clear() { sent.clear(); activeOffer = 0 },
+  }
+})
+
+/** Undo the waiting deletion if its window or shown notice still permits it. */
+effect function undoWaiting(): void!!Held.Machine {
+  const held = try Held.Machine
+  if (try contained(held.send({ type: "undo", now: untimed }), "undoing a deletion")) return
+  try contained(held.send({ type: "undoShown" }), "undoing a shown deletion")
+}
+
+// spec/app/calendar/deletions.md, "Confirming a deletion holds it; a deletion still waiting is sent first, so the only Undo shown is the newest"
+/** Confirm a deletion and raise its Undo toast through the global notices area without racing the shell. */
+export effect function confirmDelete(event: Extract<Event, { readonly type: "confirm" }>): boolean!!(Held.Machine | Shown | DeletionMeta | Notices.Machine | Said) {
+  const held = try Held.Machine
+  const shown = try Shown
+  const meta = try DeletionMeta
+  const title = shown.lastSeen(event.id)?.title || "Event"
+  if (!(try contained(held.send(event), "confirming a deletion"))) return false
+  const prev = meta.offered()
+  if (prev !== 0 && prev !== event.id) try withdraw(undoArea, prev)
+  meta.setOffered(event.id)
+  const undo = Effect.provideService(undoWaiting(), Held.Machine, held)
+  try offer(`${title} deleted`, undoArea, event.id, undo)
+  return true
+}
 
 // spec/app/calendar/deletions.md, "Confirming a deletion holds it; a deletion still waiting is sent first, so the only Undo shown is the newest"; spec/app/calendar/deletions.md, "A refused send shows the event again and says it was not deleted; a sent deletion hides it until a read no longer has it unchanged"; spec/app/calendar/deletions.md, "A deletion is sent only when its window ended with its notice gone, when the owner leaves, when a newer one is confirmed, or when the owner sends one a restart paused, at the revision confirmed"
 /** A released deletion goes to the editor at the revision the owner confirmed, which sends it once; one the editor cannot take now ends refused, and its event shows again. */
-function carry(fx: Out): Job<Event, Editor.Machine, []> {
-  const row = shown.find(fx.id) ?? shown.lastSeen(fx.id)
-  const remove: Editor.Event = {
-    type: "deleteEvent", id: fx.id, revision: fx.revision,
-    scope: fx.reach === "WholeSeries" ? "WholeSeries" : fx.reach === "FromThisOn" ? "ThisAndFollowing" : "ThisOne", repeating: row?.recurring ?? false,
+function carry(fx: Out): Job<Event, Editor.Machine | Shown | DeletionMeta, []> {
+  const released = effect {
+    const shown = try Shown
+    const meta = try DeletionMeta
+    const row = shown.find(fx.id) ?? shown.lastSeen(fx.id)
+    meta.remember(fx.id, fx.revision, row?.version ?? "")
+    const remove: Editor.Event = {
+      type: "deleteEvent", id: fx.id, revision: fx.revision,
+      scope: fx.reach === "WholeSeries" ? "WholeSeries" : fx.reach === "FromThisOn" ? "ThisAndFollowing" : "ThisOne", repeating: row?.recurring ?? false,
+    }
+    return effect {
+      try (try Editor.Machine).send(remove)
+      return Stream.empty
+    } catch () => Stream.succeed({ type: "ended", id: fx.id, done: false } as Event)
   }
-  return tell(`release ${fx.id}`, Editor.Machine, [remove], { refused: { type: "ended", id: fx.id, done: false } })
+  return Job.Run({ key: `release ${fx.id}`, answers: Stream.unwrap(released), lost: Option.some({ type: "ended", id: fx.id, done: false }), by: [], allowEmpty: true })
 }
 
 // spec/app/calendar/deletions.md, "The window ends only once its Undo notice is no longer shown"
@@ -38,6 +99,73 @@ const left = hearing(away, Held.Machine, (): Event => ({ type: "leave" }))
 // spec/app/calendar/deletions.md, "The Undo window is ten seconds, scaled by Android's timeout setting"
 const scaled = following(Notices.Machine, (notices) => notices.scale, Held.Machine, (scale): Event | undefined => (scale >= 100 ? { type: "scaleChanged", scale } : undefined))
 
+// spec/app/calendar/deletions.md, "Another owner signing in drops a waiting deletion unsent, and says the event was not deleted"; spec/app/calendar/deletions.md, "A refused send shows the event again and says it was not deleted; a sent deletion hides it until a read no longer has it unchanged"
+/** Keep global toasts synchronized with waiting, dropped, and failed Calendar deletions. */
+const notices = started(effect {
+  const held = try Held.Machine
+  const shown = try Shown
+  const meta = try DeletionMeta
+  let lastDropped = 0
+  let lastFailed = 0
+  try Stream.runForEach(held.changes, effect (state) => {
+    const active = state.waiting !== 0 && state.notice && !state.paused ? state.waiting : 0
+    const prev = meta.offered()
+    if (prev !== 0 && prev !== active) {
+      meta.setOffered(0)
+      try withdraw(undoArea, prev)
+    }
+    if (active !== 0 && meta.offered() !== active) {
+      meta.setOffered(active)
+      const title = shown.lastSeen(active)?.title || "Event"
+      const undo = Effect.provideService(undoWaiting(), Held.Machine, held)
+      try offer(`${title} deleted`, undoArea, active, undo)
+    }
+    if (state.dropped !== 0 && state.dropped !== lastDropped) {
+      const title = shown.lastSeen(state.dropped)?.title || "An event"
+      try say(`${title} was not deleted: you signed in to another account.`, true)
+    }
+    lastDropped = state.dropped
+    if (state.failed !== 0 && state.failed !== lastFailed) {
+      const title = shown.lastSeen(state.failed)?.title || "the event"
+      try say(`Couldn't delete ${title}. It may have changed; it's shown again.`, true)
+    }
+    lastFailed = state.failed
+  })
+}, "notifying Calendar deletions")
+
+// spec/app/calendar/deletions.md, "A refused send shows the event again and says it was not deleted; a sent deletion hides it until a read no longer has it unchanged"
+/** Reconcile a hidden sent deletion after each calendar read so declined invitations reappear and removed events clear `hiding`. */
+const reconciled = started(effect {
+  const view = try View.Machine
+  const held = try Held.Machine
+  const shown = try Shown
+  const meta = try DeletionMeta
+  const settled = Stream.filter(view.changes, (s) => s.phone.status === "Loaded" || s.google.status === "Loaded")
+  try Stream.runForEach(Stream.changesWith(settled, (a, b) => a.phone.ticket === b.phone.ticket && a.phone.status === b.phone.status && a.google.ticket === b.google.ticket && a.google.status === b.google.status), effect (s) => {
+    const d = try held.get()
+    if (d.hiding === 0) return
+    const id = d.hiding
+    const prior = shown.lastSeen(id)
+    const sourceLoaded = prior === undefined
+      ? s.phone.status === "Loaded" || s.google.status === "Loaded"
+      : prior.source === "Phone" ? s.phone.status === "Loaded" : s.google.status === "Loaded"
+    if (!sourceLoaded) return
+    const current = shown.find(id)
+    if (current === undefined) {
+      const covered = prior === undefined || (!(prior.source === "Phone" && s.phoneLimited) && Math.abs(civilDay(prior.begin) - s.anchor) <= 31)
+      if (!covered) return
+      meta.forget(id)
+      try contained(held.send({ type: "readShows", id, unchanged: false }), "clearing a deleted event after read")
+      return
+    }
+    const before = meta.of(id)
+    const changed = current.answer === "AnsweredDeclined"
+      || (before !== undefined ? current.revision !== before.revision || (before.version !== "" && current.version !== before.version) : current.revision !== d.revision)
+    if (changed) meta.forget(id)
+    try contained(held.send({ type: "readShows", id, unchanged: !changed }), "updating a hidden deletion after read")
+  })
+}, "reconciling hidden Calendar deletions after reads")
+
 // spec/app/calendar/deletions.md, "A restart pauses a deletion still in its window; the owner sends it or keeps the event"
 /** Calendar's deletions: kept on the phone with their Undo window across a restart, which pauses one still waiting, and released to the editor. */
-export const deletions = together(reacting(Held, { keep: 1, open: [{ type: "restart" }], carry, timers }), left, scaled)
+export const deletions = together(deletionMeta, reacting(Held, { keep: 1, open: [{ type: "restart" }], carry, timers }), left, scaled, notices, reconciled)

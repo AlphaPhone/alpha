@@ -1,7 +1,7 @@
 // spec/app/workflows/clock.md, "Story: Describe an alarm for Clock"; spec/app/workflows/clock.md, "Story: Review, then hand over to Clock"; spec/app/workflows/clock.md, "Story: Know what happened"
-import { Effect } from "effect";
-import { Button, Dialog, DialogContent, DialogTitle, Input, Spinner, cn } from "@repo/ui";
+import { Button, Dialog, DialogContent, DialogTitle, Input, Spinner, cn, dockClearance } from "@repo/ui";
 import { ChevronLeft, ExternalLink } from "lucide-react";
+import { useState, useSyncExternalStore } from "react";
 import { useMachine } from "../../gen/app__workflows__clock.react.ts";
 import { type Event, type Handoff, type Receipt, busy, maxLabel, maxSnooze } from "../../gen/app__workflows__clock.ts";
 import type { Machine } from "../../gen/app__workflows__clock.effect.vibe";
@@ -49,19 +49,24 @@ function reviewText(kind: Handoff, time: string, label: string, snooze: number, 
 /** Review a Clock handoff inside Workflows. Clock reports only whether it opened. */
 export function ClockPage({ runtime, container, restoreFocus }: ClockProps) {
   const machine = useMachine(runtime);
+  const labelService = runtime.runSync(AlarmLabel);
+  const label = useSyncExternalStore(labelService.subscribe, labelService.snapshot, labelService.snapshot);
+  const [snoozeInput, setSnoozeInput] = useState<string | null>(null);
   const state = machine.state;
   if (!state?.open) return null;
   const tell = (event: Event) => { if (machine.can(event)) void machine.send(event); };
-  const label = runtime.runSync(Effect.flatMap(AlarmLabel, (value) => value.read()));
   const time = `${String(state.hour).padStart(2, "0")}:${String(state.minute).padStart(2, "0")}`;
   const repeating = repeatDays(state.days);
   const receipt = state.receipt === "NoReceipt" ? state.lastReceipt : state.receipt;
   const disabled = busy(state);
   const close = { type: "closeClock" } as const;
+  const canSetTime = machine.can({ type: "setTime", hour: state.hour, minute: state.minute });
+  const canSetLabel = machine.can({ type: "setLabel", chars: label.length });
+  const canSetSnooze = machine.can({ type: "setSnooze", minutes: state.snooze });
   return <Dialog open>
     <DialogContent container={container} overlayClassName="absolute bg-transparent dark:bg-transparent"
       aria-label="Clock alarms" aria-labelledby={undefined} aria-describedby={undefined}
-      className="absolute inset-0 mx-0 max-w-none translate-y-0 gap-0 overflow-auto rounded-none bg-background px-6 pt-[max(var(--alpha-native-inset-top,0px),env(safe-area-inset-top))] pb-30 text-foreground shadow-none"
+      className={cn("absolute inset-0 mx-0 max-w-none translate-y-0 gap-0 overflow-x-hidden overflow-y-auto rounded-none bg-background px-6 pt-[max(var(--alpha-native-inset-top,0px),env(safe-area-inset-top))] text-foreground shadow-none", dockClearance)}
       onInteractOutside={(event) => event.preventDefault()}
       onEscapeKeyDown={(event) => { event.preventDefault(); tell(close); }}
       onCloseAutoFocus={(event) => { event.preventDefault(); restoreFocus(); }}>
@@ -73,38 +78,56 @@ export function ClockPage({ runtime, container, restoreFocus }: ClockProps) {
       </header>
       {!state.clock ? <p role="status" className="text-sm text-muted-foreground">Clock isn’t available on this device.</p> : <>
         <div className="mb-6 grid grid-cols-2 gap-2">
-          {actions.map(([kind, title]) => <Button key={kind} variant="secondary" aria-pressed={kind === state.kind}
-            className={cn("h-auto rounded-action p-3.5", picked)}
-            disabled={disabled} onClick={() => tell({ type: "pick", wanted: kind })}>{title}</Button>)}
+          {actions.map(([kind, title]) => {
+            const pick = { type: "pick", wanted: kind } as const;
+            return <Button key={kind} variant="secondary" aria-pressed={kind === state.kind}
+              className={cn("h-auto rounded-action p-3.5", picked)}
+              disabled={kind !== state.kind && !machine.can(pick)} onClick={() => tell(pick)}>{title}</Button>;
+          })}
         </div>
         {state.kind === "SetAlarm" && <>
           <label className="mb-4.5 grid gap-2 text-sm">Alarm time
-            <Input type="time" aria-label="Alarm time" value={time} className={cn(field, "text-title")} disabled={disabled} onChange={(event) => {
+            <Input type="time" aria-label="Alarm time" value={time} className={cn(field, "text-title")} disabled={!canSetTime} onChange={(event) => {
               const [hour, minute] = event.currentTarget.value.split(":").map(Number);
               if (hour !== undefined && minute !== undefined) tell({ type: "setTime", hour, minute });
             }} />
           </label>
           <label className="mb-3.5 grid gap-2 text-sm">Label
-            <Input aria-label="Alarm label" value={label} className={field} maxLength={maxLabel} disabled={disabled}
+            <Input aria-label="Alarm label" value={label} className={field} maxLength={maxLabel} disabled={!canSetLabel}
               onChange={(event) => void runtime.runPromiseExit(setAlarmLabel(event.currentTarget.value))} />
           </label>
           {state.repeats && <fieldset className="mb-4.5">
             <legend className="mb-2 text-sm">Repeat</legend>
             <div className="flex flex-wrap gap-1.5">
-              {week.map(([day, name]) => <Button key={day} variant="secondary" aria-label={`Repeat on ${name}`}
-                className={cn("size-11 min-w-11 px-2.5", picked)}
-                aria-pressed={state.days.includes(day)} disabled={disabled}
-                onClick={() => tell({ type: "toggleDay", day })}>{name}</Button>)}
+              {week.map(([day, name]) => {
+                const toggleDay = { type: "toggleDay", day } as const;
+                return <Button key={day} variant="secondary" aria-label={`Repeat on ${name}`}
+                  className={cn("size-11 min-w-11 px-2.5", picked)}
+                  aria-pressed={state.days.includes(day)} disabled={!machine.can(toggleDay)}
+                  onClick={() => tell(toggleDay)}>{name}</Button>;
+              })}
             </div>
             <p className="mt-2 text-sm text-muted-foreground">{repeating ? `Repeats ${repeating}` : "One time"}</p>
           </fieldset>}
         </>}
         {state.kind === "Snooze" && <label className="mb-4.5 grid gap-2 text-sm">Snooze
-          <Input aria-label="Snooze minutes" type="number" className={field} min={1} max={maxSnooze} value={state.snooze} disabled={disabled}
-            onChange={(event) => tell({ type: "setSnooze", minutes: event.currentTarget.valueAsNumber })} />
+          <Input aria-label="Snooze minutes" type="number" className={field} min={1} max={maxSnooze}
+            value={snoozeInput ?? String(state.snooze)} disabled={!canSetSnooze}
+            onChange={(event) => {
+              const raw = event.currentTarget.value;
+              setSnoozeInput(raw);
+              if (raw.trim() === "") return;
+              const parsed = Number(raw);
+              if (Number.isInteger(parsed) && parsed >= 1 && parsed <= maxSnooze) {
+                tell({ type: "setSnooze", minutes: parsed });
+              }
+            }}
+            onBlur={() => setSnoozeInput(null)} />
         </label>}
         {state.history.status === "Loading" && <Spinner aria-label="Reading the last Clock request" />}
-        {state.history.status === "Failed" && <Button variant="secondary" onClick={() => tell({ type: "retryHistory" })}>Retry Clock history</Button>}
+        {state.history.status === "Failed" && machine.can({ type: "retryHistory" }) && (
+          <Button variant="secondary" onClick={() => tell({ type: "retryHistory" })}>Retry Clock history</Button>
+        )}
         <Button className="mt-3 h-auto gap-1.5 rounded-panel p-4" aria-label="Review Clock request"
           disabled={!machine.can({ type: "prepare" })}
           onClick={() => void runtime.runPromiseExit(reviewAlarm())}>Review<ExternalLink aria-hidden className="size-4.5" /></Button>
@@ -112,8 +135,10 @@ export function ClockPage({ runtime, container, restoreFocus }: ClockProps) {
           <p className="mb-4 inline-block rounded-md bg-accent px-3 py-1.5 text-sm leading-snug font-semibold">{reviewText(state.kind, time, label, state.snooze, repeating)}</p>
           <div className="flex flex-wrap">
             <Button ref={focus} variant="secondary" className="h-auto rounded-xl bg-foreground px-4.5 py-3.5 text-background hover:bg-foreground/90" aria-label="Confirm Clock request"
+              disabled={!machine.can({ type: "confirm" })}
               onClick={() => tell({ type: "confirm" })}>Open Clock</Button>
             <Button variant="ghost" className="h-auto p-3.5 text-muted-foreground" aria-label="Cancel Clock review"
+              disabled={!machine.can({ type: "cancelReview" })}
               onClick={() => tell({ type: "cancelReview" })}>Cancel</Button>
           </div>
         </section>}

@@ -553,6 +553,48 @@ lemma ownerChanged_ensures(s: Reminders, owner: int)
   }
 }
 
+lemma clearCompleted_ensures(s: Reminders)
+  ensures (inv(s) ==> canClearCompleted(s) ==> alwaysDefaultListExists(clearCompleted(s).state))
+  ensures (inv(s) ==> canClearCompleted(s) ==> alwaysEveryItemWellFormed(clearCompleted(s).state))
+  ensures (inv(s) ==> canClearCompleted(s) ==> alwaysSelectedItemExists(clearCompleted(s).state))
+  ensures (inv(s) ==> canClearCompleted(s) ==> alwaysHiddenExactlyWhileDeleteHeld(clearCompleted(s).state))
+  ensures (inv(s) ==> canClearCompleted(s) ==> alwaysActiveCustomListExists(clearCompleted(s).state))
+  ensures (inv(s) ==> canClearCompleted(s) ==> alwaysSmartCountsConsistent(clearCompleted(s).state))
+  ensures (inv(s) ==> canClearCompleted(s) ==> stepDeleteOnlyOnExpire(s, "clearCompleted", clearCompleted(s).state, clearCompleted(s).out))
+  ensures (inv(s) ==> canClearCompleted(s) ==> stepUndoRestoresExactState(s, "clearCompleted", clearCompleted(s).state))
+  ensures (inv(s) ==> canClearCompleted(s) ==> stepDeleteListKeepsItemsValid(s, "clearCompleted", clearCompleted(s).state))
+  ensures (inv(s) ==> canClearCompleted(s) ==> stepNoSentWriteAfterRestart(s, "clearCompleted", clearCompleted(s).state, clearCompleted(s).out))
+  ensures (inv(s) ==> canClearCompleted(s) ==> stepRecurringCompleteAdvancesDue(s, "clearCompleted", clearCompleted(s).state))
+{
+  if inv(s) && canClearCompleted(s) {
+    ItemsUniqueFromCounts(s.items);
+    var p := (it: ItemEntry) => !it.completed;
+    var after := clearCompleted(s).state;
+    ProofLib.FilterKeepsDistinctBy(p, s.items, (it: ItemEntry) => it.id);
+    ProofLib.FilterSubset(p, s.items);
+    ItemsCountsFromUnique(after.items);
+    SmartCountsHold(after);
+  }
+}
+
+lemma applySync_ensures(s: Reminders, syncedLists: seq<ListEntry>, nextListId: int, syncedItems: seq<ItemEntry>, nextItemId: int)
+  ensures (inv(s) ==> canApplySync(s, syncedLists, nextListId, syncedItems, nextItemId) ==> alwaysDefaultListExists(applySync(s, syncedLists, nextListId, syncedItems, nextItemId)))
+  ensures (inv(s) ==> canApplySync(s, syncedLists, nextListId, syncedItems, nextItemId) ==> alwaysEveryItemWellFormed(applySync(s, syncedLists, nextListId, syncedItems, nextItemId)))
+  ensures (inv(s) ==> canApplySync(s, syncedLists, nextListId, syncedItems, nextItemId) ==> alwaysSelectedItemExists(applySync(s, syncedLists, nextListId, syncedItems, nextItemId)))
+  ensures (inv(s) ==> canApplySync(s, syncedLists, nextListId, syncedItems, nextItemId) ==> alwaysHiddenExactlyWhileDeleteHeld(applySync(s, syncedLists, nextListId, syncedItems, nextItemId)))
+  ensures (inv(s) ==> canApplySync(s, syncedLists, nextListId, syncedItems, nextItemId) ==> alwaysActiveCustomListExists(applySync(s, syncedLists, nextListId, syncedItems, nextItemId)))
+  ensures (inv(s) ==> canApplySync(s, syncedLists, nextListId, syncedItems, nextItemId) ==> alwaysSmartCountsConsistent(applySync(s, syncedLists, nextListId, syncedItems, nextItemId)))
+  ensures (inv(s) ==> canApplySync(s, syncedLists, nextListId, syncedItems, nextItemId) ==> stepDeleteOnlyOnExpire(s, "applySync", applySync(s, syncedLists, nextListId, syncedItems, nextItemId), []))
+  ensures (inv(s) ==> canApplySync(s, syncedLists, nextListId, syncedItems, nextItemId) ==> stepUndoRestoresExactState(s, "applySync", applySync(s, syncedLists, nextListId, syncedItems, nextItemId)))
+  ensures (inv(s) ==> canApplySync(s, syncedLists, nextListId, syncedItems, nextItemId) ==> stepDeleteListKeepsItemsValid(s, "applySync", applySync(s, syncedLists, nextListId, syncedItems, nextItemId)))
+  ensures (inv(s) ==> canApplySync(s, syncedLists, nextListId, syncedItems, nextItemId) ==> stepNoSentWriteAfterRestart(s, "applySync", applySync(s, syncedLists, nextListId, syncedItems, nextItemId), []))
+  ensures (inv(s) ==> canApplySync(s, syncedLists, nextListId, syncedItems, nextItemId) ==> stepRecurringCompleteAdvancesDue(s, "applySync", applySync(s, syncedLists, nextListId, syncedItems, nextItemId)))
+{
+  if inv(s) && canApplySync(s, syncedLists, nextListId, syncedItems, nextItemId) {
+    SmartCountsHold(applySync(s, syncedLists, nextListId, syncedItems, nextItemId));
+  }
+}
+
 lemma reopen_ensures(s: Reminders)
   ensures (inv(s) ==> alwaysDefaultListExists(reopen(s).state))
   ensures (inv(s) ==> alwaysEveryItemWellFormed(reopen(s).state))

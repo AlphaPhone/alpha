@@ -1,7 +1,15 @@
-// spec/app/calendar/index.md, "The calendar holds its layout, today and the day it is anchored to, what each source last read and whether the phone's read was cut short, the owner it reads for and the calendars hidden, the reminders it was told of, an open event, one overlay, and whether it is in front or a write is under way"
+// spec/app/calendar/index.md, "The calendar holds its layout, today and the day it is anchored to, what each source last read and whether the phone's read was cut short, the owner it reads for and the calendars hidden, the reminders it was told of, an open event, one overlay, and whether it is in front or a write is under way"; spec/app/calendar/writing.md, "A missing or repeated wall time is refused, and nothing is saved"
 import { windowFirstMonth, windowLastMonth } from "../../gen/app__calendar__presentation.ts";
+import type { WallTime } from "../../gen/app__calendar__writing.ts";
 
 const dayMs = 86_400_000;
+const ambiguityShifts = [-3_600_000, -1_800_000, 1_800_000, 3_600_000] as const;
+
+/** A local wall-clock instant and whether that wall time exists once, is missing in a spring-forward gap, or occurs twice on fall-back. */
+export interface ResolvedWallTime {
+  readonly kind: WallTime;
+  readonly ms: number;
+}
 
 /** The phone's civil day of `ms`, counted in days from 1970-01-01, in the phone's own time zone. @throws {never} */
 export function civilDay(ms: number): number {
@@ -18,6 +26,42 @@ export function dateOf(civil: number): Date {
 /** The instant a civil day starts on this phone. @throws {never} */
 export function dayStart(civil: number): number {
   return dateOf(civil).getTime();
+}
+
+/** The UTC midnight ISO string of a civil day, for all-day wire dates. @throws {never} */
+export function utcDate(civil: number): string {
+  return new Date(civil * dayMs).toISOString();
+}
+
+/** Whether `at` displays the exact local calendar components `(year, month, date, hour, minute)`. @throws {never} */
+function matchesWall(at: Date, year: number, month: number, date: number, hour: number, minute: number): boolean {
+  return at.getFullYear() === year && at.getMonth() === month && at.getDate() === date && at.getHours() === hour && at.getMinutes() === minute;
+}
+
+/** Resolve local wall-clock `(civil, hour, minute)` and classify missing or repeated DST wall times. @throws {never} */
+export function localWallTime(civil: number, hour: number, minute: number): ResolvedWallTime {
+  const base = dateOf(civil);
+  const year = base.getFullYear();
+  const month = base.getMonth();
+  const date = base.getDate();
+  const candidate = new Date(year, month, date, hour, minute, 0, 0);
+  const ms = candidate.getTime();
+  if (!matchesWall(candidate, year, month, date, hour, minute)) return { kind: "WallMissing", ms };
+  for (const delta of ambiguityShifts) {
+    if (matchesWall(new Date(ms + delta), year, month, date, hour, minute)) return { kind: "WallTwice", ms };
+  }
+  return { kind: "WallExists", ms };
+}
+
+/** Construct a local wall-clock instant on `civil` at `hour:minute` without adding fixed millisecond offsets. @throws {never} */
+export function wallDateTime(civil: number, hour: number, minute: number): number {
+  return localWallTime(civil, hour, minute).ms;
+}
+
+/** Move `ms` by `days` civil days while preserving its local wall-clock hour and minute across DST transitions. @throws {never} */
+export function shiftDays(ms: number, days: number): ResolvedWallTime {
+  const at = new Date(ms);
+  return localWallTime(civilDay(ms) + days, at.getHours(), at.getMinutes());
 }
 
 /** The first instant of the civil day after `ms`'s: the next midnight. @throws {never} */
@@ -56,7 +100,7 @@ export function localDate(iso: string): number {
 
 /** The phone's own time zone, which a read of the agent's Calendar names. @throws {never} */
 export function zone(): string {
-  return Intl.DateTimeFormat().resolvedOptions().timeZone;
+  return Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
 }
 
 /** Whether `url` is a plain HTTPS address without credentials. @throws {never} */

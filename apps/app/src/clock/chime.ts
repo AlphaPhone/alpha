@@ -34,20 +34,13 @@ function audioContext(): AudioContext | undefined {
   if (!ctor) return undefined;
   try {
     sharedContext ??= new ctor();
-    if (sharedContext.state === "suspended") void sharedContext.resume().catch(() => undefined);
     return sharedContext;
   } catch {
     return undefined;
   }
 }
 
-/**
- * Play one synthesized Web Audio pulse for an alarm sound or timer completion; safe no-op where AudioContext is unavailable.
- * @throws {never}
- */
-export function playChimePulse(sound: AlarmSound, isTimer = false): void {
-  const ctx = audioContext();
-  if (!ctx) return;
+function schedulePulse(ctx: AudioContext, sound: AlarmSound, isTimer: boolean): void {
   try {
     const pattern = isTimer ? TIMER_PATTERN : PATTERNS[sound];
     let offset = ctx.currentTime + 0.01;
@@ -68,4 +61,24 @@ export function playChimePulse(sound: AlarmSound, isTimer = false): void {
   } catch {
     return;
   }
+}
+
+/**
+ * Play one synthesized Web Audio pulse for an alarm sound or timer completion, awaiting `AudioContext.resume()`
+ * when suspended before scheduling the first oscillator pulse; safe no-op where AudioContext is unavailable.
+ * @throws {never}
+ */
+export function playChimePulse(sound: AlarmSound, isTimer = false): void {
+  const ctx = audioContext();
+  if (!ctx) return;
+  if (ctx.state === "suspended") {
+    void ctx.resume().then(
+      () => {
+        if (ctx.state !== "closed") schedulePulse(ctx, sound, isTimer);
+      },
+      () => undefined,
+    );
+    return;
+  }
+  schedulePulse(ctx, sound, isTimer);
 }

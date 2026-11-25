@@ -88,6 +88,7 @@ type Reminders = {
   nextItemId: int,
   hiddenId: int,
   view: ActiveView,
+  drilledIn: bool,
   sort: SortKey,
   filter: Filter,
   searchOpen: bool,
@@ -124,6 +125,7 @@ pure val initial: Reminders = {
   nextItemId: 1,
   hiddenId: 0,
   view: Smart({ view: TodayView }),
+  drilledIn: false,
   sort: SortDue,
   filter: defaultFilter,
   searchOpen: false,
@@ -180,21 +182,37 @@ pure val specValues: Set[ItemSpec] = Set(
   { listId: 2, hasDue: true, dueDay: 11, hasDueTime: false, dueMinute: 0, repeat: NoRepeat, priority: HighPriority, flagged: true },
 )
 pure val criteriaValues = Set(defaultFilter, { showCompleted: true, flaggedOnly: false, priority: NoPriority }, { showCompleted: false, flaggedOnly: true, priority: HighPriority })
+pure val syncedListsValues: Set[List[ListEntry]] = Set(
+  List(defaultList),
+  List(defaultList, { id: 2, isDefault: false, revision: 1 }),
+)
+pure val nextListIdValues = Set(2, 3)
+pure val syncedItemsValues: Set[List[ItemEntry]] = Set(
+  List(),
+  List({ id: 1, listId: 1, hasDue: true, dueDay: 10, hasDueTime: false, dueMinute: 0, repeat: NoRepeat, priority: HighPriority, flagged: true, completed: false, snoozedUntil: 0, revision: 1 }),
+  List({ id: 1, listId: 2, hasDue: false, dueDay: 0, hasDueTime: false, dueMinute: 0, repeat: NoRepeat, priority: NoPriority, flagged: false, completed: true, snoozedUntil: 0, revision: 2 }),
+)
+pure val nextItemIdValues = Set(1, 2)
 ```
 
 ### Switching smart views, custom lists, sort, filter, search and item selection keeps every reference valid
 
 ```quint
-pure def canSelectSmartView(s: Reminders, view: SmartView): bool = s.view != Smart({ view: view })
+pure def canSelectSmartView(s: Reminders, view: SmartView): bool =
+  not(s.drilledIn) or s.view != Smart({ view: view })
 
 pure def selectSmartView(s: Reminders, view: SmartView): Reminders =
-  { ...s, view: Smart({ view: view }), selectedId: 0 }
+  { ...s, view: Smart({ view: view }), drilledIn: true, selectedId: 0 }
 
 pure def canSelectCustomList(s: Reminders, listId: int): bool =
-  hasList(s.lists, listId) and s.view != CustomList({ listId: listId })
+  hasList(s.lists, listId) and (not(s.drilledIn) or s.view != CustomList({ listId: listId }))
 
 pure def selectCustomList(s: Reminders, listId: int): Reminders =
-  { ...s, view: CustomList({ listId: listId }), selectedId: 0 }
+  { ...s, view: CustomList({ listId: listId }), drilledIn: true, selectedId: 0 }
+
+pure def canLeaveList(s: Reminders): bool = s.drilledIn
+
+pure def leaveList(s: Reminders): Reminders = { ...s, drilledIn: false, selectedId: 0 }
 
 pure def canSetSort(s: Reminders, sort: SortKey): bool = sort != s.sort
 
@@ -263,12 +281,14 @@ pure def deleteList(s: Reminders, listId: int, mode: DeleteMode): Moved =
     | CascadeItems => s.items.select(it => it.listId != listId)
   }
   val curView = s.view
-  val nextView = match curView {
-    | CustomList(c) => if (c.listId == listId) Smart({ view: AllView }) else curView
-    | _ => curView
+  val deletedActive = match curView {
+    | CustomList(c) => c.listId == listId
+    | _ => false
   }
+  val nextView = if (deletedActive) Smart({ view: AllView }) else curView
+  val nextDrilled = if (deletedActive) false else s.drilledIn
   val nextSelected = if (s.selectedId != 0 and hasItem(nextItems, s.selectedId)) s.selectedId else 0
-  { state: { ...s, lists: keptLists, items: nextItems, view: nextView, selectedId: nextSelected,
+  { state: { ...s, lists: keptLists, items: nextItems, view: nextView, drilledIn: nextDrilled, selectedId: nextSelected,
              write: A::dispatch(A::record(A::plan(attemptId))) },
     out: List(WriteList({ attemptId: attemptId, listId: listId })) }
 ```
@@ -336,6 +356,16 @@ pure def moveItem(s: Reminders, itemId: int, targetListId: int): Moved =
   val updated: ItemEntry = { ...cur, listId: targetListId, revision: cur.revision + 1 }
   { state: { ...s, items: putItem(s.items, updated), write: A::dispatch(A::record(A::plan(attemptId))) },
     out: List(WriteItem({ attemptId: attemptId, itemId: itemId })) }
+
+pure def canClearCompleted(s: Reminders): bool =
+  not(writing(s)) and not(undoHeld(s)) and s.items.some(it => it.completed)
+
+pure def clearCompleted(s: Reminders): Moved =
+  val attemptId = s.write.id + 1
+  val remaining = s.items.select(it => not(it.completed))
+  val nextSelected = if (s.selectedId != 0 and hasItem(remaining, s.selectedId)) s.selectedId else 0
+  { state: { ...s, items: remaining, selectedId: nextSelected, write: A::dispatch(A::record(A::plan(attemptId))) },
+    out: List(WriteItem({ attemptId: attemptId, itemId: 0 })) }
 ```
 
 ### Completing a reminder holds a five-second Undo snapshot and advances a repeating reminder to its next due day
@@ -473,6 +503,36 @@ pure def agentChanged(s: Reminders): Moved =
     { state: { ...s, again: true }, out: List() }
   else
     refresh(s)
+
+pure def canApplySync(s: Reminders, syncedLists: List[ListEntry], nextListId: int, syncedItems: List[ItemEntry], nextItemId: int): bool =
+  not(writing(s)) and not(undoHeld(s))
+    and syncedLists.length() <= 32
+    and hasList(syncedLists, defaultListId) and listOf(syncedLists, defaultListId).isDefault
+    and nextListId > defaultListId
+    and syncedLists.every(l => l.id >= 1 and l.id < nextListId and syncedLists.select(m => m.id == l.id).length() == 1)
+    and syncedItems.length() <= 200
+    and nextItemId >= 1
+    and syncedItems.every(it => itemWellFormed(it, syncedLists, nextItemId) and syncedItems.select(o => o.id == it.id).length() == 1)
+
+pure def applySync(s: Reminders, syncedLists: List[ListEntry], nextListId: int, syncedItems: List[ItemEntry], nextItemId: int): Reminders =
+  val curView = s.view
+  val keepCustom = match curView {
+    | CustomList(c) => hasList(syncedLists, c.listId)
+    | _ => true
+  }
+  val nextView = if (keepCustom) curView else Smart({ view: AllView })
+  val nextDrilled = if (keepCustom) s.drilledIn else false
+  val nextSelected = if (s.selectedId != 0 and hasItem(syncedItems, s.selectedId)) s.selectedId else 0
+  {
+    ...s,
+    lists: syncedLists,
+    nextListId: nextListId,
+    items: syncedItems,
+    nextItemId: nextItemId,
+    view: nextView,
+    drilledIn: nextDrilled,
+    selectedId: nextSelected,
+  }
 ```
 
 ### Switching owners resets custom lists, items, selection and holds; reopening resumes pending reads and holds while settling any sent write as unknown

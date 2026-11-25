@@ -1,14 +1,18 @@
 // spec/app/workflows/index.md, "Story: Open a workflow"; spec/app/workflows/index.md, "Story: Change a workflow"
 import * as KeyValueStore from "effect/persistence/KeyValueStore"
 import { type RemoteWorkflow, WorkflowActivationRejected, WorkflowHttpError, WorkflowLifecycleRejected, WorkflowMetadataRejected, WorkflowPauseRejected, WorkflowResponseInvalid } from "@elizaos/plugin-workflow-client"
+import * as Automations from "../../gen/app__workflows__automations.effect.vibe"
 import * as Listing from "../../gen/app__workflows__list.effect.vibe"
 import * as Model from "../../gen/app__workflows.effect.vibe"
 import type { Change, Effect as Out, Event } from "../../gen/app__workflows.effect.vibe"
-import type { Agent } from "../platform/agent.vibe"
+import { canFile } from "../../gen/app__workflows__request.effect.vibe"
+import { Agent } from "../platform/agent.vibe"
 import { ownerAt } from "../platform/owner.vibe"
+import { ask } from "../platform/remote.vibe"
 import { type Job, answer, applying, following, reacting, together } from "../runtime/reactor.vibe"
-import { WorkflowsApi } from "./api.vibe"
-import { Rows, refresh } from "./list.vibe"
+import { createShelf } from "../runtime/shelf.vibe"
+import { PromptSchema, WorkflowsApi } from "./api.vibe"
+import { type WorkflowRow, Rows, refresh } from "./list.vibe"
 
 interface Definition {
   readonly row: number
@@ -16,25 +20,55 @@ interface Definition {
   readonly workflow: RemoteWorkflow
 }
 
+export interface DefinitionSnapshot {
+  readonly seen?: Definition
+  readonly edit?: { readonly row: number; readonly name: string }
+  readonly toggling: ReadonlySet<number>
+}
+
+const emptyDefinition: DefinitionSnapshot = { toggling: new Set() }
+
 export service DefinitionWords {
   read(row: number): (Definition | undefined)!!
   store(row: number, workflow: RemoteWorkflow): number!!
   rename(row: number, name: string): void!!
   name(row: number): string!!
+  setToggling(row: number, active: boolean): void!!
+  snapshot(this: void): DefinitionSnapshot
+  subscribe(this: void, listener: () => void): () => void
 }
 
 const words = Layer.sync(DefinitionWords, () => {
-  let seen: Definition | undefined
-  let edit: { row: number; name: string } | undefined
+  const shelf = createShelf<DefinitionSnapshot>(emptyDefinition)
   return {
-    read: (row: number) => succeed(seen?.row === row ? seen : undefined),
+    read: (row: number) => sync(() => {
+      const seen = shelf.get().seen
+      return seen?.row === row ? seen : undefined
+    }),
     store: (row: number, workflow: RemoteWorkflow) => sync(() => {
+      const current = shelf.get()
+      const seen = current.seen
       const version = seen?.row !== row ? 1 : seen.workflow.versionId === workflow.versionId ? seen.version : seen.version + 1
-      seen = { row, workflow, version }
+      shelf.set({ ...current, seen: { row, workflow, version } })
       return version
     }),
-    rename: (row: number, name: string) => sync(() => { edit = { row, name } }),
-    name: (row: number) => succeed(edit?.row === row ? edit.name : ""),
+    rename: (row: number, name: string) => sync(() => {
+      shelf.update((current) => ({ ...current, edit: { row, name } }))
+    }),
+    name: (row: number) => sync(() => {
+      const edit = shelf.get().edit
+      return edit?.row === row ? edit.name : ""
+    }),
+    setToggling: (row: number, active: boolean) => sync(() => {
+      shelf.update((current) => {
+        const next = new Set(current.toggling)
+        if (active) next.add(row)
+        else next.delete(row)
+        return { ...current, toggling: next }
+      })
+    }),
+    snapshot: shelf.snapshot,
+    subscribe: shelf.subscribe,
   }
 })
 
@@ -72,11 +106,12 @@ effect function read(ticket: number, owner: number): Event!!Needs {
 }
 
 const HeldChange = Schema.fromJsonString(Schema.Struct({
-  id: Schema.Int, mutation: Schema.NonEmptyString, workflowId: Schema.NonEmptyString,
-  version: Schema.NonEmptyString, change: Schema.Literals(["Rename", "Remove", "Restore"]),
+  id: Schema.Int, mutation: Schema.String, workflowId: Schema.NonEmptyString,
+  version: Schema.NonEmptyString, change: Schema.Literals(["TurnOn", "TurnOff", "Rename", "Remove", "Restore"]),
 }))
 
 const changeKey = (owner: string, id: string) => `alpha/workflows/change/${encodeURIComponent(owner)}/${encodeURIComponent(id)}`
+const TriggerToggleReply = Schema.Struct({ trigger: PromptSchema })
 
 const declined = (failure: unknown) =>
   failure instanceof WorkflowActivationRejected || failure instanceof WorkflowPauseRejected || failure instanceof WorkflowLifecycleRejected
@@ -94,14 +129,32 @@ effect function changed(id: number, change: Change, version: number, name: numbe
   if (exact?.version !== version || !(try rows.sameOwner(scope, state.owner))) return { type: "changeAnswered", id, applied: false }
   const current = exact.workflow
   const key = changeKey(scope, current.id)
-  if ((store.get(key) catch () => "unreachable") !== undefined) return { type: "changeUnanswered" }
+  const rawPrevious = (store.get(key) catch () => "unreachable")
+  const previous = rawPrevious === undefined || rawPrevious === "unreachable"
+    ? undefined : (Schema.decodeUnknownEffect(HeldChange)(rawPrevious) catch () => undefined)
+  if (state.change.again) {
+    if (previous === undefined || previous.id !== id || previous.workflowId !== current.id || previous.version !== current.versionId || previous.change !== change) {
+      return { type: "changeUnanswered" }
+    }
+  } else if (rawPrevious !== undefined) {
+    return { type: "changeUnanswered" }
+  }
+  const persist = effect (mutation: string) => {
+    store.set(key, JSON.stringify({ id, mutation, workflowId: current.id, version: current.versionId, change }))
+      catch effect () => { throw new WorkflowResponseInvalid({ message: "Could not retain the change" }) }
+  }
+  let dispatched = state.change.again
   const outcome = effect {
-    if (change === "TurnOn") try workflow.activate(current.id, current.versionId)
-    else if (change === "TurnOff") try workflow.pause(current.id, current.versionId)
-    else {
+    if (change === "TurnOn" || change === "TurnOff") {
+      if (!state.change.again) try persist("")
+      dispatched = true
+      if (change === "TurnOn") try workflow.activate(current.id, current.versionId)
+      else try workflow.pause(current.id, current.versionId)
+      try ignore(store.remove(key))
+    } else {
       const keep = effect (mutation: string) => {
-        store.set(key, JSON.stringify({ id, mutation, workflowId: current.id, version: current.versionId, change }))
-          catch effect () => { throw new WorkflowResponseInvalid({ message: "Could not retain the change" }) }
+        try persist(mutation)
+        dispatched = true
       }
       if (change === "Rename") {
         const text = try definition.name(state.target)
@@ -113,7 +166,7 @@ effect function changed(id: number, change: Change, version: number, name: numbe
       try ignore(store.remove(key))
     }
     return "applied"
-  } catch (failure) => declined(failure) ? "refused" : "unknown"
+  } catch (failure) => !dispatched || declined(failure) ? "refused" : "unknown"
   if ((ownerAt() catch () => "") !== scope || outcome === "unknown") return { type: "changeUnanswered" }
   if (outcome === "refused") try ignore(store.remove(key))
   try refresh()
@@ -136,6 +189,12 @@ effect function checked(ticket: number, id: number): Event!!Needs {
   const kept = raw === undefined ? undefined : (Schema.decodeUnknownEffect(HeldChange)(raw) catch () => undefined)
   if (kept === undefined || kept.id !== id || kept.workflowId !== exact.workflow.id) return failed
   const answer = effect {
+    if (kept.change === "TurnOn" || kept.change === "TurnOff") {
+      const current = try workflow.detail(kept.workflowId)
+      const found = kept.change === "TurnOn" ? current.active && !current.removed : !current.active
+      return { found, current }
+    }
+    if (kept.mutation === "") return undefined
     const expected = kept.change === "Rename" ? try workflow.reconcileMetadata(kept.workflowId, kept.version, kept.mutation)
       : try workflow.reconcileLifecycle(kept.workflowId, kept.version, kept.mutation, kept.change === "Remove" ? "remove" : "restore")
     const current = try workflow.detail(kept.workflowId)
@@ -146,7 +205,8 @@ effect function checked(ticket: number, id: number): Event!!Needs {
   if (answer === undefined || scope !== confirmed || live.owner !== state.owner || live.target !== state.target
     || !Model.canChangeChecked(live, ticket, Math.max(1, live.version))) return failed
   const version = try definition.store(state.target, answer.current)
-  if (answer.found) try ignore(store.remove(key))
+  if (answer.found || version !== live.named) try ignore(store.remove(key))
+  if (answer.found) try refresh()
   return { type: "changeChecked", ticket, ok: true, found: answer.found, version }
 }
 
@@ -192,6 +252,69 @@ export effect function reviewName(row: number, proposed: string, unfinished: boo
   try ignore(machine.send({ type: "reviewChange", wanted: "Rename", unfinished, interrupted }))
 }
 
+const clearOnRelease = applying(
+  Model.Machine,
+  (state) => ({ owner: state.owner, target: state.target, settled: canFile(state.change) }),
+  effect ({ owner, target, settled }: { owner: number; target: number; settled: boolean }) => {
+    if (!settled || target <= 0 || owner <= 0) return
+    const exact = try (try DefinitionWords).read(target)
+    const scope = ownerAt() catch () => ""
+    if (exact === undefined || !(try (try Rows).sameOwner(scope, owner))) return
+    try ignore((try KeyValueStore.KeyValueStore).remove(changeKey(scope, exact.workflow.id)))
+  },
+)
+
+/** Toggle a Routine or Prompt directly from the list row switch, opening detail only when a scheduled workflow requires review before turning on. */
+export effect function toggleListRow(owner: number, row: WorkflowRow): void!!(Needs | Automations.Machine) {
+  if (row.removed || (row.kind !== "Routine" && row.kind !== "Prompt")) return
+  const listing = try Listing.Machine
+  const listState = try listing.get()
+  if (listState.owner !== owner || listState.list.status !== "Loaded" || listState.place.tag !== "ListingRows") return
+  const rows = try Rows
+  const scope = ownerAt() catch () => ""
+  if (!(try rows.sameOwner(scope, owner))) return
+  if (row.kind === "Routine" && !row.on && scheduled(row.record)) {
+    const open: Listing.Event = { type: "openRow", row: row.number }
+    if (Listing.canOpenRow(listState, row.number)) try ignore(listing.send(open))
+    return
+  }
+  const definition = try DefinitionWords
+  if (definition.snapshot().toggling.has(row.number)) return
+  if (row.kind === "Routine") {
+    const lifecycleState = try (try Model.Machine).get()
+    if (!canFile(lifecycleState.change)) return
+  } else {
+    const autoState = try (try Automations.Machine).get()
+    if (!canFile(autoState.change)) return
+  }
+  try definition.setToggling(row.number, true)
+  try Effect.ensuring(effect {
+    if (row.kind === "Routine") {
+      const { workflow } = try WorkflowsApi
+      const store = try KeyValueStore.KeyValueStore
+      const key = changeKey(scope, row.id)
+      const change: Change = row.on ? "TurnOff" : "TurnOn"
+      if ((store.get(key) catch () => "unreachable") !== undefined) return
+      const stored = effect {
+        try store.set(key, JSON.stringify({ id: 0, mutation: "", workflowId: row.id, version: row.record.versionId, change }))
+        return true
+      } catch () => false
+      if (!stored) return
+      const applied = effect {
+        if (row.on) try workflow.pause(row.id, row.record.versionId)
+        else try workflow.activate(row.id, row.record.versionId)
+        return true
+      } catch () => false
+      if (applied || (ownerAt() catch () => "") === scope) try ignore(store.remove(key))
+    } else {
+      const path = `/api/triggers/${encodeURIComponent(row.id)}`
+      const req = HttpClientRequest.bodyJsonUnsafe(HttpClientRequest.put(path), { enabled: !row.on, expectedRevision: row.record.revision })
+      try ignore(ask(Agent, req, TriggerToggleReply))
+    }
+    if ((ownerAt() catch () => "") === scope) try refresh()
+  }, definition.setToggling(row.number, false))
+}
+
 export effect function backLifecycle(): boolean!!Model.Machine {
   const machine = try Model.Machine
   if (!Model.canCancelReview(try machine.get())) return false
@@ -199,4 +322,4 @@ export effect function backLifecycle(): boolean!!Model.Machine {
   return true
 }
 
-export const lifecycle = together(reacting(Model, { carry }), words, focus, sending)
+export const lifecycle = together(reacting(Model, { carry }), words, focus, sending, clearOnRelease)

@@ -1,6 +1,6 @@
 // spec/app/workflows/approvals.md, "Story: Answer a run's approval on the phone"
 import type { WorkflowApproval } from "@elizaos/plugin-workflow-client";
-import { Effect } from "effect";
+import { useSyncExternalStore } from "react";
 import { Alert, Button } from "@repo/ui";
 import { useMachine } from "../../gen/app__workflows__approvals.react.ts";
 import type { Machine } from "../../gen/app__workflows__approvals.effect.vibe";
@@ -15,12 +15,24 @@ interface ApprovalProps extends Pick<Shown<Resident | Machine | ApprovalWords>, 
   readonly approvals?: readonly WorkflowApproval[];
 }
 
+const noticeMessages = {
+  Gone: "This approval is no longer waiting.",
+  OtherAgent: "This approval belongs to another agent.",
+  Lapsed: "This approval expired before it could be opened.",
+  Unreadable: "The approval couldn’t be checked.",
+} as const;
+
 /** An exact, versioned approval the agent says is still waiting on this run. */
 export function Approval({ runtime, run, owner, approvals }: ApprovalProps) {
   const machine = useTimed(runtime, useMachine);
+  const words = runtime.runSync(ApprovalWords);
+  const pending = useSyncExternalStore(words.subscribe, words.snapshot, words.snapshot);
   const state = machine.state;
-  if (!state || state.owner !== owner || state.runId !== run || state.approval === "NoApproval") return null;
-  const pending = runtime.runSync(Effect.flatMap(ApprovalWords, (words) => words.get()));
+  if (!state || state.owner !== owner) return null;
+  if (state.tapRun === run && (state.opened === "Gone" || state.opened === "OtherAgent" || state.opened === "Lapsed" || state.opened === "Unreadable") && state.approval === "NoApproval") {
+    return <Alert variant="warn" role="status">{noticeMessages[state.opened]}</Alert>;
+  }
+  if (state.runId !== run || state.approval === "NoApproval") return null;
   if (!pending || pending.number !== state.digest || pending.owner !== owner || pending.runId !== run) return null;
   const { approval } = pending;
   if (state.approval === "Waiting" && !approvals?.some((current) => current.status === "pending" && sameAsking(approval, current))) return null;
