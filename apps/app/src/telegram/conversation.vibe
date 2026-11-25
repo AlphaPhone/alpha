@@ -1,0 +1,149 @@
+// spec/app/telegram/conversation.md, "Story: Read and interact with a Telegram conversation"
+import * as Auth from "../../gen/app__telegram__auth.effect.vibe"
+import * as Conversation from "../../gen/app__telegram__conversation.effect.vibe"
+import type { Effect as Out, Event } from "../../gen/app__telegram__conversation.effect.vibe"
+import { Machine as Shell, showing } from "../../gen/app__shell.effect.vibe"
+import { Device } from "../platform/device.vibe"
+import type { MessagingSessions } from "../platform/messaging.vibe"
+import { Telegram } from "../platform/telegram.vibe"
+import { type Job, answer, contained, following, reacting, run, started, together } from "../runtime/reactor.vibe"
+import { reportSessionRevoked, resolveAuthedPeer, runPeerMutation } from "./auth.vibe"
+import {
+  TelegramStore,
+  isRevokedFailure,
+  mergeTimeline,
+  removeHistoryMessages,
+  updateDialogReadState,
+  upsertHistoryMessage,
+} from "./store.vibe"
+
+// spec/app/telegram/conversation.md, "Only the newest timeline read answers; MarkRead fires ONLY when the newest page is visibly shown in front"
+effect function readHistory(
+  ticket: number,
+  chat: number,
+  cursor: number,
+): Event!!(Telegram | MessagingSessions | TelegramStore | Auth.Machine) {
+  const target = try resolveAuthedPeer(chat)
+  if (Option.isNone(target)) return { type: "pageRead", ticket, ok: false, following: 0, unread: 0, upTo: 0 }
+  const { token, peerKey } = target.value
+  const store = try TelegramStore
+  const cursorStr = try store.cursorValue(cursor)
+  const res = (try Telegram).getHistory(token, peerKey, { cursor: cursorStr }) catch (failure) => ({ failed: failure })
+  if ("failed" in res) {
+    if (isRevokedFailure(res.failed)) try reportSessionRevoked()
+    return { type: "pageRead", ticket, ok: false, following: 0, unread: 0, upTo: 0 }
+  }
+  const followingId = res.has_more && res.next_cursor !== "" ? try store.nextCursorId(res.next_cursor) : 0
+  const updated = try store.update((snap) => {
+    const prior = cursor === 0 ? [] : (snap.historyByPeer.get(peerKey) ?? [])
+    const nextHistory = new Map(snap.historyByPeer)
+    nextHistory.set(peerKey, mergeTimeline(prior, res.messages))
+    return { ...snap, historyByPeer: nextHistory, pts: Math.max(snap.pts, res.pts) }
+  })
+  const timeline = updated.historyByPeer.get(peerKey) ?? []
+  const upTo = timeline.length > 0 ? timeline[timeline.length - 1].id : 0
+  const dialog = updated.dialogs.find((item) => item.peer_key === peerKey)
+  return { type: "pageRead", ticket, ok: true, following: followingId, unread: dialog?.unread_count ?? 0, upTo }
+}
+
+effect function markChatRead(chat: number, upTo: number): void!!(Telegram | MessagingSessions | TelegramStore | Auth.Machine) {
+  try runPeerMutation(
+    chat,
+    (client, token, peerKey) => client.readHistory(token, peerKey, upTo),
+    (res, peerKey) => asVoid(updateDialogReadState(peerKey, res.unread_count, res.read_inbox_max_id, res.pts)),
+  )
+}
+
+// spec/app/telegram/conversation.md, "Message edit, reviewed delete and reaction toggle execute one attempt at a time with honest outcomes"
+effect function applyEdit(id: number, chat: number, msg: number): Event!!(Telegram | MessagingSessions | TelegramStore | Auth.Machine) {
+  const draft = (try (try TelegramStore).get()).editDraft
+  if (draft === undefined || draft.messageId !== msg) return { type: "mutationAnswered", id, ok: false, known: true }
+  const outcome = try runPeerMutation(
+    chat,
+    (client, token, peerKey) => client.editMessage(token, { peer: peerKey, id: msg, message: draft.text }),
+    (res, peerKey) => asVoid(upsertHistoryMessage(peerKey, res.message, res.pts, true)),
+  )
+  return { type: "mutationAnswered", id, ok: outcome.confirmed, known: outcome.known }
+}
+
+effect function applyDelete(id: number, chat: number, msg: number): Event!!(Telegram | MessagingSessions | TelegramStore | Auth.Machine) {
+  const outcome = try runPeerMutation(
+    chat,
+    (client, token, peerKey) => client.deleteMessages(token, { peer: peerKey, ids: [msg] }),
+    (res, peerKey) => asVoid(removeHistoryMessages(peerKey, res.deleted_ids, res.pts)),
+  )
+  return { type: "mutationAnswered", id, ok: outcome.confirmed, known: outcome.known }
+}
+
+effect function applyReact(
+  id: number,
+  chat: number,
+  msg: number,
+  emoji: string,
+  add: boolean,
+): Event!!(Telegram | MessagingSessions | TelegramStore | Auth.Machine) {
+  const outcome = try runPeerMutation(
+    chat,
+    (client, token, peerKey) => client.sendReaction(token, { peer: peerKey, msgId: msg, reaction: add ? emoji : "" }),
+    (res, peerKey) => asVoid(upsertHistoryMessage(peerKey, res.message, res.pts)),
+  )
+  return { type: "mutationAnswered", id, ok: outcome.confirmed, known: outcome.known }
+}
+
+function carry(fx: Out): Job<Event, Telegram | MessagingSessions | TelegramStore | Auth.Machine, []> {
+  return match (fx) {
+    when { tag: "ReadMessages", let ticket, let chat, let cursor }: answer(
+      "history",
+      readHistory(ticket, chat, cursor),
+      { type: "pageRead", ticket, ok: false, following: 0, unread: 0, upTo: 0 },
+    );
+    when { tag: "MarkRead", let chat, let upTo }: run(`mark-read ${chat}`, markChatRead(chat, upTo));
+    when { tag: "EditMessage", let id, let chat, let msg }: answer(
+      `mutation ${id}`,
+      applyEdit(id, chat, msg),
+      { type: "mutationAnswered", id, ok: false, known: false },
+    );
+    when { tag: "DeleteMessage", let id, let chat, let msg }: answer(
+      `mutation ${id}`,
+      applyDelete(id, chat, msg),
+      { type: "mutationAnswered", id, ok: false, known: false },
+    );
+    when { tag: "ReactMessage", let id, let chat, let msg, let emoji, let add }: answer(
+      `mutation ${id}`,
+      applyReact(id, chat, msg, emoji, add),
+      { type: "mutationAnswered", id, ok: false, known: false },
+    );
+  }
+}
+
+const machine = reacting(Conversation, { carry })
+
+const authSync = following(
+  Auth.Machine,
+  (auth) => auth.step === "Authenticated",
+  Conversation.Machine,
+  (authenticated): Event => ({ type: "sessionChanged", authenticated }),
+)
+
+const visibilitySync = started(effect {
+  const device = try Device
+  const shell = try Shell
+  const conv = try Conversation.Machine
+  const store = try TelegramStore
+  const pageVisible = Stream.concat(Stream.fromEffect(device.showing()), device.visible)
+  const viewVisible = Stream.map(shell.changes, (state) => showing(state, "Telegram"))
+  try Stream.runForEach(Stream.zipLatest(pageVisible, viewVisible), effect ([shownPage, shownView]) => {
+    const state = try conv.get()
+    if (state.chat === 0) return
+    const peerKey = try store.peerKeyOf(state.chat)
+    const timeline = peerKey === undefined ? [] : ((try store.get()).historyByPeer.get(peerKey) ?? [])
+    const upTo = timeline.length > 0 ? timeline[timeline.length - 1].id : 0
+    const front = shownPage && shownView
+    if (Conversation.canVisibilityChanged(state, front, upTo)) {
+      try contained(conv.send({ type: "visibilityChanged", front, upTo }), "telegram visibility")
+    }
+  })
+}, "telegram conversation visibility")
+
+/** Telegram open conversation shell: timeline history, visible-only mark-read, reply, edit, reviewed delete, and reactions. */
+export const telegramConversation = together(machine, authSync, visibilitySync)

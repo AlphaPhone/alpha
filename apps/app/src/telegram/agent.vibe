@@ -1,0 +1,463 @@
+// spec/app/telegram/agent.md, "Story: Let Alpha help with Telegram safely and transparently"
+import * as Preferences from "../../gen/app__settings__preferences.effect.vibe"
+import * as AgentTelegram from "../../gen/app__telegram__agent.effect.vibe"
+import type { Actor, Effect as Out, Event, MutationTool, Pane, ReadTool, Told } from "../../gen/app__telegram__agent.effect.vibe"
+import * as Auth from "../../gen/app__telegram__auth.effect.vibe"
+import * as Composer from "../../gen/app__telegram__composer.effect.vibe"
+import * as Conversation from "../../gen/app__telegram__conversation.effect.vibe"
+import type { MessagingFailure, MessagingSessions } from "../platform/messaging.vibe"
+import { Telegram, type TelegramMessage } from "../platform/telegram.vibe"
+import { type Job, answer, contained, reacting, run, started, together, untimed } from "../runtime/reactor.vibe"
+import { reportSessionRevoked, resolveAuthedPeer, runPeerMutation } from "./auth.vibe"
+import {
+  type TelegramAgentMutationPayload,
+  type TelegramSnapshot,
+  TelegramStore,
+  currentSessionToken,
+  dialogTitle,
+  isRevokedFailure,
+  mergeEntities,
+  removeHistoryMessages,
+  senderNameOf,
+  updateDialogNotify,
+  updateDialogReadState,
+  upsertHistoryMessage,
+} from "./store.vibe"
+
+/** Sanitized, secret-free message summary included in bounded Telegram ambient context. */
+export interface TelegramAmbientMessage {
+  readonly id: number
+  readonly sender: string
+  readonly body: string
+  readonly date: number
+  readonly out: boolean
+}
+
+/** Bounded, privacy-gated ambient context snapshot exposed to Ask Alpha. */
+export type TelegramAmbientSnapshot =
+  | {
+    readonly available: false
+    readonly sensitive: boolean
+    readonly shareAllowed: boolean
+    readonly pane: Pane
+  }
+  | {
+    readonly available: true
+    readonly sensitive: false
+    readonly shareAllowed: true
+    readonly pane: Pane
+    readonly chatId: number
+    readonly peerKey: string | undefined
+    readonly chatTitle: string | undefined
+    readonly messages: ReadonlyArray<TelegramAmbientMessage>
+    readonly charCount: number
+  }
+
+/** Ask Alpha tool request routed through the formal Telegram agent machine. */
+export type TelegramAgentRequest =
+  | { readonly kind: "TelegramListChats"; readonly limit?: number }
+  | { readonly kind: "TelegramReadMessages"; readonly chat: number; readonly limit?: number }
+  | { readonly kind: "TelegramSearchMessages"; readonly query: string; readonly chat?: number; readonly limit?: number }
+  | { readonly kind: "TelegramGetChatInfo"; readonly chat: number }
+  | { readonly kind: "TelegramDraftMessage"; readonly turn: number; readonly chat: number; readonly text: string; readonly replyTo?: number }
+  | {
+    readonly kind: "ProposeMutation"
+    readonly turn: number
+    readonly chat: number
+    readonly message: number
+    readonly tool: MutationTool
+    readonly text?: string
+    readonly emoji?: string
+    readonly add?: boolean
+    readonly forEveryone?: boolean
+    readonly muted?: boolean
+  }
+  | { readonly kind: "ApproveMutation"; readonly turn: number; readonly revision: number }
+  | { readonly kind: "DeclineMutation" }
+
+/** Outcome returned by `executeTelegramAgentRequest`. */
+export interface TelegramAgentResult {
+  readonly ok: boolean
+  readonly told?: Told
+  readonly data?: unknown
+  readonly revision?: number
+}
+
+const pendingReadResolvers = new Map<string, Deferred.Deferred<unknown>>()
+
+function readKey(tool: ReadTool, chat: number, limit: number, query: string): string {
+  return `${tool}:${chat}:${limit}:${query}`
+}
+
+function formatAgentMessage(
+  msg: TelegramMessage,
+  snap: TelegramSnapshot,
+  peerKey: string,
+  includePeerKey: boolean,
+) {
+  return {
+    id: msg.id,
+    ...(includePeerKey ? { peerKey: msg.peer_key } : {}),
+    sender: senderNameOf(msg.from_id, snap.users, snap.chats, peerKey),
+    body: msg.message,
+    date: msg.date,
+    out: msg.out,
+  }
+}
+
+effect function runReadCall<A>(
+  call: A!MessagingFailure,
+): Option.Option<A>!!(MessagingSessions | TelegramStore | Auth.Machine) {
+  const res = call catch (failure) => ({ failed: failure })
+  if (typeof res === "object" && res !== null && "failed" in res) {
+    if (isRevokedFailure(res.failed)) try reportSessionRevoked()
+    return Option.none()
+  }
+  return Option.some(res)
+}
+
+// spec/app/telegram/agent.md, "Direct read tools run only while authenticated within the 25-message bound and mutate no state"
+effect function executeReadTool(
+  tool: ReadTool,
+  chat: number,
+  limit: number,
+  query: string,
+): unknown!!(Telegram | MessagingSessions | TelegramStore | Auth.Machine) {
+  const token = try currentSessionToken()
+  if (Option.isNone(token)) {
+    try reportSessionRevoked()
+    return { ok: false, error: "unauthenticated" }
+  }
+  const client = try Telegram
+  const store = try TelegramStore
+  const bounded = Math.max(1, Math.min(AgentTelegram.maxReadLimit, limit))
+  if (tool === "TelegramListChats") {
+    const res = try runReadCall(client.getDialogs(token.value, { limit: bounded }))
+    if (Option.isNone(res)) return { ok: false }
+    for (const dialog of res.value.dialogs) try store.chatIdOf(dialog.peer_key)
+    const snap = try store.update((current) => ({ ...current, ...mergeEntities(current, res.value.users, res.value.chats) }))
+    return {
+      ok: true,
+      chats: res.value.dialogs.map((dialog) => ({
+        peerKey: dialog.peer_key,
+        title: dialogTitle(dialog, snap.users, snap.chats),
+        unreadCount: dialog.unread_count,
+        mentionCount: dialog.unread_mentions_count,
+        pinned: dialog.pinned,
+        archived: dialog.archived,
+        canPost: dialog.can_post,
+      })),
+    }
+  }
+  if (tool === "TelegramSearchMessages") {
+    const peerKey = chat > 0 ? try store.peerKeyOf(chat) : undefined
+    const res = try runReadCall(client.searchGlobal(token.value, query, { peer: peerKey, limit: bounded }))
+    if (Option.isNone(res)) return { ok: false }
+    const snap = try store.update((current) => ({ ...current, ...mergeEntities(current, res.value.users, res.value.chats) }))
+    return {
+      ok: true,
+      messages: res.value.messages.map((msg) => formatAgentMessage(msg, snap, msg.peer_key, true)),
+    }
+  }
+  const peerKey = try store.peerKeyOf(chat)
+  if (peerKey === undefined) return { ok: false, error: "unknown_chat" }
+  if (tool === "TelegramGetChatInfo") {
+    const snap = try store.get()
+    const dialog = snap.dialogs.find((item) => item.peer_key === peerKey)
+    if (dialog === undefined) return { ok: false, error: "chat_not_loaded" }
+    return {
+      ok: true,
+      chat: {
+        chatId: chat,
+        peerKey,
+        title: dialogTitle(dialog, snap.users, snap.chats),
+        unreadCount: dialog.unread_count,
+        canPost: dialog.can_post,
+        pinned: dialog.pinned,
+        archived: dialog.archived,
+      },
+    }
+  }
+  const res = try runReadCall(client.getHistory(token.value, peerKey, { limit: bounded }))
+  if (Option.isNone(res)) return { ok: false }
+  const snap = try store.get()
+  return {
+    ok: true,
+    peerKey,
+    messages: res.value.messages.map((msg) => formatAgentMessage(msg, snap, peerKey, false)),
+  }
+}
+
+// spec/app/telegram/agent.md, "Staging a draft (`TELEGRAM_DRAFT_MESSAGE`) emits only `StageDraft` and NEVER sends"
+effect function applyStageDraft(
+  turn: number,
+  chat: number,
+  replyTo: number,
+): void!!(TelegramStore | Composer.Machine | Conversation.Machine) {
+  const store = try TelegramStore
+  const staged = (try store.get()).agentStagedDraft
+  if (staged === undefined || staged.turn !== turn || staged.chat !== chat) return
+  const composer = try Composer.Machine
+  const state = try composer.get()
+  if (state.chat === chat && state.slot.author === "OwnerWrote") return
+  try store.update((snap) => {
+    const nextDrafts = new Map(snap.drafts)
+    nextDrafts.set(chat, staged.text)
+    return { ...snap, drafts: nextDrafts }
+  })
+  if (state.chat === chat && Composer.canAgentDraft(state, state.clock, "Agent")) {
+    try contained(composer.send({ type: "agentDraft", now: untimed }, "Agent"), "stage alpha telegram draft")
+  }
+  if (replyTo > 0) {
+    const conv = try Conversation.Machine
+    const convState = try conv.get()
+    if (convState.chat === chat && Conversation.canSetReply(convState, replyTo)) {
+      try contained(conv.send({ type: "setReply", msg: replyTo }), "stage alpha telegram reply")
+    }
+  }
+}
+
+// spec/app/telegram/agent.md, "Mutations require a revision-bound proposal and owner confirmation on the exact revision shown"
+effect function applyApprovedMutation(
+  turn: number,
+  chat: number,
+  message: number,
+  tool: MutationTool,
+): Event!!(Telegram | MessagingSessions | TelegramStore | Auth.Machine) {
+  const payload = (try (try TelegramStore).get()).agentMutationPayloads.get(turn)
+  const outcome = match (tool) {
+    when "TelegramEditMessage": try runPeerMutation(
+      chat,
+      (client, token, peerKey) => client.editMessage(token, { peer: peerKey, id: message, message: payload?.text ?? "" }),
+      (res, peerKey) => asVoid(upsertHistoryMessage(peerKey, res.message, res.pts)),
+    );
+    when "TelegramDeleteMessage": try runPeerMutation(
+      chat,
+      (client, token, peerKey) => client.deleteMessages(token, { peer: peerKey, ids: [message] }),
+      (res, peerKey) => asVoid(removeHistoryMessages(peerKey, res.deleted_ids, res.pts)),
+    );
+    when "TelegramReact": try runPeerMutation(
+      chat,
+      (client, token, peerKey) => client.sendReaction(token, { peer: peerKey, msgId: message, reaction: payload?.add === false ? "" : (payload?.emoji ?? "👍") }),
+      (res, peerKey) => asVoid(upsertHistoryMessage(peerKey, res.message, res.pts)),
+    );
+    when "TelegramMarkRead": try runPeerMutation(
+      chat,
+      (client, token, peerKey) => client.readHistory(token, peerKey, message > 0 ? message : undefined),
+      (res, peerKey) => asVoid(updateDialogReadState(peerKey, res.unread_count, res.read_inbox_max_id, res.pts)),
+    );
+    when "TelegramMuteChat": try runPeerMutation(
+      chat,
+      (client, token, peerKey) => client.updateNotifySettings(token, peerKey, payload?.muted === false ? 0 : 2147483647),
+      (res, peerKey) => asVoid(updateDialogNotify(peerKey, res.notify_settings)),
+    );
+  }
+  return { type: "answered", attempt: turn, ok: outcome.confirmed, known: outcome.known }
+}
+
+effect function readBackMutation(
+  ticket: number,
+  chat: number,
+  message: number,
+): Event!!(Telegram | MessagingSessions | TelegramStore | Auth.Machine) {
+  const target = try resolveAuthedPeer(chat)
+  if (Option.isNone(target)) return { type: "readBackAnswered", ticket, ok: false, applied: false }
+  const { token, peerKey } = target.value
+  const res = (try Telegram).getHistory(token, peerKey, { limit: 20 }) catch (failure) => ({ failed: failure })
+  if ("failed" in res) {
+    if (isRevokedFailure(res.failed)) try reportSessionRevoked()
+    return { type: "readBackAnswered", ticket, ok: false, applied: false }
+  }
+  return { type: "readBackAnswered", ticket, ok: true, applied: res.messages.some((item) => item.id === message) }
+}
+
+function carry(
+  fx: Out,
+): Job<Event, Telegram | MessagingSessions | TelegramStore | Auth.Machine | Composer.Machine | Conversation.Machine, [Actor]> {
+  return match (fx) {
+    when { tag: "RunReadTool", let tool, let chat, let limit, let query }: run(
+      `read ${tool}`,
+      effect {
+        const result = try executeReadTool(tool, chat, limit, query)
+        try (try TelegramStore).update((snap) => ({ ...snap, lastReadResult: result }))
+        const key = readKey(tool, chat, limit, query)
+        const pending = pendingReadResolvers.get(key)
+        if (pending !== undefined) {
+          pendingReadResolvers.delete(key)
+          try Deferred.succeed(pending, result)
+        }
+      },
+      "Device",
+    );
+    when { tag: "StageDraft", let turn, let chat, let replyTo }: run(
+      `stage-draft ${turn}`,
+      applyStageDraft(turn, chat, replyTo),
+      "Device",
+    );
+    when { tag: "ProposeMutation" }: run("propose-mutation", Effect.void, "Device");
+    when { tag: "ApplyMutation", let turn, let chat, let message, let tool }: answer(
+      `apply-mutation ${turn}`,
+      applyApprovedMutation(turn, chat, message, tool),
+      { type: "answered", attempt: turn, ok: false, known: false },
+      "Device",
+    );
+    when { tag: "ReadBackMutation", let ticket, let chat, let message }: answer(
+      `readback-mutation ${ticket}`,
+      readBackMutation(ticket, chat, message),
+      { type: "readBackAnswered", ticket, ok: false, applied: false },
+      "Device",
+    );
+    when { tag: "ReportOutcome", let turn, let told }: run(
+      `report-outcome ${turn}`,
+      effect {
+        try (try TelegramStore).update((snap) => {
+          const nextOutcomes = new Map(snap.agentOutcomes)
+          nextOutcomes.set(turn, { turn, told })
+          return { ...snap, agentOutcomes: nextOutcomes }
+        })
+      },
+      "Device",
+    );
+  }
+}
+
+const machine = reacting(AgentTelegram, { carry })
+
+const screenSync = started(effect {
+  const auth = try Auth.Machine
+  const conv = try Conversation.Machine
+  const prefs = try Preferences.Machine
+  const agent = try AgentTelegram.Machine
+  const combined = Stream.zipLatest(Stream.zipLatest(auth.changes, conv.changes), prefs.changes)
+  try Stream.runForEach(combined, effect ([[authState, convState], prefsState]) => {
+    const authenticated = authState.step === "Authenticated"
+    const shareAllowed = Preferences.allows(prefsState, "TelegramContext")
+    const pane: Pane = !authenticated ? "AuthPane" : convState.chat > 0 ? "ChatPane" : "ListPane"
+    const chat = authenticated ? convState.chat : 0
+    const current = try agent.get()
+    if (
+      current.authenticated === authenticated
+      && current.shareAllowed === shareAllowed
+      && current.pane === pane
+      && current.activeChat === chat
+    ) return
+    if (AgentTelegram.canScreenUpdated(current, authenticated, shareAllowed, pane, chat, "Device")) {
+      try contained(agent.send({ type: "screenUpdated", authenticated, shareAllowed, pane, chat }, "Device"), "telegram agent screen sync")
+    }
+  })
+}, "telegram agent screen sync")
+
+// spec/app/telegram/agent.md, "Ambient context is emitted ONLY when authenticated, non-sensitive and allowed by `TelegramContext`, bounded to 15 messages and 6000 characters, with zero secrets"
+/** Read the current bounded, secret-free Telegram ambient context snapshot for Ask Alpha. */
+export effect function readTelegramAmbientSnapshot(): TelegramAmbientSnapshot!!(AgentTelegram.Machine | Auth.Machine | TelegramStore) {
+  const authState = try (try Auth.Machine).get()
+  const agentState = try (try AgentTelegram.Machine).get()
+  const store = try TelegramStore
+  const snap = try store.get()
+  const peerKey = agentState.activeChat > 0 ? try store.peerKeyOf(agentState.activeChat) : undefined
+  const rawTimeline = peerKey === undefined ? [] : (snap.historyByPeer.get(peerKey) ?? [])
+  const tail = rawTimeline.slice(-AgentTelegram.maxAmbientMessages)
+  const boundedMessages: TelegramAmbientMessage[] = []
+  let charCount = 0
+  for (const msg of tail) {
+    if (charCount >= AgentTelegram.maxAmbientChars) break
+    const sender = senderNameOf(msg.from_id, snap.users, snap.chats, peerKey ?? msg.peer_key)
+    const body = msg.message.slice(0, AgentTelegram.maxAmbientChars - charCount)
+    charCount += body.length
+    boundedMessages.push({ id: msg.id, sender, body, date: msg.date, out: msg.out })
+  }
+  const decision = AgentTelegram.ambientContext(agentState, boundedMessages.length, charCount)
+  if (authState.step !== "Authenticated" || decision.tag === "NoContext") {
+    return {
+      available: false,
+      sensitive: authState.step !== "Authenticated" || agentState.sensitive,
+      shareAllowed: agentState.shareAllowed,
+      pane: agentState.pane,
+    }
+  }
+  const dialog = peerKey === undefined ? undefined : snap.dialogs.find((item) => item.peer_key === peerKey)
+  return {
+    available: true,
+    sensitive: false,
+    shareAllowed: true,
+    pane: decision.pane,
+    chatId: decision.chat,
+    peerKey,
+    chatTitle: dialog === undefined ? undefined : dialogTitle(dialog, snap.users, snap.chats),
+    messages: boundedMessages.slice(0, decision.messageCount),
+    charCount: decision.charCount,
+  }
+}
+
+/** Execute one Ask Alpha Telegram read, staged draft, or revision-bound mutation request. */
+export effect function executeTelegramAgentRequest(
+  request: TelegramAgentRequest,
+): TelegramAgentResult!!(AgentTelegram.Machine | TelegramStore | Composer.Machine | Conversation.Machine) {
+  const agent = try AgentTelegram.Machine
+  const store = try TelegramStore
+  if (request.kind === "TelegramDraftMessage") {
+    const peerKey = try store.peerKeyOf(request.chat)
+    if (peerKey === undefined) return { ok: false }
+    const replyTo = request.replyTo ?? 0
+    if (!AgentTelegram.canStageDraft(try agent.get(), request.turn, request.chat, replyTo, "Agent")) return { ok: false }
+    try store.update((snap) => ({
+      ...snap,
+      agentStagedDraft: { turn: request.turn, chat: request.chat, peerKey, replyToMsgId: replyTo, text: request.text },
+    }))
+    const staged = try contained(agent.send({ type: "stageDraft", turn: request.turn, chat: request.chat, replyTo }, "Agent"), "telegram stage draft")
+    if (!staged) return { ok: false }
+    try applyStageDraft(request.turn, request.chat, replyTo)
+    return { ok: true, data: { chat: request.chat, peerKey, text: request.text, sent: false } }
+  }
+  if (request.kind === "ProposeMutation") {
+    const payload: TelegramAgentMutationPayload = {
+      turn: request.turn,
+      chat: request.chat,
+      message: request.message,
+      tool: request.tool,
+      text: request.text,
+      emoji: request.emoji,
+      add: request.add,
+      forEveryone: request.forEveryone,
+      muted: request.muted,
+    }
+    try store.update((snap) => {
+      const nextPayloads = new Map(snap.agentMutationPayloads)
+      nextPayloads.set(request.turn, payload)
+      return { ...snap, agentMutationPayloads: nextPayloads }
+    })
+    const proposed = agent.send(
+      { type: "proposeMutation", turn: request.turn, chat: request.chat, message: request.message, tool: request.tool },
+      "Agent",
+    ) catch () => undefined
+    if (proposed === undefined) return { ok: false }
+    return { ok: true, revision: proposed.state.pending.revision }
+  }
+  if (request.kind === "ApproveMutation") {
+    const approved = agent.send({ type: "approveMutation", turn: request.turn, revision: request.revision }, "Owner") catch () => undefined
+    if (approved === undefined) return { ok: false }
+    return { ok: true, told: approved.state.told }
+  }
+  if (request.kind === "DeclineMutation") {
+    const declined = try contained(agent.send({ type: "declineMutation" }, "Owner"), "telegram decline mutation")
+    return { ok: declined }
+  }
+  const chat = request.kind === "TelegramListChats" ? 0 : (request.chat ?? 0)
+  const query = request.kind === "TelegramSearchMessages" ? request.query : ""
+  const rawLimit = request.kind === "TelegramGetChatInfo" ? 1 : (request.limit ?? AgentTelegram.maxReadLimit)
+  const limit = Math.max(1, Math.min(AgentTelegram.maxReadLimit, rawLimit))
+  if (!AgentTelegram.canRunRead(try agent.get(), request.kind, chat, limit, query, "Agent")) return { ok: false }
+  const key = readKey(request.kind, chat, limit, query)
+  const deferred = try Deferred.make<unknown>()
+  pendingReadResolvers.set(key, deferred)
+  const sent = try contained(agent.send({ type: "runRead", tool: request.kind, chat, limit, query }, "Agent"), "telegram agent read")
+  if (!sent) {
+    pendingReadResolvers.delete(key)
+    return { ok: false }
+  }
+  const data = try Deferred.await(deferred)
+  return { ok: true, data }
+}
+
+/** Telegram agent integration shell: bounded ambient context, direct reads, non-sending drafts, and reviewed mutations. */
+export const telegramAgent = together(machine, screenSync)

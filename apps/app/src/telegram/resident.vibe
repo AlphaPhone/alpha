@@ -1,0 +1,110 @@
+// spec/app/telegram/index.md, "Story: Browse and search my Telegram chats"
+import * as ChatList from "../../gen/app__telegram.effect.vibe"
+import type { Standing } from "../../gen/app__telegram.effect.vibe"
+import * as Auth from "../../gen/app__telegram__auth.effect.vibe"
+import * as Conversation from "../../gen/app__telegram__conversation.effect.vibe"
+import { contained, together } from "../runtime/reactor.vibe"
+import {
+  type TelegramAgentRequest,
+  type TelegramAgentResult,
+  type TelegramAmbientSnapshot,
+  executeTelegramAgentRequest,
+  readTelegramAmbientSnapshot,
+  telegramAgent,
+} from "./agent.vibe"
+import { telegramAuth } from "./auth.vibe"
+import { telegramChats } from "./chats.vibe"
+import { telegramComposer } from "./composer.vibe"
+import { telegramConversation } from "./conversation.vibe"
+import { telegramNotices } from "./notices.vibe"
+import { TelegramStore, dialogTitle, isDialogMuted, telegramStore } from "./store.vibe"
+
+export type { TelegramAgentRequest, TelegramAgentResult, TelegramAmbientSnapshot }
+export { executeTelegramAgentRequest }
+
+/** Summary row rendered on Home's Telegram card. */
+export interface TelegramHomeCardRow {
+  readonly chatId: number
+  readonly peerKey: string
+  readonly title: string
+  readonly preview: string
+  readonly unreadCount: number
+  readonly mentionCount: number
+  readonly muted: boolean
+  readonly pinned: boolean
+  readonly date: number
+}
+
+/** Snapshot supplied to Home's `TelegramCard`. */
+export interface TelegramHomeCardSnapshot {
+  readonly standing: Standing
+  readonly unread: number
+  readonly mentions: number
+  readonly rows: ReadonlyArray<TelegramHomeCardRow>
+}
+
+/** Combined resident layer of all Telegram machines, store, SSE sync, Home badge, and notice bridge. */
+export const telegramResident = together(
+  telegramStore,
+  telegramAuth,
+  telegramChats,
+  telegramConversation,
+  telegramComposer,
+  telegramAgent,
+  telegramNotices,
+)
+
+/** Effect reading the bounded, secret-free Telegram ambient context snapshot for Ask Alpha. */
+export const telegramAmbientSnapshot = readTelegramAmbientSnapshot()
+
+/** Effect reading the Home card standing, unread/mention totals, and top conversation summaries. */
+export const telegramHomeCard = effect {
+  const list = try (try ChatList.Machine).get()
+  const att = ChatList.attention(list)
+  if (!list.authenticated) {
+    return { standing: att.standing, unread: 0, mentions: 0, rows: [] } satisfies TelegramHomeCardSnapshot
+  }
+  const store = try TelegramStore
+  const snap = try store.get()
+  const rows: TelegramHomeCardRow[] = []
+  for (const dialog of snap.dialogs.filter((item) => !item.archived).slice(0, 3)) {
+    const chatId = try store.chatIdOf(dialog.peer_key)
+    const timeline = snap.historyByPeer.get(dialog.peer_key) ?? []
+    const last = timeline.length > 0 ? timeline[timeline.length - 1] : undefined
+    rows.push({
+      chatId,
+      peerKey: dialog.peer_key,
+      title: dialogTitle(dialog, snap.users, snap.chats),
+      preview: last?.message ?? "",
+      unreadCount: dialog.unread_count,
+      mentionCount: dialog.unread_mentions_count,
+      muted: isDialogMuted(dialog),
+      pinned: dialog.pinned,
+      date: dialog.top_date,
+    })
+  }
+  return {
+    standing: att.standing,
+    unread: att.unread,
+    mentions: att.mentions,
+    rows,
+  } satisfies TelegramHomeCardSnapshot
+}
+
+/** Telegram's own step back: closes an open conversation or active search before leaving the app. */
+export const telegramBack = effect {
+  const conv = try Conversation.Machine
+  if (Conversation.canCloseChat(try conv.get())) {
+    return try contained(conv.send({ type: "closeChat" }), "telegram back from chat")
+  }
+  const list = try ChatList.Machine
+  const listState = try list.get()
+  if (listState.selected.query !== "" && ChatList.canSearch(listState, "")) {
+    return try contained(list.send({ type: "search", query: "" }), "telegram back from search")
+  }
+  const auth = try Auth.Machine
+  if (Auth.canBackToPhone(try auth.get())) {
+    return try contained(auth.send({ type: "backToPhone" }), "telegram back to phone")
+  }
+  return false
+}
