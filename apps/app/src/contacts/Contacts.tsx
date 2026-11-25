@@ -2,7 +2,7 @@
 import { Alert, AppHeader, Avatar, Banner, Button, Chip, Input, ListGroup, ListRow, SearchField, Tabs, TabsContent, Textarea, cn } from "@repo/ui";
 import { Effect, type ManagedRuntime } from "effect";
 import { CONTACT_MAX_ADDRESS, CONTACT_MAX_NAME, CONTACT_MAX_NOTES, CONTACT_MAX_NUMBER, type ContactDetail } from "@elizaos/os-bridges";
-import { Check, ChevronDown, ChevronLeft, Mail, MessageSquare, Minus, Pencil, Phone as Call, Plus, Search, Trash2, X, createLucideIcon } from "lucide-react";
+import { Check, ChevronDown, ChevronLeft, MessageSquare, Minus, Pencil, Plus, Search, Trash2, X, createLucideIcon } from "lucide-react";
 import { useMemo, useRef } from "react";
 import type { Machine as ContactsMachine } from "../../gen/app__contacts.effect.vibe";
 import { accessNeeded, listFailed, listedEmpty, maxEach, noMatches, pending, refused, shown, uncertain } from "../../gen/app__contacts.ts";
@@ -164,6 +164,8 @@ export function Contacts({ runtime, alpha }: ContactsProps & { alpha: Alpha }) {
 }
 
 /** The notes glyph of a contact's card, as Alpha's phone draws it. */
+const PhoneGlyph = createLucideIcon({ name: "ContactPhone", node: [["path", { key: "phone", d: "M4 4h4l2 5-2 2 5 5 2-2 5 2v4C10 22 2 14 4 4" }]] });
+const MailGlyph = createLucideIcon({ name: "ContactMail", node: [["path", { key: "mail", d: "M3 5h18v14H3zM3 5l9 7 9-7" }]] });
 const NotesGlyph = createLucideIcon({ name: "NotesGlyph", node: [["path", { key: "page", d: "M4 3h16v18H4zM8 7h8M8 11h8M8 15h5" }]] });
 
 /** One contact as the phone holds it now; compact while Alpha's sheet is open over it. */
@@ -220,18 +222,18 @@ function Card({ runtime, safe }: ContactsProps & { safe: boolean }) {
           </>}
           {card.phoneNumbers.length > 0 && <div className={cn("flex", compact ? "flex-wrap justify-start gap-2.5 pr-4 pb-2 pl-15" : "flex-wrap justify-center gap-3.5 px-4 pt-5.5 pb-1")} role="group" aria-label="Contact actions">
             {[...new Set(card.phoneNumbers.map(({ number }) => number))].flatMap((number) => [
-              can({ type: "reach", how: "Call" }) && <Button key={`call ${number}`} variant="secondary" size="icon" className={compact ? "size-11" : "size-15"} aria-label={`Call ${number}`} onClick={() => reach("Call", number)}><Call /></Button>,
+              can({ type: "reach", how: "Call" }) && <Button key={`call ${number}`} variant="secondary" size="icon" className={compact ? "size-11" : "size-15"} aria-label={`Call ${number}`} onClick={() => reach("Call", number)}><PhoneGlyph /></Button>,
               can({ type: "reach", how: "Message" }) && <Button key={`message ${number}`} variant="secondary" size="icon" className={compact ? "size-11" : "size-15"} aria-label={`Message ${number}`} onClick={() => reach("Message", number)}><MessageSquare /></Button>,
             ])}
           </div>}
           <div aria-label="Contact details" role="group" className="mx-4 mt-9 rounded-group bg-secondary py-1.5 select-text">
             {card.phoneNumbers.map((phone, at) => (
               // eslint-disable-next-line @eslint-react/no-array-index-key -- The phone can return a duplicated number at distinct positions.
-              <div key={`${phone.number}-${at}`} className={field}><Call aria-hidden className="size-5 shrink-0 text-muted-foreground" /><span className={value}>{displayNumber(phone.number)}</span><span className={sub}>{phoneLabel(phone.type)}</span></div>
+              <div key={`${phone.number}-${at}`} className={field}><PhoneGlyph aria-hidden className="size-5 shrink-0 text-muted-foreground" /><span className={value}>{displayNumber(phone.number)}</span><span className={sub}>{phoneLabel(phone.type)}</span></div>
             ))}
             {card.emailAddresses.map((email, at) => (
               // eslint-disable-next-line @eslint-react/no-array-index-key -- The phone can return a duplicated address at distinct positions.
-              <div key={`${email.address}-${at}`} className={field}><Mail aria-hidden className="size-5 shrink-0 text-muted-foreground" /><span className={value}>{email.address}</span><span className={sub}>{emailLabel(email.type)}</span></div>
+              <div key={`${email.address}-${at}`} className={field}><MailGlyph aria-hidden className="size-5 shrink-0 text-muted-foreground" /><span className={value}>{email.address}</span><span className={sub}>{emailLabel(email.type)}</span></div>
             ))}
             {card.notes && <div className={field}><NotesGlyph aria-hidden className="size-5 shrink-0 text-muted-foreground" /><span className={cn(value, "whitespace-pre-wrap")}>{card.notes}</span><span className={sub}>Notes</span></div>}
           </div>
