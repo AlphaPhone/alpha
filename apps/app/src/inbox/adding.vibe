@@ -140,11 +140,17 @@ effect function people(draft: number, ticket: number, query: string, further: bo
 }
 
 // spec/app/inbox/adding.md, "Nothing joins a draft but a file that fit, a file the owner saw, or a contact picked for it"
-effect function addedContact(draft: number, ticket: number, address: number): void!!(ContactAddresses | Adding.Machine | Drafts.Machine | Letters | Shell) {
+effect function addedContact(draft: number, ticket: number, address: number): void!!(ContactAddresses | Adding.Machine | Drafts.Machine | Letters | Shell | Telephony) {
   const adding = try Adding.Machine
   const chosen = (try ContactAddresses).current()
   const found = chosen?.ticket === ticket ? chosen.addresses.at(address - 1) : undefined
-  if (found === undefined || !(try activeDraft(draft)) || !Adding.canChooseContact(try adding.get(), draft, ticket, address)) return
+  if (found === undefined || !(try activeDraft(draft))) return
+  const permission = telephony("verify contact access", (phone) => phone.phone.status()) catch () => undefined
+  if (grantOf(permission?.permissions.contacts) !== "Granted") {
+    if (Adding.canChooseContact(try adding.get(), draft, ticket, address)) try ignore(exit(adding.send({ type: "closePeople" })))
+    return
+  }
+  if (!(try activeDraft(draft)) || !Adding.canChooseContact(try adding.get(), draft, ticket, address)) return
   const composer = try Drafts.Machine
   const words = try Letters
   const before = words.words(draft)
