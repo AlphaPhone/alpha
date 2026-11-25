@@ -1,6 +1,4 @@
 // spec/app/inbox/index.md, "Story: See my mail"
-import { Buffer } from "node:buffer";
-import { createHash } from "node:crypto";
 import type { GoogleStatus, MailCard, MailMessage, MailOperation, MailSearch } from "@elizaos/cloud/client";
 import type { Route } from "./routes.ts";
 
@@ -210,9 +208,12 @@ export function inboxRoutes(scene: InboxScene): Route[] {
       const text = partId === undefined ? undefined : stored?.attachmentText?.[partId];
       if (!file || text === undefined) return refused(404, "not_found");
       if (historyId === undefined || stored?.card.metadata.historyId !== historyId) return refused(409, "stale_revision");
-      const bytes = Buffer.from(text, "utf8");
+      const bytes = new TextEncoder().encode(text);
       scene.attachmentReads.push(`${messageId}/${partId}`);
-      return Response.json({ version: 1, messageId, historyId, ...file, dataBase64: bytes.toString("base64"), sha256: createHash("sha256").update(bytes).digest("hex") });
+      const dataBase64 = btoa(Array.from(bytes, (byte) => String.fromCharCode(byte)).join(""));
+      return crypto.subtle.digest("SHA-256", bytes).then((digest) => Response.json({
+        version: 1, messageId, historyId, ...file, dataBase64, sha256: Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join(""),
+      }));
     },
     (request, url) => {
       if (request.method !== "POST" || url.pathname !== operations) return;

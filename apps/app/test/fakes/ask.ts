@@ -12,6 +12,11 @@ export interface AskScene {
   searchDown: boolean;
   /** The agent fails every read of a conversation's messages with a 503, as while it is starting. */
   pagesDown: boolean;
+  /** The agent lists its conversations but answers every read of their messages 404, as a mismatched store or a proxy does. */
+  pagesMissing: boolean;
+  /** How many reads of a conversation's messages, and of the list of conversations, the agent was asked. */
+  pageReads: number;
+  listReads: number;
   acknowledgment?: string;
   metadata?: unknown[];
   /** The failure fields of the resident's terminal reply. */
@@ -28,7 +33,7 @@ export interface Kept {
 }
 
 export function askScene(): AskScene {
-  return { opened: 0, said: [], down: false, stalled: false, turns: new Map(), kept: new Map(), searchDown: false, pagesDown: false, cloudWarmCalls: 0 };
+  return { opened: 0, said: [], down: false, stalled: false, turns: new Map(), kept: new Map(), searchDown: false, pagesDown: false, pagesMissing: false, pageReads: 0, listReads: 0, cloudWarmCalls: 0 };
 }
 
 const encoder = new TextEncoder();
@@ -86,12 +91,15 @@ export function askRoutes(scene: AskScene): Route[] {
     },
     (request, url) => {
       if (request.method !== "GET" || url.pathname !== "/api/conversations") return;
+      scene.listReads += 1;
       return Response.json({ conversations: [...scene.kept].map(([id, one]) => ({ id, roomId: one.roomId, title: one.title, createdAt: 0, updatedAt: 0 })) });
     },
     (request, url) => {
       const id = /^\/api\/conversations\/([^/]+)\/messages$/.exec(url.pathname)?.[1];
       if (request.method !== "GET" || id === undefined || id === "messages") return;
+      scene.pageReads += 1;
       if (scene.pagesDown) return Response.json({ error: "starting" }, { status: 503 });
+      if (scene.pagesMissing) return Response.json({ error: "unknown_conversation" }, { status: 404 });
       const one = scene.kept.get(id);
       return one === undefined ? Response.json({ error: "unknown_conversation" }, { status: 404 }) : Response.json({ messages: one.messages.map((message) => ({ ...message, timestamp: 0 })) });
     },
