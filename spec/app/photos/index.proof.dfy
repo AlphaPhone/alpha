@@ -32,7 +32,7 @@ lemma Kept(xs: seq<int>, ys: seq<int>)
   }
 }
 
-lemma Sent(r: app__photos__changes_Run, items: seq<int>)
+lemma SentBatch(r: app__photos__changes_Run, items: seq<int>)
   requires app__photos__changes_alwaysDecidedByTheOwner(r) && app__photos__changes_alwaysOneRequestAtATime(r) && app__photos__changes_alwaysUndoFollowsADeletion(r)
   requires app__photos__changes_canSend(r, items)
   ensures app__photos__changes_running(r) && r.by_.Owner?
@@ -75,7 +75,7 @@ lemma sendNext_ensures(s: Photos, items: seq<int>, by_: app__photos__actor_Actor
   ensures (inv(s) ==> canSendNext(s, items, by_) ==> stepAlbumChangesCarryTheSelection(s, "sendNext", sendNext(s, items, by_).state, sendNext(s, items, by_).out))
 {
   if inv(s) && canSendNext(s, items, by_) {
-    Sent(s.job, items);
+    SentBatch(s.job, items);
   }
 }
 

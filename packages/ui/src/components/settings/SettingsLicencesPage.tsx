@@ -43,7 +43,7 @@ export function SettingsLicencesPage({ load, found, query, licences, onQuery, on
       {load === "loaded" && licences.length ? (
         <ListGroup heading={query ? `${licences.length} of ${found}` : `${found} licences`}>
           {licences.map((licence, index) => (
-            <ListRow key={licence.name} title={licence.name} detail={licence.licence} trailing={<ChevronRight aria-hidden className="size-5" />} onClick={onOpen && (() => onOpen(index))} {...placed({ place, onPlace }, index)} />
+            <ListRow key={licence.name} title={licence.name} detail={licence.licence} trailing={<ChevronRight aria-hidden className="size-4" />} onClick={onOpen && (() => onOpen(index))} {...placed({ place, onPlace }, index)} />
           ))}
         </ListGroup>
       ) : null}

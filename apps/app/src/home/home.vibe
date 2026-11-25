@@ -1,6 +1,5 @@
 // spec/app/home/index.md, "Story: Start Home"
 import * as KeyValueStore from "effect/persistence/KeyValueStore"
-import type { InstalledApp } from "@elizaos/os/bridges/definitions/system"
 import * as Home from "../../gen/app__home.effect.vibe"
 import type { Actor, Effect as Out, Event, Host } from "../../gen/app__home.effect.vibe"
 import { type Ask, waiting } from "../../gen/app__home__android.effect.vibe"
@@ -11,7 +10,7 @@ import { Device } from "../platform/device.vibe"
 import { Launcher, type Presentation, type Why } from "../platform/launcher.vibe"
 import { type Job, answer, contained, due, following, hearing, reacting, run, started, untimed, together } from "../runtime/reactor.vibe"
 import type { HomeAsk, HomeNoticeMessage } from "@repo/ui"
-import { Said, say } from "../notices/toasts.vibe"
+import { type Said, say } from "../notices/toasts.vibe"
 import type { Machine as Toasts } from "../../gen/app__notices__toasts.effect.vibe"
 import { stepping } from "../shell/shell.vibe"
 import { catalog, labelOf } from "./catalog.vibe"
@@ -66,7 +65,7 @@ effect function asked(ask: Ask, ticket: number): Event!!Launcher {
     ? (try launcher.shade())
     : app === undefined
       ? { done: false as const, why: "Gone" as Why }
-      : ask.tag === "OpenApp" ? (try launcher.open(app)) : (try launcher.info(app))
+      : (try launcher.open(app))
   return { type: "answered", ticket, opened: said.done, why: said.done ? "Unable" : said.why }
 }
 
@@ -88,24 +87,26 @@ function noticeOf(fx: Out): HomeNoticeMessage | undefined {
   }
 }
 
-/** The notice Home last told inside the drawer or the edit bar, and where: an external store the screen reads without an effect. */
+/** The notice Home last told inside the edit bar or drawer, and where: an external store the screen reads without an effect. */
 export interface Told {
   readonly notice: HomeNoticeMessage
-  readonly place: "InDrawer" | "InEditBar"
+  readonly place: "InEditBar" | "InDrawer"
 }
 
 let last: Told | undefined
 const listeners = new Set<() => void>()
 
-export const told = {
-  snapshot: (): Told | undefined => last,
-  subscribe(listener: () => void): () => void {
-    listeners.add(listener)
-    return () => { listeners.delete(listener) }
-  },
+function subscribeTold(this: void, listener: () => void): () => void {
+  listeners.add(listener)
+  return () => { listeners.delete(listener) }
 }
 
-// spec/app/home/index.md, "A notice shows as a toast on bare Home, inline in the open drawer, and in the edit bar while editing; told while an app or Ask Alpha is up, it is not shown"
+export const told = {
+  snapshot: (): Told | undefined => last,
+  subscribe: subscribeTold,
+}
+
+// spec/app/home/index.md, "A notice shows as a toast on bare Home and in the edit bar while editing; told while an app or Ask Alpha is up, it is not shown"
 effect function tell(fx: Out) {
   const notice = noticeOf(fx)
   if (notice === undefined) return
@@ -126,12 +127,6 @@ effect function go(view: View) {
   try contained((try Shell.Machine).send({ type: "openView", view }), "opening an app from Home")
 }
 
-// spec/app/home/index.md, "Add to Home adds one of Alpha's own apps it lists, and an app's menu in the drawer adds that app; adding from the menu closes the drawer"
-effect function closeDrawer() {
-  const shell = try Shell.Machine
-  if ((try shell.get()).drawer) try contained(shell.send({ type: "goBack" }), "closing the drawer")
-}
-
 function carry(fx: Out): Job<Event, KeyValueStore.KeyValueStore | Launcher | Device | Shell.Machine | Home.Machine | Toasts | Said, [Actor]> {
   return match (fx) {
     when { tag: "ReadSaved", let ticket }: answer("saved", readSaved(ticket), { type: "savedRead", ticket, found: "Unreadable", tiles: [] }, owner);
@@ -139,7 +134,6 @@ function carry(fx: Out): Job<Event, KeyValueStore.KeyValueStore | Launcher | Dev
     when { tag: "ReadApps", let ticket }: answer("apps", readApps(ticket), { type: "appsRead", ticket, ok: false, listed: [], visible: false }, owner);
     when { tag: "AskAndroid", let ask, let ticket }: answer("android", asked(ask, ticket), { type: "answered", ticket, opened: false, why: "Unable" }, owner);
     when { tag: "Go", let view }: run("go", go(view), owner);
-    when { tag: "CloseDrawer" }: run("drawer", closeDrawer(), owner);
     default: run(`tell ${fx.tag}`, tell(fx), owner);
   }
 }

@@ -25,6 +25,7 @@ import { useMachine as useSearch } from "../../gen/app__assistant__search.react.
 import type { Machine as CommsMachine } from "../../gen/app__phone__comms.effect.vibe";
 import { useMachine as useComms } from "../../gen/app__phone__comms.react.ts";
 import { type Machine as ShellMachine, showing } from "../../gen/app__shell.effect.vibe";
+import type { Machine as LayersMachine } from "../../gen/app__shell__layers.effect.vibe";
 import { useMachine as useShell } from "../../gen/app__shell.react.ts";
 import { untimed } from "../runtime/reactor.vibe";
 import { MailQuestions } from "../inbox/mail-context.vibe";
@@ -34,6 +35,7 @@ import { useMachine as useInboxList } from "../../gen/app__inbox.react.ts";
 import type { Machine as InboxSuggestions } from "../../gen/app__inbox__suggestion.effect.vibe";
 import type { Machine as InboxWriting } from "../../gen/app__inbox__drafts.effect.vibe";
 import { useMachine as useInboxWriting } from "../../gen/app__inbox__drafts.react.ts";
+import { home } from "../shell/shell.vibe";
 import { isCommsView } from "../shell/views.tsx";
 import { type Attachment, removeAttachment } from "./attachments.vibe";
 import { MediaReview } from "./media-review.vibe";
@@ -42,7 +44,7 @@ import { Talk } from "./talk.vibe";
 import { CommsTarget, type CommsTargetServices } from "../phone/CommsTarget.tsx";
 
 export interface AssistantProps {
-  runtime: ManagedRuntime.ManagedRuntime<ConversationMachine | ChatsMachine | ComposerMachine | SearchMachine | ReplyMachine | DockMachine | ShellMachine | CommsMachine | CommsTargetServices | Talk | MailQuestions | InboxList | InboxWriting | InboxSuggestions | Offers | MediaReview, unknown>;
+  runtime: ManagedRuntime.ManagedRuntime<ConversationMachine | ChatsMachine | ComposerMachine | SearchMachine | ReplyMachine | DockMachine | ShellMachine | LayersMachine | CommsMachine | CommsTargetServices | Talk | MailQuestions | InboxList | InboxWriting | InboxSuggestions | Offers | MediaReview, unknown>;
 }
 
 function turnOf(talking: Talking, label: string): AssistantTurnNoteProps["status"] | undefined {
@@ -102,6 +104,7 @@ function about(waitMs: number): string {
 }
 
 function actionOf(kind: Failure, fix: Fix): "signIn" | "funding" | "retry" | undefined {
+  if (kind === "OutOfFunds") return "funding";
   if (fix === "SignInFix") return "signIn";
   if (fix === "FundingFix" || (fix === "NoFix" && managesPlan(kind))) return "funding";
   if (fix === "RetryFix") return "retry";
@@ -110,7 +113,7 @@ function actionOf(kind: Failure, fix: Fix): "signIn" | "funding" | "retry" | und
 
 const detached = { mail: "Mail", transcript: "Transcript", shown: "Shown" } as const;
 
-const barHeight = 80;
+const barHeight = 102;
 
 /** @model spec/app/assistant/index.md */
 export function Assistant({ runtime }: AssistantProps) {
@@ -124,7 +127,7 @@ export function Assistant({ runtime }: AssistantProps) {
   const inbox = useInboxList(runtime);
   const email = useInboxWriting(runtime);
   const comms = useComms(runtime);
-  const board = runtime.runSync(Effect.map(Talk, (talk) => talk.board));
+  const [board] = useState(() => runtime.runSync(Effect.flatMap(Talk, (talk) => Effect.succeed(talk.board))));
   const seen = useSyncExternalStore((listener) => board.subscribe(listener), () => board.snapshot());
   const mail = runtime.runSync(MailQuestions);
   const reviewed = useSyncExternalStore(mail.subscribe, mail.snapshot);
@@ -175,14 +178,13 @@ export function Assistant({ runtime }: AssistantProps) {
       void runtime.runPromise(askComms({ about: subject, text: request }));
       return;
     }
-    const talk = runtime.runSync(Effect.map(Talk, (t) => t.board));
     if (newChat) {
-      talk.sendWhenMade = true;
+      board.queueSend();
       void chats.send(start);
       return;
     }
-    talk.outgoing = seen.typed;
-    talk.type("");
+    board.hold(seen.typed);
+    board.type("");
     void composer.send(hold);
   };
   // spec/app/assistant/reply.md, "A failed reply offers the fix the agent named, and a limit reached shows its live wait, never sending the message again"
@@ -288,18 +290,12 @@ export function Assistant({ runtime }: AssistantProps) {
         header={{
           title: seen.titles.get(shown.chosen) ?? "Ask Alpha",
           context: { view, selected: talking.context.selected, sensitive: talking.context.sensitive },
-          onHistory: () => {
-            void chats.send({ type: "browse" });
-            setListing(true);
-          },
-          onSearch: search.can({ type: "openSearch" }) ? () => { void chats.send({ type: "browse" }); void search.send({ type: "openSearch" }); } : undefined,
-          onNew: chats.can(start) ? () => void chats.send(start) : undefined,
+          onHome: () => void runtime.runPromise(home()),
           onClose: open && shell.can({ type: "goBack" }) ? () => void shell.send({ type: "goBack" }) : undefined,
           expanded: assistantDetent === "Full",
           onResize: assistantDetent === "Full"
             ? () => void shell.send({ type: "goBack" })
             : shell.can({ type: "raise", detent: "Full" }) ? () => void shell.send({ type: "raise", detent: "Full" }) : undefined,
-          making: making(shown),
           grabber: open ? grabber : undefined,
         }}
         transcript={{
@@ -343,6 +339,13 @@ export function Assistant({ runtime }: AssistantProps) {
           onStop: conversation.can({ type: "stop" }) ? () => void conversation.send({ type: "stop" }) : undefined,
           stopping: talking.turn.stopping,
           onFocusField: () => openWithFocus(false),
+          onHistory: () => {
+            void chats.send({ type: "browse" });
+            setListing(true);
+          },
+          onSearch: search.can({ type: "openSearch" }) ? () => { void chats.send({ type: "browse" }); void search.send({ type: "openSearch" }); } : undefined,
+          onNew: chats.can(start) ? () => void chats.send(start) : undefined,
+          making: making(shown),
           onClick: !open ? (event) => {
             if (event.target instanceof Element && event.target.closest("button, textarea")) return;
             openWithFocus(true);
