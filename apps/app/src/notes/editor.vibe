@@ -4,9 +4,9 @@ import * as List from "../../gen/app__notes.effect.vibe"
 import * as Trash from "../../gen/app__notes__trash.effect.vibe"
 import type { Actor } from "../../gen/app__notes__note.effect.vibe"
 import { NoteStore } from "../platform/notes.vibe"
-import { type Agent } from "../platform/agent.vibe"
+import type { Agent } from "../platform/agent.vibe"
 import { ownerAt } from "../platform/owner.vibe"
-import { type Job, answer, reacting, run, started, together, untimed } from "../runtime/reactor.vibe"
+import { type Job, Whole, answer, reacting, run, started, together, untimed } from "../runtime/reactor.vibe"
 import { type DraftWords, NoteContent, creationId, formatOf, fromSaved, hasContent, newWords, numberOf, wordsOf } from "./content.vibe"
 
 export type Fields = Pick<DraftWords, "title" | "body" | "items" | "kind">
@@ -68,7 +68,10 @@ export service NoteEditor {
 const typing = Layer.effect(NoteEditor, effect {
   const read = try NoteContent
   const editor = try Editor.Machine
+  const whole = try Whole
   const turn = try Semaphore.make(1)
+  const held = <A>(work: A!!(Editor.Machine | NoteContent | List.Machine | Agent)) => turn.withPermit(
+    flatMap(whole.context, (context) => Effect.provideContext(work, context as Context.Context<Editor.Machine | NoteContent | List.Machine | Agent>)))
 
   /** Save from the current words before closing, holding any failed or overtaken draft. */
   effect function close() {
@@ -80,8 +83,8 @@ const typing = Layer.effect(NoteEditor, effect {
   }
 
   return {
-    newNote: (kind: Fields["kind"], available: boolean, folder: number, covered: boolean) => turn.withPermit(freshEditor(kind, available, folder, covered)),
-    typed: (fields: Partial<Fields>) => turn.withPermit(effect {
+    newNote: (kind: Fields["kind"], available: boolean, folder: number, covered: boolean) => held(freshEditor(kind, available, folder, covered)),
+    typed: (fields: Partial<Fields>) => held(effect {
       const current = try editor.get()
       const draft = try read.draft()
       if (draft === undefined || !Editor.canEdit(current, "Owner")) return
@@ -91,10 +94,10 @@ const typing = Layer.effect(NoteEditor, effect {
       const event: Editor.Event = next.kind === current.kind ? { type: "edit", kept } : { type: "formatNote", kind: next.kind, kept }
       try ignore(editor.send(event, "Owner"))
     }),
-    save: () => turn.withPermit(saveDraft("Owner")),
-    close: () => turn.withPermit(close()),
-    takeSaved: () => turn.withPermit(oldEditor()),
-    keepMine: () => turn.withPermit(effect {
+    save: () => held(saveDraft("Owner")),
+    close: () => held(close()),
+    takeSaved: () => held(oldEditor()),
+    keepMine: () => held(effect {
       const current = (editor.send({ type: "keepMine" }, "Owner") catch () => undefined)?.state
       const draft = try read.draft()
       if (current === undefined || draft === undefined) return
@@ -103,7 +106,7 @@ const typing = Layer.effect(NoteEditor, effect {
       try ignore(read.keepDraft(retained))
       try saveDraft("Owner")
     }),
-    keepAsNew: () => turn.withPermit(effect {
+    keepAsNew: () => held(effect {
       const current = (editor.send({ type: "keepAsNew" }, "Owner") catch () => undefined)?.state
       const draft = try read.draft()
       if (current === undefined || draft === undefined) return
@@ -112,7 +115,7 @@ const typing = Layer.effect(NoteEditor, effect {
       try ignore(read.keepDraft(retained))
       try saveDraft("Owner")
     }),
-    discard: () => turn.withPermit(effect {
+    discard: () => held(effect {
       const current = try editor.get()
       if (!Editor.canDiscardDraft(current, "Owner") && !Editor.canDropDraft(current, "Owner")) return
       const identity = ownerAt() catch () => ""
@@ -120,7 +123,7 @@ const typing = Layer.effect(NoteEditor, effect {
       try ignore(editor.send({ type: current.unreadable ? "dropDraft" : "discardDraft" }, "Owner"))
       try read.showDraft(undefined)
     }),
-    settled: (initial: DraftWords, id: string, revision: number) => turn.withPermit(effect {
+    settled: (initial: DraftWords, id: string, revision: number) => held(effect {
       const current = try read.draft()
       if (current === undefined || current.owner !== initial.owner || current.creation !== initial.creation) return
       const saved = { ...current, id, base: revision, folder: 0, made: 0 }
