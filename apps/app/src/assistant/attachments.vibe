@@ -122,33 +122,33 @@ effect function added(target: FileTarget, candidates: readonly { readonly name: 
     const current = try composer.get()
     const context = (try conversation.get()).context
     if (context.sensitive || context.revision !== target.revision || !sameBinding(current.binding, target.binding) || current.read.ticket !== target.slot || current.slot !== "Open" || current.away !== "Free") return false
-  const prior = board.snapshot()
-  const before = sameBinding(prior.filesBinding, target.binding) ? prior.files : []
-  const chosen: Attached[] = [...before]
-  const room = Composer.maxFiles - Composer.attachments(current.editor)
-  let bytes = before.reduce((size, file) => size + file.data.length, 0)
-  const refused: string[] = []
-  for (const candidate of candidates) {
-    const next = candidate.file
-    if (next !== undefined && chosen.some((file) => file.id === next.id)) continue
-    if (next === undefined || chosen.length - before.length >= room || !batchFits(chosen.length + 1, bytes + next.data.length)) refused.push(candidate.name)
-    else {
-      chosen.push(next)
-      bytes += next.data.length
+    const prior = board.snapshot()
+    const before = sameBinding(prior.filesBinding, target.binding) ? prior.files : []
+    const chosen: Attached[] = [...before]
+    const room = Composer.maxFiles - Composer.attachments(current.editor)
+    let bytes = before.reduce((size, file) => size + file.data.length, 0)
+    const refused: string[] = []
+    for (const candidate of candidates) {
+      const next = candidate.file
+      if (next !== undefined && chosen.some((file) => file.id === next.id)) continue
+      if (next === undefined || chosen.length - before.length >= room || !batchFits(chosen.length + 1, bytes + next.data.length)) refused.push(candidate.name)
+      else {
+        chosen.push(next)
+        bytes += next.data.length
+      }
     }
-  }
-  const count = chosen.length - before.length
-  if (count > 0) {
-    const event: Composer.Event = { type: "attach", count }
-    if (!Composer.enabled(current, event)) return false
-    board.change({ files: chosen, filesBinding: target.binding })
-    const taken = composer.send(event) catch () => undefined
-    if (taken === undefined) {
-      if (board.snapshot().files === chosen) board.change({ files: prior.files, filesBinding: prior.filesBinding })
-      return false
+    const count = chosen.length - before.length
+    if (count > 0) {
+      const event: Composer.Event = { type: "attach", count }
+      if (!Composer.enabled(current, event)) return false
+      board.change({ files: chosen, filesBinding: target.binding })
+      const taken = composer.send(event) catch () => undefined
+      if (taken === undefined) {
+        if (board.snapshot().files === chosen) board.change({ files: prior.files, filesBinding: prior.filesBinding })
+        return false
+      }
     }
-  }
-  board.change({ attachmentNotice: refused.length === 0 ? "" : `Could not attach ${refused.join(", ")}` })
+    board.change({ attachmentNotice: refused.length === 0 ? "" : `Could not attach ${refused.join(", ")}` })
     return refused.length < candidates.length
   })
 }
@@ -177,15 +177,15 @@ export effect function removeFile(id: string): void!!(Talk | Composer.Machine) {
   const { board, attachmentLock } = try Talk
   const composer = try Composer.Machine
   try attachmentLock.withPermits(1)(effect {
-  const current = try composer.get()
-  const shown = board.snapshot()
-  if (!sameBinding(shown.filesBinding, current.binding) || !Composer.canRemoveFile(current)) return
-  const before = shown.files
-  const files = before.filter((file) => file.id !== id)
-  if (files.length === before.length) return
-  board.change({ files, attachmentNotice: "" })
-  const taken = composer.send({ type: "removeFile" }) catch () => undefined
-  if (taken === undefined && board.snapshot().files === files) board.change({ files: before })
+    const current = try composer.get()
+    const shown = board.snapshot()
+    if (!sameBinding(shown.filesBinding, current.binding) || !Composer.canRemoveFile(current)) return
+    const before = shown.files
+    const files = before.filter((file) => file.id !== id)
+    if (files.length === before.length) return
+    board.change({ files, attachmentNotice: "" })
+    const taken = composer.send({ type: "removeFile" }) catch () => undefined
+    if (taken === undefined && board.snapshot().files === files) board.change({ files: before })
   })
 }
 
