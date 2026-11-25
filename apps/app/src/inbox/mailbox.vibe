@@ -132,10 +132,11 @@ const home = started(effect {
       detail: card.from.replace(/<[^>]*>/u, "").replace(/"/gu, "").trim() || card.from,
     })) : []
     const card = { connected, unread: unread.unread, rows, current: unread.standing === "Ready" && civilDay(unread.at) === civilDay(try time.now()) }
-    const written = JSON.stringify([card, unread.more])
+    const read = connected ? { account: ledger.email(state.selected.account), at: unread.at } : undefined
+    const written = JSON.stringify([card, unread.more, read])
     if (written !== previous) {
       previous = written
-      fromAreas.mail(card, unread.more)
+      fromAreas.mail(card, unread.more, read)
     }
   })
 }, "telling Home")
