@@ -1,7 +1,7 @@
 // @vitest-environment happy-dom
 // spec/app/voice/index.md, "Story: Hold a spoken conversation"; spec/app/voice/index.md, "The speech pipeline warms on startup, foreground return and account readiness without opening the microphone"; spec/app/voice/index.md, "A reply that needs the owner's review in chat keeps voice listening with the microphone open"; spec/app/voice/index.md, "Story: Go where the conversation takes me"; spec/app/voice/index.md, "A spoken reply says a written date, clock time, range and percentage in words"; spec/app/voice/index.md, "A turn Cloud refuses because the account is out of funds ends voice quietly, as Stop does"
 import { type Context, Effect, Layer, ManagedRuntime, Stream } from "effect";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import * as Shell from "../gen/app__shell.effect.vibe";
 import * as Voice from "../gen/app__voice.effect.vibe";
 import { VoiceBridge } from "../src/platform/voice.vibe";
@@ -25,6 +25,7 @@ import assistant from "../src/assistant/index.tsx";
 import files from "../src/files/index.tsx";
 import { button, closeAll, drawn, fill, later, open, press, seen, underAct, until as drawnUntil } from "./alpha.tsx";
 import { scene, type Scene } from "./fakes/scene.ts";
+import { prepared } from "./fakes/notes.ts";
 import { textReview } from "./fakes/text-review.ts";
 import { fakeWorld } from "./fakes/world.vibe";
 
@@ -650,7 +651,7 @@ describe("Talk from Ask Alpha's composer (spec/app/voice/index.md, \"Story: Hold
   });
 
   // spec/app/assistant/context.md, "A spoken turn carries what a typed turn sent at that moment would, the view claim included"
-  it("a spoken turn tells the agent the same screen a typed turn sent at that moment does, location and view claim included", async () => {
+  it("a spoken turn tells the agent the same screen as typing and follows the current prepared view with Talk still open", async () => {
     const world = { ...scene(), phone: true, signedIn: false };
     const { alpha } = await open(world, talkMounts);
     const area = assistant.runtime(alpha);
@@ -673,8 +674,42 @@ describe("Talk from Ask Alpha's composer (spec/app/voice/index.md, \"Story: Hold
     speakUtterance(world, "And now?");
     await drawnUntil(alpha, area, Voice.Machine, (s) => s.sent === 1 && s.phase === "Listening");
     expect([world.ask.said.at(-1), world.ask.metadata.length, world.ask.metadata.at(-1)]).toEqual(["And now?", 3, typed]);
-    await press("Stop voice conversation");
-    await drawnUntil(alpha, area, Voice.Machine, (s) => s.phase === "Idle");
+
+    // spec/app/voice/index.md, "An active voice conversation may ask the shell to open Home or any admitted screen"
+    const shellState = () => alpha.runtime.runSync(Shell.Machine.use((machine) => machine.get()));
+    const preparedFor = (view: string) => (metadata: unknown) => [
+      prepared(String((metadata as { viewClientId?: unknown }).viewClientId), view, false),
+    ];
+    const client = (typed as { viewClientId: string }).viewClientId;
+    const binding = (viewId: string) => ({ requestId: `request-${viewId}`, clientId: client, viewId, viewType: "gui", installationId: "alpha" });
+    world.ask.nextReplyChunks = ["[NAVIGATE:Notes] Opening Calendar."];
+    world.ask.nextActions = preparedFor("calendar");
+    speakUtterance(world, "Open my calendar");
+    await drawnUntil(alpha, area, Voice.Machine, (s) => s.sent === 2 && s.phase === "Listening" && s.mic === "On");
+    expect(shellState().trail).toEqual(["Calendar"]);
+    expect(world.notes.views).toEqual([
+      { path: "claim", body: binding("calendar") },
+      { path: "result", body: { ...binding("calendar"), claimId: "claim-1", success: true, result: { switched: true } } },
+    ]);
+
+    // spec/app/voice/index.md, "Voice keeps talking after a navigation only when it is the one the conversation asked for; any other ends it"
+    const gate = Promise.withResolvers<void>();
+    world.notes.viewClaimGate = gate.promise;
+    try {
+      await drawnUntil(alpha, area, Conversation, (s) => s.observing && s.context.showing.tag === "App" && s.context.showing.view === "Calendar");
+      world.ask.nextReplyChunks = ["Opening Notes."];
+      world.ask.nextActions = preparedFor("notes");
+      speakUtterance(world, "Open Notes");
+      await drawn(() => vi.waitFor(() => expect(world.notes.views.at(-1)).toEqual({ path: "claim", body: binding("notes") })));
+      await drawn(() => alpha.runtime.runPromise(Shell.Machine.use((machine) => machine.send({ type: "openView", view: "Notes" }))));
+      await drawnUntil(alpha, area, Voice.Machine, (s) => s.phase === "Idle");
+    } finally {
+      gate.resolve();
+    }
+    await drawn(() => vi.waitFor(() => expect(world.notes.views.at(-1)).toEqual({
+      path: "result", body: { ...binding("notes"), claimId: "claim-3", success: false, result: { switched: false } },
+    })));
+    expect(shellState()).toMatchObject({ trail: ["Calendar", "Notes"], assistant: "Bar" });
   });
 
   // spec/app/voice/index.md, "A reply that needs the owner's review in chat keeps voice listening with the microphone open"
