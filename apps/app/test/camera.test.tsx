@@ -163,7 +163,7 @@ describe("Camera on a phone", () => {
       selected.mutationRevision = operation;
       selected.favorite = operation === "favorite";
       const status = selected.favorite ? "favorited" : "unfavorited";
-      return { status: "complete", outcomes: [{ id: selected.id, status, item: selected }] };
+      return Promise.resolve({ status: "complete", outcomes: [{ id: selected.id, status, item: selected }] });
     };
     world.photos.rows.splice(world.photos.rows.indexOf(selected), 1);
     world.photos.rows.push(selected);
