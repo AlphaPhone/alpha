@@ -23,7 +23,7 @@ import { desktopPreview } from "../shell/canvas.vibe";
 import type { ManagedRuntime } from "effect";
 import { Pages, type PageRuntime, addressOf, idOf, inputOf, openDownloads, placed } from "./browser.vibe";
 import { LibraryRows, editHistory, markPage, setMark } from "./library.vibe";
-import { type SharePages, offerShare } from "./share.vibe";
+import { type SharePages, cancelPrivateFrame, confirmPrivateFrame, offerShare } from "./share.vibe";
 
 export interface BrowserProps {
   /** Provides the Browser's tabs and each tab's page, `browser` of browser.vibe, over the resident machines and the phone's tab host. */
@@ -79,8 +79,6 @@ function Tab({ runtime, alpha, tabs, page }: BrowserProps & { tabs: State; page:
   const editing = tabs.layer === "Address";
   const native = Option.isSome(tabHost.plugin);
   const hasLibrary = native || tabHost.web !== undefined;
-  const canCopy = native && state.phase === "Shown" && tabHost.session.pageBinding(idOf(tab)) !== undefined;
-  const canShare = native && share.can({ type: "openPanel", ready: canCopy });
   const privateTab = state.kind === "Private";
   const readSuggestions = () => hasLibrary ? loadLibrary(runtime) : undefined;
   const cover = (layer: State["layer"]) => (browser.can({ type: "cover", layer }) ? () => void browser.send({ type: "cover", layer }) : undefined);
@@ -112,6 +110,7 @@ function Tab({ runtime, alpha, tabs, page }: BrowserProps & { tabs: State; page:
   const binding = tabs.layer === "Menu" && state.phase === "Shown"
     ? tabHost.web === undefined ? tabHost.session.pageBinding(idOf(tab)) : tabHost.web.current(idOf(tab), state.load)
     : undefined;
+  const canShare = share.can({ type: "openPanel", ready: binding !== undefined });
   const booked = binding !== undefined && runtime.runSync(Effect.flatMap(LibraryRows, (rows) => rows.bookmarks())).some((entry) => entry.url === binding.url);
   const canBookmark = library.can(booked ? { type: "unmark" } : { type: "mark", secure: state.secure, userInfo: false });
   const chooseBookmark = () => {
@@ -136,8 +135,8 @@ function Tab({ runtime, alpha, tabs, page }: BrowserProps & { tabs: State; page:
     hasLibrary && { label: booked ? "Bookmarked" : "Bookmark", icon: <Star fill={booked ? "currentColor" : "none"} />, disabled: !canBookmark, onSelect: chooseBookmark },
     hasLibrary && { label: "Library", name: "Library, bookmarks and history", icon: <History />, onSelect: openLibrary },
     hasLibrary && { label: "Downloads", icon: <Download />, onSelect: () => void runtime.runPromise(openDownloads) },
-    canShare && { label: "Share", icon: <Share2 />, onSelect: () => void runtime.runPromise(offerShare("System")) },
-    canShare && canCopy && { label: "Copy link", icon: <Link />, onSelect: () => void runtime.runPromise(offerShare("Copy")) },
+    native && canShare && { label: "Share", icon: <Share2 />, onSelect: () => void runtime.runPromise(offerShare("System")) },
+    canShare && binding !== undefined && { label: "Copy link", icon: <Link />, onSelect: () => void runtime.runPromise(offerShare("Copy")) },
     native && can({ type: "openFind" }) && { label: "Find", name: "Find in page", icon: <Search />, onSelect: () => { setFinding(""); void browser.send({ type: "uncover" }).then(() => send({ type: "openFind" })); } },
     canAskErase(tabs) && { label: "Clear all", name: "Clear all browsing data", icon: <Trash2 />, onSelect: () => void browser.send({ type: "askErase" }) },
   ];
@@ -199,6 +198,11 @@ function Tab({ runtime, alpha, tabs, page }: BrowserProps & { tabs: State; page:
           onNewPrivate={opening("Private")}
         />
       )}
+      <ConfirmDialog open={share.state?.handoff.showing === true} title="Open private page?" confirmLabel="Open in browser"
+        onConfirm={() => void runtime.runPromise(confirmPrivateFrame())}
+        onCancel={() => void runtime.runPromise(cancelPrivateFrame())}>
+        Your browser will receive this private page.
+      </ConfirmDialog>
       <ConfirmDialog open={tabs.erasing === "Asked"} title="Clear browsing data?" confirmLabel="Clear" destructive
         onConfirm={() => { if (canConfirmErase(tabs)) void browser.send({ type: "confirmErase" }); }}
         onCancel={() => { if (canCancelErase(tabs)) void browser.send({ type: "cancelErase" }); }}>
