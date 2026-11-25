@@ -251,14 +251,18 @@ pure val personalDetailSwap: bool = true
 pure def privacyAdmitted(secrets: bool, details: bool): bool = secrets == secretSwap and details == personalDetailSwap
 ```
 
-### The agent changes the owner's mail and calendar through Google only where the launch consents, and the pack consents to neither yet
+### The agent changes the owner's mail and calendar through Google only where the launch consents, and the pack's host file consents to neither
 
 eliza's launch carries the owner's consent for the agent to change Gmail
 and to edit Google Calendar (`spec/agent/host/launch.md`, `google`), off
-unless named. The old phone reached Google only through its own host
-module, with every change reviewed on the phone; whether the pack's launch
-consents to either waits on the owner, and until then it consents to
-neither.
+unless named. The pack's host file consents to neither. The owner's own
+choice in Settings replaces it at each launch once the phone has read or
+saved it (`spec/app/settings/preferences.md`, "The agent is launched
+allowed to change Gmail and Calendar exactly as the phone last read or
+saved, allowed neither once it could not read them, and Alpha says nothing
+of it before the first answer"): Alpha's agent service keeps that choice
+and gives it to eliza's, which launches with it in place of the host
+file's.
 
 ```quint
 pure val gmailChanges: bool = false
