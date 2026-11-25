@@ -1,0 +1,63 @@
+// spec/app/assistant/chats.md, "Story: Reuse words from a message"
+import * as Chats from "../../gen/app__assistant__chats.effect.vibe"
+import * as Inbox from "../../gen/app__inbox.effect.vibe"
+import * as Drafts from "../../gen/app__inbox__drafts.effect.vibe"
+import type { Machine as OffersMachine } from "../../gen/app__inbox__suggestion.effect.vibe"
+import * as Shell from "../../gen/app__shell.effect.vibe"
+import type { Machine as Toasts } from "../../gen/app__notices__toasts.effect.vibe"
+import { useInEmail, type Offers } from "../inbox/suggestion.vibe"
+import { say, type Said } from "../notices/toasts.vibe"
+import { Device } from "../platform/device.vibe"
+import { Talk, type Line } from "./talk.vibe"
+
+/** The exact page and recorded message offered by the transcript. */
+export interface MessageSelection {
+  readonly conversation: number
+  readonly page: number
+  readonly message: number
+}
+
+/** The email draft offered to the owner, or the selected account for a new draft. */
+export interface EmailDestination {
+  readonly account: number
+  readonly draft: number
+  readonly session: number
+}
+
+/** Which draft Inbox can review an answer for under the current account and session. */
+export function emailDestination(mailbox: Inbox.Mailbox | undefined, composer: Drafts.Composer | undefined): EmailDestination | undefined {
+  if (!mailbox?.signedIn || mailbox.accounts.status !== "Loaded" || mailbox.failure === "Revoked" || composer === undefined) return undefined
+  const account = composer.open ? composer.letter.account : mailbox.selected.account
+  if (!Inbox.accessOf(mailbox, account).grant.read || (!composer.open && !Drafts.canStartedWith(composer, "Fresh", account))) return undefined
+  return { account, draft: composer.open ? composer.letter.id : 0, session: composer.session }
+}
+
+effect function selected(selection: MessageSelection): (Line | undefined)!!(Chats.Machine | Talk) {
+  const chats = try (try Chats.Machine).get()
+  if (chats.chosen !== selection.conversation || chats.page.ticket !== selection.page || chats.page.status !== "Loaded") return undefined
+  const { board } = try Talk
+  const messageId = board.messageId(selection.message)
+  return board.page(selection.page).find((line) => line.id === messageId)
+}
+
+/** Copy the text of the selected message and report the clipboard's answer. */
+export effect function copyMessage(selection: MessageSelection): void!!(Chats.Machine | Talk | Device | Toasts | Said) {
+  const line = try selected(selection)
+  if (line === undefined || !Chats.copyableText(true, line.text.trim() === "")) return
+  const copied = try (try Device).copyText(line.text)
+  try say(copied ? "Copied" : "Could not copy message", !copied)
+}
+
+/** Bring the selected reply to Inbox for a review without sending or changing a draft. */
+export effect function emailMessage(selection: MessageSelection, expected: EmailDestination): void!!(Chats.Machine | Talk | Inbox.Machine | Drafts.Machine | OffersMachine | Offers | Shell.Machine | Toasts | Said) {
+  const line = try selected(selection)
+  if (line === undefined || !Chats.textForEmail(true, line.text.trim() === "", line.mine)) return
+  const composer = try (try Drafts.Machine).get()
+  const target = emailDestination(try (try Inbox.Machine).get(), composer)
+  if (target === undefined || target.account !== expected.account || target.draft !== expected.draft || target.session !== expected.session) {
+    try say("The email draft changed. Try again.", true)
+    return
+  }
+  const opened = try useInEmail(line.text, "Ask Alpha", { target: "NewEmail", account: target.account, message: 0, draft: target.draft }, true)
+  if (!opened) try say("Could not open the email review", true)
+}

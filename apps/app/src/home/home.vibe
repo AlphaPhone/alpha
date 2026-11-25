@@ -6,6 +6,7 @@ import { type Ask, waiting } from "../../gen/app__home__android.effect.vibe"
 import type { Tile } from "../../gen/app__home__tiles.effect.vibe"
 import * as Shell from "../../gen/app__shell.effect.vibe"
 import type { View } from "../../gen/app__shell.effect.vibe"
+import { Machine as Canvas } from "../../gen/app__shell__keyboard.effect.vibe"
 import { Device } from "../platform/device.vibe"
 import { Launcher, type Presentation, type Why } from "../platform/launcher.vibe"
 import { type Job, answer, contained, due, following, hearing, reacting, run, started, untimed, together } from "../runtime/reactor.vibe"
@@ -142,12 +143,12 @@ function carry(fx: Out): Job<Event, KeyValueStore.KeyValueStore | Launcher | Dev
 const presented = started(effect {
   const home = try Home.Machine
   const launcher = try Launcher
-  const device = try Device
   const host = hostOf(try launcher.presentation())
   try contained(home.send({ type: "presented", host }, owner), "presenting Home")
-  try Stream.runForEach(Stream.filter(device.visible, (shown) => shown), effect () => {
-    const now = hostOf(try launcher.presentation())
-    if (now === "AsLauncher" || now === "AsApp") try contained(home.send({ type: "launcherChanged", launcher: now === "AsLauncher" }, owner), "the launcher role")
+  const canvas = try Canvas
+  const role = Stream.changes(Stream.map(Stream.filter(canvas.changes, (frame) => frame.mounted), (frame) => frame.launcher))
+  try Stream.runForEach(role, effect (held) => {
+    if (Home.canLauncherChanged(try home.get(), held)) try contained(home.send({ type: "launcherChanged", launcher: held }, owner), "the launcher role")
   })
 }, "presenting Home")
 
