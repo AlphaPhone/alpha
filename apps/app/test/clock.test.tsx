@@ -180,6 +180,8 @@ describe("Clock journeys", () => {
     expect(document.body.textContent).toContain("Morning workout");
     expect(document.body.textContent).toContain("Weekdays");
     expect(document.body.textContent).toContain("7:00");
+    // spec/app/clock/alarms.md, "A new alarm snoozes for ten minutes until the owner picks another length, as v121's Clock did"
+    await waitFor(Alarms.Machine, (s) => s.items[0]?.snoozeMinutes === 10);
 
     // spec/app/clock/alarms.md, "Toggling an alarm enables it for its next fire time or disables it cleanly to idle"
     const toggle = document.querySelector<HTMLElement>("[role=switch][aria-label^='Toggle alarm']");
@@ -209,12 +211,12 @@ describe("Clock journeys", () => {
     await waitFor(ClockView.Machine, (s) => s.muted && !s.soundOn);
 
     // spec/app/clock/alarms.md, "Snoozing a ringing alarm schedules it for its snooze duration in the future"
-    await press("Snooze 9m");
+    await press("Snooze 10m");
     await waitFor(Alarms.Machine, (s) => s.items[0]?.phase === "Snoozed");
     expect(document.querySelector("[role=alertdialog][aria-label='Ringing alarm']")).toBeNull();
 
     // spec/app/clock/alarms.md, "Dismissing disables a one-off alarm and advances a repeating alarm to its next occurrence"
-    await advance(9 * 60_000);
+    await advance(10 * 60_000);
     await waitFor(Alarms.Machine, (s) => s.items[0]?.phase === "Ringing");
     await press("Dismiss");
     await waitFor(Alarms.Machine, (s) => s.items[0]?.phase === "Idle" && s.items[0]?.enabled === true);

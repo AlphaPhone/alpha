@@ -4,6 +4,7 @@ import { Effect, type ManagedRuntime } from "effect";
 import { Minus, Plus, Trash2, Volume2 } from "lucide-react";
 import { useState, useSyncExternalStore } from "react";
 import type { Machine as ClockViewMachine } from "../../gen/app__clock.effect.vibe";
+import { defaultSnooze } from "../../gen/app__clock__alarms.ts";
 import { useMachine as useAlarms } from "../../gen/app__clock__alarms.react.ts";
 import type { Machine as ToastsMachine } from "../../gen/app__notices__toasts.effect.vibe";
 import type { Said } from "../notices/toasts.vibe";
@@ -47,7 +48,7 @@ export function AlarmEditorSheet({ runtime, alarmId, onClose }: AlarmEditorSheet
   const [daysMask, setDaysMask] = useState<number>(() => existing?.daysMask ?? 0);
   const [label, setLabel] = useState<string>(() => existingMeta?.label ?? "");
   const [sound, setSound] = useState<AlarmSound>(() => existingMeta?.sound ?? "radar");
-  const [snoozeMinutes, setSnoozeMinutes] = useState<number>(() => existing?.snoozeMinutes ?? 9);
+  const [snoozeMinutes, setSnoozeMinutes] = useState<number>(() => existing?.snoozeMinutes ?? defaultSnooze);
   const [vibrate, setVibrate] = useState<boolean>(() => existing?.vibrate ?? true);
 
   const display = formatAlarmTime(hour, minute, meta.hour24);
