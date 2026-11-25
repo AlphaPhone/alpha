@@ -35,18 +35,21 @@ type Contacts = Usable | Asked | InSettings | NotOnThisPhone
 type Adding = {
   draft: int, picker: R::Read, refused: Refusal,
   thing: int, mib: int, into: int, account: int, contacts: Contacts,
+  contactDraft: int, people: R::Read, query: str, addresses: int, morePeople: bool,
 }
 
 type Effect =
   | PickFile({ ticket: int })
   | Attach({ draft: int, account: int, mib: int })
-  | PickContact({ draft: int })
-  | AskForContacts
+  | PickContact({ draft: int, ticket: int, query: str, further: bool })
+  | AddContact({ draft: int, ticket: int, address: int })
+  | AskForContacts({ draft: int })
   | OpenContactsSettings
 type Added = { state: Adding, out: List[Effect] }
 
 pure val initial: Adding = {
   draft: 0, picker: R::unread, refused: Accepted, thing: 0, mib: 0, into: 0, account: 0, contacts: Usable,
+  contactDraft: 0, people: R::unread, query: "", addresses: 0, morePeople: false,
 }
 
 pure val draftValues = Set(0, 1, 2)
@@ -54,6 +57,9 @@ pure val accountValues = Set(0, 1)
 pure val thingValues = Set(0, 1, 2)
 pure val mibValues = Set(1, 6)
 pure val ticketValues = Set(1, 2, 3, 4)
+pure val queryValues = Set("", "Pat")
+pure val addressValues = Set(1, 2, 3)
+pure val addressesValues = Set(0, 1, 2, 3)
 pure val contactsValues = Set(
   { grant: P::Unasked, asked: false },
   { grant: P::Granted, asked: true },
@@ -110,19 +116,64 @@ pure def leaveOut(s: Adding): Adding = { ...s, thing: 0, mib: 0, into: 0, accoun
 pure def canPickContact(s: Adding, draft: int, admitted: bool, contacts: P::Permission): bool =
   draft != 0 and admitted and P::allows(contacts)
 
+pure def readPeople(s: Adding, draft: int, query: str, further: bool): Added =
+  val people = R::ask(s.people)
+  {
+    state: { ...s, contactDraft: draft, contacts: Usable, people: people, query: query,
+      addresses: if (further) s.addresses else 0, morePeople: false },
+    out: List(PickContact({ draft: draft, ticket: people.ticket, query: query, further: further })),
+  }
+
 pure def pickContact(s: Adding, draft: int, admitted: bool, contacts: P::Permission): Added =
-  { state: { ...s, contacts: Usable }, out: List(PickContact({ draft: draft })) }
+  readPeople(s, draft, "", false)
 
 pure def canWantContacts(s: Adding, draft: int, admitted: bool, contacts: P::Permission): bool =
   draft != 0 and not(admitted and P::allows(contacts))
 
 pure def wantContacts(s: Adding, draft: int, admitted: bool, contacts: P::Permission): Added =
   if (not(admitted)) { state: { ...s, contacts: NotOnThisPhone }, out: List() }
-  else if (P::canAsk(contacts)) { state: { ...s, contacts: Asked }, out: List(AskForContacts) }
+  else if (P::canAsk(contacts)) { state: { ...s, contacts: Asked, contactDraft: draft }, out: List(AskForContacts({ draft: draft })) }
   else { state: { ...s, contacts: InSettings }, out: List(OpenContactsSettings) }
 
 pure def lawNoContactsWhereThePhoneHasNone(draft: int, contacts: P::Permission): bool =
   not(canPickContact(initial, draft, false, contacts)) and wantContacts(initial, draft, false, contacts).out.length() == 0
+```
+
+### The people shown are for the draft and the newest Contacts read, and choosing one adds only its displayed address
+
+Search reads anew and more reads the next page. Cancel, closing the
+draft, or a new owner retires the picker and refuses a late answer.
+
+```quint
+pure def canFindPeople(s: Adding, draft: int, query: str): bool =
+  draft != 0 and draft == s.contactDraft and s.contacts == Usable and s.people.status != R::Idle
+
+pure def findPeople(s: Adding, draft: int, query: str): Added = readPeople(s, draft, query, false)
+
+pure def canMorePeople(s: Adding, draft: int): bool =
+  draft != 0 and draft == s.contactDraft and s.people.status == R::Loaded and s.morePeople
+
+pure def morePeople(s: Adding, draft: int): Added = readPeople(s, draft, s.query, true)
+
+pure def canPeopleRead(s: Adding, draft: int, ticket: int, addresses: int): bool =
+  draft != 0 and draft == s.contactDraft and R::canAnswer(s.people, ticket) and addresses >= 0
+
+pure def peopleRead(s: Adding, draft: int, ticket: int, ok: bool, addresses: int, more: bool): Adding =
+  { ...s, people: R::answer(s.people, ok), addresses: if (ok) addresses else 0, morePeople: ok and more }
+
+pure def canChooseContact(s: Adding, draft: int, ticket: int, address: int): bool =
+  draft != 0 and draft == s.contactDraft and s.people.status == R::Loaded and ticket == s.people.ticket
+    and address >= 1 and address <= s.addresses
+
+pure def chooseContact(s: Adding, draft: int, ticket: int, address: int): Added =
+  { state: s, out: List(AddContact({ draft: draft, ticket: ticket, address: address })) }
+
+pure def clearPeople(s: Adding): Adding =
+  { ...s, contactDraft: 0, people: { ...s.people, status: R::Idle }, query: "", addresses: 0, morePeople: false }
+
+pure def canClosePeople(s: Adding): bool = s.contactDraft != 0
+
+pure def closePeople(s: Adding): Adding = clearPeople(s)
 ```
 
 ### Nothing joins a draft but a file that fit, a file the owner saw, or a contact picked for it
@@ -135,7 +186,8 @@ pure def stepNothingJoinsUnseen(before: Adding, via: str, after: Adding, out: Li
         (via == "picked" and a.account == 0 and a.draft == before.draft and a.draft != 0)
           or (via == "takeIn" and before.thing != 0 and a.draft == before.into and a.account == before.account and a.mib == before.mib)
       )
-    | PickContact(c) => via == "pickContact" and c.draft != 0
+    | PickContact(c) => (via == "pickContact" or via == "findPeople" or via == "morePeople") and c.draft == after.contactDraft and c.draft != 0
+    | AddContact(c) => via == "chooseContact" and canChooseContact(before, c.draft, c.ticket, c.address)
     | _ => true
   })
 ```
@@ -144,13 +196,14 @@ pure def stepNothingJoinsUnseen(before: Adding, via: str, after: Adding, out: Li
 
 ```quint
 pure def draftClosed(s: Adding, draft: int): Adding =
+  val cleared = if (draft == s.contactDraft) clearPeople(s) else s
   if (draft == s.draft or draft == s.into) {
-    ...s, picker: { ...s.picker, status: R::Idle }, refused: Accepted, thing: 0, mib: 0, into: 0, account: 0, contacts: Usable,
-  } else s
+    ...cleared, picker: { ...cleared.picker, status: R::Idle }, refused: Accepted, thing: 0, mib: 0, into: 0, account: 0, contacts: Usable,
+  } else cleared
 
-pure def sessionChanged(s: Adding): Adding = { ...initial, picker: { ...s.picker, status: R::Idle } }
+pure def sessionChanged(s: Adding): Adding = { ...initial, picker: { ...s.picker, status: R::Idle }, people: { ...s.people, status: R::Idle } }
 
-pure def restart(s: Adding): Adding = { ...initial, picker: { ...s.picker, status: R::Idle } }
+pure def restart(s: Adding): Adding = sessionChanged(s)
 ```
 
 ### A picker open is for a draft, and a file handed over has somewhere to go
