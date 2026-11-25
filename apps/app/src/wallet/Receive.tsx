@@ -1,7 +1,7 @@
 // spec/app/wallet/index.md, "Receive opens over a wallet that serves and has an account, and closes when it no longer does"; spec/app/wallet/index.md, "Copy puts one of the wallet's own addresses on the clipboard, one copy at a time, and says whether it was copied"
 import { Alert, Sheet, SheetContent, WalletAddress, WalletQr } from "@repo/ui";
 import { useState } from "react";
-import type { Ledger } from "./Wallet.tsx";
+import type { Ledger } from "./machines.ts";
 
 /**
  * Each account's address to be paid at: as a code another phone scans and as text, with the control that copies it.

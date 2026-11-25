@@ -1,7 +1,7 @@
 // spec/app/wallet/transfer.md, "The send form opens when nothing else is under way, and closes without asking anything"; spec/app/wallet/transfer.md, "The owner asks for a transfer of an amount written exactly in the asset's own units, to a recipient, once"
 import { Alert, Button, Input, ListGroup, ListRow, Sheet, SheetContent, WalletAmount } from "@repo/ui";
 import { useState } from "react";
-import type { Ledger, Transferring } from "./Wallet.tsx";
+import type { Ledger, Transferring } from "./machines.ts";
 import { atomicOf, shownUnits } from "./units.ts";
 
 /** Whether `amount` is more than nothing, written exactly in an asset of `decimals` places. */

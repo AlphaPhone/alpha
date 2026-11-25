@@ -1,7 +1,7 @@
 // spec/app/wallet/transfer.md, "The review shows the agent's exact terms for the request that was opened, and only the newest asking's answer is taken"; spec/app/wallet/transfer.md, "The owner approves only the review shown, before it lapses, and the approval is sent once with that review's own marks"; spec/app/wallet/transfer.md, "A waiting request is opened for review when nothing else is under way, or afresh from its own stale review, unless it is spent"
 import { Alert, Button, ListGroup, ListRow, Sheet, SheetContent, Spinner, WalletAmount } from "@repo/ui";
 import { untimed } from "../runtime/reactor.vibe";
-import type { Transferring } from "./Wallet.tsx";
+import type { Transferring } from "./machines.ts";
 import { shownUnits } from "./units.ts";
 
 const clock = new Intl.DateTimeFormat(undefined, { hour: "numeric", minute: "2-digit", second: "2-digit" });

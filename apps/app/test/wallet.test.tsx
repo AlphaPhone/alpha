@@ -7,7 +7,7 @@ import { agents, own, readingOf } from "../gen/app__wallet.ts";
 import { Machine as Sending } from "../gen/app__wallet__transfer.effect.vibe";
 import type { Alpha } from "../src/runtime/area.tsx";
 import wallet from "../src/wallet/index.tsx";
-import { button, closeAll, fill, hardware, later, only, open, press, pressOnTop, seen, underAct, until } from "./alpha.tsx";
+import { button, closeAll, drawn, fill, hardware, later, only, open, press, pressOnTop, seen, underAct, until } from "./alpha.tsx";
 import { type Scene, scene } from "./fakes/scene.ts";
 import { agentAsks } from "./fakes/wallet.ts";
 
@@ -29,7 +29,7 @@ function holding(phone: boolean, custody: Scene["wallet"]["custody"] = "ready"):
 async function opened(world: Scene) {
   const running = await open(world, only("view:Wallet"));
   const runtime = wallet.runtime(running.alpha);
-  await running.alpha.runtime.runPromise(Effect.flatMap(Shell, (shell) => Effect.ignore(shell.send({ type: "openView", view: "Wallet" }))));
+  await drawn(() => running.alpha.runtime.runPromise(Effect.flatMap(Shell, (shell) => Effect.ignore(shell.send({ type: "openView", view: "Wallet" })))));
   const ledger = () => runtime.runPromise(Effect.flatMap(Ledger, (machine) => machine.get()));
   const sending = () => runtime.runPromise(Effect.flatMap(Sending, (machine) => machine.get()));
   return { ...running, runtime, ledger, sending };

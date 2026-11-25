@@ -9,6 +9,7 @@ import type { Machine as Sending, Said } from "../../gen/app__wallet__transfer.e
 import { useMachine as useTransfer } from "../../gen/app__wallet__transfer.react.ts";
 import { useTimed } from "../runtime/react.ts";
 import type { Time } from "../runtime/time.vibe";
+import type { Ledger, Transferring } from "./machines.ts";
 import { Receive } from "./Receive.tsx";
 import { Review } from "./Review.tsx";
 import { Send } from "./Send.tsx";
@@ -18,11 +19,6 @@ export interface WalletProps {
   /** Provides the wallet and the transfer under way, `wallet` and `transfer` of this area, and Alpha's time, at which `can` is asked. */
   runtime: ManagedRuntime.ManagedRuntime<Machine | Sending | Time, unknown>;
 }
-
-/** The wallet machine as a screen holds it, once it has a state. */
-export type Ledger = ReturnType<typeof useMachine> & { state: NonNullable<ReturnType<typeof useMachine>["state"]> };
-/** The transfer machine as a screen holds it, once it has a state. */
-export type Transferring = ReturnType<typeof useTransfer> & { state: NonNullable<ReturnType<typeof useTransfer>["state"]> };
 
 const fates: Record<Fate, { status: "off" | "busy" | "ok" | "error"; label: string }> = {
   NotSent: { status: "off", label: "Not sent" },
