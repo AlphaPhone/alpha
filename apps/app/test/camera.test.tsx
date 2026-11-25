@@ -103,6 +103,33 @@ describe("Camera on a phone", () => {
     expect([Boolean(button("Different still.jpg")), world.photos.readCount]).toEqual([true, 0]);
   });
 
+  it("Open Camera’s exact capture beyond the first Photos page (spec/app/photos/index.md, \"Only the newest read's answer is shown, only while Photos is showing, and a further page only adds older items\")", async () => {
+    const world = { ...scene(), phone: true };
+    world.photos.access = { scope: "full", images: "full", videos: "full" };
+    const selected = world.photos.rows.find((item) => item.owned);
+    if (selected === undefined) throw new Error("The Camera album has no capture");
+    selected.date = 1795399000000;
+    world.photos.rows.splice(world.photos.rows.indexOf(selected), 1);
+    world.photos.rows.push(selected);
+
+    const { alpha } = await open(world, only("home", "view:Camera", "view:Photos", "notice"));
+    const runtime = camera.runtime(alpha);
+    const library = photosArea.runtime(alpha);
+    await press("Camera");
+    await until(alpha, runtime, Machine, (state) => state.phase === "Ready" && state.last > 0);
+    await press("Open last capture in Photos");
+    await until(alpha, library, Viewer, (state) => state.read.status === "Loaded");
+    expect(document.querySelector('img[alt="Camera.jpg"]')).not.toBeNull();
+    expect(world.photos.readCount).toBe(1);
+
+    await press("Back to photos");
+    await until(alpha, library, Viewer, (state) => state.open === 0);
+    expect(button("Camera.jpg")).toBeUndefined();
+    await press("Show more");
+    await until(alpha, library, Library, (state) => state.library.status === "Loaded" && state.rows.length === 3);
+    expect(button("Camera.jpg")).toBeDefined();
+  });
+
   it("Let Alpha take a photo after owner approval (spec/app/camera/index.md, \"Story: Let Alpha take a photo\")", async () => {
     const world = { ...scene(), phone: true };
     const { alpha } = await open(world, only("home", "view:Camera", "notice"));
