@@ -679,6 +679,22 @@ describe("Settings", () => {
     expect([world.settings.reviews, (await machines.runPromise(Reset.Machine.use((reset) => reset.get()))).pending]).toEqual([[1, 2], false]);
   });
 
+  it("Shows Carrier setup guidance on the web without exposing phone identifiers", async () => {
+    const alpha = await open(scene());
+    await press("Settings");
+    await press("General");
+    expect(button("Wi-Fi")).toBeUndefined();
+    expect(button("Default apps in Android")).toBeUndefined();
+    await drawn(() => titled("Carrier & SIM setup")?.focus());
+    await tap("Carrier & SIM setup");
+    await vi.waitFor(() => expect(document.body.textContent).toContain("Available only on an Android phone"));
+    expect(await page(alpha)).toBe("CarrierInfoPage");
+    expect(button("Show identifiers")).toBeUndefined();
+    expect(button("Android SIM settings")).toBeUndefined();
+    await hardware("back");
+    await vi.waitFor(() => expect(titled("Carrier & SIM setup")).toBe(document.activeElement));
+  });
+
   it("Join a nearby network (spec/app/settings/network.md, \"Story: Join a nearby network\"; spec/app/settings/network.md, \"Story: See whether I am online\")", async () => {
     const { alpha, machines, world } = await settingsOpen();
     await press("General");

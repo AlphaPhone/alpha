@@ -13,8 +13,8 @@ it could not; Alpha says which.
 
 Android's settings home is offered on the first page, and the warning
 that its microphone may still be on can open it from Privacy.
-General offers Wi-Fi, Bluetooth, mobile networks, airplane mode, the
-screen lock and default apps; Display offers Android's display and
+On a phone, General offers Wi-Fi, Bluetooth, mobile networks, airplane
+mode, the screen lock and default apps; Display offers Android's display and
 brightness; Sound its sound and Do Not Disturb; Battery the battery saver;
 the Phone page default apps. Notifications offers Alpha's alerts, each of
 its channels and notification access; the Workflows page its own alerts.
