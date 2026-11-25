@@ -94,6 +94,9 @@ pure val weight_listed = 3
 
 ### The list of conversations is read whenever it is shown
 
+Chat history opens as a sheet over Ask Alpha. Back closes that sheet before
+it lowers Ask Alpha.
+
 ```quint
 pure def browse(c: Chats): Moved =
   val list = R::ask(c.list)

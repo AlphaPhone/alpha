@@ -7,6 +7,8 @@ import * as Chats from "../../gen/app__assistant__chats.effect.vibe";
 import type { useMachine as useChats } from "../../gen/app__assistant__chats.react.ts";
 import * as Composer from "../../gen/app__assistant__composer.effect.vibe";
 import type { useMachine as useSearch } from "../../gen/app__assistant__search.react.ts";
+import type { useMachine as useLayers } from "../../gen/app__shell__layers.react.ts";
+import { top } from "../../gen/app__shell__layers.ts";
 import type { MessageSelection } from "./message-actions.vibe";
 import { MapsCardView, mapsCardsOf } from "./maps-cards.tsx";
 import { replyBlocks, wordsOf } from "./words.ts";
@@ -104,22 +106,28 @@ export function useMessageRows({ runtime, board, lines, chats, writing, replying
   }, [actions, board, canReadAloud, chats, holding, lines, onChoose, onOpenMaps, onPreview, onSettings, opened, replying, runtime, settled, writing]);
 }
 
-// spec/app/assistant/chats.md, "Story: Find my conversations"; spec/app/assistant/search.md, "Story: Search my conversations"
+const historyLayer = "assistant-history";
+const showHistory = { type: "openLayer", id: historyLayer, kind: "SheetLayer", covers: true } as const;
+const hideHistory = { type: "closeLayer", id: historyLayer } as const;
+
+// spec/app/assistant/chats.md, "Story: Find my conversations"; spec/app/assistant/search.md, "Story: Search my conversations"; spec/app/shell/layers.md, "Back closes the layer on top, and nothing under it"
 export function useHistorySheets(
   chats: ReturnType<typeof useChats>,
   search: ReturnType<typeof useSearch>,
+  layers: ReturnType<typeof useLayers>,
   seen: ReturnType<Board["snapshot"]>,
   free: { replying: boolean; holding: boolean },
+  returnFocus: () => void,
 ) {
-  const [listing, setListing] = useState(false);
   const [words, setWords] = useState("");
   const shown = chats.state;
   const finding = search.state;
   const start = { type: "start", ...free } as const;
-  const browse = () => {
-    void chats.send({ type: "browse" });
-    setListing(true);
-  };
+  const listing = layers.state !== undefined && top(layers.state).id === historyLayer;
+  const closeHistory = () => { if (layers.can(hideHistory)) void layers.send(hideHistory); };
+  const browse = layers.can(showHistory) ? () => {
+    void layers.send(showHistory).then(({ _tag }) => { if (_tag === "Success") void chats.send({ type: "browse" }); });
+  } : undefined;
   const searchHistory = search.can({ type: "openSearch" }) ? () => {
     void chats.send({ type: "browse" });
     void search.send({ type: "openSearch" });
@@ -128,7 +136,8 @@ export function useHistorySheets(
     <>
       <AssistantChatHistorySheet
         open={listing}
-        onOpenChange={setListing}
+        onOpenChange={(open) => { if (!open) closeHistory(); }}
+        onReturnFocus={returnFocus}
         history={{
           chats: shown.ids.map((id) => ({ id: String(id), title: seen.titles.get(id) ?? "Ask Alpha", current: id === shown.chosen })),
           status: shown.list.status === "Loading" ? "loading" : shown.list.status === "Failed" ? "failed" : "loaded",
@@ -139,9 +148,9 @@ export function useHistorySheets(
             const choose = { type: "choose", conversation: Number(id), ...free } as const;
             if (!chats.can(choose)) return;
             void chats.send(choose);
-            setListing(false);
+            closeHistory();
           },
-          onStart: chats.can(start) ? () => { void chats.send(start); setListing(false); } : undefined,
+          onStart: chats.can(start) ? () => { void chats.send(start); closeHistory(); } : undefined,
           onRetry: () => void chats.send({ type: "browse" }),
         }}
       />

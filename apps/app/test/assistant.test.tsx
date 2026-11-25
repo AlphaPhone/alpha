@@ -502,6 +502,18 @@ describe.each([["a browser", false], ["a phone", true]])("in %s", (_where, phone
     runtime = assistant.runtime(third.alpha);
     await until(third.alpha, runtime, Chats, (s) => s.chosen > 1 && s.ids.length === 2 && s.page.status === "Loaded");
     expect([document.body.textContent?.includes("Messages did not load"), button("Try again"), lines()]).toEqual([false, undefined, ["Dinner at eight?"]]);
+
+    // spec/app/assistant/chats.md, "The list of conversations is read whenever it is shown": Back closes the list and keeps the current conversation and draft.
+    write("Ideas for dinner");
+    const shellState = () => runtime.runPromise(Effect.flatMap(Shell, (machine) => machine.get()));
+    const detent = (await shellState()).assistant;
+    const listing = () => document.querySelector("[role='dialog'] [aria-label='Chats']");
+    chatsList();
+    await drawn(() => vi.waitFor(() => expect(listing()).not.toBeNull()));
+    await hardware("back");
+    await drawn(() => vi.waitFor(() => expect(listing()).toBeNull()));
+    expect([(await shellState()).assistant, composerText(), lines()]).toEqual([detent, "Ideas for dinner", ["Dinner at eight?"]]);
+    write("");
     await third.close();
 
     world.ask.kept.clear();

@@ -29,6 +29,7 @@ import { Machine as CommsMachine } from "../../gen/app__phone__comms.effect.vibe
 import { useMachine as useComms } from "../../gen/app__phone__comms.react.ts";
 import { Machine as ShellMachine, showing } from "../../gen/app__shell.effect.vibe";
 import type { Machine as LayersMachine } from "../../gen/app__shell__layers.effect.vibe";
+import { useMachine as useLayers } from "../../gen/app__shell__layers.react.ts";
 import { useMachine as useShell } from "../../gen/app__shell.react.ts";
 import { untimed } from "../runtime/reactor.vibe";
 import { MailQuestions } from "../inbox/mail-context.vibe";
@@ -109,6 +110,11 @@ const settings = { type: "openView", view: "Settings" } as const;
 const maps = { type: "openView", view: "Maps" } as const;
 const back = { type: "goBack" } as const;
 
+function focusChatActions(field: HTMLTextAreaElement | null) {
+  const trigger = field?.parentElement?.querySelector<HTMLButtonElement>('button[aria-label="Chat actions"]');
+  if (trigger && !trigger.disabled && !trigger.closest("[inert], [hidden]")) trigger.focus({ preventScroll: true });
+}
+
 function DeviceReview({ runtime, card }: { runtime: AssistantProps["runtime"]; card: MediaCard }) {
   const decide = (approve: boolean, confirmation?: "Tap") => void runtime.runPromise(Effect.flatMap(MediaReview, (review) => review.decide(card, approve, confirmation)));
   const deciding = card.decision === "Deciding";
@@ -184,7 +190,7 @@ function AssistantAttachments({ runtime, attachments, preview, targetRef, compos
           targetRef.current = undefined;
           void attachments.send({ type: "cancel" });
         }}
-        onReturnFocus={() => composerRef.current?.parentElement?.querySelector<HTMLButtonElement>('button[aria-label="Chat actions"]')?.focus()}
+        onReturnFocus={() => focusChatActions(composerRef.current)}
         onTab={(tab) => void attachments.send({ type: "switchTab", tab })}
         onAttach={async (selected) => {
           const held = targetRef.current;
@@ -285,6 +291,7 @@ export function Assistant({ runtime, messageActions, speech, canReadAloud = fals
   const search = useSearch(runtime);
   const reply = useReply(runtime);
   const shell = useShell(runtime);
+  const layers = useLayers(runtime);
   const dock = useDock(runtime);
   const comms = useComms(runtime);
   const board = useMemo(() => runtime.runSync(Effect.map(Talk, (talk) => talk.board)), [runtime]);
@@ -315,7 +322,7 @@ export function Assistant({ runtime, messageActions, speech, canReadAloud = fals
   const fileTargetRef = useRef<FileTarget | undefined>(undefined);
   const [talking, shown, writing, finding] = [conversation.state, chats.state, composer.state, search.state];
   const free = talking && shown && writing ? freedom(talking, writing, shown.chosen) : { replying: true, holding: true };
-  const history = useHistorySheets(chats, search, seen, free);
+  const history = useHistorySheets(chats, search, layers, seen, free, () => focusChatActions(composerRef.current));
   const lines = !shown || (shown.page.status === "Idle" && shown.chosen === 0) ? emptyLines : seen.pages.get(shown.page.ticket)?.lines ?? emptyLines;
   const canPreview = attachments.can({ type: "preview", attachment: 1 });
   const preview = useCallback((file: Attached) => void runtime.runPromise(previewFile(file)), [runtime]);
