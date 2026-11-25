@@ -1,0 +1,75 @@
+// spec/app/wallet/transfer.md, "Story: Send"; spec/app/wallet/transfer.md, "Story: Decide what my agent asked"
+import * as Transfer from "../../gen/app__wallet__transfer.effect.vibe"
+import type { Effect as Out, Event, Terms } from "../../gen/app__wallet__transfer.effect.vibe"
+import { Machine as Wallet } from "../../gen/app__wallet.effect.vibe"
+import type { Event as WalletEvent } from "../../gen/app__wallet.effect.vibe"
+import { Agent } from "../platform/agent.vibe"
+import { ask, attemptedWith } from "../platform/remote.vibe"
+import { Attempts } from "../runtime/attempts.vibe"
+import { type Job, answer, due, following, reacting, together, untimed } from "../runtime/reactor.vibe"
+import { familyNames, familyOf, whole } from "./wallet.vibe"
+import { type WalletAsk, WalletDecided, type WalletDecision, WalletRequestRow, WalletReview, walletPaths } from "./wire.vibe"
+
+const posted = (path: string, body: object) => HttpClientRequest.post(path) |> HttpClientRequest.bodyJsonUnsafe(%, body)
+
+// spec/app/wallet/transfer.md, "A request the agent took is opened for review at once; one it turned down leaves the form open, and an unknown answer closes it"
+/** The owner's asking `fx`, sent once: the number of the request the agent took it as, and unknown where its answer names none. */
+effect function asked(fx: Out & { tag: "Ask" }): Event!!(Agent | Attempts) {
+  const body: WalletAsk = { family: familyNames[fx.family], recipient: fx.recipient, amount: fx.amount, ...(fx.asset === "native" ? {} : { token: fx.asset }) }
+  const sent = try attemptedWith(Agent, () => posted(walletPaths.requests, body), fx.attempt)
+  const row = sent.confirmed ? Option.getOrUndefined(Schema.decodeUnknownOption(WalletRequestRow)(sent.body)) : undefined
+  if (row === undefined || !whole(row.id) || row.id === 0) return { type: "asked", id: fx.attempt, confirmed: false, known: sent.known && !sent.confirmed, request: 0 }
+  return { type: "asked", id: fx.attempt, confirmed: true, known: true, request: row.id }
+}
+
+const noTerms: Terms = Transfer.noTerms
+
+// spec/app/wallet/transfer.md, "The review shows the agent's exact terms for the request that was opened, and only the newest asking's answer is taken"
+effect function reviewOpened(ticket: number, request: number): Event!!Agent {
+  const said = ask(Agent, posted(walletPaths.review(request), {}), WalletReview) catch () => undefined
+  if (said === undefined || !whole(said.decimals, said.feeDecimals, said.requestId, said.expiresAt)) return { type: "reviewOpened", ticket, ok: false, terms: noTerms }
+  return {
+    type: "reviewOpened", ticket, ok: true,
+    terms: {
+      request: said.requestId, family: familyOf(said.family), network: said.network, account: said.account, recipient: said.recipient,
+      symbol: said.symbol, decimals: said.decimals, units: said.atomicUnits, fee: said.maximumFee, feeSymbol: said.feeSymbol,
+      feeDecimals: said.feeDecimals, intent: said.intentId, commitment: said.commitment, expires: said.expiresAt,
+    },
+  }
+}
+
+// spec/app/wallet/transfer.md, "A decision ends as the agent says: submitted, signed but unresolved, declined, turned down, or unknown"
+/** The decision `id` of `request`, sent once: what the agent says became of it, and unknown where its answer is not one of its own. */
+effect function decided(id: number, request: number, decision: WalletDecision): Event!!(Agent | Attempts) {
+  const sent = try attemptedWith(Agent, () => posted(walletPaths.decide(request), decision), id)
+  const said = sent.confirmed ? Option.getOrUndefined(Schema.decodeUnknownOption(WalletDecided)(sent.body)) : undefined
+  if (said === undefined) return { type: "decided", id, confirmed: false, known: sent.known && !sent.confirmed, resolved: false }
+  if ((said.status === "declined") !== (decision.decision === "decline")) return { type: "decided", id, confirmed: false, known: false, resolved: false }
+  return { type: "decided", id, confirmed: true, known: true, resolved: said.status !== "unresolved" }
+}
+
+function carry(fx: Out): Job<Event, Agent, []> {
+  return match (fx) {
+    when { tag: "Ask" }: answer(`ask ${fx.attempt}`, asked(fx), { type: "asked", id: fx.attempt, confirmed: false, known: false, request: 0 });
+    when { tag: "Review", let ticket, let request }: answer("review", reviewOpened(ticket, request), { type: "reviewOpened", ticket, ok: false, terms: noTerms });
+    when { tag: "Approve", let attempt, let request, let intent, let commitment }:
+      answer(`decide ${attempt}`, decided(attempt, request, { decision: "approve", intentId: intent, commitment }), { type: "decided", id: attempt, confirmed: false, known: false, resolved: false });
+    when { tag: "Decline", let attempt, let request }:
+      answer(`decide ${attempt}`, decided(attempt, request, { decision: "decline" }), { type: "decided", id: attempt, confirmed: false, known: false, resolved: false });
+  }
+}
+
+// spec/app/wallet/transfer.md, "A review lapses at the time the agent gave, and a lapsed review approves nothing"
+function timers(state: Transfer.Transfer) {
+  return state.stage === "Reviewing" ? [due<Event, []>("lapse", state.terms.expires, { type: "lapse", now: untimed })] : []
+}
+
+// spec/app/wallet/transfer.md, "When Alpha opens again, the form and any review are closed, and an asking or a decision that was sent is unknown"
+const kept = reacting(Transfer, { keep: 1, open: [{ type: "reopen" }], carry, timers })
+
+// spec/app/wallet/index.md, "Shown, the wallet is read under the next ticket; hidden, an open address is put away"
+/** Each asking and each decision the agent may have taken reads the wallet again: its lists say what waits and what was sent. */
+const settled = following(Transfer.Machine, (transfer) => transfer.settled, Wallet, (count): WalletEvent | undefined => (count === 0 ? undefined : { type: "refresh" }))
+
+/** The transfer under way: kept across restarts, which end what was in flight as unknown, and lapsed at the time its review gave. */
+export const transfer = together(kept, settled)
