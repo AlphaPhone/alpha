@@ -100,7 +100,7 @@ it("Open or ask about the exact Android mail notice (spec/app/inbox/notices.md, 
   expect([title(), notices.spent, world.ask.said]).toEqual([first.card.subject, ["ordinary"], []]);
 
   const ask = { ...tap, question: true, messageId: second.card.id, threadId: second.card.threadId };
-  const review = () => document.querySelector("[role=dialog]")?.textContent;
+  const review = () => document.querySelector("[role=alertdialog]")?.textContent ?? "";
   await drawn(() => enter({ ...ask, token: "dismissed" }));
   await drawn(() => vi.waitFor(() => expect(review()).toContain(second.body)));
   await confirm("Cancel");
@@ -146,7 +146,8 @@ describe.each([["a browser", false], ["a phone", true]])("in %s", (_where, phone
     // spec/app/inbox/index.md, "Only a card with a positive attachment hint shows a paperclip"
     const attachmentBadge = (subject: string) => {
       const message = opens().find((open) => subjectOf(open) === subject);
-      return [Boolean(message?.querySelector("svg.lucide-paperclip")), message?.textContent?.includes("Has attachments.")];
+      const announced = [...(message?.querySelectorAll(".sr-only") ?? [])].some((label) => label.textContent === "Has attachments");
+      return [Boolean(message?.querySelector("svg.lucide-paperclip")), announced];
     };
     expect([attachmentBadge("Revised term sheet"), attachmentBadge("Dinner Friday?"), attachmentBadge("Standup notes")]).toEqual([[true, true], [false, false], [false, false]]);
     expect(world.inbox.attachmentReads).toEqual([]);
@@ -198,8 +199,8 @@ describe.each([["a browser", false], ["a phone", true]])("in %s", (_where, phone
       // spec/app/inbox/message.md, "Ask Alpha is handed the message on screen, once it has loaded, named by its account, number and history revision"
       await menu("Ask Alpha");
       await until(alpha, alpha.runtime, Shell, (s) => s.assistant === "Sheet");
-      await drawn(() => vi.waitFor(() => expect(document.querySelector("[role=dialog]")?.textContent).toContain("Share this email with Alpha?")));
-      expect([document.querySelector("[role=dialog]")?.textContent, world.ask.said]).toEqual([expect.stringContaining(termSheet.body), []]);
+      await drawn(() => vi.waitFor(() => expect(document.querySelector("[role=alertdialog]")?.textContent ?? "").toContain("Share this email with Alpha?")));
+      expect([document.querySelector("[role=alertdialog]")?.textContent, world.ask.said]).toEqual([expect.stringContaining(termSheet.body), []]);
       await confirm("Add to chat");
       await drawn(() => vi.waitFor(() => expect(document.querySelector('textarea[aria-label="Message Alpha"]')).not.toBeNull()));
       await fill("Message Alpha", "What changed in the term sheet?");
