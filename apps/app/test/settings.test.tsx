@@ -211,6 +211,29 @@ describe("Settings", () => {
     await vi.waitFor(() => expect(world.settings.consents).toEqual([
       { gmailChanges: false, calendarEdits: false }, { gmailChanges: true, calendarEdits: true }, { gmailChanges: false, calendarEdits: true },
     ]));
+    // spec/app/settings/preferences.md, "The agent is launched allowed to change Gmail and Calendar exactly as the phone last read or saved, allowed neither once it could not read them, and Alpha says nothing of it before the first answer": a change the host refuses is put back and not saved, and a save that changes neither still saves.
+    world.settings.refusesConsent = true;
+    await tap("Calendar changes");
+    await until(alpha, alpha.runtime, Prefs.Machine, (s) => s.saving.read.status === "Failed" && s.notice === "NotSaved");
+    const refused = await alpha.runtime.runPromise(Prefs.Machine.use((prefs) => prefs.get()));
+    expect([Prefs.allows(refused, "CalendarEdits"), refused.agentGoogle]).toEqual([true, { tag: "Consents", gmailChanges: false, calendarEdits: true }]);
+    expect(JSON.parse(localStorage.getItem("alpha.preferences") ?? "{}")).toEqual({ askFirst: true, images: true, shares: ["AgentLocation", "CalendarEdits"] });
+    await tap("Location");
+    await until(alpha, alpha.runtime, Prefs.Machine, (s) => s.saving.read.status === "Loaded" && !Prefs.allows(s, "AgentLocation"));
+    expect(world.settings.consents).toHaveLength(3);
+  });
+
+  it("A consent the host refused after a read is told again at the next read (spec/app/settings/preferences.md, \"Story: Decide whether Alpha asks before it acts\")", async () => {
+    // spec/app/settings/preferences.md, "The agent is launched allowed to change Gmail and Calendar exactly as the phone last read or saved, allowed neither once it could not read them, and Alpha says nothing of it before the first answer"
+    localStorage.setItem("alpha.preferences", JSON.stringify({ askFirst: true, images: false, shares: ["CalendarEdits"] }));
+    const world = { ...scene(), phone: true };
+    world.settings.refusesConsent = true;
+    const first = await open(world);
+    await until(first.alpha, first.alpha.runtime, Prefs.Machine, (s) => s.document.read.status === "Loaded" && Prefs.allows(s, "CalendarEdits"));
+    expect(world.settings.consents).toEqual([]);
+    world.settings.refusesConsent = false;
+    await press("Settings");
+    await vi.waitFor(() => expect(world.settings.consents).toEqual([{ gmailChanges: false, calendarEdits: true }]));
   });
 
   it("A phone updated from the previous Alpha keeps its choices (spec/app/settings/preferences.md, \"The device preferences are read when Alpha starts, when Settings opens, and when Alpha comes back while Settings shows, with ten seconds to answer, never while a change or a recovery is in flight\")", async () => {

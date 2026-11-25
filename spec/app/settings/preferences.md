@@ -47,7 +47,7 @@ type Effect =
   | SetTextSize({ sizeAsk: int, percent: int })
   | ReadTextSize({ sizeRead: int })
   | ReadDocument({ docRead: int })
-  | SaveDocument({ save: int, saveAskFirst: bool, saveImages: bool, saveShares: List[Share] })
+  | SaveDocument({ save: int, saveAskFirst: bool, saveImages: bool, saveShares: List[Share], saveConsent: AgentGoogle })
   | RecoverDocument({ recovery: int })
 type Changed = { state: Preferences, out: List[Effect] }
 
@@ -409,17 +409,35 @@ eliza's agent takes the owner's consent to change Gmail and to edit
 Calendar only from its launch (the pinned eliza's
 `spec/os/agentService/config.md`, "A launch carries the Google consent the
 owner saved, else the host file's"). On a phone the shell tells Alpha's
-host each new consent, never the same one twice in a row; the host keeps
-it for every launch and restarts a running agent when it changed. Until
-the phone has answered the first read, Alpha has said nothing, so the
-agent launches with what the host kept, or else with the pack's host file,
-which allows neither. A browser launches no agent and is told nothing.
+host the consent each answered read gives; the host keeps it for every
+launch, restarts a running or starting agent only when it changed, and
+keeps what it had when it cannot. A consent the host refused is told again
+at the next read. Until the phone has answered the first read, Alpha has
+said nothing, so the agent launches with what the host kept, or else with
+the pack's host file, which allows neither, as the previous Alpha's host
+did until Settings had published the owner's switches. A browser launches
+no agent and is told nothing.
+
+A change to Gmail changes or Calendar edits is saved only once the host
+has taken it: the save carries the new consent, and when the host refuses
+it the phone puts back the document it had and answers that the change was
+not saved, so Settings never shows a consent the agent does not launch
+with. A save that changes neither carries none.
 
 ```quint
 type AgentGoogle = Unsaid | Consents({ gmailChanges: bool, calendarEdits: bool })
 
 pure def consentOf(shares: List[Share]): AgentGoogle =
   Consents({ gmailChanges: shares.includes(GmailChanges), calendarEdits: shares.includes(CalendarEdits) })
+
+pure def consentChanged(was: List[Share], shares: List[Share]): AgentGoogle =
+  if (consentOf(shares) == consentOf(was)) Unsaid else consentOf(shares)
+
+pure def lawASaveCarriesTheConsentItChanges(on: bool): bool =
+  val was = List(AgentLocation, CalendarEdits)
+  val changed = if (on) was.append(GmailChanges) else was.select(x => x != CalendarEdits)
+  consentChanged(was, was.append(BrowserPage)) == Unsaid
+    and consentChanged(was, changed) == Consents({ gmailChanges: on, calendarEdits: on })
 
 pure def alwaysTheAgentIsAllowedWhatThePhoneLastReadOrSaved(s: Preferences): bool =
   (s.document.read.status == R::Loaded implies s.agentGoogle == consentOf(s.shares))
@@ -439,7 +457,7 @@ pure def saveDocument(at: int, askFirst: bool, images: bool, shares: List[Share]
   val asking = T::ask(s.saving, at, limit)
   {
     state: { ...s, saving: asking, nextAskFirst: askFirst, nextImages: images, nextShares: shares, notice: Quiet },
-    out: List(SaveDocument({ save: asking.read.ticket, saveAskFirst: askFirst, saveImages: images, saveShares: shares })),
+    out: List(SaveDocument({ save: asking.read.ticket, saveAskFirst: askFirst, saveImages: images, saveShares: shares, saveConsent: consentChanged(s.shares, shares) })),
   }
 
 pure def canSetAskFirst(s: Preferences, askFirst: bool, at: int, by: Sender): bool = editable(s, by) and askFirst != s.askFirst

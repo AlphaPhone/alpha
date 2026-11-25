@@ -1,7 +1,7 @@
 // spec/app/settings/preferences.md, "Story: Choose how Alpha looks"; spec/app/settings/preferences.md, "Story: Keep my preferences through a restart"
 import * as KeyValueStore from "effect/persistence/KeyValueStore"
 import * as Prefs from "../../gen/app__settings__preferences.effect.vibe"
-import type { Effect as Out, Event, Look, Sender, Share, Theme } from "../../gen/app__settings__preferences.effect.vibe"
+import type { AgentGoogle, Effect as Out, Event, Look, Sender, Share, Theme } from "../../gen/app__settings__preferences.effect.vibe"
 import * as Pages from "../../gen/app__settings.effect.vibe"
 import { Machine as Shell, showing } from "../../gen/app__shell.effect.vibe"
 import { Device } from "../platform/device.vibe"
@@ -94,10 +94,15 @@ effect function documentRead(docRead: number): Event!!KeyValueStore.KeyValueStor
     : { type: "documentRead", docRead, readable: true, askFirst: choices.askFirst, images: choices.images, shares: [...choices.shares] }
 }
 
-effect function saved(save: number, choices: Choices): Event!!KeyValueStore.KeyValueStore {
+// spec/app/settings/preferences.md, "The agent is launched allowed to change Gmail and Calendar exactly as the phone last read or saved, allowed neither once it could not read them, and Alpha says nothing of it before the first answer"
+effect function saved(save: number, choices: Choices, consent: AgentGoogle): Event!!(KeyValueStore.KeyValueStore | Device) {
   const store = try KeyValueStore.KeyValueStore
+  const before = store.get(keys.choices) catch () => undefined
   const ok = effect { try store.set(keys.choices, JSON.stringify(choices)); return true } catch () => false
-  return { type: "documentSaved", save, ok }
+  if (!ok || consent.tag !== "Consents") return { type: "documentSaved", save, ok }
+  const taken = try (try Device).agentConsent({ gmailChanges: consent.gmailChanges, calendarEdits: consent.calendarEdits })
+  if (!taken) try ignore(before === undefined ? store.remove(keys.choices) : store.set(keys.choices, before))
+  return { type: "documentSaved", save, ok: taken }
 }
 
 // spec/app/settings/preferences.md, "When the device preferences cannot be read, the owner can recover them: the phone resets them to its defaults, and they are read again"
@@ -131,7 +136,7 @@ function carry(fx: Out): Job<Event, KeyValueStore.KeyValueStore | Device | Shell
     when { tag: "SetTextSize", let sizeAsk, let percent }: answer("size", sizeApplied(sizeAsk, percent), { type: "sizeApplied", sizeAsk, result: "NotConfirmed", percent, at: untimed }, "Phone");
     when { tag: "ReadTextSize", let sizeRead }: answer("size", sizeAsked(sizeRead), { type: "giveUpOnSize", now: untimed, at: untimed }, "Phone");
     when { tag: "ReadDocument", let docRead }: answer("document", documentRead(docRead), { type: "giveUpOnDocument", now: untimed }, "Phone");
-    when { tag: "SaveDocument", let save, let saveAskFirst, let saveImages, let saveShares }: answer("save", saved(save, { askFirst: saveAskFirst, images: saveImages, shares: saveShares }), { type: "documentSaved", save, ok: false }, "Phone");
+    when { tag: "SaveDocument", let save, let saveAskFirst, let saveImages, let saveShares, let saveConsent }: answer("save", saved(save, { askFirst: saveAskFirst, images: saveImages, shares: saveShares }, saveConsent), { type: "documentSaved", save, ok: false }, "Phone");
     when { tag: "RecoverDocument", let recovery }: answer("recover", recovered(recovery), { type: "giveUpOnRecovery", now: untimed, at: untimed }, "Phone");
   }
 }
@@ -195,8 +200,10 @@ const large = applying(Prefs.Machine, Prefs.largeText, effect (on) => {
 })
 
 // spec/app/settings/preferences.md, "The agent is launched allowed to change Gmail and Calendar exactly as the phone last read or saved, allowed neither once it could not read them, and Alpha says nothing of it before the first answer"
-const consented = applying(Prefs.Machine, (state) => state.agentGoogle, effect (said) => {
-  if (said.tag === "Consents") try (try Device).agentConsent({ gmailChanges: said.gmailChanges, calendarEdits: said.calendarEdits })
+const consented = applying(Prefs.Machine, (state) => state.document.read, effect (read) => {
+  if (read.status !== "Loaded" && read.status !== "Failed") return
+  const said = (try (try Prefs.Machine).get()).agentGoogle
+  if (said.tag === "Consents") try ignore((try Device).agentConsent({ gmailChanges: said.gmailChanges, calendarEdits: said.calendarEdits }))
 })
 
 /** The owner's preferences, from launch: the look and the text the whole page follows, what other areas ask before they act, and what the agent is launched allowed to change. */
