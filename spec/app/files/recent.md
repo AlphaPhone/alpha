@@ -143,8 +143,12 @@ pure def remember(s: Recent, key: int, by: Actor): Moved =
 
 The earlier Alpha kept each picked document by the selection Android gave
 it, which the phone still holds; the shell gives the earlier selections,
-the oldest first, at most twenty-four. A restart closes the viewer, so the
-document open when the earlier Alpha stopped is not shown again.
+the oldest first, at most twenty-four, each document once, by its newest
+row. A restart closes the viewer, so the document open when the earlier
+Alpha stopped is not shown again. Once the carried rows are in, Android's
+access to every earlier document that was not carried, the one it had
+open among them, is given back, so that Alpha holds no access it does not
+list; while this Recent is in use the earlier one is left as it is.
 
 ```quint
 pure val keptValues = Set(List(), List("a"), List("a", "b"))

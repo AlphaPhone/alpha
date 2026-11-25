@@ -946,3 +946,24 @@ pure def sometimesProposalRunning(s: Photos): bool = C::running(s.job) and s.job
 
 pure def sometimesProposedAlbum(s: Photos): bool = s.shelf.proposed and s.shelf.write.outcome == A::Confirmed
 ```
+
+### A saved copy the earlier Alpha left pending is checked once instead of forgotten
+
+On the phone the earlier Alpha kept the one pending saved-copy operation
+id under `alpha.photos.pending-copy.v1`. When Camera or Photos starts on
+the phone and that record holds an operation id, its outcome is checked
+once through the phone's edit receipt, never saved again, and the record
+is removed only once the phone settles it (saved or no longer pending). A
+record that is not an operation id, or one whose receipt is still unknown
+or unreachable, stays where it is. The browser build kept its own
+receipts in its library, so it leaves the phone record alone.
+
+```quint
+type PendingOutcome = PendingUnknown | PendingSaved | PendingGone
+
+pure def previousCopyCleared(hasRecord: bool, outcome: PendingOutcome): bool =
+  hasRecord and outcome != PendingUnknown
+
+pure def lawAnUnsettledPreviousCopyIsNeverForgotten(hasRecord: bool, outcome: PendingOutcome): bool =
+  (hasRecord and outcome == PendingUnknown) implies not(previousCopyCleared(hasRecord, outcome))
+```

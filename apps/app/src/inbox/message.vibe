@@ -7,7 +7,7 @@ import type { Effect as Out, Event } from "../../gen/app__inbox__message.effect.
 import * as Marking from "../../gen/app__inbox__marking.effect.vibe"
 import type { Effect as MarkOut, Event as MarkEvent } from "../../gen/app__inbox__marking.effect.vibe"
 import { Machine as Shell, showing } from "../../gen/app__shell.effect.vibe"
-import { Machine as Preferences } from "../../gen/app__settings__preferences.effect.vibe"
+import { Machine as Preferences, loadsImages } from "../../gen/app__settings__preferences.effect.vibe"
 import type { Machine as Toasts } from "../../gen/app__notices__toasts.effect.vibe"
 import type { Actor } from "../../gen/app__inbox__access.ts"
 import { reviewMailContext, MailContextRefused } from "@elizaos/plugin-inbox-client"
@@ -199,10 +199,10 @@ const access = started(effect {
   const grants = Stream.zipLatest(list.changes, view.changes) |> Stream.map(%, ([mailbox, shown]) => ({ shown, access: accessOf(mailbox, shown.account), known: mailbox.accounts.status === "Loaded" }))
   try Stream.runForEach(Stream.changesWith(grants, (a, b) => JSON.stringify(a.access) === JSON.stringify(b.access) && a.known === b.known && a.shown.account === b.shown.account), effect ({ shown, access, known }) => {
     if (shown.account === 0) return
-    try contained(view.send({ type: "accessChanged", access }), "the grant of the message open")
+    if (known || !shown.fromPhone) try contained(view.send({ type: "accessChanged", access }), "the grant of the message open")
     // spec/app/inbox/message.md, "While the list shows its saved copy and access is being checked, a message saved on the phone opens from there, marked as saved"
     if (known && shown.fromPhone) {
-      const remote = (try (try Preferences).get()).images
+      const remote = loadsImages(try (try Preferences).get())
       try contained(view.send({ type: "accessKnown", access, remote }), "access known")
     }
   })

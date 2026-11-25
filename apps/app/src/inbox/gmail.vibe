@@ -507,6 +507,20 @@ export effect function operate(id: number, account: number, proposal: Proposal, 
     ? endedAs(dispatched.operation) : { done: false, known: false, expired: false }
 }
 
+// spec/app/inbox/sending.md, "What the earlier Alpha sent, or never heard the answer to, is taken in as the operation in flight, is never sent again, and ends as Gmail's record of it says"
+/** What Gmail recorded of the request `requestId` of `account`, of kind `kind`: read only, never prepared or dispatched again. An answer for another request or kind is unknown. */
+export effect function recorded(account: number, requestId: string, kind: Proposal["kind"]): Changed!!(Cloud | Mail) {
+  const { client } = try Cloud
+  const grantId = (try Mail).grant(account)
+  if (grantId === undefined) return { done: false, known: false, expired: false }
+  const read = effect {
+    return { operation: try asked((signal) => client.gmailReceipt({ grantId, requestId }, { signal })) }
+  } catch (failed) => ({ expired: expiredBy(failed) })
+  if ("expired" in read) return { done: false, known: false, expired: read.expired }
+  const receipt = read.operation.receipt
+  return receipt.requestId === requestId && receipt.kind === kind ? endedAs(read.operation) : { done: false, known: false, expired: false }
+}
+
 /** Change one message's labels in Gmail, once, as `operate` does, at the history revision the list read it at. */
 export effect function relabel(id: number, account: number, message: number, kind: "mark-read" | "mark-unread" | "archive" | "unarchive" | "trash" | "untrash" | "star" | "unstar", at = 0, history?: string): Changed!!(Cloud | Mail | Attempts) {
   const ledger = try Mail

@@ -15,6 +15,7 @@ import { PhotosPort, saveBrowserCapture, type BrowserCapture, type PhotoHandoff 
 import type { BrowserEditFrame } from "../platform/photoCanvas.vibe"
 import { answer, following, reacting, run, started, together, type Job } from "../runtime/reactor.vibe"
 import { Catalog, catalog, reviewed, taken, type ListedAlbum, type Row } from "./catalog.vibe"
+import { checkPreviousPendingCopy } from "../camera/previous.ts"
 import { OpenedPhoto } from "./viewer.vibe"
 
 /** One explicit image chooser belongs to the Photos entry that opened it. */
@@ -663,4 +664,17 @@ const notices = started(effect {
   })))
 }, "Photos change notices")
 
-export const library = together(chooser, catalog, reacting(Library, { carry }), lifecycle, libraryChanges, batches, handoff, cameraUpdates, notices)
+// spec/app/photos/index.md, "A saved copy the earlier Alpha left pending is checked once instead of forgotten"
+const previousCopy = started(effect {
+  const { phone } = try PhotosPort
+  if (Option.isNone(phone)) return
+  if (Viewer.unresolved(try (try Viewer.Machine).get())) return
+  const outcome = tryPromise(() => checkPreviousPendingCopy(phone.value)) catch () => "PendingUnknown" as const
+  if (outcome === "PendingSaved") {
+    try (try Catalog).changed()
+    try ignore((try Library.Machine).send({ type: "libraryChanged" }, "Phone"))
+    try say("Saved copy found.", false)
+  }
+}, "checking the earlier Alpha's saved copy")
+
+export const library = together(chooser, catalog, reacting(Library, { carry }), lifecycle, libraryChanges, batches, handoff, cameraUpdates, notices, previousCopy)

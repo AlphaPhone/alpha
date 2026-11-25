@@ -22,6 +22,8 @@ export type InboxSendOutcomeProps = {
   onSendAgain?: () => void;
   /** Puts the notice away; an unknown outcome stays until the owner has seen it. */
   onDismiss?: () => void;
+  /** The send was the earlier Alpha's, taken in from before this version, so it names no draft of this one. */
+  earlier?: boolean;
 };
 
 /**
@@ -30,8 +32,9 @@ export type InboxSendOutcomeProps = {
  *
  * @model spec/app/inbox/sending.md
  */
-export function InboxSendOutcome({ outcome, onCheckSent, checking = false, onSendAgain, onDismiss }: InboxSendOutcomeProps) {
-  const { variant, text } = outcomes[outcome];
+export function InboxSendOutcome({ outcome, onCheckSent, checking = false, onSendAgain, onDismiss, earlier = false }: InboxSendOutcomeProps) {
+  const { variant, text: told } = outcomes[outcome];
+  const text = earlier ? `An email the earlier Alpha was sending: ${told}` : told;
   const actions = [
     onCheckSent ? <Button key="check" variant="ghost" size="sm" loading={checking} onClick={onCheckSent}>Check Sent</Button> : null,
     onSendAgain ? <Button key="again" variant="ghost" size="sm" onClick={onSendAgain}>Send again</Button> : null,

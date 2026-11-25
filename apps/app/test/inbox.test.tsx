@@ -1,4 +1,6 @@
 // @vitest-environment happy-dom
+import { createHash } from "node:crypto";
+import { inboxOperationKey } from "@elizaos/plugin-inbox-client";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { Machine as Home } from "../gen/app__home.effect.vibe";
 import { Machine as List } from "../gen/app__inbox.effect.vibe";
@@ -682,6 +684,165 @@ it("Send a draft I reviewed (spec/app/inbox/sending.md, \"Story: Send a draft I 
     document.querySelector<HTMLTextAreaElement>('textarea[aria-label="Message"]')?.value,
     world.inbox.changes.length,
   ]).toEqual(["unfinished@", "Keep these words.", 4]);
+});
+
+it("Keep the drafts the earlier Alpha kept (spec/app/inbox/drafts.md, \"Story: Keep the drafts the earlier Alpha kept\")", async () => {
+  const world = { ...scene(), phone: true };
+  const hex = (text: string) => createHash("sha256").update(text).digest("hex");
+  const owner = JSON.stringify(["production", "u1", "o1"]);
+  const draftOwner = JSON.stringify(["production", "u1", "o1", "grant-1"]);
+  const draft = (id: string, to: string, subject: string, body: string) => ({ version: 1, id, revision: `${id}-1`, owner: draftOwner, to: [to], subject, body, mode: "compose" });
+  const contract = draft("c1", "lee@example.test", "Contract signed", "Attached and signed.");
+  const slots = {
+    saved: `inbox-drafts:v1:${draftOwner}`,
+    shelf: `inbox-drafts:v1:shelf:${hex(draftOwner)}`,
+    unsaved: `inbox-drafts:v1:unsaved:${hex(JSON.stringify(["inbox-unsaved", "app", draftOwner]))}`,
+    operation: `inbox-operation:v1:${hex(JSON.stringify([owner, "grant-1"]))}`,
+  };
+  world.platform.earlier.set(slots.saved, JSON.stringify(draft("a1", "ana@example.test", "Lunch on Friday", "Shall we meet at noon?")));
+  world.platform.earlier.set(slots.shelf, JSON.stringify({
+    version: 1, owner: draftOwner,
+    items: [{ draft: draft("b1", "bo@example.test", "Budget notes", "The numbers for May."), toQ: "" }, { draft: contract, toQ: "" }],
+  }));
+  world.platform.earlier.set(slots.operation, JSON.stringify({
+    version: 1, owner, grantId: "grant-1", requestId: "earlier-send", phase: "dispatching", review: {}, receipt: null, source: { draftId: "c1" },
+    proposal: { kind: "send", mode: "compose", to: contract.to, cc: [], bcc: [], subject: contract.subject, bodyText: contract.body },
+  }));
+  world.platform.earlier.set(slots.unsaved, "not what the earlier Alpha wrote");
+  world.inbox.receipts.set("earlier-send", "outcome-unknown");
+  const { alpha, close } = await openInbox(world);
+  const runtime = inbox.runtime(alpha);
+
+  // spec/app/inbox/drafts.md, "A draft the earlier Alpha kept is set aside on the shelf as a whole draft of its account, while there is room, never opened, handed to anything or put in place of another"
+  await openInboxFromHome(alpha);
+  await until(alpha, runtime, Writing, (s) => !s.open && s.shelf.shelved.length === 3);
+  await until(alpha, runtime, Changes, (s) => s.draft < 0 && s.attempt.outcome === "Unknown" && !s.noticed);
+  // spec/app/platform/adoption.md, "A value is moved by copying it only where the new place is still empty, and its earlier place is cleared only once the new place holds a value": a slot that cannot be read stays where it was
+  await until(alpha, runtime, Writing, () => !world.platform.earlier.has(slots.saved) && !world.platform.earlier.has(slots.shelf) && !world.platform.earlier.has(slots.operation));
+  expect([...world.platform.earlier.keys()]).toEqual([slots.unsaved]);
+  await close();
+
+  const again = await open(world, inboxMounts);
+  const restored = inbox.runtime(again.alpha);
+  await until(again.alpha, restored, Writing, (s) => !s.open && s.shelf.shelved.length === 3);
+  await menu("Drafts", "More folders");
+  await until(again.alpha, restored, List, (s) => s.selected.folder === "DraftsFolder" && s.list.status === "Loaded");
+  await row("Contract signed");
+  await until(again.alpha, restored, Writing, (s) => s.open && s.letter.doubt.attempt === 0 && s.letter.doubt.revision === 1);
+  expect([
+    document.querySelector<HTMLInputElement>('input[aria-label="Subject"]')?.value,
+    told(),
+    world.inbox.changes,
+  ]).toEqual(["Contract signed", expect.stringContaining("May have been sent"), []]);
+});
+
+it("Never send twice what the earlier Alpha was sending (spec/app/inbox/sending.md, \"Story: Send a draft I reviewed\")", async () => {
+  const world = { ...scene(), phone: true };
+  const slot = (environment: string) => Effect.runPromise(inboxOperationKey(JSON.stringify([environment, "u1", "o1"]), "grant-1"));
+  const record = (requestId: string, phase: string, state: string | null) => JSON.stringify({
+    version: 1, owner: "", grantId: "grant-1", requestId, phase, review: null, composer: { draftId: "d1" },
+    proposal: { kind: "send", to: ["lena@ruiz.example"], subject: "Friday", bodyText: "Count me in." },
+    receipt: state === null ? null : { requestId, kind: "send", reviewDigest: "a".repeat(64), state, providerResult: null, rejectionCode: null },
+  });
+  world.platform.earlier.set(await slot("production"), record("11111111-1111-4111-8111-111111111111", "dispatching", "prepared"));
+  world.platform.earlier.set(await slot("staging"), record("22222222-2222-4222-8222-222222222222", "preparing", null));
+  world.inbox.receipts.set("11111111-1111-4111-8111-111111111111", "outcome-unknown");
+  const first = await openInbox(world);
+  const runtime = inbox.runtime(first.alpha);
+  await openInboxFromHome(first.alpha);
+  await until(first.alpha, runtime, List, (s) => s.accounts.status === "Loaded");
+
+  // spec/app/inbox/sending.md, "What the earlier Alpha sent, or never heard the answer to, is taken in as the operation in flight, is never sent again, and ends as Gmail's record of it says": a send the earlier Alpha was dispatching is read back, never dispatched, and one it was still preparing is cleared.
+  await until(first.alpha, runtime, Changes, (s) => s.draft < 0 && s.attempt.outcome === "Unknown" && !s.noticed);
+  expect([told(), world.inbox.changes, world.platform.earlier.size]).toEqual([expect.stringContaining("An email the earlier Alpha was sending: Alpha cannot tell whether it was sent"), [], 0]);
+
+  // spec/app/inbox/sending.md, "An outcome that is unknown or confirmed is never sent again, and a later operation never hides an unknown one the owner has not seen"
+  await press("Dismiss");
+  await until(first.alpha, runtime, Changes, (s) => s.noticed);
+  expect(told()).not.toContain("the earlier Alpha");
+  await first.close();
+
+  world.platform.earlier.set(await slot("production"), record("33333333-3333-4333-8333-333333333333", "observed", "dispatched"));
+  world.inbox.receipts.set("33333333-3333-4333-8333-333333333333", "succeeded");
+  const second = await open(world, inboxMounts);
+  const again = inbox.runtime(second.alpha);
+  if (title() !== "Inbox") await tile("Inbox");
+  await until(second.alpha, again, Changes, (s) => s.draft < 0 && s.attempt.outcome === "Confirmed");
+  expect([told(), world.inbox.changes, world.platform.earlier.size]).toEqual([expect.stringContaining("An email the earlier Alpha was sending: Sent"), [], 0]);
+});
+
+it("Find out when an unknown send was rejected, or dismiss it (spec/app/inbox/drafts.md, \"Story: Find out whether a send went\"; spec/app/inbox/letter.md, \"Story: Know what was sent\")", async () => {
+  const world = { ...scene(), phone: false };
+  const { alpha } = await openInbox(world);
+  const runtime = inbox.runtime(alpha);
+  await openInboxFromHome(alpha);
+  await until(alpha, runtime, List, (s) => s.list.status === "Loaded");
+
+  await press("Compose");
+  await until(alpha, runtime, Writing, (s) => s.open && s.letter.kind === "Fresh");
+  await fill("To", "friend@mail.test");
+  await drawn(() => document.querySelector<HTMLInputElement>('input[aria-label="To"]')?.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true })));
+  await until(alpha, runtime, Writing, (s) => s.letter.recipients === 1);
+  await fill("Subject", "Plans");
+  await later(alpha, 10);
+  await until(alpha, runtime, Writing, (s) => s.stored && !s.pending && s.write.status === "Loaded");
+
+  world.inbox.loseSendReply = "rejected";
+  await press("Send email");
+  await until(alpha, runtime, Changes, (s) => s.review.showing && s.kind === "Send");
+  await confirm("Send");
+  await until(alpha, runtime, Changes, (s) => s.attempt.outcome === "Unknown" && !s.noticed);
+  await until(alpha, runtime, Writing, (s) => s.open && s.letter.doubt.attempt !== 0);
+  expect([told(), button("Send email")?.disabled, Boolean(button("Dismiss"))]).toEqual([expect.stringContaining("Alpha cannot tell whether it was sent"), true, true]);
+
+  await press("Check Sent");
+  await until(alpha, runtime, Writing, (s) => s.check.status === "Loaded" && s.letter.doubt.attempt === 0);
+  expect([told(), button("Check Sent"), world.inbox.changes]).toEqual([expect.stringContaining("It was not sent"), undefined, []]);
+
+  await press("Send email");
+  await until(alpha, runtime, Changes, (s) => s.review.showing && s.kind === "Send");
+  await confirm("Send");
+  await until(alpha, runtime, Changes, (s) => s.attempt.outcome === "Confirmed");
+  await until(alpha, runtime, Writing, (s) => !s.open);
+  expect(world.inbox.changes).toEqual(["send friend@mail.test Plans"]);
+});
+
+it("Stay safe with what a message carries (spec/app/inbox/message.md, \"Story: Stay safe with what a message carries\"; spec/app/inbox/message.md, \"Story: Read a saved message offline\")", async () => {
+  const world = { ...scene(), phone: false };
+  localStorage.setItem("alpha.preferences", JSON.stringify({ askFirst: true, images: false, shares: [] }));
+  const standup = world.inbox.mail.find((stored) => stored.card.subject === "Standup notes");
+  if (standup) standup.html = "<p>Build 0.9 goes to beta testers Thursday.</p><img src=\"https://track.test/pixel.png\">";
+  const first = await openInbox(world);
+  const runtime = inbox.runtime(first.alpha);
+  const policy = () => document.querySelector("iframe[title='Formatted email']")?.getAttribute("srcdoc") ?? "";
+  await openInboxFromHome(first.alpha);
+  await until(first.alpha, runtime, List, (s) => s.list.status === "Loaded");
+  await row("Standup notes");
+  await until(first.alpha, runtime, Shown, (s) => s.body.status === "Loaded");
+
+  // spec/app/inbox/message.md, "Remote images load only after Show images, or when the owner turned on loading them in Settings"
+  expect([policy(), Boolean(button("Show images"))]).toEqual([expect.stringContaining("img-src data:;"), true]);
+  await press("Show images");
+  await until(first.alpha, runtime, Shown, (s) => s.images);
+  expect([policy(), Boolean(button("Show images"))]).toEqual([expect.stringContaining("img-src data: https:"), false]);
+  expect(world.inbox.changes).toEqual([]);
+  await first.close();
+
+  // spec/app/inbox/message.md, "While the list shows its saved copy and access is being checked, a message saved on the phone opens from there, marked as saved"; spec/app/inbox/message.md, "A saved copy is shown only with nothing read for it"
+  localStorage.setItem("alpha.preferences", JSON.stringify({ askFirst: true, images: true, shares: [] }));
+  world.inbox.stalled = true;
+  const second = await open(world, inboxMounts);
+  const again = inbox.runtime(second.alpha);
+  await until(second.alpha, again, List, (s) => s.saved && s.accounts.status === "Loading");
+  await row("Standup notes");
+  await until(second.alpha, again, Shown, (s) => s.fromPhone && s.message !== 0);
+  expect([told(), policy(), button("Show images")]).toEqual([expect.stringContaining("Saved copy"), "", undefined]);
+
+  // spec/app/inbox/message.md, "Remote images load only after Show images, or when the owner turned on loading them in Settings"
+  world.inbox.stalled = false;
+  await again.runPromise(List.use((list) => list.send({ type: "checkAccess" })));
+  await until(second.alpha, again, Shown, (s) => !s.fromPhone && s.body.status === "Loaded");
+  expect([policy(), button("Show images")]).toEqual([expect.stringContaining("img-src data: https:"), undefined]);
 });
 
 // spec/app/home/cards.md, "The mail card shows the unread count, senders and subjects only, never a message body; marked not up to date when Inbox's page is not, and not drawn without an account or a row"

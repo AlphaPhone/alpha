@@ -173,7 +173,15 @@ export function elizaFiles(scene: FilesScene): Faked {
         if (!found) return Promise.resolve({ status: "missing" });
         const to = join(parent(path), name);
         if (find(on(volume), to)) return Promise.resolve({ status: "exists" });
-        for (const one of inside(on(volume), path)) one.path = `${to}${one.path.slice(path.length)}`;
+        for (const one of inside(on(volume), path)) {
+          const was = one.path;
+          one.path = `${to}${was.slice(path.length)}`;
+          // A renamed file keeps what it holds.
+          if (scene.texts[was] !== undefined) {
+            scene.texts[one.path] = scene.texts[was];
+            delete scene.texts[was];
+          }
+        }
         return Promise.resolve({ status: "ready", path: to });
       },
       storageCreateFolder({ volume, parent: where, name }) {
