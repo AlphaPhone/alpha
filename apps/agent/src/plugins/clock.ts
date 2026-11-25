@@ -149,7 +149,7 @@ function findAlarmTarget(alarms: readonly ClockAlarmRecord[], params: Record<str
     const byTime = alarms.find((entry) => entry.hour === time.hour && entry.minute === time.minute);
     if (byTime !== undefined) return byTime;
   }
-  return alarms.length === 1 ? alarms[0] : alarms.find((entry) => entry.enabled);
+  return alarms.length === 1 ? alarms[0] : undefined;
 }
 
 function findTimerTarget(timers: readonly ClockTimerRecord[], params: Record<string, unknown>): ClockTimerRecord | undefined {
@@ -337,7 +337,7 @@ export function clockActions(store: AlphaAppsStore, timeZone: string): AgentActi
         { name: "action", description: "What to do with an alarm.", required: true, schema: { type: "string", enum: ["set", "update", "toggle", "snooze", "dismiss", "delete", "list"] } },
         { name: "hour", description: "The alarm's hour on a 24-hour clock, 0 to 23, to set or move it.", required: false, schema: { type: "integer", minimum: 0, maximum: 23 } },
         { name: "minute", description: "The alarm's minute, 0 to 59.", required: false, schema: { type: "integer", minimum: 0, maximum: 59 } },
-        { name: "days", description: "The days it repeats on; leave it out for an alarm that rings once.", required: false, schema: { type: "array", items: { type: "string", enum: ["sunday", "monday", "tuesday", "wednesday", "thursday", "friday", "saturday"] } } },
+        { name: "days", description: "The days it repeats on, all seven for every day; leave it out for an alarm that rings once.", required: false, schema: { type: "array", items: { type: "string", enum: ["sunday", "monday", "tuesday", "wednesday", "thursday", "friday", "saturday"] } } },
         labelParameter("alarm"),
         { name: "enabled", description: "Whether the alarm is on, to turn it on or off.", required: false, schema: { type: "boolean" } },
         { name: "snoozeMinutes", description: "Minutes to snooze for.", required: false, schema: { type: "integer", minimum: 1 } },
@@ -391,6 +391,10 @@ export function clockProvider(store: AlphaAppsStore, timeZone: string): AgentPro
       }
       const upcoming = snapshot.alarms.filter((a) => a.enabled && a.fireAtMs !== null).sort((a, b) => (a.fireAtMs ?? 0) - (b.fireAtMs ?? 0));
       const nextAlarm = upcoming[0];
+      if (snapshot.alarms.length > 0) {
+        lines.push("Alarms:");
+        for (const a of snapshot.alarms) lines.push(`- Alarm [${a.id}] ${formatHourMinute(a.hour, a.minute)}${a.label ? ` "${a.label}"` : ""} ${a.enabled ? a.phase : "off"}`);
+      }
       if (nextAlarm !== undefined) {
         lines.push(`Next alarm: ${formatHourMinute(nextAlarm.hour, nextAlarm.minute)}${nextAlarm.label ? ` "${nextAlarm.label}"` : ""} (${nextAlarm.phase}) [${nextAlarm.id}]`);
       }

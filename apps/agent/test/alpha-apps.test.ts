@@ -101,6 +101,20 @@ describe("Alpha product plugin: Clock reads the model's arguments, never the own
     expect(store.getClock().timers.map(({ label }) => label)).toEqual([""]);
     expect(store.getClock().alarms.map(({ label, daysMask }) => ({ label, daysMask }))).toEqual([{ label: "", daysMask: 0 }]);
   });
+
+  it("acts on an alarm only when the model names which one, once there are several", async () => {
+    const store = new AlphaAppsStore({ now: () => Date.UTC(2026, 10, 24, 18, 0) });
+    const { plugin } = createAlphaAppsPlugin({ store, timeZone: "UTC" });
+    const alarm = plugin.actions!.find((action) => action.name === "CLOCK_ALARM")!;
+    const run = (parameters: Record<string, string | number>) => alarm.handler(makeFakeRuntime().runtime, emptyMessage(""), emptyState, { parameters });
+    await run({ action: "set", hour: 6, minute: 0 });
+    await run({ action: "set", hour: 7, minute: 0 });
+    const guessed = await run({ action: "delete" });
+    const named = await run({ action: "delete", hour: 7, minute: 0 });
+    expect([guessed?.success, named?.success, store.getClock().alarms.map(({ hour }) => hour)]).toEqual([false, true, [6]]);
+    const context = await plugin.providers!.find((provider) => provider.name === "CLOCK_CONTEXT")!.get(makeFakeRuntime().runtime, emptyMessage(""), emptyState);
+    expect(context.text).toContain(`[${store.getClock().alarms[0]?.id}] 6:00 AM`);
+  });
 });
 
 describe("Alpha product plugin: Clock actions, provider, and routes", () => {
@@ -132,7 +146,7 @@ describe("Alpha product plugin: Clock actions, provider, and routes", () => {
     await alarmAction.handler(runtime, emptyMessage("Update alarm"), emptyState, { parameters: { action: "update", id: alarmId, hour: 8, minute: 15, enabled: true } });
     expect(store.getClock().alarms[0]?.hour).toBe(8);
 
-    const snoozeRes = await alarmAction.handler(runtime, emptyMessage("Snooze"), emptyState, { parameters: { action: "snooze", id: alarmId, minutes: 10 } });
+    const snoozeRes = await alarmAction.handler(runtime, emptyMessage("Snooze"), emptyState, { parameters: { action: "snooze", id: alarmId, snoozeMinutes: 10 } });
     expect(snoozeRes?.success).toBe(true);
     expect(store.getClock().alarms[0]?.phase).toBe("snoozed");
 
@@ -151,7 +165,7 @@ describe("Alpha product plugin: Clock actions, provider, and routes", () => {
     expect(store.getClock().timers[0]?.remainingMs).toBe(240_000);
 
     await timerAction.handler(runtime, emptyMessage("Resume timer"), emptyState, { parameters: { action: "resume", id: timerId } });
-    await timerAction.handler(runtime, emptyMessage("Add 1 minute"), emptyState, { parameters: { action: "add_time", id: timerId, addMs: 60_000 } });
+    await timerAction.handler(runtime, emptyMessage("Add 1 minute"), emptyState, { parameters: { action: "add_time", id: timerId, durationSeconds: 60 } });
     expect(store.getClock().timers[0]?.remainingMs).toBe(300_000);
 
     const worldAdd = await worldAction.handler(runtime, emptyMessage("Add Tokyo"), emptyState, { parameters: { action: "add_city", city: "Tokyo" } });
