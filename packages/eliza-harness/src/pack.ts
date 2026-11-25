@@ -170,7 +170,7 @@ export function stagePackEntry(pack: Pack, source: string, product?: ProductPack
 export const packDist = path.join(repository, "apps/agent/dist");
 
 /**
- * What a launch of the built pack names: the bundle, the policy's allowed actions and load list, and the workflow
+ * What a launch of the built pack names: the bundle, the policy's allowed actions and plugins (load list and product), and the workflow
  * worker the bundle pinned, where the pack's clone built it, as the phone stages it beside the bundle. A pack restored
  * from a build cache comes without its clone, so the clone is prepared here where it is not.
  * @throws {Error} where the pack is not built
