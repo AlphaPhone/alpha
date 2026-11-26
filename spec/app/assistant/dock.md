@@ -6,6 +6,12 @@ chooses where it lands, and asks the shell to raise it there or to go back
 by a step or two. The dock keeps one gesture at a time, the moment until
 which a stray click is ignored, and the height a sheet was left at.
 
+The sheet draws only the arrows Alpha's Sunday v119 build drew (old-line
+Alpha 45f6bed30, template.html:4447-4740): Minimize's chevron down, the
+chevron of a card that opens, and Send's arrow up while there is text. The
+way back to a call or a conversation, the strip above them, the way back
+to a fork's original, Earlier, Later and a digest's rows have no arrow.
+
 ## Story: Drag Ask Alpha where I want it
 
 > As the owner, I want a drag or a flick of Ask Alpha to land where my
@@ -13,14 +19,30 @@ which a stray click is ignored, and the height a sheet was left at.
 > away, with one press doing one thing, and the composer never hidden by
 > the keyboard.
 
-As in Alpha before VibeStack (v121 on the owner's phone, which the owner
-asked to match on 2026-11-26), the sheet follows the finger while its
-handle or the resting bar is dragged (the bar's background, Alpha's mark,
-an empty field, or anywhere on the pill), and lands where the release
-says. A tap
-or a drag on the page outside an open sheet lowers Ask Alpha when it ends;
-outside the bar being typed in, it only leaves the field, which rests the
-bar once.
+As in Alpha before VibeStack (the Sunday v119 demo build, old-line Alpha
+45f6bed30, which the owner named the reference on 2026-11-26), the sheet
+follows the finger while its handle, the strip above a full-screen call or
+conversation, or the resting bar is dragged (the bar's background, Alpha's
+mark, an empty field, or anywhere on the pill, its buttons too), and lands
+where the release says. Each height is reached in order both ways: the
+bar, a sheet at any height between the zones, and the full screen; a sheet
+dragged down and let go between the zones stays there, so a second drag
+down takes it lower again. A finger counts as a drag once it
+has moved 8 points. While the sheet rises from the bar or the pill, the
+bar or pill is hidden and the sheet shows its own composer; while an open
+sheet is pulled down it fades by how far it has gone into the floor's zone
+and the bar or pill it will rest on shows through it. A release is a flick
+when the finger rose or fell at 1 point a millisecond over the last 100
+milliseconds before it lifted, and was not held still for 80 milliseconds;
+a flick goes the way it was aimed. Once released, the sheet moves to where
+it landed over 420 milliseconds on v119's curve, and a tap that opens or
+closes it from the bar grows it from the bar or shrinks it onto the bar the
+same way, keeping its composer until the bar shows. A sheet put away
+shrinks and fades over the bar or pill already drawn under it, which then
+stays in place with its own controls in their own colours: no control of
+the sheet's, such as its black Talk, is carried onto the bar. A tap or a drag on the
+page outside an open sheet lowers Ask Alpha when it ends; outside the bar
+being typed in, it only leaves the field, which rests the bar once.
 
 ### A released drag lands on the bar, a sheet at a height, or the full screen
 
@@ -116,6 +138,49 @@ pure def lawAKeptHeightLiesBetweenTheZones(start: S::Detent, direction: Directio
   l.height != 0 implies (l.detent == S::Sheet and l.height == height and floor + z < height and height < full - z)
 ```
 
+### A short, slow pull of the bar or the pill leaves Ask Alpha where it was
+
+As v119 settled a release: a finger that ended within 8 points of where it
+pressed goes nowhere; from the bar a pull that was not quick (half a point
+a millisecond, over the whole pull or its last move) and travelled less
+than 24 points goes nowhere, and from the pill less than 56 (the pull
+distance every v119 gesture shared). The gesture is dropped as a shifted
+one is: nothing is asked and its late click is ignored. An open sheet
+moved past the 8 points always settles.
+
+```quint
+pure val tapSlop = 8
+
+pure val barReach = 24
+
+pure val pillReach = 56
+
+pure def stays(start: S::Detent, pill: bool, travel: int, quick: bool): bool =
+  travel < tapSlop or (not(isOpen(start)) and not(quick) and travel < (if (pill) pillReach else barReach))
+
+pure def lawAnOpenSheetAlwaysSettles(start: S::Detent, pill: bool, travel: int, quick: bool): bool =
+  (isOpen(start) and travel >= tapSlop) implies not(stays(start, pill, travel, quick))
+
+pure def lawAQuickPullAlwaysSettles(start: S::Detent, pill: bool, travel: int): bool =
+  travel >= tapSlop implies not(stays(start, pill, travel, true))
+```
+
+### A sheet keeps the share of the screen it was left at
+
+As v119 remembered it, the height a sheet was left at is kept as its share
+of the full height, in thousandths, so it keeps its place on a screen that
+changes size.
+
+```quint
+pure val shareScale = 1000
+
+pure def keptShare(height: int, full: int): int = if (full > 0) height * shareScale / full else 0
+
+pure def lawAKeptShareIsBelowTheFullScreen(start: S::Detent, direction: Direction, flick: bool, height: int, floor: int, full: int): bool =
+  val l = landing(start, direction, flick, height, floor, full)
+  (0 <= floor and floor < full and l.detent == S::Sheet) implies (0 <= keptShare(l.height, full) and keptShare(l.height, full) < shareScale)
+```
+
 ### The dock holds the gesture under the finger, where it started, until when a click is ignored, and the height the sheet was left at
 
 ```quint
@@ -136,6 +201,7 @@ pure val nowValues = Set(100, 300, 700)
 pure val heightValues = Set(0, 300, 700)
 pure val floorValues = Set(80)
 pure val fullValues = Set(800)
+pure val travelValues = Set(4, 10, 30, 60)
 ```
 
 ### A press starts one gesture, on Ask Alpha as it stands
@@ -145,7 +211,7 @@ pure def canPress(d: Dock, detent: S::Detent, now: int): bool = d.gesture == Idl
 
 pure def press(d: Dock, detent: S::Detent, now: int): Dock = { ...d, gesture: Pressed, start: detent, at: now }
 
-pure def canDrag(d: Dock): bool = d.gesture == Pressed and not(d.voice and isOpen(d.start))
+pure def canDrag(d: Dock): bool = d.gesture == Pressed and not(d.voice)
 
 pure def drag(d: Dock): Dock = { ...d, gesture: Dragging }
 ```
@@ -153,7 +219,10 @@ pure def drag(d: Dock): Dock = { ...d, gesture: Dragging }
 ### A drag released asks the shell once for where it landed, and keeps a sheet's height
 
 The click Android sends after the finger lifts is ignored for a moment, so
-a drag that ends over Talk does not also start voice.
+a drag that ends over Talk does not also start voice. As v119 kept it
+(45f6bed30 chat-overlay-motion-adapter.ts:859, :961-965), a sheet raised to
+the full screen keeps the height it was left at, so shrinking it again
+returns there; only a sheet put away forgets it.
 
 ```quint
 pure def canRelease(d: Dock, direction: Direction, flick: bool, height: int, floor: int, full: int, now: int): bool =
@@ -161,7 +230,7 @@ pure def canRelease(d: Dock, direction: Direction, flick: bool, height: int, flo
 
 pure def release(d: Dock, direction: Direction, flick: bool, height: int, floor: int, full: int, now: int): Moved =
   val l = landing(d.start, direction, flick, height, floor, full)
-  { state: { ...d, gesture: Idle, at: now, quiet: now + clickWindow, kept: if (l.detent == S::Sheet) l.height else 0 },
+  { state: { ...d, gesture: Idle, at: now, quiet: now + clickWindow, kept: if (l.detent == S::Sheet) keptShare(l.height, full) else if (l.detent == S::Full) d.kept else 0 },
     out: asked(d.start, l.detent) }
 ```
 
@@ -210,9 +279,10 @@ pure def shift(d: Dock, now: int): Moved =
   { state: { ...d, gesture: Idle, at: now, quiet: if (d.gesture == Idle) d.quiet else now + clickWindow }, out: List() }
 ```
 
-### While voice owns Ask Alpha its open sheet is not dragged, a drag under way is let go, and the sheet is dragged again once voice ends
+### While voice owns Ask Alpha nothing drags it, a drag under way is let go, and it is dragged again once voice ends
 
-The Talk and dictation controls stay where they are while voice runs; a
+As on v119, while Talk or dictation holds the chat no drag starts from the
+bar, the pill or the sheet, so the voice controls stay where they are; a
 press on them still taps.
 
 ```quint
@@ -222,7 +292,7 @@ pure def voicing(d: Dock, on: bool, now: int): Moved =
   { state: { ...d, voice: on, at: now, gesture: if (on and d.gesture == Dragging) Idle else d.gesture,
       quiet: if (on and d.gesture == Dragging) now + clickWindow else d.quiet }, out: List() }
 
-pure def alwaysVoiceDragsNoOpenSheet(d: Dock): bool = (d.voice and isOpen(d.start)) implies d.gesture != Dragging
+pure def alwaysVoiceDragsNothing(d: Dock): bool = d.voice implies d.gesture != Dragging
 
 pure def sometimesVoiceHoldsTheSheet(d: Dock): bool = d.voice and isOpen(d.start) and d.gesture == Pressed
 ```
@@ -266,7 +336,7 @@ pure def stepAPressDoesOneThing(before: Dock, via: str, after: Dock, out: List[E
 ```quint
 pure def stepTimeNeverGoesBack(before: Dock, via: str, after: Dock): bool = after.at >= before.at
 
-pure def alwaysAKeptHeightIsAHeight(d: Dock): bool = d.kept >= 0
+pure def alwaysAKeptHeightIsAShare(d: Dock): bool = d.kept >= 0 and d.kept < shareScale
 ```
 
 ### A drag can be under way, a sheet can keep its height, and a click can be ignored

@@ -253,7 +253,7 @@ describe("Ask Alpha dock and shell navigation", () => {
       await runtime.runPromise(Effect.flatMap(Dock, (m) => m.send({ type: "drag" })));
       await runtime.runPromise(Effect.flatMap(Dock, (m) => m.send({ type: "release", direction: "Up", flick: false, height: 420, floor: 80, full: 800, now: 200 })));
     });
-    expect((await runtime.runPromise(Effect.flatMap(Dock, (m) => m.get()))).kept).toBe(420);
+    expect((await runtime.runPromise(Effect.flatMap(Dock, (m) => m.get()))).kept).toBe(525);
 
     await act(async () => {
       await runtime.runPromise(Effect.flatMap(Shell, (m) => m.send({ type: "goBack" })));
@@ -267,19 +267,19 @@ describe("Ask Alpha dock and shell navigation", () => {
     const { runtime } = await mountDock({ view: "Home", flush: underAct });
     const section = () => document.querySelector<HTMLElement>("section[aria-label='Ask Alpha']");
     const at = (type: string, y: number, target: EventTarget = window) =>
-      underAct(() => { target.dispatchEvent(new PointerEvent(type, { bubbles: true, clientY: y, pointerId: 5, pointerType: "touch" })); });
+      underAct(() => { target.dispatchEvent(new PointerEvent(type, { bubbles: true, clientY: y, pointerId: 5, pointerType: "touch", isPrimary: true })); });
     const shell = () => runtime.runPromise(Effect.flatMap(Shell, (m) => m.get()));
-    const pressed = () => runtime.runPromise(Effect.flatMap(Dock, (m) => Stream.runHead(Stream.filter(m.changes, (s) => s.gesture === "Pressed"))));
+    const pressed = () => runtime.runPromise(Effect.flatMap(Dock, (m) => Stream.runHead(Stream.filter(m.changes, (s) => s.gesture !== "Idle"))));
 
     const mark = document.querySelector<HTMLElement>("button[aria-label='Open conversation']");
     expect(mark).not.toBeNull();
     await at("pointerdown", 700, mark ?? window);
-    await underAct(async () => { await pressed(); });
     await at("pointermove", 650, mark ?? window);
-    await at("pointermove", 500, mark ?? window);
-    expect([section()?.getAttribute("data-alpha-detent"), section()?.style.height]).toEqual(["sheet", "302px"]);
+    await underAct(async () => { await pressed(); });
+    await at("pointermove", 500, section() ?? window);
+    expect([section()?.getAttribute("data-alpha-detent"), section()?.style.height]).toEqual(["sheet", "290px"]);
     expect((await shell()).assistant).toBe("Bar");
-    await at("pointerup", 500, mark ?? window);
+    await at("pointerup", 500, section() ?? window);
     await act(async () => { await runtime.runPromise(Effect.flatMap(Shell, (m) => Stream.runHead(Stream.filter(m.changes, (s) => s.assistant === "Sheet")))); });
 
     // spec/app/assistant/dock.md, "A released drag lands on the bar, a sheet at a height, or the full screen": pulled to the floor by its handle, the open sheet follows and rests on the bar
@@ -289,10 +289,28 @@ describe("Ask Alpha dock and shell navigation", () => {
     await underAct(async () => { await pressed(); });
     await at("pointermove", 500, handle ?? window);
     await at("pointermove", 740, handle ?? window);
-    expect(section()?.style.height).toBe("102px");
+    expect([section()?.style.height, section()?.style.opacity]).toEqual(["0px", "0"]);
     await at("pointerup", 740, handle ?? window);
     await act(async () => { await runtime.runPromise(Effect.flatMap(Shell, (m) => Stream.runHead(Stream.filter(m.changes, (s) => s.assistant === "Bar")))); });
+    // spec/app/assistant/dock.md, "Story: Drag Ask Alpha where I want it": as v119's retire did (45f6bed30 chat-overlay-motion-adapter.ts:613-651), the bar is Ask Alpha at once while the sheet fades over it
+    await act(async () => { await Effect.runPromise(Effect.sleep("700 millis")); });
     expect(section()?.getAttribute("data-alpha-detent")).toBe("bar");
+  });
+
+  // spec/app/assistant/dock.md, "Story: Drag Ask Alpha where I want it": a sheet put away hands over to the bar at once, whose Talk is its own button and never the sheet's black one
+  it("puts the sheet away onto a bar whose Talk was never the sheet's (spec/app/assistant/dock.md, \"Story: Drag Ask Alpha where I want it\")", async () => {
+    const { runtime } = await mountDock({ view: "Home", flush: underAct, speech: { onTalk: () => undefined } });
+    const section = () => document.querySelector<HTMLElement>("section[aria-label='Ask Alpha']");
+    const settled = (detent: "Sheet" | "Bar") => act(async () => { await runtime.runPromise(Effect.flatMap(Shell, (m) => Stream.runHead(Stream.filter(m.changes, (s) => s.assistant === detent)))); });
+    await underAct(() => { named<HTMLButtonElement>("Open conversation")?.click(); });
+    await settled("Sheet");
+    const sheetTalk = section()?.querySelector<HTMLButtonElement>("button[aria-label='Talk']");
+    expect(sheetTalk?.className).toContain("bg-foreground");
+    await underAct(() => { named<HTMLButtonElement>("Minimize chat")?.click(); });
+    await settled("Bar");
+    const barTalk = section()?.querySelector<HTMLButtonElement>("button[aria-label='Talk']");
+    expect([section()?.getAttribute("data-alpha-detent"), barTalk === sheetTalk, barTalk?.className.includes("bg-foreground")]).toEqual(["bar", false, false]);
+    expect(section()?.hasAttribute("inert")).toBe(false);
   });
 
   // spec/app/assistant/dock.md, "Story: Drag Ask Alpha where I want it": as v121's chat scrim did, a tap or a drag on the page outside the open sheet lowers it when it ends
