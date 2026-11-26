@@ -10,10 +10,13 @@ import { Machine as Ask } from "../gen/app__ask.effect.vibe";
 import { Machine as Mailbox } from "../gen/app__inbox.effect.vibe";
 import { Machine as Message } from "../gen/app__inbox__message.effect.vibe";
 import { Machine as Preferences } from "../gen/app__settings__preferences.effect.vibe";
+import { Machine as Library } from "../gen/app__photos.effect.vibe";
+import { Machine as Viewer } from "../gen/app__photos__viewer.effect.vibe";
 import { Machine as Shell } from "../gen/app__shell.effect.vibe";
 import ask from "../src/ask/index.tsx";
 import assistant from "../src/assistant/index.tsx";
 import inbox from "../src/inbox/index.tsx";
+import photos from "../src/photos/index.tsx";
 import { Agent } from "../src/platform/agent.vibe";
 import { Cloud } from "../src/platform/cloud.vibe";
 import { askExample, askExampleLines, button, closeAll, drawn, fill, only, openOver, press, pressOnTop, underAct, until } from "./alpha.tsx";
@@ -224,6 +227,55 @@ it('Send one reviewed email as context to my resident agent (spec/app/inbox/mess
     from: source.card.from, to: [...source.card.to, ...source.card.cc], subject: source.card.subject, bodyText: source.body,
   })), []]);
   expect(received).toEqual(expect.stringContaining(prompt));
+}, 300_000);
+
+it('Ask my resident agent about one reviewed photo (spec/app/photos/viewer.md, "Story: Share what I am looking at")', async () => {
+  const world = { ...scene(), phone: true, image: true, now: Date.now() };
+  world.photos.access = { scope: "full", images: "full", videos: "denied" };
+  const source = world.photos.rows.find((row) => row.kind === "image" && row.image.startsWith("data:image/png;base64,"));
+  if (!source) throw new Error("The phone fixture has no PNG");
+  source.name = "Reviewed photo.png";
+  const prompt = "What should I look for in this photo?";
+  const reply = "Look for the landmarks near the center.";
+  const received: unknown[] = [];
+  const forwardAgent = forward(mine.agent.origin, mine.agent.token);
+  const { alpha } = await openOver(fakeWorld(world, {
+    agent: async (request) => {
+      if (request.method === "POST" && /^\/api\/conversations\/[^/]+\/messages(?:\/stream)?$/u.test(new URL(request.url).pathname)) {
+        const body: unknown = await request.clone().json();
+        received.push(body);
+      }
+      return forwardAgent(request);
+    },
+    cloud: forward(mine.cloud.local, mine.key.token),
+  }), only("home", "view:Photos", "assistant", "notice"));
+  const library = photos.runtime(alpha);
+  const chat = assistant.runtime(alpha);
+  await until(alpha, chat, Conversation, (state) => state.ready);
+  await press("Photos");
+  await until(alpha, library, Library, (state) => state.library.status === "Loaded");
+  await press(source.name);
+  await until(alpha, library, Viewer, (state) => state.read.status === "Loaded");
+  await drawn(() => button("Photo actions")?.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true })));
+  await drawn(() => {
+    const action = [...document.querySelectorAll<HTMLElement>("[role=menuitem]")].find((item) => item.textContent === "Ask Alpha");
+    if (!action) throw new Error("Ask Alpha was not offered for the photo");
+    action.click();
+  });
+  await until(alpha, alpha.runtime, Shell, (state) => state.assistant === "Sheet");
+  await drawn(() => vi.waitFor(() => expect(button(`Remove ${source.name}`)).toBeDefined()));
+  expect(received).toEqual([]);
+
+  await mine.script({ kind: "text", parts: [`[answer] ${reply}`] });
+  await fill("Message Alpha", prompt);
+  await drawn(() => vi.waitFor(() => expect(button("Send")?.disabled).toBe(false)));
+  await press("Send");
+  await until(alpha, chat, Conversation, (state) => state.turn.reply === "Complete");
+  await drawn(() => vi.waitFor(() => expect(document.querySelector("[role=log]")?.textContent).toContain(reply)));
+  expect(received).toEqual([expect.objectContaining({
+    text: expect.stringContaining(prompt),
+    images: [{ data: source.image.slice(source.image.indexOf(",") + 1), mimeType: "image/png", name: source.name }],
+  })]);
 }, 300_000);
 
 it('Approve a photo requested by the resident agent (spec/app/camera/index.md, "Story: Let Alpha take a photo")', async () => {
