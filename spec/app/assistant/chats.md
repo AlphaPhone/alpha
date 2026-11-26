@@ -94,8 +94,8 @@ pure val weight_listed = 3
 
 ### The list of conversations is read whenever it is shown
 
-Chat history opens as a sheet over Ask Alpha. Back closes that sheet before
-it lowers Ask Alpha.
+Chat history is on Agent activity in Settings, as in Alpha's earlier build:
+its History row reads the list each time it is opened.
 
 ```quint
 pure def browse(c: Chats): Moved =

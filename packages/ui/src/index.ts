@@ -44,8 +44,6 @@ export * from "./components/assistant/AssistantCallCard.tsx";
 export { AssistantCardFrame, type AssistantCardFrameProps } from "./components/assistant/AssistantCardFrame.tsx";
 export * from "./components/assistant/AssistantCard.tsx";
 export * from "./components/assistant/AssistantChatHeader.tsx";
-export * from "./components/assistant/AssistantChatHistorySheet.tsx";
-export * from "./components/assistant/AssistantChatHistory.tsx";
 export * from "./components/assistant/AssistantChoicesCard.tsx";
 export * from "./components/assistant/AssistantComposer.tsx";
 export * from "./components/assistant/AssistantChatActions.tsx";
