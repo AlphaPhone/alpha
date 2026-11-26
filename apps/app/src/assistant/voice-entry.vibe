@@ -13,6 +13,7 @@ import { contained, started, untimed } from "../runtime/reactor.vibe"
 import { keyboardVoice } from "../shell/canvas.vibe"
 import { Talk } from "./talk.vibe"
 
+// spec/app/voice/index.md, "Talk started from the bar or the pill stays there with speech on the phone; with Cloud speech or while typing it brings up the sheet"
 /**
  * Start only if the microphone and speaker are free at the time of the owner's request. Talk is drawn in Ask Alpha's
  * sheet, as in the Sunday demo build (v119 45f6bed30, apps/app/src/prototype/voice-adapter.ts:1092-1094): while typing it
