@@ -162,7 +162,7 @@ describe("Messages on an Alpha image", () => {
   it("See my conversations, read one, and send a message once (spec/app/messages/index.md, \"Story: See my conversations\"; spec/app/messages/composer.md, \"Story: Let Alpha suggest a draft\"; spec/app/messages/index.md, \"Story: Read a conversation\"; spec/app/messages/composer.md, \"Story: Send a message\"; spec/app/messages/sending.md, \"Story: Send a message once\"; spec/app/messages/sending.md, \"Story: Know whether it arrived\")", async () => {
     const world = image();
     world.telephony.live = [];
-    const { alpha } = await openImage(world);
+    const { alpha } = await open(world, [...mounts, ...only("view:Phone")]);
     // spec/app/messages/index.md, "Messages reads the conversation list each time it comes to the front"
     await openMessages(alpha);
     await ready(alpha.runtime, Messages, "Messages state", (s) => s.list.status === "Loaded" && s.threads === 1);
@@ -220,6 +220,21 @@ describe("Messages on an Alpha image", () => {
       expect([...document.querySelectorAll("[data-alpha-composer]")].map((field) => field.getAttribute("aria-label"))).toEqual(["Ask Alpha"]);
     }, { timeout: 12_000 });
     await fill("Ask Alpha", "What did I miss?");
+
+    // spec/app/messages/index.md, "Returning from Phone restores the conversation the Ask Alpha stage held"
+    await ready(alpha.runtime, Composer, "The message draft is saved", (state) => state.slot.author === "OwnerWrote" && state.slot.draft.sync === "Kept");
+    const beforePhone = alpha.runtime.runSync(Messages.use((machine) => machine.get()));
+    await press("Call Maya Chen");
+    await ready(alpha.runtime, Shell, "Phone on the same Ask Alpha sheet", (state) => state.trail.at(-1) === "Phone" && state.assistant === "Sheet");
+    await ready(alpha.runtime, Phone, "Maya's number on the keypad", (state) => state.front && state.tab === "Keypad" && state.digits === "+14155550100".length);
+    await vi.waitFor(() => expect(document.querySelector<HTMLInputElement>("[data-alpha-phone-number]")?.value).toBe("+14155550100"));
+    expect([world.telephony.dialed, world.telephony.placed, world.telephony.sent]).toEqual([[], [], []]);
+    await hardware("back");
+    await ready(alpha.runtime, Shell, "Messages again on the same Ask Alpha sheet", (state) => state.trail.at(-1) === "Messages" && state.assistant === "Sheet");
+    await ready(alpha.runtime, Messages, "The exact conversation was read again", (state) => state.thread === beforePhone.thread && state.page.ticket > beforePhone.page.ticket && state.page.status === "Loaded");
+    await ready(alpha.runtime, Composer, "The exact conversation's draft was restored", (state) => state.thread === beforePhone.thread && state.slot.author === "OwnerWrote" && state.slot.draft.sync === "Kept");
+    expect(document.querySelector("[role='log'][aria-label='Messages']")?.textContent).toContain("See you at five");
+
     await press("Back to texting Maya Chen");
     await ready(alpha.runtime, Shell, "Alpha image admitted", (s) => s.assistant === "Bar");
     expect([document.querySelectorAll("[data-alpha-composer]").length, document.querySelector<HTMLTextAreaElement>('textarea[aria-label="Text Maya"]')?.value, world.telephony.sent])

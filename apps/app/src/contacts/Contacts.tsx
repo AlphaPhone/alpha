@@ -176,9 +176,9 @@ function Card({ runtime, safe, route }: ContactsProps & { safe: boolean; route: 
   if (!state) return null;
   const card = runtime.runSync(Effect.flatMap(Rows, (rows) => rows.get())).card;
   const reach = (how: "Call" | "Message", number: string) => {
-    if (how === "Message" && route === undefined) return;
-    runtime.runSync(Effect.flatMap(Rows, (rows) => rows.set(how === "Message" && route !== undefined
-      ? { message: { route, contact: state.contact, card: state.card.ticket, number } } : { reach: number })));
+    if (route === undefined) return;
+    const request = { how, route, contact: state.contact, card: state.card.ticket, number };
+    runtime.runSync(Effect.flatMap(Rows, (rows) => rows.set({ reach: request })));
     void send({ type: "reach", how });
   };
   const field = "flex min-h-13.5 items-center gap-4 px-5 py-2";

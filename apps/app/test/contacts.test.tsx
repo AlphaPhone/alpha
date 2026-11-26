@@ -101,6 +101,20 @@ describe("Contacts on an Alpha image", () => {
     await until(alpha, alpha.runtime, Contacts, (state) => state.front && state.opened && state.contact === "7" && state.card.status === "Loaded");
     expect(button("Message +14155550100")).toBeDefined();
 
+    // spec/app/phone/index.md, "A number handed to Phone opens the keypad with it filled in, and never dials"; spec/app/shell/index.md, "Opening another communications app from the stage keeps Ask Alpha open"
+    await press("Call +14155550100");
+    await until(alpha, alpha.runtime, Shell, (state) => state.trail.join(",") === "Contacts,Phone" && state.assistant === "Sheet");
+    await filledPhoneKeypad(alpha, 12);
+    expect(document.querySelector<HTMLInputElement>("[data-alpha-phone-number]")?.value).toBe("+14155550100");
+    expect([world.telephony.placed, world.telephony.dialed]).toEqual([[], []]);
+
+    // spec/app/contacts/index.md, "Returning to a contact on the Ask Alpha stage reads that exact card again"
+    await enabled("Return to Contacts");
+    await press("Return to Contacts");
+    await until(alpha, alpha.runtime, Shell, (state) => state.trail.join(",") === "Contacts" && state.assistant === "Sheet");
+    await until(alpha, alpha.runtime, Contacts, (state) => state.front && state.opened && state.contact === "7" && state.card.status === "Loaded");
+    expect(button("Call +14155550100")).toBeDefined();
+
     await hardware("home");
     await until(alpha, alpha.runtime, Shell, (state) => state.trail.length === 0);
     await show("Ben Ortiz");

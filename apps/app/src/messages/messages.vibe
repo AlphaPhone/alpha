@@ -327,8 +327,15 @@ effect function numbers(thread: number): ReadonlyArray<string>!!Conversations {
 }
 
 // spec/app/messages/index.md, "Copy puts a message's text on the clipboard, Call opens Phone with the number, and a message Alpha cannot show opens in the messaging app; none changes anything here"
-effect function called(thread: number): void!!(Conversations | Dialer | PhoneMachine | Shell) {
-  try ignore(dialing((try numbers(thread))[0] ?? ""))
+effect function called(thread: number, ticket: number): void!!(Conversations | Dialer | PhoneMachine | Shell | Messages.Machine) {
+  const shell = try Shell
+  const visit = try shell.get()
+  if (!showing(visit, "Messages")) return
+  const page = try (try Messages.Machine).get()
+  if (page.thread !== thread || page.page.ticket !== ticket || !Messages.canCall(page)) return
+  const addresses = try numbers(thread)
+  if (addresses.length !== 1) return
+  try ignore(dialing(addresses[0], { view: "Messages", route: visit.route }))
 }
 
 /** The messaging app, opened on the conversation's numbers, for what Alpha cannot show or send. */
@@ -350,7 +357,7 @@ function carry(fx: Out): Job<Event, Telephony | Inbox | Conversations | Messages
     when { tag: "Prompt", let need }: answer("prompt", prompted(need), { type: "accessReported", need, grant: "Unasked" });
     when { tag: "OpenSettings" }: run("settings", effect { try (try SystemSettings).open("AppPermissions", "") });
     when { tag: "CopyText" }: run("copy", copySelected());
-    when { tag: "OpenPhone" }: run("call", effect { try called((try (try Messages.Machine).get()).thread) });
+    when { tag: "OpenPhone", let thread, let ticket }: run("call", called(thread, ticket));
     when { tag: "OpenMessagingApp" }: run("elsewhere", effect { try elsewhere((try (try Messages.Machine).get()).thread) });
     when { tag: "RemoveMessage", let id }: answer(`remove ${id}`, removed(id), { type: "removalLost" });
   }
