@@ -622,6 +622,41 @@ describe.each([["a browser", false], ["a phone", true]])("in %s", (_where, phone
     expect(world.ask.said.at(-1)).toBe(carried);
   });
 
+  it("Keeps the Later boundary ahead of my new turn when I send while reading older messages (spec/app/assistant/chats.md, \"Older or newer messages are read around a message of the conversation showing\")", async () => {
+    const world = { ...scene(), phone };
+    world.ask.kept.set("c1", { roomId: "r1", title: "Earlier history", messages: Array.from({ length: 205 }, (_, at) => ({
+      id: `history-${at + 1}`, role: "user", text: `History ${at + 1}`,
+    })) });
+    const { alpha, runtime } = await openAssistant(world);
+    await press("Open conversation");
+    await until(alpha, runtime, Shell, (state) => state.assistant === "Sheet");
+    await chatsList();
+    await until(alpha, runtime, Chats, (state) => state.list.status === "Loaded");
+    row("Chats", "Earlier history");
+    await until(alpha, runtime, Chats, (state) => state.chosen > 0 && state.page.status === "Loaded");
+    await until(alpha, runtime, Composer, (state) => state.binding.conversation > 0 && state.slot === "Open");
+    await press("Earlier");
+    await until(alpha, runtime, Chats, (state) => state.around > 0 && state.page.status === "Loaded");
+
+    const transcriptOrder = () => [...document.querySelectorAll("[role=log] [data-alpha-message-text], [role=log] button")].flatMap((element) =>
+      element.hasAttribute("data-alpha-message-text") || element.textContent === "Later" ? [element.textContent] : []);
+    const lastFour = ["History 106", "Later", "Question from here", "Reply from the current turn"];
+    const done = Promise.withResolvers<void>();
+    world.ask.nextReplyChunks = ["Reply from the current turn"];
+    world.ask.holdDoneAfterReady = done.promise;
+    try {
+      write("Question from here");
+      await press("Send");
+      await drawn(() => vi.waitFor(() => expect(transcriptOrder().slice(-4)).toEqual(lastFour)));
+    } finally {
+      done.resolve();
+    }
+    await until(alpha, runtime, Conversation, (state) => state.turn.reply === "Complete");
+    expect(transcriptOrder().slice(-4)).toEqual(lastFour);
+    expect(lines()[0]).toBe("History 1");
+    expect(lines().slice(-2)).toEqual(["Question from here", "Reply from the current turn"]);
+  });
+
   // spec/app/assistant/index.md, "Story: Stop a reply"
   it("Stop a reply, and learn how it ended (spec/app/assistant/index.md, \"Story: Stop a reply\")", async () => {
     const world = { ...scene(), phone };

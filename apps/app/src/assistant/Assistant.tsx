@@ -515,6 +515,7 @@ export function Assistant({ runtime, messageActions, speech, canReadAloud = fals
   const history = useHistorySheets(chats, search, layers, seen, free, beginSearch, returnChatFocus, returnSearchFocus);
   const page = shown === undefined || (shown.page.status === "Idle" && shown.chosen === 0) ? undefined : seen.pages.get(shown.page.ticket);
   const lines = page?.lines ?? emptyLines;
+  const later = page?.bounds?.later;
   const canPreview = attachments.can({ type: "preview", attachment: 1 });
   const preview = useCallback((file: Attached) => void runtime.runPromise(previewFile(file)), [runtime]);
   const onSettingsPage = shell.state && showing(shell.state, "Settings") && shell.state.assistant !== "Bar" && shell.can(back);
@@ -557,6 +558,13 @@ export function Assistant({ runtime, messageActions, speech, canReadAloud = fals
     opened,
     onChoose,
   });
+  const [historyRows, newerRows] = useMemo(() => {
+    const edge = later === undefined ? -1 : lines.findIndex((line) => line.id === later);
+    if (edge < 0 || edge === lines.length - 1) return [messages, undefined] as const;
+    const following = new Set(lines.slice(edge + 1).map((line) => line.id));
+    const split = messages.findIndex((message) => following.has(message.id));
+    return split < 0 ? [messages, undefined] as const : [messages.slice(0, split), messages.slice(split)] as const;
+  }, [later, lines, messages]);
   if (conversation.cause || chats.cause || composer.cause || reply.cause) return <Alert variant="destructive" className="m-4">Alpha could not open Ask Alpha</Alert>;
   if (!talking || !shown || !writing || !finding) return null;
   const hold = { type: "hold", askable: askable(talking) } as const;
@@ -628,7 +636,6 @@ export function Assistant({ runtime, messageActions, speech, canReadAloud = fals
   };
   // spec/app/assistant/chats.md, "Older or newer messages are read around a message of the conversation showing"
   const earlier = page?.bounds?.earlier;
-  const later = page?.bounds?.later;
   const readEarlier = { type: "scroll", around: board.numbered(earlier ?? "") } as const;
   const readLater = { type: "scroll", around: board.numbered(later ?? "") } as const;
   const replyWords = replyBlocks(seen.reply, true).words;
@@ -712,7 +719,8 @@ export function Assistant({ runtime, messageActions, speech, canReadAloud = fals
         }}
         attachmentNotice={onComms ? undefined : seen.attachmentNotice}
         transcript={{
-          messages,
+          messages: historyRows,
+          messagesAfterLater: newerRows,
           holdMessage: open ? holdMessage : undefined,
           briefing: brief === "" ? undefined : <AssistantNoticeCard key={`briefing:${subject}`} title="Phone" detail={brief} />,
           liveMessages: [...writingReply, ...draftCards, ...failed, ...mediaCards, ...mediaNote, ...recordingSummary],
