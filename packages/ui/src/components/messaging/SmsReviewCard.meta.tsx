@@ -20,7 +20,7 @@ export const meta: ComponentMeta<SmsReviewCardProps> = {
       onDecline.mockClear();
       const card = within(canvasElement);
       await userEvent.click(card.getByRole("button", { name: "Send this text" }));
-      await userEvent.click(card.getByRole("button", { name: "Don’t send" }));
+      await userEvent.click(card.getByRole("button", { name: "Decline Keep things as they are." }));
       await expect([onSend.mock.calls.length, onDecline.mock.calls.length]).toEqual([1, 1]);
     },
   },
