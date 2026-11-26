@@ -133,7 +133,7 @@ async function mountCalendar(
   const { alpha } = await open(world, areas);
   const runtime = calendar.runtime(alpha);
   await openCalendar(alpha);
-  await until(alpha, runtime, View, ready);
+  await until(alpha, runtime, View, (state) => state.front && ready(state));
   return { alpha, runtime, world };
 }
 

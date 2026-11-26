@@ -2,7 +2,6 @@
 import type { LocalRoute } from "@elizaos/agent"
 import type { ModuleContext } from "@elizaos/agent-host"
 import { notesRecordingCleanupHost } from "@elizaos/plugin-notes"
-// eslint-disable-next-line @typescript-eslint/consistent-type-imports -- CleanupReceipt is the schema `schema CleanupRequest` decodes with, a value the projection ESLint reads does not show
 import { CleanupReceipt, type NotesTrashRecordingCleanup } from "@elizaos/plugin-notes-client"
 
 schema CleanupScope { userId: string; organizationId: string; agentId: string; epoch: Schema.Int }

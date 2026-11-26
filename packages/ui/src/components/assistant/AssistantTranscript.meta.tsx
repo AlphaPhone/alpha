@@ -104,6 +104,7 @@ export const meta: ComponentMeta<AssistantTranscriptProps> = {
       const readingLog = await within(reading.host).findByRole("log");
       await waitFor(() => expect(scrollOf(readingLog).below).toBeLessThan(2));
       readingLog.scrollTop -= 200;
+      readingLog.dispatchEvent(new Event("scroll"));
       await waitFor(() => expect(scrollOf(readingLog).below).toBeGreaterThan(150));
       const place = readingLog.scrollTop;
       await reading.finish(readingLog);

@@ -205,7 +205,7 @@ describe("Home on a phone", () => {
     await until(alpha, alpha.runtime, Shell, (state) => state.drawer && state.assistant === "Sheet");
     await until(alpha, homes, Home.Machine, (state) => state.installed.read.status === "Loaded");
     expect(dialog()?.getAttribute("aria-modal")).toBeNull();
-    expect(button("Open Clock")).toBeDefined();
+    expect(button("Open Clock org.fixture.clock")).toBeDefined();
     await fill("Search apps", "clock");
     expect(button("Open Mail")).toBeUndefined();
 
@@ -325,8 +325,8 @@ describe("Home on a phone", () => {
 
     await drawn(() => search()?.focus());
     await fill("Search apps", "fíxture.clock");
-    expect([Boolean(button("Open Clock")), Boolean(button("Open Mail"))]).toEqual([true, false]);
-    await press("Open Clock");
+    expect([Boolean(button("Open Clock org.fixture.clock")), Boolean(button("Open Clock")), Boolean(button("Open Mail"))]).toEqual([true, false, false]);
+    await press("Open Clock org.fixture.clock");
     await vi.waitFor(() => expect(world.launcher.opened).toEqual(["org.fixture.clock"]));
 
     // spec/app/shell/focus.md, "A layer that closes gives focus back to the control that opened it, never over a control that took it"
@@ -390,7 +390,7 @@ describe("Home on a phone", () => {
       await drawn(() => item?.click());
     };
     const holdClock = async () => {
-      const clock = button("Open Clock");
+      const clock = button("Open Clock org.fixture.clock");
       expect(clock).toBeInstanceOf(HTMLButtonElement);
       await drawn(() => clock?.dispatchEvent(pointer("pointerdown", 100, 235)));
       await later(alpha, 450);
@@ -603,7 +603,7 @@ describe("Home on a phone", () => {
     await until(alpha, homes, Home.Machine, (h) => h.tiles.load.status === "Loaded");
     await press("Apps");
     await until(alpha, homes, Home.Machine, (h) => h.installed.read.status === "Loaded");
-    await press("Open Clock");
+    await press("Open Clock org.fixture.clock");
     await until(alpha, homes, Home.Machine, (h) => h.handoff.attempt.outcome === "Refused");
     expect(document.querySelector('[role="dialog"][aria-label="Apps"]')?.textContent).toContain("Couldn't open Clock.");
 

@@ -11,7 +11,7 @@ import { Machine as VoicemailMachine, removing as removingVoicemail } from "../.
 import { type Telephony, readAddressBook, telephony } from "../platform/telephony.vibe"
 import { Device } from "../platform/device.vibe"
 import { contained } from "../runtime/reactor.vibe"
-import { type Drafts, offerMessageDraft } from "../messages/composer.vibe"
+import { Drafts, offerMessageDraft } from "../messages/composer.vibe"
 import { Conversations, Inbox, titleOf } from "../messages/messages.vibe"
 import { Dialer, prefilled } from "../phone/phone.vibe"
 import { Callers, Voicemails } from "../phone/voicemail.vibe"

@@ -36,8 +36,8 @@ export type SmsReviewCardProps = {
  * @model spec/app/contacts/agent.md
  */
 export function SmsReviewCard({ to, number, body, note, hint, review, onSend, onDecline, sendDisabled = false, declineDisabled = false, className }: SmsReviewCardProps) {
-  const row = "flex min-h-14 w-full items-center gap-3 border-b border-border px-4 py-3 text-left disabled:cursor-default disabled:opacity-50";
-  const label = "inline-flex min-h-9 shrink-0 items-center rounded-action px-4 text-sm font-semibold";
+  const row = "relative flex min-h-14 w-full items-center gap-3 border-b border-border px-4 py-3 text-left";
+  const label = "inline-flex min-h-9 shrink-0 items-center rounded-action px-4 text-sm font-semibold after:absolute after:inset-0 disabled:cursor-default disabled:opacity-50";
   const details = (
     <div className="min-w-0 grow">
       <div className="text-sm font-semibold">Review SMS</div>
@@ -51,16 +51,18 @@ export function SmsReviewCard({ to, number, body, note, hint, review, onSend, on
     <section aria-label={`Text to ${to}`} data-alpha-sms-review="" data-alpha-review={review}
       className={cn("overflow-hidden rounded-tile bg-secondary text-foreground", className)}>
       {onSend ? (
-        <button type="button" aria-label="Send this text" data-alpha-review-send="" disabled={sendDisabled} className={row} onClick={onSend}>
+        <div className={row}>
           {details}
-          <strong className={cn(label, "bg-alpha text-alpha-foreground")}>Send</strong>
-        </button>
+          <button type="button" aria-label="Send this text" data-alpha-review-send="" disabled={sendDisabled}
+            className={cn(label, "bg-alpha text-alpha-foreground")} onClick={onSend}>Send</button>
+        </div>
       ) : <div className={row}>{details}</div>}
       {onDecline ? (
-        <button type="button" aria-label="Decline Keep things as they are." disabled={declineDisabled} className={row} onClick={onDecline}>
+        <div className={row}>
           <div className="min-w-0 grow text-meta leading-details text-muted-foreground">Keep things as they are.</div>
-          <strong className={cn(label, "bg-accent text-foreground")}>Decline</strong>
-        </button>
+          <button type="button" aria-label="Decline Keep things as they are." disabled={declineDisabled}
+            className={cn(label, "bg-accent text-foreground")} onClick={onDecline}>Decline</button>
+        </div>
       ) : null}
     </section>
   );

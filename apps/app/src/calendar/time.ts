@@ -122,17 +122,6 @@ export function minutesOf(ms: number): number {
   return at.getHours() * 60 + at.getMinutes();
 }
 
-/** The instant civil `day` reads `minutes` past midnight on the phone's clock. @throws {never} */
-export function wallTime(day: number, minutes: number): number {
-  return wallDateTime(day, Math.floor(minutes / 60), minutes % 60);
-}
-
-// spec/app/calendar/writing.md, "A missing or repeated wall time is refused, and nothing is saved"
-/** Whether `minutes` past midnight of civil `day` exists on the phone's clock, is skipped by a clock change, or comes twice. @throws {never} */
-export function wallOf(day: number, minutes: number): WallTime {
-  return localWallTime(day, Math.floor(minutes / 60), minutes % 60).kind;
-}
-
 // spec/app/calendar/writing.md, "An existing event whose timing cannot be shown as a wall-clock span keeps its original time"
 /** The minutes between two instants as the phone's clock shows them, which a clock change can make zero or less. @throws {never} */
 export function wallSpan(begin: number, end: number): number {

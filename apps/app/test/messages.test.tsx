@@ -733,9 +733,9 @@ describe("Messages on an Alpha image", () => {
     expect(document.body.textContent).toContain(`To: ${displayNumber(sms.recipients[0])}`);
     expect(document.body.textContent).toContain(sms.body);
     // spec/app/contacts/agent.md, "A text's review is two rows, and a tap anywhere on its first row approves the text while a tap on its second declines it"
-    const sendRow = button("Send this text")?.textContent ?? "";
+    const sendRow = button("Send this text")?.parentElement?.textContent ?? "";
     expect([sendRow.startsWith(`Review SMSTo: ${displayNumber(sms.recipients[0])}${sms.body}`), sendRow.endsWith("Send")]).toEqual([true, true]);
-    expect(button("Decline Keep things as they are.")?.textContent).toBe("Keep things as they are.Decline");
+    expect(button("Decline Keep things as they are.")?.parentElement?.textContent).toBe("Keep things as they are.Decline");
     expect([review.decisions, review.confirmations, world.telephony.sent]).toEqual([[], [], []]);
     await press("Send this text");
     try {
@@ -1127,7 +1127,7 @@ describe("Messages on an Alpha image", () => {
     await ready(alpha.runtime, Messages, "Maya conversation", (s) => s.pane === "Conversation" && s.page.status === "Loaded");
     await ready(alpha.runtime, Composer, "Maya composer", (s) => s.thread > 0 && s.sending.grant === "Granted");
     await fill("Text Maya", "Already sent");
-    await ready(alpha.runtime, Composer, "owner wrote", (s) => s.slot.author === "OwnerWrote");
+    await ready(alpha.runtime, Composer, "owner wrote", (s) => s.slot.author === "OwnerWrote" && s.slot.draft.sync === "Kept");
     await press("Send");
     await ready(alpha.runtime, Composer, "send confirmed and slot cleared", (s) => s.outgoing.op.outcome === "Confirmed" && s.slot.author === "Nobody" && s.slot.draft.sync === "Kept");
     const mayaThread = (await alpha.runtime.runPromise(Effect.flatMap(Composer, (m) => m.get()))).thread;

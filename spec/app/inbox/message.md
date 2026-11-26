@@ -499,7 +499,7 @@ pure val eval_witness_sometimesALaterPdfPageIsDrawn = (
   ("loaded", 1, { account: 1, grant: { read: true, send: false, modify: false } }, true, Fine, 1, 1, 0, 1),
   ("reviewAttachment", 1, Opening),
   ("confirmAttachment", { account: 1, grant: { read: true, send: false, modify: false } }),
-  ("attachmentHandled", 1, true, true, 3),
+  ("attachmentHandled", 1, true, true, 3, false),
   ("pdfPage", { account: 1, grant: { read: true, send: false, modify: false } }, 2),
   ("pdfDrawn", 1, 2, 2, true))
 ```

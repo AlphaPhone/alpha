@@ -1008,7 +1008,7 @@ pure def sometimesFollowedAgentNavigationWhileListening(v: Voice): bool = v.phas
 pure val eval_witness_sometimesFollowedAgentNavigationWhileListening = (
   ("startTalking", 0), ("answerPrompt", true), ("micOpened", 1), ("speechHeard", 1),
   ("turnEnded", 1), ("micClosed", 1), ("agentNavigates", 1, 1, 1, 0), ("navigated", 1, 1, true),
-  ("replyEnds", 1, 1, false), ("micOpened", 1)
+  ("replyEnds", 1, 1, false, false), ("micOpened", 1)
 )
 ```
 

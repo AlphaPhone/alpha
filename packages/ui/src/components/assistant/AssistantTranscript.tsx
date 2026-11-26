@@ -143,7 +143,7 @@ export function AssistantTranscript({ messages, messagesAfterLater, holdMessage,
       onScroll={(event) => {
         const viewport = event.currentTarget;
         const reading = scrollRef.current;
-        if (visible && status === "loaded") {
+        if (visible && status === "loaded" && (reading.follows || viewport.scrollHeight - viewport.clientHeight >= reading.top)) {
           reading.follows = atSeenEnd(reading, viewport.scrollTop);
           reading.top = viewport.scrollTop;
         }

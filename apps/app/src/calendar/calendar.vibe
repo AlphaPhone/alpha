@@ -26,7 +26,7 @@ import { PhoneCalendar } from "../platform/calendar.vibe"
 import { type Failure, ask } from "../platform/remote.vibe"
 import { SystemSettings } from "../platform/systemSettings.vibe"
 import { remindersStore } from "../reminders/store.ts"
-import { type Job, answer, contained, due, following, hearing, reacting, run, started, together, untimed } from "../runtime/reactor.vibe"
+import { type Job, answer, contained, due, following, reacting, run, started, together, untimed } from "../runtime/reactor.vibe"
 import { Time } from "../runtime/time.vibe"
 import type { DeletionMeta } from "./deletions.vibe"
 import type { LinkCache } from "./link.vibe"
@@ -289,8 +289,25 @@ const accessOnReturn = started(effect {
 }, "refreshing Calendar access on return")
 
 // spec/app/calendar/index.md, "Calendar says when it comes in front and when it leaves; coming in front reads again"; spec/app/calendar/index.md, "The event's place opens in Maps, and coming back from Maps or Android Calendar reads the event again"
-const fronted = hearing(calendarInFront, View.Machine, (front): Event => ({ type: "frontChanged", front, now: untimed }))
-const returned = hearing(forward, View.Machine, (): Event => ({ type: "comeBack" }))
+const fronted = started(effect {
+  const view = try View.Machine
+  const shell = try Shell.Machine
+  const device = try Device
+  let seenFront = false
+  let left = false
+  try Stream.runForEach(calendarInFront, effect (front) => {
+    try contained(view.send({ type: "frontChanged", front, now: untimed }), "telling Calendar it came in front")
+    if (!front) {
+      if (seenFront || (try view.get()).detail !== "Showing") left = true
+    } else {
+      seenFront = true
+      if (left && Shell.showing(try shell.get(), "Calendar") && (try device.showing())) {
+        left = false
+        try contained(view.send({ type: "comeBack" }), "reading the open event on return")
+      }
+    }
+  })
+}, "following when Calendar is in front")
 
 // spec/app/calendar/index.md, "Leaving Calendar closes its search, its sheets and its dialogs"
 const covering = following(Layers, (layers) => pageInert(layers), View.Machine, (covered): Event => ({ type: "coverChanged", covered }))
@@ -346,7 +363,7 @@ const reminders = started(effect {
 }, "reading reminders for Calendar")
 
 /** Calendar's view: in memory, told today by Alpha's time and the shell, and what it may read by Android and the agent. */
-export const calendar = together(kept, told, accessOnReturn, fronted, returned, widened, writing, covering, forms, reviews, detailWatch, reminders)
+export const calendar = together(kept, told, accessOnReturn, fronted, widened, writing, covering, forms, reviews, detailWatch, reminders)
 
 /** Every machine and scoped store of the Calendar area, which its screen reads, and Alpha's time. */
 export type Calendared = View.Machine | Writes.Machine | Changes.Machine | Linking.Machine | Held.Machine | Canvas.Machine | Reopen.Machine | Shell.Machine | Cloud | Device | Time | KeyValueStore.KeyValueStore | Shown | Requests | DeletionMeta | LinkCache | Notices.Machine | Said

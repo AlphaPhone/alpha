@@ -1003,6 +1003,51 @@ function FormPeopleCard({ people, picking, canEdit, typedEmail, addable, setPick
   );
 }
 
+const toDay = (value: string) => (/^\d{4}-\d{2}-\d{2}$/.test(value) ? civilDay(new Date(`${value}T12:00`).getTime()) : NaN);
+
+function FormTimingCard({
+  fields, reminder, canEdit, startDay, endDay, inclusiveEndDay, length, lengthMinutes, setWall, setWallError, retime, startAt, lasting,
+}: {
+  fields: Fields; reminder: boolean; canEdit: boolean; startDay: number; endDay: number; inclusiveEndDay: number; length: number; lengthMinutes: number;
+  setWall: (base: number, value: string, apply: (ms: number) => void) => void;
+  setWallError: (message: string) => void;
+  retime: (begin: number, end: number) => void;
+  startAt: (minutes: number) => (() => void) | undefined;
+  lasting: (minutes: number) => (() => void) | undefined;
+}) {
+  return (
+    <CalendarFormCard className="py-1 pr-2 pl-4">
+      {fields.allDay && !reminder ? null : (
+        <>
+          <CalendarTimeRow caption={hourMinute.format(fields.begin)} label={reminder ? "Reminder time" : "Start time"} value={timeValue(fields.begin)}
+            onChange={(value) => setWall(startDay, value, (begin) => retime(begin, begin + length))}
+            earlierLabel="Start earlier" laterLabel="Start later" onEarlier={startAt(earlierStart(minutesOf(fields.begin)))} onLater={startAt(laterStart(minutesOf(fields.begin)))} />
+          {reminder ? null : (
+            <CalendarTimeRow icon={null} caption={`${hourMinute.format(fields.end)} · ${duration(length)}`} label="End time" value={timeValue(fields.end)}
+              onChange={(value) => setWall(endDay, value, (end) => retime(fields.begin, end))}
+              earlierLabel="End earlier" laterLabel="End later" onEarlier={lasting(shorterEnd(lengthMinutes))} onLater={lasting(longerEnd(lengthMinutes))} />
+          )}
+        </>
+      )}
+      {reminder ? null : (
+        <CalendarFormDate inset label="Ends on" aria-label="End date" disabled={!canEdit}
+          value={dateValue(fields.allDay ? dayStart(inclusiveEndDay) : fields.end)}
+          onChange={(input) => {
+            const chosenDay = toDay(input.target.value);
+            if (!Number.isFinite(chosenDay)) return;
+            if (fields.allDay) {
+              if (chosenDay >= startDay) retime(dayStart(startDay), dayStart(chosenDay + 1));
+              return;
+            }
+            const moved = shiftDays(fields.end, chosenDay - endDay);
+            if (!wallTimeSavable(moved.kind)) { setWallError(wallMessage(moved.kind)); return; }
+            retime(fields.begin, moved.ms);
+          }} />
+      )}
+    </CalendarFormCard>
+  );
+}
+
 // spec/app/calendar/editor.md, "Story: Write an event"; spec/app/calendar/editor.md, "Story: Hand Android Calendar what Alpha cannot write"; spec/app/calendar/editor.md, "Story: Never create an event twice"; spec/app/calendar/writing.md, "A missing or repeated wall time is refused, and nothing is saved"; spec/app/calendar/writing.md, "An existing event whose timing cannot be shown as a wall-clock span keeps its original time"
 function Form({ runtime, day, today, connected, viewOwner }: CalendarProps & { day: number; today: number; connected: boolean; viewOwner: number }) {
   const editor = useEditor(runtime);
@@ -1041,7 +1086,6 @@ function Form({ runtime, day, today, connected, viewOwner }: CalendarProps & { d
   const startDay = civilDay(fields.begin);
   const endDay = civilDay(fields.end);
   const inclusiveEndDay = Math.max(startDay, civilDay(Math.max(fields.begin, fields.end - 1)));
-  const toDay = (value: string) => (/^\d{4}-\d{2}-\d{2}$/.test(value) ? civilDay(new Date(`${value}T12:00`).getTime()) : NaN);
   const moveStartTo = (targetDay: number) => {
     if (locked || !canEdit || !Number.isFinite(targetDay)) return;
     if (fields.allDay && !reminder) {
@@ -1198,35 +1242,8 @@ function Form({ runtime, day, today, connected, viewOwner }: CalendarProps & { d
       {locked && editingRow ? <CalendarNotice className="mx-6">{`${interval(editingRow)}. This event's time can't be changed here because of a clock change.`}</CalendarNotice> : null}
       <div className="flex flex-col gap-2.5 px-5 pt-3">
         {locked ? null : (
-          <CalendarFormCard className="py-1 pr-2 pl-4">
-            {fields.allDay && !reminder ? null : (
-              <>
-                <CalendarTimeRow caption={hourMinute.format(fields.begin)} label={reminder ? "Reminder time" : "Start time"} value={timeValue(fields.begin)}
-                  onChange={(value) => setWall(startDay, value, (begin) => retime(begin, begin + length))}
-                  earlierLabel="Start earlier" laterLabel="Start later" onEarlier={startAt(earlierStart(minutesOf(fields.begin)))} onLater={startAt(laterStart(minutesOf(fields.begin)))} />
-                {reminder ? null : (
-                  <CalendarTimeRow icon={null} caption={`${hourMinute.format(fields.end)} · ${duration(length)}`} label="End time" value={timeValue(fields.end)}
-                    onChange={(value) => setWall(endDay, value, (end) => retime(fields.begin, end))}
-                    earlierLabel="End earlier" laterLabel="End later" onEarlier={lasting(shorterEnd(lengthMinutes))} onLater={lasting(longerEnd(lengthMinutes))} />
-                )}
-              </>
-            )}
-            {reminder ? null : (
-              <CalendarFormDate inset label="Ends on" aria-label="End date" disabled={!canEdit}
-                value={dateValue(fields.allDay ? dayStart(inclusiveEndDay) : fields.end)}
-                onChange={(input) => {
-                  const chosenDay = toDay(input.target.value);
-                  if (!Number.isFinite(chosenDay)) return;
-                  if (fields.allDay) {
-                    if (chosenDay >= startDay) retime(dayStart(startDay), dayStart(chosenDay + 1));
-                    return;
-                  }
-                  const moved = shiftDays(fields.end, chosenDay - endDay);
-                  if (!wallTimeSavable(moved.kind)) { setWallError(wallMessage(moved.kind)); return; }
-                  retime(fields.begin, moved.ms);
-                }} />
-            )}
-          </CalendarFormCard>
+          <FormTimingCard fields={fields} reminder={reminder} canEdit={canEdit} startDay={startDay} endDay={endDay} inclusiveEndDay={inclusiveEndDay}
+            length={length} lengthMinutes={lengthMinutes} setWall={setWall} setWallError={setWallError} retime={retime} startAt={startAt} lasting={lasting} />
         )}
         {!reminder ? <>
         <CalendarFieldRow icon={<MapPin />} aria-label="Location" placeholder="Location" value={fields.place} disabled={!canEdit}

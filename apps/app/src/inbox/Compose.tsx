@@ -237,7 +237,7 @@ export function Compose({ runtime, list }: ComposeProps) {
   };
   const sendAction = ops.can(sending, "Owner")
     ? () => void ops.send(sending, "Owner")
-    : mayHaveGone(letter) && ops.can(sendingAgain, "Owner")
+    : mayHaveGone(letter) && outcomeProps?.onSendAgain === undefined && ops.can(sendingAgain, "Owner")
       ? () => void ops.send(sendingAgain, "Owner")
       : undefined;
   return (

@@ -195,8 +195,8 @@ describe("Voice Bug 1 & Bug 3 journeys", () => {
     expect([stopped.engineHeld, world.voice.engineHeld, world.voice.releaseEngineHoldCalls]).toEqual([false, false, 1]);
 
     world.voice.probeGate = undefined;
-    Object.defineProperty(document, "visibilityState", { configurable: true, value: "visible" });
-    document.dispatchEvent(new Event("visibilitychange"));
+    await seen(false);
+    await seen(true);
     await untilCondition(runtime, () => world.voice.warmSpeechOutputCalls === 2 && world.voice.liveCaptureStatusCalls === 3);
 
     world.signedIn = true;
@@ -1298,7 +1298,7 @@ describe("Talk from Ask Alpha's composer (spec/app/voice/index.md, \"Story: Hold
         await drawn(() => speakUtterance(world, answer));
         await drawnUntil(alpha, area, Voice.Machine, (state) =>
           state.sent === 2 && state.reviewPending === again && state.phase === "Listening" && state.mic === "On");
-        expect([review.decisions, review.claims, review.confirmations, world.telephony.sent]).toEqual([[], [], [], []]);
+        expect([review.decisions, review.rejections, review.claims, review.confirmations, world.telephony.sent]).toEqual([[], [], [], [], []]);
         expect(button("Send this text") !== undefined).toBe(again);
         if (outcome === "send") {
           await tapSend();
@@ -1319,9 +1319,9 @@ describe("Talk from Ask Alpha's composer (spec/app/voice/index.md, \"Story: Hold
     }
     expect(world.ask.said).toEqual(by === "voice" ? ["Start this chat", text, answer] : ["Start this chat", text]);
     expect(button("Send this text") !== undefined).toBe(outcome === "shown");
-    expect([review.decisions, review.claims, world.telephony.sent]).toEqual(outcome === "send" ? [
-      [review.proposal.id], [review.proposal.id], [{ operationId: review.proposal.id, recipients: [...operation.recipients], body: operation.body }],
-    ] : outcome === "decline" ? [[review.proposal.id], [], []] : [[], [], []]);
+    expect([review.decisions, review.rejections, review.claims, world.telephony.sent]).toEqual(outcome === "send" ? [
+      [review.proposal.id], [], [review.proposal.id], [{ operationId: review.proposal.id, recipients: [...operation.recipients], body: operation.body }],
+    ] : outcome === "decline" ? [[], [review.proposal.id], [], []] : [[], [], [], []]);
   });
 
   async function openSpokenBrowserWorld(url: string) {
@@ -1733,6 +1733,7 @@ describe("Talk from Ask Alpha's composer (spec/app/voice/index.md, \"Story: Hold
     const { alpha, area } = await onComposer(world);
     await drawnUntil(alpha, area, Voice.Machine, (s) => s.permission.grant === "Denied");
 
+    await seen(false);
     world.voice.permission = "granted";
     await seen(true);
     await drawnUntil(alpha, area, Voice.Machine, (s) => s.permission.grant === "Granted");

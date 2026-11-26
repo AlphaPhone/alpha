@@ -527,10 +527,10 @@ function assertSafeZipEntry(entry: string): void {
 
 function verifyCloudRoutes(name: string, capacitor: Record<string, unknown>): void {
   const cloud = record(record(capacitor.plugins).ElizaCloud);
-  const groups = Array.isArray(cloud.routes) ? cloud.routes : [];
-  const routes = groups.flatMap((item) => {
+  const groups: readonly unknown[] = Array.isArray(cloud.routes) ? (cloud.routes as readonly unknown[]) : [];
+  const routes: readonly unknown[] = groups.flatMap((item) => {
     const nested = record(item).routes;
-    return Array.isArray(nested) ? nested : [item];
+    return Array.isArray(nested) ? (nested as readonly unknown[]) : [item];
   });
   if (routes.length === 0) throw new Error(`${name} carries no ElizaCloud.routes table`);
   for (const item of routes) {
