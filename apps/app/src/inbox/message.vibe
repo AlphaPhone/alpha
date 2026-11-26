@@ -329,7 +329,7 @@ export effect function prepareInboxCardEntry() {
     let closed = false
     if (Message.canClose(previous)) {
       closed = try contained(reader.send({ type: "close" }, (state) => current() && matchesReader(state)
-        && matchesList(Effect.runSync(list.get())), "closing the previous Inbox message")
+        && matchesList(Effect.runSync(list.get()))), "closing the previous Inbox message")
       if (!closed) return
     }
     if (Inbox.canClearSearch(try list.get())) {
