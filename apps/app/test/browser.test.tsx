@@ -27,7 +27,7 @@ import { TabHost } from "../src/platform/browser.vibe";
 import { button, closeAll, drawn, fill, hardware, later, only, open, press, pressOnTop, readInboxFirst, typeInto, underAct, until } from "./alpha.tsx";
 import { memoryIndexedDB } from "./fakes/indexeddb.ts";
 import { scene } from "./fakes/scene.ts";
-import { textReview } from "./fakes/text-review.ts";
+import { askedPage, textReview } from "./fakes/text-review.ts";
 
 underAct();
 afterEach(closeAll);
@@ -886,10 +886,7 @@ describe("The Browser on a phone", () => {
     await until(alpha, alpha.runtime, Shell, (s) => s.assistant === "Sheet");
     const front = () => committedAddress(runtime, world.browser.tabs);
     world.ask.nextReplyChunks = ["Opening alphacompute.ai."];
-    world.ask.nextActions = () => {
-      review.proposal.payload.requestMessageId = `m${world.ask.said.length}u`;
-      return [{ action: "PROPOSE_DEVICE_ACTION", data: { proposalId: "page-asked", state: "pending", executed: false, approvalRequired: false, awaitingDeviceExecution: true, directRequest: true } }];
-    };
+    world.ask.nextActions = (_, capabilities) => askedPage(review, `m${world.ask.said.length}u`, capabilities);
     await fill("Message Alpha", "Open https://www.alphacompute.ai/ in Browser.");
     await vi.waitFor(() => expect(button("Send")?.disabled).toBe(false));
     await press("Send");
@@ -940,10 +937,7 @@ describe("The Browser on a phone", () => {
     const front = () => committedAddress(runtime, world.browser.tabs);
     const reads = review.pendingReads;
     world.ask.nextReplyChunks = ["Opening alphacompute.ai."];
-    world.ask.nextActions = () => {
-      review.proposal.payload.requestMessageId = `m${world.ask.said.length}u`;
-      return [{ action: "PROPOSE_DEVICE_ACTION", data: { proposalId: "page-asked", state: "pending", executed: false, approvalRequired: false, awaitingDeviceExecution: true, directRequest: true } }];
-    };
+    world.ask.nextActions = (_, capabilities) => askedPage(review, `m${world.ask.said.length}u`, capabilities);
     await fill("Message Alpha", "Open https://www.alphacompute.ai/ in Browser.");
     await vi.waitFor(() => expect(button("Send")?.disabled).toBe(false));
     await press("Send");
