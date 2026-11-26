@@ -118,7 +118,11 @@ export function Preview({ runtime, today }: PreviewProps) {
   };
   return (
     <section ref={focusOnOpen} role="dialog" aria-label="Preview" tabIndex={-1} data-alpha-subview="files-preview"
-      onKeyDown={(event) => { if (event.key === "Escape" && owner({ type: "close" })) { event.stopPropagation(); tell({ type: "close" }); } }}
+      onKeyDown={(event) => {
+        if (event.key !== "Escape" || !event.currentTarget.contains(event.target as Node) || !owner({ type: "close" })) return;
+        event.stopPropagation();
+        tell({ type: "close" });
+      }}
       className={cn("absolute inset-0 z-20 flex flex-col overflow-hidden bg-background text-foreground focus-visible:outline-none", launcherTop)}>
         <div className={cn("flex min-h-13 shrink-0 items-center gap-0.5 px-2 pt-[env(safe-area-inset-top)] in-data-[alpha-launcher]:pt-0 [&_button]:size-13", launcherInnerHeader)}>
           {owner({ type: "close" }) && <Button variant="ghost" size="icon" aria-label="Close" onClick={() => tell({ type: "close" })}><ChevronLeft /></Button>}

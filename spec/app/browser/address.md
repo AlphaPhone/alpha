@@ -379,7 +379,8 @@ pure def lawEveryTabHasTheSameHint(p: Page): bool = addressHint(p) == addressHin
 ### The find bar opens over a shown page
 
 On Android, choosing Find with no shown page keeps the menu open and asks
-the owner to load a page.
+the owner to load a page. The phone draws the page above Alpha, so while the
+find bar is open the page starts at the find bar's foot and never covers it.
 
 ```quint
 pure def canOpenFind(p: Page): bool = p.phase == Shown and not(p.finding)

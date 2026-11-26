@@ -219,6 +219,20 @@ pure def lawTheAgentCalendarTakesNoRepeat(hasAlert: bool, hasVideo: bool): bool 
   not(agentCalendarAccepts(true, true, hasAlert, hasVideo))
 ```
 
+### The form offers with the agent's calendar only what it holds, and keeps the calendar chosen
+
+While the agent's calendar is chosen, a repeat, an alert or a video link
+is offered only where that calendar would take the event with it; picking
+one never switches the event to another calendar, and Save stays in reach.
+
+```quint
+pure def offeredOn(agentCalendar: bool, repeats: bool, hasAlert: bool, hasVideo: bool): bool =
+  agentCalendarAccepts(agentCalendar, repeats, hasAlert, hasVideo)
+
+pure def lawTheAgentCalendarIsOfferedNoRepeat(hasAlert: bool, hasVideo: bool): bool =
+  not(offeredOn(true, true, hasAlert, hasVideo)) and offeredOn(true, false, false, false)
+```
+
 ### Guests need an email each, and existing guests without one cannot be changed here
 
 ```quint
@@ -253,10 +267,10 @@ pure def agentAllDayUpdateAllowed(allDay: bool, startWholeDay: bool, endWholeDay
 pure def lawAPartDayIsNeverSentAsAllDay(endWholeDay: bool): bool = not(agentAllDayUpdateAllowed(true, false, endWholeDay))
 ```
 
-### A repeat is daily, weekly, monthly or yearly, and a new event can be created with one
+### A new event repeats once, daily, on weekdays or weekly, as in v119, and can be created with one
 
 ```quint
-type Repeat = NoRepeat | Daily | Weekly | Monthly | Yearly
+type Repeat = NoRepeat | Daily | Weekdays | Weekly
 
 pure def repeating(repeat: Repeat): bool = repeat != NoRepeat
 

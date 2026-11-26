@@ -20,10 +20,14 @@ export interface BrowserAddressChoicesProps {
   privateNotice?: string;
 }
 
-/** Local bookmark and history suggestions beneath the Browser's address field. */
+/**
+ * Local bookmark and history suggestions beneath the Browser's address field, from the bar's foot down: 100px on the
+ * launcher (its 44px status room and 56px bar) as v119 (Alpha 45f6bed30 apps/app/src/prototype/template.html:1691), and
+ * 52px off it, where the bar is 52px at the top.
+ */
 export function BrowserAddressChoices({ choices, onOpen, refusal, privateTab, privateNotice }: BrowserAddressChoicesProps) {
   return (
-    <section aria-label="Address suggestions" className="absolute inset-x-0 top-25 bottom-0 z-20 overflow-y-auto bg-background pt-1.5 pb-35">
+    <section aria-label="Address suggestions" className="absolute inset-x-0 top-13 bottom-0 in-data-[alpha-launcher]:top-25 z-20 overflow-y-auto bg-background pt-1.5 pb-35">
       {privateTab && <PrivateNotice icon={<PrivateMark aria-hidden className="size-4.5 shrink-0 self-center" />} className="mx-5.5 mt-2.5 mb-3 flex items-baseline gap-2.5">{privateNotice}</PrivateNotice>}
       {refusal && <p role="alert" className="mx-5.5 py-2 text-base">{refusal}</p>}
       <ul>
