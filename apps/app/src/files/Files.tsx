@@ -13,6 +13,7 @@ import type { Item, Kind } from "../../gen/app__files__shared.ts";
 import type { Machine as TrashMachine } from "../../gen/app__files__trash.effect.vibe";
 import type { Alpha, Resident } from "../runtime/area.tsx";
 import { AppBack } from "../shell/AppBack.tsx";
+import { launcherFirstHeader, launcherInnerHeader, launcherTop } from "../shell/launcherFrame.ts";
 import { Time } from "../runtime/time.vibe";
 import { Handles } from "./handles.vibe";
 import { changedOn, folderLocation, parentPath, sized } from "./entries.vibe";
@@ -118,8 +119,9 @@ export function Files({ runtime, alpha }: FilesProps) {
   const marked = state?.picked;
   const marks = useMemo(() => new Set(marked), [marked]);
   const back = <AppBack alpha={alpha} />;
+  const firstBack = <AppBack alpha={alpha} firstPage />;
   const scanner = <Scan runtime={runtime} alpha={alpha} />;
-  const header = (title: string) => <AppHeader title={title} leading={back} />;
+  const header = (title: string) => <AppHeader title={title} className={launcherFirstHeader} leading={firstBack} />;
   if (cause) return <>{header("Files")}<Alert variant="destructive" className="m-4">Alpha could not open Files</Alert></>;
   if (!state) return <section aria-label="Files" aria-busy className="relative flex min-h-0 flex-1 flex-col">{header("Files")}</section>;
   const owner = <E extends Parameters<typeof can>[0]>(event: E) => can(event, "Owner");
@@ -222,9 +224,9 @@ export function Files({ runtime, alpha }: FilesProps) {
   const selectionActions = actionsOf({ owner, tell, chosenCount: marks.size, setDestination, rename: () => setNaming({ work: "Rename", name: firstPicked?.name ?? "" }) });
   const canDetails = firstPicked !== undefined && picked.length === 1 && owner({ type: "showDetails", target: firstPicked.id });
   return (
-    <section aria-label="Files" className="relative flex min-h-0 flex-1 flex-col">
+    <section aria-label="Files" className={cn("relative flex min-h-0 flex-1 flex-col", launcherTop)}>
       <div key={atTop ? "top" : "folder"} className={cn("flex min-h-0 flex-1 flex-col", !atTop && "motion-safe:animate-rise")}>
-        <AppHeader title={title} detail={selecting || !atTop} className={cn(selecting || !atTop ? "[&>h1]:ms-1.5 in-data-[alpha-title-row]:[&>h1]:ms-0" : undefined, selecting && "[&>h1]:font-display [&>h1]:text-2xl [&>h1]:font-light")} leading={selecting && (choosing || owner({ type: "cancelSelection" })) ? <Button variant="ghost" size="icon" aria-label="Cancel" onClick={endChoosing}><X /></Button> : back}>
+        <AppHeader title={title} detail={selecting || !atTop} className={cn(selecting || !atTop ? cn("[&>h1]:ms-1.5 in-data-[alpha-title-row]:[&>h1]:ms-0", launcherInnerHeader) : launcherFirstHeader, selecting && "[&>h1]:font-display [&>h1]:text-2xl [&>h1]:font-light")} leading={selecting && (choosing || owner({ type: "cancelSelection" })) ? <Button variant="ghost" size="icon" aria-label="Cancel" onClick={endChoosing}><X /></Button> : atTop ? firstBack : back}>
           {selecting && canDetails && <Button variant="ghost" size="icon" aria-label="Details" onClick={() => tell({ type: "showDetails", target: firstPicked.id })}><Info /></Button>}
           {selecting && owner({ type: "selectAll" }) && <Button variant="ghost" className="h-11 px-3" onClick={() => tell({ type: "selectAll" })}>Select all</Button>}
           {!selecting && showTools && (

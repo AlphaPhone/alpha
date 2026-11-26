@@ -26,6 +26,8 @@ import type { Layer } from "effect";
 import { Scan } from "../files/Scan.tsx";
 import { scanSelectedImage, type imageScan } from "../files/scan.vibe";
 import { useMachine as useScan } from "../../gen/app__files__scan.react.ts";
+import { AppBack } from "../shell/AppBack.tsx";
+import { launcherFirstHeader, launcherInnerHeader, launcherTop } from "../shell/launcherFrame.ts";
 
 type PhotosRuntime = Layer.Success<typeof agentPhotos> | Layer.Success<typeof library> | Layer.Success<typeof viewer> | Layer.Success<typeof trash> | Layer.Success<typeof imageScan> | Resident;
 
@@ -160,8 +162,8 @@ export function Photos({ runtime, alpha }: PhotosProps) {
   const state = library.state;
   const bin = trash.state;
   if (library.cause || viewer.cause || trash.cause) return <Alert variant="destructive" className="m-4">Photos could not open.</Alert>;
-  if (!state || !bin) return <section aria-label="Photos" aria-busy className="relative flex min-h-0 flex-1 flex-col bg-background">
-    <AppHeader title="Photos" className="shrink-0" leading={<Button variant="ghost" size="icon" aria-label="Back to apps" onClick={() => void alpha.back()}><ChevronLeft /></Button>} />
+  if (!state || !bin) return <section aria-label="Photos" aria-busy className={cn("relative flex min-h-0 flex-1 flex-col bg-background", launcherTop)}>
+    <AppHeader title="Photos" className={cn("shrink-0", launcherFirstHeader)} leading={<AppBack alpha={alpha} firstPage label="Back to apps" />} />
   </section>;
   const content = runtime.runSync(Effect.flatMap(Catalog, (catalog) => catalog.displayed()));
   const inTrash = bin.open;
@@ -264,9 +266,11 @@ export function Photos({ runtime, alpha }: PhotosProps) {
     : owner({ type: "openSettings" }) ? { label: "Open settings", event: { type: "openSettings" } as const } : undefined;
   const albumName = { type: "saveAlbum", name: name.trim(), letters: Array.from(name.trim()).length } satisfies Event;
   const cancelSelection = () => inTrash ? binTalk({ type: "endSelect" }) : talk({ type: "endSelect" });
-  const header = <AppHeader title={title} detail={Boolean(selection) || inTrash || album !== undefined} className="shrink-0"
-    leading={<Button variant="ghost" size="icon" aria-label={selection ? "Cancel selection" : inTrash || album ? "Back to albums" : "Back to apps"}
-      onClick={() => selection ? cancelSelection() : void alpha.back()}>{selection ? <X /> : <ChevronLeft />}</Button>}>
+  const inner = Boolean(selection) || inTrash || album !== undefined;
+  const header = <AppHeader title={title} detail={inner} className={cn("shrink-0", inner ? launcherInnerHeader : launcherFirstHeader)}
+    leading={inner ? <Button variant="ghost" size="icon" aria-label={selection ? "Cancel selection" : "Back to albums"}
+      onClick={() => selection ? cancelSelection() : void alpha.back()}>{selection ? <X /> : <ChevronLeft />}</Button>
+      : <AppBack alpha={alpha} firstPage label="Back to apps" />}>
     {selection && (inTrash ? binOwner({ type: "selectAll" }) : owner({ type: "selectAll" })) && <Button variant="ghost" className="h-11 px-3 text-body font-semibold whitespace-nowrap text-primary hover:text-primary" onClick={() => inTrash ? binTalk({ type: "selectAll" }) : talk({ type: "selectAll" })}>{allSelected ? "Deselect all" : "Select all"}</Button>}
     {!selection && (menu.length > 0 || scanFromMenu) && <Menu><MenuTrigger asChild><Button variant="ghost" size="icon" ref={toolsRef} aria-label="Photos tools"><Ellipsis /></Button></MenuTrigger>
       <MenuContent>{menu.map(({ icon, label, run, ariaLabel }) => <MenuItem key={label} aria-label={ariaLabel} onSelect={run}>{icon}{label}</MenuItem>)}
@@ -284,7 +288,7 @@ export function Photos({ runtime, alpha }: PhotosProps) {
       {browser && state.choosingImage && <ImageChoice key={state.imageChoice} runtime={runtime} choice={state.imageChoice} canScan={canScan}
         close={() => talk({ type: "closeImageChoice", choice: state.imageChoice })} focusTools={() => toolsRef.current?.focus({ preventScroll: true })} />}
       <Scan runtime={runtime} alpha={alpha} />
-      <div key={album ? `album-${state.album}` : "photos"} inert={opened !== 0} aria-hidden={opened !== 0 || undefined} className={cn("flex min-h-0 flex-1 flex-col", album && "motion-safe:animate-rise")} data-alpha-subview="photos-list">
+      <div key={album ? `album-${state.album}` : "photos"} inert={opened !== 0} aria-hidden={opened !== 0 || undefined} className={cn("flex min-h-0 flex-1 flex-col", launcherTop, album && "motion-safe:animate-rise")} data-alpha-subview="photos-list">
         {header}
         {!selection && !inTrash && !album && (owner({ type: "showTab", tab: "Library" }) || owner({ type: "showTab", tab: "Albums" })) &&
           <div role="group" aria-label="Photos sections" className={cn("mx-4 flex shrink-0 gap-0.75 rounded-segment bg-secondary p-1", state.tab === "Library" && allow === undefined ? "mb-6" : "mb-3")}>

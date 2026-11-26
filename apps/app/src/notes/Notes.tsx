@@ -23,6 +23,7 @@ import { unfinished } from "../../gen/app__notes__recording.ts";
 import type { Alpha } from "../runtime/area.tsx";
 import { AppBack } from "../shell/AppBack.tsx";
 import { Layers, Over, Under } from "../shell/Layers.tsx";
+import { launcherFirstHeader, launcherInnerHeader, launcherTop } from "../shell/launcherFrame.ts";
 import { desktopPreview } from "../shell/canvas.vibe";
 import { type Collection, type DraftWords, NoteContent, audioIdOf, hasContent, savedVoice } from "./content.vibe";
 import { type Fields, NoteEditor } from "./editor.vibe";
@@ -455,10 +456,10 @@ function NotesList({ alpha, runtime }: { readonly alpha: Alpha; readonly runtime
   return <Layers>
     <Under covered={over !== undefined}>
     <section aria-label="Notes" data-alpha-subview="notes-list" className="flex min-h-0 flex-1 flex-col">
-      {selecting ? <AppHeader detail title={selected === 0 ? "Select notes" : `${selected} selected`}>
+      {selecting ? <AppHeader detail className={launcherInnerHeader} title={selected === 0 ? "Select notes" : `${selected} selected`}>
         <Button size="icon" variant="ghost" aria-label="Delete selected notes" disabled={!can(reviewSelection)} onClick={() => listEvent(reviewSelection)}><Trash2 /></Button>
         <Button variant="ghost" className="h-11 px-3 font-semibold" disabled={busy} onClick={closeSelection}>Done</Button>
-      </AppHeader> : <AppHeader title="Notes" leading={<AppBack alpha={alpha} />}>
+      </AppHeader> : <AppHeader title="Notes" className={launcherFirstHeader} leading={<AppBack alpha={alpha} firstPage />}>
         {available && hasMic && !Editor.waiting(writing) && <Button size="icon" variant="ghost" aria-label="Record voice note" onClick={() => void runtime.runPromise(record)}><Mic className="size-5" /></Button>}
         {editor.can(newNote, "Owner") && <Button size="icon" variant="ghost" aria-label="New note" onClick={() => void runtime.runPromise(writer.newNote("Text", available, state.filter, false))}><Plus className="size-5" /></Button>}
         {(bin.can(openTrash, "Owner") || can(startSelection)) && <Menu>
@@ -521,7 +522,7 @@ function NotesList({ alpha, runtime }: { readonly alpha: Alpha; readonly runtime
 /** Notes before its machines first answer: its header over an empty list, so the app rises with its frame drawn. */
 function NotesOpening({ alpha }: { readonly alpha: Alpha }) {
   return <section aria-label="Notes" data-alpha-subview="notes-list" aria-busy className="flex min-h-0 flex-1 flex-col">
-    <AppHeader title="Notes" leading={<AppBack alpha={alpha} />} />
+    <AppHeader title="Notes" className={launcherFirstHeader} leading={<AppBack alpha={alpha} firstPage />} />
   </section>;
 }
 
@@ -529,6 +530,7 @@ function NotesOpening({ alpha }: { readonly alpha: Alpha }) {
 export function NotesScreen({ alpha, runtime }: { readonly alpha: Alpha; readonly runtime: Runtime }) {
   const notes = useNotes(runtime);
   if (notes.cause) return <Alert variant="destructive" className="m-4">Alpha couldn't open Notes</Alert>;
-  if (notes.state === undefined) return <NotesOpening alpha={alpha} />;
-  return <NotesList alpha={alpha} runtime={runtime} />;
+  return <div className={cn("flex min-h-0 flex-1 flex-col", launcherTop)}>
+    {notes.state === undefined ? <NotesOpening alpha={alpha} /> : <NotesList alpha={alpha} runtime={runtime} />}
+  </div>;
 }
