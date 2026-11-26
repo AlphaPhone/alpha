@@ -27,7 +27,7 @@ const withSample = [...mounts.filter((m) => m.at !== "view:Notes" && m.at !== "v
 const kept = "alpha/app/sample/index@1";
 const shown = () => [...document.querySelectorAll("section[aria-label=Reminders] li span")].map((title) => title.textContent);
 const told = () => document.querySelector("section[aria-label=Reminders] [role=alert]")?.textContent;
-const shellKept = "alpha/app/shell/index@4";
+const shellKept = "alpha/app/shell/index@5";
 /** The key the store takes no write under, once: the phone's storage is full for a moment. */
 let refusing = "";
 vi.stubGlobal("localStorage", new Proxy(localStorage, {
@@ -132,7 +132,8 @@ describe.each([["a browser", false], ["a phone", true]])("in %s", (_where, phone
     localStorage.setItem(kept, JSON.stringify({ titles: "of another shape" }));
     const fourth = await open(world, withSample);
     await until(fourth.alpha, sample.runtime(fourth.alpha), Reminders, (s) => s.list.status === "Loaded");
-    expect([localStorage.getItem(`${kept}.unreadable`), document.querySelector("h1")?.textContent]).toEqual([JSON.stringify({ titles: "of another shape" }), "Notes"]);
+    // The Notes view draws its own header, so the sample mounted there shows no title of the shell's: the shell is still at Notes.
+    expect([localStorage.getItem(`${kept}.unreadable`), (await fourth.alpha.runtime.runPromise(Shell.use((shell) => shell.get()))).trail.at(-1)]).toEqual([JSON.stringify({ titles: "of another shape" }), "Notes"]);
 
     // spec/kit/attempt.md, "A sent attempt ends as its own answer says, or as unknown when no answer can be trusted": an agent that takes a deletion and never answers is waited on for ten seconds, and the deletion is then unknown, never refused.
     const last = sample.runtime(fourth.alpha);

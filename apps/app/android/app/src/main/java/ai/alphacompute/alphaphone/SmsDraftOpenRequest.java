@@ -6,6 +6,8 @@ import android.content.Intent;
 import android.net.Uri;
 import android.os.SystemClock;
 import java.lang.ref.WeakReference;
+import java.util.ArrayList;
+import java.util.Collections;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.UUID;
@@ -42,7 +44,7 @@ final class SmsDraftOpenRequest {
    if (body == null) body = intent.getStringExtra(Intent.EXTRA_TEXT);
    if (body == null) body = "";
    if (body.length() > SmsSendJournal.MAX_BODY || body.indexOf('\0') >= 0) return null;
-   return new Draft(List.copyOf(recipients), body);
+   return new Draft(Collections.unmodifiableList(new ArrayList<>(recipients)), body);
   } catch (RuntimeException invalid) { return null; }
  }
 

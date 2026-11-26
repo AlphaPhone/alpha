@@ -1,19 +1,24 @@
 // spec/app/account/billing.md, "The plans and their prices are read from Cloud, and only the newest reading is taken"; spec/app/account/plan.md, "Story: Know my plan"; spec/app/settings/index.md, "Each page links to what another area owns there"; spec/app/shell/layers.md, "Story: Keep a sheet or a dialog above the phone"; spec/kit/read.md, "Story: Read from outside"
-import { AuthMark, Button, cn, Dialog, DialogContent, DialogTitle, Sheet, SheetContent, Spinner, StatusDot } from "@repo/ui";
-import { ChevronDown, RotateCw, X } from "lucide-react";
+import { AuthMark, Button, cn, Dialog, DialogContent, DialogTitle, Input, Sheet, SheetContent, Spinner, StatusDot } from "@repo/ui";
+import { ChevronDown, RotateCw, Ticket, X } from "lucide-react";
+import { normalizeSubscriptionCode } from "@elizaos/cloud";
 import { Layer } from "effect";
 import { useCallback, useRef, useState, useSyncExternalStore } from "react";
 import * as Billing from "../../gen/app__account__billing.effect.vibe";
+import { useMachine as useCodes } from "../../gen/app__account__codes.react.ts";
 import { useMachine as useBilling } from "../../gen/app__account__billing.react.ts";
 import { useMachine as useSettings } from "../../gen/app__settings.react.ts";
 import { useMachine } from "../../gen/app__shell__layers.react.ts";
 import { listed, top } from "../../gen/app__shell__layers.ts";
 import { area, type Alpha, type Area, type Resident, type Shown } from "../runtime/area.tsx";
-import { checkout, choosePurchase, purchaseVisibility, recheckPlan, tierOf } from "./billing.vibe";
-import { accountLayer, closeCatalog, openCatalog, type Profile, profileLive, profileShelf } from "./profile.vibe";
+import { checkout, choosePurchase, recheckPlan, tierOf } from "./billing.vibe";
+import { accountAccess, checkCodePlan, codes, readReferral, referralCode, submitCode } from "./codes.vibe";
+import { AccountWrites, accountLayer, accountWrites, closeCatalog, openCatalog, type Profile, profileLive, profileShelf } from "./profile.vibe";
 
 const usd = new Intl.NumberFormat(undefined, { style: "currency", currency: "USD" });
 const planDate = new Intl.DateTimeFormat(undefined, { dateStyle: "medium" });
+type CodeRuntime = Layer.Success<ReturnType<typeof codes>> | AccountWrites;
+
 const credits = (micros: number) => usd.format(micros / 1_000_000);
 const roundUsd = new Intl.NumberFormat(undefined, { style: "currency", currency: "USD", maximumFractionDigits: 0 });
 const price = (cents: number) => (cents % 100 === 0 ? roundUsd : usd).format(cents / 100);
@@ -59,7 +64,7 @@ function AccountDetails({ profile }: { profile: Profile }) {
 /** The offers the owner can inspect in the open Account sheet. */
 type CheckoutRuntime = Layer.Success<ReturnType<typeof checkout>>;
 
-function Plans({ runtime, shelf, canSubscribe }: { runtime: Shown<Resident | CheckoutRuntime>["runtime"]; shelf: ReturnType<typeof profileShelf>; canSubscribe: boolean }) {
+function Plans({ runtime, shelf, canSubscribe }: { runtime: Shown<Resident | CheckoutRuntime | CodeRuntime>["runtime"]; shelf: ReturnType<typeof profileShelf>; canSubscribe: boolean }) {
   const { state, can, send } = useBilling(runtime);
   const catalog = useSyncExternalStore(shelf.subscribe, shelf.catalog, shelf.catalog);
   const offers = catalog && state?.offers.status === "Loaded" && state.offers.ticket === catalog.ticket ? catalog.offers : undefined;
@@ -163,7 +168,7 @@ function BrowserAccount({ open, reading, retry, close }: { open: boolean; readin
   const openerRef = useRef<Element | null>(null);
   const panelRef = useRef<HTMLDivElement>(null);
   const connect = useCallback((node: HTMLDivElement | null) => {
-    if (node) openerRef.current = node.ownerDocument.querySelector('[data-alpha-shell-page] button[aria-label="Account"]');
+    if (node) openerRef.current = node.ownerDocument.querySelector('[data-alpha-shell-page] button[data-settings-row="account"]');
     setHost(node);
   }, []);
   return (
@@ -194,11 +199,75 @@ function BrowserAccount({ open, reading, retry, close }: { open: boolean; readin
   );
 }
 
+// spec/app/account/codes.md, "Story: Redeem a code"
+function AccountCodes({ runtime }: Pick<Shown<Resident | CheckoutRuntime | CodeRuntime>, "runtime">) {
+  const { state } = useCodes(runtime);
+  const billing = useBilling(runtime).state;
+  if (state === undefined || billing === undefined) return null;
+  const sending = state.redeem.outcome === "Sent" || state.apply.outcome === "Sent";
+  const ownCode = state.referral.status === "Loaded" ? runtime.runSync(referralCode(state.authority)) : undefined;
+  const busy = sending || state.unsettled || billing.unsettled || billing.pending || billing.visit.open || billing.visit.orphan;
+  const message = state.notice === "Redeemed" ? "Code redeemed" : state.notice === "NotRedeemed" ? "The code couldn’t be redeemed."
+    : state.notice === "ReferralApplied" ? "Referral applied."
+    : state.notice === "ReferralInvalid" ? "That referral code is invalid."
+    : state.notice === "ReferralUsed" ? "A referral was already applied."
+    : state.notice === "ReferralRefused" ? "The referral couldn’t be applied."
+    : state.notice === "OutcomeUnknown" ? "Alpha couldn’t confirm the outcome. Check your plan before using another code." : "";
+  return (
+    <details className="rounded-lg border px-3 py-2">
+      <summary className="flex min-h-9 cursor-pointer items-center gap-2 rounded-sm text-sm font-medium">
+        <Ticket aria-hidden className="size-4" />Redeem code
+      </summary>
+      <form className="flex flex-col gap-3 pt-2" onSubmit={(event) => {
+        event.preventDefault();
+        const input = event.currentTarget.elements.namedItem("subscriptionCode");
+        if (!(input instanceof HTMLInputElement)) return;
+        const code = normalizeSubscriptionCode(input.value);
+        if (code === null) {
+          input.setCustomValidity("Enter a valid redemption code.");
+          input.reportValidity();
+          return;
+        }
+        const entered = input.value;
+        void runtime.runPromise(submitCode(code)).then((sent) => { if (sent && input.value === entered) input.value = ""; });
+      }}>
+        <label className="flex flex-col gap-1 text-sm">
+          Code
+          <Input aria-label="Redemption code" name="subscriptionCode" maxLength={64} autoComplete="off" spellCheck={false} required disabled={busy}
+            onInput={(event) => event.currentTarget.setCustomValidity("")} />
+        </label>
+        <Button type="submit" disabled={busy}>{sending ? "Redeeming…" : "Redeem"}</Button>
+        {message !== "" && <p role="status" className="text-sm text-muted-foreground">{message}</p>}
+        {state.unsettled && <Button type="button" variant="ghost" onClick={() => runtime.runFork(checkCodePlan())}>Check plan</Button>}
+      </form>
+      <details className="mt-4 border-t pt-3">
+        <summary className="min-h-9 cursor-pointer rounded-sm text-sm font-medium">Referral</summary>
+        {ownCode !== undefined ? <p className="select-all text-sm">Your referral code <strong>{ownCode}</strong></p> : (
+          <Button type="button" variant="ghost" onClick={() => runtime.runFork(readReferral())} disabled={state.referral.status === "Loading"}>
+            {state.referral.status === "Loading" ? "Reading referral…" : "Show my referral code"}
+          </Button>
+        )}
+        {state.referral.status === "Failed" && <p role="status" className="text-sm">Referral unavailable</p>}
+        <form className="mt-3 flex flex-col gap-3" onSubmit={(event) => {
+          event.preventDefault();
+          const input = event.currentTarget.elements.namedItem("referral");
+          if (!(input instanceof HTMLInputElement)) return;
+          const entered = input.value;
+          void runtime.runPromise(submitCode(entered, "applyReferral")).then((sent) => { if (sent && input.value === entered) input.value = ""; });
+        }}>
+          <label className="flex flex-col gap-1 text-sm">Friend’s code<Input name="referral" maxLength={100} autoComplete="off" required disabled={busy} /></label>
+          <Button type="submit" variant="secondary" disabled={busy}>Apply referral</Button>
+        </form>
+      </details>
+    </details>
+  );
+}
+
 /** The account sheet above Settings, drawing only the details the authenticated account read returned. */
 export default {
   open(alpha, place) {
     const profile = profileFor(alpha);
-    function AccountSheet({ runtime }: Shown<Resident | CheckoutRuntime>) {
+    function AccountSheet({ runtime }: Shown<Resident | CheckoutRuntime | CodeRuntime>) {
       const { state, can, send } = useMachine(runtime);
       const { state: settings } = useSettings(runtime);
       const shown = useSyncExternalStore(profile.subscribe, profile.snapshot, profile.snapshot);
@@ -221,10 +290,12 @@ export default {
             <AccountDetails profile={shown} />
             {shown.tag === "Read" && shown.purchase === "Matches" ? <PurchaseStatus runtime={runtime} /> : null}
             {shown.tag === "Read" ? <Plans runtime={runtime} shelf={profile} canSubscribe={shown.plan?.tag === "PlanRead" && shown.plan.name === "No plan"} /> : null}
+            {shown.tag === "Read" && shown.codesAvailable ? <AccountCodes runtime={runtime} /> : null}
           </SheetContent>
         </Sheet>
       );
     }
-    return area(Layer.provideMerge(profileLive(profile.publish, profile.publishCatalog, profile.refreshed, purchaseVisibility), checkout(profile.refresh, profile.publishCatalog)), AccountSheet).open(alpha, place);
+    return area(Layer.provideMerge(profileLive(profile.publish, profile.publishCatalog, profile.refreshed, accountAccess),
+      Layer.merge(accountWrites, Layer.provideMerge(codes(profile.refresh), checkout(profile.refresh, profile.publishCatalog)))), AccountSheet).open(alpha, place);
   },
 } satisfies Area;

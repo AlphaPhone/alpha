@@ -1,7 +1,7 @@
 // @vitest-environment happy-dom
 import { digestInbox, type DigestResult, hostedDigestProtocol } from "@elizaos/plugin-workflow-client";
 import { Effect } from "effect";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, onTestFinished, vi } from "vitest";
 import * as Home from "../gen/app__home.effect.vibe";
 import { Machine as DigestSchedules } from "../gen/app__digests__schedules.effect.vibe";
 import { Machine as WorkflowList } from "../gen/app__workflows__list.effect.vibe";
@@ -11,6 +11,7 @@ import { Machine as Toasts } from "../gen/app__notices__toasts.effect.vibe";
 import home from "../src/home/index.tsx";
 import type { Alpha } from "../src/runtime/area.tsx";
 import { button, closeAll, drawn, fill, hardware, later, only, open, press, seen, underAct, until } from "./alpha.tsx";
+import { memoryIndexedDB } from "./fakes/indexeddb.ts";
 import { scene, type Scene } from "./fakes/scene.ts";
 import { savedKey, written } from "../src/home/saved.vibe";
 import { waiting } from "../src/home/waiting.vibe";
@@ -400,6 +401,9 @@ describe("Home on a phone", () => {
   });
 
   it('Shows Android’s retained brief and refreshes its digest results through the native inbox (spec/app/digests/index.md, "Android supplies one verified view of retained results and background checks")', async () => {
+    // spec/app/assistant/index.md, "Stored attachments are posted with their message, and a message whose attachments could not be stored never left": the WebView's IndexedDB keeps the result attached to Ask Alpha.
+    vi.stubGlobal("indexedDB", memoryIndexedDB());
+    onTestFinished(() => { vi.unstubAllGlobals(); });
     const world = { ...scene(), phone: true };
     const initial = digestResult(1, "finished", "Owner’s retained Android brief");
     const missed = digestResult(2, "missed", "A missed run cannot replace the brief");
@@ -428,7 +432,7 @@ describe("Home on a phone", () => {
     const area = workflows.runtime(alpha);
     await until(alpha, area, WorkflowList, (state) => state.list.status === "Loaded");
     await press("Add to Workflows");
-    await press("Scheduled digests");
+    await press("Scheduled digest");
     await until(alpha, area, DigestSchedules, (state) => state.open && state.schedules.status === "Loaded");
     await vi.waitFor(() => expect(results()).toHaveLength(2), { timeout: 5_000 });
 

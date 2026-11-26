@@ -6,6 +6,32 @@ import "../src/main.css";
 
 afterEach(closeAll);
 
+it('Keep a message and its list on a wide phone canvas (spec/app/shell/keyboard.md, "Story: Read everything at the text size I chose"; spec/app/inbox/message.md, "Story: Read a message")', async () => {
+  await page.viewport(1280, 800);
+  const world = { ...scene(), phone: true };
+  await open(world, only("home", "view:Inbox", "assistant"));
+  await page.getByRole("button", { name: "Inbox", exact: true }).click();
+  const list = page.locator('[data-alpha-subview="inbox-list"]');
+  const reader = page.locator('[data-alpha-subview="inbox-detail"]');
+  const row = list.getByRole("button", { name: /Standup notes/ });
+  await row.click();
+  await expect.element(reader.getByText(/Quick notes from standup/)).toBeVisible();
+  await expect.element(row).toHaveAttribute("aria-current", "true");
+  await expect.poll(() => {
+    const columns = [list.element(), reader.element()].map((pane) => pane.getBoundingClientRect());
+    const [left, right] = columns;
+    return Boolean(left && right && left.width >= 300 && left.right <= right.left && right.width > 400);
+  }).toBe(true);
+
+  await page.viewport(412, 915);
+  await expect.element(list).toHaveAttribute("inert", "");
+  await expect.element(reader.getByText(/Quick notes from standup/)).toBeVisible();
+  await expect.poll(() => reader.element().contains(document.activeElement)).toBe(true);
+  await reader.getByRole("button", { name: "Back to the list", exact: true }).click();
+  await expect.element(row).toHaveFocus();
+  expect(world.inbox.changes).toEqual([]);
+});
+
 function twoPagePdf(): Uint8Array<ArrayBuffer> {
   const pages = [120, 160].map((width) => `<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ${width} 200] >>`);
   const objects = ["<< /Type /Catalog /Pages 2 0 R >>", "<< /Type /Pages /Kids [3 0 R 4 0 R] /Count 2 >>", ...pages];
@@ -19,7 +45,8 @@ function twoPagePdf(): Uint8Array<ArrayBuffer> {
   return new TextEncoder().encode(`${document}xref\n0 5\n0000000000 65535 f \n${xref}trailer\n<< /Root 1 0 R /Size 5 >>\nstartxref\n${document.length}\n%%EOF\n`);
 }
 
-it("Review an attachment and save the copy in Files (spec/app/inbox/message.md, \"An attachment is reviewed before it is opened or saved, and one use is in flight at a time\"; spec/app/inbox/message.md, \"An attachment use ends as its own answer says, or unknown\"; spec/app/inbox/message.md, \"A reviewed PDF turns one page at a time under a new draw ticket, and shows only the page drawn for that review\")", async () => {
+// spec/app/inbox/message.md, "An attachment is reviewed before it is opened or saved, and one use is in flight at a time"; spec/app/inbox/message.md, "An attachment use ends as its own answer says, or unknown"; spec/app/inbox/message.md, "A reviewed PDF turns one page at a time under a new draw ticket, and shows only the page drawn for that review"
+it("Review an attachment and save the copy in Files", async () => {
   await page.viewport(390, 844);
   const world = scene();
   const message = world.inbox.mail.find(({ card }) => card.id === "g1");
@@ -35,7 +62,8 @@ it("Review an attachment and save the copy in Files (spec/app/inbox/message.md, 
   message.attachmentData = { "1": bytes, "2": pdf };
 
   await open(world, only("home", "view:Inbox", "view:Files", "assistant"));
-  await page.getByRole("button", { name: "Inbox", exact: true }).click();
+  // spec/app/home/tiles.md, "Only Phone, Messages, Inbox, Telegram and Slack carry a badge, only when something waits there, and no tile does while Home is being edited": the tile's name is its app's, with what waits there said after it
+  await page.getByRole("button", { name: /^Inbox(?![A-Za-z])/ }).click();
   await page.getByRole("button", { name: /Revised term sheet/ }).click();
   const reader = page.getByRole("button", { name: /^Open Inbox receipt / });
   await reader.click();
@@ -62,15 +90,15 @@ it("Review an attachment and save the copy in Files (spec/app/inbox/message.md, 
   await page.getByRole("button", { name: /^Open Meeting notes\.pdf/ }).click();
   await opening.getByRole("button", { name: "Open", exact: true }).click();
   const pdfReview = page.getByRole("dialog", { name: "Meeting notes.pdf" });
-  await expect.element(pdfReview.getByRole("img", { name: "Page 1 of 2" })).toHaveAttribute("src", /^blob:/u);
+  await expect.element(pdfReview.getByRole("img", { name: "Page 1 of 2" })).toHaveAttribute("src", expect.stringMatching(/^blob:/u));
   await pdfReview.getByRole("button", { name: "Next page" }).click();
   const second = pdfReview.getByRole("img", { name: "Page 2 of 2" });
-  await expect.element(second).toHaveAttribute("src", /^blob:/u);
+  await expect.element(second).toHaveAttribute("src", expect.stringMatching(/^blob:/u));
   const secondUrl = second.element().getAttribute("src");
   expect(secondUrl).toBeTruthy();
   await expect.element(pdfReview.getByRole("button", { name: "Next page" })).toBeDisabled();
   await pdfReview.getByRole("button", { name: "Previous page" }).click();
-  await expect.element(pdfReview.getByRole("img", { name: "Page 1 of 2" })).toHaveAttribute("src", /^blob:/u);
+  await expect.element(pdfReview.getByRole("img", { name: "Page 1 of 2" })).toHaveAttribute("src", expect.stringMatching(/^blob:/u));
   await pdfReview.getByRole("button", { name: "Close", exact: true }).click();
   expect(secondUrl && await fetch(secondUrl).then(() => false, () => true)).toBe(true);
 

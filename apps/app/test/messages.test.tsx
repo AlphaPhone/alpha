@@ -1,6 +1,5 @@
 // @vitest-environment happy-dom
 import { NOT_DISPATCHED } from "@elizaos/agent";
-import { smsBindingHash } from "@elizaos/os-bridges";
 import { type Context, Effect, type ManagedRuntime, Stream } from "effect";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { Machine as Conversation } from "../gen/app__assistant.effect.vibe";
@@ -429,7 +428,7 @@ describe("Messages on an Alpha image", () => {
     expect(world.telephony.deletionAttempts).toEqual(["sms:1"]);
   });
 
-  it("Checks the original picture message after a restart (spec/app/messages/composer.md, \"The owner attaches up to five pictures, and removes them one by one\"; spec/app/messages/composer.md, \"A restart closes the conversation and keeps the saved drafts, the send, access and the SIMs the phone has\"; spec/app/messages/sending.md, \"The journal read back settles an unknown outcome: sent, or never sent\")", async () => {
+  it("Checks the original picture message after a restart (spec/app/messages/composer.md, \"The owner attaches up to five pictures, and removes them one by one\"; spec/app/messages/composer.md, \"A restart closes the conversation and keeps the saved drafts, the send and its pending clear, access and the SIMs the phone has\"; spec/app/messages/sending.md, \"The journal read back settles an unknown outcome: sent, or never sent\")", async () => {
     const world = image();
     world.telephony.holdMmsSubmission = true;
     const first = await openImage(world);
@@ -444,7 +443,7 @@ describe("Messages on an Alpha image", () => {
       Object.defineProperty(picker, "files", { value: [new File([Uint8Array.from(atob("R0lGODlhAQABAAAAACwAAAAAAQABAAA="), (byte) => byte.charCodeAt(0))], "photo.gif", { type: "image/gif" })] });
       picker.dispatchEvent(new Event("change", { bubbles: true }));
     });
-    await ready(first.alpha.runtime, Composer, "picture attached", (state) => state.pictures === 1);
+    await ready(first.alpha.runtime, Composer, "picture draft saved", (state) => state.pictures === 1 && state.slot.draft.sync === "Kept");
     await press("Send");
     await ready(first.alpha.runtime, Composer, "picture send awaiting receipt", (state) => state.outgoing.op.outcome === "Unknown");
     const operation = world.telephony.mmsAttempts[0];
@@ -458,64 +457,22 @@ describe("Messages on an Alpha image", () => {
     await ready(restarted.alpha.runtime, Shell, "Messages returns after restart", (state) => state.trail.at(-1) === "Messages");
     await ready(restarted.alpha.runtime, Messages, "conversation list after restart", (state) => state.list.status === "Loaded" && state.threads === 1);
     await press("Maya Chen");
-    await ready(restarted.alpha.runtime, Composer, "picture check without saved bytes", (state) => state.thread === state.outgoing.thread && state.pictures === 0 && state.outgoing.op.outcome === "Unknown");
+    await ready(restarted.alpha.runtime, Composer, "picture restored while waiting for the original receipt", (state) => state.thread === state.outgoing.thread && state.pictures === 1 && state.outgoing.op.outcome === "Unknown");
+    expect(button("Remove photo.gif")?.disabled).toBe(true);
     const priorReads = world.telephony.mmsQueries.length;
     await press("Check send status");
-    await ready(restarted.alpha.runtime, Composer, "original picture send confirmed", (state) => state.outgoing.op.outcome === "Confirmed");
+    await ready(restarted.alpha.runtime, Composer, "original picture confirmed and saved attachment removed", (state) => state.outgoing.op.outcome === "Confirmed" && state.pictures === 0 && state.pendingClear.id === 0);
+    expect(button("Remove photo.gif")).toBeUndefined();
     expect([world.telephony.mmsAttempts, world.telephony.mmsQueries.slice(priorReads), world.telephony.sent.map((send) => send.operationId)])
       .toEqual([[operation], [operation], [operation]]);
-  });
 
-  it("Keeps the earlier Alpha's draft and never sends its recorded text twice (spec/app/messages/composer.md, \"Story: Keep my draft\"; spec/app/messages/composer.md, \"The earlier Alpha's draft for a conversation is carried into it once, as it opens holding no draft or send of its own, and a send that draft had recorded comes with it as one whose outcome is unknown\"; spec/app/messages/sending.md, \"A send the earlier Alpha recorded is taken in as one whose outcome is unknown, under the next number, while no send is under way or unknown\"; spec/app/messages/sending.md, \"The phone's journal begins from the earlier Alpha's, so a send that Alpha journaled is read back and never sent again\")", async () => {
-    const world = image();
-    const operation = "3f2b8c1e-5d4a-4b6c-8e7f-9a0b1c2d3e4f";
-    const slot = "sms-draft:v1:thread:1";
-    world.platform.earlier.set(slot, JSON.stringify({
-      binding: slot, recipients: "+14155550100", body: "Running ten late", origin: "owner", sim: "1", pictures: [],
-      operation: { kind: "sms", id: operation, recipients: ["+14155550100"], subscriptionId: 1 },
-    }));
-    const bindingHash = await smsBindingHash({ recipients: ["+14155550100"] as never, body: "Running ten late", subscriptionId: 1 });
-    world.telephony.journal.set(operation, { kind: "sms-send", operationId: operation, subscriptionId: 1, bindingHash, status: "sent", parts: [{ index: 0, recipientIndex: 0, partIndex: 0, sent: "success", delivery: "unknown" }], createdAt: 1_700_000_040_000 });
-    const { alpha } = await openImage(world);
-    await openMessages(alpha);
-    await ready(alpha.runtime, Messages, "conversation list", (s) => s.list.status === "Loaded" && s.threads === 1);
-
-    await press("Maya Chen");
-    await ready(alpha.runtime, Composer, "the earlier draft and its send", (s) => s.thread > 0 && s.slot.author === "OwnerWrote" && s.outgoing.thread === s.thread && s.outgoing.op.outcome === "Unknown");
-    expect([document.querySelector<HTMLTextAreaElement>('textarea[aria-label="Text Maya"]')?.value, world.platform.earlier.has(slot), world.telephony.sent]).toEqual(["Running ten late", false, []]);
-
-    // spec/app/messages/sending.md, "A send whose outcome is unknown is never sent again, only read back"
-    await press("Check send status");
-    await ready(alpha.runtime, Composer, "the earlier send read back as sent", (s) => s.outgoing.op.outcome === "Confirmed" && s.slot.author === "Nobody");
-    expect(world.telephony.sent).toEqual([]);
-  });
-
-  it("Leaves an earlier draft it cannot read where it was, and carries a new message's draft and picture into the conversation with its numbers (spec/app/messages/composer.md, \"The earlier Alpha's draft for a conversation is carried into it once, as it opens holding no draft or send of its own, and a send that draft had recorded comes with it as one whose outcome is unknown\"; spec/app/platform/adoption.md, \"A value is moved by copying it only where the new place is still empty, and its earlier place is cleared only once the new place holds a value\")", async () => {
-    const world = image();
-    const unreadable = "{\"binding\":\"sms-draft:v1:thread:1\",\"body\":";
-    world.platform.earlier.set("sms-draft:v1:thread:1", unreadable);
-    const picture = "R0lGODlhAQABAAAAACwAAAAAAQABAAA=";
-    world.platform.earlier.set("sms-draft:v1:new", JSON.stringify({
-      binding: "sms-draft:v1:new", recipients: "+14155550122", body: "Lunch on Friday?", origin: "asked", sim: "",
-      pictures: [{ contentType: "image/gif", name: "picture-1.gif", bytes: picture }], operation: null,
-    }));
-    const { alpha } = await openImage(world);
-    await openMessages(alpha);
-    await ready(alpha.runtime, Messages, "conversation list", (s) => s.list.status === "Loaded" && s.threads === 1);
-
-    await press("Maya Chen");
-    await ready(alpha.runtime, Composer, "a conversation with no draft", (s) => s.thread > 0 && s.recipients === 1);
-    expect([(await alpha.runtime.runPromise(Composer.use((machine) => machine.get()))).slot.author, world.platform.earlier.get("sms-draft:v1:thread:1"), world.platform.earlier.has("sms-draft:v1:new")])
-      .toEqual(["Nobody", unreadable, true]);
-
-    await press("Back");
-    await ready(alpha.runtime, Messages, "conversation list", (s) => s.pane === "Threads" && s.list.status === "Loaded");
-    await press("New message");
-    await ready(alpha.runtime, Messages, "the picker", (s) => s.pane === "Picker" && s.picker.status === "Loaded");
-    await press("Ben Ortiz");
-    await ready(alpha.runtime, Composer, "the new message's draft carried", (s) => s.thread > 0 && s.slot.author === "AlphaWrote" && s.pictures === 1);
-    expect([document.querySelector<HTMLTextAreaElement>('textarea[aria-label="Text Ben"]')?.value, world.platform.earlier.has("sms-draft:v1:new"), world.telephony.sent])
-      .toEqual(["Lunch on Friday?", false, []]);
+    await fill("Text Maya", "The next message");
+    await ready(restarted.alpha.runtime, Composer, "next draft saved", (state) => state.slot.author === "OwnerWrote" && state.slot.draft.sync === "Kept");
+    await press("Send");
+    await ready(restarted.alpha.runtime, Composer, "next message confirmed", (state) =>
+      state.outgoing.op.id > 1 && state.outgoing.op.outcome === "Confirmed" && state.pendingClear.id === 0);
+    expect(world.telephony.journal.get(operation)?.status).toBe("sent");
+    expect(world.telephony.sent.map((send) => send.body)).toEqual(["", "The next message"]);
   });
 
   it("Shares only the reviewed open conversation (spec/app/contacts/agent.md, \"The agent reads only the conversation, voicemail or contact open on screen, as the phone last read it\")", async () => {

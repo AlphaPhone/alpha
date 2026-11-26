@@ -32,7 +32,7 @@ export interface SettingsScene {
   roles: AndroidRoleStatus[];
   launcher: boolean;
   version: string;
-  hostFacts: { androidRelease: string; permissions: { Camera?: boolean; Microphone?: boolean; Calendar?: boolean } };
+  hostFacts: { androidRelease: string; startupPermissionDefaults?: boolean; permissions: { Camera?: boolean; Microphone?: boolean; Calendar?: boolean } };
   /** Reads of the phone's facts wait for this before they answer. */
   gate: Promise<unknown>;
   /** Android takes the Home role for Alpha when its dialog closes. */

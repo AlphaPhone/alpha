@@ -41,7 +41,7 @@ export function PhoneTabs({ title, contacts, voicemail, unheard, onBack, childre
   );
   return (
     <>
-      <AppHeader title={title} data-alpha-phone-header="" className="mt-[max(0.125rem,env(safe-area-inset-top))] shrink-0 flex-wrap"
+      <AppHeader title={title} data-alpha-phone-header="" className="mt-[max(0.125rem,env(safe-area-inset-top))] shrink-0 flex-wrap in-[main:has([data-alpha-call-strip=over])]:mt-0"
         leading={onBack && <Button variant="ghost" size="icon" aria-label={separate ? "Back" : "Back to apps"} className="rounded-lg" onClick={onBack}><ChevronLeft /></Button>}>
         {separate ? children : selector}
       </AppHeader>

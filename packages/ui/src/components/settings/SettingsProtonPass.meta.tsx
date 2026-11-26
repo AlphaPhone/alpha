@@ -16,7 +16,7 @@ export const meta: ComponentMeta<SettingsProtonPassProps> = {
   play: {
     Default: async ({ canvasElement }: { canvasElement: HTMLElement }) => {
       const canvas = within(canvasElement);
-      const provider = canvas.getByRole("button", { name: "Proton Pass" });
+      const provider = canvas.getByRole("button", { name: /^Proton Pass\b/ });
       await expect(provider).toHaveAttribute("aria-expanded", "false");
       await userEvent.click(provider);
       await expect(provider).toHaveAttribute("aria-expanded", "true");

@@ -216,7 +216,7 @@ function editableCopy(content: GmailDraftContent): typeof SavedWords.Type | unde
 }
 
 // spec/app/inbox/drafts.md, "Before a draft with a Gmail copy is saved over it, and whenever the draft is unsure of that copy, Gmail's copy is read, one read at a time, while its account may be read"
-effect function lookedUp(ticket: number, draft: number, account: number, gmail: number, attempt: number): Event!!(Cloud | Mail | Letters | Install | Changes | Drafts.Machine | Inbox.Machine) {
+effect function lookedUp(ticket: number, draft: number, account: number, gmail: number, attempt: number): Event!!(Cloud | Mail | Letters | Install | KeyValueStore.KeyValueStore | Changes | Drafts.Machine | Inbox.Machine) {
   const letters = try Letters
   const ledger = try Mail
   const composer = try Drafts.Machine
@@ -342,7 +342,7 @@ export effect function openGmailDraft(account: number, id: string): boolean!!(Cl
 }
 
 // spec/app/inbox/drafts.md, "An unknown send is checked once by reading its own Gmail operation receipt, while its account may be read and no new send of the draft is handed over"
-effect function inSent(ticket: number, draft: number, account: number, attempt: number): Event!!(Cloud | Mail | Install | Changes | Drafts.Machine | Inbox.Machine) {
+effect function inSent(ticket: number, draft: number, account: number, attempt: number): Event!!(Cloud | Mail | Install | KeyValueStore.KeyValueStore | Changes | Drafts.Machine | Inbox.Machine) {
   const composer = try Drafts.Machine
   const list = try Inbox.Machine
   const current = effect {
@@ -373,7 +373,7 @@ effect function loaded(ticket: number): Event!!Letters {
 const keptAside = (draft: number) => effect { try ignore((try Letters).keep(draft)) }
 const forgotten = (drafts: ReadonlyArray<number>) => effect { try (try Letters).forget(drafts) }
 
-function carry(fx: Out): Job<Event, Cloud | Mail | Letters | Install | Changes | Drafts.Machine | Inbox.Machine, [by: Actor]> {
+function carry(fx: Out): Job<Event, Cloud | Mail | Letters | Install | KeyValueStore.KeyValueStore | Changes | Drafts.Machine | Inbox.Machine, [by: Actor]> {
   return match (fx) {
     // spec/app/inbox/drafts.md, "A write goes out only when none is in flight, under the newest ticket, carrying the draft as it is"
     when { tag: "Keep", let ticket, let draft }:

@@ -17,6 +17,7 @@ export const meta: ComponentMeta<StartupAllSetProps> = {
     Default: async () => {
       onDone.mockClear();
       const sheet = await screen.findByRole("dialog", { name: "All set" });
+      await expect(within(sheet).getByRole("heading", { name: "All set" })).toHaveFocus();
       await userEvent.click(within(sheet).getByRole("button", { name: "Done" }));
       await expect(onDone.mock.calls.length).toBe(1);
     },

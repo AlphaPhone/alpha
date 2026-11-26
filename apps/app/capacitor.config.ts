@@ -31,6 +31,9 @@ const config: CapacitorConfig = {
       slots: [
         { pattern: "notes-draft:[1-9][0-9]*", access: "writable", limit: 256 * 1024 },
         { pattern: "notes-folders:[1-9][0-9]*", access: "writable", limit: 64 * 1024 },
+        { pattern: "inbox-saved-bodies", access: "writable", limit: 256 * 1024 },
+        { pattern: "sms-draft:v2:(new|thread:[1-9][0-9]{0,18}|recipients:[0-9a-f]{64})", access: "exchangeable", limit: 2 * 1024 * 1024 },
+        { pattern: "sms-outgoing:v2:device", access: "exchangeable", limit: 64 * 1024 },
       ],
     },
     ElizaSignIn: {

@@ -12,7 +12,7 @@ import { CameraPort, ownedCaptureId, playable, type CameraMedia, type LensFacts,
 import { PhotosPort, latestBrowserCapture, saveBrowserCapture } from "../platform/photos.vibe"
 import { attachToAlpha } from "../assistant/attachments.vibe"
 import { SystemSettings } from "../platform/systemSettings.vibe"
-import { answer, applying, contained, due, reacting, run, started, together, untimed, type Due, type Job } from "../runtime/reactor.vibe"
+import { answer, applying, contained, due, reacting, run, started, stream, together, untimed, type Due, type Job } from "../runtime/reactor.vibe"
 import { checkPreviousPendingCopy } from "./previous.ts"
 
 type Phone = ["Phone"]
@@ -186,6 +186,7 @@ effect function finish(): Camera.Event!!(CameraPort | CameraAssets | Camera.Mach
   const camera = try Camera.Machine
   const before = try camera.get()
   const captured = try port.finish()
+  if (captured === "failed") return { type: "recordingFailed", now: untimed }
   if (captured?.size !== undefined) try observeSize(captured.size)
   const media = captured === undefined ? undefined : try saved(captured, before.film.elapsed)
   if (captured !== undefined && media === undefined) try port.release(captured)
@@ -215,10 +216,12 @@ function carry(fx: Camera.Effect): CameraJob {
       return { type: "focusWritten", tap: fx.tap, applied } as const
     }, { type: "focusWritten", tap: fx.tap, applied: false }, "Phone")
     case "Capture": return answer(`capture ${fx.ticket}`, take(fx.ticket), { type: "captured", ticket: fx.ticket, photo: 0 }, "Phone")
-    case "StartRecording": return answer("start recording", effect {
-      const ok = try (try CameraPort).record(fx.sound)
-      return { type: "recordingStarted", ok, now: untimed } as const
-    }, { type: "recordingStarted", ok: false, now: untimed }, "Phone")
+    case "StartRecording": return stream("start recording", Stream.unwrap(effect {
+      const failures = try (try CameraPort).record(fx.sound)
+      const began = Stream.succeed<Camera.Event>({ type: "recordingStarted", ok: failures !== undefined, now: untimed })
+      if (failures === undefined) return began
+      return Stream.concat(began, Stream.map(failures, (): Camera.Event => ({ type: "recordingFailed", now: untimed })))
+    }), { type: "recordingStarted", ok: false, now: untimed }, "Phone")
     case "StopRecording": return answer("finish recording", finish(), { type: "recordingEnded", ok: false, video: 0, now: untimed }, "Phone")
     case "CheckRecording": return answer("check recording", effect {
       const asset = try (try CameraAssets).read(fx.video)

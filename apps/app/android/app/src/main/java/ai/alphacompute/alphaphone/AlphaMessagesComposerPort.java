@@ -12,7 +12,7 @@ import com.getcapacitor.Bridge;
 import com.getcapacitor.JSObject;
 import com.getcapacitor.PluginCall;
 import com.getcapacitor.PluginHandle;
-import java.util.Set;
+import java.util.Collections;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.regex.Pattern;
 import org.json.JSONException;
@@ -20,6 +20,7 @@ import org.json.JSONException;
 final class AlphaMessagesComposerPort {
  private static final String ORIGIN = "https://localhost";
  private static final int MAX_REQUEST_CHARS = 2 * SmsSendJournal.MAX_MMS_BYTES;
+ private static final int MAX_DRAFT_REQUEST_CHARS = 2 * AlphaLegacySms.DRAFT_BYTES + 512;
  private static final Pattern REQUEST = Pattern.compile("[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}");
 
  private final MainActivity activity;
@@ -35,17 +36,35 @@ final class AlphaMessagesComposerPort {
   if (!WebViewFeature.isFeatureSupported(WebViewFeature.WEB_MESSAGE_LISTENER)) return;
   AlphaMessagesComposerPort port = new AlphaMessagesComposerPort(activity, view);
   try {
-   WebViewCompat.addWebMessageListener(view, "alphaMessagesComposer", Set.of(ORIGIN), (page, message, source, mainFrame, reply) -> {
+   WebViewCompat.addWebMessageListener(view, "alphaMessagesComposer", Collections.singleton(ORIGIN), (page, message, source, mainFrame, reply) -> {
     if (page == view && mainFrame && packagedOrigin(source)) port.receive(message, reply);
    });
   } catch (RuntimeException unavailable) {
    android.util.Log.w("AlphaMessages", "The packaged composer port is unavailable");
   }
+  try {
+   WebViewCompat.addWebMessageListener(view, "alphaLegacySmsDrafts", Collections.singleton(ORIGIN), (page, message, source, mainFrame, reply) -> {
+    if (page == view && mainFrame && packagedOrigin(source)) port.receiveLegacyDraft(message, reply);
+   });
+  } catch (RuntimeException unavailable) {
+   android.util.Log.w("AlphaMessages", "The packaged legacy draft port is unavailable");
+  }
  }
 
- private static boolean packagedOrigin(Uri source) {
+ static boolean packagedOrigin(Uri source) {
   return source != null && "https".equals(source.getScheme())
     && ("localhost".equals(source.getEncodedAuthority()) || "localhost:443".equals(source.getEncodedAuthority()));
+ }
+
+ private void receiveLegacyDraft(WebMessageCompat message, JavaScriptReplyProxy reply) {
+  if (message.getType() != WebMessageCompat.TYPE_STRING) return;
+  Bridge bridge = activity.getBridge();
+  if (bridge == null || bridge.getWebView() != view || bridge.getServerUrl() != null) return;
+  String text = message.getData();
+  if (text == null || text.length() > MAX_DRAFT_REQUEST_CHARS) return;
+  PluginHandle handle = bridge.getPlugin("ElizaTelephony");
+  if (handle == null || !(handle.getInstance() instanceof AlphaTelephonyPlugin plugin)) return;
+  plugin.accessLegacyDraft(activity, view, bridge, text, reply);
  }
 
  private void receive(WebMessageCompat message, JavaScriptReplyProxy reply) {

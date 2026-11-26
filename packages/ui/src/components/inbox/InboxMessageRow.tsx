@@ -19,6 +19,8 @@ export type InboxMessageRowProps = {
   attachment?: boolean;
   /** Is among the messages chosen for archiving or Trash. */
   chosen?: boolean;
+  /** The message open beside this list. */
+  current?: boolean;
   /** The list is in selection mode and pressing the row chooses it. */
   selecting?: boolean;
   /** Opens the message. */
@@ -37,7 +39,7 @@ const swipeDistance = 72;
  *
  * @model spec/app/inbox/index.md
  */
-export function InboxMessageRow({ sender, initial, subject, snippet, time, unread = false, attachment = false, chosen = false, selecting = false, onOpen, onChosenChange, onSwipe }: InboxMessageRowProps) {
+export function InboxMessageRow({ sender, initial, subject, snippet, time, unread = false, attachment = false, chosen = false, current = false, selecting = false, onOpen, onChosenChange, onSwipe }: InboxMessageRowProps) {
   const swipeFromRef = useRef<{ pointer: number; x: number; y: number } | undefined>(undefined);
   const suppressClickRef = useRef(false);
   const start = (event: PointerEvent<HTMLButtonElement>) => {
@@ -63,10 +65,10 @@ export function InboxMessageRow({ sender, initial, subject, snippet, time, unrea
   return (
     <div className="relative touch-pan-y overflow-hidden">
       <span aria-hidden className="absolute inset-0 flex items-center justify-end bg-secondary px-6 text-muted-foreground"><Archive className="size-5.5" /></span>
-      <button type="button" role={selecting ? "checkbox" : undefined} aria-checked={selecting ? chosen : undefined}
+      <button type="button" role={selecting ? "checkbox" : undefined} aria-checked={selecting ? chosen : undefined} aria-current={current || undefined}
         disabled={selecting ? !onChosenChange : !onOpen} onClick={activate}
         onPointerDown={start} onPointerUp={end} onPointerCancel={() => { swipeFromRef.current = undefined; }}
-        className={cn(focusRing, "relative flex w-full touch-pan-y items-start gap-3.5 bg-background px-5 py-3.25 text-left focus-visible:-outline-offset-focus")}
+        className={cn(focusRing, "relative flex w-full touch-pan-y items-start gap-3.5 bg-background px-5 py-3.25 text-left focus-visible:-outline-offset-focus", current && "bg-secondary")}
       >
         {unread ? <span className="sr-only">Unread</span> : null}
         {selecting ? (

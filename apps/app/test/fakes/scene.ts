@@ -5,7 +5,7 @@ import { type CalendarScene, calendarRoutes, calendarScene } from "./calendar.ts
 import { type ClockScene, clockRoutes, clockScene } from "./clock.ts";
 import { type MapsScene, mapsRoutes, mapsScene } from "./maps.ts";
 import { type NotesScene, notesRoutes, notesScene } from "./notes.ts";
-import { type CheckoutScene, cloudRoutes } from "./cloud.ts";
+import { type CheckoutScene, type RedemptionScene, cloudRoutes } from "./cloud.ts";
 import { type InboxScene, inboxRoutes, inboxScene } from "./inbox.ts";
 import { type PlatformScene, platformRoutes, platformScene } from "./platform.ts";
 import { type RemindersScene, remindersRoutes, remindersScene } from "./reminders.ts";
@@ -30,6 +30,7 @@ export interface Scene {
   now: number;
   signedIn: boolean;
   checkout?: CheckoutScene;
+  redemption?: RedemptionScene;
   /** The phone's device lease for mail and calendar: a phone signed in before mail leases existed holds none. */
   readonly mailLease: MailLeaseScene;
   residentAvailable: boolean;
@@ -107,7 +108,7 @@ export function services(world: Scene) {
       ...walletRoutes(world.wallet, () => world.now),
     ]),
     cloud: answering([
-      ...cloudRoutes(() => world.signedIn, () => world.now, world.checkout),
+      ...cloudRoutes(() => world.signedIn, () => world.now, world.checkout, world.redemption),
       ...inboxRoutes(world.inbox),
       ...mapsRoutes(world.maps, () => world.now),
     ]),
