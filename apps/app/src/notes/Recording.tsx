@@ -95,7 +95,7 @@ export function Recording({ runtime }: { readonly runtime: Alpha["runtime"] }) {
   const levels = matchingTake ? meters.levels : [];
   const canStop = can({ type: "stop", take: state.take });
   const canSave = can({ type: "keepPartial" });
-  const askDiscard = { type: "askDiscard", take: state.take } as const;
+  const askDiscard = { type: "askDiscard", take: state.take, captureReady: measuring } as const;
   const cancelDiscard = { type: "cancelDiscard", take: state.take } as const;
   const confirmDiscard = { type: "confirmDiscard", take: state.take } as const;
   const canCancel = can(cancelDiscard);

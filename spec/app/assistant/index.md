@@ -490,27 +490,36 @@ pure def sometimesAReplyBreaksOff(c: Conversation): bool = c.turn.reply == Broke
 pure def sometimesTheAgentIsAwayWithACheckToDo(c: Conversation): bool = not(c.ready) and c.check == LookLater
 ```
 
-### Alpha asks the agent to warm up at launch, on return to the foreground and when Ask Alpha is raised from its bar, only while the agent can answer, and shows nothing of it
+### Alpha asks the agent to warm up at launch, on return to the foreground, after a sign-in and when Ask Alpha is raised from its bar, only while the agent can answer, and shows nothing of it
 
 The first reply after opening Alpha should come as fast as the second, so
 Alpha asks the agent to warm its model (`POST /api/turns/warm`, eliza's
 `spec/agent/conversation/planning.md`) when the owner may talk soon: when
 Ask Alpha first loads at launch, each time Alpha returns to the
-foreground, and each time Ask Alpha leaves its bar for typing, the sheet or
-the full screen. It asks only when the agent's status says it can answer
+foreground, each time the phone's sign-in settles on an account, and each
+time Ask Alpha leaves its bar for typing, the sheet or the full screen.
+This warm-up is the only one that asks the agent: a spoken turn of the
+enrolled phone is planned with the same tools as a typed one, so Talk's
+own warm-up warms speech and its Cloud relay ([voice](../voice/index.md))
+and leaves the agent to this one, and no other control asks for it.
+Every trigger is gated alike: it asks only when the agent's status says it can answer
 (signed in, or on a key of the owner's, and not blocked) and no sensitive
 screen shows, where no message is sent either, and with the enrolled
 device's headers, so the warm-up builds the tools this phone's turns are
 offered; a warm-up that finds the device not yet enrolled shares the one
 enrollment a message would wait for, never a second. The agent keeps the
-warm-ups at least four minutes apart and pays for nothing more; the
+warm-ups at least four minutes apart and pays for nothing more, so a
+warm-up asked without this phone's headers would take that slot with a
+prompt no turn of this phone sends; the
 warm-up is detached and bounded as a whole, never holds the screen, and
 its answer and any failure are dropped without a word.
 
 ```quint
-type WarmTrigger = Launched | Foreground | Raised
+type WarmTrigger = Launched | Foreground | SignedIn | Raised
 pure def raisedFromTheBar(before: S::Detent, after: S::Detent): bool = before == S::Bar and after != S::Bar
 pure def asksWarmUp(trigger: WarmTrigger, canRespond: bool, sensitive: bool): bool = canRespond and not(sensitive)
+pure def lawEveryTriggerIsGatedAlike(trigger: WarmTrigger, other: WarmTrigger, canRespond: bool, sensitive: bool): bool =
+  asksWarmUp(trigger, canRespond, sensitive) iff asksWarmUp(other, canRespond, sensitive)
 pure def lawAnAgentThatCannotAnswerIsNeverWarmed(trigger: WarmTrigger, sensitive: bool): bool = not(asksWarmUp(trigger, false, sensitive))
 pure def lawNoWarmUpOverASensitiveScreen(trigger: WarmTrigger, canRespond: bool): bool = not(asksWarmUp(trigger, canRespond, true))
 pure def lawEveryRaiseFromTheBarIsATrigger(after: S::Detent): bool = raisedFromTheBar(S::Bar, after) iff after != S::Bar

@@ -30,6 +30,7 @@ import { useMachine as useCanvas } from "../../gen/app__shell__keyboard.react.ts
 import type { Machine as Preferences } from "../../gen/app__settings__preferences.effect.vibe";
 import { useMachine as usePreferences } from "../../gen/app__settings__preferences.react.ts";
 import type { Alpha } from "../runtime/area.tsx";
+import { openInboxAccount } from "../account/profile.vibe";
 import { useTimed } from "../runtime/react.ts";
 import type { Cloud } from "../platform/cloud.vibe";
 import { untimed } from "../runtime/reactor.vibe";
@@ -419,7 +420,14 @@ export function Inbox({ runtime, alpha }: InboxProps & { alpha: Alpha }) {
   const retryList = refresh ?? retryAccess;
   const review = <ChangeReview runtime={runtime} list={state} cards={cards} />;
   const settings = shell.can({ type: "openView", view: "Settings" }) ? () => void shell.send({ type: "openView", view: "Settings" }) : undefined;
-  const signIn = settings ? () => void runtime.runPromise(Effect.flatMap(MailSignIn, (mail) => mail.signIn(settings))) : undefined;
+  const askMailSignIn = (otherwise: () => void) => () => {
+    void runtime.runPromise(Effect.flatMap(MailSignIn, (mail) => mail.signIn(otherwise)));
+  };
+  const route = shell.state?.route;
+  const signIn = route === undefined ? undefined : askMailSignIn(() => {
+    alpha.runtime.runFork(openInboxAccount(route));
+  });
+  const reconnect = state.failure === "Revoked" ? settings && askMailSignIn(settings) : signIn;
   const hidden = new Set(changes.state ? aside(changes.state) : []);
   const letters = mail.shown(state).filter(({ message: number }) => !hidden.has(number));
   const { account, folder, query } = state.selected;
@@ -565,7 +573,7 @@ export function Inbox({ runtime, alpha }: InboxProps & { alpha: Alpha }) {
             if (text !== "") signIn();
           } : undefined}
           notice={notice}
-          onNoticeAction={notice === "reconnect" ? signIn : retryList}
+          onNoticeAction={notice === "reconnect" ? reconnect : retryList}
           state={mustChoose ? undefined : kind}
           onStateAction={kind === "offline" || kind === "failed" ? retryList : kind === "signedOut" ? signIn : settings}
           chosen={draftsFolder ? shelf.picks.length : state.chosen.length}

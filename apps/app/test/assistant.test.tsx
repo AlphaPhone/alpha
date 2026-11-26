@@ -383,8 +383,8 @@ describe.each([["a browser", false], ["a phone", true]])("in %s", (_where, phone
     expect(document.body.textContent?.includes("Let me look")).toBe(false);
   });
 
-  // spec/app/assistant/index.md, "Alpha asks the agent to warm up at launch, on return to the foreground and when Ask Alpha is raised from its bar, only while the agent can answer, and shows nothing of it"
-  it("Warm the agent before my first message: at launch, on return and when Ask Alpha is raised, never while it cannot answer, and without a word (spec/app/assistant/index.md, \"Alpha asks the agent to warm up at launch, on return to the foreground and when Ask Alpha is raised from its bar, only while the agent can answer, and shows nothing of it\")", async () => {
+  // spec/app/assistant/index.md, "Alpha asks the agent to warm up at launch, on return to the foreground, after a sign-in and when Ask Alpha is raised from its bar, only while the agent can answer, and shows nothing of it"
+  it("Warm the agent before my first message: at launch, on return, after a sign-in and when Ask Alpha is raised, never while it cannot answer, and without a word (spec/app/assistant/index.md, \"Alpha asks the agent to warm up at launch, on return to the foreground, after a sign-in and when Ask Alpha is raised from its bar, only while the agent can answer, and shows nothing of it\")", async () => {
     const world = { ...scene(), phone };
     const { alpha, runtime } = await openAssistant(world);
     const asked = () => world.ask.warmUps.length;
@@ -395,17 +395,21 @@ describe.each([["a browser", false], ["a phone", true]])("in %s", (_where, phone
     await alpha.runtime.runPromise(Effect.flatMap(Shell, (shell) => shell.send({ type: "raise", detent: "Sheet" })));
     await settled(alpha, () => asked() === 3, asked);
     await alpha.runtime.runPromise(Effect.flatMap(Shell, (shell) => shell.send({ type: "raise", detent: "Full" })));
+    // Only the phone's sign-in settles; Talk warming speech for the new account asks the agent for nothing more.
+    const signedIn = phone ? 1 : 0;
+    await drawn(() => world.voice.signedInHere?.());
+    await settled(alpha, () => asked() === 3 + signedIn, asked);
     world.ask.warmUpFails = true;
     await seen(false);
     await seen(true);
-    await settled(alpha, () => asked() === 4, asked);
+    await settled(alpha, () => asked() === 4 + signedIn, asked);
     world.ask.canRespond = false;
     const reads = world.ask.statusReads;
     await seen(false);
     await seen(true);
     await settled(alpha, () => world.ask.statusReads > reads, () => world.ask.statusReads);
     await later(alpha, 10);
-    expect([asked(), world.ask.opened, world.ask.said, lines(), document.body.textContent?.toLowerCase().includes("warm"), new Set(world.ask.warmUps.map((headers) => JSON.stringify(headers))).size]).toEqual([4, 0, [], [], false, 1]);
+    expect([asked(), world.ask.opened, world.ask.said, lines(), document.body.textContent?.toLowerCase().includes("warm"), new Set(world.ask.warmUps.map((headers) => JSON.stringify(headers))).size]).toEqual([4 + signedIn, 0, [], [], false, 1]);
     world.ask.canRespond = true;
     write("Hello");
     await press("Send");

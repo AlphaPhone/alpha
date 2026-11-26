@@ -5,6 +5,7 @@ import { Effect } from "effect";
 import { Bell, Repeat } from "lucide-react";
 import { useRef } from "react";
 import { Machine as Calendar } from "../../gen/app__calendar.effect.vibe";
+import { useMachine as useCalendar } from "../../gen/app__calendar.react.ts";
 import { useMachine as useReopen } from "../../gen/app__calendar__reminderReopen.react.ts";
 import { snoozeSelectedReminder } from "../reminders/alerts.vibe";
 import { deleteReminderItem, toggleReminderComplete } from "../reminders/reminders.vibe";
@@ -12,6 +13,7 @@ import { remindersStore } from "../reminders/store.ts";
 import type { Alpha } from "../runtime/area.tsx";
 import type { CalendarProps } from "./Calendar.tsx";
 import { startReminderEdit } from "./editor.vibe";
+import { SourceNote } from "./SourceNote.tsx";
 import { ReminderReview } from "./ReminderReview.tsx";
 import { confirmReopening, reviewReopening } from "./reopen.vibe";
 import type { DatedReminder } from "./reminders.ts";
@@ -36,6 +38,7 @@ function alertCaption(minutes: number): string {
 export function ReminderPage({ alpha, runtime, row, onBack }: { alpha: Alpha; runtime: CalendarProps["runtime"]; row: DatedReminder; onBack: () => void }) {
   const { record, begin } = row;
   const review = useReopen(runtime);
+  const owner = useCalendar(runtime).state?.owner;
   const reviewTriggerRef = useRef<HTMLButtonElement>(null);
   const reviewing = review.state?.showing === true && review.state.reminderKey === record.id;
   const sending = review.state?.sending === true;
@@ -71,6 +74,7 @@ export function ReminderPage({ alpha, runtime, row, onBack }: { alpha: Alpha; ru
   return (
     <CalendarEventPage title={record.title} when={`Due ${hour.format(begin)}`} day={date.format(begin)} source="Reminders" notes={words} onBack={onBack}
       actions={<CalendarEventMenu items={[{ label: "Edit", name: "Edit event", onSelect: edit }, { label: "Delete", name: "Delete event", onSelect: remove }]} />}>
+      {owner !== undefined && <SourceNote runtime={runtime} account={owner} selection={row.id} target="Reminder" record={record.id} />}
       <div className={record.alertMinutes === null ? "mt-5 pb-5" : "mt-5"}>
         <span role="img" aria-label={oneTime ? record.completed ? "Completed." : "One-time reminder." : record.recurrence} className="block text-muted-foreground">
           <Repeat aria-hidden className="size-4.5" />

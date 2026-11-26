@@ -147,9 +147,18 @@ describe("Phone on an Alpha image", () => {
     await until(alpha, alpha.runtime, Phone, (s) => s.dialled && s.dial.status === "Loaded");
     expect([world.telephony.dialed, world.telephony.placed]).toEqual([["14155550100"], []]);
 
-    // spec/app/phone/index.md, "Leaving Phone, or leaving Recents, forgets the rows"
+    // spec/app/phone/index.md, "Phone reads the call log whenever Recents comes to the front"; spec/app/phone/index.md, "Leaving Phone, or leaving Recents, forgets the rows"
+    world.telephony.calls.push({ id: 4, number: "+14155550123", name: "New caller", date: 1_700_000_350_000, type: "incoming" });
     await tab("Recents");
-    await until(alpha, alpha.runtime, Phone, (s) => s.tab === "Recents" && s.recents.status === "Loaded" && s.rows === 2);
+    await until(alpha, alpha.runtime, Phone, (s) => s.tab === "Recents" && s.recents.status === "Loaded" && s.rows === 3);
+    expect(button("Call New caller")).toBeDefined();
+    await tab("Keypad");
+    await until(alpha, alpha.runtime, Phone, (s) => s.tab === "Keypad");
+    world.telephony.callLog = "denied";
+    await tab("Recents");
+    await until(alpha, alpha.runtime, Phone, (s) => s.tab === "Recents" && s.recents.status === "Failed" && s.log.grant === "Denied" && s.rows === 0);
+    expect(button("Call New caller")).toBeUndefined();
+    expect(button("Retry call history")).toBeUndefined();
     await hardware("home");
     await until(alpha, alpha.runtime, Phone, (s) => !s.front && s.rows === 0);
   });
@@ -193,6 +202,7 @@ describe("Phone on an Alpha image", () => {
     await tab("Voicemail");
     await until(alpha, alpha.runtime, Shell, (state) => state.trail.join(",") === "Phone");
     await until(alpha, alpha.runtime, Phone, (state) => state.front && state.tab === "Voicemail");
+    await until(alpha, alpha.runtime, Comms, (state) => state.app === "PhoneApp" && state.key === "phone:recents:");
     await tab("Contacts");
     await contactsFront();
     await contactsListed();
@@ -207,10 +217,27 @@ describe("Phone on an Alpha image", () => {
     expect(document.querySelector("[data-alpha-shell-page]")?.hasAttribute("inert")).toBe(true);
     await press("Shrink chat");
     await until(alpha, alpha.runtime, Shell, (state) => state.assistant === "Sheet");
+    // spec/app/phone/comms.md, "Returning through an embedded Contacts tab follows the Phone stage without adding history"
+    await until(alpha, alpha.runtime, Comms, (state) => state.app === "ContactsApp" && state.stage.length === 0);
+    await tab("Voicemail");
+    await until(alpha, alpha.runtime, Shell, (state) => state.trail.join(",") === "Phone" && state.assistant === "Sheet");
+    await until(alpha, alpha.runtime, Phone, (state) => state.front && state.tab === "Voicemail");
+    await until(alpha, alpha.runtime, Comms, (state) => state.app === "PhoneApp" && state.key === "phone:recents:" && state.stage.length === 0);
+    await tab("Keypad");
+    await until(alpha, alpha.runtime, Phone, (state) => state.front && state.tab === "Keypad");
+    await until(alpha, alpha.runtime, Comms, (state) => state.app === "PhoneApp" && state.key === "phone:keypad:" && state.stage.length === 0);
+    expect(document.querySelector('[data-alpha-phone-tab="keypad"]')?.getAttribute("aria-selected")).toBe("true");
+    await draftKept();
+
+    // spec/app/shell/index.md, "Opening another communications app from the stage keeps Ask Alpha open"
+    await tab("Contacts");
+    await until(alpha, alpha.runtime, Shell, (state) => state.trail.join(",") === "Phone,Contacts" && state.assistant === "Sheet");
+    await contactsListed();
+    await until(alpha, alpha.runtime, Comms, (state) => state.app === "ContactsApp" && state.stage.at(-1)?.app === "PhoneApp");
     await tab("Keypad");
     await until(alpha, alpha.runtime, Shell, (state) => state.trail.join(",") === "Phone" && state.assistant === "Sheet");
     await until(alpha, alpha.runtime, Phone, (state) => state.front && state.tab === "Keypad");
-    expect(document.querySelector('[data-alpha-phone-tab="keypad"]')?.getAttribute("aria-selected")).toBe("true");
+    await until(alpha, alpha.runtime, Comms, (state) => state.app === "PhoneApp" && state.key === "phone:keypad:" && state.stage.length === 0);
     await draftKept();
 
     await hardware("back");

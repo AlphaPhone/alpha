@@ -1,6 +1,6 @@
 // spec/app/notes/index.md, "Story: See my notes"; spec/app/notes/index.md, "Story: Organise my notes"; spec/app/notes/editor.md, "Story: Write a note"; spec/app/notes/trash.md, "Story: Delete a note and get it back"
 import { Alert, AppHeader, Button, Chip, ConfirmDialog, Dialog, DialogClose, DialogContent, DialogDescription, DialogTitle, Input, LinkNoteView, Menu, MenuContent, MenuItem, MenuTrigger, NoteEditor as NoteForm, NoteMenu, NoteRow, cn, focusRing, noteMenuItem, noteMenuPanel, NotesList as NoteRows, Spinner, VoiceNoteView } from "@repo/ui";
-import { Copy, Download, Ellipsis, FileDown, Folder, FolderInput, ListChecks, Mail, MessageSquare, Mic, Pin, Plus, Share2, Trash2, X } from "lucide-react";
+import { AlarmClock, CalendarPlus, Copy, Download, Ellipsis, FileDown, Folder, FolderInput, ListChecks, Mail, MessageSquare, Mic, Pin, Plus, Share2, Trash2, X } from "lucide-react";
 import { useEffect, useRef, useState, useSyncExternalStore, type CSSProperties, type FormEvent } from "react";
 import * as Notes from "../../gen/app__notes.ts";
 import * as Editor from "../../gen/app__notes__editor.ts";
@@ -23,6 +23,7 @@ import { unfinished } from "../../gen/app__notes__recording.ts";
 import type { Alpha } from "../runtime/area.tsx";
 import { AppBack } from "../shell/AppBack.tsx";
 import { desktopPreview } from "../shell/canvas.vibe";
+import { reviewNoteSchedule } from "./calendar.vibe";
 import { type Collection, type DraftWords, NoteContent, audioIdOf, hasContent, savedVoice } from "./content.vibe";
 import { type Fields, NoteEditor } from "./editor.vibe";
 import { deleteSelection, enter } from "./notes.vibe";
@@ -99,12 +100,16 @@ function EditorScreen({ runtime, saved }: { readonly runtime: Runtime; readonly 
   const exporting = { type: "exportNote", note: current.note, revision: current.draft.base } as const;
   const sharing = { type: "openMenu", note: current.note, link: current.link, saved: current.draft.sync === "Kept" && !current.deleting } as const;
   const shared = sharing.saved && current.link.tie === "NoLink" && (actions.can(sharing, "Owner") || actions.state?.open === true);
+  const canSchedule = current.note > 0 && current.draft.sync === "Kept" && !current.deleting && !Editor.waiting(current);
+  const schedule = (kind: "event" | "reminder") => void runtime.runPromise(reviewNoteSchedule({
+    number: current.note, revision: current.draft.base, view: "editor",
+  }, kind));
   const exportable = hasDocuments && current.draft.sync === "Kept" && transfer.can(exporting, "Owner");
   const editable = owner({ type: "edit", kept: true });
   const status = current.draft.sync === "Saving" ? "Saving…" : current.failed ? "Couldn't save the note"
     : current.full ? "There isn't room to keep your draft" : current.told === "WasUnknown" ? "Alpha couldn't confirm the deletion"
       : current.told === "WasRefused" ? "Couldn't delete the note" : current.told === "WasFull" ? "Recently deleted is full" : undefined;
-  const menu = (deletable || exportable || shared || organised.pin !== undefined || organised.moves.length > 0) && <Menu onOpenChange={(open) => {
+  const menu = (deletable || canSchedule || exportable || shared || organised.pin !== undefined || organised.moves.length > 0) && <Menu onOpenChange={(open) => {
     if (open && actions.can(sharing, "Owner")) void actions.send(sharing, "Owner");
     if (!open && actions.can({ type: "closeMenu" }, "Owner")) void actions.send({ type: "closeMenu" }, "Owner");
   }}>
@@ -116,8 +121,12 @@ function EditorScreen({ runtime, saved }: { readonly runtime: Runtime; readonly 
       </>}
       {organised.pin && <MenuItem className={noteMenuItem} onSelect={organised.pin}><Pin /> {organised.pinned ? "Unpin" : "Pin"}</MenuItem>}
       {organised.moves.map(({ folder, move }) => <MenuItem className={noteMenuItem} key={folder.id} onSelect={move}><FolderInput /> {folder.id === 0 ? "Move out of folder" : `Move to ${folder.name}`}</MenuItem>)}
+      {canSchedule && <>
+        <MenuItem className={noteMenuItem} onSelect={() => schedule("reminder")}><AlarmClock /> Review reminder</MenuItem>
+        <MenuItem className={noteMenuItem} onSelect={() => schedule("event")}><CalendarPlus /> Review event</MenuItem>
+      </>}
       {exportable && <MenuItem className={noteMenuItem} onSelect={() => void transfer.send(exporting, "Owner")}><FileDown /> Save as text</MenuItem>}
-      {deletable && (shared && actions.state?.open || exportable || organised.pin !== undefined || organised.moves.length > 0) && <div role="separator" className="my-1 border-t border-border" />}
+      {deletable && (shared && actions.state?.open || canSchedule || exportable || organised.pin !== undefined || organised.moves.length > 0) && <div role="separator" className="my-1 border-t border-border" />}
       {deletable && <MenuItem className={noteMenuItem} onSelect={() => send(deletion)}><Trash2 /> Delete</MenuItem>}
     </MenuContent>
   </Menu>;
@@ -305,6 +314,9 @@ function VoiceNote({ runtime, collection }: { readonly runtime: Runtime; readonl
   })) : undefined;
   const player = device.canPlay && audio;
   const canPlay = player && current && voice.can(play, "Owner");
+  const schedule = (kind: "event" | "reminder") => void runtime.runPromise(reviewNoteSchedule({
+    number: state.note, revision: state.revision, view: "voice",
+  }, kind));
   const toggle = voice.can(stop, "Owner") ? () => void voice.send(stop, "Owner") : canPlay ? () => void voice.send(play, "Owner") : undefined;
   const seek = canPlay && Array.isArray(data?.segments) && data.segments.length > 0 ? (from: number) => {
     const event = { type: "play", from } as const;
@@ -320,6 +332,8 @@ function VoiceNote({ runtime, collection }: { readonly runtime: Runtime; readonl
     lines={lines}
     menu={note !== undefined && <NoteMenu pinned={pinned} triggerRef={moreRef}
       onPin={canPin ? () => void voice.send(pin, "Owner") : undefined}
+      onReviewReminder={current ? () => schedule("reminder") : undefined}
+      onReviewEvent={current ? () => schedule("event") : undefined}
       onShare={current && voice.can(share, "Owner") ? () => void voice.send(share, "Owner") : undefined} />}
     onAskTranscript={canUseTranscript ? () => void voice.send(ask, "Owner") : undefined}
     onCopyTranscript={copy}

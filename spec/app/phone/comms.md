@@ -120,10 +120,12 @@ pure def sometimesAlphaAddressedOverAThread(c: Comms): bool = c.target == AlphaT
 ### A view change while the conversation is open keeps the sheet's height and remembers the view it left
 
 The stage slides sideways and the sheet holds its height and transcript
-(AC-05). Back first returns the stage to the view it came from (the
-"‹ Messages" chip), then closes the conversation, then is the app's own Back
-(AC-06). Closing the conversation keeps the current stage view: a call Alpha
-started stays on the call.
+(AC-05). Moving to another communications app remembers the app and subject
+it left. Choosing a tab, recipient or conversation in the same app updates
+the subject while preserving the app history. Back from the sheet first
+returns to the earlier app (the "‹ Messages" chip), then closes the
+conversation, then is the app's own Back (AC-06). Closing the conversation
+keeps the current stage view: a call Alpha started stays on the call.
 
 ```quint
 type BackStep = StageReturns | ChatCloses | AppBack
@@ -131,10 +133,13 @@ type BackStep = StageReturns | ChatCloses | AppBack
 pure def backStep(c: Comms): BackStep = if (c.stage.length() > 0) StageReturns else if (c.height != SheetClosed) ChatCloses else AppBack
 
 pure def subjectShown(c: Comms, app: CommsApp, subject: Subject, key: str, by: Actor): Comms =
-  val shifted = c.height != SheetClosed and key != c.key
+  val shifted = c.height != SheetClosed and app != c.app
   { ...c, app: app, subject: subject, key: key,
     stage: if (shifted) c.stage.append({ app: c.app, subject: c.subject, key: c.key }) else c.stage,
     height: if (c.emergency and c.height == SheetFull) SheetOpen else c.height }
+
+pure def stepSameAppKeepsStageHistory(before: Comms, via: str, after: Comms): bool =
+  (via == "subjectShown" and before.app == after.app) implies before.stage == after.stage
 
 pure def canStageReturned(c: Comms, by: Actor): bool = by != Agent and c.stage.length() > 0
 
@@ -149,6 +154,25 @@ pure def stepTheSheetHoldsItsHeightWhenTheStageChanges(before: Comms, via: str, 
   (via == "subjectShown" or via == "stageReturned") implies (after.height == before.height or (before.emergency and after.height == SheetOpen))
 
 pure def sometimesTheStageCanReturn(c: Comms): bool = c.stage.length() > 0 and c.subject == CallSubject
+```
+
+### Returning through an embedded Contacts tab follows the Phone stage without adding history
+
+Once the shell has returned to Phone from its embedded Contacts tab at the
+same Ask Alpha height, the Phone subject replaces Contacts on stage. A
+staged Phone entry is consumed if Contacts still owns it.
+
+```quint
+pure def canPhoneTabReturned(c: Comms, subject: Subject, key: str, by: Actor): bool =
+  by == Device and key != "" and (subject == KeypadSubject or subject == RecentsSubject)
+
+pure def phoneTabReturned(c: Comms, subject: Subject, key: str, by: Actor): Comms =
+  val shown = subjectShown(c, PhoneApp, subject, key, by)
+  val last = c.stage.nthOr(c.stage.length() - 1, { app: ContactsApp, subject: ListSubject, key: "" })
+  { ...shown, stage: if (c.app == ContactsApp and last.app == PhoneApp) c.stage.removeAt(c.stage.length() - 1) else c.stage }
+
+pure def stepPhoneTabReturnDoesNotAddHistory(before: Comms, via: str, after: Comms): bool =
+  via == "phoneTabReturned" implies after.stage.length() <= before.stage.length()
 ```
 
 ### The sheet is closed, open or full, and full never compacts an emergency call

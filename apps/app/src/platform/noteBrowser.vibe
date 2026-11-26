@@ -1,6 +1,6 @@
 // spec/app/notes/recording.md, "Story: Record a voice note"; spec/app/notes/recording.md, "Story: Pick up a recording a crash cut off"
 module browser {
-  import { createBrowserRecordingJournal, createNotesAudioStore, NotesAudioRefused, type BrowserRecording } from "@elizaos/plugin-notes-client"
+  import { createBrowserRecordingJournal, createNotesAudioStore, NotesAudioRefused, type BrowserRecording, type NotesTrashRecordingCleanup } from "@elizaos/plugin-notes-client"
   import type { Command } from "../../gen/app__notes__recording.effect.vibe"
   import type { Tape } from "./noteDevice.vibe"
   import { browserNotePlayback } from "./notePlayback.vibe"
@@ -189,7 +189,7 @@ module browser {
           if (document.hidden || owner !== ownerDigest) throw Error("Recording connection changed")
           const mimeType = ["audio/webm;codecs=opus", "audio/mp4", "audio/ogg;codecs=opus"].find((type) => MediaRecorder.isTypeSupported(type))
           const recorder = new MediaRecorder(stream, mimeType === undefined ? undefined : { mimeType })
-          const row = await journal.start({ ownerDigest, folderId: folderId ?? null, recordingId: crypto.randomUUID(), startedAt: Date.now(), mimeType: recorder.mimeType })
+          const row = await journal.start({ ownerDigest, folderId: folderId ?? null, recordingId: `browser-audio-${crypto.randomUUID()}`, startedAt: Date.now(), mimeType: recorder.mimeType })
           if (document.hidden || owner !== ownerDigest) throw Error("Recording connection changed")
           let finished = () => {}
           const ended = new Promise<void>((resolve) => { finished = resolve })
@@ -273,6 +273,19 @@ module browser {
           await audio.claimPendingAudio(recordingId, authority)
           if (owner !== authority) throw Error("Recording connection changed")
           return finish(await audio.commitPendingAudio(recordingId, authority, noteId, prior?.transcript ?? ""))
+        })
+      },
+      async purge(receipt: NotesTrashRecordingCleanup): Promise<boolean> {
+        const authority = owner
+        if (authority === undefined) return false
+        return oneRecording(authority, async () => {
+          if (owner !== authority) return false
+          playback.halt()
+          await audio.purgeCommittedAudio({
+            audioId: receipt.audioId, noteId: receipt.noteId, operationId: receipt.operationId,
+            deletedAt: Date.parse(receipt.deletedAt), connection: authority,
+          })
+          return owner === authority
         })
       },
       async discard(recordingId: string) {

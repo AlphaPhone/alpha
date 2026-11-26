@@ -29,6 +29,7 @@ export interface PhoneProps {
 const keys = [["1", ""], ["2", "ABC"], ["3", "DEF"], ["4", "GHI"], ["5", "JKL"], ["6", "MNO"], ["7", "PQRS"], ["8", "TUV"], ["9", "WXYZ"], ["*", ""], ["0", "+"], ["#", ""]] as const;
 const missed = new Set(["missed", "rejected", "blocked"]);
 const contacts = { type: "openView", view: "Contacts" } as const;
+const stagedContacts = { type: "openCommsView", view: "Contacts" } as const;
 
 const RecentRow = memo(function RecentRow({ row, now, enabled, call, first }: {
   row: TelephonyCallLogEntry;
@@ -92,7 +93,8 @@ export function Phone({ runtime, alpha }: PhoneProps) {
   };
   const select = (tab: string) => {
     if (tab === "Contacts") {
-      if (shell.can(contacts)) void shell.send(contacts);
+      if (shell.can(stagedContacts)) void shell.send(stagedContacts);
+      else if (shell.can(contacts)) void shell.send(contacts);
       return;
     }
     const event = { type: "pickTab", tab: tab as Tab } as const;
