@@ -1,6 +1,5 @@
 import type { MouseEvent } from "react";
 import { cn } from "../../lib/cn.ts";
-import { Button } from "../Button.tsx";
 
 export type SmsReviewCardProps = {
   /** Who the text goes to: the number, or the contact's name. */
@@ -27,29 +26,45 @@ export type SmsReviewCardProps = {
 };
 
 /**
- * A text the agent asks to send, for the owner to approve: who it goes to, the text as it will go, and Don’t send
- * beside a black Send. Nothing is sent until the owner presses Send.
+ * A text the agent asks to send, for the owner to approve, as the Pixel drew it on Sunday's v119 (Alpha 45f6bed30): one
+ * grey review with two rows. The first says Review SMS, who it goes to, the text as it will go in its own white box and
+ * the quieter note, with a blue Send at its end; the second is "Keep things as they are." with a grey Decline
+ * (`prototype/template.html:4577-4590`; `prototype/agent-adapter.ts:493-496,1992-1994`;
+ * `ui/device-actions/client-coordinator.ts:3559-3568`; `prototype/phone.css:926-930,943-946,956`).
+ * Nothing is sent until the owner presses Send.
  *
  * @model spec/app/contacts/agent.md
  */
 export function SmsReviewCard({ to, number, body, note, hint, review, onSend, onDecline, sendDisabled = false, declineDisabled = false, className }: SmsReviewCardProps) {
+  // `.alpha-action-review button` (min-height 56px, `phone.css:930`) with the row style at `template.html:4579`.
+  const row = "flex min-h-14 w-full items-center gap-3 border-b border-border px-4 py-3 text-left disabled:cursor-default disabled:opacity-50";
+  // `.alpha-row-label` (`phone.css:926-928`).
+  const label = "inline-flex min-h-9 shrink-0 items-center rounded-action px-4 text-sm font-semibold";
+  // `<small>` is the browser's smaller size, about 13px (`template.html:4581-4584`).
+  const details = (
+    <div className="min-w-0 grow">
+      <div className="text-sm font-semibold">Review SMS</div>
+      <small className="mt-1 block text-meta text-muted-foreground wrap-anywhere">To: {to}{number ? (number.startsWith("(") ? ` ${number}` : ` (${number})`) : ""}</small>
+      <span data-alpha-telephony-review-body="" className="my-1.5 block rounded-[0.75rem] bg-background px-3 py-2.5 text-lg leading-[1.45] font-medium whitespace-pre-wrap text-foreground wrap-anywhere shadow-[inset_0_0_0_1px_var(--color-border)]">{body}</span>
+      {note ? <small className="block text-meta text-muted-foreground wrap-anywhere">{note}</small> : null}
+      {hint ? <small className="block text-meta">{hint}</small> : null}
+    </div>
+  );
   return (
     <section aria-label={`Text to ${to}`} data-alpha-sms-review="" data-alpha-review={review}
-      className={cn("flex flex-col gap-2 rounded-tile border border-border bg-background px-4.5 pt-4 pb-3.5 text-foreground", className)}>
-      <p className="text-lg leading-snug font-bold wrap-anywhere">To {to}</p>
-      {number ? <p className="-mt-1.5 text-sm text-muted-foreground">{number}</p> : null}
-      <p className="text-lead leading-normal whitespace-pre-wrap wrap-anywhere">{body}</p>
-      {note ? <p className="text-sm text-muted-foreground">{note}</p> : null}
-      {onSend || onDecline ? (
-        <div className="flex flex-wrap justify-end gap-2">
-          {onDecline ? <Button variant="secondary" className="h-11 px-4.5 font-normal" disabled={declineDisabled} onClick={onDecline}>Don’t send</Button> : null}
-          {onSend ? (
-            <Button aria-label="Send this text" data-alpha-review-send="" disabled={sendDisabled}
-              className="h-11 bg-foreground px-4.5 font-normal text-background hover:bg-foreground/90 active:bg-foreground/80" onClick={onSend}>Send</Button>
-          ) : null}
-        </div>
+      className={cn("overflow-hidden rounded-tile bg-secondary text-foreground", className)}>
+      {onSend ? (
+        <button type="button" aria-label="Send this text" data-alpha-review-send="" disabled={sendDisabled} className={row} onClick={onSend}>
+          {details}
+          <strong className={cn(label, "bg-primary text-primary-foreground")}>Send</strong>
+        </button>
+      ) : <div className={row}>{details}</div>}
+      {onDecline ? (
+        <button type="button" aria-label="Decline Keep things as they are." disabled={declineDisabled} className={row} onClick={onDecline}>
+          <div className="min-w-0 grow text-meta leading-[1.45] text-muted-foreground">Keep things as they are.</div>
+          <strong className={cn(label, "bg-accent text-foreground")}>Decline</strong>
+        </button>
       ) : null}
-      {hint ? <p className="text-sm text-muted-foreground">{hint}</p> : null}
     </section>
   );
 }

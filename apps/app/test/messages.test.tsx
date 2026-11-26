@@ -167,7 +167,8 @@ describe("Messages on an Alpha image", () => {
     await openMessages(alpha);
     await ready(alpha.runtime, Messages, "Messages state", (s) => s.list.status === "Loaded" && s.threads === 1);
     const listHeading = document.querySelector("[data-alpha-messages-header] h1");
-    expect([listHeading?.textContent, listHeading?.classList.contains("sr-only")]).toEqual(["Messages", true]);
+    // Sunday's v119 (Alpha 45f6bed30 `prototype/template.html:566-568`) titles the list "Messages".
+    expect([listHeading?.textContent, listHeading?.classList.contains("sr-only")]).toEqual(["Messages", false]);
 
     // spec/app/messages/index.md, "Only the newest read of the open conversation is shown, and it marks the shown messages read only where Alpha is the phone's SMS app"
     await press("Maya Chen");
