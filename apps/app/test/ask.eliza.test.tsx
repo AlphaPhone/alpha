@@ -458,7 +458,8 @@ it('Approve the resident agent’s exact text once and read its recorded outcome
   await drawn(() => messages()?.click());
   await until(alpha, alpha.runtime, Messages, (state) => state.pane === "Threads" && state.list.status === "Loaded");
   await until(alpha, runtime, Conversation, (state) => state.ready && state.context.showing.tag === "App" && state.context.showing.view === "Messages");
-  await press("Open conversation");
+  await onScreen(() => expect(button("Open Alpha")?.disabled).toBe(false));
+  await press("Open Alpha");
   await until(alpha, alpha.runtime, Shell, (state) => state.assistant === "Sheet");
   await until(alpha, runtime, Composer, (state) => state.binding.owner > 0 && state.slot === "Open" && state.away === "Free");
 
@@ -466,7 +467,7 @@ it('Approve the resident agent’s exact text once and read its recorded outcome
   const prompt = "Send an SMS to +14155550100 saying Meet at the front door";
   await mine.script({ kind: "tool", name: "PROPOSE_DEVICE_ACTION", input: { operation } }, prompt);
   await mine.script({ kind: "text", parts: ["[answer] Review this send on your phone."] }, prompt);
-  await fill("Message Alpha", prompt);
+  await fill("Ask Alpha", prompt);
   await onScreen(() => expect(button("Send")?.disabled).toBe(false));
   await press("Send");
 
