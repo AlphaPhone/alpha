@@ -480,6 +480,7 @@ export function Inbox({ runtime, alpha }: InboxProps & { alpha: Alpha }) {
   // spec/app/inbox/index.md, "Select all chooses every message the list shows, in one change"
   const chooseAll = { type: "chooseAll", shown: letters.map((letter) => letter.message) } as const;
   const canSearch = !draftsFolder && readable(state) && searchableIn(folder, state);
+  const canOpenSearch = canSearch || (kind === "signedOut" && signIn !== undefined);
   const clearSearch = { type: "clearSearch" } as const;
   const clearSelection = () => {
     for (const message of chosenMessages) void send({ type: "unchoose", message });
@@ -540,7 +541,7 @@ export function Inbox({ runtime, alpha }: InboxProps & { alpha: Alpha }) {
           } : undefined}
           searching={searching}
           search={typedHere ?? query}
-          onOpenSearch={canSearch ? () => {
+          onOpenSearch={canOpenSearch ? () => {
             finishSelection();
             setTyped({ text: query, over: query, folder: folderKey });
           } : undefined}
@@ -560,6 +561,8 @@ export function Inbox({ runtime, alpha }: InboxProps & { alpha: Alpha }) {
               setTyped(undefined);
               void send(event);
             }
+          } : kind === "signedOut" && signIn ? (text) => {
+            if (text !== "") signIn();
           } : undefined}
           notice={notice}
           onNoticeAction={notice === "reconnect" ? signIn : retryList}

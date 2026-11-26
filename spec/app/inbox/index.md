@@ -180,7 +180,9 @@ pure def emptied(account: int, s: Mailbox): Mailbox =
 ### Choosing a folder or a search reads its first page
 
 Both need read access. A folder starts without a search. Spam and Trash
-are chosen only where they can be searched.
+are chosen only where they can be searched. A signed-out owner can open
+and type into the search field. Submitting a nonempty search there opens
+Cloud sign-in before any mail is requested.
 
 ```quint
 pure def canChooseFolder(s: Mailbox, folder: Folder): bool =

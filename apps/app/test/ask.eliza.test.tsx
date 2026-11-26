@@ -1,4 +1,6 @@
 // @vitest-environment happy-dom
+import { request as nodeRequest } from "node:http";
+import { Readable } from "node:stream";
 import { ConversationRecord, type DeviceOperation } from "@elizaos/agent";
 import { Effect, Schema } from "effect";
 import * as HttpClientRequest from "effect/http/HttpClientRequest";
@@ -47,7 +49,7 @@ it("Talk to my agent, through eliza's agent and cloud (spec/app/ask/index.md, \"
   await until(alpha, asking, Ask, (s) => s.conversation !== "");
 
   // spec/app/ask/index.md, "The owner says something only in a conversation, one turn at a time, and it is sent once"
-  await mine.script({ kind: "text", parts: ["[answer] Hello ", "from ", "the cloud."] });
+  await mine.script({ kind: "text", parts: ["[answer] Hello ", "from ", "the cloud."] }, "Say hello.");
   await fill("Ask Alpha", "Say hello.");
   await press("Send");
   // spec/app/ask/index.md, "Only the turn under way is heard: its reply so far, then the whole reply, or that it did not finish"
@@ -60,7 +62,7 @@ it("Talk to my agent, through eliza's agent and cloud (spec/app/ask/index.md, \"
   expect(await balance()).toBeLessThan(mine.granted);
 
   // spec/app/ask/index.md, "The owner stops the reply under way once, and the agent is asked to stop that conversation's turn"
-  await mine.script({ kind: "stall", first: "Thinking" });
+  await mine.script({ kind: "stall", first: "[answer] Thinking" }, "Take your time.");
   await fill("Ask Alpha", "Take your time.");
   await press("Send");
   await until(alpha, asking, Ask, (s) => s.reply === "Thinking");
@@ -171,15 +173,34 @@ it('Ask and stop a reply from Home through the real resident and cloud (spec/app
   expect(matching.map((text) => text.split("\n", 1)[0])).toEqual([prompt, next]);
 }, 300_000);
 
-/** The native plugin fixture forwards to the actual services for this journey's account. */
 function forward(origin: string, token: string): Answering {
+  const service = new URL(origin);
+  if (service.protocol !== "http:" || service.hostname !== "127.0.0.1" || !service.port || service.username || service.password) {
+    throw new Error("The journey forwards only to its loopback service");
+  }
   return async (request) => {
     const { pathname, search } = new URL(request.url);
+    const target = new URL(service.origin);
+    target.pathname = pathname;
+    target.search = search;
     const headers = new Headers(request.headers);
     headers.set("authorization", `Bearer ${token}`);
-    return fetch(new URL(pathname + search, origin), {
-      method: request.method, headers, signal: request.signal,
-      ...(request.body === null ? {} : { body: await request.arrayBuffer() }),
+    headers.set("accept-encoding", "identity");
+    headers.delete("host");
+    headers.delete("transfer-encoding");
+    headers.delete("content-length");
+    const body = request.body === null ? undefined : Buffer.from(await request.arrayBuffer());
+    if (body !== undefined) headers.set("content-length", String(body.byteLength));
+    return new Promise<Response>((resolve, reject) => {
+      const outgoing = nodeRequest(target, { method: request.method, headers: Object.fromEntries(headers), signal: request.signal }, (incoming) => {
+        const status = incoming.statusCode ?? 502;
+        const received = new Headers(Object.entries(incoming.headersDistinct).flatMap(([name, values]) => values?.map((value) => [name, value]) ?? []));
+        const bodyless = request.method === "HEAD" || status === 204 || status === 205 || status === 304;
+        if (bodyless) incoming.resume();
+        const stream = bodyless ? null : Readable.toWeb(incoming) as ReadableStream<Uint8Array>;
+        resolve(new Response(stream, { status, headers: received }));
+      });
+      outgoing.once("error", reject).end(body);
     });
   };
 }

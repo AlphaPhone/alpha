@@ -136,7 +136,7 @@ export function NewMessageDock({ runtime, scope, draft, textarea, minHeight, bod
         {hasContent && <Button size="icon" className="disabled:opacity-100" aria-label={checking ? "Check send status" : "Send"} data-alpha-bar-send disabled={!canSend}
           onClick={(event) => { if (textIsSaved()) void runtime.runPromise(sendNewMessage(visit, revision, selected, event.nativeEvent.isTrusted)); }}>{checking ? <RefreshCw /> : <ArrowUp />}</Button>}
         {editable && phone.state.telecom === "NoCall" && voice.can({ type: "openRecorder", target: "MessagesBar" }) && <Button variant="ghost" size="icon"
-          aria-label={`Dictate a text to ${first || "them"}`} disabled={picking || !saved} onClick={() => { if (textIsSaved()) void runtime.runPromise(dictateNewMessage(visit, revision)); }}><Mic /></Button>}
+          aria-label={`Dictate a text to ${first || "them"}`} disabled={!saved} onClick={() => { if (textIsSaved()) void runtime.runPromise(dictateNewMessage(visit, revision)); }}><Mic /></Button>}
       </div>
     )} />
   </>;

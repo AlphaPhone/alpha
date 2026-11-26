@@ -29,11 +29,11 @@ export const meta: ComponentMeta<SettingsLicencesPageProps> = {
       onQuery.mockClear();
       onOpen.mockClear();
       const canvas = within(canvasElement);
-      await userEvent.type(canvas.getByRole("searchbox", { name: "Search licenses" }), "m");
+      await userEvent.type(canvas.getByRole("searchbox", { name: "Search components" }), "m");
       await userEvent.click(canvas.getByRole("button", { name: /tailwindcss/ }));
       await expect([onQuery.mock.calls, onOpen.mock.calls]).toEqual([[["m"]], [[2]]]);
     },
-    Loading: ({ canvasElement }: { canvasElement: HTMLElement }) => expect(within(canvasElement).getByRole("searchbox", { name: "Search licenses" }).hasAttribute("disabled")).toBe(true),
+    Loading: ({ canvasElement }: { canvasElement: HTMLElement }) => expect(within(canvasElement).queryByRole("searchbox", { name: "Search components" })).toBeNull(),
     "Returning to a row": ({ canvasElement }: { canvasElement: HTMLElement }) => expect(document.activeElement).toBe(within(canvasElement).getByRole("button", { name: /tailwindcss/ })),
   },
 };

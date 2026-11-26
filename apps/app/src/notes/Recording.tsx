@@ -1,7 +1,7 @@
-// spec/app/notes/recording.md, "Story: Record a voice note"; spec/app/notes/recording.md, "Story: Discard a recording"
+// spec/app/notes/recording.md, "Story: Record a voice note"; spec/app/notes/recording.md, "Story: Discard a recording"; spec/app/notes/microphone.md, "The owner sees Mic unavailable after asking to record while the browser denies the microphone"
 import { Alert, Button } from "@repo/ui";
 import { Check, Mic, Pause, Square } from "lucide-react";
-import { useCallback, useRef, useSyncExternalStore } from "react";
+import { type ReactNode, type Ref, useCallback, useRef, useSyncExternalStore } from "react";
 import { useMachine } from "../../gen/app__notes__recording.react.ts";
 import type { Event } from "../../gen/app__notes__recording.ts";
 import type { Alpha } from "../runtime/area.tsx";
@@ -12,6 +12,56 @@ function elapsed(seconds: number) {
   const minutes = Math.floor(seconds / 60) % 60;
   const remainder = String(seconds % 60).padStart(2, "0");
   return hours ? `${hours}:${String(minutes).padStart(2, "0")}:${remainder}` : `${minutes}:${remainder}`;
+}
+
+const actionClass = "h-auto min-h-14 min-w-0 flex-1 whitespace-normal rounded-lg px-4 py-3 text-md in-data-[alpha-title-row]:flex-none";
+
+type RecorderFrameProps = {
+  readonly seconds: number;
+  readonly levels: readonly number[];
+  readonly measuring: boolean;
+  readonly status: string;
+  readonly onDiscard?: (() => void) | undefined;
+  readonly discardRef?: Ref<HTMLButtonElement>;
+  readonly details?: ReactNode;
+  readonly review?: ReactNode;
+  readonly actions: ReactNode;
+};
+
+function RecorderFrame({ seconds, levels, measuring, status, onDiscard, discardRef, details, review, actions }: RecorderFrameProps) {
+  return (
+    <section aria-label="Voice recording" className="@container flex min-h-0 flex-1 flex-col px-6" data-alpha-subview="notes-recording">
+      <header className="flex min-h-14 shrink-0 items-center gap-4">
+        <h2 className="flex-1 font-display text-title leading-serif font-light">Voice note</h2>
+        <Button ref={discardRef} variant="ghost" className="min-w-0 px-1 font-normal text-muted-foreground" aria-label="Discard recording"
+          disabled={onDiscard === undefined} onClick={onDiscard}>Discard</Button>
+      </header>
+      <div className="flex min-h-0 flex-1 flex-col justify-center overflow-y-auto py-6">
+        <span role="timer" className="whitespace-nowrap font-display text-recorder-timer font-light tabular-nums" aria-label="Recording duration" style={{ fontSize: "min(var(--text-recorder-timer), 20cqw)" }}>{elapsed(seconds)}</span>
+        <div role="img" aria-label="Microphone levels" className="mt-6.5 flex h-24 shrink-0 items-center gap-0.75">
+          {Array.from({ length: levelCount }, (_, index) => {
+            const peak = levels[levels.length - levelCount + index] ?? 0;
+            return <span key={index} aria-hidden className="flex-1 rounded-clip bg-alpha motion-safe:transition-[height] motion-safe:duration-fast"
+              style={{ height: Math.max(4, Math.round(Math.sqrt(peak) * 92)), opacity: measuring ? 1 : 0.35 }} />;
+          })}
+        </div>
+        <p role="status" className="mt-3 min-h-5.5 text-sm text-muted-foreground">{status}</p>
+        {details}
+      </div>
+      {review}
+      <div className="flex shrink-0 items-center gap-3 pt-5 pb-[calc(max(6.75rem,var(--alpha-dock-overlap,0px),env(safe-area-inset-bottom))+--spacing(4))] in-data-[alpha-title-row]:flex-col in-data-[alpha-title-row]:items-stretch">
+        {actions}
+      </div>
+    </section>
+  );
+}
+
+export function MicrophoneUnavailable({ onRecord, onDiscard }: { readonly onRecord: () => void; readonly onDiscard: () => void }) {
+  return <RecorderFrame seconds={0} levels={[]} measuring={false} status="" onDiscard={onDiscard}
+    details={<p role="alert" className="mt-2 text-sm leading-voice-status text-muted-foreground">Mic unavailable</p>} actions={<>
+    <Button variant="secondary" className={actionClass} onClick={onRecord}><Mic className="size-5" /> Record</Button>
+    <Button className={actionClass} disabled><Square className="size-5" /> Stop recording</Button>
+  </>} />;
 }
 
 export function Recording({ runtime }: { readonly runtime: Alpha["runtime"] }) {
@@ -34,7 +84,7 @@ export function Recording({ runtime }: { readonly runtime: Alpha["runtime"] }) {
   if (state === undefined) return null;
   const send = (event: Event) => void recording.send(event, "Owner");
   const can = (event: Event) => recording.can(event, "Owner");
-  const run = (action: "pause" | "resume" | "stop") => void runtime.runPromise(control(action));
+  const run = (action: "pause" | "resume" | "stop") => void runtime.runPromise(control(action, state.take));
   const resume = { type: "resume", take: state.take, room: { allowed: true, free: true, front: true, silent: true } } as const;
   const active = state.phase === "Recording";
   const paused = state.phase === "Paused";
@@ -45,54 +95,42 @@ export function Recording({ runtime }: { readonly runtime: Alpha["runtime"] }) {
   const levels = matchingTake ? meters.levels : [];
   const canStop = can({ type: "stop", take: state.take });
   const canSave = can({ type: "keepPartial" });
-  const canCancel = can({ type: "cancelDiscard" });
+  const askDiscard = { type: "askDiscard", take: state.take } as const;
+  const cancelDiscard = { type: "cancelDiscard", take: state.take } as const;
+  const confirmDiscard = { type: "confirmDiscard", take: state.take } as const;
+  const canCancel = can(cancelDiscard);
   const status = active ? (measuring ? "Recording" : "Starting…")
     : paused ? (state.recovered ? "Recovered recording" : "Paused")
       : turning ? "Saving…" : "";
-  const actionClass = "h-auto min-h-14 min-w-0 flex-1 whitespace-normal rounded-lg px-4 py-3 text-md in-data-[alpha-title-row]:flex-none";
 
-  return (
-    <section aria-label="Voice recording" className="@container flex min-h-0 flex-1 flex-col px-6" data-alpha-subview="notes-recording">
-      <header className="flex min-h-14 shrink-0 items-center gap-4">
-        <h2 className="flex-1 font-display text-title leading-serif font-light">Voice note</h2>
-        <Button ref={discardRef} variant="ghost" className="min-w-0 px-1 font-normal text-muted-foreground" aria-label="Discard recording"
-          disabled={!can({ type: "askDiscard" })} onClick={() => send({ type: "askDiscard" })}>Discard</Button>
-      </header>
-      <div className="flex min-h-0 flex-1 flex-col justify-center overflow-y-auto py-6">
-        <span role="timer" className="whitespace-nowrap font-display text-recorder-timer font-light tabular-nums" aria-label="Recording duration" style={{ fontSize: "min(var(--text-recorder-timer), 20cqw)" }}>{elapsed(seconds)}</span>
-        <div role="img" aria-label="Microphone levels" className="mt-6.5 flex h-24 shrink-0 items-center gap-0.75">
-          {Array.from({ length: levelCount }, (_, index) => {
-            const peak = levels[levels.length - levelCount + index] ?? 0;
-            return <span key={index} aria-hidden className="flex-1 rounded-clip bg-alpha motion-safe:transition-[height] motion-safe:duration-fast"
-              style={{ height: Math.max(4, Math.round(Math.sqrt(peak) * 92)), opacity: measuring ? 1 : 0.35 }} />;
-          })}
-        </div>
-        <p role="status" className="mt-3 min-h-5.5 text-sm text-muted-foreground">{status}</p>
-        {state.calling && <Alert variant="warn">Recording paused for a phone call</Alert>}
-        {state.phase === "Failed" && <Alert variant="warn">{state.damaged ? "Only part of this recording could be recovered" : "Recording stopped. The saved audio is still here."}</Alert>}
-      </div>
-      {confirming && <div role="group" aria-label="Discard this recording?" className="my-3 flex shrink-0 flex-wrap items-center gap-3"
-        onKeyDown={(event) => {
-          if (event.key !== "Escape" || !canCancel) return;
-          event.preventDefault();
-          event.stopPropagation();
-          send({ type: "cancelDiscard" });
-        }}>
-        <span className="flex-1">Discard?</span>
-        {canCancel && <Button ref={keepRef} variant="secondary" className="rounded-dictation-type px-4" onClick={() => send({ type: "cancelDiscard" })}>Keep</Button>}
-        {can({ type: "confirmDiscard" }) && <Button className="rounded-dictation-type bg-foreground px-4 text-background hover:bg-foreground/90" onClick={() => send({ type: "confirmDiscard" })}>Discard</Button>}
+  return <RecorderFrame seconds={seconds} levels={levels} measuring={measuring} status={status}
+    onDiscard={can(askDiscard) ? () => send(askDiscard) : undefined}
+    discardRef={discardRef}
+    details={<>
+      {state.calling && <Alert variant="warn">Recording paused for a phone call</Alert>}
+      {state.phase === "Failed" && <Alert variant="warn">{state.damaged ? "Only part of this recording could be recovered" : "Recording stopped. The saved audio is still here."}</Alert>}
+    </>}
+    review={confirming && <div role="group" aria-label="Discard this recording?" className="my-3 flex shrink-0 flex-wrap items-center gap-3"
+      onKeyDown={(event) => {
+        if (event.key !== "Escape" || !canCancel) return;
+        event.preventDefault();
+        event.stopPropagation();
+        send(cancelDiscard);
+      }}>
+      <span className="flex-1">Discard?</span>
+      {canCancel && <Button ref={keepRef} variant="secondary" className="rounded-dictation-type px-4" onClick={() => send(cancelDiscard)}>Keep</Button>}
+      {can(confirmDiscard) && <Button className="rounded-dictation-type bg-foreground px-4 text-background hover:bg-foreground/90" onClick={() => send(confirmDiscard)}>Discard</Button>}
       </div>}
-      <div className="flex shrink-0 items-center gap-3 pt-5 pb-[calc(max(6.75rem,var(--alpha-dock-overlap,0px),env(safe-area-inset-bottom))+--spacing(4))] in-data-[alpha-title-row]:flex-col in-data-[alpha-title-row]:items-stretch">
-        {(active || paused || turning) && (
-          active
-            ? <Button variant="secondary" className={actionClass} disabled={!can({ type: "pause", take: state.take })} onClick={() => run("pause")}><Pause className="size-5" /> Pause</Button>
-            : <Button variant="secondary" className={actionClass} disabled={!can(resume)} onClick={() => run("resume")}><Mic className="size-5" /> Resume</Button>
-        )}
-        {can({ type: "lookUp" }) && <Button variant="secondary" className={actionClass} onClick={() => send({ type: "lookUp" })}>Check again</Button>}
-        {canSave
-          ? <Button className={actionClass} onClick={() => send({ type: "keepPartial" })}><Check className="size-5" /> Save recording</Button>
-          : <Button className={actionClass} disabled={!canStop} onClick={() => run("stop")}><Square className="size-5" /> {turning ? "Saving…" : "Stop recording"}</Button>}
-      </div>
-    </section>
-  );
+    actions={<>
+      {(active || paused || turning) && (
+        active
+          ? <Button variant="secondary" className={actionClass} disabled={!can({ type: "pause", take: state.take })} onClick={() => run("pause")}><Pause className="size-5" /> Pause</Button>
+          : <Button variant="secondary" className={actionClass} disabled={!can(resume)} onClick={() => run("resume")}><Mic className="size-5" /> Resume</Button>
+      )}
+      {can({ type: "lookUp" }) && <Button variant="secondary" className={actionClass} onClick={() => send({ type: "lookUp" })}>Check again</Button>}
+      {canSave
+        ? <Button className={actionClass} onClick={() => send({ type: "keepPartial" })}><Check className="size-5" /> Save recording</Button>
+        : <Button className={actionClass} disabled={!canStop} onClick={() => run("stop")}><Square className="size-5" /> {turning ? "Saving…" : "Stop recording"}</Button>}
+    </>}
+  />;
 }

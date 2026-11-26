@@ -13,7 +13,7 @@ import home from "../src/home/index.tsx";
 import { Machine as Home } from "../gen/app__home.effect.vibe";
 import { button, closeAll, drawn, fill, later, only, open, press, pressOnTop, seen, underAct, until } from "./alpha.tsx";
 import { type Scene, scene } from "./fakes/scene.ts";
-import { nativeApprovalNotices, workflowNoteOffer } from "./fakes/workflows.ts";
+import { nativeApprovalNotices, workflowNoteOffer, workflowPhoneOffer } from "./fakes/workflows.ts";
 
 underAct();
 afterEach(closeAll);
@@ -352,7 +352,7 @@ describe("Workflows", () => {
     await vi.waitFor(() => expect(button("Send")?.disabled).toBe(false));
     await press("Send");
     await vi.waitFor(() => expect(world.ask.said).toEqual(["What happened in this run?"]));
-    const attachment = world.ask.spokenFiles.at(-1)?.images?.[0];
+    const attachment = world.ask.spokenFiles?.at(-1)?.images?.[0] as { readonly name?: string; readonly mimeType?: string; readonly data?: string } | undefined;
     expect(attachment).toMatchObject({ name: "Workflow run.json", mimeType: "application/json" });
     expect(JSON.parse(atob(attachment?.data ?? ""))).toMatchObject({
       workflowId: "monthly-statement", runId: "monthly-statement-r1", versionId: "monthly-statement-v3",
@@ -390,6 +390,67 @@ describe("Workflows", () => {
       expect(world.voice.startCloudSpeechCalls).toBe(0);
     } finally {
       endPlayback();
+    }
+  });
+
+  it.each(["post_notification", "speak_text", "speak_text_stopped"] as const)('Presents a reviewed workflow step on Android (%s) (spec/app/workflows/approvals.md, "Story: Confirm exactly what this workflow does on my phone")', async (scenario) => {
+    const kind = scenario === "speak_text_stopped" ? "speak_text" : scenario;
+    const world = scene();
+    world.phone = true;
+    world.image = true;
+    const proposal = await workflowPhoneOffer(world.workflows, world.notes.owner, kind);
+    world.telephony.textReview = proposal;
+    world.voice.onDevice = kind === "speak_text";
+    if (scenario === "speak_text_stopped") world.voice.playbackHold = () => new Promise<void>(() => {});
+    const notices = nativeApprovalNotices();
+    world.workflows.nativeNotices = notices;
+    world.workflows.stage = "Device";
+    const alpha = await openWorkflows(world, true);
+    const area = workflows.runtime(alpha);
+    await until(alpha, area, Listing, (state) => state.list.status === "Loaded");
+    await choose("Monthly statement");
+    await until(alpha, area, Definition, (state) => state.detail.status === "Loaded");
+    await until(alpha, area, Runs, (state) => state.reading.status === "Loaded");
+    await press("Run now");
+    await press("Confirm run");
+    await until(alpha, area, Sheet, (state) => state.history.status === "Loaded" && state.shown === 1);
+    await drawn(() => {
+      const row = document.querySelector<HTMLButtonElement>('[aria-label="Run history"] li > button');
+      if (!row) throw new Error("No run history");
+      row.click();
+    });
+    await until(alpha, area, Approvals, (state) => state.device.phase === "DeviceShown");
+    expect(document.querySelector('[aria-label="Review device action"]')?.textContent).toContain("A reviewed note.");
+    expect(proposal.receipts).toEqual([]);
+    await press("Approve device action");
+    if (scenario === "speak_text_stopped") {
+      await vi.waitFor(() => expect(world.voice.played).toHaveLength(1), { timeout: 15_000 });
+      const hushes = world.voice.hushCalls;
+      await press("Stop reading");
+      await until(alpha, area, Approvals, (state) => state.device.phase === "DeviceUnconfirmed");
+      await vi.waitFor(() => expect(world.voice.hushCalls).toBeGreaterThan(hushes));
+      expect(proposal.receipts.some(({ outcome }) => outcome === "applied")).toBe(false);
+      return;
+    }
+    await until(alpha, area, Approvals, (state) => state.device.phase === "DeviceAnswered");
+    expect(proposal.receipts).toMatchObject([{ outcome: "applied", operationId: proposal.proposal.id }]);
+    if (kind === "speak_text") {
+      expect(world.voice.played).toHaveLength(1);
+    } else {
+      expect(notices.results).toMatchObject([{
+        operationId: expect.stringMatching(/^step-[a-f0-9]{64}$/),
+        title: "A reviewed notification", body: "A reviewed note.",
+        route: { workflowId: "monthly-statement", runId: "monthly-statement-r1", versionId: "monthly-statement-v3" },
+      }]);
+      await drawn(() => alpha.back());
+      await until(alpha, area, Sheet, (state) => state.runId === 0);
+      await drawn(() => alpha.back());
+      await until(alpha, area, Listing, (state) => state.place.tag === "ListingRows");
+      const notice = notices.results[0];
+      if (!notice) throw new Error("The step posted no notice");
+      await drawn(() => notices.tapResult(notice));
+      await until(alpha, area, Sheet, (state) => state.output.status === "Loaded" && state.runId > 0);
+      await vi.waitFor(() => expect(notices.consumed).toEqual(["tap-result"]));
     }
   });
 

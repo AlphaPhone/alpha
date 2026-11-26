@@ -231,7 +231,9 @@ pure def includePicked(a: Attachments, count: int): Attachments = choose(a, coun
 ### Attach reads the chosen files once, and adds only those within the type, name and size limits
 
 A file refused is named to the owner and never attached. When every file
-went, the picker closes.
+went, the picker closes. The chooser opens over the current dock position.
+A fully accepted selection raises a closed or typing dock to the sheet
+while its original draft and route are still current.
 
 ```quint
 pure def canAttachChosen(a: Attachments): bool =

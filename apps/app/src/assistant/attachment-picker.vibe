@@ -10,7 +10,7 @@ import { Documents } from "../platform/documents.vibe"
 import { Files } from "../platform/files.vibe"
 import { PhotosPort } from "../platform/photos.vibe"
 import { fresh } from "../runtime/attempts.vibe"
-import { type Job, answer, contained, reacting, run, started, together } from "../runtime/reactor.vibe"
+import { type Job, answer, contained, reacting, run, started, stream, together } from "../runtime/reactor.vibe"
 import { attachmentPhotoAccess, listAttachmentPhotos, openAttachmentPhotoSettings, readPickedPhoto, type AttachmentPhotoCursor, type AttachmentPhotoRow } from "./attachment-library.vibe"
 import { attachmentDocumentsAccess, listAttachmentDocuments, openAttachmentDocumentSettings, readPickedDocument, reviewPickedDocument,
   type AttachmentDocumentLocation, type AttachmentDocumentRow, type PickedAttachmentDocument } from "./attachment-documents.vibe"
@@ -204,12 +204,9 @@ export effect function openAttachmentPicker(target: FileTarget, room: number): b
     const state = try machine.get()
     const available = Math.min(room, maxFiles - draftFiles((try (try Composer).get()).editor))
     if (!Picker.canOpenPicker(state, available) || !(try device.showing()) || !(try targetCurrent(target)) || (try shell.get()).route !== source.route) return false
-    const shown = canRaise(source, "Sheet")
-      ? (shell.send({ type: "raise", detent: "Sheet" }, (live) => live.route === source.route) catch () => undefined) : source
-    if (shown === undefined || (try shell.get()).route !== shown.route || !(try targetCurrent(target))) return false
     const previous = board.current()
     const visit: Visit = {
-      id: state.visit + 1, route: shown.route, target, systemDocuments: native() && Option.isSome((try Documents).client),
+      id: state.visit + 1, route: source.route, target, systemDocuments: native() && Option.isSome((try Documents).client),
       folders: new Map([[0, root]]), volumes: [], selection: [], availability: "checking", preparing: false, refused: [],
     }
     board.show(visit)
@@ -445,7 +442,7 @@ export effect function usePickerVolume(id: string, visitId: number): boolean!!Pi
   })
 }
 
-const filesRead = ({ attempt }: ReadFiles, accepted: number): Picker.Event => ({ type: "filesRead", attempt, accepted })
+const filesRead = ({ attempt }: ReadFiles, accepted: number) => ({ type: "filesRead", attempt, accepted } as const)
 
 effect function selectedFile(choice: Choice): (File | undefined)!!(PhotosPort | Documents) {
   switch (choice.kind) {
@@ -459,7 +456,7 @@ effect function selectedFile(choice: Choice): (File | undefined)!!(PhotosPort | 
   }
 }
 
-effect function readFiles(request: ReadFiles): Picker.Event!!PickerNeeds {
+effect function readFiles(request: ReadFiles): ReturnType<typeof filesRead>!!PickerNeeds {
   const { board, writer } = try AttachmentPicker
   const machine = try Picker.Machine
   const device = try Device
@@ -493,11 +490,31 @@ effect function readFiles(request: ReadFiles): Picker.Event!!PickerNeeds {
   return filesRead(request, accepted)
 }
 
+function picked(request: ReadFiles): Job<Picker.Event, PickerNeeds, []> {
+  const answers = Stream.unwrap(effect {
+    const visit = (try AttachmentPicker).board.current()
+    const receipt = try readFiles(request)
+    const answer = Stream.succeed(receipt)
+    if (visit === undefined || visit.id !== request.visit || receipt.accepted !== request.count) return answer
+    const reveal = effect {
+      const selection = try (try Picker.Machine).get()
+      const shell = try Shell
+      const where = try shell.get()
+      if (selection.visit !== visit.id || selection.open || selection.reading.id !== request.attempt ||
+        where.route !== visit.route || !canRaise(where, "Sheet") || !(try (try Device).showing()) || !(try targetCurrent(visit.target))) return
+      try contained(shell.send({ type: "raise", detent: "Sheet" }, (live) => live.route === visit.route && canRaise(live, "Sheet")), "showing the selected files in the draft")
+    }
+    // The reactor stops pulling answers if it refuses the read receipt.
+    return Stream.concat(answer, Stream.fromEffectDrain(reveal))
+  })
+  return stream("picker files", answers, filesRead(request, 0))
+}
+
 function carry(request: Picker.Effect): Job<Picker.Event, PickerNeeds, []> {
   return match (request) {
     when { tag: "Access" }: run("picker access", observeAccess(request));
     when { tag: "Browse" }: answer("picker browse", browse(request), listed(request, "Failure"));
-    when { tag: "ReadFiles" }: answer("picker files", readFiles(request), filesRead(request, 0));
+    when { tag: "ReadFiles" }: picked(request);
   }
 }
 

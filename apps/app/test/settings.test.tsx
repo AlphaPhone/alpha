@@ -237,7 +237,7 @@ describe("Settings", () => {
     const checkout: CheckoutScene = { starts: [], confirmations: [], opened: [], returned: null, paid: false };
     const world = { ...scene(), phone: true, checkout };
     await settingsOpen(world);
-    await press("Account");
+    await tap("Account");
     await vi.waitFor(() => expect(document.querySelector('[aria-label="Cloud plan"]')?.textContent).toContain("No plan"));
     await drawn(() => document.querySelector<HTMLElement>('[role="dialog"] summary')?.click());
     await vi.waitFor(() => expect(button("Review Plus subscription")).toBeTruthy());
@@ -274,7 +274,7 @@ describe("Settings", () => {
   it('Redeems the owner’s code once and refreshes the plan (spec/app/account/codes.md, "Story: Redeem a code")', async () => {
     const redemption: RedemptionScene = { calls: [] };
     await settingsOpen({ ...scene(), phone: true, redemption });
-    await press("Account");
+    await tap("Account");
     await vi.waitFor(() => {
       const form = [...document.querySelectorAll("summary")].find((row) => row.textContent === "Redeem code");
       if (!form) throw new Error("No redemption control");
@@ -292,8 +292,8 @@ describe("Settings", () => {
     const world = { ...scene(), phone: true, checkout: { starts: [], confirmations: [], opened: [], returned: null, paid: true, change } };
     const emailed: string[] = [];
     world.voice.startupSignIn = {
-      reauthenticate: async ({ email }) => {
-        emailed.push(email ?? "");
+      reauthenticate: async (options) => {
+        emailed.push("email" in options ? options.email : "");
         return { request: 1, attempt: 1, verdict: "code-on-its-way", expiresAt: world.now + 60_000, resendAt: world.now + 10_000 };
       },
       verify: async ({ code }) => {
@@ -303,7 +303,7 @@ describe("Settings", () => {
       },
     };
     await settingsOpen(world);
-    await press("Account");
+    await tap("Account");
     await vi.waitFor(() => {
       const plans = [...document.querySelectorAll("summary")].find((row) => row.textContent === "Plans");
       if (!plans) throw new Error("No Plans control");
@@ -730,13 +730,16 @@ describe("Settings", () => {
     await press("Licenses");
     await until(alpha, machines, Licences.Machine, (s) => s.load.read.status === "Loaded" && s.found === 3);
     // spec/app/settings/licences.md, "Searching narrows the loaded list to the licences that match, from its top, and an empty search shows them all"
-    await fill("Search licenses", "mpl");
+    await fill("Search components", "mpl");
     await until(alpha, machines, Licences.Machine, (s) => s.query === "mpl" && s.shown === 1);
+    await fill("Search components", "1.0.0");
+    await until(alpha, machines, Licences.Machine, (s) => s.query === "1.0.0" && s.shown === 1);
     // spec/app/settings/licences.md, "Back from a licence returns to the same search"
     await tap("mediabunny");
     await until(alpha, machines, Licences.Machine, (s) => s.licence === 0);
+    expect(document.querySelector('[data-settings-page="License details"]')?.textContent).toContain("Check this component’s attribution.");
     await hardware("back");
-    await until(alpha, machines, Licences.Machine, (s) => s.licence < 0 && s.query === "mpl");
+    await until(alpha, machines, Licences.Machine, (s) => s.licence < 0 && s.query === "1.0.0");
     // spec/app/settings/licences.md, "Opening the page clears the search, and loads the licences unless they are loading or loaded with some found"
     await hardware("back");
     await press("Licenses");

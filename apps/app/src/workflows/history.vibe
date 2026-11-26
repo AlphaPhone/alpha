@@ -336,7 +336,7 @@ const followTap = started(effect {
     const current = try history.view(state.owner, row.number)
     if (tap.token === entered) {
       if ("approval" in tap || runSheet.output.status !== "Loaded" || current.opened?.raw.id !== tap.route.runId ||
-        current.opened.raw.versionId !== tap.route.versionId || !current.opened.raw.finished) return
+        current.opened.raw.versionId !== tap.route.versionId || (!tap.duringRun && !current.opened.raw.finished)) return
       if (!(try settleWorkflowTap(tap)) || tap.noticeRevision === undefined || !(try workflowsVisible())) return
       const live = try sheet.get()
       if (live.owner === state.owner && live.runId === runSheet.runId && Sheet.canAskAbout(live)) {

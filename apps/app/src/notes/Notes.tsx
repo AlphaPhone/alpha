@@ -12,6 +12,7 @@ import { useMachine as useEditor } from "../../gen/app__notes__editor.react.ts";
 import { useMachine as useTrash } from "../../gen/app__notes__trash.react.ts";
 import { useMachine as useLink } from "../../gen/app__notes__linkNote.react.ts";
 import { useMachine as useRecorder } from "../../gen/app__notes__recording.react.ts";
+import { useMachine as useMicrophone } from "../../gen/app__notes__microphone.react.ts";
 import { useMachine as usePrevious } from "../../gen/app__notes__previous.react.ts";
 import { useMachine as useTransfer } from "../../gen/app__notes__transfer.react.ts";
 import { useMachine as useVoice } from "../../gen/app__notes__voice.react.ts";
@@ -28,7 +29,7 @@ import { deleteSelection, enter } from "./notes.vibe";
 import { record } from "./recording.vibe";
 import { Previous } from "./Previous.tsx";
 import { clock, dated, preview, titleOf } from "./present.ts";
-import { Recording } from "./Recording.tsx";
+import { MicrophoneUnavailable, Recording } from "./Recording.tsx";
 import { RecentlyDeleted } from "./RecentlyDeleted.tsx";
 import { VoiceReview, copyTranscript, generateTranscript, pageOf } from "./sides.vibe";
 
@@ -352,6 +353,7 @@ function NotesList({ alpha, runtime }: { readonly alpha: Alpha; readonly runtime
   const voice = useVoice(runtime);
   const bin = useTrash(runtime);
   const recorder = useRecorder(runtime).state;
+  const microphone = useMicrophone(runtime);
   const previous = usePrevious(runtime);
   const transfer = useTransfer(runtime);
   const hasDocuments = runtime.runSync(NoteDocuments).available;
@@ -376,6 +378,10 @@ function NotesList({ alpha, runtime }: { readonly alpha: Alpha; readonly runtime
     {bin.state?.question === "AskFull" && <RecentlyDeleted runtime={runtime} collection={collection} />}
   </>;
   if (recorder !== undefined && unfinished(recorder)) return <Recording runtime={runtime} />;
+  if (microphone.state?.browserDenied && microphone.state.owner === state.owner) {
+    return <MicrophoneUnavailable onRecord={() => void runtime.runPromise(record)}
+      onDiscard={() => void microphone.send({ type: "closeBrowserDenial" }, "Owner")} />;
+  }
   const available = Notes.readyForNew(state);
   const newNote = { type: "newNote", kind: "Text", available, covered: false, folder: state.filter } as const;
   const openTrash = { type: "show", covered: false } as const;

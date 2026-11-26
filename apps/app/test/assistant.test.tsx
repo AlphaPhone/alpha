@@ -536,12 +536,30 @@ describe.each([["a browser", false], ["a phone", true]])("in %s", (_where, phone
     await press("Open conversation");
     await until(long.alpha, runtime, Shell, (s) => s.assistant === "Sheet");
     expect([lines().length, lines()[0], lines().at(-1), button("Later")]).toEqual([200, "History 6", "History 205", undefined]);
+    await until(long.alpha, runtime, Composer, (s) => s.slot === "Open");
+    onMessage("History 205", "Reply");
+    await until(long.alpha, runtime, Composer, (s) => s.editor.quote > 0);
+    const currentPage = () => runtime.runSync(Effect.flatMap(Chats, (machine) => machine.get())).page.ticket;
+    for (let visit = 0; visit < 3; visit++) {
+      const laterPage = currentPage();
+      await press("Earlier");
+      await until(long.alpha, runtime, Chats, (s) => s.page.status === "Loaded" && s.page.ticket > laterPage);
+      expect([lines()[0], lines().at(-1), button("Earlier")]).toEqual(["History 1", "History 106", undefined]);
+      expect(button("Remove quote")?.parentElement?.textContent).toContain("History 205");
+
+      const earlierPage = currentPage();
+      await press("Later");
+      await until(long.alpha, runtime, Chats, (s) => s.page.status === "Loaded" && s.page.ticket > earlierPage);
+      expect([lines()[0], lines().at(-1), Boolean(button("Earlier")), button("Later")]).toEqual(["History 6", "History 205", true, undefined]);
+    }
+    const laterPage = currentPage();
     await press("Earlier");
-    await until(long.alpha, runtime, Chats, (s) => s.around > 0 && s.page.status === "Loaded");
-    expect([lines()[0], lines().at(-1), button("Earlier")]).toEqual(["History 1", "History 106", undefined]);
-    await press("Later");
-    await until(long.alpha, runtime, Chats, (s) => s.page.status === "Loaded" && s.around > 1);
-    expect([lines()[0], lines().at(-1), Boolean(button("Earlier")), button("Later")]).toEqual(["History 6", "History 205", true, undefined]);
+    await until(long.alpha, runtime, Chats, (s) => s.page.status === "Loaded" && s.page.ticket > laterPage);
+    world.ask.metadata = [];
+    write("Reply to a message outside this window");
+    await press("Send");
+    await until(long.alpha, runtime, Conversation, (s) => s.turn.reply === "Complete");
+    expect(world.ask.metadata?.at(-1)).toMatchObject({ replyToMessageId: "history-205" });
     await long.close();
 
     world.ask.kept.clear();
@@ -604,6 +622,41 @@ describe.each([["a browser", false], ["a phone", true]])("in %s", (_where, phone
     expect(world.ask.said.at(-1)).toBe(carried);
   });
 
+  it("Keeps the Later boundary ahead of my new turn when I send while reading older messages (spec/app/assistant/chats.md, \"Older or newer messages are read around a message of the conversation showing\")", async () => {
+    const world = { ...scene(), phone };
+    world.ask.kept.set("c1", { roomId: "r1", title: "Earlier history", messages: Array.from({ length: 205 }, (_, at) => ({
+      id: `history-${at + 1}`, role: "user", text: `History ${at + 1}`,
+    })) });
+    const { alpha, runtime } = await openAssistant(world);
+    await press("Open conversation");
+    await until(alpha, runtime, Shell, (state) => state.assistant === "Sheet");
+    await chatsList();
+    await until(alpha, runtime, Chats, (state) => state.list.status === "Loaded");
+    row("Chats", "Earlier history");
+    await until(alpha, runtime, Chats, (state) => state.chosen > 0 && state.page.status === "Loaded");
+    await until(alpha, runtime, Composer, (state) => state.binding.conversation > 0 && state.slot === "Open");
+    await press("Earlier");
+    await until(alpha, runtime, Chats, (state) => state.around > 0 && state.page.status === "Loaded");
+
+    const transcriptOrder = () => [...document.querySelectorAll("[role=log] [data-alpha-message-text], [role=log] button")].flatMap((element) =>
+      element.hasAttribute("data-alpha-message-text") || element.textContent === "Later" ? [element.textContent] : []);
+    const lastFour = ["History 106", "Later", "Question from here", "Reply from the current turn"];
+    const done = Promise.withResolvers<void>();
+    world.ask.nextReplyChunks = ["Reply from the current turn"];
+    world.ask.holdDoneAfterReady = done.promise;
+    try {
+      write("Question from here");
+      await press("Send");
+      await drawn(() => vi.waitFor(() => expect(transcriptOrder().slice(-4)).toEqual(lastFour)));
+    } finally {
+      done.resolve();
+    }
+    await until(alpha, runtime, Conversation, (state) => state.turn.reply === "Complete");
+    expect(transcriptOrder().slice(-4)).toEqual(lastFour);
+    expect(lines()[0]).toBe("History 1");
+    expect(lines().slice(-2)).toEqual(["Question from here", "Reply from the current turn"]);
+  });
+
   // spec/app/assistant/index.md, "Story: Stop a reply"
   it("Stop a reply, and learn how it ended (spec/app/assistant/index.md, \"Story: Stop a reply\")", async () => {
     const world = { ...scene(), phone };
@@ -635,8 +688,18 @@ describe.each([["a browser", false], ["a phone", true]])("in %s", (_where, phone
     await press("Stop reply");
     // spec/app/assistant/index.md, "The agent's answer to the abort starts the one read of the conversation"; spec/app/assistant/index.md, "The read says the reply finished anyway, was stopped for sure, was never recorded, or to look later"
     await until(alpha, runtime, Conversation, (s) => s.turn.reply === "Stopped" && s.check !== "Aborting" && s.recheck.status !== "Loading");
-    const { check } = await runtime.runPromise(Effect.flatMap(Conversation, (machine) => machine.get()));
-    expect([world.ask.turns.size, lines()[0], check === "StoppedForSure" || check === "LookLater"]).toEqual([0, "Take your time", true]);
+    const first = await runtime.runPromise(Effect.flatMap(Conversation, (machine) => machine.get()));
+    expect([world.ask.turns.size, lines()[0], first.check]).toEqual([0, "Take your time", "StoppedForSure"]);
+
+    await until(alpha, runtime, Composer, (s) => s.slot === "Open" && s.away === "Free" && !s.unsettled);
+    write("Take your time");
+    await press("Send");
+    await until(alpha, runtime, Conversation, (s) => s.turn.reply === "Streaming");
+    world.ask.afterStop = [{ id: "scheduled-reminder", role: "assistant", text: "Your review starts now." }];
+    await press("Stop reply");
+    await until(alpha, runtime, Conversation, (s) => s.turn.reply === "Stopped" && s.recheck.ticket > first.recheck.ticket && s.recheck.status !== "Loading");
+    const second = await runtime.runPromise(Effect.flatMap(Conversation, (machine) => machine.get()));
+    expect([world.ask.turns.size, world.ask.said, second.check]).toEqual([0, ["Take your time", "Take your time"], "LookLater"]);
   });
 
   // spec/app/assistant/context.md, "Story: Let my agent see the Telegram or Slack chat I have open"; spec/app/assistant/context.md, "A turn carries bounded Telegram or Slack context only while that app is in front, authenticated, non-sensitive, allowed by Settings' privacy share, and taken by the peer"

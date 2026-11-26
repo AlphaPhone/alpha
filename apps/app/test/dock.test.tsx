@@ -21,6 +21,7 @@ const underAct = async (work: () => Promise<void> | void) => {
 };
 
 const named = <T extends HTMLElement>(name: string) => document.querySelector<T>(`[aria-label="${name}"]`);
+const detent = () => document.querySelector<HTMLElement>('section[aria-label="Ask Alpha"]')?.dataset.alphaDetent;
 
 async function showAttachments() {
   await underAct(() => {
@@ -35,8 +36,10 @@ async function showAttachments() {
 describe("Ask Alpha dock and shell navigation", () => {
   // spec/app/assistant/attachments.md, "Story: Choose files to attach"; "Cancel closes the picker, and files still being read are not attached"
   it("reviews local Files and only attaches the confirmed selection to the draft", async () => {
-    const { runtime } = await mountDock({ view: "Home", flush: underAct });
-    await underAct(() => runtime.runPromise(Effect.flatMap(Conversation, (m) => Stream.runHead(Stream.filter(m.changes, (s) => s.context.revision > 0)))).then(() => undefined));
+    const { alpha } = await open(scene(), only("home", "assistant", "notice"));
+    const runtime = assistant.runtime(alpha);
+    await until(alpha, runtime, Composer, (state) => state.slot === "Open");
+    await until(alpha, runtime, Conversation, (state) => state.context.revision > 0);
     const file = new File(["notes for the appointment"], "appointment.txt", { type: "text/plain" });
     const pick = async () => {
       const source = [...document.querySelectorAll<HTMLButtonElement>('[aria-label="Attachment sources"] button')].find((item) => item.textContent === "Files");
@@ -54,15 +57,18 @@ describe("Ask Alpha dock and shell navigation", () => {
     };
 
     await showAttachments();
+    expect(detent()).toBe("bar");
     await pick();
     await underAct(() => { named("Close attachments")?.click(); });
     expect(named("Attach files")).toBeNull();
     expect(named("Attached")).toBeNull();
+    expect(detent()).toBe("bar");
 
     await showAttachments();
     await pick();
     await underAct(() => { named("Attach selected files")?.click(); });
     await expect.poll(() => named("Attach files")).toBeNull();
+    await expect.poll(detent).toBe("sheet");
     expect(named("Attached")?.textContent).toContain("appointment.txt");
     expect(document.querySelector<HTMLTextAreaElement>("textarea[data-alpha-composer]")?.value).toBe("");
   });
@@ -99,12 +105,14 @@ describe("Ask Alpha dock and shell navigation", () => {
     await pressOnTop("Attach selected files");
     await expect.poll(() => named("Attach files")?.querySelector("[role=alert]")?.textContent).toContain(changedPhoto.name);
     expect(named("Attached")).toBeNull();
+    expect(detent()).toBe("bar");
 
     await pressOnTop(keptPhoto.name);
     await expect.poll(() => button(`Remove ${keptPhoto.name} from the selection`)).toBeDefined();
     await pressOnTop("Attach selected files");
     await expect.poll(() => [named("Attach files") === null, named("Attached")?.textContent?.includes(keptPhoto.name)])
       .toEqual([true, true]);
+    await expect.poll(detent).toBe("sheet");
 
     await showAttachments();
     await expect.poll(() => button(keptPhoto.name)).toBeDefined();

@@ -13,6 +13,8 @@ type TranscriptMessage = AssistantMessageProps & { id: string };
 export type AssistantTranscriptProps = Omit<ComponentProps<"div">, "children"> & {
   /** The messages of the conversation showing, oldest first, each with a key that stays its own. */
   messages: readonly TranscriptMessage[];
+  /** Messages from a new turn shown after the Later boundary of an older page. */
+  messagesAfterLater?: readonly TranscriptMessage[];
   /** Arms a hold on recorded message text. */
   holdMessage?: MessageHold;
   /** Facts from the current screen shown in the transcript without Alpha's signature. */
@@ -68,7 +70,7 @@ const MessageRows = memo(function MessageRows({ messages, hold }: { messages: re
  * hit opens around the message requested.
  * @model spec/app/assistant/chats.md
  */
-export function AssistantTranscript({ messages, holdMessage, briefing, liveMessages, interim, position, visible = true, status = "loaded", turn, onRetry, onEarlier, onLater, onReturnToOriginal, className, onScroll, ...props }: AssistantTranscriptProps) {
+export function AssistantTranscript({ messages, messagesAfterLater, holdMessage, briefing, liveMessages, interim, position, visible = true, status = "loaded", turn, onRetry, onEarlier, onLater, onReturnToOriginal, className, onScroll, ...props }: AssistantTranscriptProps) {
   const scrollRef = useRef<TranscriptScroll>({ follows: true, end: 0 });
   const page = position?.page;
   const around = position?.around;
@@ -108,10 +110,11 @@ export function AssistantTranscript({ messages, holdMessage, briefing, liveMessa
       <>
         {onEarlier ? <Button variant="ghost" size="sm" className="self-center" onClick={(event) => pageFrom(event.currentTarget, position?.earlier ?? messages[0]?.id, onEarlier)}><ChevronUp aria-hidden />Earlier</Button> : null}
         <MessageRows messages={messages} hold={holdMessage} />
+        {onLater ? <Button variant="ghost" size="sm" className="self-center" onClick={(event) => pageFrom(event.currentTarget, position?.later ?? messages.at(-1)?.id, onLater)}><ChevronDown aria-hidden />Later</Button> : null}
+        {messagesAfterLater?.length ? <MessageRows messages={messagesAfterLater} hold={holdMessage} /> : null}
         {briefing}
         {liveMessages?.length ? <MessageRows messages={liveMessages} /> : null}
         {interim}
-        {onLater ? <Button variant="ghost" size="sm" className="self-center" onClick={(event) => pageFrom(event.currentTarget, position?.later ?? messages.at(-1)?.id, onLater)}><ChevronDown aria-hidden />Later</Button> : null}
         {turn ? <AssistantTurnNote {...turn} /> : null}
       </>
     );

@@ -77,6 +77,7 @@ export error RecordingUnavailable
 /** Audio custody and microphone permission belong to the device hosting Notes. */
 export service NoteDevice {
   readonly available: boolean
+  readonly onWeb: boolean
   readonly canPlay: boolean
   readonly canTranscribe: boolean
   readonly changed: Stream.Stream<Tape>
@@ -134,7 +135,7 @@ export const noteDevice = Layer.sync(NoteDevice, () => {
     (listener) => promise(() => listener.remove()),
   ))
   return {
-    available, canPlay: api !== undefined || browser !== undefined, canTranscribe, changed, openAsked,
+    available, onWeb: browser !== undefined, canPlay: api !== undefined || browser !== undefined, canTranscribe, changed, openAsked,
     permission: () => granted(browser === undefined ? read(Permission, (native) => native.permission()) : web(() => browser.permission())),
     request: () => granted(browser === undefined ? read(Permission, (native) => native.requestMicrophone()) : web(() => browser.request())),
     status: (ownerDigest?: string) => browser !== undefined ? web(() => browser.status(ownerDigest))

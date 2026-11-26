@@ -10,6 +10,7 @@ export interface AskScene {
   down: boolean;
   stalled: boolean;
   readonly turns: Map<string, () => void>;
+  afterStop?: Kept["messages"];
   readonly kept: Map<string, Kept>;
   searchDown: boolean;
   /** The agent fails every read of a conversation's messages with a 503, as while it is starting. */
@@ -254,6 +255,9 @@ export function askRoutes(scene: AskScene): Route[] {
         const stop = scene.turns.get(room);
         scene.turns.delete(room);
         stop?.();
+        const after = scene.afterStop;
+        scene.afterStop = undefined;
+        if (after !== undefined) [...scene.kept.values()].find((one) => one.roomId === room)?.messages.push(...after);
         return Response.json({ aborted: stop !== undefined, roomId: room, reason, outcome: stop === undefined ? "nothingRunning" : "stopped" });
       });
     },

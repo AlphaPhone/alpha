@@ -61,21 +61,28 @@ function SourceRow({ row, photos, reading }: { row: AttachmentSourceRow; photos:
   return (
     <button type="button" aria-label={row.selected && !folder ? `Remove ${row.name} from the selection` : row.name}
       aria-pressed={folder ? undefined : row.selected} disabled={reading || row.onPress === undefined}
-      className={cn("relative min-w-0 overflow-hidden text-left text-base disabled:opacity-60", photos ? "aspect-square rounded-lg bg-secondary" : "flex min-h-19 w-full items-center gap-3.5 border-b py-3 [&>svg]:size-6.5 [&>svg]:shrink-0")}
+      className={cn("relative min-w-0 overflow-hidden text-left text-base disabled:opacity-60",
+        photos ? "aspect-square rounded-frame bg-secondary" : "flex min-h-19 w-full items-center gap-3.5 border-b py-3 [&>svg]:size-6.5 [&>svg]:shrink-0",
+        photos && row.selected && "outline-2 -outline-offset-2 outline-alpha")}
       onClick={row.onPress}>
       {photos && (row.thumbnail || row.thumbnailFile) ? <img src={row.thumbnail} alt="" className="size-full object-cover" loading="lazy" ref={row.thumbnailFile ? (node) => {
         if (!node || !row.thumbnailFile) return;
         const url = URL.createObjectURL(row.thumbnailFile);
         node.src = url;
         return () => URL.revokeObjectURL(url);
-      } : undefined} /> : photos ? <Image aria-hidden className="mx-auto size-6.5" /> : icon}
+      } : undefined} /> : photos ? <span aria-hidden className="flex h-full min-w-0 flex-col items-center justify-center gap-2 p-3 text-muted-foreground">
+        <Image className="size-6.5 shrink-0" />
+        <span className="max-w-full truncate text-2xs">{row.name}</span>
+      </span> : icon}
       {!photos && <span className="flex min-w-0 flex-1 flex-col gap-1">
         <span className="truncate font-medium">{row.name}</span>
         {folder ? <span className="text-xs text-muted-foreground">Folder</span>
           : row.bytes !== undefined && <span className="text-xs text-muted-foreground">{sizeOf(row.bytes)}</span>}
       </span>}
       {folder ? <ChevronRight aria-hidden className="text-muted-foreground" />
-        : row.selected && <Check aria-hidden className={cn("size-6 shrink-0 rounded-full bg-alpha p-1 text-alpha-foreground", photos && "absolute top-2 right-2")} />}
+        : photos ? <span aria-hidden className={cn("absolute top-2 right-2 grid size-6 place-items-center rounded-full border-[1.5px] bg-background",
+          row.selected && "border-alpha bg-alpha text-alpha-foreground")}>{row.selected && <Check className="size-4" />}</span>
+        : row.selected && <Check aria-hidden className="size-6 shrink-0 rounded-full bg-alpha p-1 text-alpha-foreground" />}
     </button>
   );
 }
@@ -101,7 +108,8 @@ export function AttachmentSources({
         aria-labelledby={undefined}
         overlayClassName="bg-black/28"
         style={{ top: "8dvh" }}
-        className="inset-x-0 bottom-0 max-h-none max-w-103 translate-y-0 gap-0 overflow-hidden rounded-t-sheet rounded-b-none bg-background p-0 text-foreground"
+        className={cn("inset-x-0 bottom-0 max-h-none max-w-103 translate-y-0 gap-0 overflow-hidden rounded-t-sheet rounded-b-none bg-background p-0 text-foreground",
+          "in-[body:has(main[data-alpha-native])]:max-w-none")}
         onOpenAutoFocus={(event) => { event.preventDefault(); openerRef.current?.focus(); }}
         onCloseAutoFocus={(event) => { event.preventDefault(); onReturnFocus(); }}
       >
@@ -113,9 +121,9 @@ export function AttachmentSources({
         </header>
         <SearchField className="mx-5 mb-3 shrink-0" style={{ height: 46, minHeight: 46, borderRadius: 16 }} aria-label={`Search ${source}`}
           placeholder={`Search ${source}`} value={query} disabled={reading || !onSearch} onValueChange={onSearch ?? (() => {})} />
-        <nav className="mx-5 mb-3 flex shrink-0 gap-1 rounded-action bg-secondary p-[3px]" aria-label="Attachment sources">
+        <nav className="mx-5 mb-3 flex shrink-0 gap-1 rounded-action bg-secondary p-1" aria-label="Attachment sources">
           {tabs.map(([value, label]) => <Button key={value} variant="ghost" aria-pressed={value === tab} disabled={reading || !onTab} onClick={() => { if (value !== tab) onTab?.(value); }}
-            className={cn("h-11 flex-1 rounded-action px-2 text-base", value === tab && "bg-foreground text-background hover:bg-foreground/90")}>{label}</Button>)}
+            className={cn("h-10.5 flex-1 rounded-list-icon px-2 text-base", value === tab && "bg-foreground text-background hover:bg-foreground/90")}>{label}</Button>)}
         </nav>
         {location && <div className="mx-5 mb-3 flex shrink-0 flex-wrap items-center gap-2" aria-label="File location">
           {location.onUp && <Button variant="ghost" size="icon" aria-label="Parent folder" disabled={reading} onClick={location.onUp}><ChevronLeft /></Button>}
@@ -135,13 +143,13 @@ export function AttachmentSources({
             {onRetry && <Button variant="ghost" disabled={reading} onClick={onRetry}>Try again</Button>}
           </div>}
           {selected > room && <p role="status" className="py-3 text-sm text-muted-foreground">{`Choose up to ${room} files.`}</p>}
-          {loading && rows.length === 0 && <div role="status" aria-label={`Loading ${source}`} className={photos ? "grid grid-cols-3 gap-0.75" : "grid gap-2"}>
-            {placeholders.map((key) => <Skeleton key={key} className={photos ? "aspect-square rounded-lg" : "h-13 rounded-action"} />)}
+          {loading && rows.length === 0 && <div role="status" aria-label={`Loading ${source}`} className={photos ? "-mx-2 grid grid-cols-3 gap-0.75" : "grid gap-2"}>
+            {placeholders.map((key) => <Skeleton key={key} className={photos ? "aspect-square rounded-frame" : "h-13 rounded-action"} />)}
           </div>}
           {empty && <p role="status" className="pt-8 text-center text-sm text-muted-foreground">
             {query.trim() ? "No matching files" : photos ? "No photos yet" : "This folder is empty"}
           </p>}
-          {rows.length > 0 && <div className={photos ? "grid grid-cols-3 gap-0.75" : undefined}>
+          {rows.length > 0 && <div className={photos ? "-mx-2 grid grid-cols-3 gap-0.75" : undefined}>
             {rows.map((row) => <SourceRow key={row.id} row={row} photos={photos} reading={reading || loading} />)}
           </div>}
           {truncated && <p role="status" className="my-3 text-sm text-muted-foreground">Only some files are shown.</p>}
@@ -149,7 +157,7 @@ export function AttachmentSources({
         </div>
         <footer style={{ minHeight: 81 }} className="flex shrink-0 items-center gap-3 border-t px-5 pt-2 pb-[max(--spacing(3.5),calc(max(var(--alpha-native-inset-bottom,0px),env(safe-area-inset-bottom))_+_--spacing(2)))] text-meta">
           <span role="status" className="flex-1 text-muted-foreground">{selected > 0 ? `${selected} selected` : ""}</span>
-          {selected > 0 && onClear && <Button variant="secondary" size="icon" className="w-auto px-3.5 text-sm" disabled={reading} onClick={onClear}>Clear</Button>}
+          {selected > 0 && onClear && <Button variant="secondary" size="icon" className="w-auto px-3.5 text-sm font-medium" disabled={reading} onClick={onClear}>Clear</Button>}
           {onBrowse && <Button variant="secondary" size="icon" className="w-auto px-3.5 text-sm" disabled={reading} onClick={onBrowse}>{`Choose ${source}`}</Button>}
           {onImport && <Button variant="secondary" size="icon" className="w-auto px-3.5 text-sm" disabled={reading} onClick={() => inputRef.current?.click()}>{importLabel}</Button>}
         </footer>

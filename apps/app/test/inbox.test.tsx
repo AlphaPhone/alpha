@@ -469,10 +469,15 @@ it("Connect Gmail and keep to its grant (spec/app/inbox/index.md, \"Story: Conne
   const { alpha } = await openInbox(world);
   const runtime = inbox.runtime(alpha);
 
-  // spec/app/platform/index.md, "The owner's tap on a mail sign-in control starts the phone's one more sign-in for mail where the phone wants it, then reads again once": signed out, the phone wants no mail sign-in and Connect Eliza Cloud opens Settings as it always did.
+  // spec/app/inbox/index.md, "Choosing a folder or a search reads its first page"
   await openInboxFromHome(alpha);
   await until(alpha, runtime, List, (s) => !s.signedIn);
-  await press("Connect Eliza Cloud");
+  await press("Search email");
+  await fill("Search mail", "standup");
+  await press("Back to inbox");
+  expect(document.activeElement).toBe(button("Search email"));
+  await press("Search email");
+  await search("standup");
   await until(alpha, alpha.runtime, Shell, (s) => showing(s, "Settings"));
   expect(world.mailLease.asked).toBe(0);
   world.signedIn = true;

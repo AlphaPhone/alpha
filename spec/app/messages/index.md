@@ -615,8 +615,10 @@ after the phone confirms that its saved draft is empty. Only the admitted
 visit can save the request's address and text, after checking the request
 and draft again. The phone acknowledges only the exact still-current
 request whose fill was saved. Replacing a request leaves any admitted
-save in place and leaves the replacement unacknowledged. Send stays with
-the owner.
+save in place. If it was replaced before any save, its exact untouched
+empty New visit returns to the list, where the phone can take the newer
+request. An opening the owner has started using stays in front and the
+phone leaves its draft to the owner. Send stays with the owner.
 
 The encrypted New draft keeps the admitted request's token and revision
 with the fill. That evidence stays available through owner edits and send
@@ -636,6 +638,15 @@ pure def stepAndroidDraftOpensItsNewVisit(before: Messages, via: str, after: Mes
     and after.newDraft.recipient == 0 and not(after.newDraft.picking))
 
 pure val eval_witness_canOpenAndroidDraft = ("show", ("openAndroidDraft", true, true, 0))
+
+pure def canAbandonAndroidDraft(s: Messages, visit: int, revision: int, untouched: bool): bool =
+  untouched and canBack(s) and holdsNewDraft(s, visit) and s.newDraft.revision == revision
+    and s.newDraft.recipient == 0 and not(s.newDraft.picking)
+
+pure def abandonAndroidDraft(s: Messages, visit: int, revision: int, untouched: bool): Moved = back(s)
+
+pure val eval_witness_canAbandonAndroidDraft =
+  ("show", ("openAndroidDraft", true, true, 0), ("abandonAndroidDraft", 1, 0, true))
 ```
 
 ### The owner can write before choosing To, then adjust To without moving or losing the message

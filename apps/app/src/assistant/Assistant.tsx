@@ -39,7 +39,7 @@ import { home } from "../shell/shell.vibe";
 import { isCommsView } from "../shell/views.tsx";
 import { type MediaCard, MediaReview, namedReviewQuery, spokenText } from "./media-review.vibe";
 import type { Agent } from "../platform/agent.vibe";
-import type { Device } from "../platform/device.vibe";
+import { native, type Device } from "../platform/device.vibe";
 import type { NoteStore } from "../platform/notes.vibe";
 import type { Machine as NotesMachine } from "../../gen/app__notes.effect.vibe";
 import { Documents } from "../platform/documents.vibe";
@@ -225,6 +225,8 @@ function AssistantAttachments({ runtime, attachments, preview, notice, composerR
       onPress: () => void runtime.runPromise(usePickerVolume(volume.id, state.visit)),
     })) : undefined,
   } : undefined;
+  const browsingNativePhotos = active && native() && state.tab === "Photos"
+    && state.photos.grant === "Granted" && view.availability === "available" && state.rows.status !== "Failed";
   return (
     <>
       {preview !== undefined && <AssistantPhotoPreview
@@ -255,7 +257,7 @@ function AssistantAttachments({ runtime, attachments, preview, notice, composerR
         onClear={active && state.selected > 0 ? () => void runtime.runPromise(clearPickerChoice(state.visit)) : undefined}
         onAttach={active && attachments.can(attach) ? () => void attachments.send(attach) : undefined}
         onBrowse={active && state.tab === "Documents" && view.systemDocuments ? () => void runtime.runPromise(pickSystemDocument(state.visit)) : undefined}
-        onImport={active && (!view.systemDocuments || state.tab === "Photos") ? (files) => void runtime.runPromise(importPickerFiles(files, state.visit)) : undefined}
+        onImport={active && !browsingNativePhotos && (!view.systemDocuments || state.tab === "Photos") ? (files) => void runtime.runPromise(importPickerFiles(files, state.visit)) : undefined}
         importLabel={view.systemDocuments ? "Choose photos" : undefined}
       />}
     </>
@@ -496,6 +498,7 @@ export function Assistant({ runtime, messageActions, speech, canReadAloud = fals
   const history = useHistorySheets(chats, search, layers, seen, free, beginSearch, returnChatFocus, returnSearchFocus);
   const page = shown === undefined || (shown.page.status === "Idle" && shown.chosen === 0) ? undefined : seen.pages.get(shown.page.ticket);
   const lines = page?.lines ?? emptyLines;
+  const later = page?.bounds?.later;
   const canPreview = attachments.can({ type: "preview", attachment: 1 });
   const preview = useCallback((file: Attached) => void runtime.runPromise(previewFile(file)), [runtime]);
   const onSettingsPage = shell.state && showing(shell.state, "Settings") && shell.state.assistant !== "Bar" && shell.can(back);
@@ -538,6 +541,13 @@ export function Assistant({ runtime, messageActions, speech, canReadAloud = fals
     opened,
     onChoose,
   });
+  const [historyRows, newerRows] = useMemo(() => {
+    const edge = later === undefined ? -1 : lines.findIndex((line) => line.id === later);
+    if (edge < 0 || edge === lines.length - 1) return [messages, undefined] as const;
+    const following = new Set(lines.slice(edge + 1).map((line) => line.id));
+    const split = messages.findIndex((message) => following.has(message.id));
+    return split < 0 ? [messages, undefined] as const : [messages.slice(0, split), messages.slice(split)] as const;
+  }, [later, lines, messages]);
   if (conversation.cause || chats.cause || composer.cause || reply.cause) return <Alert variant="destructive" className="m-4">Alpha could not open Ask Alpha</Alert>;
   if (!talking || !shown || !writing || !finding) return null;
   const hold = { type: "hold", askable: askable(talking) } as const;
@@ -609,7 +619,6 @@ export function Assistant({ runtime, messageActions, speech, canReadAloud = fals
   };
   // spec/app/assistant/chats.md, "Older or newer messages are read around a message of the conversation showing"
   const earlier = page?.bounds?.earlier;
-  const later = page?.bounds?.later;
   const readEarlier = { type: "scroll", around: board.numbered(earlier ?? "") } as const;
   const readLater = { type: "scroll", around: board.numbered(later ?? "") } as const;
   const replyWords = replyBlocks(seen.reply, true).words;
@@ -685,7 +694,8 @@ export function Assistant({ runtime, messageActions, speech, canReadAloud = fals
         }}
         attachmentNotice={onComms ? undefined : seen.attachmentNotice}
         transcript={{
-          messages,
+          messages: historyRows,
+          messagesAfterLater: newerRows,
           holdMessage: open ? holdMessage : undefined,
           briefing: brief === "" ? undefined : <AssistantNoticeCard key={`briefing:${subject}`} title="Phone" detail={brief} />,
           liveMessages: [...writingReply, ...draftCards, ...failed, ...mediaCards, ...mediaNote, ...recordingSummary],

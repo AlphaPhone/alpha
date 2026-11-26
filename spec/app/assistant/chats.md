@@ -152,7 +152,9 @@ pure def paged(c: Chats, ticket: int, ok: bool, messages: int): Chats =
 Earlier and Later are offered when the resident confirms there are messages
 past the current page in that direction. The page is centered on the loaded
 server row at that edge. The number Alpha gives a message identifies it and
-carries no information about its position in history.
+carries no information about its position in history. A new turn sent
+while reading older history appears after Later; sending leaves the
+older window in place.
 
 ```quint
 pure def canScroll(c: Chats, around: int): bool =

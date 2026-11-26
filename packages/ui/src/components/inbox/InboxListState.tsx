@@ -7,6 +7,7 @@ const states = {
   emptyArchive: { icon: <Mail />, title: "No archived messages" },
   emptyTrash: { icon: <Mail />, title: "Trash is empty" },
   emptyDrafts: { icon: <Mail />, title: "No drafts" },
+  searchPrompt: { icon: <Mail />, title: "Search" },
   noResults: { icon: <Mail />, title: "No messages match this search" },
   loading: { icon: <Mail />, title: "Loading Inbox…" },
   checking: { icon: <Mail />, title: "Checking…" },
@@ -35,7 +36,7 @@ export type InboxListStateProps = {
 export function InboxListState({ kind, onAction }: InboxListStateProps) {
   const { icon, title, ...rest } = states[kind] as { icon: React.ReactNode; title: string; action?: string };
   return (
-    <div role={kind === "loading" || kind === "checking" ? "status" : undefined} className="flex flex-col items-center gap-3 px-6 pt-27.5 text-center text-muted-foreground">
+    <div role={kind === "loading" || kind === "checking" ? "status" : undefined} className={cn("flex flex-col items-center gap-3 px-6 pt-27.5 text-center text-muted-foreground", (kind === "signedOut" || kind === "searchPrompt") && "mt-2")}>
       <span aria-hidden className="[&_svg]:size-7">{icon}</span>
       <p className="text-base">{title}</p>
       {onAction && rest.action ? (
