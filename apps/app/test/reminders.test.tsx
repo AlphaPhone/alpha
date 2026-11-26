@@ -386,9 +386,8 @@ describe("Reminders full journeys", () => {
     const second = await runtime.runPromise(createReminderItem({ listId: DEFAULT_LIST_ID, title: "Take out trash" }));
     await until(alpha, runtime, RemindersMachine.Machine, (s) => s.write.outcome === "Confirmed");
     await drawn(() => runtime.runPromise(deleteReminderItem(first!.id)));
-    const queued = runtime.runPromise(deleteReminderItem(second!.id));
-    await later(alpha, 5_100);
-    await drawn(() => queued);
+    await drawn(() => runtime.runPromise(deleteReminderItem(second!.id)));
+    expect(recorder.snapshot.items.some((item) => item.id === first!.id)).toBe(false);
     expect({ hidden: [...remindersStore.snapshot().hiddenIds], undo: Boolean(button("Undo")) }).toEqual({ hidden: [second!.id], undo: true });
     await later(alpha, 5_100);
     await until(alpha, runtime, RemindersMachine.Machine, (s) => s.undo.holding === "Released" && s.write.outcome === "Confirmed");
@@ -398,9 +397,7 @@ describe("Reminders full journeys", () => {
     const gone = await runtime.runPromise(createReminderItem({ listId: DEFAULT_LIST_ID, title: "Old list" }));
     await until(alpha, runtime, RemindersMachine.Machine, (s) => s.write.outcome === "Confirmed");
     await drawn(() => runtime.runPromise(deleteReminderItem(gone!.id)));
-    const added = [runtime.runPromise(createReminderItem({ listId: DEFAULT_LIST_ID, title: "Buy stamps" })), runtime.runPromise(createReminderItem({ listId: DEFAULT_LIST_ID, title: "Call mom" }))];
-    await later(alpha, 5_100);
-    await drawn(() => Promise.all(added));
+    await drawn(() => Promise.all([runtime.runPromise(createReminderItem({ listId: DEFAULT_LIST_ID, title: "Buy stamps" })), runtime.runPromise(createReminderItem({ listId: DEFAULT_LIST_ID, title: "Call mom" }))]));
     await until(alpha, runtime, RemindersMachine.Machine, (s) => s.write.outcome === "Confirmed" && s.undo.holding !== "Held");
     expect(recorder.snapshot.items.map((item) => item.title).filter((title) => ["Old list", "Buy stamps", "Call mom"].includes(title)).toSorted()).toEqual(["Buy stamps", "Call mom"]);
 
@@ -415,6 +412,24 @@ describe("Reminders full journeys", () => {
     await until(again.alpha, againRuntime, RemindersMachine.Machine, (s) => s.undo.holding !== "Held" && s.write.outcome !== "Sent");
     expect(recorder.snapshot.items.some((item) => item.id === kept.id)).toBe(false);
     expect(recorder.snapshot.items.some((item) => item.title === "Buy stamps")).toBe(true);
+  });
+
+  // spec/app/reminders/index.md, "Creating, updating, flagging and moving a reminder validates its list, due time and recurrence and sends one write at a time"
+  it("a full Reminders refuses another add and says so, instead of showing one that vanishes", async () => {
+    const held: ReminderItemRecord[] = Array.from({ length: 200 }, (_, n) => ({
+      id: `rem-full-${n}`, listId: DEFAULT_LIST_ID, title: `Reminder ${n}`, notes: "", dueDate: null, dueMinute: null, alertMinutes: null,
+      recurrence: "none", priority: "none", flagged: false, subtasks: [], completed: false, completedAtMs: null, snoozedUntilMs: null,
+      notifiedAtMs: null, agentTaskId: null, revision: 1, createdAtMs: baseNow, updatedAtMs: baseNow,
+    }));
+    const { recorder, runtime } = await launchReminders(baseNow, held);
+    let extra: ReminderItemRecord | undefined = held[0];
+    await drawn(async () => { extra = await runtime.runPromise(createReminderItem({ listId: DEFAULT_LIST_ID, title: "One more" })); });
+    expect({
+      made: extra,
+      kept: remindersStore.snapshot().snapshot.items.some((item) => item.title === "One more"),
+      sent: recorder.calls.some((call) => call.method === "POST" && call.path === "/api/alpha/reminders/items"),
+      said: document.body.textContent?.includes("Reminders holds 200 reminders. Delete one to add another."),
+    }).toEqual({ made: undefined, kept: false, sent: false, said: true });
   });
 
   // spec/app/reminders/alerts.md, "Story: Alert on due reminders and act from the banner"
