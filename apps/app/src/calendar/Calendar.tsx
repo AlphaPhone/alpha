@@ -792,17 +792,22 @@ function Form({ runtime, day, today, connected }: CalendarProps & { day: number;
   const target = e.target > 0 ? shown.find(e.target) ?? shown.lastSeen(e.target) : undefined;
   const off_ = !reminder && !e.extras && !editor.can(save) ? saveOff[saveBlock(e.form === "NewEvent" && e.receipts.status === "Loading", saving, false, Editor.canKeepMyChanges(e), !e.titled)] : "";
   const choosesCalendar = reminder || e.form === "NewEvent";
-  // v119 45f6bed30 prototype/template.html:1423-1497 drew Video link, Repeat and Alert on every new event; they need this phone's calendar.
-  // The live v119 adapter hid them on the agent's calendar (45f6bed30 prototype/agent-calendar-adapter.ts:312, :328), so here they are dimmed there.
-  // spec/app/calendar/writing.md, "The form offers with the agent's calendar only what it holds, and keeps the calendar chosen"
-  const choosesOptions = !reminder && e.form === "NewEvent" && shown.present();
-  const choosesRepeat = reminder || choosesOptions;
   const editingPhone = e.form === "EditEvent" && shown.find(e.target)?.source === "Phone";
   const destinations: { name: string; value: NonNullable<Fields["calendar"]> }[] = [{ name: "Reminders", value: "Reminders" }];
   if (e.form === "NewEvent" && connected) destinations.push({ name: "Your agent's calendar", value: "Agent" });
   if (e.form === "NewEvent" && shown.present()) destinations.push({ name: "This phone's calendar", value: "Phone" });
   const destination = fields.calendar ?? (connected ? "Agent" : "Phone");
   const onAgent = destination === "Agent";
+  // v119 45f6bed30 prototype/template.html:1423-1497 drew Video link, Repeat and Alert on every new event; they need this phone's calendar.
+  // The live v119 adapter left them off the agent's calendar (45f6bed30 prototype/agent-calendar-adapter.ts:312 alerts and video, :328 repeats,
+  // keeping only a "No repeat" chip for a draft that held one), so here an option the agent's calendar would refuse is not drawn.
+  // spec/app/calendar/writing.md, "The form offers with the agent's calendar only what it holds, and keeps the calendar chosen"
+  const choosesOptions = !reminder && e.form === "NewEvent" && shown.present();
+  const offersVideo = choosesOptions && (fields.video === true || offeredOn(onAgent, false, false, true));
+  const offeredRepeats = repeats.filter(({ repeat }) => offeredOn(onAgent, repeat !== "NoRepeat", false, false));
+  const offeredAlerts = alerts.filter(({ minutes }) => offeredOn(onAgent, false, minutes !== undefined, false));
+  const choosesRepeat = reminder || (choosesOptions && (!onAgent || (fields.repeat ?? "NoRepeat") !== "NoRepeat"));
+  const choosesAlert = choosesOptions && (!onAgent || fields.alert !== undefined);
   // A repeat, alert or video link is picked on the calendar shown chosen; keeping that calendar in the draft stops a later Google connection from moving it to the agent's.
   const picked = (next: Fields) => withExtras({ ...next, calendar: destination });
   const close = () => (editor.can({ type: "close" }) ? void editor.send({ type: "close" }) : undefined);
@@ -908,11 +913,11 @@ function Form({ runtime, day, today, connected }: CalendarProps & { day: number;
             }} />
         </CalendarFormCard>
         {/* v119 45f6bed30 prototype/template.html:1423-1430: the Video link row comes before the people. */}
-        {choosesOptions ? (
+        {offersVideo ? (
           <CalendarFormCard className="h-14 flex-row items-center gap-3.5 pr-3 pl-4">
             <Video aria-hidden className="size-5.5 shrink-0 text-muted-foreground" />
             <span className="grow text-body leading-plain">Video link</span>
-            <CalendarSwitch aria-label="Video link" checked={fields.video === true} disabled={!editor.can(plain) || (fields.video !== true && !offeredOn(onAgent, false, false, true))} onCheckedChange={(video) => (video ? picked : withExtras)({ ...fields, video })} />
+            <CalendarSwitch aria-label="Video link" checked={fields.video === true} disabled={!editor.can(plain)} onCheckedChange={(video) => (video ? picked : withExtras)({ ...fields, video })} />
           </CalendarFormCard>
         ) : null}
         <CalendarFormCard className="gap-1 py-2.5 pr-3 pl-4">
@@ -941,7 +946,7 @@ function Form({ runtime, day, today, connected }: CalendarProps & { day: number;
           {picking !== undefined && typedEmail !== "" && !addable ? <div className="pt-3 pr-0 pb-1 pl-0.5 text-sm text-muted-foreground">No match</div> : null}
         </CalendarFormCard>
         </> : null}
-        {choosesCalendar || choosesRepeat || choosesOptions ? (
+        {choosesCalendar || choosesRepeat || choosesAlert ? (
           <CalendarFormCard className="gap-1 py-2 pr-3 pl-4">
             {choosesCalendar ? (
               <CalendarFormRow icon={<CalendarIcon />}>
@@ -964,16 +969,16 @@ function Form({ runtime, day, today, connected }: CalendarProps & { day: number;
                   {reminder ? reminderRepeats.map(({ repeat, label }) => (
                     <CalendarChip key={repeat} label={label} chosen={(fields.reminderRepeat ?? "none") === repeat}
                       onClick={() => change({ ...fields, reminderRepeat: repeat }, plain)} />
-                  )) : repeats.map(({ repeat, label }) => <CalendarChip key={repeat} label={label} chosen={(fields.repeat ?? "NoRepeat") === repeat}
-                    disabled={!editor.can(plain) || !offeredOn(onAgent, repeat !== "NoRepeat", false, false)} onClick={() => (repeat === "NoRepeat" ? withExtras : picked)({ ...fields, repeat })} />)}
+                  )) : offeredRepeats.map(({ repeat, label }) => <CalendarChip key={repeat} label={label} chosen={(fields.repeat ?? "NoRepeat") === repeat}
+                    disabled={!editor.can(plain)} onClick={() => (repeat === "NoRepeat" ? withExtras : picked)({ ...fields, repeat })} />)}
                 </div>
               </CalendarFormRow>
             ) : null}
-            {choosesOptions ? (
+            {choosesAlert ? (
               <CalendarFormRow icon={<Bell />}>
                 <div role="group" aria-label="Alert" className="flex min-w-0 flex-[1_1_0] flex-wrap gap-1.5">
-                  {alerts.map(({ minutes, label }) => (
-                    <CalendarChip key={label} label={label} chosen={minutes === fields.alert} disabled={!editor.can(plain) || !offeredOn(onAgent, false, minutes !== undefined, false)} onClick={() => {
+                  {offeredAlerts.map(({ minutes, label }) => (
+                    <CalendarChip key={label} label={label} chosen={minutes === fields.alert} disabled={!editor.can(plain)} onClick={() => {
                       if (minutes !== undefined) picked({ ...fields, alert: minutes });
                       else {
                         const { alert: _alert, ...next } = fields;

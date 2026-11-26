@@ -704,6 +704,23 @@ interface CloudVoiceSession {
   capture: Awaited<ReturnType<CloudStreamingSpeech["listen"]>> | undefined
 }
 
+type CloudPreview = { readonly session: number; readonly outlet: VoicePreview | undefined }
+
+/** Retire `held` once it is `session`'s, letting it go first so its retirement cannot reach it again. */
+function retirePreview(held: CloudPreview | undefined, session: number, letGo: () => void): void {
+  if (held?.session !== session) return
+  letGo()
+  held.outlet?.retire()
+}
+
+const startFailed = (cause: unknown) => new VoiceBridgeFailed({ method: "startCloudSpeech", cause })
+
+/** Speak `text` on `cloud`'s stream until `abort` stops it. */
+const speakOn = (cloud: CloudVoiceSession, text: string, abort: AbortController, started: () => void) => tryPromise({
+  try: () => cloud.stream.speak(text, abort.signal, started),
+  catch: (cause) => new VoiceBridgeFailed({ method: "speakCloudSpeech", cause }),
+})
+
 // spec/app/assistant/reply.md, "A spoken acknowledgment starts at once; a reply ready before it is audible drops it, and an audible one finishes before the reply, within 2.5 s": the phone's cue is audible once play answers, and is over at its playback's end or a stop.
 effect function playLocalCue(text: string, requestId: string, current: () => boolean, started: () => void, stop: Deferred.Deferred<void>): void!VoiceBridgeFailed {
   const plugin = localPlugin()
@@ -746,7 +763,7 @@ export const phoneVoiceBridge = Layer.effect(VoiceBridge, effect {
   let cloudSpeech: CloudVoiceSession | undefined
   let cloudKey: CredentialId | undefined
   let accountEpoch = 0
-  let cloudPreview: { readonly session: number; readonly outlet: VoicePreview | undefined } | undefined
+  let cloudPreview: CloudPreview | undefined
   let cloudSpeechAbort: AbortController | undefined
   let activePlaybackRequest: string | undefined
   let cueStop: Deferred.Deferred<void> | undefined
@@ -771,10 +788,7 @@ export const phoneVoiceBridge = Layer.effect(VoiceBridge, effect {
   }
 
   function clearCloudPreview(session: number): void {
-    if (cloudPreview?.session !== session) return
-    const closing = cloudPreview
-    cloudPreview = undefined
-    closing.outlet?.retire()
+    retirePreview(cloudPreview, session, () => { cloudPreview = undefined })
   }
 
   effect function openMic(session: number, network: boolean, preview?: VoicePreview): boolean!VoiceBridgeFailed!Agent {
@@ -816,7 +830,7 @@ export const phoneVoiceBridge = Layer.effect(VoiceBridge, effect {
             publish({ kind: "ended", session: currentSession, reason: cause === undefined ? "ended" : interruptedByCall(cause) ? "call-active" : "error" })
           },
         }),
-        catch: (cause) => new VoiceBridgeFailed({ method: "startCloudSpeech", cause }),
+        catch: startFailed,
       }) catch effect (failure) => {
         if (cloudPreview === previewOwner) clearCloudPreview(currentSession)
         if (cloudSpeech === owner) {
@@ -933,10 +947,7 @@ export const phoneVoiceBridge = Layer.effect(VoiceBridge, effect {
     if (cloud?.session !== session) return false
     const abort = makeAbort()
     cloudSpeechAbort = abort
-    try tryPromise({
-      try: () => cloud.stream.speak(text, abort.signal, started),
-      catch: (cause) => new VoiceBridgeFailed({ method: "speakCloudSpeech", cause }),
-    })
+    try speakOn(cloud, text, abort, started)
     return true
   }
 
@@ -1079,19 +1090,15 @@ export const browserVoiceBridge = Layer.effect(VoiceBridge, effect {
   const relay = base === undefined ? undefined : pageSpeechRelay(base)
   let activeSession = 0
   let cloudSpeech: CloudVoiceSession | undefined
-  let cloudPreview: { readonly session: number; readonly outlet: VoicePreview | undefined } | undefined
+  let cloudPreview: CloudPreview | undefined
+  function clearCloudPreview(session: number): void {
+    retirePreview(cloudPreview, session, () => { cloudPreview = undefined })
+  }
   let cloudSpeechAbort: AbortController | undefined
   let cueStop: Deferred.Deferred<void> | undefined
   const eventSubscribers = new Set<(event: VoiceEvent) => void>()
   const publish = (event: VoiceEvent) => {
     for (const emit of eventSubscribers) emit(event)
-  }
-
-  function clearCloudPreview(session: number): void {
-    if (cloudPreview?.session !== session) return
-    const closing = cloudPreview
-    cloudPreview = undefined
-    closing.outlet?.retire()
   }
 
   effect function openMic(session: number, network: boolean, preview?: VoicePreview): boolean!VoiceBridgeFailed {
@@ -1130,7 +1137,7 @@ export const browserVoiceBridge = Layer.effect(VoiceBridge, effect {
           publish({ kind: "ended", session, reason: cause === undefined ? "ended" : "error" })
         },
       }),
-      catch: (cause) => new VoiceBridgeFailed({ method: "startCloudSpeech", cause }),
+      catch: startFailed,
     }) catch effect (failure) => {
       if (cloudPreview === previewOwner) clearCloudPreview(session)
       if (cloudSpeech === owner) cloudSpeech = undefined
@@ -1158,10 +1165,7 @@ export const browserVoiceBridge = Layer.effect(VoiceBridge, effect {
     if (activeSession !== session || cloud?.session !== session) return
     const abort = makeAbort()
     cloudSpeechAbort = abort
-    try tryPromise({
-      try: () => cloud.stream.speak(text, abort.signal, started),
-      catch: (cause) => new VoiceBridgeFailed({ method: "speakCloudSpeech", cause }),
-    })
+    try speakOn(cloud, text, abort, started)
   }
 
   effect function setSpeakerMuted(session: number, muted: boolean): boolean!! {

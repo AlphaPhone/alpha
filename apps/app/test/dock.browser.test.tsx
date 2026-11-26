@@ -4,10 +4,15 @@ import { page, userEvent } from "vitest/browser";
 import { Machine as Shell } from "../gen/app__shell.effect.vibe";
 import { Machine as Canvas } from "../gen/app__shell__keyboard.effect.vibe";
 import { Machine as Dock } from "../gen/app__assistant__dock.effect.vibe";
+import type { Shell as ShellState } from "../gen/app__shell.ts";
 import { closeAllDocks, mountDock } from "./dock-support.tsx";
 import "../src/main.css";
 
 afterEach(closeAllDocks);
+
+/** Wait until the dock's shell is in a state `ok` admits. */
+const shellReaches = (runtime: Awaited<ReturnType<typeof mountDock>>["runtime"], ok: (state: ShellState) => boolean) =>
+  runtime.runPromise(Effect.flatMap(Shell, (m) => Stream.runHead(Stream.filter(m.changes, ok))));
 
 describe("Ask Alpha dock", () => {
   // spec/app/assistant/dock.md, "Focusing the composer on the bar raises Ask Alpha to typing"; spec/app/shell/index.md, "Agent navigation shows an admitted app or Home without lowering Ask Alpha"
@@ -57,7 +62,7 @@ describe("Ask Alpha dock", () => {
     await expect.element(assistant).toHaveAttribute("data-alpha-detent", "bar");
     await textarea.click();
 
-    await runtime.runPromise(Effect.flatMap(Shell, (m) => Stream.runHead(Stream.filter(m.changes, (s) => s.assistant === "Typing"))));
+    await shellReaches(runtime, (s) => s.assistant === "Typing");
     await runtime.runPromise(Effect.flatMap(Canvas, (m) => Stream.runHead(Stream.filter(m.changes, (s) => s.field === "Composer"))));
 
     const afterTextarea = document.querySelector<HTMLTextAreaElement>("textarea[data-alpha-composer]");
@@ -66,7 +71,7 @@ describe("Ask Alpha dock", () => {
     expect(section?.getAttribute("data-alpha-detent")).toBe("bar");
 
     await page.getByRole("button", { name: "Open conversation" }).click();
-    await runtime.runPromise(Effect.flatMap(Shell, (m) => Stream.runHead(Stream.filter(m.changes, (s) => s.assistant === "Sheet"))));
+    await shellReaches(runtime, (s) => s.assistant === "Sheet");
 
     // spec/app/shell/index.md, "Agent navigation shows an admitted app or Home without lowering Ask Alpha"
     await runtime.runPromise(Effect.flatMap(Shell, (m) => m.send({ type: "agentOpenView", view: "Calendar" })));
@@ -84,18 +89,18 @@ describe("Ask Alpha dock", () => {
     const { runtime } = await mountDock({ view: "Browser" });
 
     await page.getByRole("button", { name: "Open conversation" }).click();
-    await runtime.runPromise(Effect.flatMap(Shell, (m) => Stream.runHead(Stream.filter(m.changes, (s) => s.assistant === "Sheet"))));
+    await shellReaches(runtime, (s) => s.assistant === "Sheet");
     expect(document.activeElement).not.toBe(document.querySelector("textarea[data-alpha-composer]"));
 
     await runtime.runPromise(Effect.flatMap(Shell, (m) => m.send({ type: "goBack" })));
-    await runtime.runPromise(Effect.flatMap(Shell, (m) => Stream.runHead(Stream.filter(m.changes, (s) => s.assistant === "Bar"))));
+    await shellReaches(runtime, (s) => s.assistant === "Bar");
     (document.activeElement as HTMLElement | null)?.blur();
 
     const grabber = document.querySelector<HTMLButtonElement>("button[aria-label='Open conversation']");
     expect(grabber).not.toBeNull();
     grabber?.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true, clientY: 760, pointerId: 2, pointerType: "touch", isPrimary: true }));
     grabber?.dispatchEvent(new PointerEvent("pointerup", { bubbles: true, clientY: 760, pointerId: 2, pointerType: "touch", isPrimary: true }));
-    await runtime.runPromise(Effect.flatMap(Shell, (m) => Stream.runHead(Stream.filter(m.changes, (s) => s.assistant === "Sheet"))));
+    await shellReaches(runtime, (s) => s.assistant === "Sheet");
     expect(document.activeElement).not.toBe(document.querySelector("textarea[data-alpha-composer]"));
   });
   // spec/app/assistant/dock.md, "Story: Drag Ask Alpha where I want it"; spec/app/assistant/dock.md, "A released drag lands on the bar, a sheet at a height, or the full screen"
@@ -114,13 +119,13 @@ describe("Ask Alpha dock", () => {
     finger("lostpointercapture", field, 790);
     for (const y of [600, 300, 60]) finger("pointermove", field, y);
     finger("pointerup", field, 60);
-    await runtime.runPromise(Effect.flatMap(Shell, (m) => Stream.runHead(Stream.filter(m.changes, (s) => s.assistant === "Full"))));
+    await shellReaches(runtime, (s) => s.assistant === "Full");
 
     // spec/app/assistant/dock.md, "A gesture asks the shell to raise Ask Alpha, to go back a step or two, or nothing; a press that did not move is a tap on its control": a press on the bar that does not move leaves Ask Alpha on the bar
     for (let step = 0; step < 3 && (await runtime.runPromise(Effect.flatMap(Shell, (m) => m.get()))).assistant !== "Bar"; step++) {
       await runtime.runPromise(Effect.flatMap(Shell, (m) => m.send({ type: "goBack" })));
     }
-    await runtime.runPromise(Effect.flatMap(Shell, (m) => Stream.runHead(Stream.filter(m.changes, (s) => s.assistant === "Bar"))));
+    await shellReaches(runtime, (s) => s.assistant === "Bar");
     finger("pointerdown", field, 800);
     finger("pointerup", field, 800);
     const still = await runtime.runPromise(Effect.flatMap(Shell, (m) => m.get()));
@@ -133,7 +138,7 @@ describe("Ask Alpha dock", () => {
     const section = () => document.querySelector<HTMLElement>("section[aria-label='Ask Alpha']");
     const height = () => Math.round(section()?.getBoundingClientRect().height ?? 0);
     const shell = async () => (await runtime.runPromise(Effect.flatMap(Shell, (m) => m.get()))).assistant;
-    const reaches = (detent: "Bar" | "Sheet" | "Full") => runtime.runPromise(Effect.flatMap(Shell, (m) => Stream.runHead(Stream.filter(m.changes, (s) => s.assistant === detent))));
+    const reaches = (detent: "Bar" | "Sheet" | "Full") => shellReaches(runtime, (s) => s.assistant === detent);
     const pause = (ms: number) => Effect.runPromise(Effect.sleep(`${ms} millis`));
     const finger = (type: string, target: Element | null | undefined, clientY: number) =>
       target?.dispatchEvent(new PointerEvent(type, { bubbles: true, cancelable: true, clientY, pointerId: 11, pointerType: "touch", isPrimary: true }));
@@ -200,7 +205,7 @@ describe("Ask Alpha dock", () => {
     /** How opaque a computed colour is: its alpha, or 1 when it names none. */
     const alphaOf = (color: string) => color === "transparent" ? 0 : Number(/(?:rgba\([^)]*,|\/)\s*([\d.]+)\)$/.exec(color)?.[1] ?? 1);
     await page.getByRole("button", { name: "Open conversation" }).click();
-    await runtime.runPromise(Effect.flatMap(Shell, (m) => Stream.runHead(Stream.filter(m.changes, (s) => s.assistant === "Sheet"))));
+    await shellReaches(runtime, (s) => s.assistant === "Sheet");
     await Effect.runPromise(Effect.sleep("600 millis"));
     const sheetTalk = section()?.querySelector("button[aria-label='Talk']");
     expect(alphaOf(getComputedStyle(sheetTalk as Element).backgroundColor)).toBe(1);
@@ -229,7 +234,7 @@ describe("Ask Alpha dock", () => {
     const { runtime } = await mountDock({ view: "Home" });
     const section = () => document.querySelector<HTMLElement>("section[aria-label='Ask Alpha']");
     await page.getByRole("button", { name: "Open conversation" }).click();
-    await runtime.runPromise(Effect.flatMap(Shell, (m) => Stream.runHead(Stream.filter(m.changes, (s) => s.assistant === "Sheet"))));
+    await shellReaches(runtime, (s) => s.assistant === "Sheet");
     await Effect.runPromise(Effect.sleep("600 millis"));
     const fitted = section()?.getBoundingClientRect().height ?? 0;
     section()?.querySelector("[role='log'] > div")?.append(Object.assign(document.createElement("div"), { style: "height: 400px; flex-shrink: 0" }));
@@ -321,7 +326,7 @@ describe("Ask Alpha dock", () => {
     await expect.poll(() => document.querySelector("section[aria-label='Ask Alpha']")?.getAttribute("data-alpha-detent")).toBe("sheet");
     expect((await runtime.runPromise(Effect.flatMap(Shell, (m) => m.get()))).assistant).toBe("Bar");
     holder()?.dispatchEvent(new PointerEvent("pointerup", { bubbles: true, clientY: 700, pointerId: 3, pointerType: "touch", isPrimary: true }));
-    await runtime.runPromise(Effect.flatMap(Shell, (m) => Stream.runHead(Stream.filter(m.changes, (s) => s.assistant === "Sheet"))));
+    await shellReaches(runtime, (s) => s.assistant === "Sheet");
     expect(document.querySelector("section[aria-label='Ask Alpha']")?.getAttribute("data-alpha-detent")).toBe("sheet");
   });
 });

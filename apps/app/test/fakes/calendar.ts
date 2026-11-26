@@ -134,7 +134,7 @@ export function agentEvent(title: string, begin: number, end: number, more: Part
   };
 }
 
-const etag = (event: FakeEvent) => (typeof event.metadata["etag"] === "string" ? event.metadata["etag"] : "");
+const etag = (event: FakeEvent) => { const tag = event.metadata["etag"]; return typeof tag === "string" ? tag : ""; };
 const bump = (event: FakeEvent) => { event.metadata = { ...event.metadata, etag: String(Number(etag(event)) + 1) }; };
 const never = () => new Promise<Response>(() => {});
 const base = "/api/lifeops/calendar";

@@ -47,13 +47,13 @@ export const startupMainAction = "h-13 w-full rounded-md bg-primary text-base le
  * outside it ignored, and Escape doing `onEscape`.
  */
 export function useStartupPanel(onEscape: () => void) {
-  const heading = useRef<HTMLHeadingElement>(null);
+  const headingRef = useRef<HTMLHeadingElement>(null);
   const content: ComponentProps<typeof DialogContent> = {
     className: startupPanel,
     "aria-describedby": undefined,
     onOpenAutoFocus: (event) => {
       event.preventDefault();
-      heading.current?.focus({ preventScroll: true });
+      headingRef.current?.focus({ preventScroll: true });
     },
     onInteractOutside: (event) => event.preventDefault(),
     onEscapeKeyDown: (event) => {
@@ -61,7 +61,7 @@ export function useStartupPanel(onEscape: () => void) {
       onEscape();
     },
   };
-  return { heading, content };
+  return { headingRef, content };
 }
 
 /**
@@ -71,15 +71,15 @@ export function useStartupPanel(onEscape: () => void) {
  */
 export function StartupAccessPanel({ rows, current, review = false, place, continueReady = true, native, notice, onAct, onContinue, onSkip, onDone }: StartupAccessPanelProps) {
   const said = notice ? notices[notice] : undefined;
-  const { heading, content } = useStartupPanel(() => {
+  const { headingRef, content } = useStartupPanel(() => {
     if (review) onDone?.();
   });
   return (
     <Dialog open>
       <DialogContent {...content}>
         <div className="m-auto flex w-full max-w-90 flex-col">
-          <DialogTitle ref={heading} tabIndex={-1} className={startupHeading}>Access</DialogTitle>
-          {place ? <p role="status" className="mb-2 text-center text-sm leading-[1.5] text-muted-foreground">Step {place.step} of {place.count}</p> : null}
+          <DialogTitle ref={headingRef} tabIndex={-1} className={startupHeading}>Access</DialogTitle>
+          {place ? <p role="status" className="mb-2 text-center text-sm leading-chat text-muted-foreground">Step {place.step} of {place.count}</p> : null}
           <ol>
             {rows.map((row) => (
               <StartupAccessRow key={row.access} {...row} native={native} current={row.access === current} onAct={onAct && row.action ? () => onAct(row.access) : undefined} />

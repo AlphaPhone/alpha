@@ -7,6 +7,8 @@ import { Machine as Composer } from "../gen/app__assistant__composer.effect.vibe
 import { Machine as Dock } from "../gen/app__assistant__dock.effect.vibe";
 import { Machine as Shell } from "../gen/app__shell.effect.vibe";
 import { Machine as Canvas } from "../gen/app__shell__keyboard.effect.vibe";
+import type { Dock as DockState } from "../gen/app__assistant__dock.ts";
+import type { Shell as ShellState } from "../gen/app__shell.ts";
 import assistant from "../src/assistant/index.tsx";
 import { button, closeAll, drawn, fill, only, open, pressOnTop, until, seen } from "./alpha.tsx";
 import { closeAllDocks, mountDock } from "./dock-support.tsx";
@@ -34,9 +36,25 @@ async function showAttachments() {
   await expect.poll(() => named("Attach files")).not.toBeNull();
 }
 
+type DockRuntime = Awaited<ReturnType<typeof mountDock>>["runtime"];
+
+/** Wait until the shell is in a state `ok` admits. */
+const shellReaches = (runtime: DockRuntime, ok: (state: ShellState) => boolean) =>
+  runtime.runPromise(Effect.flatMap(Shell, (m) => Stream.runHead(Stream.filter(m.changes, ok))));
+
+/** Wait until the dock is in a state `ok` admits. */
+const dockReaches = (runtime: DockRuntime, ok: (state: DockState) => boolean) =>
+  runtime.runPromise(Effect.flatMap(Dock, (m) => Stream.runHead(Stream.filter(m.changes, ok))));
+
+/** Ask Alpha rests as the whole bar, not tucked into the pill. */
+async function expectWholeBar(runtime: DockRuntime) {
+  expect((await runtime.runPromise(Effect.flatMap(Dock, (m) => m.get()))).tucked).toBe(false);
+  expect(document.querySelector("[data-alpha-input-bar]")).not.toBeNull();
+  expect(document.querySelector("[data-alpha-compact-dock]")).toBeNull();
+}
+
 /** Wait until Ask Alpha rests at `detent`. */
-const resting = (runtime: Awaited<ReturnType<typeof mountDock>>["runtime"], detent: "Bar" | "Typing") =>
-  runtime.runPromise(Effect.flatMap(Shell, (m) => Stream.runHead(Stream.filter(m.changes, (s) => s.assistant === detent))));
+const resting = (runtime: DockRuntime, detent: "Bar" | "Typing") => shellReaches(runtime, (s) => s.assistant === detent);
 
 /** Ask Alpha rests on the bar and Calendar is still the app shown. */
 const restsOverCalendar = async (runtime: Awaited<ReturnType<typeof mountDock>>["runtime"]) =>
@@ -50,7 +68,7 @@ async function typingOverCalendar() {
     await resting(runtime, "Typing");
   });
   const textarea = document.querySelector<HTMLTextAreaElement>("textarea[data-alpha-composer]");
-  await act(async () => { textarea?.focus(); });
+  await drawn(() => { textarea?.focus(); });
   return { runtime, textarea };
 }
 
@@ -185,7 +203,7 @@ describe("Ask Alpha dock and shell navigation", () => {
 
     await act(async () => {
       textarea?.focus();
-      await runtime.runPromise(Effect.flatMap(Shell, (m) => Stream.runHead(Stream.filter(m.changes, (s) => s.assistant === "Typing"))));
+      await shellReaches(runtime, (s) => s.assistant === "Typing");
     });
     await act(async () => {
       await runtime.runPromise(Effect.flatMap(Canvas, (m) => Stream.runHead(Stream.filter(m.changes, (s) => s.field === "Composer"))));
@@ -238,13 +256,13 @@ describe("Ask Alpha dock and shell navigation", () => {
 
     await act(async () => {
       openBtn?.click();
-      await runtime.runPromise(Effect.flatMap(Shell, (m) => Stream.runHead(Stream.filter(m.changes, (s) => s.assistant === "Sheet"))));
+      await shellReaches(runtime, (s) => s.assistant === "Sheet");
     });
     expect(document.activeElement).not.toBe(document.querySelector("textarea[data-alpha-composer]"));
 
     await act(async () => {
       document.querySelector<HTMLButtonElement>("button[aria-label='Resize chat']")?.click();
-      await runtime.runPromise(Effect.flatMap(Shell, (m) => Stream.runHead(Stream.filter(m.changes, (s) => s.assistant === "Full"))));
+      await shellReaches(runtime, (s) => s.assistant === "Full");
       await runtime.runPromise(Effect.flatMap(Shell, (m) => m.send({ type: "goBack" })));
     });
     expect((await runtime.runPromise(Effect.flatMap(Shell, (m) => m.get()))).assistant).toBe("Sheet");
@@ -258,7 +276,7 @@ describe("Ask Alpha dock and shell navigation", () => {
 
     await act(async () => {
       await runtime.runPromise(Effect.flatMap(Shell, (m) => m.send({ type: "goBack" })));
-      await runtime.runPromise(Effect.flatMap(Dock, (m) => Stream.runHead(Stream.filter(m.changes, (s) => s.kept === 0))));
+      await dockReaches(runtime, (s) => s.kept === 0);
     });
     expect((await runtime.runPromise(Effect.flatMap(Shell, (m) => m.get()))).assistant).toBe("Bar");
   });
@@ -270,7 +288,7 @@ describe("Ask Alpha dock and shell navigation", () => {
     const at = (type: string, y: number, target: EventTarget = window) =>
       underAct(() => { target.dispatchEvent(new PointerEvent(type, { bubbles: true, clientY: y, pointerId: 5, pointerType: "touch", isPrimary: true })); });
     const shell = () => runtime.runPromise(Effect.flatMap(Shell, (m) => m.get()));
-    const pressed = () => runtime.runPromise(Effect.flatMap(Dock, (m) => Stream.runHead(Stream.filter(m.changes, (s) => s.gesture !== "Idle"))));
+    const pressed = () => dockReaches(runtime, (s) => s.gesture !== "Idle");
 
     const mark = document.querySelector<HTMLElement>("button[aria-label='Open conversation']");
     expect(mark).not.toBeNull();
@@ -281,7 +299,7 @@ describe("Ask Alpha dock and shell navigation", () => {
     expect([section()?.getAttribute("data-alpha-detent"), section()?.style.height]).toEqual(["sheet", "290px"]);
     expect((await shell()).assistant).toBe("Bar");
     await at("pointerup", 500, section() ?? window);
-    await act(async () => { await runtime.runPromise(Effect.flatMap(Shell, (m) => Stream.runHead(Stream.filter(m.changes, (s) => s.assistant === "Sheet")))); });
+    await act(async () => { await shellReaches(runtime, (s) => s.assistant === "Sheet"); });
 
     // spec/app/assistant/dock.md, "A released drag lands on the bar, a sheet at a height, or the full screen": pulled to the floor by its handle, the open sheet follows and rests on the bar
     const handle = document.querySelector<HTMLElement>("button[aria-label='Resize chat']");
@@ -292,7 +310,7 @@ describe("Ask Alpha dock and shell navigation", () => {
     await at("pointermove", 740, handle ?? window);
     expect([section()?.style.height, section()?.style.opacity]).toEqual(["0px", "0"]);
     await at("pointerup", 740, handle ?? window);
-    await act(async () => { await runtime.runPromise(Effect.flatMap(Shell, (m) => Stream.runHead(Stream.filter(m.changes, (s) => s.assistant === "Bar")))); });
+    await act(async () => { await shellReaches(runtime, (s) => s.assistant === "Bar"); });
     // spec/app/assistant/dock.md, "Story: Drag Ask Alpha where I want it": as v119's retire did (45f6bed30 chat-overlay-motion-adapter.ts:613-651), the bar is Ask Alpha at once while the sheet fades over it
     await act(async () => { await Effect.runPromise(Effect.sleep("700 millis")); });
     expect(section()?.getAttribute("data-alpha-detent")).toBe("bar");
@@ -302,7 +320,7 @@ describe("Ask Alpha dock and shell navigation", () => {
   it("puts the sheet away onto a bar whose Talk was never the sheet's (spec/app/assistant/dock.md, \"Story: Drag Ask Alpha where I want it\")", async () => {
     const { runtime } = await mountDock({ view: "Home", flush: underAct, speech: { onTalk: () => undefined } });
     const section = () => document.querySelector<HTMLElement>("section[aria-label='Ask Alpha']");
-    const settled = (detent: "Sheet" | "Bar") => act(async () => { await runtime.runPromise(Effect.flatMap(Shell, (m) => Stream.runHead(Stream.filter(m.changes, (s) => s.assistant === detent)))); });
+    const settled = (detent: "Sheet" | "Bar") => act(async () => { await shellReaches(runtime, (s) => s.assistant === detent); });
     await underAct(() => { named<HTMLButtonElement>("Open conversation")?.click(); });
     await settled("Sheet");
     const sheetTalk = section()?.querySelector<HTMLButtonElement>("button[aria-label='Talk']");
@@ -321,7 +339,7 @@ describe("Ask Alpha dock and shell navigation", () => {
     const raise = () => act(async () => {
       await runtime.runPromise(Effect.flatMap(Shell, (m) => m.send({ type: "raise", detent: "Sheet" })));
     });
-    const lowered = () => act(async () => { await runtime.runPromise(Effect.flatMap(Shell, (m) => Stream.runHead(Stream.filter(m.changes, (s) => s.assistant === "Bar")))); });
+    const lowered = () => act(async () => { await shellReaches(runtime, (s) => s.assistant === "Bar"); });
     const on = (target: Element | null, type: string, y: number) =>
       underAct(() => { target?.dispatchEvent(new PointerEvent(type, { bubbles: true, clientX: 40, clientY: y, pointerId: 9, pointerType: "touch", isPrimary: true })); });
     const scrim = () => document.querySelector("[data-alpha-chat-scrim]");
@@ -439,9 +457,7 @@ describe("Ask Alpha dock and shell navigation", () => {
       field?.blur();
       await resting(runtime, "Bar");
     });
-    expect((await dockState()).tucked).toBe(false);
-    expect(document.querySelector("[data-alpha-input-bar]")).not.toBeNull();
-    expect(document.querySelector("[data-alpha-compact-dock]")).toBeNull();
+    await expectWholeBar(runtime);
 
     await act(async () => {
       field?.focus();
@@ -455,16 +471,14 @@ describe("Ask Alpha dock and shell navigation", () => {
     await act(async () => { await Effect.runPromise(Effect.sleep("450 millis")); });
     await act(async () => {
       named<HTMLButtonElement>("Open conversation")?.click();
-      await runtime.runPromise(Effect.flatMap(Shell, (m) => Stream.runHead(Stream.filter(m.changes, (s) => s.assistant === "Sheet"))));
+      await shellReaches(runtime, (s) => s.assistant === "Sheet");
     });
     await expect.poll(async () => (await dockState()).tucked).toBe(false);
     await act(async () => {
       named<HTMLButtonElement>("Minimize chat")?.click();
       await resting(runtime, "Bar");
     });
-    expect((await dockState()).tucked).toBe(false);
-    expect(document.querySelector("[data-alpha-input-bar]")).not.toBeNull();
-    expect(document.querySelector("[data-alpha-compact-dock]")).toBeNull();
+    await expectWholeBar(runtime);
 
     await act(async () => {
       await runtime.runPromise(Effect.flatMap(Shell, (m) => m.send({ type: "openView", view: "Browser" })));
@@ -529,6 +543,14 @@ describe("Ask Alpha dock and shell navigation", () => {
     const animateDescriptor = Object.getOwnPropertyDescriptor(HTMLElement.prototype, "animate");
     let animateCalls = 0;
     let reduced = true;
+    /** A slow short pull leaves Ask Alpha typing in the focused field with the bar unstyled, after `animations` animations in all. */
+    const pullStaysTyping = async (pointerId: number, animations: number) => {
+      await slowShortPull(pointerId);
+      expect(animateCalls).toBe(animations);
+      expect((await shellState()).assistant).toBe("Typing");
+      expect(document.activeElement).toBe(field);
+      expect([bar?.style.transform, bar?.style.opacity, bar?.style.transition, bar?.style.animation]).toEqual(["", "", "", ""]);
+    };
     Object.defineProperty(HTMLElement.prototype, "animate", {
       configurable: true,
       writable: true,
@@ -542,18 +564,10 @@ describe("Ask Alpha dock and shell navigation", () => {
     const originalMatch = window.matchMedia.bind(window);
     const media = vi.spyOn(window, "matchMedia").mockImplementation((query) => query === "(prefers-reduced-motion: reduce)" ? reducedQuery : originalMatch(query));
     try {
-      await slowShortPull(32);
-      expect(animateCalls).toBe(0);
-      expect((await shellState()).assistant).toBe("Typing");
-      expect(document.activeElement).toBe(field);
-      expect([bar?.style.transform, bar?.style.opacity, bar?.style.transition, bar?.style.animation]).toEqual(["", "", "", ""]);
+      await pullStaysTyping(32, 0);
 
       reduced = false;
-      await slowShortPull(33);
-      expect(animateCalls).toBe(1);
-      expect((await shellState()).assistant).toBe("Typing");
-      expect(document.activeElement).toBe(field);
-      expect([bar?.style.transform, bar?.style.opacity, bar?.style.transition, bar?.style.animation]).toEqual(["", "", "", ""]);
+      await pullStaysTyping(33, 1);
     } finally {
       media.mockRestore();
       if (animateDescriptor) Object.defineProperty(HTMLElement.prototype, "animate", animateDescriptor);
@@ -682,11 +696,11 @@ describe("Ask Alpha dock and shell navigation", () => {
     const { runtime } = await mountDock({ view: "Home", flush: underAct, speech: { onTalk: () => undefined } });
     const dockState = () => runtime.runPromise(Effect.flatMap(Dock, (m) => m.get()));
     const shellState = () => runtime.runPromise(Effect.flatMap(Shell, (m) => m.get()));
-    const pressed = () => runtime.runPromise(Effect.flatMap(Dock, (m) => Stream.runHead(Stream.filter(m.changes, (s) => s.gesture !== "Idle"))));
+    const pressed = () => dockReaches(runtime, (s) => s.gesture !== "Idle");
 
     await act(async () => {
       named<HTMLButtonElement>("Open conversation")?.click();
-      await runtime.runPromise(Effect.flatMap(Shell, (m) => Stream.runHead(Stream.filter(m.changes, (s) => s.assistant === "Sheet"))));
+      await shellReaches(runtime, (s) => s.assistant === "Sheet");
     });
     const handle = document.querySelector<HTMLElement>("button[aria-label='Resize chat']");
     expect(handle).not.toBeNull();
@@ -699,31 +713,29 @@ describe("Ask Alpha dock and shell navigation", () => {
     await at("pointerup", 740);
     await act(async () => { await resting(runtime, "Bar"); });
     expect((await shellState()).assistant).toBe("Bar");
-    expect((await dockState()).tucked).toBe(false);
-    expect(document.querySelector("[data-alpha-input-bar]")).not.toBeNull();
-    expect(document.querySelector("[data-alpha-compact-dock]")).toBeNull();
+    await expectWholeBar(runtime);
   });
 
   // spec/app/assistant/search.md, "Story: Search my conversations"; spec/app/assistant/attachments.md, "Story: Choose files to attach"
   it("the Chat actions menu offers only Attach media and Search chat on the resting bar and open sheet", async () => {
     const { runtime } = await mountDock({ view: "Home", flush: underAct });
     const menuItems = () => [...document.querySelectorAll<HTMLElement>("[role=menuitem]")].map((item) => item.textContent);
+    const offersAttachAndSearch = async () => {
+      await underAct(() => {
+        named("Chat actions")?.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+      });
+      expect(menuItems()).toEqual(["Attach media", "Search chat"]);
+    };
 
-    await underAct(() => {
-      named("Chat actions")?.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
-    });
-    expect(menuItems()).toEqual(["Attach media", "Search chat"]);
+    await offersAttachAndSearch();
     await underAct(() => {
       document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
     });
 
     await act(async () => {
       named<HTMLButtonElement>("Open conversation")?.click();
-      await runtime.runPromise(Effect.flatMap(Shell, (m) => Stream.runHead(Stream.filter(m.changes, (s) => s.assistant === "Sheet"))));
+      await shellReaches(runtime, (s) => s.assistant === "Sheet");
     });
-    await underAct(() => {
-      named("Chat actions")?.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
-    });
-    expect(menuItems()).toEqual(["Attach media", "Search chat"]);
+    await offersAttachAndSearch();
   });
 });
