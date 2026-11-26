@@ -1,14 +1,14 @@
 // spec/app/files/preview.md, "Story: Look at a file"; spec/app/files/preview.md, "Story: Act on the file I am looking at"; spec/app/files/preview.md, "Story: Get a file back when access was lost"; spec/app/files/recent.md, "Story: Find what I opened lately"; spec/app/files/preview.md, "The caption and Details show facts for the exact document held"
 import { validName } from "@elizaos/plugin-files-client";
-import { Alert, Button, Dialog, DialogContent, DialogTitle, FilesCard, filesCardCancel, FilesRow, Input, Menu, MenuContent, MenuItem, MenuTrigger, Spinner } from "@repo/ui";
+import { Alert, Button, cn, FilesCard, filesCardCancel, FilesRow, Input, Menu, MenuContent, MenuItem, MenuTrigger, Spinner } from "@repo/ui";
 import { Effect, Option, type ManagedRuntime } from "effect";
-import { useRef, useState } from "react";
-import { ChevronLeft, ChevronRight, Ellipsis, ExternalLink, FileText, FolderInput, Info, Mail, MessageCircle, Pause, Pencil, Play, Share2, Sparkles, Trash2, X } from "lucide-react";
+import { useCallback, useRef, useState } from "react";
+import { AudioLines, ChevronLeft, ChevronRight, Ellipsis, ExternalLink, FileArchive, FileText, FolderInput, Image, Info, Mail, MessageCircle, Pause, Pencil, Play, Receipt, Share2, Sparkles, Trash2, Video, X, type LucideIcon } from "lucide-react";
 import type { Machine as Browser } from "../../gen/app__files.effect.vibe";
 import { previewActionReady } from "../../gen/app__files.ts";
 import { useMachine as useFiles } from "../../gen/app__files.react.ts";
 import type { Machine } from "../../gen/app__files__preview.effect.vibe";
-import { loaded, showing, showsFileFacts, usable } from "../../gen/app__files__preview.ts";
+import { type Kind, loaded, showing, showsFileFacts, usable } from "../../gen/app__files__preview.ts";
 import { useMachine } from "../../gen/app__files__preview.react.ts";
 import type { Machine as RecentMachine } from "../../gen/app__files__recent.effect.vibe";
 import { useMachine as useRecent } from "../../gen/app__files__recent.react.ts";
@@ -21,10 +21,13 @@ import { useMachine as useDrafts } from "../../gen/app__inbox__drafts.react.ts";
 import { changedOn, folderLocation, parentPath, sized } from "./entries.vibe";
 import { Handles } from "./handles.vibe";
 import { Opened, emailAccount, pictureFits } from "./preview.vibe";
+import { launcherInnerHeader, launcherTop } from "../shell/launcherFrame.ts";
 
 /** Develop's File actions: a 220px panel under the header, ringed, with 44px rows and 20px icons. */
 const actionsPanel = "w-55 min-w-0 rounded-tile p-1.5 ring-1 ring-border shadow-popup dark:shadow-popup-dark";
 const actionRow = "min-h-11 rounded-lg px-3.5 py-2 [&_svg]:size-5";
+/** The icon v119 drew before a preview's facts (`template.html:3230`), by what the file is. */
+const kindIcons: Record<Kind, LucideIcon> = { Media: Video, Photo: Image, Text: FileText, Archive: FileArchive, Pdf: FileText, Receipt };
 const fully = new Intl.DateTimeFormat(undefined, { year: "numeric", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
 
 export interface PreviewProps {
@@ -55,6 +58,7 @@ export function Preview({ runtime, today }: PreviewProps) {
   const nameButtonRef = useRef<HTMLButtonElement>(null);
   const [details, setDetails] = useState<{ readonly viewer: number; readonly revision: number }>();
   const [rename, setRename] = useState<{ readonly viewer: number; readonly revision: number; readonly name: string }>();
+  const focusOnOpen = useCallback((node: HTMLElement | null) => node?.focus({ preventScroll: true }), []);
   if (!state || !recent.state || !showing(state) || shell.state?.assistant === "Sheet" || shell.state?.assistant === "Full") return null;
   const owner = <E extends Parameters<typeof can>[0]>(event: E) => can(event, "Owner");
   const tell = <E extends Parameters<typeof send>[0]>(event: E) => void send(event, "Owner");
@@ -102,6 +106,7 @@ export function Preview({ runtime, today }: PreviewProps) {
   const modified = changed === "" ? undefined : new Date(revision);
   const bytes = facts?.bytes;
   const kind = { Media: "Media", Photo: "Image", Text: "Text", Archive: "Archive", Pdf: "PDF", Receipt: "Receipt" }[state.kind];
+  const KindIcon = state.kind === "Media" && file?.mimeType.startsWith("audio/") ? AudioLines : kindIcons[state.kind];
   const caption = [kind, bytes === undefined ? "" : sized(bytes), changed, location].filter(Boolean).join(" · ");
   const destination = inbox.state && drafts.state ? emailAccount(inbox.state, drafts.state) : undefined;
   const offer = { type: "useInEmail", account: destination?.account ?? 0 } as const;
@@ -112,9 +117,10 @@ export function Preview({ runtime, today }: PreviewProps) {
     setRename(undefined);
   };
   return (
-    <Dialog open onOpenChange={(open) => { if (!open && owner({ type: "close" })) tell({ type: "close" }); }}>
-      <DialogContent aria-label="Preview" aria-describedby={undefined} className="inset-x-0 top-0 flex h-dvh max-h-none w-full max-w-none translate-y-0 flex-col gap-0 overflow-hidden rounded-none border-0 bg-background p-0 text-foreground shadow-none sm:pointer-fine:max-w-103">
-        <div className="flex min-h-13 shrink-0 items-center gap-0.5 px-2 pt-[env(safe-area-inset-top)] [&_button]:size-13">
+    <section ref={focusOnOpen} role="dialog" aria-label="Preview" tabIndex={-1} data-alpha-subview="files-preview"
+      onKeyDown={(event) => { if (event.key === "Escape" && owner({ type: "close" })) { event.stopPropagation(); tell({ type: "close" }); } }}
+      className={cn("absolute inset-0 z-20 flex flex-col overflow-hidden bg-background text-foreground focus-visible:outline-none", launcherTop)}>
+        <div className={cn("flex min-h-13 shrink-0 items-center gap-0.5 px-2 pt-[env(safe-area-inset-top)] in-data-[alpha-launcher]:pt-0 [&_button]:size-13", launcherInnerHeader)}>
           {owner({ type: "close" }) && <Button variant="ghost" size="icon" aria-label="Close" onClick={() => tell({ type: "close" })}><ChevronLeft /></Button>}
           <div className="flex-1" />
           {(askAlpha || openElsewhere || forget || email || owner(picture) || share || showDetails || (showRename && !renameTitle) || owner(move) || owner(trash)) && (
@@ -136,10 +142,10 @@ export function Preview({ runtime, today }: PreviewProps) {
           )}
         </div>
         <div className="min-h-0 flex-1 touch-pan-y overflow-y-auto px-6 pt-1 pb-42">
-          <DialogTitle aria-label={renameTitle ? name : undefined} className="font-display text-title font-light break-words">
+          <h2 aria-label={renameTitle ? name : undefined} className="font-display text-title font-light break-words">
             {renameTitle ? <button ref={nameButtonRef} type="button" aria-label={`Rename ${name}`} className="block w-full text-left" onClick={startRename}>{name}</button> : name}
-          </DialogTitle>
-          {facts !== undefined && <p className="mt-2.5 mb-5 ps-7 text-sm wrap-anywhere text-muted-foreground">{caption}</p>}
+          </h2>
+          {facts !== undefined && <p className="mt-2.5 mb-5 flex items-start gap-2.5 text-sm wrap-anywhere text-muted-foreground"><KindIcon aria-hidden className="mt-px size-4.5 shrink-0" />{caption}</p>}
           {state.attempt.outcome === "Unknown" && state.offered.item === state.item && state.offered.revision === state.revision && <Alert variant="warn">Check Inbox before offering this file again</Alert>}
           {!usable(state) && <Alert variant="warn">Alpha can no longer read this file</Alert>}
           {state.content.status === "Loading" && <Spinner label="Opening the file" />}
@@ -201,8 +207,7 @@ export function Preview({ runtime, today }: PreviewProps) {
           </dl>
           <div className="mt-4.5 flex justify-end"><button type="button" aria-label="Close details" className={filesCardCancel} onClick={() => setDetails(undefined)}>Close</button></div>
         </FilesCard>
-      </DialogContent>
-    </Dialog>
+    </section>
   );
 }
 
