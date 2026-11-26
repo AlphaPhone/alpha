@@ -16,7 +16,11 @@ export const meta: ComponentMeta<InboxRecipientFieldProps> = {
     "Half typed": { value: "elena.fa" },
   },
   play: {
+    // v119 45f6bed30 prototype/model.js:1381: the To field reads "To" with no recipient and "Add" after one.
+    Empty: ({ canvasElement }: { canvasElement: HTMLElement }) => expect(within(canvasElement).getByRole("textbox", { name: "To" })).toHaveAttribute("placeholder", "To"),
+    Cc: ({ canvasElement }: { canvasElement: HTMLElement }) => expect(within(canvasElement).getByRole("textbox", { name: "Cc" })).toHaveAttribute("placeholder", "Cc"),
     Default: async ({ canvasElement }: { canvasElement: HTMLElement }) => {
+      await expect(within(canvasElement).getByRole("textbox", { name: "To" })).toHaveAttribute("placeholder", "Add");
       onRemove.mockClear();
       await userEvent.click(within(canvasElement).getByRole("button", { name: "Remove bruno@costa.example" }));
       await expect(onRemove.mock.calls).toEqual([["bruno@costa.example"]]);

@@ -20,6 +20,7 @@ export const meta: ComponentMeta<InboxListScreenProps> = {
     "Draft set aside": { aside: [{ id: "1", onOpen: fn() }] },
     "Two accounts": { accounts: [{ id: "1", email: "sam.rivera@gmail.com" }, { id: "2", email: "sam@work.example" }], onChooseAccount: fn() },
     "Searching": { searching: true, search: "tax", rows: rows.slice(3) },
+    "Searching on the launcher": { searching: true, launcher: true, onBack: undefined, search: "tax", rows: rows.slice(3) },
     "Loading first page": { loading: true, rows: [], onRefresh: undefined, onBack: undefined, state: undefined },
     "Signed out": { account: undefined, rows: [], state: "signedOut", onStateAction: fn(), onRefresh: undefined, onCompose: undefined, onChooseFolder: undefined, onSearch: undefined, onOpenSearch: undefined },
     "Needs access": { rows: [], state: "needsAccess", onStateAction: fn(), onRefresh: undefined, onCompose: undefined, onChooseFolder: undefined, onSearch: undefined },
@@ -36,6 +37,16 @@ export const meta: ComponentMeta<InboxListScreenProps> = {
       await userEvent.click(canvas.getByRole("button", { name: "Refresh" }));
       await userEvent.click(canvas.getByRole("button", { name: "Compose" }));
       await expect([onRefresh.mock.calls.length, onCompose.mock.calls.length]).toEqual([1, 1]);
+    },
+    // Off the launcher the open search keeps its Back to the folder and sets the folders aside.
+    Searching: ({ canvasElement }: { canvasElement: HTMLElement }) => {
+      const canvas = within(canvasElement);
+      return expect([Boolean(canvas.queryByRole("button", { name: "Back to inbox" })), Boolean(canvas.queryByRole("group", { name: "Folder" }))]).toEqual([true, false]);
+    },
+    // v119 45f6bed30 prototype/template.html:887-899: on the launcher the search draws no Back, and the folders stay under it.
+    "Searching on the launcher": async ({ canvasElement }: { canvasElement: HTMLElement }) => {
+      const canvas = within(canvasElement);
+      await expect([canvas.queryByRole("button", { name: /^Back/ }), Boolean(canvas.getByRole("search", { name: "Search Gmail" })), Boolean(canvas.queryByRole("group", { name: "Folder" }))]).toEqual([null, true, true]);
     },
     "Loading first page": async ({ canvasElement }: { canvasElement: HTMLElement }) => {
       await expect(within(canvasElement).getByRole("button", { name: "Refresh" })).toHaveAttribute("aria-busy", "true");
