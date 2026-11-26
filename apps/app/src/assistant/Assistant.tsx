@@ -1,4 +1,4 @@
-// spec/app/assistant/index.md, "Story: Ask Alpha something"; spec/app/assistant/index.md, "Story: Stop a reply"; spec/app/assistant/chats.md, "Story: Find my conversations"; spec/app/assistant/composer.md, "Story: Send what I wrote"; spec/app/assistant/dock.md, "Focusing the composer on the bar raises Ask Alpha to typing"; spec/app/assistant/dock.md, "Story: Drag Ask Alpha where I want it"; spec/app/assistant/dock.md, "Inside an app other than the Browser, Ask Alpha at rest is the pill; Type raises it to typing, where the whole bar shows, and a swipe up from it opens the sheet"; spec/app/assistant/search.md, "Story: Search my conversations"; spec/app/assistant/reply.md, "Story: Hear a brief acknowledgment and still get the whole answer"; spec/app/assistant/reply.md, "A recognized tool block outside a fence becomes its card; inside a fence every line stays code"
+// spec/app/assistant/index.md, "Story: Ask Alpha something"; spec/app/assistant/index.md, "Story: Stop a reply"; spec/app/assistant/chats.md, "Story: Find my conversations"; spec/app/assistant/composer.md, "Story: Send what I wrote"; spec/app/assistant/dock.md, "Focusing the composer on the bar raises Ask Alpha to typing"; spec/app/assistant/dock.md, "Sending from the bar opens the sheet, where the reply shows"; spec/app/assistant/dock.md, "Story: Drag Ask Alpha where I want it"; spec/app/assistant/dock.md, "Inside an app other than the Browser, Ask Alpha at rest is the pill; Type raises it to typing, where the whole bar shows, and a swipe up from it opens the sheet"; spec/app/assistant/search.md, "Story: Search my conversations"; spec/app/assistant/reply.md, "Story: Hear a brief acknowledgment and still get the whole answer"; spec/app/assistant/reply.md, "A recognized tool block outside a fence becomes its card; inside a fence every line stays code"
 import {
   Alert, AssistantCard, AssistantCardFrame, Button, AssistantConversation, AssistantGrabber, AssistantMessageDraftCard, AssistantNoticeCard, AssistantPhotoPreview, ConfirmDialog, Sheet, SheetContent, SmsReviewCard, Textarea,
   type AssistantAttachment, type AssistantComposerProps, type AssistantPull, type AssistantDraftNoticeProps, type AssistantMessageProps, type AssistantTurnNoteProps,
@@ -19,7 +19,7 @@ import { type Composer as Writing, Machine as ComposerMachine } from "../../gen/
 import { attachments as attachmentCount, content, maxFiles, textLimit } from "../../gen/app__assistant__composer.ts";
 import { useMachine as useComposer } from "../../gen/app__assistant__composer.react.ts";
 import type { Machine as DockMachine } from "../../gen/app__assistant__dock.effect.vibe";
-import { browserFieldPull, focused as dockFocused, isOpen as dockOpen, tapped as dockTapped } from "../../gen/app__assistant__dock.ts";
+import { browserFieldPull, focused as dockFocused, isOpen as dockOpen, sent as dockSent } from "../../gen/app__assistant__dock.ts";
 import { useMachine as useDock } from "../../gen/app__assistant__dock.react.ts";
 import type { Machine as ReplyMachine } from "../../gen/app__assistant__reply.effect.vibe";
 import { liveAddsToHistory } from "../../gen/app__assistant__reply.ts";
@@ -640,7 +640,7 @@ export function Assistant({ runtime, messageActions, speech, canReadAloud = fals
   const raiseAll = (asks: ReturnType<typeof dockFocused>) => {
     for (const ask of asks) if (ask.tag === "Raise" && shell.can({ type: "raise", detent: ask.detent })) void shell.send({ type: "raise", detent: ask.detent });
   };
-  const openSheet = () => raiseAll(dockTapped(assistantDetent));
+  const openSheet = () => raiseAll(dockSent(assistantDetent));
   const revealComposer = () => {
     const typing = { type: "raise", detent: "Typing" } as const;
     if (!shell.can(typing)) return;

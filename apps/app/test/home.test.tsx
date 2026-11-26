@@ -187,11 +187,9 @@ describe("Home on a phone", () => {
     await hardware("back");
     await until(alpha, alpha.runtime, Shell, (state) => state.drawer && state.assistant === "Bar");
     expect(dialog()).not.toBeNull();
-    const composer = document.activeElement;
-    expect(composer?.getAttribute("aria-label")).toBe("Message Alpha");
     await hardware("back");
     await until(alpha, alpha.runtime, Shell, (state) => !state.drawer);
-    expect(document.activeElement).toBe(composer);
+    await focusedAfterFrames(button("Apps"));
 
     await press("Apps");
     await until(alpha, alpha.runtime, Shell, (state) => state.drawer);

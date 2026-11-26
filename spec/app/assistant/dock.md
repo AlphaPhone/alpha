@@ -300,14 +300,25 @@ pure def lawTheKeyboardLiftsNothingElse(keyboard: int, navigation: int): bool =
 ### Focusing the composer on the bar raises Ask Alpha to typing
 
 As on v121, a tap in the resting bar's field types there: the bar rises
-above the keyboard and the page keeps its place behind it. Only sending,
-Alpha's mark or a swipe up opens the conversation sheet.
+above the keyboard and the page keeps its place behind it.
 
 ```quint
 pure def focused(detent: S::Detent): List[Effect] = if (detent == S::Bar) List(Raise({ detent: S::Typing })) else List()
 
 pure def lawFocusingTheBarTypes(phone: S::Shell): bool =
   applied(focused(phone.assistant), phone).assistant == (if (phone.assistant == S::Bar) S::Typing else phone.assistant)
+```
+
+### Sending from the bar opens the sheet, where the reply shows
+
+As on v121, a message sent from the bar or while typing on it opens the
+conversation sheet; an open sheet or the full screen stays as it is.
+
+```quint
+pure def sent(detent: S::Detent): List[Effect] = if (not(isOpen(detent))) List(Raise({ detent: S::Sheet })) else List()
+
+pure def lawSendingShowsTheReply(phone: S::Shell): bool =
+  applied(sent(phone.assistant), phone).assistant == (if (not(isOpen(phone.assistant))) S::Sheet else phone.assistant)
 ```
 
 ### A tap of Alpha's mark opens the sheet, and a tap of the open sheet's handle fills the screen

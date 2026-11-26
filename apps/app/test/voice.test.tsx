@@ -905,7 +905,8 @@ describe("Talk from Ask Alpha's composer (spec/app/voice/index.md, \"Story: Hold
     const typed = world.ask.metadata.at(-1);
     expect(typed).toMatchObject({ observation: { view: "home", sensitive: false, location: { latitude: 43.73, longitude: 7.42 } }, viewDelivery: "completed-action" });
 
-    await drawn(() => alpha.runtime.runPromise(Effect.flatMap(Shell.Machine, (machine) => machine.send({ type: "raise", detent: "Sheet" }))));
+    // spec/app/assistant/dock.md, "Sending from the bar opens the sheet, where the reply shows"
+    await drawnUntil(alpha, area, Shell.Machine, (s) => s.assistant === "Sheet");
     await press("Talk");
     await drawnUntil(alpha, area, Voice.Machine, (s) => s.phase === "Listening" && s.mic === "On");
     await drawn(() => vi.waitFor(() => expect([...world.platform.listening].some(({ topic }) => topic === "voice")).toBe(true)));
