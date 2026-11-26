@@ -1,9 +1,10 @@
-// spec/app/assistant/index.md, "Alpha asks the agent to warm up at launch, on return to the foreground and when Ask Alpha is raised from its bar, only while the agent can answer, and shows nothing of it"
+// spec/app/assistant/index.md, "Alpha asks the agent to warm up at launch, on return to the foreground, after a sign-in and when Ask Alpha is raised from its bar, only while the agent can answer, and shows nothing of it"
 import { Machine as Conversation, asksWarmUp, raisedFromTheBar, type WarmTrigger } from "../../gen/app__assistant.effect.vibe"
 import { type Detent, Machine as Shell } from "../../gen/app__shell.effect.vibe"
 import { Agent } from "../platform/agent.vibe"
 import { Device } from "../platform/device.vibe"
 import { ask } from "../platform/remote.vibe"
+import { VoiceBridge } from "../platform/voice.vibe"
 import { started } from "../runtime/reactor.vibe"
 import { MediaReview } from "./media-review.vibe"
 
@@ -27,10 +28,11 @@ effect function asked(trigger: WarmTrigger): void!!(Agent | MediaReview | Conver
   fork.detached ignore(timeout(warmUp(trigger), bound))
 }
 
-/** Each moment the owner may be about to talk: Ask Alpha loaded at launch, Alpha back in the foreground, Ask Alpha raised from its bar. */
+/** Each moment the owner may be about to talk: Ask Alpha loaded at launch, Alpha back in the foreground, the phone's sign-in settled, Ask Alpha raised from its bar. The only warm-up of the agent; Talk's warms speech alone. */
 export const agentWarmUp = started(effect {
   const device = try Device
   const shell = try Shell
+  const signIns = Stream.map((try VoiceBridge).signIns, (): WarmTrigger => "SignedIn")
   try asked("Launched")
   let detent: Detent = (try shell.get()).assistant
   const foreground = Stream.map(Stream.filter(device.visible, (shown) => shown), (): WarmTrigger => "Foreground")
@@ -40,5 +42,5 @@ export const agentWarmUp = started(effect {
     return raisedFromTheBar(before, state.assistant)
   })
   const raised = Stream.map(raisedStates, (): WarmTrigger => "Raised")
-  try Stream.runForEach(Stream.merge(foreground, raised), asked)
-}, "warming the agent on launch, foreground and Ask Alpha raised")
+  try Stream.runForEach(Stream.mergeAll([foreground, signIns, raised], { concurrency: "unbounded" }), asked)
+}, "warming the agent on launch, foreground, sign-in and Ask Alpha raised")
