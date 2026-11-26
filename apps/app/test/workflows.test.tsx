@@ -400,7 +400,6 @@ describe("Workflows", () => {
     world.image = true;
     const proposal = await workflowPhoneOffer(world.workflows, world.notes.owner, kind);
     world.telephony.textReview = proposal;
-    world.voice.onDevice = kind === "speak_text";
     if (scenario === "speak_text_stopped") world.voice.playbackHold = () => new Promise<void>(() => {});
     const notices = nativeApprovalNotices();
     world.workflows.nativeNotices = notices;
