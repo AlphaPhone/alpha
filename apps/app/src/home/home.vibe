@@ -2,7 +2,7 @@
 import * as KeyValueStore from "effect/persistence/KeyValueStore"
 import * as Home from "../../gen/app__home.effect.vibe"
 import * as Drawer from "../../gen/app__home__drawer.effect.vibe"
-import type { Actor, Effect as Out, Event, Host } from "../../gen/app__home.effect.vibe"
+import type { Actor, AndroidVisit, Effect as Out, Event, Host } from "../../gen/app__home.effect.vibe"
 import { type Ask, waiting } from "../../gen/app__home__android.effect.vibe"
 import type { Tile } from "../../gen/app__home__tiles.effect.vibe"
 import * as Shell from "../../gen/app__shell.effect.vibe"
@@ -62,8 +62,15 @@ effect function readApps(ticket: number): Event!!(Launcher | Device | Home.Machi
 }
 
 // spec/app/home/index.md, "Android's answer ends the wait; a refusal is told with its reason, and the apps are read again"
-effect function asked(ask: Ask, ticket: number): Event!!Launcher {
+effect function asked(ask: Ask, ticket: number, visit: AndroidVisit): Event!!(Launcher | Home.Machine | Shell.Machine | Device | Canvas | Layers.Machine) {
   const launcher = try Launcher
+  if (visit.tag === "FavoriteVisit" && ask.tag === "OpenApp") {
+    const admits = try favoriteVisit(ask.app, visit.route, visit.beside)
+    const shell = try (try Shell.Machine).get()
+    const home = try (try Home.Machine).get()
+    if (!Home.canRetireOpening(home, ticket) || home.handoff.ask.tag !== "OpenApp"
+      || home.handoff.ask.app !== ask.app || !admits(home, shell)) return { type: "retireOpening", ticket }
+  }
   const app = ask.tag === "Shade" ? undefined : catalog.app(ask.app)
   const said = ask.tag === "Shade"
     ? (try launcher.shade())
@@ -166,6 +173,22 @@ effect function homeInput(beside: boolean) {
     && (!beside || landscapeHomeInput(Effect.runSync(canvas.get()), coarsePointer()))
 }
 
+// spec/app/home/index.md, "A favorite on bare Home or beside the landscape Ask sheet opens the installed app and leaves Ask where it is"
+effect function favoriteVisit(app: string, route: number, beside: boolean) {
+  const free = try homeInput(beside)
+  return (home: Home.Home, shell: Shell.Shell) => shell.route === route && Home.favoriteAt(home, app, shell, beside) && free()
+}
+
+export effect function openHomeFavorite(app: string, route: number, beside: boolean) {
+  const home = try Home.Machine
+  const shell = try Shell.Machine
+  const admits = try favoriteVisit(app, route, beside)
+  const showing = try shell.get()
+  if (!admits(try home.get(), showing)) return
+  const event = { type: "openFavorite", app, shell: showing, beside, now: untimed } as const
+  try contained(home.send(event, owner, (state) => admits(state, Effect.runSync(shell.get()))), "choosing an installed favorite")
+}
+
 // spec/app/shell/index.md, "Apps can open beside the landscape Ask sheet and Close leaves Ask open"; spec/app/shell/index.md, "The Apps drawer opens on phone Home with Ask Alpha at rest"
 effect function appsVisit(route: number, beside: boolean) {
   const free = try homeInput(beside)
@@ -238,7 +261,7 @@ function carry(fx: Out): Job<Event, KeyValueStore.KeyValueStore | Launcher | Dev
     when { tag: "ReadSaved", let ticket }: answer("saved", readSaved(ticket), { type: "savedRead", ticket, found: "Unreadable", tiles: [] }, owner);
     when { tag: "SaveHome", let tiles, let ticket }: answer("save", saveTiles(tiles, ticket), { type: "homeSaved", ticket, ok: false }, owner);
     when { tag: "ReadApps", let ticket }: answer("apps", readApps(ticket), { type: "appsRead", ticket, ok: false, listed: [], visible: false }, owner);
-    when { tag: "AskAndroid", let ask, let ticket }: answer("android", asked(ask, ticket), { type: "answered", ticket, opened: false, why: "Unable" }, owner);
+    when { tag: "AskAndroid", let ask, let ticket, let visit }: answer("android", asked(ask, ticket, visit), { type: "answered", ticket, opened: false, why: "Unable" }, owner);
     when { tag: "Go", let view, let route, let beside }: run("go", go(view, route, beside), owner);
     default: run(`tell ${fx.tag}`, tell(fx), owner);
   }

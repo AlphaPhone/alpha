@@ -37,11 +37,12 @@ type Home = {
   host: Host, installed: P::Installed,
   tiles: T::Tiles, editing: bool, adding: bool, handoff: N::Handoff,
 }
+type AndroidVisit = NoFavoriteVisit | FavoriteVisit({ route: int, beside: bool })
 type Effect =
   | ReadSaved({ ticket: int })
   | SaveHome({ tiles: List[T::Tile], ticket: int })
   | ReadApps({ ticket: int })
-  | AskAndroid({ ask: N::Ask, ticket: int })
+  | AskAndroid({ ask: N::Ask, ticket: int, visit: AndroidVisit })
   | Go({ view: S::View, route: int, beside: bool })
   | TellNotOpened({ ask: N::Ask, why: Why })
   | TellNoAnswer({ ask: N::Ask })
@@ -314,7 +315,7 @@ pure def canShowAppInfo(h: Home, app: str, shell: S::Shell, drawer: D::Drawer, b
   by == Owner and inMenu(h, app, shell, drawer) and N::canSend(h.handoff)
 
 pure def showAppInfo(h: Home, app: str, shell: S::Shell, drawer: D::Drawer, now: int, by: Actor): Moved =
-  asking(N::AppInfo({ app: app }), now, h)
+  asking(N::AppInfo({ app: app }), now, h, NoFavoriteVisit)
 ```
 
 ## Story: Open an app
@@ -343,9 +344,8 @@ The uncovered Home pane on a landscape phone with a coarse primary pointer
 can open one of Alpha's own apps. The same Shell route and layout must
 still admit that tap when the app opens. An actual covering layer, voice,
 a protected Android Ask visit, Typing, Full, and the Apps drawer still
-own their input. Cards and installed-app tiles stay visible without
-receiving input in this visit. The Apps tile follows the shell's drawer
-rule.
+own their input. Cards stay visible without receiving input in this
+visit. The Apps tile follows the shell's drawer rule.
 
 ```quint
 pure def besideHomeSheet(shell: S::Shell, landscapePhone: bool): bool =
@@ -368,14 +368,46 @@ pure def lawOnlyTheAdjacentSheetAdmitsAHomeTile(h: Home, view: S::View, shell: S
 An app that has gone is never sent to Android.
 
 ```quint
-pure def asking(ask: N::Ask, now: int, h: Home): Moved =
+pure def asking(ask: N::Ask, now: int, h: Home, visit: AndroidVisit): Moved =
   val handoff = N::send(h.handoff, ask, now)
-  { state: { ...h, handoff: handoff }, out: List(AskAndroid({ ask: ask, ticket: handoff.attempt.id })) }
+  { state: { ...h, handoff: handoff }, out: List(AskAndroid({ ask: ask, ticket: handoff.attempt.id, visit: visit })) }
 
 pure def canOpenApp(h: Home, app: str, by: Actor): bool =
   by == Owner and N::canSend(h.handoff) and not(h.editing) and h.installed.apps.contains(app)
 
-pure def openApp(h: Home, app: str, now: int, by: Actor): Moved = asking(N::OpenApp({ app: app }), now, h)
+pure def openApp(h: Home, app: str, now: int, by: Actor): Moved = asking(N::OpenApp({ app: app }), now, h, NoFavoriteVisit)
+```
+
+### A favorite on bare Home or beside the landscape Ask sheet opens the installed app and leaves Ask where it is
+
+Home hands Android only the favorite still shown on the same Home
+visit. Beside Ask, the phone must still have the uncovered landscape
+pane when the request reaches Android. If the visit is lost before
+handoff, Home ends the wait without an Android answer.
+
+```quint
+pure def favoriteAt(h: Home, app: str, shell: S::Shell, beside: bool): bool =
+  onPhone(h) and not(h.editing) and shell.textAsk == S::NoTextAsk
+    and (if (beside) besideHomeSheet(shell, beside) else S::layers(shell) == 0)
+    and tilesShown(h, shell).some(t => T::installs(t, app))
+
+pure def canOpenFavorite(h: Home, app: str, shell: S::Shell, beside: bool, now: int, by: Actor): bool =
+  canOpenApp(h, app, by) and favoriteAt(h, app, shell, beside)
+
+pure def openFavorite(h: Home, app: str, shell: S::Shell, beside: bool, now: int, by: Actor): Moved =
+  asking(N::OpenApp({ app: app }), now, h, FavoriteVisit({ route: shell.route, beside: beside }))
+
+pure def canRetireOpening(h: Home, ticket: int): bool =
+  N::canAnswered(h.handoff, ticket) and N::isOpening(h.handoff.ask)
+
+pure def retireOpening(h: Home, ticket: int): Home =
+  { ...h, handoff: { ...h.handoff, attempt: A::conclude(h.handoff.attempt, false, false) } }
+
+pure val eval_witness_canOpenFavorite = (
+  ("presented", AsLauncher),
+  ("savedRead", 1, T::Saved, List(T::Installed({ app: "clock" }))),
+  ("appsRead", 1, true, Set("clock"), true),
+  ("openFavorite", "clock", S::raise(S::initial, S::Sheet), true, 0, Owner))
 ```
 
 ### Nothing is opened while Home is being edited
@@ -689,7 +721,7 @@ pure def canPullDown(h: Home, shell: S::Shell, locked: bool, by: Actor): bool =
   by == Owner and h.host == AsLauncher and S::layers(shell) == 0 and not(h.editing) and N::canSend(h.handoff)
 
 pure def pullDown(h: Home, shell: S::Shell, locked: bool, now: int, by: Actor): Moved =
-  if (locked) { state: h, out: List(TellUnlockFirst) } else asking(N::Shade, now, h)
+  if (locked) { state: h, out: List(TellUnlockFirst) } else asking(N::Shade, now, h, NoFavoriteVisit)
 
 pure def lawALockedPhoneNeverAsksForTheShade(home: Home, shell: S::Shell, now: int): bool =
   val pulled = pullDown(home, shell, true, now, Owner)
@@ -752,6 +784,7 @@ pure def lawANoticeIsShownOnlyWhereTheOwnerIs(home: Home, shell: S::Shell): bool
 pure def lawTheAgentChangesNothingOnHome(home: Home, shell: S::Shell, drawer: D::Drawer, app: str, tile: T::Tile, onto: T::Tile, view: S::View, landscapePhone: bool): bool =
   not(canOpenTile(home, view, shell, Agent)) and not(canOpenTileBeside(home, view, shell, landscapePhone, Agent))
     and not(canOpenApp(home, app, Agent))
+    and not(canOpenFavorite(home, app, shell, landscapePhone, 0, Agent))
     and not(canPinInstalled(home, app, shell, drawer, Agent)) and not(canShowAppInfo(home, app, shell, drawer, Agent))
     and not(canPullDown(home, shell, false, Agent))
     and not(canAddToHome(home, tile, shell, Agent)) and not(canRemoveFromHome(home, tile, shell, Agent))

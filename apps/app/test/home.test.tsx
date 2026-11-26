@@ -161,6 +161,8 @@ describe("Home on a phone", () => {
       if (height) Object.defineProperty(window, "innerHeight", height);
     });
     const world = holdingHome({ ...scene(), phone: true });
+    const clock = "org.fixture.clock/org.fixture.clock.Main";
+    localStorage.setItem(savedKey, written([{ tag: "Own", view: "Notes" }, { tag: "Installed", app: clock }]));
     const { alpha } = await open(world, only("home", "assistant", "view:Notes"));
     const rotate = async (landscape: boolean) => {
       Object.defineProperty(window, "innerWidth", { configurable: true, value: landscape ? 844 : 390 });
@@ -172,17 +174,24 @@ describe("Home on a phone", () => {
     const homes = home.runtime(alpha);
     const dialog = () => document.querySelector('[data-alpha-apps-drawer]');
     const chat = () => document.querySelector('[data-alpha-detent="sheet"]');
-    await until(alpha, homes, Home.Machine, (state) => state.tiles.load.status === "Loaded");
+    await until(alpha, homes, Home.Machine, (state) => state.installed.read.status === "Loaded");
     await press("Open conversation");
     await until(alpha, alpha.runtime, Shell, (state) => state.assistant === "Sheet");
     expect(tileButton("view:Notes")?.closest("[inert]")).toBeNull();
     expect(button("Apps")?.closest("[inert]")).toBeNull();
+    // spec/app/home/index.md, "A favorite on bare Home or beside the landscape Ask sheet opens the installed app and leaves Ask where it is"
+    expect(tileButton(`app:${clock}`)?.closest("[inert]")).toBeNull();
+    await drawn(() => tileButton(`app:${clock}`)?.click());
+    await vi.waitFor(() => expect(world.launcher.opened).toEqual(["org.fixture.clock"]));
+    expect(chat()).not.toBeNull();
 
     await alpha.runtime.runPromise(Layers.use((layers) => layers.send({ type: "openLayer", id: "review", kind: "DialogLayer", covers: true })));
     await until(alpha, alpha.runtime, Layers, (state) => state.open.length === 1);
     expect(tileButton("view:Notes")?.closest("[inert]")).not.toBeNull();
     await press("Notes");
     await press("Apps");
+    await drawn(() => tileButton(`app:${clock}`)?.click());
+    expect(world.launcher.opened).toEqual(["org.fixture.clock"]);
     expect(await alpha.runtime.runPromise(Shell.use((shell) => shell.get()))).toMatchObject({ trail: [], drawer: false, assistant: "Sheet" });
     await alpha.runtime.runPromise(Layers.use((layers) => layers.send({ type: "closeLayer", id: "review" })));
     await until(alpha, alpha.runtime, Layers, (state) => state.open.length === 0);
@@ -206,6 +215,17 @@ describe("Home on a phone", () => {
     await press("Close apps");
     await until(alpha, alpha.runtime, Shell, (state) => !state.drawer && state.assistant === "Sheet");
     expect(dialog()).toBeNull();
+    expect(chat()).not.toBeNull();
+
+    await press("Apps");
+    await until(alpha, alpha.runtime, Shell, (state) => state.drawer && state.assistant === "Sheet");
+    const search = dialog()?.querySelector("input");
+    expect(search).toBeInstanceOf(HTMLInputElement);
+    await drawn(() => {
+      search?.focus();
+      search?.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true }));
+    });
+    await vi.waitFor(() => expect(dialog()).toBeNull());
     expect(chat()).not.toBeNull();
 
     await press("Apps");

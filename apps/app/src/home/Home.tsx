@@ -15,11 +15,10 @@ import type { Resident, Shown } from "../runtime/area.tsx";
 import { untimed } from "../runtime/reactor.vibe";
 import { coarsePointer, landscapeHomeInput, watchPrimaryPointer } from "../shell/canvas.vibe";
 import { feel } from "../shell/haptics.vibe";
-import { back } from "../shell/shell.vibe";
 import { views } from "../shell/views.tsx";
 import { useDayCards } from "./Cards.tsx";
 import { catalog, labelOf } from "./catalog.vibe";
-import { type AppsInput, actInApps, chooseApp, closeApps, openApps, openOwnTile, told } from "./home.vibe";
+import { type AppsInput, actInApps, chooseApp, closeApps, openApps, openHomeFavorite, openOwnTile, told } from "./home.vibe";
 import { launcherHeld, openNotifications, watchHomePull } from "./pull.vibe";
 import { waiting } from "./waiting.vibe";
 import type { HomeMachines } from "./index.tsx";
@@ -91,7 +90,6 @@ export function HomePage({ runtime, alpha }: Shown<HomeMachines | Resident>) {
     const app = known.apps.get(id);
     return app && app.packageName !== "ai.alphacompute.alphaphone" ? [drawerApp(id, app)] : [];
   }) : [];
-  const openInstalled = (app: string) => offered({ type: "openApp", app, now: untimed })?.();
   const opening = h.handoff.ask.tag !== "Shade" && h.handoff.attempt.outcome === "Sent" ? h.handoff.ask.app : undefined;
   const selected = drawer.state;
   const menuApp = selected?.menu;
@@ -119,7 +117,7 @@ export function HomePage({ runtime, alpha }: Shown<HomeMachines | Resident>) {
       appCards={Home.showsCards(h) && alpha.slot("home/cards")}
       tiles={ready(h.tiles) ? Home.tilesShown(h, s).map((tile) => ({
         ...tileItem(tile, known.apps, tile.tag === "Own" ? waits.get(tile.view) : undefined, h.editing),
-        inert: alongside && tile.tag === "Installed",
+        inert: tile.tag === "Installed" && !h.editing && !Home.favoriteAt(h, tile.app, s, alongside),
       })) : undefined}
       cardsInert={alongside}
       drawerInert={s.assistant !== "Bar" && !alongside}
@@ -127,7 +125,7 @@ export function HomePage({ runtime, alpha }: Shown<HomeMachines | Resident>) {
       onOpenTile={(id) => {
         const tile = tileOf(id);
         if (tile.tag === "Own") void runtime.runPromise(openOwnTile(tile.view, s.route, alongside));
-        else if (!alongside) openInstalled(tile.app);
+        else void runtime.runPromise(openHomeFavorite(tile.app, s.route, alongside));
       }}
       onOpenDrawer={Home.offersDrawer(h) ? () => { void runtime.runPromise(openApps(s.route, alongside)); } : undefined}
       onBeginEditing={can(beginEditing) ? () => {
@@ -161,7 +159,6 @@ export function HomePage({ runtime, alpha }: Shown<HomeMachines | Resident>) {
             if (drawer.can(event)) act(event);
           }}
           onClose={() => { if (drawerActive) void runtime.runPromise(closeApps(s.route, paired)); }}
-          onBack={() => { if (drawerActive) void alpha.runtime.runPromise(back()); }}
           onOpen={(app) => act({ type: "openApp", app, now: untimed })}
           onOpenMenu={drawerActive ? (app) => {
             const event = { type: "openMenu", app, open: showingApps, listed: catalogApps.map(({ id }) => id) } as const;
