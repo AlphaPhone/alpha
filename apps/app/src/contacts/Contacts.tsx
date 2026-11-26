@@ -21,7 +21,7 @@ import { type Book, type Form, Rows, blankForm, sheetOf } from "./contacts.vibe"
 import { CommsBar, type CommsServices, useCommsDock } from "../phone/CommsBar.tsx";
 import { emailFieldLabel, emailLabel, emailRemoveLabel, phoneFieldLabel, phoneLabel, phoneRemoveLabel } from "./labels.ts";
 import type { Alpha } from "../runtime/area.tsx";
-import { AppBack } from "../shell/AppBack.tsx";
+import { AppBack, useFirstPageBack } from "../shell/AppBack.tsx";
 
 export interface ContactsProps {
   /** Provides Contacts' machine, resident, Phone's, for whether a call may be an emergency call, and what Contacts counts. */
@@ -39,6 +39,7 @@ export function Contacts({ runtime, alpha }: ContactsProps & { alpha: Alpha }) {
   const phone = usePhone(runtime).state;
   const returningRef = useRef<{ tab: Tab } | undefined>(undefined);
   const shell = useShell(runtime);
+  const firstPageBack = useFirstPageBack(alpha);
   const held = runtime.runSync(Effect.flatMap(Rows, (rows) => rows.get()));
   const groups = useMemo(() => {
     const grouped = Object.groupBy(held.rows, ({ name }) => {
@@ -67,9 +68,8 @@ export function Contacts({ runtime, alpha }: ContactsProps & { alpha: Alpha }) {
     set({ card: undefined });
     void send({ type: "openContact", contact: id });
   };
-  const canBack = shell.can({ type: "goBack" });
   const phoneTabs = !state.opened && shell.state?.trail.at(-2) === "Phone";
-  const back = canBack ? () => void alpha.back() : undefined;
+  const back = firstPageBack ? () => void alpha.back() : undefined;
   const select = (tab: string) => {
     if (tab !== "Recents" && tab !== "Keypad" && tab !== "Voicemail") return;
     if (returningRef.current) {
@@ -104,7 +104,7 @@ export function Contacts({ runtime, alpha }: ContactsProps & { alpha: Alpha }) {
     // v119 (45f6bed30) prototype/phone-adapter.ts:276-277: the pill on Contacts shows no unheard voicemail dot.
     <PhoneTabs title="Contacts" contacts voicemail={phone.voicemail} unheard={false} onBack={back} header={searchHeader}>{chip}{actions}</PhoneTabs>
   ) : searchHeader ?? (
-    <AppHeader title="Contacts" className={cn(telephonyHeader, filtered && "[&>h1]:flex-none")} leading={<AppBack alpha={alpha} />}>{chip}{actions}</AppHeader>
+    <AppHeader title="Contacts" className={cn(telephonyHeader, filtered && "[&>h1]:flex-none")} leading={<AppBack alpha={alpha} firstPage />}>{chip}{actions}</AppHeader>
   );
   const allow = "my-6 min-h-13 rounded-full bg-foreground px-7 text-lg font-semibold text-background hover:bg-foreground/90 active:bg-foreground/80";
   const route = shell.state?.route;
