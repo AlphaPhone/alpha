@@ -381,6 +381,7 @@ it('Ask my resident agent about one reviewed photo (spec/app/photos/viewer.md, "
 it('Approve a photo requested by the resident agent (spec/app/camera/index.md, "Story: Let Alpha take a photo"); (spec/app/camera/agent.md, "A confirmed capture can be offered in the same draft for the owner to send")', async () => {
   const world = { ...scene(), phone: true, image: true, now: Date.now() };
   world.camera.galleryVolume = "external_primary";
+  world.telephony.enrollment = { journal: new Map() };
   let outgoing = 0;
   const forwardAgent = forward(mine.agent.origin, mine.agent.token);
   const { alpha } = await openOver(fakeWorld(world, {
@@ -407,7 +408,10 @@ it('Approve a photo requested by the resident agent (spec/app/camera/index.md, "
   await waitForScreen(() => expect(button("Send")?.disabled).toBe(false));
   await press("Send");
 
-  await waitForScreen(() => expect(button("Approve")?.disabled).toBe(false));
+  await waitForScreen(() => {
+    expect(document.querySelector('[role="log"]')?.textContent).toContain("Open the rear camera to review the shot");
+    expect(button("Approve")?.disabled).toBe(false);
+  });
   expect(world.camera.photos).toHaveLength(0);
   await press("Approve");
 
