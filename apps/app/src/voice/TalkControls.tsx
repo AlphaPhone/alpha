@@ -33,8 +33,8 @@ const spoken: Record<Phase | "Muted", string> = {
  * first receipt is awaited (voice-adapter.ts:1120-1121, speakerMuteDisabled while starting or pending; demo frame v89-064);
  * the microphone control stays in place, dimmed, while it cannot act (voice-adapter.ts:1631-1633, phone.css:920), and
  * while Alpha answers with the microphone really closed it shows it paused, as v119 did only while its input was held
- * (voice-adapter.ts:1116-1118; demo frames v89-072, v89-076); once the microphone opens again while Alpha speaks it shows
- * it open and mutes it, as v119 offered Mute whenever input was not held (voice-adapter.ts:1117, 1631); Stop is always
+ * (voice-adapter.ts:1116-1118; demo frames v89-072, v89-076), as the Cloud relay holds it through the reply; once the
+ * phone's own recognizer opens it again while Alpha speaks it shows it open and mutes it, as v119 offered Mute whenever input was not held (voice-adapter.ts:1117, 1631); Stop is always
  * there. While Talk connects the 18px ring turns in place of the motion (voice-adapter.ts:1646-1650,
  * phone.css:1075-1083). v119 also wrote the phase in words ("Connecting…", "Listening", "Voice stopped",
  * voice-adapter.ts:1646); the owner's rule removes every voice status word, so the phase name is read to assistive
