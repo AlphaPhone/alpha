@@ -14,7 +14,7 @@ import { Agent, isCloudFundsRefusal } from "../platform/agent.vibe"
 import { Device } from "../platform/device.vibe"
 import { Views, delivery, pageIn, placeOf, preparedIn, resendWithoutMode, viewOfPlace, voiceViews } from "../assistant/views.vibe"
 export { placeOf, viewOfPlace }
-import { MediaReview, proposedReview, ranDirect, sameFiles } from "../assistant/media-review.vibe"
+import { MediaReview, proposedDevice, ranDirect, sameFiles } from "../assistant/media-review.vibe"
 import { Talk, type Attached, type DraftSeat } from "../assistant/talk.vibe"
 import type { MessageSmsRequest } from "../messages/agent-sim.vibe"
 import { SystemSettings } from "../platform/systemSettings.vibe"
@@ -879,11 +879,9 @@ effect function postVoiceTurn({ session, turn, queue, lease, spoken }: VoicePost
   }
   memory.lastReply = finalText
   // spec/app/files/index.md, "An explicit request to open or filter Files may act directly on the same idle Files view": a direct Files result is said even beside a page's card, whose notice Talk still shows.
-  // spec/app/voice/index.md, "A reply that needs the owner's review in chat keeps voice listening with the microphone open": an unshowable Messages review or an unrun direct device action ends the turn quietly without setting reviewPending.
-  const proposed = result?.kind === "Replied" && proposedReview(result.reply.actionResults)
-  const unrunDirect = result?.kind === "Replied" && ranDirect(result.reply.actionResults) && !filesRan && !pageOpened
-  const quiet = !asks && filesReport === undefined && (unrunDirect || (smsText !== undefined && proposed))
-  const says = !quiet && (!asks || filesReport !== undefined)
+  // spec/app/voice/index.md, "A reply that needs the owner's review in chat keeps voice listening with the microphone open": a reply that proposed a phone step Talk neither showed as a card nor ran describes what did not happen, so the turn ends quietly without setting reviewPending.
+  const proposed = result?.kind === "Replied" && proposedDevice(result.reply.actionResults)
+  const says = Voice.replySaid(proposed, asks, filesRan || pageOpened, filesReport !== undefined)
   if (says) output.finishSpeech(finalText)
   return { type: "replyEnds", session, turn, asks, says }
 }
