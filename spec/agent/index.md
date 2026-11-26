@@ -50,8 +50,14 @@ which was meant, where the old phone went to its home screen. So the prompt
 tells the agent that the phone's screens are its views and Home is the home
 screen, and that a request to go to one of these screens by its name, with no
 directions, route or travel asked for, means that screen, shown with VIEWS
-without asking. The model still decides what a request means; nothing matches the
-owner's words. The words are in `apps/agent/host/character.json`.
+without asking. In a long chat the model once wrote its own reasoning back
+to the owner, naming an action ("I don't have access to the OWNER_REMINDERS
+tool"), so the prompt also tells the agent to say in plain words what it
+did or cannot do, and to keep how it does it behind the scenes, and what any
+of that is called, out of its replies. The sentence names no tools itself:
+one that said "never mention your tools" did no better in 100 real-model
+asks. The model still decides what a request means; nothing matches the
+owner's words, and nothing is taken out of a reply. The words are in `apps/agent/host/character.json`.
 
 ```quint
 pure val characterName: str = "Alpha"
