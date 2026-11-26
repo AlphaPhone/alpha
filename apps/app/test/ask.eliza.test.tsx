@@ -78,8 +78,8 @@ it("Read what my agent keeps, from eliza's agent with its modules loaded (spec/k
   const read = (route: string) => alpha.runtime.runPromise(Effect.flatMap(Agent, (agent) => agent.call(HttpClientRequest.get(route))));
   // spec/kit/read.md, "Only the newest ticket's answer is taken, once": each route an area reads answers at the pinned commit, through Alpha's own Agent service.
   expect(await read("/api/approvals")).toMatchObject({ approvals: [] });
-  // Since elizaOS/eliza#40584 the list answers only the native page; any other list query is refused.
-  expect(await read("/api/notifications?nativeTransport=true")).toMatchObject({ nativeEpoch: expect.any(String) });
+  const noticePage = Schema.decodeUnknownSync(Schema.Struct({ nativeEpoch: Schema.NonEmptyString }));
+  expect(noticePage(await read("/api/notifications?nativeTransport=true")).nativeEpoch).not.toBe("");
   expect(await read("/api/scheduled-tasks?ownerVisibleOnly=1")).toEqual({ tasks: [expect.objectContaining({ kind: "personal-assistant.checkin", state: { status: "scheduled" } })] });
   expect(await read("/api/triggers")).toEqual({ triggers: [] });
   expect(await read("/api/tasks/current")).toEqual({ task: null });
@@ -351,8 +351,8 @@ it('Ask my resident agent about one reviewed photo (spec/app/photos/viewer.md, "
   await press("Send");
   await until(alpha, chat, Conversation, (state) => state.turn.reply === "Complete");
   await drawn(() => vi.waitFor(() => expect(document.querySelector("[role=log]")?.textContent).toContain(reply)));
+  expect(received[0]).toHaveProperty("text", expect.stringContaining(prompt));
   expect(received).toEqual([expect.objectContaining({
-    text: expect.stringContaining(prompt),
     images: [
       { data: replacement.image.slice(replacement.image.indexOf(",") + 1), mimeType: "image/jpeg", name: replacement.name },
       { data: ordinaryData, mimeType: "image/png", name: ordinary },
@@ -465,14 +465,14 @@ it('Filter Files from Home and open the named file with the resident agent (spec
     expect(Array.from(found?.querySelectorAll("button") ?? [], (row) => row.getAttribute("aria-label"))).toEqual(["lease.pdf"]);
     expect(document.body.textContent).toContain("Showing 1 item in Files.");
     expect(button("Approve")).toBeUndefined();
-    expect(receipts().map(({ operation }) => JSON.parse(operation))).toEqual([filter]);
+    expect(receipts().map(({ operation }): unknown => JSON.parse(operation))).toEqual([filter]);
   });
 
   const open = { type: "files_open", path } as const;
   await send("Open Documents/notes.txt", open);
   await waitForScreen(() => {
     expect(document.querySelector('[role="dialog"][aria-label="Preview"] pre')?.textContent).toBe(contents);
-    expect(receipts().map(({ operation }) => JSON.parse(operation))).toEqual([filter, open]);
+    expect(receipts().map(({ operation }): unknown => JSON.parse(operation))).toEqual([filter, open]);
   });
   expect(receipts().map(({ evidence }) => evidence.result)).toEqual([undefined, undefined]);
 }, 300_000);
