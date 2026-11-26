@@ -16,7 +16,7 @@ interface ReminderReviewProps {
 export function ReminderReview({ open, title, details, action, sending, onApprove, onCancel, returnFocus }: ReminderReviewProps) {
   return (
     <Dialog open={open} onOpenChange={(shown) => { if (!shown && !sending) onCancel(); }}>
-      <DialogContent className="inset-x-3 top-1/2 bottom-auto max-w-110 -translate-y-1/2 gap-0 rounded-action border border-border bg-background p-0"
+      <DialogContent className="inset-x-3 top-1/2 bottom-auto max-w-110 -translate-y-1/2 gap-0 rounded-action border border-border bg-background p-0 motion-safe:animate-none"
         overlayClassName="bg-foreground/53 dark:bg-background/53"
         {...(details === undefined ? { "aria-describedby": undefined } : {})}
         onCloseAutoFocus={(event) => {

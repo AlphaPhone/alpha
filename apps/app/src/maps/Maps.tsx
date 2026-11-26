@@ -449,7 +449,7 @@ function PlaceSheet({ screen, state, spot, kept, height, back, outside }: { scre
       <div className="flex items-start gap-2">
         <div className="min-w-0 flex-1">
           <h2 className="font-display text-3xl font-light break-words">{titleOf(spot, kept)}</h2>
-          {can({ type: "startRenaming" }) && <button type="button" aria-label="Rename place" className="min-h-12 px-3 text-primary" onClick={() => { setName(saveName); void send({ type: "startRenaming" }); }}>Rename</button>}
+          {can({ type: "startRenaming" }) && <button type="button" aria-label="Rename place" className="min-h-12 px-3 text-primary" onClick={() => { setName(kept === undefined ? titleOf(spot, kept) : saveName); void send({ type: "startRenaming" }); }}>Rename</button>}
           <div className="mt-1.5 text-sm text-muted-foreground">{pinned ? "Selected location" : spot.category || "Place"}</div>
           {spot.hours !== undefined && <div className="mt-1 text-sm"><span className="font-semibold">Hours</span><span className="text-muted-foreground">{` · ${spot.hours}`}</span></div>}
         </div>

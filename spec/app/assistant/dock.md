@@ -3,8 +3,9 @@
 How the owner's finger and the keyboard move Ask Alpha. The height Ask
 Alpha is raised to belongs to the [shell](../shell/): a gesture here only
 chooses where it lands, and asks the shell to raise it there or to go back
-by a step or two. The dock keeps one gesture at a time, the moment until
-which a stray click is ignored, and the height a sheet was left at.
+by a step or two. The dock keeps one gesture at a time, the moment until which a stray click
+is ignored, the height a sheet was left at, and whether a resting bar was
+tucked to the pill.
 
 The sheet draws only the arrows Alpha's Sunday v119 build drew (old-line
 Alpha 45f6bed30, template.html:4447-4740): Minimize's chevron down, the
@@ -49,8 +50,9 @@ being typed in, it only leaves the field, which rests the bar once.
 Near the top it fills the screen and near the floor it goes to the bar;
 the zones are 120 points deep, or a third of the travel when that is less.
 An open sheet flicked up fills the screen and flicked down goes to the bar.
-Pulled down from the bar or typing, it rests on the bar. Between the zones
-a sheet keeps the height it was left at; height 0 is its fitted height.
+Pulled down from the bar or typing, it stays on the bar detent and tucks to
+the compact pill. Between the zones a sheet keeps the height it was left at;
+height 0 is its fitted height.
 
 ```quint
 import shell as S from "../shell"
@@ -124,6 +126,11 @@ pure def lawAFlickGoesByItsDirection(start: S::Detent, direction: Direction, hei
 
 ### Pulled down from the bar or from typing, Ask Alpha rests on the bar
 
+Swiping down from an open sheet or full screen rests on the bar first;
+swiping down on the resting bar or while typing keeps the bar detent and
+tucks the bar into the compact pill everywhere, including on Home and the
+Browser.
+
 ```quint
 pure def lawPulledDownAtRestStaysOnTheBar(start: S::Detent, flick: bool, height: int, floor: int, full: int): bool =
   not(isOpen(start)) implies landing(start, Down, flick, height, floor, full).detent == S::Bar
@@ -181,13 +188,13 @@ pure def lawAKeptShareIsBelowTheFullScreen(start: S::Detent, direction: Directio
   (0 <= floor and floor < full and l.detent == S::Sheet) implies (0 <= keptShare(l.height, full) and keptShare(l.height, full) < shareScale)
 ```
 
-### The dock holds the gesture under the finger, where it started, until when a click is ignored, and the height the sheet was left at
+### The dock holds the gesture under the finger, where it started, until when a click is ignored, the height the sheet was left at, and whether a resting bar was tucked to the pill
 
 ```quint
 type Gesture = Idle | Pressed | Dragging
-type Dock = { gesture: Gesture, start: S::Detent, quiet: int, at: int, kept: int, voice: bool }
+type Dock = { gesture: Gesture, start: S::Detent, quiet: int, at: int, kept: int, voice: bool, tucked: bool }
 
-pure val initial: Dock = { gesture: Idle, start: S::Bar, quiet: 0, at: 0, kept: 0, voice: false }
+pure val initial: Dock = { gesture: Idle, start: S::Bar, quiet: 0, at: 0, kept: 0, voice: false, tucked: false }
 
 pure val clickWindow = 400
 
@@ -230,8 +237,15 @@ pure def canRelease(d: Dock, direction: Direction, flick: bool, height: int, flo
 
 pure def release(d: Dock, direction: Direction, flick: bool, height: int, floor: int, full: int, now: int): Moved =
   val l = landing(d.start, direction, flick, height, floor, full)
-  { state: { ...d, gesture: Idle, at: now, quiet: now + clickWindow, kept: if (l.detent == S::Sheet) keptShare(l.height, full) else if (l.detent == S::Full) d.kept else 0 },
+  val tucked = not(isOpen(d.start)) and direction == Down
+  { state: { ...d, gesture: Idle, at: now, quiet: now + clickWindow, kept: if (l.detent == S::Sheet) keptShare(l.height, full) else if (l.detent == S::Full) d.kept else 0, tucked: tucked },
     out: asked(d.start, l.detent) }
+
+pure def lawSwipingDownAtRestTucksToThePill(d: Dock, flick: bool, height: int, floor: int, full: int, now: int): bool =
+  (canRelease(d, Down, flick, height, floor, full, now) and not(isOpen(d.start))) implies release(d, Down, flick, height, floor, full, now).state.tucked
+
+pure def lawClosingAnOpenSheetRestsOnTheBarFirst(d: Dock, direction: Direction, flick: bool, height: int, floor: int, full: int, now: int): bool =
+  (canRelease(d, direction, flick, height, floor, full, now) and isOpen(d.start)) implies not(release(d, direction, flick, height, floor, full, now).state.tucked)
 ```
 
 ### A press that did not move taps its control once
@@ -239,7 +253,7 @@ pure def release(d: Dock, direction: Direction, flick: bool, height: int, floor:
 ```quint
 pure def canLift(d: Dock, now: int): bool = d.gesture == Pressed and now >= d.at
 
-pure def lift(d: Dock, now: int): Moved = { state: { ...d, gesture: Idle, at: now, quiet: now + clickWindow }, out: List(Tap) }
+pure def lift(d: Dock, now: int): Moved = { state: { ...d, gesture: Idle, at: now, quiet: now + clickWindow, tucked: false }, out: List(Tap) }
 ```
 
 ### An empty Browser composer can start a drag without taking focus
@@ -264,7 +278,9 @@ pure def fieldLift(d: Dock, now: int): Dock =
 ```quint
 pure def canClick(d: Dock, now: int): bool = d.gesture == Idle and now >= d.at
 
-pure def click(d: Dock, now: int): Moved = { state: { ...d, at: now }, out: if (now >= d.quiet) List(Tap) else List() }
+pure def click(d: Dock, now: int): Moved =
+  val fires = now >= d.quiet
+  { state: { ...d, at: now, tucked: if (fires) false else d.tucked }, out: if (fires) List(Tap) else List() }
 ```
 
 ### A gesture under the finger is dropped when the shell changes beneath it
@@ -302,10 +318,10 @@ pure def sometimesVoiceHoldsTheSheet(d: Dock): bool = d.voice and isOpen(d.start
 ```quint
 pure def canPutAway(d: Dock, now: int): bool = now >= d.at
 
-pure def putAway(d: Dock, now: int): Moved = { state: { ...d, gesture: Idle, at: now, kept: 0 }, out: List() }
+pure def putAway(d: Dock, now: int): Moved = { state: { ...d, gesture: Idle, at: now, kept: 0, tucked: false }, out: List() }
 
 pure def stepAPutAwaySheetForgetsItsHeight(before: Dock, via: str, after: Dock): bool =
-  (via == "putAway" implies after.kept == 0) and (after.kept != before.kept implies (via == "release" or via == "putAway"))
+  (via == "putAway" implies (after.kept == 0 and not(after.tucked))) and (after.kept != before.kept implies (via == "release" or via == "putAway"))
 ```
 
 ### One gesture asks the shell once, and only a drag released asks it to move
@@ -347,6 +363,8 @@ pure def sometimesADragIsUnderWay(d: Dock): bool = d.gesture == Dragging
 pure def sometimesASheetKeepsItsHeight(d: Dock): bool = d.kept > 0
 
 pure def sometimesALateClickIsIgnored(d: Dock): bool = d.gesture == Idle and d.at < d.quiet and d.at > 0
+
+pure def sometimesTheBarIsTucked(d: Dock): bool = d.tucked
 ```
 
 ## Story: Type without losing the composer
@@ -427,23 +445,31 @@ pure def lawAClosedKeyboardLeavesTypingForTheBar(phone: S::Shell): bool =
 > As the owner, I want Ask Alpha at rest inside an app to take as little of
 > the screen as it did before VibeStack: a small pill centred above the
 > bottom edge with Alpha's mark, Type and Talk, while Home and the Browser
-> keep the whole bar to type in.
+> start with the whole bar to type in and tuck into that same pill whenever
+> I swipe down on the resting bar.
 
 ### Inside an app other than the Browser, Ask Alpha at rest is the pill; Type raises it to typing, where the whole bar shows, and a swipe up from it opens the sheet
 
-The pill is how the bar is drawn in an app, not another height: Back,
-gestures and every guard treat it as the bar. Alpha's mark opens the sheet,
-Type focuses the composer, and Talk starts a spoken turn. A swipe up that
-starts on one of the pill's buttons opens the sheet, which follows the
-finger as it does from the bar, as the pill in Alpha before VibeStack did;
-a press there that does not move stays that button's tap.
+The pill is how the bar is drawn in an app other than the Browser, and also
+on Home or the Browser after the owner swipes down on the resting bar
+(`tucked = true`), not another height: Back, gestures and every guard treat
+it as the bar. Tapping Type, opening the sheet or full screen, or changing
+views clears `tucked`. Alpha's mark opens the sheet, Type focuses the
+composer, and Talk starts a spoken turn. A swipe up that starts on one of
+the pill's buttons opens the sheet, which follows the finger as it does from
+the bar, as the pill in Alpha before VibeStack did; a press there that does
+not move stays that button's tap.
 
 ```quint
-pure def pill(phone: S::Shell): bool = phone.assistant == S::Bar and phone.trail.length() > 0 and not(S::showing(phone, S::Browser))
+pure def pill(phone: S::Shell, tucked: bool): bool =
+  phone.assistant == S::Bar and (tucked or (phone.trail.length() > 0 and not(S::showing(phone, S::Browser))))
 
-pure def lawThePillIsOnlyTheBarInAnApp(phone: S::Shell): bool =
-  pill(phone) implies (phone.assistant == S::Bar and phone.trail.length() > 0)
+pure def lawThePillIsAlwaysAtTheBarDetent(phone: S::Shell, tucked: bool): bool =
+  pill(phone, tucked) implies phone.assistant == S::Bar
 
-pure def lawTypeLeavesThePill(phone: S::Shell): bool =
-  pill(phone) implies not(pill(applied(focused(phone.assistant), phone)))
+pure def lawTuckingAtRestShowsThePillEverywhere(phone: S::Shell): bool =
+  phone.assistant == S::Bar implies pill(phone, true)
+
+pure def lawTypeLeavesThePill(phone: S::Shell, tucked: bool): bool =
+  pill(phone, tucked) implies not(pill(applied(focused(phone.assistant), phone), false))
 ```

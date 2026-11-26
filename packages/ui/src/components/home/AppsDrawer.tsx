@@ -133,7 +133,7 @@ export function AppsDrawer({ apps, query, catalog, opening, notice, hold, menu, 
   const failed = catalog === "unavailable";
   return (
     <section data-alpha-apps-drawer="" role="dialog" aria-modal={modal || undefined} aria-label="Apps" inert={inactive || undefined}
-      className="absolute inset-x-0 top-[max(--spacing(11),var(--alpha-native-inset-top,0px),env(safe-area-inset-top))] bottom-0 z-10 flex min-h-0 flex-col bg-background pt-3 text-foreground"
+      className="absolute inset-0 z-10 flex min-h-0 flex-col bg-background pt-[calc(max(--spacing(11),var(--alpha-native-inset-top,0px),env(safe-area-inset-top))+--spacing(3))] text-foreground motion-safe:animate-[fade_700ms_cubic-bezier(0.19,1,0.22,1)_both]"
       onKeyDown={(event) => {
         if (inactive || event.key !== "Escape" || event.defaultPrevented) return;
         const drawer = event.currentTarget;
@@ -145,13 +145,13 @@ export function AppsDrawer({ apps, query, catalog, opening, notice, hold, menu, 
         else onClose();
       }}>
       <header className="flex h-11 shrink-0 items-center gap-2 pr-3 pl-5">
-        <h1 className="grow font-display text-3xl font-light outline-none">Apps</h1>
+        <h1 className="grow font-display text-3xl leading-serif font-light outline-none [font-variation-settings:'opsz'_144]">Apps</h1>
         <Button variant="ghost" size="icon" aria-label="Close apps" onClick={onClose}><X className="size-5" /></Button>
       </header>
       <div className="relative mx-4 mt-3 mb-2 shrink-0">
         <Search aria-hidden className="pointer-events-none absolute top-1/2 left-4 size-4.5 -translate-y-1/2 text-muted-foreground" />
         <Input type="search" aria-label="Search apps" placeholder="Search apps" autoComplete="off" enterKeyHint="search"
-          value={query} onChange={(event) => onSearch(event.currentTarget.value)} className="rounded-panel border-0 pr-4 pl-11.5" />
+          value={query} onChange={(event) => onSearch(event.currentTarget.value)} className="rounded-panel border-0 pr-4 pl-11" />
       </div>
       {notice && <HomeNotice notice={notice} place="InDrawer" className="mx-5 mt-1" />}
       <div aria-busy={reading || undefined} className={cn(dockClearance, "min-h-0 flex-1 touch-pan-y overflow-y-auto px-2 pt-1 [scrollbar-width:none]")}>
