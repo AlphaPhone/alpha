@@ -10,6 +10,7 @@
   "preview_urls": false,
   "routes": [{ "pattern": "{{apiHost}}", "custom_domain": true }],
   "hyperdrive": [{ "binding": "HYPERDRIVE", "id": "{{hyperdriveId}}" }],
+  "send_email": "{{sendEmail}}",
   "ai": { "binding": "AI" },
   "triggers": { "crons": ["* * * * *"] },
   "observability": { "enabled": true },

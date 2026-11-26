@@ -129,9 +129,8 @@ deploy: the app's sign-in callback and App Link host come from them.
 - **Accounts, per environment:** Cloudflare (Workers Paid, a token with
   Workers Scripts and Workers Routes Edit, Hyperdrive Edit, and Zone Read and
   DNS Edit on `alphaphone.dev`), an empty Postgres database on a direct TLS
-  connection (not a transaction pooler), Cerebras, Cartesia, Resend with
-  `alphaphone.dev` verified, Google OAuth web clients for sign-in and the
-  Gmail and Calendar connector with the redirect URIs
+  connection (not a transaction pooler), Cerebras, Cartesia, and Google OAuth
+  web clients for sign-in and the Gmail and Calendar connector with the redirect URIs
   `https://<api host>/api/v1/auth/google/callback` and
   `https://<api host>/api/v1/oauth/google/callback` (start Google's Gmail and
   Calendar scope verification early: it takes weeks) and, where
@@ -148,6 +147,9 @@ deploy: the app's sign-in callback and App Link host come from them.
   `invoice.paid`, `invoice.payment_failed`, `payment_intent.succeeded`,
   `payment_intent.payment_failed`, `charge.refunded` and
   `charge.dispute.funds_reinstated`.
+- **Sign-in email:** onboard `auth.alphaphone.dev` in [Cloudflare Email Sending](https://developers.cloudflare.com/email-service/get-started/send-emails/).
+  The API Worker uses the `SIGN_IN_EMAIL` binding for `noreply@auth.alphaphone.dev`.
+  Workers Paid permits sign-in codes to reach any recipient.
 - **Secrets file:** copy `apps/cloud/alpha-cloud.env.example` outside the
   checkout, `chmod 600` it, fill it in, and run
   `pnpm cloud secrets --environment staging --env-file <file>` once: it adds
@@ -191,10 +193,10 @@ deploy: the app's sign-in callback and App Link host come from them.
   API first) and `smoke`, whose every gate must pass. Then by hand: `/api/health`,
   `/api/v1/subscriptions/plans` (Plus and Pro) and `/api/v1/auth/methods` on
   the API host and `/.well-known/assetlinks.json` (naming
-  `ai.alphacompute.alphaphone`) on the web host answer; Stripe's test webhook
-  returns 200; Resend shows the domain verified and the sign-in code email
-  arrives during the app test; and the Alpha team signs in, chats, talks and
-  subscribes with a test card on a staging build.
+  `ai.alphacompute.alphaphone`) on the web host answer. Check that Stripe's
+  test webhook returns 200 and that Cloudflare Email Sending records the
+  delivered code. Sign in, chat, talk and subscribe with a test card on a
+  staging build.
 - **From GitHub:** the Cloud deploy workflow, `.github/workflows/cloud-deploy.yml`,
   runs the same steps from `main`, dispatched with the environment, `check`
   or `deploy`, and the component; its header names the GitHub environments
