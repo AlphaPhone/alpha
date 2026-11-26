@@ -556,6 +556,13 @@ it("Connect Gmail and keep to its grant (spec/app/inbox/index.md, \"Story: Conne
   await press("Reconnect Gmail");
   await until(alpha, runtime, List, (s) => s.failure === "Fine" && s.accounts.status === "Loaded" && s.list.status === "Loaded");
   expect([world.mailLease.held, world.mailLease.asked, Boolean(button("Reconnect Gmail")), rows()]).toEqual([true, 3, false, shown]);
+
+  // spec/app/inbox/index.md, "A new cloud session starts from nothing, and checks the accounts only once signed in"
+  world.voice.organizationId = "org-2";
+  await hardware("home");
+  await openInboxFromHome(alpha);
+  await until(alpha, runtime, List, (s) => !s.signedIn);
+  expect([rows(), Boolean(button("Connect Eliza Cloud"))]).toEqual([[], true]);
 });
 
 it("Send a draft I reviewed (spec/app/inbox/sending.md, \"Story: Send a draft I reviewed\"; spec/app/inbox/drafts.md, \"Story: Write a message\"; spec/app/inbox/drafts.md, \"Story: Set a draft aside or discard it\"; spec/app/inbox/adding.md, \"Story: Add files and people to my draft\"; spec/app/inbox/suggestion.md, \"Story: Review what is offered into my email\"; spec/app/inbox/sending.md, \"Story: Save my draft to Gmail, or delete it there, knowingly\"; spec/app/inbox/drafts.md, \"Story: Find out whether a send went\")", async () => {

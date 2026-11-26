@@ -391,6 +391,16 @@ export function Inbox({ runtime, alpha }: InboxProps & { alpha: Alpha }) {
   }, [split]);
   if (cause) return <Alert variant="destructive" className="m-4">Alpha could not open Inbox</Alert>;
   if (!state || !message.state || !drafts.state) return null;
+  const mail = runtime.runSync(Mail);
+  const retryAccess = can({ type: "checkAccess" })
+    ? () => void runtime.runPromise(Effect.flatMap(MailSignIn, (access) => access.retry()))
+    : undefined;
+  if (state.signedIn && !mail.ownerConfirmed()) {
+    const waiting = state.accounts.status !== "Failed";
+    return <InboxListScreen folder="incoming" rows={[]} search="" onSearchChange={() => undefined} loading={waiting}
+      state={waiting ? undefined : "failed"} onStateAction={retryAccess}
+      onBack={shell.can({ type: "goBack" }) ? () => void alpha.back() : undefined} />;
+  }
   // spec/app/inbox/drafts.md, "A new message, a reply, a reply to all or a forward begins as [one draft](./letter.md) says; a reply to a message with no usable address is refused and the owner told"
   const onBegin = (beginning: Beginning) => {
     const event = { type: "compose", kind: beginning.kind, account: beginning.account, others: 0, files: 0, mib: 0 } as const;
@@ -398,10 +408,9 @@ export function Inbox({ runtime, alpha }: InboxProps & { alpha: Alpha }) {
       ? () => void runtime.runPromise(begin(beginning))
       : undefined;
   };
-  const mail = runtime.runSync(Mail);
   const cards = (number: number) => mail.card(number);
   const refresh = can({ type: "refresh" }) ? () => void send({ type: "refresh" }) : undefined;
-  const retryList = refresh ?? (can({ type: "checkAccess" }) ? () => void send({ type: "checkAccess" }) : undefined);
+  const retryList = refresh ?? retryAccess;
   const review = <ChangeReview runtime={runtime} list={state} cards={cards} />;
   const settings = shell.can({ type: "openView", view: "Settings" }) ? () => void shell.send({ type: "openView", view: "Settings" }) : undefined;
   const signIn = settings ? () => void runtime.runPromise(Effect.flatMap(MailSignIn, (mail) => mail.signIn(settings))) : undefined;

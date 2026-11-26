@@ -20,6 +20,8 @@ import { Mail, asked, connections, failureOf, mail, page } from "./gmail.vibe"
 import { savedBodies } from "./saved-bodies.vibe"
 
 const owner = "alpha/inbox/owner"
+type Owner = { readonly stamp: string; readonly saved: string | undefined }
+type MailSession = Cloud | Mail | Inbox.Machine | KeyValueStore.KeyValueStore
 
 /** Each new owner session, including a different owner who is already signed in. */
 export const ownerChanges = Stream.unwrap(effect {
@@ -30,12 +32,15 @@ export const ownerChanges = Stream.unwrap(effect {
 })
 
 // spec/app/inbox/index.md, "The answer names the connected accounts, their credentials and grants; the account chosen stays selected while it is connected, else the one account that may be read, else none and the owner chooses"; spec/app/inbox/index.md, "A check the phone holds back for want of the mail lease keeps the session and everything kept, and asks for one more sign-in"
-effect function checked(ticket: number): Event!!(Cloud | Mail | Inbox.Machine | KeyValueStore.KeyValueStore) {
+effect function checked(ticket: number): Event!!MailSession {
   const list = try Inbox.Machine
   const ledger = try Mail
+  const lost: Event = { type: "accountsAnswered", ticket, ok: false, connected: [] }
+  if (!ledger.ownerConfirmed()) return lost
+  const generation = ledger.generation()
   const reply = effect { return { accounts: try connections() } }
     catch (cause) => ({ signedOut: protocolFailure(cause)?.status === 401, held: protocolFailure(cause)?.reason === leaseRefusalReason })
-  if (!Inbox.canAccountsAnswered(try list.get(), ticket)) return { type: "accountsAnswered", ticket, ok: false, connected: [] }
+  if (ledger.generation() !== generation || !Inbox.canAccountsAnswered(try list.get(), ticket)) return lost
   if ("signedOut" in reply) {
     if (reply.held) return { type: "accountsHeld", ticket }
     if (reply.signedOut) {
@@ -92,37 +97,51 @@ effect function deviceOwner() {
   return owner
 }
 
-// spec/app/inbox/index.md, "A new cloud session starts from nothing, and checks the accounts only once signed in"
-effect function recheck(): void!!(Cloud | Mail | Inbox.Machine | KeyValueStore.KeyValueStore) {
+/** The owner's current scope, a confirmed sign-out or mismatch, or an unanswered check. */
+effect function currentOwner(): (Owner | null | undefined)!!Cloud {
   const { client } = try Cloud
-  const store = try KeyValueStore.KeyValueStore
-  const machine = try Inbox.Machine
-  const ledger = try Mail
-  const generation = ledger.generation()
   const phone = native()
   const { cloud, device } = try all({
     cloud: effect { return try asked((signal) => client.account({ signal })) }
       catch (failed) => (failed.cause instanceof CloudError && failed.cause.failure.tag === "CloudCredentialInvalid" ? null : undefined),
     device: phone ? deviceOwner() : succeed(undefined),
   }, { concurrency: "unbounded" })
+  if (cloud === null || device === null) return null
+  if (device !== undefined && cloud !== undefined &&
+    (cloud.id !== device.userId || cloud.organization_id !== device.organizationId)) return null
+  const organization = cloud?.organization_id ?? device?.organizationId
+  const user = cloud?.id ?? device?.userId
+  if (!organization || !user) return undefined
+  const saved = device !== undefined ? JSON.stringify([organization, user, device.credentialId])
+    : phone ? undefined : JSON.stringify([organization, user])
+  return { stamp: JSON.stringify([2, CLOUD_ENVIRONMENT, organization, user]), saved }
+}
+
+// spec/app/inbox/index.md, "A new cloud session starts from nothing, and checks the accounts only once signed in"
+effect function recheck(): void!!MailSession {
+  const store = try KeyValueStore.KeyValueStore
+  const machine = try Inbox.Machine
+  const ledger = try Mail
+  const generation = ledger.generation()
+  const who = try currentOwner()
   if (ledger.generation() !== generation) return
-  const state = try machine.get()
-  const before = (store.get(owner) catch () => undefined) ?? ""
-  const who = cloud === null || device === null ? "" : cloud?.id ?? device?.userId
-  if (who !== undefined && who !== before) try ledger.forget()
-  if (phone) {
-    const matched = who !== "" && device !== undefined && device !== null &&
-      (cloud === undefined || (cloud !== null && cloud.id === device.userId && cloud.organization_id === device.organizationId))
-    try ledger.savedOwner(matched ? JSON.stringify([device.organizationId, device.userId, device.credentialId]) : undefined)
-  } else if (cloud !== undefined) {
-    try ledger.savedOwner(cloud?.id && cloud.organization_id ? JSON.stringify([cloud.organization_id, cloud.id]) : undefined)
-  }
-  if (who === undefined || (who === before && state.signedIn === (who !== ""))) {
-    if (state.signedIn) try contained(machine.send({ type: "checkAccess" }), "checking Gmail access")
+  if (who === undefined) {
+    if (native()) ledger.concealSaved()
+    if ((try machine.get()).signedIn) try contained(machine.send({ type: "checkAccess" }), "checking Gmail access")
     return
   }
-  try ignore(store.set(owner, who))
-  try contained(machine.send({ type: "sessionChanged", signedIn: who !== "" }), "the cloud session")
+  const before = (store.get(owner) catch () => undefined) ?? ""
+  const stamp = who?.stamp ?? ""
+  const changed = stamp !== before
+  const retired = changed ? try ledger.forget() : generation
+  if (ledger.generation() !== retired) return
+  if (changed) try ignore(store.set(owner, stamp))
+  if (who !== null) try ledger.confirmOwner(who.saved)
+  if (ledger.generation() !== retired) return
+  const signedIn = who !== null
+  if (changed || (try machine.get()).signedIn !== signedIn) {
+    try contained(machine.send({ type: "sessionChanged", signedIn }), "the cloud session")
+  } else if (signedIn) try contained(machine.send({ type: "checkAccess" }), "checking Gmail access")
 }
 
 // spec/app/platform/index.md, "The owner's tap on a mail sign-in control starts the phone's one more sign-in for mail where the phone wants it, then reads again once"
@@ -137,11 +156,15 @@ effect function signInForMail(usual: () => void): void!!(Cloud | Mail | Inbox.Ma
 export service MailSignIn {
   /** The owner tapped Connect Eliza Cloud or Reconnect, whose action is otherwise `usual`. */
   signIn(usual: () => void): void!!
+  retry(): void!!
 }
 
 const signIns = Layer.effect(MailSignIn, effect {
   const whole = try Whole
-  return { signIn: (usual: () => void) => flatMap(whole.context, (context) => Effect.provideContext(signInForMail(usual), context as Context.Context<Cloud | Mail | Inbox.Machine | KeyValueStore.KeyValueStore>)) }
+  return {
+    signIn: (usual: () => void) => flatMap(whole.context, (context) => Effect.provideContext(signInForMail(usual), context as Context.Context<MailSession>)),
+    retry: () => flatMap(whole.context, (context) => Effect.provideContext(recheck(), context as Context.Context<MailSession>)),
+  }
 })
 
 // spec/app/inbox/index.md, "Opening Inbox, and every change to Google access, checks the accounts again, even while a check is out"
@@ -175,7 +198,7 @@ const home = started(effect {
   let previous = ""
   try Stream.runForEach(Stream.zipLatest(list.changes, sending.changes), effect ([state, changing]) => {
     try ledger.accept(state)
-    const unread = Inbox.attention(state)
+    const unread = Inbox.attention(ledger.ownerConfirmed() ? state : Inbox.initial)
     waiting.tell("Inbox", waitingOf(unread))
     const connected = Inbox.readable(state) && (unread.standing === "Ready" || unread.standing === "Stale")
     const held = new Set(Sending.aside(changing))
