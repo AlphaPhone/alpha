@@ -17,7 +17,7 @@ import { afterMailSignIn, leaseRefusalReason } from "../../gen/app__platform.eff
 import { Cloud, mailSignIn } from "../platform/cloud.vibe"
 import { Machine as Toasts } from "../../gen/app__notices__toasts.effect.vibe"
 import { Said, say } from "../notices/toasts.vibe"
-import { type Job, Whole, answer, contained, reacting, started, stream, together, untimed } from "../runtime/reactor.vibe"
+import { type Job, Whole, answer, contained, migratedStore, reacting, started, stream, together, untimed } from "../runtime/reactor.vibe"
 import { InboxAhead, aheadKey, prefetch } from "./ahead.vibe"
 import type { GmailAuthorizationWindow } from "./authorization.vibe"
 import { Mail, asked, connections, failureOf, mail, page } from "./gmail.vibe"
@@ -93,7 +93,20 @@ function carry(fx: Out): Job<Event, Cloud | Mail | Inbox.Machine | InboxAhead | 
 }
 
 // spec/app/inbox/index.md, "A restart keeps the selection, the list kept for it and its credential, whether Spam and Trash can be searched, and the count as no longer fresh, and forgets the rest"
-const kept = reacting(Inbox, { keep: 1, open: [{ type: "restart" }], carry })
+/** A list kept before the search field was part of it, brought in with the field closed so its saved list is not lost. */
+effect function listRecord(raw: string | undefined): (string | undefined)!! {
+  if (raw === undefined) return undefined
+  const fields = Schema.decodeUnknownEffect(Schema.fromJsonString(Schema.Record(Schema.String, Schema.Unknown)))(raw) catch () => undefined
+  if (fields === undefined || "searching" in fields) return raw
+  const migrated = Inbox.decodeState({ ...fields, searching: false }) catch () => undefined
+  return migrated === undefined ? raw : JSON.stringify(migrated)
+}
+
+function stored(key: string, start = Inbox.initial) {
+  return Layer.provide(Inbox.stored(key, start), migratedStore(key, listRecord))
+}
+
+const kept = reacting({ ...Inbox, stored }, { keep: 1, open: [{ type: "restart" }], carry })
 
 /** The phone can still identify its previously signed-in owner when Cloud cannot be reached. */
 effect function deviceOwner() {
