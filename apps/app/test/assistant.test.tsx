@@ -12,6 +12,7 @@ import { Machine as Search } from "../gen/app__assistant__search.effect.vibe";
 import * as Pages from "../gen/app__settings.effect.vibe";
 import * as Prefs from "../gen/app__settings__preferences.effect.vibe";
 import { Machine as Shell } from "../gen/app__shell.effect.vibe";
+import { Machine as Layers } from "../gen/app__shell__layers.effect.vibe";
 import type { Mount } from "../src/areas.ts";
 import { freedom } from "../src/assistant/assistant.vibe";
 import assistant from "../src/assistant/index.tsx";
@@ -813,7 +814,7 @@ describe("Ask Alpha edge flows", () => {
     const opened = await openAssistant(world);
     await chatsList(opened.runtime);
     await until(opened.alpha, opened.runtime, Chats, (s) => s.list.status === "Loaded");
-    row("Chats", title);
+    await restore(opened.runtime, title);
     return opened;
   };
 
@@ -854,7 +855,7 @@ describe("Ask Alpha edge flows", () => {
     world.ask.down = false;
     await chatsList(runtime);
     await until(alpha, runtime, Chats, (s) => s.list.status === "Loaded");
-    row("Chats", "Earlier chat");
+    await restore(runtime, "Earlier chat");
     await until(alpha, runtime, Composer, (s) => s.binding.conversation === 1 && s.slot === "Open");
 
     write("Draft only");
