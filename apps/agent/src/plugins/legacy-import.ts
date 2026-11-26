@@ -9,7 +9,9 @@ import {
   broughtTaskOf,
   isEarlierOwner,
   maxEarlierStoreBytes,
+  maxStoppedLaunches,
   retryDelayMs,
+  startOf,
   triesPerLaunch,
 } from "../../gen/app__platform__adoption.ts";
 
@@ -72,6 +74,7 @@ type SkipReason =
   | "already_imported"
   | "store_in_use"
   | "gave_up"
+  | "held_after_stopped_launches"
   | "no_adapter"
   | "multi_agent_ambiguous";
 
@@ -94,14 +97,20 @@ interface LegacyImportOptions {
   readonly wait?: (ms: number) => Promise<void>;
 }
 
-interface ImportRecord {
+interface RecordCounts {
   readonly attempts: number;
+  readonly stopped: number;
+  readonly lastStopAt: number;
+}
+
+interface ImportRecord extends RecordCounts {
+  readonly startedAt: number | null;
   readonly outcome: LegacyImportResult | { readonly status: "started" };
   readonly at: number;
 }
 
-interface ReadRecord {
-  readonly attempts: number;
+interface ReadRecord extends RecordCounts {
+  readonly startedAt: number | null;
   readonly settled: boolean;
 }
 
@@ -413,9 +422,15 @@ async function sweepEarlierScratch(stateDirectory: string): Promise<void> {
 async function readImportRecord(stateDirectory: string): Promise<ReadRecord> {
   const text = await fs.readFile(path.join(stateDirectory, LEGACY_IMPORT_RECORD_FILE), "utf8").catch(() => undefined);
   const parsed = asPlainObject(text === undefined ? {} : parseJsonColumn(text));
-  const attempts = typeof parsed.attempts === "number" && Number.isSafeInteger(parsed.attempts) && parsed.attempts >= 0 ? parsed.attempts : 0;
+  const count = (value: unknown) => (typeof value === "number" && Number.isSafeInteger(value) && value >= 0 ? value : 0);
   const outcome = asPlainObject(parsed.outcome);
-  return { attempts, settled: outcome.status === "imported" || (outcome.status === "skipped" && outcome.reason === "gave_up") };
+  return {
+    attempts: count(parsed.attempts),
+    stopped: count(parsed.stopped),
+    lastStopAt: count(parsed.lastStopAt),
+    startedAt: typeof parsed.startedAt === "number" && Number.isSafeInteger(parsed.startedAt) ? parsed.startedAt : null,
+    settled: outcome.status === "imported" || (outcome.status === "skipped" && outcome.reason === "gave_up"),
+  };
 }
 
 async function writeImportRecord(stateDirectory: string, record: ImportRecord): Promise<void> {
@@ -939,12 +954,15 @@ export async function importLegacyStore(options: LegacyImportOptions): Promise<L
   await sweepEarlierScratch(options.stateDirectory);
   if (options.legacyStoreDir === undefined) return { status: "skipped", reason: skipOf.NoEarlierStore };
   const nowMs = (options.now ?? Date.now)();
-  const result: LegacyImportResult = sameAccount(options.owner, options.account)
-    ? await decideAndBringIn(options, nowMs)
-    : { status: "skipped", reason: skipOf.NotTheOwner };
   const record = await readImportRecord(options.stateDirectory);
-  if (result.status === "imported" || !(record.settled || isSettledByAnEarlierLaunch(result))) {
-    await writeImportRecord(options.stateDirectory, { attempts: record.attempts, outcome: result, at: nowMs }).catch(() => undefined);
+  const counts: RecordCounts = record.startedAt === null
+    ? record
+    : { attempts: record.attempts, stopped: record.stopped + 1, lastStopAt: record.startedAt };
+  const { result, kept } = sameAccount(options.owner, options.account)
+    ? await decideAndBringIn(options, nowMs, counts)
+    : { result: { status: "skipped", reason: skipOf.NotTheOwner } as const, kept: counts };
+  if (result.status === "imported" || record.startedAt !== null || !(record.settled || isSettledByAnEarlierLaunch(result))) {
+    await writeImportRecord(options.stateDirectory, { ...kept, startedAt: null, outcome: result, at: nowMs }).catch(() => undefined);
   }
   if (result.status !== "imported") {
     options.logger?.warn({ src: "alpha:earlier-import", outcome: result }, "The earlier store was not brought in");
@@ -962,32 +980,45 @@ function failureOf(error: unknown): string {
   return typeof code === "string" && /^[A-Za-z0-9_]{1,32}$/.test(code) ? `${error.name}:${code}` : error.name;
 }
 
-async function decideAndBringIn(options: LegacyImportOptions, nowMs: number): Promise<LegacyImportResult> {
+async function decideAndBringIn(
+  options: LegacyImportOptions,
+  nowMs: number,
+  counts: RecordCounts,
+): Promise<{ readonly result: LegacyImportResult; readonly kept: RecordCounts }> {
+  const skipped = (reason: SkipReason) => ({ result: { status: "skipped", reason } as const, kept: counts });
   const storeHeld = await isEarlierWorkspaceStore(options.legacyStoreDir);
-  if (!storeHeld) return { status: "skipped", reason: skipOf.NoEarlierStore };
-  if (!isTargetAdapter(options.adapter)) return { status: "skipped", reason: "no_adapter" };
+  if (!storeHeld) return skipped(skipOf.NoEarlierStore);
+  if (!isTargetAdapter(options.adapter)) return skipped("no_adapter");
   const adapter = options.adapter;
   const sourceDir = options.legacyStoreDir?.trim() ?? "";
   try {
     const rawConn = await adapter.getConnection();
-    if (!isSqlQueryable(rawConn)) return { status: "skipped", reason: "no_adapter" };
+    if (!isSqlQueryable(rawConn)) return skipped("no_adapter");
     const preflight = await readTargetEligibility(rawConn, options.conversationWorldId);
-    const record = await readImportRecord(options.stateDirectory);
-    const bringing = bringingOf(true, storeHeld, preflight.marked, preflight.populated, record.attempts);
-    if (bringing !== "BringIn") return { status: "skipped", reason: skipOf[bringing] };
-    await writeImportRecord(options.stateDirectory, { attempts: record.attempts + 1, outcome: { status: "started" }, at: nowMs });
+    const bringing = bringingOf(true, storeHeld, preflight.marked, preflight.populated, counts.attempts);
+    if (bringing !== "BringIn") return skipped(skipOf[bringing]);
+    if (startOf(counts.stopped, nowMs - counts.lastStopAt) === "HeldForADay") return skipped("held_after_stopped_launches");
+    const started: RecordCounts = counts.stopped >= maxStoppedLaunches ? { ...counts, stopped: 0 } : counts;
+    await writeImportRecord(options.stateDirectory, { ...started, startedAt: nowMs, outcome: { status: "started" }, at: nowMs });
+    const finished: RecordCounts = { ...started, attempts: started.attempts + 1, stopped: 0 };
     const wait = options.wait ?? ((ms: number) => Effect.runPromise(Effect.sleep(ms)));
     for (let failures = 1; ; failures += 1) {
       try {
-        return await bringIn(options, adapter, sourceDir, nowMs);
+        return { result: await bringIn(options, adapter, sourceDir, nowMs), kept: finished };
       } catch (error) {
-        if (failures >= triesPerLaunch) return { status: "failed", error: failureOf(error) };
+        if (failures >= triesPerLaunch) return { result: { status: "failed", error: failureOf(error) }, kept: finished };
         await wait(retryDelayMs(failures));
       }
     }
   } catch (error) {
-    return { status: "failed", error: failureOf(error) };
+    return { result: { status: "failed", error: failureOf(error) }, kept: counts };
   }
+}
+
+/** Opens the earlier database from its image and lets the image go, so only the open database stays in memory. */
+async function openEarlierImage(options: LegacyImportOptions, sourceDir: string): Promise<EarlierSqlClient | "too_large"> {
+  const read = await readStoreImage(sourceDir);
+  return read.kind === "too_large" ? "too_large" : options.openLegacyStore(read.image);
 }
 
 async function bringIn(
@@ -996,9 +1027,8 @@ async function bringIn(
   sourceDir: string,
   nowMs: number,
 ): Promise<LegacyImportResult> {
-  const read = await readStoreImage(sourceDir);
-  if (read.kind === "too_large") return { status: "failed", error: "source_too_large" };
-  const sourceClient = await options.openLegacyStore(read.image);
+  const sourceClient = await openEarlierImage(options, sourceDir);
+  if (sourceClient === "too_large") return { status: "failed", error: "source_too_large" };
   try {
     const extracted = await readEarlierRows(sourceClient, options.agentId, options.conversationWorldId, nowMs);
     if (extracted.kind === "ambiguous") return { status: "skipped", reason: "multi_agent_ambiguous" };
