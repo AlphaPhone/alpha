@@ -107,7 +107,7 @@ export function AssistantTranscript({ messages, messagesAfterLater, holdMessage,
     observer.observe(viewport);
     observer.observe(content);
     return () => observer.disconnect();
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- each change to what the conversation shows is followed as it is drawn, as v119 did after every update (45f6bed30 model.js:5561-5576), so a size the observer never sees still keeps the end
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- each change to what the conversation shows is followed as it is drawn, as v119 did (45f6bed30 model.js:5561-5576), so a size the observer never sees still keeps the end
   }, [around, page, status, visible, messages, messagesAfterLater, briefing, liveMessages, interim, turn]);
   const pageFrom = (button: HTMLElement, id: string | undefined, load: () => void) => {
     const content = button.parentElement;
