@@ -623,8 +623,8 @@ describe("Ask Alpha dock and shell navigation", () => {
     expect([barAgain?.style.transform, barAgain?.style.opacity, barAgain?.style.transition, barAgain?.style.animation]).toEqual(["", "", "", ""]);
   });
 
-  // spec/app/assistant/dock.md, "Pulled down from the bar or from typing, Ask Alpha rests on the bar": the bar keeps the finger's paint until the pill is drawn in its place, and the pill rises on the design system's rise
-  it("a bar swiped down to the pill never shows at rest first, and the pill rises on the rise token", async () => {
+  // spec/app/assistant/dock.md, "Pulled down from the bar or from typing, Ask Alpha rests on the bar": the bar keeps the finger's paint until the pill is drawn in its place, which then has no entrance, as v119's
+  it("a bar swiped down to the pill never shows at rest first", async () => {
     const { runtime } = await mountDock({ view: "Home", flush: underAct, speech: { onTalk: () => undefined } });
     const bar = document.querySelector<HTMLElement>("[data-alpha-input-bar]");
     const mark = named("Open conversation");
@@ -650,11 +650,30 @@ describe("Ask Alpha dock and shell navigation", () => {
     await send("pointerup", 770);
     await expect.poll(async () => (await runtime.runPromise(Effect.flatMap(Dock, (m) => m.get()))).tucked).toBe(true);
     await vi.waitFor(() => expect(bar.hasAttribute("data-alpha-pill")).toBe(true));
-    expect([cleared, bar.style.transform, bar.style.opacity]).toEqual([[true], "", ""]);
+    expect([cleared, bar.style.transform, bar.style.opacity, risen]).toEqual([[true], "", "", []]);
+  });
+
+  // spec/app/assistant/dock.md, "Inside an app other than the Browser, Ask Alpha at rest is the pill; Type raises it to typing, where the whole bar shows, and a swipe up from it opens the sheet": the bar Type raises from the pill rises on the design system's rise
+  it("Type raises the pill to the bar on the rise token", async () => {
+    const { runtime } = await mountDock({ view: "Calendar", flush: underAct });
+    const pill = document.querySelector<HTMLElement>("[data-alpha-pill]");
+    expect(pill).not.toBeNull();
+    if (!pill) return;
+    const risen: Parameters<HTMLElement["animate"]>[] = [];
+    pill.animate = (...args: Parameters<HTMLElement["animate"]>) => {
+      risen.push(args);
+      return { finished: Promise.resolve(), cancel: () => undefined } as unknown as Animation;
+    };
+    await act(async () => {
+      document.querySelector<HTMLButtonElement>("[data-alpha-compact-dock] button[aria-label='Type']")?.click();
+      await resting(runtime, "Typing");
+    });
+    expect(pill.hasAttribute("data-alpha-input-bar")).toBe(true);
     const [frames, options] = risen.at(-1) ?? [];
     const [from] = Array.isArray(frames) ? frames : [];
     const timing = typeof options === "object" ? options : undefined;
-    expect(tokens.keyframes.rise).toContain(String(from?.transform));
+    expect(risen).toHaveLength(1);
+    expect(tokens.keyframes.rise).toContain(`transform:${String(from?.transform)}`);
     expect(tokens.animate.rise).toContain(`${timing?.duration}ms ${timing?.easing}`);
   });
 
