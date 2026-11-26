@@ -39,6 +39,7 @@ export const meta: ComponentMeta<AssistantComposerProps> = {
     },
     Editing: { value: "What is on Friday?", editing: true, onSend },
     "Storage failed": { value: "Ask Ana about lunch", notice: { status: "failed", onRetry: fn() }, onSend },
+    Closed: { value: "", closed: true },
   },
   play: {
     Default: async ({ canvasElement }: { canvasElement: HTMLElement }) => {
