@@ -99,6 +99,7 @@ export function InboxListScreen({
     focusSearchAfterCloseRef.current = true;
     onCloseSearch?.();
   };
+  const emptyState = state === "empty" ? emptyIn[folder] : state === "signedOut" && searching ? "searchPrompt" : state;
   const compose = onCompose ?? (state === "signedOut" ? onStateAction : undefined);
   const actions = (
     <>
@@ -155,10 +156,10 @@ export function InboxListScreen({
           )) : null}
         </div>
       ) : null}
-      {state === "signedOut" && onStateAction ? <Button variant="secondary" size="sm" className="mt-1.5 ml-1 self-start px-3 text-[.8125rem] font-normal" onClick={onStateAction}>Connect Eliza Cloud</Button> : null}
+      {state === "signedOut" && onStateAction ? <Button variant="secondary" size="sm" className="mt-1.5 ml-1 self-start px-3 text-caption font-normal" onClick={onStateAction}>Connect Eliza Cloud</Button> : null}
       {notice ? <InboxNotice kind={notice} onAction={onNoticeAction} plain /> : null}
       {rows.length === 0 && loading ? <InboxListState kind="loading" />
-        : state && rows.length === 0 ? <InboxListState kind={state === "empty" ? emptyIn[folder] : state} onAction={onStateAction} />
+        : emptyState && rows.length === 0 ? <InboxListState kind={emptyState} onAction={onStateAction} />
         : <InboxList rows={rows} searching={searching} loading={loading} onLoadMore={onLoadMore} loadingMore={loadingMore} />}
     </Screen>
   );

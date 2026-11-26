@@ -8,6 +8,7 @@ export const meta: ComponentMeta<InboxListStateProps> = {
   args: { kind: "signedOut", onAction },
   examples: {
     Empty: { kind: "empty", onAction: undefined },
+    "Search prompt": { kind: "searchPrompt", onAction: undefined },
     "No matches": { kind: "noResults", onAction: undefined },
     Checking: { kind: "checking", onAction: undefined },
     "Not connected": { kind: "notConnected" },
