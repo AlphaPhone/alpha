@@ -173,8 +173,8 @@ describe("Ask Alpha dock and shell navigation", () => {
     expect([named<HTMLTextAreaElement>("Message Alpha")?.value, world.ask.kept.size, world.ask.said]).toEqual(["", 0, []]);
   });
 
-  // spec/app/assistant/dock.md, "Focusing or tapping the composer on the bar opens Ask Alpha as a sheet"
-  it("focusing the composer on the Browser bar opens half-open Sheet without reparenting and marks host chrome (spec/app/assistant/dock.md, \"Focusing or tapping the composer on the bar opens Ask Alpha as a sheet\")", async () => {
+  // spec/app/assistant/dock.md, "Focusing the composer on the bar raises Ask Alpha to typing"
+  it("focusing the composer on the Browser bar types in place without reparenting and marks host chrome (spec/app/assistant/dock.md, \"Focusing the composer on the bar raises Ask Alpha to typing\")", async () => {
     const { runtime } = await mountDock({ view: "Browser", withToast: true, flush: underAct });
     const section = document.querySelector<HTMLElement>("section[aria-label='Ask Alpha']");
     const textarea = document.querySelector<HTMLTextAreaElement>("textarea[data-alpha-composer]");
@@ -184,7 +184,7 @@ describe("Ask Alpha dock and shell navigation", () => {
 
     await act(async () => {
       textarea?.focus();
-      await runtime.runPromise(Effect.flatMap(Shell, (m) => Stream.runHead(Stream.filter(m.changes, (s) => s.assistant === "Sheet"))));
+      await runtime.runPromise(Effect.flatMap(Shell, (m) => Stream.runHead(Stream.filter(m.changes, (s) => s.assistant === "Typing"))));
     });
     await act(async () => {
       await runtime.runPromise(Effect.flatMap(Canvas, (m) => Stream.runHead(Stream.filter(m.changes, (s) => s.field === "Composer"))));
@@ -192,7 +192,7 @@ describe("Ask Alpha dock and shell navigation", () => {
 
     expect(document.querySelector("textarea[data-alpha-composer]")).toBe(textarea);
     expect(document.activeElement).toBe(textarea);
-    expect(section?.getAttribute("data-alpha-detent")).toBe("sheet");
+    expect(section?.getAttribute("data-alpha-detent")).toBe("bar");
   });
 
   // spec/app/shell/index.md, "Ask Alpha rises to typing, a sheet or the full screen"
@@ -229,8 +229,8 @@ describe("Ask Alpha dock and shell navigation", () => {
     expect(document.querySelector("section[aria-label='Ask Alpha']")?.getAttribute("data-alpha-detent")).toBe("sheet");
   });
 
-  // spec/app/assistant/dock.md, "Focusing or tapping the composer on the bar opens Ask Alpha as a sheet"; spec/app/assistant/dock.md, "Ask Alpha put away forgets the height its sheet was left at"
-  it("tapping Open conversation focuses the composer and Back lowers Sheet to Bar clearing kept height (spec/app/assistant/dock.md, \"Focusing or tapping the composer on the bar opens Ask Alpha as a sheet\")", async () => {
+  // spec/app/assistant/dock.md, "A tap of Alpha's mark opens the sheet, and a tap of the open sheet's handle fills the screen"; spec/app/assistant/dock.md, "Ask Alpha put away forgets the height its sheet was left at"
+  it("tapping Open conversation opens Sheet without the keyboard, its handle fills the screen, and Back lowers Sheet to Bar clearing kept height (spec/app/assistant/dock.md, \"A tap of Alpha's mark opens the sheet, and a tap of the open sheet's handle fills the screen\")", async () => {
     const { runtime } = await mountDock({ view: "Home", withToast: true, flush: underAct });
     const openBtn = document.querySelector<HTMLButtonElement>("button[aria-label='Open conversation']");
     expect(openBtn).not.toBeNull();
@@ -239,7 +239,14 @@ describe("Ask Alpha dock and shell navigation", () => {
       openBtn?.click();
       await runtime.runPromise(Effect.flatMap(Shell, (m) => Stream.runHead(Stream.filter(m.changes, (s) => s.assistant === "Sheet"))));
     });
-    expect(document.activeElement).toBe(document.querySelector("textarea[data-alpha-composer]"));
+    expect(document.activeElement).not.toBe(document.querySelector("textarea[data-alpha-composer]"));
+
+    await act(async () => {
+      document.querySelector<HTMLButtonElement>("button[aria-label='Resize chat']")?.click();
+      await runtime.runPromise(Effect.flatMap(Shell, (m) => Stream.runHead(Stream.filter(m.changes, (s) => s.assistant === "Full"))));
+      await runtime.runPromise(Effect.flatMap(Shell, (m) => m.send({ type: "goBack" })));
+    });
+    expect((await runtime.runPromise(Effect.flatMap(Shell, (m) => m.get()))).assistant).toBe("Sheet");
 
     await act(async () => {
       await runtime.runPromise(Effect.flatMap(Dock, (m) => m.send({ type: "press", detent: "Sheet", now: 100 })));

@@ -105,10 +105,9 @@ holds the `CLOUDFLARE_ACCOUNT_ID` variable and the
 ### Alpha Cloud
 
 Alpha Cloud is `apps/cloud` on AlphaCompute's Cloudflare account, in the
-`alphaphone.dev` zone; never the Eliza Labs account. Deploy staging end to
-end before production. The production deploy is the owner's step, and no
-deploy moves a phone: until the cutover release below, phones use Eliza
-Cloud.
+`alphaphone.dev` zone. Deploy staging before production. Worker deployments
+leave each installed app's configured hosts in place. The Android release
+below changes the hosts new builds use.
 
 | | Production | Staging |
 |---|---|---|
@@ -116,10 +115,10 @@ Cloud.
 | Web Worker (App Links, return pages) | `cloud.alphaphone.dev` | `cloud-staging.alphaphone.dev` |
 | Worker names | `alphacompute-cloud-api`, `…-edge` | `alphacompute-cloud-api-staging`, `…-edge` |
 
-The hosts are the `cutoverCandidate` rows of
-`packages/deployment/deployments.json`, the names `workerName` in
-`apps/cloud/resources.json`. Never change either after the first production
-deploy: the app's sign-in callback and App Link host come from them.
+The app and the Cloud operator read the same hosted rows in
+`packages/deployment/deployments.json`. `apps/cloud/resources.json` names
+their Workers. Keep both pairs of hosts stable after the first deployment
+because signed apps use them for sign-in and verified App Links.
 
 - **Deploy machine:** Linux or macOS with 16 GB of memory and 5 GB free
   disk, git, Node 26 and pnpm 10.24.0. In a checkout, `pnpm install`, then
@@ -238,19 +237,21 @@ deploy: the app's sign-in callback and App Link host come from them.
   an issue, chat or pull request. Hand the owner the `smoke` output, the
   `apps/cloud/resources.json` change, where (not what) the backups are, and
   anything that needed a workaround.
-- **Cutover:** once both environments pass and a candidate build passes
-  against staging, one reviewed release moves both rows of
-  `packages/deployment/deployments.json` to their `cutoverCandidate` (moving one
-  alone is refused), with the phone's stored sign-in moved to a new namespace
-  so no Eliza Cloud credential reaches Alpha Cloud. Every phone signs in
-  again; Eliza Cloud accounts, subscriptions and Google grants do not move.
+- **Android cutover.** Release only after a signed staging build passes email
+  and Google sign-in with verified App Links. On a separate device, upgrade an
+  enrolled Eliza Cloud build to the signed production candidate with app data
+  intact. Verify it opens signed out, then sign in again and confirm the session
+  survives relaunch. The Eliza SDK keys device credentials by API origin, so
+  the new Alpha Cloud origin uses a fresh namespace. Each phone signs in again.
+  Existing Eliza Cloud accounts, subscriptions and Google grants stay with Eliza
+  Cloud. Roll back with a newer signed build that restores the earlier hosts.
 
 ### Maps through the Cloud
 
-Maps is Google Maps Platform through the Cloud the phone signs in to: Eliza
-Cloud until the cutover, Alpha Cloud after it. Both are eliza's cloud, so the
-routes and checks below are the same; the Eliza Cloud Worker settings that
-select Google and its allowance are kept by that deployment's operator, as in
+Maps uses Google Maps Platform through the Cloud the phone signs in to.
+Older builds use Eliza Cloud, and builds after the cutover use Alpha Cloud.
+Both use eliza's routes. The Eliza Cloud operator manages the provider and
+allowances for older builds, as in
 [develop's Maps runbook](https://github.com/eliza-research/alpha/blob/bd70db55b2b3cab4c6f0ec2f4faa28edfa83979a/docs/runbooks/667-maps-provider-coverage.md).
 
 - **Key:** one Google Cloud project with billing, Places API (New),

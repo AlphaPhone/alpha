@@ -8,8 +8,8 @@ enter the repository; a profile only names them. Every step is read back
 before the next one runs; staging goes first, and production follows only
 once staging is up at the same pin.
 
-Where the deployment is the shipped Eliza Cloud, its operator runs these
-steps with the registration `apps/cloud` prints; nothing here deploys.
+The Alpha Cloud operator applies the registration that `apps/cloud` prints
+for the environment's API origin and App Link host.
 `--seed` is for the local cloud alone: eliza refuses it outside staging
 (`spec/cloud/deployment.md`, "An instance starts only for an accepted
 profile, on its environment's own readable database, seeded only in staging,
@@ -58,7 +58,7 @@ pure def commandOf(task: Step): str =
 ### Each environment records how many steps were read back, whether one is running, whether the last read-back failed, and the pin it is at
 
 ```quint
-type Trigger = ByHandOnMain | ByHandElsewhere | Scheduled
+type Trigger = PushOnVibestackDevelop | DeployDispatchOnAdmittedBranch | OtherTrigger
 type Progress = { done: int, running: bool, failed: bool, pin: int }
 type Provisioning = { pin: int, staging: Progress, production: Progress }
 type Effect = Run({ environment: Environment, task: Step, trigger: Trigger })
@@ -90,14 +90,23 @@ pure def canAdvance(s: Provisioning, pin: int): bool =
 pure def advance(s: Provisioning, pin: int): Provisioning = { pin: pin, staging: fresh(pin), production: fresh(pin) }
 ```
 
-### A step runs only once the step before it was read back, one at a time per environment; production runs only after staging is up at the same pin; and a serve runs only by hand from the main branch
+### A step runs only after the prior read-back, one per environment, with staging up at the same pin before production and an admitted trigger before serving
+
+Cloud serves on a qualifying push to `vibestack-develop` or on a manual
+`deploy` dispatch from a branch admitted by the selected GitHub environment.
+A push promotes only after staging passes on that revision. For a manual
+production recovery, the operator uses a revision whose staging deployment
+already passed its read-back.
 
 ```quint
+pure def serveTriggerAllowed(trigger: Trigger): bool =
+  trigger == PushOnVibestackDevelop or trigger == DeployDispatchOnAdmittedBranch
+
 pure def canLaunch(s: Provisioning, environment: Environment, trigger: Trigger): bool =
   val p = progress(s, environment)
   not(p.running) and p.done < total and p.pin == s.pin
     and (environment == Production implies live(s.staging, s.pin))
-    and (taskAt(p.done) == Serve implies trigger == ByHandOnMain)
+    and (taskAt(p.done) == Serve implies serveTriggerAllowed(trigger))
 
 pure def launch(s: Provisioning, environment: Environment, trigger: Trigger): Moved =
   val p = progress(s, environment)
@@ -158,14 +167,14 @@ pure def stepStepsCountOneAtATime(before: Provisioning, via: str, after: Provisi
     or (after.production.done == before.production.done + 1 and via == "readBack"))
 ```
 
-### What runs is the next step of its environment, and a serve is always by hand from the main branch
+### What runs is the next step of its environment, and a serve uses an admitted trigger
 
 ```quint
 pure def stepRunsAreInOrder(before: Provisioning, after: Provisioning, out: List[Effect]): bool =
   out.every(e => match e {
     | Run(r) => taskAt(progress(before, r.environment).done) == r.task
         and not(progress(before, r.environment).running)
-        and (r.task == Serve implies r.trigger == ByHandOnMain)
+        and (r.task == Serve implies serveTriggerAllowed(r.trigger))
   })
 ```
 

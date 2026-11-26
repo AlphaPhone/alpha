@@ -280,8 +280,8 @@ const home = started(effect {
     // spec/app/home/cards.md, "The mail card shows the unread count, senders and subjects only, never a message body; marked not up to date when Inbox's page is not, and not drawn without an account or a row"
     const failed = state.failure !== "Fine" || state.list.status === "Failed" || state.accounts.status === "Failed"
     const pending = state.list.status === "Loading"
-    const status = !connected ? "" : failed ? `Open to retry${read === "" ? "" : ` · last updated ${read}`}`
-      : pending ? "Updating email…"
+    const status = !connected ? "" : pending ? "Updating email…"
+      : failed ? `Open to retry${read === "" ? "" : ` · last updated ${read}`}`
       : [unread.more ? "Recent email" : ledger.email(state.selected.account), read === "" ? "" : `Updated ${read}`].filter((part) => part !== "").join(" · ")
     const written = JSON.stringify([card, unread.more, status])
     if (written !== previous) {
