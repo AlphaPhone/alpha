@@ -1,11 +1,16 @@
 import { type PointerEvent, useRef } from "react";
 
-type Press = { now: number };
-type Sample = { y: number; at: number };
-type Track = { pointer: number; start: number; prev: Sample; last: Sample; moved: boolean; onCancel: AssistantPull["onCancel"] };
+import { KEPT_SAMPLES, releaseOf, type Sample, TAP_SLOP } from "./chat-overlay-motion.ts";
 
-/** The direction, speed, position and time of one released drag. */
-export type AssistantRelease = { direction: "up" | "down"; flick: boolean; y: number; now: number };
+type Press = { now: number };
+type Track = { pointer: number; start: Sample; samples: Sample[]; moved: boolean; onCancel?: AssistantPull["onCancel"] };
+
+/**
+ * One released drag, settled as v123 settled it (chat-overlay-motion-adapter.ts:1092-1108, use-pull-gesture.ts:380-479):
+ * the way it went (a flick's aim, else its travel), whether it was a flick, whether it was quick enough to count as a
+ * pull, how far it travelled, where it ended and when.
+ */
+export type AssistantRelease = { direction: "up" | "down"; flick: boolean; quick: boolean; travel: number; y: number; now: number };
 
 export interface AssistantPull {
   /** A finger or mouse pressed the control at `y`. */
@@ -20,8 +25,15 @@ export interface AssistantPull {
   onCancel?: (press: Press) => void;
 }
 
-const slop = 6;
-const flickPixelsPerMillisecond = 1;
+function settle(track: Track, event: PointerEvent<HTMLElement>): AssistantRelease {
+  const { direction, flick, quick, travel, y } = releaseOf(track.start, track.samples, { y: event.clientY, t: event.timeStamp }, event.pointerType === "touch");
+  return { direction, flick, quick, travel, y, now: event.timeStamp };
+}
+
+function follow(track: Track, y: number, t: number) {
+  track.samples.push({ y, t });
+  if (track.samples.length > KEPT_SAMPLES) track.samples.shift();
+}
 
 function capture(element: HTMLElement, pointer: number) {
   try {
@@ -46,10 +58,8 @@ export function useAssistantPull<Target extends HTMLElement>(pull: AssistantPull
       const mouse = event.pointerType === "mouse";
       if (editable && mouse) event.preventDefault();
       if (!editable || mouse) capture(event.currentTarget, event.pointerId);
-      const sample = { y: event.clientY, at: event.timeStamp };
-      track.current = {
-        pointer: event.pointerId, start: sample.y, prev: sample, last: sample, moved: false, onCancel: pull.onCancel,
-      };
+      const sample = { y: event.clientY, t: event.timeStamp };
+      track.current = { pointer: event.pointerId, start: sample, samples: [sample], moved: false, onCancel: pull.onCancel };
       pull.onPress?.({ now: event.timeStamp, y: sample.y });
     },
     onPointerMove: (event: PointerEvent<Target>) => {
@@ -57,11 +67,10 @@ export function useAssistantPull<Target extends HTMLElement>(pull: AssistantPull
       if (current?.pointer !== event.pointerId) return;
       if (pull === undefined) return cancel(event);
       const y = event.clientY;
-      const starting = !current.moved && Math.abs(y - current.start) > slop;
+      const starting = !current.moved && Math.abs(y - current.start.y) >= TAP_SLOP;
       if (starting && editable) capture(event.currentTarget, event.pointerId);
       current.moved ||= starting;
-      current.prev = current.last;
-      current.last = { y, at: event.timeStamp };
+      follow(current, y, event.timeStamp);
       if (current.moved) pull.onDrag?.({ y });
     },
     onPointerUp: (event: PointerEvent<Target>) => {
@@ -75,9 +84,7 @@ export function useAssistantPull<Target extends HTMLElement>(pull: AssistantPull
         if (editable && event.pointerType === "mouse") event.currentTarget.focus();
         return;
       }
-      const y = event.clientY;
-      const flick = Math.abs(current.last.y - current.prev.y) >= (current.last.at - current.prev.at) * flickPixelsPerMillisecond;
-      pull.onRelease?.({ direction: y < current.start ? "up" : "down", flick, y, now });
+      pull.onRelease?.(settle(current, event));
     },
     onPointerCancel: cancel,
     onLostPointerCapture: cancel,
@@ -94,8 +101,12 @@ export type AssistantBarDrag = {
   onRelease?: (release: AssistantRelease) => void;
   /** The drag was taken away by the system, a resize or the window losing focus. */
   onCancel?: (press: Press) => void;
-  /** The bar is drawn as the pill: as on v121, a drag may start on any of its buttons, whose still press stays a tap. */
-  pill?: boolean;
+  /**
+   * Where the drag starts: the bar; the pill, where as on v123 a drag may start on any of its buttons, whose still press
+   * stays a tap; or the strip above a full-screen sheet, which as v123's strip (template.html:4150) drags from anywhere
+   * but its own actions.
+   */
+  from?: "bar" | "pill" | "strip";
 };
 
 /**
@@ -106,8 +117,8 @@ export type AssistantBarDrag = {
  * can start the drag. The press is seen on its way down, before a control keeps it for the field. A touch is held by the field it lands on until the bar
  * takes it, and that hand-over is not a loss.
  */
-export function useAssistantBarDrag({ onStart, onDrag, onRelease, onCancel, pill = false }: AssistantBarDrag) {
-  const track = useRef<Omit<Track, "onCancel"> | undefined>(undefined);
+export function useAssistantBarDrag({ onStart, onDrag, onRelease, onCancel, from = "bar" }: AssistantBarDrag) {
+  const track = useRef<Track | undefined>(undefined);
   const lost = (event: PointerEvent<HTMLElement>) => {
     if (event.type === "lostpointercapture" && event.target !== event.currentTarget) return;
     const current = track.current;
@@ -118,23 +129,24 @@ export function useAssistantBarDrag({ onStart, onDrag, onRelease, onCancel, pill
   return {
     onPointerDownCapture: (event: PointerEvent<HTMLElement>) => {
       if (!event.isPrimary || event.button !== 0 || !(event.target instanceof Element)) return;
-      if (event.target.closest("[data-alpha-grabber], [data-alpha-pull]")) return;
+      if (event.target.closest("[data-alpha-grabber]:not([data-alpha-input-drag-alpha]), [data-alpha-pull]")) return;
       // spec/app/assistant/dock.md, "A press does one thing: a tap is never also a drag, and a late click never taps"
-      if (pill ? !event.target.closest("button") : event.target.closest("button, a, [role=menuitem]") && !event.target.closest("[data-alpha-input-drag-alpha]")) return;
+      if (from === "pill" ? !event.target.closest("button")
+        : from === "strip" ? event.target.closest("[data-alpha-strip-action]")
+        : event.target.closest("button, a, [role=menuitem]") && !event.target.closest("[data-alpha-input-drag-alpha]")) return;
       if (event.target instanceof HTMLTextAreaElement && event.target.value !== "") return;
-      const sample = { y: event.clientY, at: event.timeStamp };
-      track.current = { pointer: event.pointerId, start: sample.y, prev: sample, last: sample, moved: false };
+      const sample = { y: event.clientY, t: event.timeStamp };
+      track.current = { pointer: event.pointerId, start: sample, samples: [sample], moved: false };
     },
     onPointerMove: (event: PointerEvent<HTMLElement>) => {
       const current = track.current;
       if (current?.pointer !== event.pointerId) return;
       const y = event.clientY;
-      current.prev = current.last;
-      current.last = { y, at: event.timeStamp };
-      if (!current.moved && Math.abs(y - current.start) > slop) {
+      follow(current, y, event.timeStamp);
+      if (!current.moved && Math.abs(y - current.start.y) >= TAP_SLOP) {
         current.moved = true;
         capture(event.currentTarget, event.pointerId);
-        onStart?.({ now: event.timeStamp, y: current.start });
+        onStart?.({ now: event.timeStamp, y: current.start.y });
       }
       if (current.moved) onDrag?.({ y });
     },
@@ -143,9 +155,7 @@ export function useAssistantBarDrag({ onStart, onDrag, onRelease, onCancel, pill
       if (current?.pointer !== event.pointerId) return;
       track.current = undefined;
       if (!current.moved) return;
-      const y = event.clientY;
-      const flick = Math.abs(current.last.y - current.prev.y) >= (current.last.at - current.prev.at) * flickPixelsPerMillisecond;
-      onRelease?.({ direction: y < current.start ? "up" : "down", flick, y, now: event.timeStamp });
+      onRelease?.(settle(current, event));
     },
     onPointerCancel: lost,
     onLostPointerCapture: lost,

@@ -33,7 +33,7 @@ export type AssistantChatHeaderProps = Omit<ComponentProps<"header">, "title" | 
 export function AssistantChatHeader({ title, context, subtitle, grabber, onHome, onClose, returnOnClose = false, expanded = false, onResize, className, ...props }: AssistantChatHeaderProps) {
   const told = context && (context.sensitive || context.selected) ? context : undefined;
   return (
-    <header className={cn("grid shrink-0 grid-cols-[minmax(0,1fr)_2.75rem_minmax(0,1fr)] items-center px-3 pb-1", className)} {...props}>
+    <header data-alpha-chat-header="" className={cn("grid shrink-0 grid-cols-[minmax(0,1fr)_2.75rem_minmax(0,1fr)] items-center px-3 pb-1", className)} {...props}>
       <div className="flex min-w-0 items-center gap-0.5">
         <button
           type="button"

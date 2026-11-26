@@ -123,7 +123,7 @@ export function AssistantComposer({
       {!compact && editing ? <AssistantQuoteBar kind="editing" /> : null}
       {voiceNotice}
       {voice}
-      <div hidden={Boolean(voice)} className={cn("items-center bg-secondary", voice ? "hidden" : "flex", compact ? "touch-none gap-0.5 self-center rounded-dock-compact p-1.25 shadow-dock-compact dark:shadow-dock-compact-dark" : bar ? cn("min-h-[calc(--spacing(18.5)_-_2_*_var(--alpha-composer-fit,0px))] gap-1 rounded-dock py-1.5 pr-2 pl-2.25 shadow-dock dark:shadow-dock-dark", draggable ? "touch-none" : "touch-pan-y") : cn("min-h-[calc(--spacing(17)_-_2_*_var(--alpha-composer-fit,0px))] touch-pan-y gap-1.5 rounded-sheet py-1.5 pr-1.5", targeting ? "pl-1.5 ring-[1.5px] ring-primary ring-inset" : "pl-5"))}>
+      <div data-alpha-input-bar={bar && !compact ? "" : undefined} hidden={Boolean(voice)} className={cn("items-center bg-secondary", voice ? "hidden" : "flex", compact ? "touch-none gap-0.5 self-center rounded-dock-compact p-1.25 shadow-dock-compact dark:shadow-dock-compact-dark" : bar ? cn("min-h-[calc(--spacing(18.5)_-_2_*_var(--alpha-composer-fit,0px))] gap-1 rounded-dock py-1.5 pr-2 pl-2.25 shadow-dock dark:shadow-dock-dark", draggable ? "touch-none" : "touch-pan-y") : cn("min-h-[calc(--spacing(17)_-_2_*_var(--alpha-composer-fit,0px))] touch-pan-y gap-1.5 rounded-sheet py-1.5 pr-1.5", targeting ? "pl-1.5 ring-[1.5px] ring-primary ring-inset" : "pl-5"))}>
         {leading}
         {bar ? opener ?? (onOpen ? (
           <Button size="icon" aria-label="Open conversation" data-alpha-input-drag-alpha="" className="overflow-hidden bg-alpha text-alpha-foreground hover:bg-alpha/90" onClick={onOpen}><Mark aria-hidden className="size-[118%]" /></Button>

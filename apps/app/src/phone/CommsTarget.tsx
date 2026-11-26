@@ -70,7 +70,7 @@ export function CommsTarget({ runtime, placement }: {
         <span className="min-w-0 flex-1 truncate text-left">{shouldShowCall ? "Ongoing call" : person === "" ? view : `${person} · ${view}`}</span>
         <ChevronDown aria-hidden />
       </Button>
-      {shouldShowCall && calls.can(end) && (!comms || endPlace(comms) !== "EndOnVoicePanel") && <Button size="icon" className={hangupButton} aria-label="End call" onClick={() => void calls.send(end)}><Handset aria-hidden className="size-5 rotate-135" /></Button>}
+      {shouldShowCall && calls.can(end) && (!comms || endPlace(comms) !== "EndOnVoicePanel") && <Button size="icon" data-alpha-strip-action="" className={hangupButton} aria-label="End call" onClick={() => void calls.send(end)}><Handset aria-hidden className="size-5 rotate-135" /></Button>}
     </div>
   );
 }

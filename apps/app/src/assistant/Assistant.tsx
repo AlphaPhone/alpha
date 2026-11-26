@@ -51,7 +51,7 @@ import { askComms, freedom, openChatSearch, restTyping } from "./assistant.vibe"
 import { contactChatActionsId } from "./contact-chat-id.ts";
 import { acceptedFiles, acceptedPhotos, attachmentAuthority, previewFile, removeContactFile, removeFile, retireTranscript, sameBinding } from "./attachments.vibe";
 import { chip, type MessageActions, useHistorySheets, useMessageRows } from "./history.tsx";
-import { ChatScrim, useSheetFollow } from "./follow.tsx";
+import { ChatScrim, DragStrip, useSheetFollow } from "./follow.tsx";
 import { holdMessagePress } from "./message-actions.vibe";
 import { ReplyFailure } from "./ReplyFailure.tsx";
 import {
@@ -610,7 +610,6 @@ export function Assistant({ runtime, messageActions, speech, canReadAloud = fals
   const contact = useContact(runtime).state;
   const board = useMemo(() => runtime.runSync(Effect.map(Talk, (talk) => talk.board)), [runtime]);
   const seen = useExternal(board);
-  const sectionRef = useRef<HTMLElement>(null);
   const composerRef = useRef<HTMLTextAreaElement>(null);
   const focusOnRevealRef = useRef(false);
   const { voice: renderVoice, voicePanel: renderDictation, interim, keyboard, ...speechProps } = speech ?? {};
@@ -620,8 +619,11 @@ export function Assistant({ runtime, messageActions, speech, canReadAloud = fals
   const currentView = shell.state?.trail.at(-1);
   const onComms = isCommsView(currentView);
   const assistantDetent = shell.state?.assistant ?? "Bar";
-  const { following, gesture, done } = useSheetFollow(dock, assistantDetent, sectionRef);
   const compact = assistantDetent === "Bar" && currentView !== undefined && currentView !== "Browser" && !onComms;
+  const { drawn: live, underlay, leaving, style: sheetStyle, ref: sheetRef, gesture, done } = useSheetFollow({
+    dock, detent: assistantDetent, pill: compact, comms: onComms, voice: dock.state?.voice ?? false,
+    canLand: (detent) => detent === assistantDetent || shell.can({ type: "raise", detent }) || shell.can({ type: "goBack" }),
+  });
   const composerField = useCallback((element: HTMLTextAreaElement | null) => {
     composerRef.current = element;
     if (element && !compact && focusOnRevealRef.current) {
@@ -699,7 +701,6 @@ export function Assistant({ runtime, messageActions, speech, canReadAloud = fals
   const view = talking.context.showing.tag === "App" ? talking.context.showing.view : "Home";
   const full = assistantDetent === "Full";
   const textAsk = shell.state?.textAsk.tag === "TextAskVisit";
-  const keptHeight = assistantDetent === "Sheet" && dock.state && dock.state.kept > 0 ? dock.state.kept : undefined;
   const raiseAll = (asks: ReturnType<typeof dockFocused>) => {
     for (const ask of asks) if (ask.tag === "Raise" && shell.can({ type: "raise", detent: ask.detent })) void shell.send({ type: "raise", detent: ask.detent });
   };
@@ -712,7 +713,6 @@ export function Assistant({ runtime, messageActions, speech, canReadAloud = fals
   };
   const draftEditable = composer.can({ type: "edit", blank: false, long: false });
   const pullFromField = shell.state && browserFieldPull(shell.state, seen.typed === "", draftEditable);
-  const live = following !== undefined;
   const handle = (variant: DockHandleProps["variant"]) => shell.state ? <DockHandle dock={dock} variant={variant} gesture={gesture} done={done} /> : undefined;
   const grabber = handle(open ? "handle" : "mark");
   const scrim = !onComms && !live && !dock.state?.voice && currentView !== "Camera" && (assistantDetent === "Sheet" || assistantDetent === "Typing");
@@ -720,17 +720,17 @@ export function Assistant({ runtime, messageActions, speech, canReadAloud = fals
   return (
     <>
       <AssistantAttachments runtime={runtime} attachments={attachments} preview={previewed} notice={seen.attachmentNotice} composerRef={composerRef} route={searchRoute} />
-      {onComms && full && <CommsTarget runtime={runtime} placement="strip" />}
+      {onComms && full && <DragStrip gesture={gesture}><CommsTarget runtime={runtime} placement="strip" /></DragStrip>}
       {scrim ? <ChatScrim typing={assistantDetent === "Typing"} field={composerRef} onLower={() => { if (shell.can(back)) void shell.send(back); }} /> : null}
-      {(!onComms || open) && <AssistantConversation
-        ref={sectionRef}
+      {(!onComms || open || leaving) && <AssistantConversation
+        ref={sheetRef}
         voicePanel={voicePanel}
         detent={live && !onComms ? "sheet" : assistantDetent === "Full" ? "full" : assistantDetent === "Sheet" ? "sheet" : "bar"}
-        barDrag={shell.state ? { onStart: gesture.onPress, onDrag: gesture.onDrag, onRelease: gesture.onRelease, onCancel: gesture.onCancel, pill: compact } : undefined}
-        className={onComms ? "relative w-full motion-safe:transition-[height] motion-safe:duration-[420ms]" : open || live ? "fixed inset-x-0 bottom-0 mx-auto max-w-md" : "sticky bottom-0"}
-        style={onComms
-          ? live ? { height: following, transition: "none" } : assistantDetent === "Full" ? { height: "calc(100dvh - 52px)" } : keptHeight === undefined ? undefined : { height: `clamp(38dvh, ${keptHeight}px, 60dvh)` }
-          : live ? { height: following, borderRadius: following >= window.innerHeight ? 0 : undefined } : keptHeight ? { height: keptHeight } : undefined}
+        underlay={underlay && !onComms ? currentView !== undefined && currentView !== "Browser" ? "pill" : "bar" : undefined}
+        inert={leaving || undefined}
+        barDrag={shell.state ? { onStart: gesture.onPress, onDrag: gesture.onDrag, onRelease: gesture.onRelease, onCancel: gesture.onCancel, from: compact ? "pill" : "bar" } : undefined}
+        className={onComms ? "relative w-full" : open || live ? "fixed inset-x-0 bottom-0 mx-auto max-w-md" : "sticky bottom-0"}
+        style={onComms && !live && assistantDetent === "Full" ? { ...sheetStyle, height: "calc(100dvh - 52px)" } : sheetStyle}
         header={{
           title: seen.titles.get(shown.chosen) ?? "Ask Alpha",
           context: { view, selected: talking.context.selected, sensitive: talking.context.sensitive },
@@ -750,7 +750,6 @@ export function Assistant({ runtime, messageActions, speech, canReadAloud = fals
         transcript={{ ...transcript, briefing: brief === "" ? undefined : <AssistantNoticeCard key={`briefing:${subject}`} title="Phone" detail={brief} /> }}
         composer={{
           ...speechProps,
-          ...(live && !open ? { variant: "bar" as const } : {}),
           voice: voicePanel ?? renderVoice?.({ compactDock: compact, atBar: assistantDetent === "Bar", onKeyboard }),
           onDictate: onComms || inFlight(talking.turn) || !speech?.onDictate ? undefined : () => {
             openSheet();
