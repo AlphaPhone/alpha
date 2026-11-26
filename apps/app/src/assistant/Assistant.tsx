@@ -62,6 +62,8 @@ import { CommsBriefing, commsViewOf } from "../phone/comms.vibe";
 import { displayNumber } from "../phone/words.ts";
 import { replyBlocks, wordsOf } from "./words.ts";
 import { handToMaps } from "../maps/handoff.ts";
+import { asked } from "../calendar/asked.ts";
+import { shownInAskAlpha } from "../../gen/app__calendar__agent.ts";
 import type { MapsCard } from "@elizaos/plugin-maps-client";
 import { type DictationKeyboard, useTalkKeyboard } from "../voice/useTalkKeyboard.ts";
 
@@ -75,6 +77,8 @@ export interface AssistantProps {
   };
   canReadAloud?: boolean;
   onBack?: () => void;
+  /** Calendar's card for a change a reply filed (calendar/sheet.tsx). */
+  calendarReview?: ReactNode;
 }
 
 function turnOf(talking: Talking, label: string): AssistantTurnNoteProps["status"] | undefined {
@@ -484,7 +488,7 @@ function useMailReview(runtime: AssistantProps["runtime"], board: Board, compose
   return { mail, reviewed, attachMail, dismissMail };
 }
 
-interface TranscriptOptions extends Pick<AssistantProps, "runtime" | "messageActions"> {
+interface TranscriptOptions extends Pick<AssistantProps, "runtime" | "messageActions" | "calendarReview"> {
   board: Board;
   seen: Seen;
   conversation: ReturnType<typeof useConversation>;
@@ -500,8 +504,9 @@ interface TranscriptOptions extends Pick<AssistantProps, "runtime" | "messageAct
 }
 
 function useAssistantTranscript({ runtime, board, seen, conversation, chats, writing, shell, free, canReadAloud,
-  messageActions, onPreview, open, interim, retry }: TranscriptOptions): AssistantTranscriptProps | undefined {
+  messageActions, onPreview, open, interim, retry, calendarReview }: TranscriptOptions): AssistantTranscriptProps | undefined {
   const [talking, shown] = [conversation.state, chats.state];
+  const calendar = useSyncExternalStore(asked.subscribe, asked.snapshot);
   const draftCards = useMessagingDrafts(runtime, shell);
   const holdMessage = useCallback((held: () => void) => {
     const fiber = runtime.runFork(holdMessagePress(held));
@@ -566,6 +571,11 @@ function useAssistantTranscript({ runtime, board, seen, conversation, chats, wri
   const mediaCards = seen.media.filter((card) => !talking.context.sensitive && card.conversation === shown.chosen && card.revision === talking.context.revision).map((card) => ({
     id: `media ${card.id}`, author: "alpha" as const, text: "", children: <DeviceReview runtime={runtime} card={card} />,
   }));
+  // spec/app/calendar/agent.md, "The card shows in Ask Alpha too, under the reply that filed its request, typed or spoken"
+  const filedHere = calendar.filed.filter((one) => one.conversation === shown.chosen);
+  const calendarCard = calendarReview !== undefined && !talking.context.sensitive
+    && shownInAskAlpha(calendar.shown, filedHere.length > 0, filedHere.some((one) => one.message === lines.at(-1)?.id))
+    ? [{ id: "calendar review", author: "alpha" as const, text: "", children: calendarReview }] : [];
   const offer = seen.recordingSummary;
   const recordingSummary = offer !== undefined && !talking.context.sensitive && offer.conversation === shown.chosen
     && lines.some((line) => !line.mine && line.id === offer.message)
@@ -580,7 +590,7 @@ function useAssistantTranscript({ runtime, board, seen, conversation, chats, wri
   return {
     ...rows,
     holdMessage: open ? holdMessage : undefined,
-    liveMessages: [...writingReply, ...draftCards, ...failed, ...mediaCards, ...mediaNote, ...recordingSummary],
+    liveMessages: [...writingReply, ...draftCards, ...failed, ...mediaCards, ...calendarCard, ...mediaNote, ...recordingSummary],
     interim: open && shown.around === 0 && !talking.context.sensitive ? interim : undefined,
     position: { page: `${shown.chosen}/${shown.page.ticket}`, around: board.messageId(shown.around), earlier, later },
     visible: open,
@@ -595,7 +605,7 @@ function useAssistantTranscript({ runtime, board, seen, conversation, chats, wri
 }
 
 /** @model spec/app/assistant/index.md */
-export function Assistant({ runtime, messageActions, speech, canReadAloud = false, onBack }: AssistantProps) {
+export function Assistant({ runtime, messageActions, speech, canReadAloud = false, onBack, calendarReview }: AssistantProps) {
   const conversation = useConversation(runtime);
   const attachments = useAttachments(runtime);
   const chats = useChats(runtime);
@@ -658,7 +668,7 @@ export function Assistant({ runtime, messageActions, speech, canReadAloud = fals
   };
   const transcript = useAssistantTranscript({
     runtime, board, seen, conversation, chats, writing, shell, free, messageActions, canReadAloud, open, interim,
-    onPreview: canPreview ? preview : undefined, retry: () => type(board.lastSent),
+    onPreview: canPreview ? preview : undefined, retry: () => type(board.lastSent), calendarReview,
   });
   const { mail, reviewed, attachMail, dismissMail } = useMailReview(runtime, board, composer, writing?.offeredAt, type, composerRef);
   if (conversation.cause || chats.cause || composer.cause || reply.cause) return <Alert variant="destructive" className="m-4">Alpha could not open Ask Alpha</Alert>;

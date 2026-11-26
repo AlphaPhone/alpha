@@ -78,6 +78,7 @@ function LiveAssistant({ runtime, alpha }: Shown<Layer.Success<typeof screens> |
     canReadAloud={readingAllowed}
     onBack={() => void alpha.back()}
     messageActions={messageActions}
+    calendarReview={alpha.slot("assistant/calendar")}
     speech={{
       showUnavailableTalk: !available,
       voicePanel: dictating ? (onKeyboard) => <DictationControls runtime={runtime} onKeyboard={onKeyboard} playback={preview} /> : undefined,
