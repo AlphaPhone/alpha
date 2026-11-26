@@ -255,7 +255,7 @@ describe("Ask Alpha dock", () => {
     expect(closing.every((height, at) => at === 0 || height <= (closing[at - 1] ?? height) + 1)).toBe(true);
   });
 
-  // spec/app/assistant/dock.md, "Story: Drag Ask Alpha where I want it": only one field shows words at a time while a sheet is put away, by a tap or by a drag, and the bar's own words show once it has gone
+  // spec/app/assistant/dock.md, "Story: Drag Ask Alpha where I want it": only one field shows words at a time while a sheet is put away, by a tap or by a drag: the fading sheet's field is empty and the bar's own words show at once under it
   it("Put the sheet away with one field's words at a time (spec/app/assistant/dock.md, \"Story: Drag Ask Alpha where I want it\")", async () => {
     await page.viewport(390, 844);
     const { runtime } = await mountDock({ view: "Home" });
@@ -271,9 +271,11 @@ describe("Ask Alpha dock", () => {
     const worded = () => [...document.querySelectorAll("textarea")]
       .filter((field) => field.getBoundingClientRect().height > 0 && seen(field) > 0.05 && (field.value || field.placeholder))
       .map((field) => field.value || field.placeholder);
+    /** The words the fading copy of the sheet still shows in its fields, whatever its opacity. */
+    const ghostWords = () => [...document.querySelectorAll<HTMLTextAreaElement>("[data-alpha-ghost] textarea")].map((field) => field.value || field.placeholder).filter(Boolean);
     const watch = async (ms: number) => {
-      const frames: { words: string[]; fading: boolean }[] = [];
-      for (const until = performance.now() + ms; performance.now() < until; await pause(8)) frames.push({ words: worded(), fading: document.querySelector("[data-alpha-ghost]") !== null });
+      const frames: { words: string[]; fading: boolean; ghost: string[] }[] = [];
+      for (const until = performance.now() + ms; performance.now() < until; await pause(8)) frames.push({ words: worded(), fading: document.querySelector("[data-alpha-ghost]") !== null, ghost: ghostWords() });
       return frames;
     };
     const open = async () => {
@@ -289,25 +291,38 @@ describe("Ask Alpha dock", () => {
     expect(tapFrames.filter(({ words }) => words.length > 1)).toEqual([]);
     expect(tapFrames.at(-1)?.words).toEqual(["Ask Alpha"]);
 
+    const dragClose = async () => {
+      const handle = section()?.querySelector("[aria-label='Resize chat']");
+      const box = handle?.getBoundingClientRect();
+      const y = Math.round((box?.top ?? 0) + (box?.height ?? 0) / 2);
+      const finger = (type: string, clientY: number) => (handle?.isConnected ? handle : section())?.dispatchEvent(new PointerEvent(type, { bubbles: true, cancelable: true, clientY, pointerId: 12, pointerType: "touch", isPrimary: true }));
+      const dragged = watch(1300);
+      finger("pointerdown", y);
+      for (let step = 1; step <= 8; step++) {
+        await pause(25);
+        finger("pointermove", y + step * 50);
+      }
+      await pause(120);
+      finger("pointerup", y + 400);
+      const frames = await dragged;
+      await reaches("Bar");
+      return frames;
+    };
+
     await open();
-    const handle = section()?.querySelector("[aria-label='Resize chat']");
-    const box = handle?.getBoundingClientRect();
-    const y = Math.round((box?.top ?? 0) + (box?.height ?? 0) / 2);
-    const finger = (type: string, clientY: number) => (handle?.isConnected ? handle : section())?.dispatchEvent(new PointerEvent(type, { bubbles: true, cancelable: true, clientY, pointerId: 12, pointerType: "touch", isPrimary: true }));
-    const dragged = watch(1300);
-    finger("pointerdown", y);
-    for (let step = 1; step <= 8; step++) {
-      await pause(25);
-      finger("pointermove", y + step * 50);
-    }
-    await pause(120);
-    finger("pointerup", y + 400);
-    const dragFrames = await dragged;
-    await reaches("Bar");
+    const dragFrames = await dragClose();
     expect(dragFrames.filter(({ words }) => words.length > 1)).toEqual([]);
-    expect(dragFrames.some(({ fading }) => fading)).toBe(true);
-    expect(dragFrames.filter(({ fading, words }) => fading && words.includes("Ask Alpha"))).toEqual([]);
+    expect(dragFrames.filter(({ ghost }) => ghost.length > 0)).toEqual([]);
+    expect(dragFrames.some(({ fading, words }) => fading && words.join() === "Ask Alpha")).toBe(true);
     expect(dragFrames.at(-1)?.words).toEqual(["Ask Alpha"]);
+
+    await open();
+    await userEvent.type(section()?.querySelector("textarea") ?? document.body, "Hello");
+    const draftFrames = await dragClose();
+    expect(draftFrames.filter(({ words }) => words.length > 1)).toEqual([]);
+    expect(draftFrames.filter(({ ghost }) => ghost.length > 0)).toEqual([]);
+    expect(draftFrames.some(({ fading, words }) => fading && words.join() === "Hello")).toBe(true);
+    expect(draftFrames.at(-1)?.words).toEqual(["Hello"]);
   });
 
   // spec/app/assistant/dock.md, "A press does one thing: a tap is never also a drag, and a late click never taps"

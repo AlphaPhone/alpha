@@ -26,7 +26,7 @@ export type AssistantConversationProps = Omit<ComponentProps<"section">, "childr
   /**
    * The bar, or the pill, Ask Alpha will rest on, drawn under a sheet that is being pulled down onto it or shrinking onto
    * it after a tap, as v119 drew them (45f6bed30 chat-overlay-motion-adapter.ts:968-973, 990-996). It takes no input, and
-   * its field shows no words: v119's one field stayed in the sheet over it (:1356-1360).
+   * its field shows no words, neither a placeholder nor a draft: v119's one field stayed in the sheet over it (:1356-1360).
    */
   underlay?: "bar" | "pill";
 };
@@ -47,7 +47,7 @@ export function AssistantConversation({ header, contextAction, attachmentNotice,
     <>
     {underlay && (
       <div inert aria-hidden data-alpha-underlay="" className="pointer-events-none fixed inset-x-0 bottom-0 z-dock mx-auto max-w-md">
-        <AssistantComposer {...composer} placeholder="" fieldRef={undefined} fieldPull={undefined} onFocusField={undefined} voice={undefined} opener={undefined} variant="bar" onOpen={noop} onType={underlay === "pill" ? noop : undefined} />
+        <AssistantComposer {...composer} value="" placeholder="" fieldRef={undefined} fieldPull={undefined} onFocusField={undefined} voice={undefined} opener={undefined} variant="bar" onOpen={noop} onType={underlay === "pill" ? noop : undefined} />
       </div>
     )}
     <section

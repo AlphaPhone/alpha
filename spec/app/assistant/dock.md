@@ -45,9 +45,9 @@ the sheet's, such as its black Talk, is carried onto the bar. As v119's
 one field did, which stayed in the sheet until the bar took it (old-line
 Alpha 45f6bed30, chat-overlay-motion-adapter.ts:1356-1360), only one field
 shows words at a time: the bar or pill drawn under a sheet being pulled
-down shows none, a sheet a tap puts away shrinks with its field empty over
-the bar's own words, and a sheet a drag puts away keeps its words as it
-fades, the bar's own showing once it has gone. A drag on the conversation
+down shows none, and a sheet put away, by a tap or by a drag, shrinks or
+fades with its field empty over the bar's own words, which show at once.
+A drag on the conversation
 that reaches its end moves nothing else: the sheet stays where it is, as
 v119's did. Alpha's mark at the start of the open sheet's header is tapped
 in v119's box, 46 points wide. A resting

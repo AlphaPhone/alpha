@@ -11,6 +11,14 @@ const long = Array.from({ length: 12 }, (_, at) => ({ id: `long-${at}`, author: 
 const scrollOf = (log: HTMLElement) => ({ top: log.scrollTop, below: log.scrollHeight - log.scrollTop - log.clientHeight });
 /** More text arriving at the end of the log, as a reply growing does. */
 const arrive = (log: HTMLElement) => log.firstElementChild?.append(Object.assign(document.createElement("div"), { style: "height: 300px; flex-shrink: 0" }));
+/** The log once the next frame has laid it out and the transcript's own observer, which was there first, has seen it. */
+const settled = (log: HTMLElement) => new Promise<void>((done) => {
+  const observer = new ResizeObserver(() => {
+    observer.disconnect();
+    done();
+  });
+  observer.observe(log.firstElementChild ?? log);
+});
 const onReturnToOriginal = fn();
 /** A reply long enough to fill the 160-point log several times over, to the one question of a new conversation. */
 const replyText = Array.from({ length: 14 }, (_, at) => `Line ${at + 1} of the reply, long enough to wrap in a narrow sheet.`).join(" ");
@@ -72,7 +80,7 @@ export const meta: ComponentMeta<AssistantTranscriptProps> = {
     "Following the end": async ({ canvasElement }: { canvasElement: HTMLElement }) => {
       const log = within(canvasElement).getByRole("log");
       // spec/app/assistant/dock.md, "Story: Drag Ask Alpha where I want it": a drag that reaches the conversation's end moves nothing else
-      await expect(getComputedStyle(log).overscrollBehaviorY).toBe("none");
+      await expect(getComputedStyle(log).overscrollBehaviorY).toBe("contain");
       log.style.height = "160px";
       await waitFor(() => expect(scrollOf(log).below).toBeLessThan(2));
       arrive(log);
@@ -107,6 +115,8 @@ export const meta: ComponentMeta<AssistantTranscriptProps> = {
       const place = reading.log.scrollTop;
       reading.finish();
       reading.log.dispatchEvent(new Event("scroll"));
+      await expect(reading.log.scrollTop).toBe(place);
+      await settled(reading.log);
       await expect(reading.log.scrollTop).toBe(place);
       reading.done();
     },

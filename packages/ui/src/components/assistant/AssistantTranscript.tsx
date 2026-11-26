@@ -137,7 +137,7 @@ export function AssistantTranscript({ messages, messagesAfterLater, holdMessage,
       role="log"
       aria-label="Conversation"
       tabIndex={0}
-      className={cn(focusRing, "min-h-0 touch-pan-y overflow-y-auto overscroll-none px-5 pt-2 pb-3.5 select-text focus-visible:-outline-offset-focus", className)}
+      className={cn(focusRing, "min-h-0 touch-pan-y overflow-y-auto overscroll-contain px-5 pt-2 pb-3.5 select-text focus-visible:-outline-offset-focus", className)}
       onScroll={(event) => {
         const viewport = event.currentTarget;
         const reading = scrollRef.current;
