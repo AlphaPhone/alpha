@@ -674,6 +674,13 @@ async function switchToKeyboard() {
   await press("Switch to keyboard");
 }
 
+/** Let the startup cover lift, as it does at the latest 2.5 s after start where Home is not drawn under it, before a step that checks nothing is on screen. */
+async function coverLifted(alpha: Alpha) {
+  const cover = () => document.querySelector('[role="status"][aria-label="Loading Alpha"]');
+  for (let waited = 0; waited < 2500 && cover(); waited += 500) await later(alpha, 500);
+  expect(cover()).toBeNull();
+}
+
 async function settleComposer(alpha: Alpha, check: () => boolean) {
   for (let turn = 0; turn < 400 && !check(); turn += 1) await drawn(() => alpha.runtime.runPromise(Effect.yieldNow));
   expect(check()).toBe(true);
@@ -1013,6 +1020,9 @@ describe("Talk from Ask Alpha's composer (spec/app/voice/index.md, \"Story: Hold
     world.ask.holdAfterTools = true;
     world.ask.nextReplyChunks = ["Nothing is on your calendar today."];
     world.ask.holdDoneAfterReady = done.promise;
+    // spec/app/assistant/chats.md, "A conversation made new here shows what it holds while its page is read": what was said and the dots stay in place, never loading rows, while the page of the conversation made for the first turn is read.
+    world.ask.holdPages = true;
+    const loadingRows = () => document.querySelector("section[aria-label='Ask Alpha'] [role=log] [aria-busy]");
     const sessionId = world.voice.activeMicSession;
     await drawn(() => {
       world.voice.emitCloud?.({ type: "speech-start", sessionId });
@@ -1024,6 +1034,11 @@ describe("Talk from Ask Alpha's composer (spec/app/voice/index.md, \"Story: Hold
     };
     await drawnUntil(alpha, area, Voice.Machine, (s) => s.phase === "Thinking" && s.sent === 1);
     await settleComposer(alpha, () => world.ask.turns.size === 1);
+    await drawnUntil(alpha, area, Chats, (s) => s.chosen > 0 && s.page.status === "Loading");
+    expect([said(), dots() !== null, recorded(), loadingRows()]).toEqual([asked, true, 0, null]);
+    world.ask.holdPages = false;
+    for (const release of world.ask.heldPages.splice(0)) release();
+    await drawnUntil(alpha, area, Chats, (s) => s.page.status === "Loaded");
     expect([said(), dots() !== null, recorded()]).toEqual([asked, true, 0]);
     expect(row()).toEqual(["Mute speaker", "Microphone paused while Alpha responds (dimmed)", "Stop voice conversation"]);
 
@@ -1417,6 +1432,7 @@ describe("Talk from Ask Alpha's composer (spec/app/voice/index.md, \"Story: Hold
     world.voice.onDevice = false;
     const { alpha, area } = await onComposer(world);
     await drawnUntil(alpha, area, Voice.Machine, (s) => s.warmed);
+    await coverLifted(alpha);
 
     await press("Talk");
     await drawnUntil(alpha, area, Voice.Machine, (s) => s.session > 0 && s.phase === "Idle");
@@ -1524,6 +1540,7 @@ describe("Talk from Ask Alpha's composer (spec/app/voice/index.md, \"Story: Hold
     world.voice.grantOnRequest = false;
     const { alpha, area } = await onComposer(world);
     await drawnUntil(alpha, area, Voice.Machine, (s) => s.warmed);
+    await coverLifted(alpha);
     await settleComposer(alpha, () => button("Talk") !== undefined);
 
     await drawn(() => document.querySelector<HTMLTextAreaElement>("textarea[data-alpha-composer]")?.focus());
