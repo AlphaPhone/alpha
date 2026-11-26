@@ -295,6 +295,14 @@ describe("Messages on an Alpha image", () => {
     await openUnreadCard();
     await ready(alpha.runtime, Messages, "Messages state", (s) => s.front && s.pane === "Conversation" && s.page.status === "Loaded" && s.shown.rows === 1);
     await ready(alpha.runtime, Messages, "Messages state", () => world.telephony.texts[0].read);
+
+    const title = () => document.querySelector("[data-alpha-messages-title]")?.textContent;
+    expect(title()).toBe("Maya Chen");
+    const ticket = alpha.runtime.runSync(Messages.use((machine) => machine.get())).page.ticket;
+    world.telephony.contacts = false;
+    await drawn(() => world.telephony.changed());
+    await ready(alpha.runtime, Messages, "Open conversation read after Contacts access ended", (state) => state.page.ticket > ticket && state.page.status === "Loaded");
+    expect(title()).toBe(displayNumber("+14155550100"));
   });
 
   it("Start a new message to a number I type (spec/app/messages/index.md, \"Story: Start a new message\")", async () => {
@@ -1013,6 +1021,25 @@ describe("Messages on an Alpha image", () => {
     const { alpha } = await openImage(world);
     await ready(alpha.runtime, Messages, "Messages state", (state) => state.pane === "Conversation" && state.page.status === "Loaded" && world.telephony.smsNotice === undefined && world.telephony.texts[1]?.read === true);
     expect([world.telephony.texts.map((text) => text.read), world.telephony.sent]).toEqual([[false, true], []]);
+    const title = () => document.querySelector("[data-alpha-messages-title]")?.textContent;
+    expect(title()).toBe("Ben Ortiz");
+
+    await press("Back");
+    await ready(alpha.runtime, Messages, "Both conversations displayed", (state) => state.pane === "Threads" && state.list.status === "Loaded" && state.threads === 2);
+    expect(button("Maya Chen")).toBeDefined();
+    const ticket = alpha.runtime.runSync(Messages.use((machine) => machine.get())).list.ticket;
+    world.telephony.people = world.telephony.people.filter((person) => person.displayName !== "Maya Chen");
+    await drawn(() => world.telephony.changed());
+    await ready(alpha.runtime, Messages, "Conversations read after a contact was removed", (state) => state.list.ticket > ticket && state.list.status === "Loaded");
+    expect(button("Maya Chen")).toBeUndefined();
+    expect(button(displayNumber("+14155550100"))).toBeDefined();
+    expect(button("Ben Ortiz")).toBeDefined();
+
+    world.telephony.people = [];
+    world.telephony.smsNotice = { threadId: "thread:23", token: "2" };
+    await drawn(() => world.telephony.wakeSmsNotice());
+    await ready(alpha.runtime, Messages, "Second notification opened after a contact was removed", (state) => state.pane === "Conversation" && state.page.status === "Loaded" && world.telephony.smsNotice === undefined);
+    expect(title()).toBe(displayNumber("+14155550122"));
 
     const links = [...document.querySelectorAll<HTMLAnchorElement>("[data-alpha-message-body] a")];
     expect([links.map((one) => one.href), world.browser.tabs.size]).toEqual([["http://news.example/lunch"], 0]);
