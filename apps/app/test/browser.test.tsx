@@ -48,6 +48,13 @@ async function onBrowser(world = { ...scene(), phone: true, image: true }, notic
   return { ...running, world, runtime };
 }
 
+/** The Browser opened from Home, once its tabs are read back. */
+async function onHydratedBrowser(world = { ...scene(), phone: true, image: true }) {
+  const opened = await onBrowser(world);
+  await until(opened.alpha, opened.runtime, Tabs, (s) => s.hydrated);
+  return opened;
+}
+
 /** Ask Alpha and the Browser on `world`, once Ask Alpha's composer is open and its conversation ready. */
 async function askingBeside(world: ReturnType<typeof scene>) {
   const { alpha } = await open(world, only("home", "assistant", "view:Browser"));
@@ -193,9 +200,7 @@ const askClearAll = async (alpha: Awaited<ReturnType<typeof onBrowser>>["alpha"]
 
 async function openHydratedPhoneBrowser() {
   const world = { ...scene(), phone: true, image: true };
-  const opened = await onBrowser(world);
-  await until(opened.alpha, opened.runtime, Tabs, (s) => s.hydrated);
-  return { ...opened, world };
+  return { ...(await onHydratedBrowser(world)), world };
 }
 
 describe("The Browser on a phone", () => {
@@ -411,8 +416,7 @@ describe("The Browser on a phone", () => {
   it("Explains unavailable Android page reading (spec/app/browser/reading.md, \"An explicit reading starts from the current committed HTTPS page\")", async () => {
     const world = { ...scene(), phone: true, image: true };
     world.browser.readingAvailable = false;
-    const { alpha, runtime } = await onBrowser(world);
-    await until(alpha, runtime, Tabs, (state) => state.hydrated);
+    const { alpha, runtime } = await onHydratedBrowser(world);
     await press("Menu");
     await drawn(() => vi.waitFor(() => expect(document.querySelector("[role='note'][aria-label='Page reading unavailable']")).not.toBeNull()));
     await pressOnTop("Read aloud");

@@ -1,19 +1,17 @@
 // spec/app/files/preview.md, "Story: Look at a file"; spec/app/files/preview.md, "Story: Act on the file I am looking at"; spec/app/files/preview.md, "Story: Get a file back when access was lost"; spec/app/files/recent.md, "Story: Find what I opened lately"; spec/app/files/preview.md, "The caption and Details show facts for the exact document held"
 import { validName } from "@elizaos/plugin-files-client";
-import { Alert, Button, cn, FilesCard, filesCardCancel, FilesRow, Input, Menu, MenuContent, MenuItem, MenuTrigger, Spinner } from "@repo/ui";
+import { Alert, Button, cn, FilesCard, filesCardCancel, FilesRow, Input, LogoMark, Menu, MenuContent, MenuItem, MenuTrigger, Spinner } from "@repo/ui";
 import { Effect, Option, type ManagedRuntime } from "effect";
 import { useCallback, useRef, useState } from "react";
-import { AudioLines, ChevronLeft, ChevronRight, Ellipsis, ExternalLink, FileArchive, FileText, FolderInput, Image, Info, Mail, MessageCircle, Pause, Pencil, Play, Receipt, Share2, Sparkles, Trash2, Video, X, type LucideIcon } from "lucide-react";
+import { ChevronLeft, ChevronRight, Ellipsis, ExternalLink, FileText, FolderInput, Info, Mail, MessageCircle, Pause, Pencil, Play, Share2, Trash2, X } from "lucide-react";
 import type { Machine as Browser } from "../../gen/app__files.effect.vibe";
 import { previewActionReady } from "../../gen/app__files.ts";
 import { useMachine as useFiles } from "../../gen/app__files.react.ts";
 import type { Machine } from "../../gen/app__files__preview.effect.vibe";
-import { type Kind, loaded, showing, showsFileFacts, usable } from "../../gen/app__files__preview.ts";
+import { loaded, showing, showsFileFacts, usable } from "../../gen/app__files__preview.ts";
 import { useMachine } from "../../gen/app__files__preview.react.ts";
 import type { Machine as RecentMachine } from "../../gen/app__files__recent.effect.vibe";
 import { useMachine as useRecent } from "../../gen/app__files__recent.react.ts";
-import type { Machine as Shell } from "../../gen/app__shell.effect.vibe";
-import { useMachine as useShell } from "../../gen/app__shell.react.ts";
 import type { Machine as Inbox } from "../../gen/app__inbox.effect.vibe";
 import { useMachine as useInbox } from "../../gen/app__inbox.react.ts";
 import type { Machine as Drafts } from "../../gen/app__inbox__drafts.effect.vibe";
@@ -21,18 +19,17 @@ import { useMachine as useDrafts } from "../../gen/app__inbox__drafts.react.ts";
 import { changedOn, folderLocation, parentPath, sized } from "./entries.vibe";
 import { Handles } from "./handles.vibe";
 import { Opened, emailAccount, pictureFits } from "./preview.vibe";
+import { native } from "../platform/device.vibe";
 import { launcherInnerHeader, launcherTop } from "../shell/launcherFrame.ts";
 
 /** Develop's File actions: a 220px panel under the header, ringed, with 44px rows and 20px icons. */
 const actionsPanel = "w-55 min-w-0 rounded-tile p-1.5 ring-1 ring-border shadow-popup dark:shadow-popup-dark";
 const actionRow = "min-h-11 rounded-lg px-3.5 py-2 [&_svg]:size-5";
-/** The icon v119 drew before a preview's facts (`template.html:3230`), by what the file is. */
-const kindIcons: Record<Kind, LucideIcon> = { Media: Video, Photo: Image, Text: FileText, Archive: FileArchive, Pdf: FileText, Receipt };
 const fully = new Intl.DateTimeFormat(undefined, { year: "numeric", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
 
 export interface PreviewProps {
   /** Provides the preview and Recent machines, and what the viewer read, of preview.vibe. */
-  runtime: ManagedRuntime.ManagedRuntime<Machine | Browser | RecentMachine | Opened | Handles | Shell | Inbox | Drafts, unknown>;
+  runtime: ManagedRuntime.ManagedRuntime<Machine | Browser | RecentMachine | Opened | Handles | Inbox | Drafts, unknown>;
   /** Files' current date, used to show the same short date as its list. */
   today: Date;
 }
@@ -50,7 +47,6 @@ function nameOf(runtime: PreviewProps["runtime"], grant: number): string | undef
 export function Preview({ runtime, today }: PreviewProps) {
   const { state, can, send } = useMachine(runtime);
   const recent = useRecent(runtime);
-  const shell = useShell(runtime);
   const inbox = useInbox(runtime);
   const drafts = useDrafts(runtime);
   const files = useFiles(runtime);
@@ -59,7 +55,7 @@ export function Preview({ runtime, today }: PreviewProps) {
   const [details, setDetails] = useState<{ readonly viewer: number; readonly revision: number }>();
   const [rename, setRename] = useState<{ readonly viewer: number; readonly revision: number; readonly name: string }>();
   const focusOnOpen = useCallback((node: HTMLElement | null) => node?.focus({ preventScroll: true }), []);
-  if (!state || !recent.state || !showing(state) || shell.state?.assistant === "Sheet" || shell.state?.assistant === "Full") return null;
+  if (!state || !recent.state || !showing(state)) return null;
   const owner = <E extends Parameters<typeof can>[0]>(event: E) => can(event, "Owner");
   const tell = <E extends Parameters<typeof send>[0]>(event: E) => void send(event, "Owner");
   const content = runtime.runSync(Effect.flatMap(Opened, (opened) => opened.content()));
@@ -106,7 +102,6 @@ export function Preview({ runtime, today }: PreviewProps) {
   const modified = changed === "" ? undefined : new Date(revision);
   const bytes = facts?.bytes;
   const kind = { Media: "Media", Photo: "Image", Text: "Text", Archive: "Archive", Pdf: "PDF", Receipt: "Receipt" }[state.kind];
-  const KindIcon = state.kind === "Media" && file?.mimeType.startsWith("audio/") ? AudioLines : kindIcons[state.kind];
   const caption = [kind, bytes === undefined ? "" : sized(bytes), changed, location].filter(Boolean).join(" · ");
   const destination = inbox.state && drafts.state ? emailAccount(inbox.state, drafts.state) : undefined;
   const offer = { type: "useInEmail", account: destination?.account ?? 0 } as const;
@@ -134,9 +129,9 @@ export function Preview({ runtime, today }: PreviewProps) {
                 {share && <MenuItem className={actionRow} onSelect={() => tell({ type: "shareFile" })}><Share2 />Share</MenuItem>}
                 {owner(move) && <MenuItem className={actionRow} onSelect={() => tell(move)}><FolderInput />Add to folder</MenuItem>}
                 {email && <MenuItem aria-label="Use in email" className={actionRow} onSelect={() => tell(offer)}><Mail />Email</MenuItem>}
-                {askAlpha && <MenuItem className={actionRow} onSelect={() => tell({ type: "askAlpha" })}><Sparkles />Ask Alpha</MenuItem>}
+                {askAlpha && <MenuItem className={actionRow} onSelect={() => tell({ type: "askAlpha" })}><LogoMark className="size-5" />Ask Alpha</MenuItem>}
                 {owner(picture) && <MenuItem className={actionRow} onSelect={() => tell(picture)}><MessageCircle />Use in Messages</MenuItem>}
-                {openElsewhere && <MenuItem className={actionRow} onSelect={() => tell({ type: "openElsewhere" })}><ExternalLink />Open elsewhere</MenuItem>}
+                {openElsewhere && <MenuItem className={actionRow} onSelect={() => tell({ type: "openElsewhere" })}><ExternalLink />{native() ? "Open in Android" : "Open elsewhere"}</MenuItem>}
                 {showRename && !renameTitle && <MenuItem className={actionRow} onSelect={startRename}><Pencil />Rename</MenuItem>}
                 {forget && <MenuItem className={actionRow} onSelect={() => tell({ type: "forget" })}><X />Forget</MenuItem>}
                 {showDetails && <MenuItem className={actionRow} onSelect={() => setDetails({ viewer: state.viewer, revision: state.revision })}><Info />Details</MenuItem>}
@@ -149,7 +144,7 @@ export function Preview({ runtime, today }: PreviewProps) {
           <h2 aria-label={renameTitle ? name : undefined} className="font-display text-title font-light break-words">
             {renameTitle ? <button ref={nameButtonRef} type="button" aria-label={`Rename ${name}`} className="block w-full text-left" onClick={startRename}>{name}</button> : name}
           </h2>
-          {facts !== undefined && <p className="mt-2.5 mb-5 flex items-start gap-2.5 text-sm wrap-anywhere text-muted-foreground"><KindIcon aria-hidden className="mt-px size-4.5 shrink-0" />{caption}</p>}
+          {facts !== undefined && <p className="mt-2.5 mb-5 flex items-start gap-2.5 text-sm wrap-anywhere text-muted-foreground">{/* v119 live left this 18px slot empty (selection-adapter.ts:282 `d: ''`). */}<span aria-hidden data-facts-slot className="size-4.5 shrink-0" />{caption}</p>}
           {state.attempt.outcome === "Unknown" && state.offered.item === state.item && state.offered.revision === state.revision && <Alert variant="warn">Check Inbox before offering this file again</Alert>}
           {!usable(state) && <Alert variant="warn">Alpha can no longer read this file</Alert>}
           {state.content.status === "Loading" && <Spinner label="Opening the file" />}
