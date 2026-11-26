@@ -17,6 +17,9 @@ export type CalendarHeaderProps = Omit<ComponentProps<"header">, "title"> & {
   children?: ReactNode;
 };
 
+/** v119 45f6bed30 prototype/template.html:1136 and prototype.css:13: on the launcher the header is 56px tall, 20px in from the left with no Back, and its actions are 44px. */
+const launcherHeader = "in-data-[alpha-launcher]:min-h-14 in-data-[alpha-launcher]:pl-5 in-data-[alpha-launcher]:has-[>button[aria-label=Back]]:pl-2 in-data-[alpha-launcher]:[&>div>button]:size-11";
+
 /**
  * The top of Calendar: Back, the month that opens the month dialog, and Calendar's actions. On the launcher
  * (`data-alpha-launcher`, the phone's Home) the month is the serif display title. The actions move to the
@@ -25,7 +28,7 @@ export type CalendarHeaderProps = Omit<ComponentProps<"header">, "title"> & {
 export function CalendarHeader({ title, expanded = false, onTitle, titleRef, leading, className, children, ...props }: CalendarHeaderProps) {
   const Chevron = expanded ? ChevronUp : ChevronDown;
   return (
-    <header data-host-chrome="" className={cn("flex min-h-13 shrink-0 flex-wrap items-center gap-x-0.5 gap-y-1 px-2 in-data-[alpha-title-row]:in-data-[alpha-launcher]:@container", className)} {...props}>
+    <header data-host-chrome="" className={cn("flex min-h-13 shrink-0 flex-wrap items-center gap-x-0.5 gap-y-1 px-2 in-data-[alpha-title-row]:in-data-[alpha-launcher]:@container", launcherHeader, className)} {...props}>
       {leading}
       <button ref={titleRef} type="button" aria-label={`Choose date: ${title}`} aria-expanded={expanded} disabled={!onTitle} onClick={onTitle}
         className={cn(focusRing, "flex min-h-12 min-w-0 max-w-full grow items-center gap-1.5 rounded-lg text-left disabled:cursor-default in-data-[alpha-title-row]:order-last in-data-[alpha-title-row]:basis-full")}>
