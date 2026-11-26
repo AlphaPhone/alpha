@@ -131,7 +131,11 @@ export effect function fromNote(fields: Fields, day: number) {
   const editor = try Editor.Machine
   if (!Editor.canFromNote(try editor.get())) return false
   if (!(try keep(fields, try owner()))) return false
-  return try contained(editor.send({ type: "fromNote", day }), "opening the note's event")
+  const opened = try contained(editor.send({ type: "fromNote", day }), "opening the note's event")
+  if (opened && fields.title.trim() === "") {
+    try ignore(editor.send({ type: "editTitle", blank: true }))
+  }
+  return opened
 }
 
 /** An event of the phone as eliza's calendar review picks it. */

@@ -17,6 +17,7 @@ import calendar from "../src/calendar/index.tsx";
 import { kept } from "../src/calendar/editor.vibe";
 import home from "../src/home/index.tsx";
 import { agentOpen } from "../src/notes/agent.vibe";
+import { reviewNoteSchedule } from "../src/notes/calendar.vibe";
 import notes from "../src/notes/index.tsx";
 import { untimed } from "../src/runtime/reactor.vibe";
 import { button, closeAll, drawn, fill, hardware, only, open, press, pressOnTop, underAct, until } from "./alpha.tsx";
@@ -77,16 +78,21 @@ async function openNotesFromHome(world: Scene) {
 
 describe("Notes", () => {
   it.each([
-    { row: "Enclave launch", action: "Review event", destination: undefined, words: "Confirm attestation flow" },
-    { row: "Design sync", action: "Review reminder", destination: "Reminders", words: "Book a review with Jordan" },
-  ] as const)('Reviews a Calendar draft from $row before any write (spec/app/notes/note.md, "Story: Review a Calendar draft from a note")', async ({ row, action, destination, words }) => {
+    { row: "Enclave launch", kind: "event", destination: undefined, words: "Confirm attestation flow" },
+    { row: "Design sync", kind: "reminder", destination: "Reminders", words: "Book a review with Jordan" },
+  ] as const)('Reviews a Calendar draft from $row before any write (spec/app/notes/note.md, "Story: Review a Calendar draft from a note")', async ({ row, kind, destination, words }) => {
     const world = scene();
     const { alpha } = await open(world, only("home", "view:Notes", "view:Calendar", "notice"));
     const notesArea = notes.runtime(alpha);
     await press("Notes");
     await until(alpha, notesArea, List, (state) => state.read.status === "Loaded");
     await press(`Open ${row}`);
-    await chooseNotesOption("More", action, true);
+    if (kind === "event") await until(alpha, notesArea, Editor, (state) => state.showing);
+    else await until(alpha, notesArea, Voice, (state) => state.showing);
+    const viewed = kind === "event"
+      ? await notesArea.runPromise(Editor.use((machine) => machine.get())).then((state) => ({ number: state.note, revision: state.draft.base, view: "editor" as const }))
+      : await notesArea.runPromise(Voice.use((machine) => machine.get())).then((state) => ({ number: state.note, revision: state.revision, view: "voice" as const }));
+    await drawn(() => notesArea.runPromise(reviewNoteSchedule(viewed, kind)));
     const target = calendar.runtime(alpha);
     await until(alpha, target, CalendarForm, (state) => state.shown && state.kept);
     const state = await target.runPromise(CalendarForm.use((form) => form.get()));

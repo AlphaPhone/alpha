@@ -196,7 +196,7 @@ pure def lawADroppedReadingTakesNoAnswer(ticket: int, asked: int): bool =
 > As the owner, I want the saved note I have open to fill in a Calendar
 > event or reminder that I can edit and save after I review its time.
 
-Alpha prepares the draft from the exact saved record and passes it to
+The retained scheduling action prepares the draft from the exact saved record and passes it to
 the requested Calendar visit for the same resident owner. An open or
 retained Calendar draft keeps its place. Opening this draft writes no
 event or reminder. Calendar supplies tomorrow at nine as a starting

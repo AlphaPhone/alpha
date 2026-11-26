@@ -56,7 +56,7 @@ export effect function reviewNoteSchedule(viewed: ViewedNote, kind: NoteSchedule
   const draft: CalendarDraft = {
     day: civilDay(begin), disclosures: [],
     fields: {
-      title: result.draft.title.trim() || "Untitled note", place: "", notes: result.draft.notes, people: "",
+      title: result.draft.title, place: "", notes: result.draft.notes, people: "",
       begin, end: begin + 3_600_000, allDay: false,
       ...(kind === "reminder" ? { calendar: "Reminders" as const, reminderAlert: 0 } : {}),
       noteOrigin: { ...result.draft.origin, agent: owner.agentId, owner: owner.identityId },
