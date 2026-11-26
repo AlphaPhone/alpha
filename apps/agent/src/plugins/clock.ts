@@ -351,7 +351,7 @@ export function clockActions(store: AlphaAppsStore, timeZone: string): AgentActi
     makeClockAction(
       "CLOCK_ALARM",
       ["SET_ALARM", "MANAGE_ALARM", "SNOOZE_ALARM", "DISMISS_ALARM"],
-      "Manage alarms in Alpha Clock.",
+      "Alarms in Alpha Clock, which ring at a clock time. Being woken up is an alarm, and a reminder never stands in for an alarm.",
       [
         { name: "action", description: "Op.", required: true, schema: { type: "string", enum: ["set", "update", "toggle", "snooze", "dismiss", "delete", "list"] } },
         { name: "hour", description: "24h hour.", required: false, schema: { type: "integer", minimum: 0, maximum: 23 } },

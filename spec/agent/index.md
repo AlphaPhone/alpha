@@ -136,7 +136,11 @@ pure def lawTheWalletHoldsNothingOfValue(chain: str): bool =
 The old agent had no allowlist: every action its plugins registered could
 run. The pack's plugins register those same actions under the pinned
 eliza's names, and Alpha's `alpha-apps` product plugin registers
-`CLOCK_ALARM`, `CLOCK_TIMER`, `CLOCK_WORLD` and `REMINDERS_MANAGE`. Eliza's
+`CLOCK_ALARM`, `CLOCK_TIMER`, `CLOCK_WORLD` and `REMINDERS_MANAGE`.
+`CLOCK_ALARM` tells the model that an alarm rings at a clock time, that
+being woken up is an alarm, and that a reminder never stands in for one,
+as the old phone's agent was told; which tool a request needs stays the
+model's to decide. Eliza's
 wallet module registers `WALLET`, which reads the wallet and asks for a
 transfer and can approve none.
 `BROWSER_OPEN` hands a web page the owner asks for to the screen they asked

@@ -49,23 +49,30 @@ pure def canBegin(r: Reply, turn: int): bool = turn > r.turn
 pure def begin(r: Reply, turn: int): Reply = { ...initial, turn: turn, status: Planning }
 ```
 
-### The planning label shows until the first text, and provisional text is shown but never spoken
+### The planning label shows until the first settled text, and provisional text is neither shown nor spoken
 
 The label is the newest of the stream's status and the label of the tool
 it runs, naming the app it chose, except that once the acknowledgment is
-taken it stays the label until text or the reply arrives.
+taken it stays the label until text or the reply arrives. Provisional text
+may still be taken back: a tool call can replace it, and a check of the
+reply can revise it after it was written. So it is never shown, and the
+owner sees one reply that is never contradicted mid-turn, as the old phone
+showed it. The label stays until settled text or the reply arrives.
 
 ```quint
 pure def canToken(r: Reply, turn: int, units: int, provisional: bool): bool = live(r) and turn == r.turn and units >= 1
 
 pure def token(r: Reply, turn: int, units: int, provisional: bool): Reply =
-  { ...r, status: if (r.status == Working) Working else Streaming, shown: units, provisional: provisional,
+  { ...r, status: if (r.status == Working) Working else Streaming, shown: if (provisional) r.shown else units, provisional: provisional,
     spoken: if (provisional) r.spoken else units }
 
 pure def stepProvisionalTextIsNotSpoken(before: Reply, via: str, after: Reply): bool =
   (via == "token" and after.provisional) implies after.spoken == before.spoken
 
-pure def sometimesProvisionalTextShows(r: Reply): bool = r.status == Streaming and r.provisional
+pure def stepProvisionalTextIsNotShown(before: Reply, via: str, after: Reply): bool =
+  (via == "token" and after.provisional) implies after.shown == before.shown
+
+pure def sometimesProvisionalTextIsHeldBack(r: Reply): bool = r.status == Streaming and r.provisional and r.shown == 0
 ```
 
 ### One brief acknowledgment at most, only from the agent's acknowledgment frame, before any tool runs

@@ -366,7 +366,7 @@ describe.each([["a browser", false], ["a phone", true]])("in %s", (_where, phone
   it("Hear a brief acknowledgment and still get the whole answer: the acknowledgment stays the label while tools run (spec/app/assistant/reply.md, \"Story: Hear a brief acknowledgment and still get the whole answer\")", async () => {
     const world = { ...scene(), phone };
     const { alpha, runtime } = await openAssistantWithPreferences(world);
-    // spec/app/assistant/reply.md, "The planning label shows until the first text, and provisional text is shown but never spoken": once taken, the acknowledgment stays the label through a later tool label and status, until text arrives.
+    // spec/app/assistant/reply.md, "The planning label shows until the first settled text, and provisional text is neither shown nor spoken": once taken, the acknowledgment stays the label through a later tool label and status, until text arrives.
     world.ask.acknowledgment = "Let me look";
     world.ask.holdAfterTools = true;
     write("What's on today?");
@@ -380,6 +380,27 @@ describe.each([["a browser", false], ["a phone", true]])("in %s", (_where, phone
     const said = await runtime.runPromise(Effect.flatMap(Reply, (machine) => machine.get()));
     expect([said.acks, lines()]).toEqual([1, ["What's on today?", "You said: What's on today?"]]);
     expect(document.body.textContent?.includes("Let me look")).toBe(false);
+  });
+
+  // spec/app/assistant/reply.md, "The planning label shows until the first settled text, and provisional text is neither shown nor spoken"
+  it("Hear a brief acknowledgment and still get the whole answer: text that may still be taken back is never shown, and the settled reply is (spec/app/assistant/reply.md, \"Story: Hear a brief acknowledgment and still get the whole answer\")", async () => {
+    const world = { ...scene(), phone };
+    const { alpha, runtime } = await openAssistantWithPreferences(world);
+    const done = Promise.withResolvers<void>();
+    world.ask.nextReplyChunks = ["I can't open the Camera", " for you."];
+    world.ask.nextReplyProvisional = true;
+    world.ask.holdDoneAfterReady = done.promise;
+    try {
+      write("Open the camera");
+      await until(alpha, runtime, Composer, (s) => s.draft.sync === "Kept");
+      await press("Send");
+      await until(alpha, runtime, Reply, (s) => s.provisional && s.shown === 0);
+      expect(document.body.textContent?.includes("I can't open the Camera")).toBe(false);
+    } finally {
+      done.resolve();
+    }
+    await until(alpha, runtime, Reply, (s) => s.status === "Settled" && s.final === "I can't open the Camera for you.".length);
+    await vi.waitFor(() => expect(lines()).toEqual(["Open the camera", "I can't open the Camera for you."]));
   });
 
   // spec/app/assistant/index.md, "Alpha asks the agent to warm up at launch, on return to the foreground, after a sign-in and when Ask Alpha is raised from its bar, only while the agent can answer, and shows nothing of it"
