@@ -14,6 +14,8 @@ import { type AssistantPull, useAssistantPull } from "./assistant-pull.ts";
 export type AssistantComposerProps = Omit<ComponentProps<"div">, "children" | "onChange"> & {
   /** Where the composer sits: in the Ask Alpha bar, raised on its own, or at the foot of the conversation sheet. */
   variant?: "bar" | "sheet";
+  /** The bar or pill is already in place, as after a drag: it changes between the two without an entrance (v119 45f6bed30 chat-overlay-motion-adapter.ts:637-646). */
+  still?: boolean;
   /** The text being written. */
   value: string;
   /** Called with the text as it is typed. */
@@ -98,7 +100,7 @@ function keepComposerFocus(event: PointerEvent<HTMLButtonElement>) {
  * @model spec/app/assistant/composer.md
  */
 export function AssistantComposer({
-  variant = "sheet", value, onValueChange, closed = false, notice, unavailable, attachments = [], limit = 4, quote, editing = false, lift,
+  variant = "sheet", still = false, value, onValueChange, closed = false, notice, unavailable, attachments = [], limit = 4, quote, editing = false, lift,
   onSend, onStop, stopping = false, onAttach, onSearch, onNew, making = false, onHistory, onTalk, onDictate, showUnavailableTalk = false, voice, voiceNotice, onOpen, onType, leading, opener, placeholder, onFocusField, fieldRef, fieldPull, onRemoveAttachment, onPreviewAttachment, onUnquote, className, style, ...props
 }: AssistantComposerProps) {
   const written = value.trim() !== "" || attachments.length > 0;
@@ -119,7 +121,7 @@ export function AssistantComposer({
   const [seen, setSeen] = useState({ bar, compact, enter: 0 });
   if (seen.bar !== bar || seen.compact !== compact) {
     const toggledAtBar = seen.bar && bar && seen.compact !== compact;
-    setSeen({ bar, compact, enter: toggledAtBar && !voice ? seen.enter + 1 : seen.enter });
+    setSeen({ bar, compact, enter: toggledAtBar && !voice && !still ? seen.enter + 1 : seen.enter });
   }
   const enter = seen.enter;
   const playedRef = useRef(0);
