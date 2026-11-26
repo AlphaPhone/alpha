@@ -183,11 +183,13 @@ describe("Home on a phone", () => {
     expect(tileButton(`app:${clock}`)?.closest("[inert]")).toBeNull();
     await drawn(() => tileButton(`app:${clock}`)?.click());
     await vi.waitFor(() => expect(world.launcher.opened).toEqual(["org.fixture.clock"]));
+    await until(alpha, homes, Home.Machine, (state) => state.handoff.attempt.outcome === "Confirmed");
     expect(chat()).not.toBeNull();
 
     await alpha.runtime.runPromise(Layers.use((layers) => layers.send({ type: "openLayer", id: "review", kind: "DialogLayer", covers: true })));
     await until(alpha, alpha.runtime, Layers, (state) => state.open.length === 1);
     expect(tileButton("view:Notes")?.closest("[inert]")).not.toBeNull();
+    expect(tileButton(`app:${clock}`)?.closest("[inert]")).not.toBeNull();
     await press("Notes");
     await press("Apps");
     await drawn(() => tileButton(`app:${clock}`)?.click());

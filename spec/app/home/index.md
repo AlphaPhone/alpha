@@ -404,9 +404,9 @@ pure def retireOpening(h: Home, ticket: int): Home =
   { ...h, handoff: { ...h.handoff, attempt: A::conclude(h.handoff.attempt, false, false) } }
 
 pure val eval_witness_canOpenFavorite = (
-  ("presented", AsLauncher),
-  ("savedRead", 1, T::Saved, List(T::Installed({ app: "clock" }))),
-  ("appsRead", 1, true, Set("clock"), true),
+  ("presented", AsLauncher, Owner),
+  ("savedRead", 1, T::Saved, List(T::Installed({ app: "clock" })), Owner),
+  ("appsRead", 1, true, Set("clock"), true, Owner),
   ("openFavorite", "clock", S::raise(S::initial, S::Sheet), true, 0, Owner))
 ```
 
