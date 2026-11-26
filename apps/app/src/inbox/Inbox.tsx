@@ -7,7 +7,7 @@ import {
 import type { MailCard } from "@elizaos/cloud";
 import { Effect, type ManagedRuntime } from "effect";
 import { type ReactNode, useCallback, useMemo, useRef, useState } from "react";
-import { type Folder, type Mailbox, accessOf, readable, searchableIn, showsAttachment } from "../../gen/app__inbox.ts";
+import { type Folder, type Mailbox, accessOf, readable, searchOpen, searchableIn, showsAttachment } from "../../gen/app__inbox.ts";
 import type { Machine as List } from "../../gen/app__inbox.effect.vibe";
 import { useMachine as useList } from "../../gen/app__inbox.react.ts";
 import type { Machine as Marks } from "../../gen/app__inbox__marking.effect.vibe";
@@ -265,6 +265,9 @@ function Opened({ runtime, list, onRefresh, onBegin }: { runtime: Runtime; list:
   };
   const file = files.at(state.attachment - 1);
   const outcome = state.file.outcome;
+  const outcomeOf = (attempt: typeof state.file) => attempt.outcome === "Planned" ? undefined
+    : attempt.outcome === "Recorded" || attempt.outcome === "Sent" ? "working" : attempt.outcome === "Confirmed" ? "done" : attempt.outcome === "Refused" ? "refused" : "unknown";
+  const saveReviewed = { type: "saveReviewed", access } as const;
   const attachment = file && state.handling === "Opening" && outcome === "Confirmed"
     ? runtime.runSync(AttachmentPreviews).read(state.file.id)
     : undefined;
@@ -332,7 +335,7 @@ function Opened({ runtime, list, onRefresh, onBegin }: { runtime: Runtime; list:
         attachments={files.map((one, at) => ({
           id: `${one.partId}:${at}`, name: one.name, size: sizeOf(one.size),
           onOpen: state.revision > 0 && canPreviewAttachment(one) ? reviewing(at + 1, "Opening") : undefined,
-          onSave: state.revision > 0 && destination !== "unavailable" && canSaveAttachment(one) ? reviewing(at + 1, "Saving") : undefined,
+          onSave: state.revision > 0 && destination !== "unavailable" && !canPreviewAttachment(one) && canSaveAttachment(one) ? reviewing(at + 1, "Saving") : undefined,
           saveUnconfirmed: unsure(at + 1),
           browserDownload: destination === "download",
         }))}
@@ -358,10 +361,12 @@ function Opened({ runtime, list, onRefresh, onBegin }: { runtime: Runtime; list:
         name={file?.name ?? ""}
         size={sizeOf(file?.size ?? 0)}
         handling={state.handling === "Saving" ? "save" : "open"}
-        outcome={outcome === "Planned" ? "review" : outcome === "Recorded" || outcome === "Sent" ? "working" : outcome === "Confirmed" ? "done" : outcome === "Refused" ? "refused" : "unknown"}
+        outcome={outcomeOf(state.file) ?? "review"}
         preview={preview}
         browserDownload={destination === "download"}
         onConfirm={can({ type: "confirmAttachment", access }) ? () => void send({ type: "confirmAttachment", access }) : undefined}
+        onSave={file && destination !== "unavailable" && canSaveAttachment(file) && can(saveReviewed) ? () => void send(saveReviewed) : undefined}
+        saveOutcome={state.handling === "Opening" ? outcomeOf(state.keep) : undefined}
         onClose={() => { if (can({ type: "closeAttachment" })) void send({ type: "closeAttachment" }); }}
       />
     </>
@@ -461,7 +466,7 @@ export function Inbox({ runtime, alpha }: InboxProps & { alpha: Alpha }) {
   const deleteDrafts = { type: "discardShelfSelection" } as const;
   const folderKey = `${account}/${folder}`;
   const typedHere = typed && typed.over === query && typed.folder === folderKey ? typed.text : undefined;
-  const searching = typedHere !== undefined || query !== "";
+  const searching = searchOpen(state); // spec/app/inbox/index.md, "Back from a search shows its folder without the search, before Back leaves Inbox"
   const selecting = !draftsFolder && selection === folderKey && !searching && readable(state) && !state.saved && state.pages > 0;
   const chosenMessages = new Set(state.chosen);
   const access = accessOf(state, account);
@@ -556,8 +561,7 @@ export function Inbox({ runtime, alpha }: InboxProps & { alpha: Alpha }) {
           onFocusCapture={() => { lastPaneRef.current = "list"; }}
           className={covered ? "hidden" : split ? "h-full w-[clamp(300px,36%,400px)] shrink-0 border-r border-border" : "min-h-0 min-w-0 flex-1"}>
         <InboxListScreen
-          onBack={firstPageBack}
-          launcher={canvas?.launcher ?? false}
+          onBack={firstPageBack} launcher={canvas?.launcher ?? false}
           account={account === 0 ? undefined : mail.email(account)}
           folder={folderNames[folder]}
           unavailable={!state.searchable}
@@ -569,16 +573,13 @@ export function Inbox({ runtime, alpha }: InboxProps & { alpha: Alpha }) {
               void send(event);
             }
           } : undefined}
-          searching={searching}
-          search={typedHere ?? query}
-          onOpenSearch={canOpenSearch ? () => {
+          searching={searching} search={typedHere ?? query}
+          onOpenSearch={canOpenSearch && can({ type: "openSearch" }) ? () => {
             finishSelection();
             setTyped({ text: query, over: query, folder: folderKey });
+            void send({ type: "openSearch" });
           } : undefined}
-          onCloseSearch={() => {
-            setTyped(undefined);
-            if (can(clearSearch)) void send(clearSearch);
-          }}
+          onCloseSearch={() => { setTyped(undefined); if (can({ type: "closeSearch" })) void send({ type: "closeSearch" }); }}
           onSearchChange={(text) => {
             if (text === "" && can(clearSearch)) {
               setTyped({ text, over: "", folder: folderKey });

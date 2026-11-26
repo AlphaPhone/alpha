@@ -279,7 +279,7 @@ describe("Phone on an Alpha image", () => {
     });
     await until(alpha, alpha.runtime, Shell, (state) => state.trail.join(",") === "Contacts");
     expect(document.querySelector('[role="tablist"][aria-label="Phone"]')).toBeNull();
-    await press("Back");
+    await press("Back to apps");
     await until(alpha, alpha.runtime, Shell, (state) => state.trail.length === 0);
   });
 

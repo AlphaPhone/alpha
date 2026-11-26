@@ -32,7 +32,7 @@ import { button, closeAll, drawn, fill, later, only, open, press, seen, underAct
 import { publish } from "./fakes/platform.ts";
 import { scene, type Scene } from "./fakes/scene.ts";
 import { prepared } from "./fakes/notes.ts";
-import { textReview } from "./fakes/text-review.ts";
+import { askedPage, textReview } from "./fakes/text-review.ts";
 import { agentRequest } from "./fakes/calendar.ts";
 import { fakeWorld } from "./fakes/world.vibe";
 
@@ -574,8 +574,8 @@ describe("Voice Bug 1 & Bug 3 journeys", () => {
     expect(document.body.textContent).not.toContain("Review in chat");
   });
 
-  // spec/app/voice/index.md, "An active voice conversation may ask the shell to open Home or any admitted screen"; spec/app/voice/index.md, "Voice keeps talking after a navigation only when it is the one the conversation asked for; any other ends it"; spec/app/shell/index.md, "Agent navigation shows an admitted app or Home without lowering Ask Alpha"
-  it("keeps voice, mic, and raised Sheet open across agent navigation to an app, to Home, and same-screen refresh, while owner navigation stops voice", async () => {
+  // spec/app/voice/index.md, "An active voice conversation may ask the shell to open Home or any admitted screen"; spec/app/voice/index.md, "Voice keeps talking after a navigation only when it is the one the conversation asked for; any other ends it"; spec/app/shell/index.md, "Agent navigation shows an admitted app or Home, lowering Ask Alpha only where it would hide it"
+  it("keeps voice and mic open across agent navigation to an app, to Home, and to Home again, keeping a raised Sheet where the view is in sight and lowering it or Full where they would hide it, while owner navigation stops voice", async () => {
     const world = { ...scene(), phone: true, signedIn: false };
     const runtime = await startListening(world);
     await sendShell(runtime, { type: "raise", detent: "Sheet" });
@@ -590,10 +590,20 @@ describe("Voice Bug 1 & Bug 3 journeys", () => {
     await until(runtime, Voice.Machine, (s) => s.phase === "Listening" && s.mic === "On" && s.followed === placeOf(undefined) && s.claim === 0);
     expect(await getShell(runtime)).toMatchObject({ trail: [], assistant: "Sheet" });
 
-    world.ask.nextReplyChunks = ["[NAVIGATE:Home] Refreshed Home."];
-    speakUtterance(world, "Refresh home");
+    // spec/app/shell/index.md, "Agent navigation shows an admitted app or Home, lowering Ask Alpha only where it would hide it": asked for Home with the sheet over Home, Talk lowers it and keeps listening.
+    const route = (await getShell(runtime)).route;
+    world.ask.nextReplyChunks = ["[NAVIGATE:Home] Here is Home."];
+    speakUtterance(world, "Go home");
+    await until(runtime, Shell.Machine, (s) => s.route === route + 1);
     await until(runtime, Voice.Machine, (s) => s.sent === 3 && s.phase === "Listening" && s.mic === "On" && s.claim === 0);
-    expect(await getShell(runtime)).toMatchObject({ trail: [], assistant: "Sheet" });
+    expect(await getShell(runtime)).toMatchObject({ trail: [], assistant: "Bar", spokenRoute: route + 1 });
+
+    // spec/app/shell/index.md, "Agent navigation shows an admitted app or Home, lowering Ask Alpha only where it would hide it": Full over Home hides any destination, so opening Calendar lowers it in the same move.
+    await sendShell(runtime, { type: "raise", detent: "Full" });
+    world.ask.nextReplyChunks = ["[NAVIGATE:Calendar] Opening Calendar."];
+    speakUtterance(world, "Open my calendar");
+    await until(runtime, Voice.Machine, (s) => s.sent === 4 && s.phase === "Listening" && s.mic === "On" && s.followed === placeOf("Calendar") && s.claim === 0);
+    expect(await getShell(runtime)).toMatchObject({ trail: ["Calendar"], assistant: "Bar" });
 
     await sendShell(runtime, { type: "openView", view: "Notes" });
     await until(runtime, Voice.Machine, (s) => s.phase === "Idle");
@@ -674,6 +684,13 @@ const openNotes = (alpha: Alpha) => drawn(() => alpha.runtime.runPromise(Effect.
 async function switchToKeyboard() {
   await drawn(() => button("Switch to keyboard")?.focus());
   await press("Switch to keyboard");
+}
+
+/** Let the startup cover lift, as it does at the latest 2.5 s after start where Home is not drawn under it, before a step that checks nothing is on screen. */
+async function coverLifted(alpha: Alpha) {
+  const cover = () => document.querySelector('[role="status"][aria-label="Loading Alpha"]');
+  for (let waited = 0; waited < 2500 && cover(); waited += 500) await later(alpha, 500);
+  expect(cover()).toBeNull();
 }
 
 async function settleComposer(alpha: Alpha, check: () => boolean) {
@@ -787,7 +804,7 @@ describe("Talk from Ask Alpha's composer (spec/app/voice/index.md, \"Story: Hold
     await drawnUntil(alpha, area, Voice.Machine, (s) => s.phase === "Listening" && s.mic === "On");
     speakUtterance(world, "Put a 30 minute event called camera setup in that slot.");
     await drawnUntil(alpha, area, Voice.Machine, (s) => s.sent === 1);
-    await drawn(() => vi.waitFor(() => expect(button("Approve")).toBeDefined(), { timeout: 10_000 }));
+    await vi.waitFor(() => expect(button("Approve")).toBeDefined(), { timeout: 10_000 });
     expect(document.querySelector("section[aria-label='Calendar change']")?.textContent).toContain("camera setup");
     expect(world.calendar.writes).toEqual([]);
     await press("Approve");
@@ -1013,6 +1030,9 @@ describe("Talk from Ask Alpha's composer (spec/app/voice/index.md, \"Story: Hold
     world.ask.holdAfterTools = true;
     world.ask.nextReplyChunks = ["Nothing is on your calendar today."];
     world.ask.holdDoneAfterReady = done.promise;
+    // spec/app/assistant/chats.md, "A conversation made new here shows what it holds while its page is read": what was said and the dots stay in place, never loading rows, while the page of the conversation made for the first turn is read.
+    world.ask.holdPages = true;
+    const loadingRows = () => document.querySelector("section[aria-label='Ask Alpha'] [role=log] [aria-busy]");
     const sessionId = world.voice.activeMicSession;
     await drawn(() => {
       world.voice.emitCloud?.({ type: "speech-start", sessionId });
@@ -1024,6 +1044,11 @@ describe("Talk from Ask Alpha's composer (spec/app/voice/index.md, \"Story: Hold
     };
     await drawnUntil(alpha, area, Voice.Machine, (s) => s.phase === "Thinking" && s.sent === 1);
     await settleComposer(alpha, () => world.ask.turns.size === 1);
+    await drawnUntil(alpha, area, Chats, (s) => s.chosen > 0 && s.page.status === "Loading");
+    expect([said(), dots() !== null, recorded(), loadingRows()]).toEqual([asked, true, 0, null]);
+    world.ask.holdPages = false;
+    for (const release of world.ask.heldPages.splice(0)) release();
+    await drawnUntil(alpha, area, Chats, (s) => s.page.status === "Loaded");
     expect([said(), dots() !== null, recorded()]).toEqual([asked, true, 0]);
     expect(row()).toEqual(["Mute speaker", "Microphone paused while Alpha responds (dimmed)", "Stop voice conversation"]);
 
@@ -1239,25 +1264,81 @@ describe("Talk from Ask Alpha's composer (spec/app/voice/index.md, \"Story: Hold
     ] : [[], [], []]);
   });
 
-  // spec/app/browser/index.md, "A page the owner's whole message asked for opens at once, typed or spoken, and any other page waits for the owner's Open"
-  it("opens from Talk, with no card, a page the spoken request asked for whole, and lowers Ask Alpha over it", async () => {
+  async function openSpokenBrowserWorld(url: string) {
     const world = { ...scene(), phone: true, image: true, signedIn: false };
-    const url = "https://www.alphacompute.ai/";
     const review = textReview(world.notes.owner, "spoken-page", { type: "browser_navigate", url });
     world.telephony.textReview = review;
     const { alpha, area } = await onComposer(world, { at: "view:Browser", load: () => import("../src/browser/index.tsx") });
     await drawnUntil(alpha, area, Voice.Machine, (s) => s.warmed);
+    return { world, review, alpha, area };
+  }
+
+  async function openFilesVoiceSession(world: ReturnType<typeof scene>) {
+    const { alpha, area } = await onComposer(world, { at: "view:Files", load: () => import("../src/files/index.tsx") });
+    await drawn(() => alpha.runtime.runPromise(Effect.flatMap(Shell.Machine, (machine) => machine.send({ type: "openView", view: "Files" }))));
+    await drawnUntil(alpha, area, Conversation, (s) => s.ready && s.observing && s.context.showing.tag === "App" && s.context.showing.view === "Files");
+    await drawnUntil(alpha, area, Voice.Machine, (s) => s.warmed);
+    await drawnUntil(alpha, files.runtime(alpha), Files, (s) => s.access === "Granted" && s.storage.status === "Loaded");
     await startTalkWithAskFirstOff({ alpha, area });
-    review.proposal.payload.requestMessageId = `m${world.ask.said.length + 1}u`;
+    return { alpha, area };
+  }
+
+  // spec/app/browser/index.md, "A page the owner's whole message asked for opens at once, typed or spoken, and any other page waits for the owner's Open"
+  it("opens from Talk, with no card, a page the spoken request asked for whole, and lowers Ask Alpha over it", async () => {
+    const url = "https://www.alphacompute.ai/";
+    const { world, review, alpha, area } = await openSpokenBrowserWorld(url);
+    await startTalkWithAskFirstOff({ alpha, area });
     world.ask.nextReplyChunks = ["Opening alphacompute.ai."];
-    world.ask.nextActions = () => [{ action: "PROPOSE_DEVICE_ACTION", data: {
-      proposalId: "spoken-page", state: "pending", executed: false, awaitingDeviceExecution: true, directRequest: true, approvalRequired: false,
-    } }];
+    world.ask.nextActions = (_, capabilities) => askedPage(review, `m${world.ask.said.length}u`, capabilities);
     speakUtterance(world, "Visit alphacompute.ai.");
     await drawnUntil(alpha, alpha.runtime, Shell.Machine, (s) => Shell.showing(s, "Browser") && s.assistant === "Bar");
     expect(review.receipts).toEqual([expect.objectContaining({ outcome: "applied", operationId: "spoken-page" })]);
     await vi.waitFor(() => expect([...world.browser.tabs.values()].some((tab) => tab.history[tab.at] === url)).toBe(true), { timeout: 10_000 });
     expect(button("Open")).toBeUndefined();
+  });
+
+  // spec/app/browser/index.md, "A page the owner's whole message asked for opens at once, typed or spoken, and any other page waits for the owner's Open"; spec/app/settings/preferences.md, "Ask before Alpha acts covers the agent's actions on the web, with the camera, in Photos and Files, its reading of the latest texter's number and its text drafts"
+  it("while Ask before Alpha acts is on, keeps a page the spoken request asked for whole on its card in chat until I choose Open", async () => {
+    const url = "https://www.alphacompute.ai/";
+    const { world, review, alpha, area } = await openSpokenBrowserWorld(url);
+    await drawnUntil(alpha, alpha.runtime, Preferences, (s) => s.document.read.status === "Loaded");
+    await drawn(() => alpha.runtime.runPromise(Preferences.use((machine) => machine.send({ type: "setAskFirst", askFirst: true, at: untimed }, "Owner"))));
+    await drawnUntil(alpha, alpha.runtime, Preferences, (s) => s.askFirst);
+    await press("Talk");
+    await drawnUntil(alpha, area, Voice.Machine, (s) => s.phase === "Listening" && s.mic === "On");
+    world.ask.nextReplyChunks = ["Opening alphacompute.ai."];
+    world.ask.nextActions = (_, capabilities) => askedPage(review, `m${world.ask.said.length}u`, capabilities);
+    speakUtterance(world, "Visit alphacompute.ai.");
+    await drawnUntil(alpha, area, Voice.Machine, (s) => s.phase === "Listening" && s.mic === "On" && s.reviewPending);
+    await drawn(() => vi.waitFor(() => expect(button("Open")).toBeDefined()));
+    await later(alpha, 500);
+    expect([review.claims, review.receipts]).toEqual([[], []]);
+    expect([...world.browser.tabs.values()].some((tab) => tab.history[tab.at] === url)).toBe(false);
+
+    await press("Open");
+    await vi.waitFor(() => expect(review.receipts).toEqual([expect.objectContaining({ outcome: "applied", operationId: "spoken-page" })]), { timeout: 10_000 });
+    await vi.waitFor(() => expect([...world.browser.tabs.values()].some((tab) => tab.history[tab.at] === url)).toBe(true), { timeout: 10_000 });
+  });
+
+  // spec/app/files/index.md, "An explicit request to open or filter Files may act directly on the same idle Files view"; spec/app/browser/index.md, "A page the owner's whole message asked for opens at once, typed or spoken, and any other page waits for the owner's Open"
+  it("from Talk over Files, shows the card of a page the agent keeps for my review, and opens it only on Open", async () => {
+    const world = { ...scene(), phone: true, image: true, signedIn: false };
+    world.ask.metadata = [];
+    const url = "https://www.alphacompute.ai/";
+    const review = textReview(world.notes.owner, "spoken-page", { type: "browser_navigate", url });
+    world.telephony.textReview = review;
+    const { alpha, area } = await openFilesVoiceSession(world);
+    world.ask.nextReplyChunks = ["Here is a page for you to open."];
+    world.ask.nextActions = () => askedPage(review, `m${world.ask.said.length}u`, []);
+    speakUtterance(world, "Find me a page about Alpha.");
+    await drawnUntil(alpha, area, Voice.Machine, (s) => s.phase === "Listening" && s.mic === "On" && s.reviewPending);
+    expect(world.ask.metadata.at(-1)).toMatchObject({ voiceUi: { agentActionMode: "direct-files-only-v1" } });
+    await drawn(() => vi.waitFor(() => expect(button("Open")).toBeDefined()));
+    await later(alpha, 500);
+    expect([review.claims, review.receipts]).toEqual([[], []]);
+
+    await press("Open");
+    await vi.waitFor(() => expect(review.receipts).toEqual([expect.objectContaining({ outcome: "applied", operationId: "spoken-page" })]), { timeout: 10_000 });
   });
 
   // spec/app/files/index.md, "An explicit request to open or filter Files may act directly on the same idle Files view"
@@ -1268,12 +1349,7 @@ describe("Talk from Ask Alpha's composer (spec/app/voice/index.md, \"Story: Hold
     const filter = { type: "files_filter", kind: "pdf", folder: "Download" } as const;
     const review = textReview(world.notes.owner, "other-filter", filter);
     world.telephony.textReview = review;
-    const { alpha, area } = await onComposer(world, { at: "view:Files", load: () => import("../src/files/index.tsx") });
-    await drawn(() => alpha.runtime.runPromise(Effect.flatMap(Shell.Machine, (machine) => machine.send({ type: "openView", view: "Files" }))));
-    await drawnUntil(alpha, area, Conversation, (s) => s.ready && s.observing && s.context.showing.tag === "App" && s.context.showing.view === "Files");
-    await drawnUntil(alpha, area, Voice.Machine, (s) => s.warmed);
-    await drawnUntil(alpha, files.runtime(alpha), Files, (s) => s.access === "Granted" && s.storage.status === "Loaded");
-    await startTalkWithAskFirstOff({ alpha, area });
+    const { alpha, area } = await openFilesVoiceSession(world);
 
     const speak = async (id: string, text: string, sent: number, proposes = true) => {
       review.proposal.id = id;
@@ -1393,6 +1469,7 @@ describe("Talk from Ask Alpha's composer (spec/app/voice/index.md, \"Story: Hold
     world.voice.onDevice = false;
     const { alpha, area } = await onComposer(world);
     await drawnUntil(alpha, area, Voice.Machine, (s) => s.warmed);
+    await coverLifted(alpha);
 
     await press("Talk");
     await drawnUntil(alpha, area, Voice.Machine, (s) => s.session > 0 && s.phase === "Idle");
@@ -1500,6 +1577,7 @@ describe("Talk from Ask Alpha's composer (spec/app/voice/index.md, \"Story: Hold
     world.voice.grantOnRequest = false;
     const { alpha, area } = await onComposer(world);
     await drawnUntil(alpha, area, Voice.Machine, (s) => s.warmed);
+    await coverLifted(alpha);
     await settleComposer(alpha, () => button("Talk") !== undefined);
 
     await drawn(() => document.querySelector<HTMLTextAreaElement>("textarea[data-alpha-composer]")?.focus());

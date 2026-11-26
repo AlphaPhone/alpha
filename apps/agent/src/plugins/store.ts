@@ -398,14 +398,6 @@ function appendTombstone(existing: readonly string[], id: string): string[] {
   return deduped.slice(-MAX_TOMBSTONES);
 }
 
-function isFiniteInt(value: unknown, min: number, max: number): value is number {
-  return typeof value === "number" && Number.isFinite(value) && value >= min && value <= max;
-}
-
-function isNullableNumber(value: unknown): value is number | null {
-  return value === null || (typeof value === "number" && Number.isFinite(value));
-}
-
 function hasInvalidClockEntryField(entry: Record<string, unknown>, numericFields: readonly string[]): boolean {
   for (const field of numericFields) {
     const value = entry[field];

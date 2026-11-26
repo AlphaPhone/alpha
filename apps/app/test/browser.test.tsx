@@ -27,7 +27,7 @@ import { TabHost } from "../src/platform/browser.vibe";
 import { button, closeAll, drawn, fill, hardware, later, only, open, press, pressOnTop, readInboxFirst, typeInto, underAct, until } from "./alpha.tsx";
 import { memoryIndexedDB } from "./fakes/indexeddb.ts";
 import { scene } from "./fakes/scene.ts";
-import { textReview } from "./fakes/text-review.ts";
+import { askedPage, textReview } from "./fakes/text-review.ts";
 
 underAct();
 afterEach(closeAll);
@@ -835,6 +835,7 @@ describe("The Browser on a phone", () => {
     reply: string;
     waitPrefs?: (s: { document: { read: { status: string } }; askFirst: boolean }) => boolean;
     directRequest: boolean;
+    forced?: boolean;
     waitCard: boolean;
   }) {
     const world = { ...scene(), phone: true, image: true };
@@ -850,15 +851,12 @@ describe("The Browser on a phone", () => {
     const front = () => committedAddress(runtime, world.browser.tabs);
     const reads = review.pendingReads;
     world.ask.nextReplyChunks = [options.reply];
-    world.ask.nextActions = () => {
-      if (options.directRequest) review.proposal.payload.requestMessageId = `m${world.ask.said.length}u`;
-      return [{
+    world.ask.nextActions = (_, capabilities) => (options.directRequest
+      ? askedPage(review, `m${world.ask.said.length}u`, options.forced ? ["browser.open-direct.v1"] : capabilities)
+      : [{
         action: "PROPOSE_DEVICE_ACTION",
-        data: options.directRequest
-          ? { proposalId: options.proposalId, state: "pending", executed: false, approvalRequired: false, awaitingDeviceExecution: true, directRequest: true }
-          : { proposalId: options.proposalId, state: "pending", executed: false, approvalRequired: true, awaitingUserInput: true },
-      }];
-    };
+        data: { proposalId: options.proposalId, state: "pending", executed: false, approvalRequired: true, awaitingUserInput: true },
+      }]);
     await fill("Message Alpha", options.prompt);
     await vi.waitFor(() => expect(button("Send")?.disabled).toBe(false));
     await press("Send");
@@ -957,7 +955,13 @@ describe("The Browser on a phone", () => {
     await drawn(() => vi.waitFor(async () => expect(await front()).toBe(url), { timeout: 10_000 }));
   });
 
-  it.each(askingFirst)("On an enrolled phone while $name, a page proposal my whole message asked for runs only on Open in Ask Alpha's card (spec/app/browser/index.md, \"A page the owner's whole message asked for opens at once, typed or spoken, and any other page waits for the owner's Open\"; spec/app/settings/preferences.md, \"Ask before Alpha acts covers the agent's actions on the web, with the camera, in Photos and Files, its reading of the latest texter's number and its text drafts\")", async ({ kept, status }) => {
+  /** Each way the agent may answer while the phone asks first: as it grounds the turn the phone sent, or still marked to run at once, as for a turn sent before asking first came on. */
+  const askingFirstAnswers = askingFirst.flatMap((one) => [
+    { ...one, answer: "as the agent grounds it", forced: false },
+    { ...one, answer: "even marked to run at once", forced: true },
+  ]);
+
+  it.each(askingFirstAnswers)("On an enrolled phone while $name, a page proposal my whole message asked for, $answer, runs only on Open in Ask Alpha's card (spec/app/browser/index.md, \"A page the owner's whole message asked for opens at once, typed or spoken, and any other page waits for the owner's Open\"; spec/app/settings/preferences.md, \"Ask before Alpha acts covers the agent's actions on the web, with the camera, in Photos and Files, its reading of the latest texter's number and its text drafts\")", async ({ kept, status, forced }) => {
     localStorage.setItem("alpha.preferences", kept);
     onTestFinished(() => localStorage.removeItem("alpha.preferences"));
     const url = "https://www.alphacompute.ai/";
@@ -968,6 +972,7 @@ describe("The Browser on a phone", () => {
       reply: "Opening alphacompute.ai.",
       waitPrefs: (s) => s.document.read.status === status && s.askFirst,
       directRequest: true,
+      forced,
       waitCard: true,
     });
     await later(alpha, 500);

@@ -154,6 +154,8 @@ function useShellSwipe(alpha: Alpha, blocked: boolean, launcher: boolean, owner:
  * over them Ask Alpha, whatever covers the screen, and the notices. Each screen is its area's, drawn at its place.
  * One startup cover, the white page with the Alpha mark, stays over it until what shows under it is ready, kept at one
  * place so its fade never starts over: v119 drew one cover for the whole start (45f6bed30 apps/app/src/main.tsx:357).
+ * The apps share one layer, as v119's did (45f6bed30 prototype/template.html:130): it rises over Home when an app opens
+ * from Home, with Home showing under it until the rise ends; an app opened from another, and Back, swap in it at once.
  * @model spec/app/shell/index.md
  */
 export function App({ alpha }: AppProps) {
@@ -190,7 +192,7 @@ export function App({ alpha }: AppProps) {
     void alpha.runtime.runPromise(firstFrame(main), { signal: stop.signal }).then(() => setHomeShown(true), () => undefined);
     return () => stop.abort();
   }, [alpha, homeShown]);
-  const [risen, setRisen] = useState<{ view: View | undefined; done: boolean }>({ view: undefined, done: false });
+  const [risen, setRisen] = useState<{ view: View | undefined; overHome: boolean }>({ view: undefined, overHome: false });
   const shellFailed = cause !== undefined;
   const showing = state?.trail.at(-1);
   const swipeBlocked = !state || shellFailed || signingIn || accessHolding || state.textAsk.tag === "TextAskVisit";
@@ -218,7 +220,8 @@ export function App({ alpha }: AppProps) {
         />
       : <ShellLayerHost alpha={alpha} portalContainer={portalNode}>{null}{cover}</ShellLayerHost>;
   }
-  if (risen.view !== showing) setRisen({ view: showing, done: false });
+  if (risen.view !== showing) setRisen({ view: showing, overHome: risen.view === undefined || risen.overHome });
+  const overHome = risen.view === showing && risen.overHome;
   const inert = shellFailed || (layers !== undefined && pageInert(layers));
   const comms = isCommsView(showing);
   const side = state.textAsk.tag === "NoTextAsk" && showing === undefined && canvas?.landscape === true && (phone || coarse);
@@ -274,15 +277,14 @@ export function App({ alpha }: AppProps) {
                 inert={showing !== undefined || undefined}
                 className={cn(
                   showing === undefined ? "contents" : "absolute inset-0 isolate flex flex-col",
-                  showing !== undefined && (comms || (risen.view === showing && risen.done) ? "invisible" : "motion-reduce:invisible"),
+                  showing !== undefined && (comms || !overHome ? "invisible" : "motion-reduce:invisible"),
                 )}
               >
                 {alpha.slot("home")}
               </div>
               {showing !== undefined && (
                 <div
-                  key={showing}
-                  onAnimationEnd={(event) => { if (event.target === event.currentTarget) setRisen({ view: showing, done: true }); }}
+                  onAnimationEnd={(event) => { if (event.target === event.currentTarget) setRisen((was) => ({ ...was, overHome: false })); }}
                   className={cn("relative flex min-h-0 flex-1 flex-col motion-safe:animate-rise has-[[data-alpha-camera-native]]:bg-transparent", showing === "Camera" ? "bg-camera-panel" : "bg-background")}
                 >
                   {!viewHasHeader(showing) && <AppHeader

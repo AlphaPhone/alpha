@@ -17,7 +17,7 @@ import { afterMailSignIn, leaseRefusalReason } from "../../gen/app__platform.eff
 import { Cloud, mailSignIn } from "../platform/cloud.vibe"
 import type { Machine as Toasts } from "../../gen/app__notices__toasts.effect.vibe"
 import { type Said, say } from "../notices/toasts.vibe"
-import { type Job, Whole, answer, contained, reacting, started, stream, together, untimed } from "../runtime/reactor.vibe"
+import { type Job, Whole, answer, contained, migratedStore, reacting, started, stream, together, untimed } from "../runtime/reactor.vibe"
 import { InboxAhead, aheadKey, prefetch } from "./ahead.vibe"
 import type { GmailAuthorizationWindow } from "./authorization.vibe"
 import { Mail, asked, connections, failureOf, mail, page } from "./gmail.vibe"
@@ -93,7 +93,20 @@ function carry(fx: Out): Job<Event, Cloud | Mail | Inbox.Machine | InboxAhead | 
 }
 
 // spec/app/inbox/index.md, "A restart keeps the selection, the list kept for it and its credential, whether Spam and Trash can be searched, and the count as no longer fresh, and forgets the rest"
-const kept = reacting(Inbox, { keep: 1, open: [{ type: "restart" }], carry })
+/** A list kept before the search field was part of it, brought in with the field closed so its saved list is not lost. */
+effect function listRecord(raw: string | undefined): (string | undefined)!! {
+  if (raw === undefined) return undefined
+  const fields = Schema.decodeUnknownEffect(Schema.fromJsonString(Schema.Record(Schema.String, Schema.Unknown)))(raw) catch () => undefined
+  if (fields === undefined || "searching" in fields) return raw
+  const migrated = Inbox.decodeState({ ...fields, searching: false }) catch () => undefined
+  return migrated === undefined ? raw : JSON.stringify(migrated)
+}
+
+function stored(key: string, start = Inbox.initial) {
+  return Layer.provide(Inbox.stored(key, start), migratedStore(key, listRecord))
+}
+
+const kept = reacting({ ...Inbox, stored }, { keep: 1, open: [{ type: "restart" }], carry })
 
 /** The phone can still identify its previously signed-in owner when Cloud cannot be reached. */
 effect function deviceOwner() {
@@ -245,6 +258,18 @@ const session = started(effect {
   try Stream.runDrain(Stream.switchMap(checks, () => Stream.fromEffectDrain(recheck())))
 }, "the cloud session")
 
+// spec/app/inbox/index.md, "Back from a search shows its folder without the search, before Back leaves Inbox"
+/** Leaving Inbox closes a search field with nothing searched, so the next visit opens on the folder. */
+const leaving = started(effect {
+  const shell = try Shell
+  const list = try Inbox.Machine
+  const left = Stream.filter(Stream.changes(Stream.map(shell.changes, (state) => showing(state, "Inbox"))), (shown) => !shown)
+  try Stream.runForEach(left, effect () => {
+    const state = try list.get()
+    if (state.searching && state.selected.query === "") try contained(list.send({ type: "closeSearch" }), "closing the empty Inbox search")
+  })
+}, "closing an empty Inbox search on leaving")
+
 // spec/app/inbox/index.md, "Attention says whether the owner is signed out, has no account, is being checked, or has a count of unread messages, fresh or no longer fresh, or could not be read"
 /** What Home's Inbox tile says waits: the unread messages of the first page, counted, and nothing else of the mail. */
 function waitingOf(said: Inbox.Attention): string | undefined {
@@ -292,4 +317,4 @@ const home = started(effect {
 }, "telling Home")
 
 /** Gmail's list, from launch: kept across restarts, read through the owner's cloud, and checked again each time Inbox opens. */
-export const mailbox = together(Layer.provideMerge(kept, Layer.provide(mail, savedBodies)), session, home, signIns, prefetch)
+export const mailbox = together(Layer.provideMerge(kept, Layer.provide(mail, savedBodies)), session, leaving, home, signIns, prefetch)

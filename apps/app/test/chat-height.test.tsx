@@ -14,6 +14,7 @@ import assistant from "../src/assistant/index.tsx";
 import { Talk } from "../src/assistant/talk.vibe";
 import { MessagingBridge } from "../src/messaging/bridge.vibe";
 import { closeAll, drawn, fill, open, press, underAct, until } from "./alpha.tsx";
+import { prepared } from "./fakes/notes.ts";
 import { scene, type Scene } from "./fakes/scene.ts";
 
 underAct();
@@ -194,6 +195,46 @@ describe("observation.chatHeight", () => {
     await until(alpha, area, Voice.Machine, (s) => s.phase === "Listening" && s.mic === "On");
     await speakAndWait(alpha, area, world, "Spoken from tucked Home pill", "turn-6");
     expect(metaAt(world, 5)?.observation).toMatchObject({ view: "home", sensitive: false, chatHeight: "hidden" });
+  });
+
+  // spec/app/shell/index.md, "Agent navigation shows an admitted app or Home, lowering Ask Alpha only where it would hide it"; spec/app/assistant/index.md, "A complete reply may take the owner Home, once, as it may open a view"
+  it("a typed reply that goes Home or opens a view lowers a raised Ask Alpha only where it would hide that view", async () => {
+    const { world, alpha, area } = await openHeightWorld();
+    await fill("Message Alpha", "Hello");
+    await press("Send");
+    await until(alpha, area, Conversation, (s) => s.turn.send.id === 1 && s.turn.reply === "Complete");
+    await until(alpha, area, Chats, (s) => s.chosen > 0);
+    const shell = () => alpha.runtime.runPromise(Effect.flatMap(Shell, (m) => m.get()));
+    const navigating = async (text: string, viewId: string, turn: number) => {
+      world.ask.nextReplyChunks = ["Opening it."];
+      world.ask.nextActions = (metadata) => [prepared(String((metadata as { viewClientId?: unknown }).viewClientId), viewId, false)];
+      await sendFromCurrentHeight(alpha, area, text, turn);
+      await until(alpha, area, Conversation, (s) => s.opening.id === turn && s.opening.outcome !== "Sent");
+      expect((await area.runPromise(Effect.flatMap(Conversation, (m) => m.get()))).opening.outcome).toBe("Confirmed");
+      return shell();
+    };
+
+    // spec/app/shell/index.md, "Agent navigation shows an admitted app or Home, lowering Ask Alpha only where it would hide it": Full at Home lowers so Home shows.
+    await setShell(alpha, undefined, "Full");
+    expect(await navigating("go home", "home", 2)).toMatchObject({ trail: [], drawer: false, assistant: "Bar" });
+    expect(metaAt(world, 1)?.observation).toMatchObject({ view: "home", chatHeight: "full" });
+
+    // spec/app/shell/index.md, "Agent navigation shows an admitted app or Home, lowering Ask Alpha only where it would hide it": a sheet over Home asked for Home lowers too.
+    await setShell(alpha, undefined, "Sheet");
+    expect(await navigating("go home", "home", 3)).toMatchObject({ trail: [], assistant: "Bar" });
+    expect(metaAt(world, 2)?.observation).toMatchObject({ view: "home", chatHeight: "sheet" });
+
+    // spec/app/shell/index.md, "Agent navigation shows an admitted app or Home, lowering Ask Alpha only where it would hide it": a sheet over Calendar asked for Calendar lowers; Full over Calendar asked for Notes opens Notes with Ask Alpha lowered.
+    await setShell(alpha, "Calendar", "Sheet");
+    expect(await navigating("show my calendar", "calendar", 4)).toMatchObject({ trail: ["Calendar"], assistant: "Bar" });
+    await setShell(alpha, "Calendar", "Full");
+    expect(await navigating("open notes", "notes", 5)).toMatchObject({ trail: ["Calendar", "Notes"], assistant: "Bar" });
+
+    // spec/app/shell/index.md, "Agent navigation shows an admitted app or Home, lowering Ask Alpha only where it would hide it": a sheet stays raised when the view it opens is in sight above it, as in v119.
+    await setShell(alpha, "Calendar", "Sheet");
+    expect(await navigating("open notes", "notes", 6)).toMatchObject({ trail: ["Calendar", "Notes"], assistant: "Sheet" });
+    await setShell(alpha, "Calendar", "Sheet");
+    expect(await navigating("go home", "home", 7)).toMatchObject({ trail: [], assistant: "Sheet" });
   });
 
   // spec/app/assistant/context.md, "A turn reports the assistant overlay height from the shell detent and dock state, only when the screen is not sensitive and the peer takes optional fields"

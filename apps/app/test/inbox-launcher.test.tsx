@@ -15,7 +15,7 @@ const mounts = only("home", "view:Inbox", "assistant", "notice");
 
 /** Opens Inbox from its Home tile once its first page has loaded. */
 async function openInbox(world: Scene) {
-  const { alpha } = await open(world, mounts);
+  const { alpha, close } = await open(world, mounts);
   await until(alpha, alpha.runtime, Shell, (state) => state.trail.length === 0);
   await vi.waitFor(async () => {
     await drawn(() => undefined);
@@ -27,31 +27,73 @@ async function openInbox(world: Scene) {
     tile.click();
   });
   await until(alpha, inbox.runtime(alpha), List, (state) => state.list.status === "Loaded");
-  return alpha;
+  return { alpha, close };
 }
 
 const folders = () => Boolean(document.querySelector("[role=group][aria-label=Folder]"));
 const searchField = () => document.querySelector("form[role=search]");
 
-it("On the launcher the open search draws no Back and keeps the folders under it (spec/app/inbox/index.md, \"Back from a search shows its folder without the search, before Back leaves Inbox\")", async () => {
+async function runSearch(alpha: Awaited<ReturnType<typeof openInbox>>["alpha"], query: string) {
+  await press("Search email");
+  await fill("Search mail", query);
+  await drawn(() => searchField()?.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true })));
+  await until(alpha, inbox.runtime(alpha), List, (state) => state.selected.query === query);
+}
+
+it("On the launcher the open search draws no Back and no folders, and the phone's Back closes it, empty or typed, before leaving Inbox (spec/app/inbox/index.md, \"Back from a search shows its folder without the search, before Back leaves Inbox\")", async () => {
   const world = { ...scene(), phone: true };
   world.settings.roles = world.settings.roles.map((role) => role.role === "home" ? { ...role, held: true } : role);
-  const alpha = await openInbox(world);
+  const { alpha } = await openInbox(world);
+  const list = inbox.runtime(alpha);
   await vi.waitFor(() => expect(document.querySelector("main")?.hasAttribute("data-alpha-launcher")).toBe(true));
   await press("Search email");
-  expect([Boolean(searchField()), button("Back to inbox"), button("Back to apps"), folders()]).toEqual([true, undefined, undefined, true]);
-  await fill("Search mail", "tacos");
-  await drawn(() => searchField()?.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true })));
-  await until(alpha, inbox.runtime(alpha), List, (state) => state.selected.query === "tacos");
+  expect([Boolean(searchField()), button("Back to inbox"), button("Back to apps"), folders()]).toEqual([true, undefined, undefined, false]);
   await hardware("back");
-  await until(alpha, inbox.runtime(alpha), List, (state) => state.selected.query === "");
+  await until(alpha, list, List, (state) => !state.searching);
+  expect([searchField(), Boolean(button("Search email")), folders(), Boolean(document.querySelector("[data-alpha-subview=inbox-list]"))]).toEqual([null, true, true, true]);
+  await press("Search email");
+  await fill("Search mail", "taco");
+  await hardware("back");
+  await until(alpha, list, List, (state) => !state.searching);
+  expect([searchField(), Boolean(button("Search email"))]).toEqual([null, true]);
+  await runSearch(alpha, "tacos");
+  await hardware("back");
+  await until(alpha, list, List, (state) => state.selected.query === "" && !state.searching);
   expect([searchField(), Boolean(button("Search email"))]).toEqual([null, true]);
 });
 
-it("Off the launcher the open search keeps its Back to the folder (spec/app/inbox/index.md, \"Back from a search shows its folder without the search, before Back leaves Inbox\")", async () => {
-  await openInbox({ ...scene(), phone: false });
+it("Off the launcher the open search keeps its Back to the folder, and emptying it keeps it open (spec/app/inbox/index.md, \"Back from a search shows its folder without the search, before Back leaves Inbox\")", async () => {
+  const { alpha } = await openInbox({ ...scene(), phone: false });
   await press("Search email");
   expect([Boolean(searchField()), Boolean(button("Back to inbox")), folders()]).toEqual([true, true, false]);
   await press("Back to inbox");
   expect([searchField(), Boolean(button("Search email"))]).toEqual([null, true]);
+  await runSearch(alpha, "tacos");
+  await press("Clear search");
+  await until(alpha, inbox.runtime(alpha), List, (state) => state.selected.query === "" && state.searching);
+  expect(Boolean(searchField())).toBe(true);
+});
+
+it("A search kept through a restart, from a list kept before the field was part of it, stays open when Clear empties it (spec/app/inbox/index.md, \"Back from a search shows its folder without the search, before Back leaves Inbox\"; spec/app/inbox/index.md, \"A restart keeps the selection, the list kept for it and its credential, whether Spam and Trash can be searched, and the count as no longer fresh, and forgets the rest\")", async () => {
+  const world = { ...scene(), phone: false };
+  const first = await openInbox(world);
+  await press("Search email");
+  await fill("Search mail", "tacos");
+  await drawn(() => searchField()?.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true })));
+  await until(first.alpha, inbox.runtime(first.alpha), List, (state) => state.selected.query === "tacos" && state.list.status === "Loaded" && state.keptPages > 0);
+  await first.close();
+  const key = Object.keys(localStorage).find((name) => name === "alpha/app/inbox/index@1");
+  if (!key) throw new Error("no kept Inbox list");
+  const before = JSON.parse(localStorage.getItem(key) ?? "{}") as Record<string, unknown>;
+  delete before.searching;
+  localStorage.setItem(key, JSON.stringify(before));
+  const { alpha } = await open(world, mounts);
+  const list = inbox.runtime(alpha);
+  await until(alpha, list, List, (state) => state.selected.query === "tacos" && state.accounts.status === "Loaded" && state.list.status === "Loaded");
+  expect(Object.keys(localStorage).filter((name) => name.includes(".unreadable"))).toEqual([]);
+  await drawn(() => document.querySelector<HTMLButtonElement>("[data-home-tile='view:Inbox']")?.click());
+  await vi.waitFor(() => expect(Boolean(searchField())).toBe(true));
+  await press("Clear search");
+  await until(alpha, list, List, (state) => state.selected.query === "" && state.list.status === "Loaded");
+  expect([Boolean(searchField()), folders()]).toEqual([true, false]);
 });

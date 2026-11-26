@@ -726,10 +726,12 @@ unreadable preference, or a work item in progress keeps the usual review. A
 spoken request uses its own current voice turn and conversation,
 declares only the Files capabilities, with opening at once a page the
 owner's whole message asked for (`browser.open-direct.v1`, see
-[Browser](../browser/index.md)), and, since voice shows no review card,
+[Browser](../browser/index.md)) while the owner lets Alpha open it with no
+card, and, since voice shows no Files review card,
 asks for a filter or an open only (`direct-files-only-v1`): the agent
 refuses a change by voice and has the owner ask for it in the chat, where
-its card shows. An attached document does not authorize a direct action. The agent gets a result receipt without the
+its card shows. A page open the agent keeps for review on that turn still
+shows its card, as Browser has it. An attached document does not authorize a direct action. The agent gets a result receipt without the
 opened file's contents. An open counts only when that folder loaded or
 that file could be shown.
 

@@ -653,11 +653,16 @@ describe("Notes", () => {
     expect(button("Save recording summary")).toBeUndefined();
   });
 
-  it("The agent opens the note I named, and only that, only for my request now (spec/app/notes/index.md, \"The agent opens the one note the owner named, as the list last read it, once for the owner's current request, and is told whether it opened\"; spec/app/notes/note.md, \"Only the owner opens a dialog or a question in Notes; a note is opened by the owner, or by the agent for the one the owner just named; and nothing opens while anything else of Notes is open\"; spec/app/assistant/index.md, \"Story: Let Alpha open what it is talking about\")", async () => {
+  async function openShoppingChat() {
     const world = scene();
     const { alpha, runtime } = await openNamedShoppingNote(world);
     await until(alpha, runtime, Composer, (s) => s.slot === "Open");
     await until(alpha, runtime, Conversation, (s) => s.ready);
+    return { world, alpha, runtime };
+  }
+
+  it("The agent opens the note I named, and only that, only for my request now (spec/app/notes/index.md, \"The agent opens the one note the owner named, as the list last read it, once for the owner's current request, and is told whether it opened\"; spec/app/notes/note.md, \"Only the owner opens a dialog or a question in Notes; a note is opened by the owner, or by the agent for the one the owner just named; and nothing opens while anything else of Notes is open\"; spec/app/assistant/index.md, \"Story: Let Alpha open what it is talking about\")", async () => {
+    const { world, alpha, runtime } = await openShoppingChat();
     const editor = () => alpha.runtime.runPromise(Effect.flatMap(Editor, (e) => e.get()));
     const list = () => alpha.runtime.runPromise(Effect.flatMap(List, (l) => l.get()));
     const results = () => world.notes.views.filter((one) => one.path === "result").map((one) => one.body.result);
@@ -682,6 +687,12 @@ describe("Notes", () => {
     await ask("open the note titled shopping list", true);
     await drawn(() => vi.waitFor(() => expect(results()).toHaveLength(1)));
     expect(world.ask.metadata[0]).toMatchObject({ viewDelivery: "completed-action", voiceUi: { viewDelivery: "completed-action", uiNotesEditor: "saved-note-v1" } });
+    // spec/app/assistant/index.md, "A turn tells the agent the views this screen can show, so a reply never promises one it cannot open": a browser preview names Home and its apps, never Phone, Messages or Contacts.
+    const shownViews = (world.ask.metadata[0] as { voiceUi: { uiViews: string[] } }).voiceUi.uiViews;
+    expect(shownViews).toEqual(expect.arrayContaining(["home", "notes", "calendar", "clock", "browser", "settings"]));
+    expect(shownViews).not.toContain("messages");
+    expect(shownViews).not.toContain("phone");
+    expect(shownViews).not.toContain("contacts");
     expect(world.notes.views[0]).toMatchObject({ path: "claim", body: { viewId: "notes", targetProtocol: "saved-note-v1" } });
     expect(results()).toEqual([{ switched: true, shown: { kind: "saved-note", noteId: "shopping" } }]);
     await rendered(async () => {
@@ -782,6 +793,44 @@ describe("Notes", () => {
     await drawn(() => vi.waitFor(() => expect(results()).toHaveLength(6)));
     expect(world.notes.views.at(-2)).toMatchObject({ path: "claim", body: { viewId: "browser" } });
     expect([results()[5], showing(await shell(), "Browser")]).toEqual([{ switched: true }, true]);
+  });
+
+  // spec/app/shell/index.md, "Agent navigation shows an admitted app or Home, lowering Ask Alpha only where it would hide it"; spec/app/assistant/index.md, "A complete reply may open one view, once, while the screen it was asked from still shows"
+  it("A note the agent opens keeps Ask Alpha's sheet or full screen, also over Notes, while asking for Notes itself under its sheet lowers it", async () => {
+    const { world, alpha, runtime } = await openShoppingChat();
+    const shell = () => alpha.runtime.runPromise(Effect.flatMap(Shell, (machine) => machine.get()));
+    const raise = (detent: "Sheet" | "Full") => drawn(() => alpha.runtime.runPromise(Effect.flatMap(Shell, (machine) => machine.send({ type: "raise", detent }))));
+    const ask = async (text: string, viewId: string, saved: boolean) => {
+      world.ask.nextReplyChunks = ["Here it is."];
+      world.ask.nextActions = (metadata) => [prepared(String((metadata as { viewClientId?: unknown }).viewClientId), viewId, saved)];
+      const turn = (await runtime.runPromise(Effect.flatMap(Conversation, (c) => c.get()))).turn.send.id + 1;
+      await rendered(() => expect(composerField()?.hidden).toBe(false));
+      await fill("Message Alpha", text);
+      await press("Send");
+      await until(alpha, runtime, Conversation, (c) => c.turn.send.id === turn && c.turn.reply === "Complete");
+      await until(alpha, runtime, Conversation, (c) => c.opening.id === turn && c.opening.outcome !== "Sent");
+      return shell();
+    };
+
+    // spec/app/shell/index.md, "Agent navigation shows an admitted app or Home, lowering Ask Alpha only where it would hide it": from Home under the sheet, Notes opens on the named note and the sheet stays.
+    await raise("Sheet");
+    expect(await ask("open the note titled shopping list", "notes", true)).toMatchObject({ trail: ["Notes"], assistant: "Sheet" });
+    await rendered(() => expect(editorTitle()).toBe("shopping list"));
+
+    // spec/app/shell/index.md, "Agent navigation shows an admitted app or Home, lowering Ask Alpha only where it would hide it": Notes already showing under the sheet keeps the sheet for a named note, as in v119.
+    world.notes.target = "enclave";
+    expect(await ask("open my enclave launch note", "notes", true)).toMatchObject({ trail: ["Notes"], assistant: "Sheet" });
+    await rendered(() => expect(editorTitle()).toBe("Enclave launch"));
+
+    // spec/app/shell/index.md, "Agent navigation shows an admitted app or Home, lowering Ask Alpha only where it would hide it": the full screen stays for a note too, as every action of the agent's keeps Ask Alpha where it is.
+    await raise("Full");
+    world.notes.target = "groceries";
+    expect(await ask("open my groceries note", "notes", true)).toMatchObject({ trail: ["Notes"], assistant: "Full" });
+
+    // spec/app/shell/index.md, "Agent navigation shows an admitted app or Home, lowering Ask Alpha only where it would hide it": asked for Notes itself under the sheet, Ask Alpha lowers so Notes shows.
+    await drawn(() => alpha.runtime.runPromise(Effect.flatMap(Shell, (machine) => machine.send({ type: "goBack" }))));
+    await until(alpha, alpha.runtime, Shell, (s) => s.assistant === "Sheet");
+    expect(await ask("show me notes", "notes", false)).toMatchObject({ trail: ["Notes"], assistant: "Bar" });
   });
 
   it("The agent opens the note I named aloud (spec/app/assistant/context.md, \"A spoken turn carries what a typed turn sent at that moment would, the view claim included\"; spec/app/notes/index.md, \"The agent opens the one note the owner named, as the list last read it, once for the owner's current request, and is told whether it opened\")", async () => {

@@ -8,7 +8,7 @@ import { pinnedCheckout, pinnedPack } from "@repo/eliza-harness"
 import {
   type Environment, type Manifest, browserNotesCleanup, browserNotesTranscription, browserNotesTranscriptionLimit, bundledPlugins, calendarEdits, characterAdmitted, cloudModel, corePlugins, entryCarried, gmailChanges, googleAdmitted,
   hostedPlugins, inputAdmitted, localEmbeddings, nativeDigestAck, nativeDigestAckLimit, nativeDigestQueries, nativeDigestScope, nativeNotesCleanup, nativeNotesCleanupLimit, nativeRoutes, nativeRoutesAdmitted, nativeSpeechRoutes, notesTrashDays, packAdmitted, packEntry, packedFor, packedPlugins, pageQueries, persistMemory, personalDetailSwap,
-  launchViews, policyAdmitted, privacyAdmitted, productPluginName, proposalsAdmitted, refusedActions, routeListAdmitted, secretSwap, viewPlugins, viewsAdmitted, walletSettings,
+  launchViews, policyAdmitted, privacyAdmitted, productPluginName, proposalsAdmitted, refusedActions, routeListAdmitted, secretSwap, viewPlugins, viewsAdmitted, walletGetsKey, walletSettings,
 } from "../gen/agent.effect.vibe"
 
 module node {
@@ -153,7 +153,8 @@ export function entrySource(bundled: readonly string[], hosted: readonly { name:
       if (name === "@elizaos/plugin-notes") factory = `(context) => { context.runtime.setSetting("ELIZA_NOTES_TRASH_RETENTION_DAYS", ${JSON.stringify(notesTrashDays)}); return host${index}({ verifyRecordingCleanup: notesCleanup.verifyRecordingCleanup })(context); }`
       if (name === walletModuleName) {
         const settings = JSON.stringify(walletSettings.map(({ setting, held }) => [setting, held]))
-        factory = `(context) => { for (const [setting, held] of ${settings}) context.runtime.setSetting(setting, held); return host${index}(context); }`
+        const keyed = walletGetsKey(true) ? "context" : "{ ...context, storageKey: undefined }"
+        factory = `(context) => { for (const [setting, held] of ${settings}) context.runtime.setSetting(setting, held); return host${index}(${keyed}); }`
       }
       if (name === localSpeechModule) {
         const named = JSON.stringify(localSpeechModule)

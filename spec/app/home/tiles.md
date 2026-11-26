@@ -8,8 +8,8 @@ phone has) and which tiles are shown; this machine keeps the list, the read
 of what was saved and the save on its way.
 
 Old saved names, such as the Workflows tile saved under its earlier name,
-or Wallet saved as `alpha:inventory` by the Sunday demo build (Alpha
-45f6bed30, `alpha-product-registration.ts:308`, `:326`), are turned into today's tiles by the storage service as it parses the
+or Wallet saved as `alpha:inventory` by a development build of that time
+(Alpha 45f6bed30, `alpha-product-registration.ts:308`, `:326`), are turned into today's tiles by the storage service as it parses the
 record; a record it cannot parse is unreadable. An earlier Alpha's record
 (`alpha.launcher.favorites.v1`, its versions 1 and 2) is read only while
 Home has no record of its own, so it is taken up once: the first save

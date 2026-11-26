@@ -56,7 +56,7 @@ function twoPagePdf(): Uint8Array<ArrayBuffer> {
   return new TextEncoder().encode(`${document}xref\n0 5\n0000000000 65535 f \n${xref}trailer\n<< /Root 1 0 R /Size 5 >>\nstartxref\n${document.length}\n%%EOF\n`);
 }
 
-// spec/app/inbox/message.md, "An attachment is reviewed before it is opened or saved, and one use is in flight at a time"; spec/app/inbox/message.md, "An attachment use ends as its own answer says, or unknown"; spec/app/inbox/message.md, "A reviewed PDF turns one page at a time under a new draw ticket, and shows only the page drawn for that review"
+// spec/app/inbox/message.md, "An attachment is reviewed before it is opened or saved, and one use is in flight at a time"; spec/app/inbox/message.md, "A review opened for opening also saves the same attachment, once, under the same rules"; spec/app/inbox/message.md, "An attachment use ends as its own answer says, or unknown"; spec/app/inbox/message.md, "A reviewed PDF turns one page at a time under a new draw ticket, and shows only the page drawn for that review"
 it("Review an attachment and save the copy in Files", async () => {
   await page.viewport(390, 844);
   const world = scene();
@@ -89,14 +89,11 @@ it("Review an attachment and save the copy in Files", async () => {
   await rendered.decode();
   const previewUrl = rendered.src;
   expect([rendered.naturalWidth, world.inbox.attachmentReads]).toEqual([24, ["g1/1"]]);
+  await preview.getByRole("button", { name: "Save", exact: true }).click();
+  await expect.element(preview.getByRole("status")).toHaveTextContent("Saved to Files");
+  await expect.element(image).toBeVisible();
   await preview.getByRole("button", { name: "Close", exact: true }).click();
   await expect.poll(async () => fetch(previewUrl).then(() => false, () => true)).toBe(true);
-
-  await page.getByRole("button", { name: `Save ${name}`, exact: true }).click();
-  const saving = page.getByRole("dialog", { name: "Save this file?" });
-  await saving.getByRole("button", { name: "Save", exact: true }).click();
-  await expect.element(saving.getByRole("status")).toHaveTextContent("Saved to Files");
-  await saving.getByRole("button", { name: "Close", exact: true }).click();
 
   await page.getByRole("button", { name: /^Open Meeting notes\.pdf/ }).click();
   await opening.getByRole("button", { name: "Open", exact: true }).click();

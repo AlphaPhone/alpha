@@ -39,7 +39,7 @@ import { type RequestStatus, requestStatus } from "../../gen/app__calendar__agen
 import type { Request, RequestsStore } from "./requests.ts";
 import type { Calendared } from "./calendar.vibe";
 import { confirmDelete } from "./deletions.vibe";
-import { type Fields, confirmCalendarReschedule, kept, rowFields, saveCalendarReminder, startForm, takeSaved, typed } from "./editor.vibe";
+import { type Fields, confirmCalendarReschedule, kept, rowFields, saveCalendarReminder, saveEvent, startForm, takeSaved, typed } from "./editor.vibe";
 import { type Row, type ShownStore, onDay } from "./shown.ts";
 import { Requests, Shown } from "./stores.vibe";
 import { type CalendarRow, type DatedReminder, calendarRowKey, datedReminders } from "./reminders.ts";
@@ -605,9 +605,6 @@ function Access({ runtime }: CalendarProps) {
   const view = useView(runtime);
   const shown = useShown(runtime);
   if (!view.state || !shown.present()) return null;
-  if (view.can({ type: "askAccess" })) {
-    return <CalendarNotice actions={<CalendarNoticeAction onClick={() => void view.send({ type: "askAccess" })}>Allow</CalendarNoticeAction>}>Calendar needs access to your phone's calendar.</CalendarNotice>;
-  }
   if (view.can({ type: "openSettings" })) {
     return (
       <CalendarNotice tone="caution" actions={<CalendarNoticeAction aria-label="Open Calendar settings" onClick={() => void view.send({ type: "openSettings" })}><Settings aria-hidden />Settings</CalendarNoticeAction>}>
@@ -870,7 +867,7 @@ function FormOptionsCard({
               <CalendarChip key={repeat} label={label} chosen={(fields.reminderRepeat ?? "none") === repeat} disabled={!canEdit}
                 onClick={() => change({ ...fields, reminderRepeat: repeat }, plain)} />
             )) : offeredRepeats.map(({ repeat, label }) => (
-              <CalendarChip key={repeat} label={label} chosen={(fields.repeat ?? "NoRepeat") === repeat}
+              <CalendarChip key={repeat} label={destination === "Agent" && repeat === "NoRepeat" ? "No repeat" : label} chosen={(fields.repeat ?? "NoRepeat") === repeat}
                 disabled={!canEdit} onClick={() => {
                   const repeating = repeat !== "NoRepeat";
                   const edit: Editor.Event = editor.can({ type: "setRepeats", repeats: repeating }) ? { type: "setRepeats", repeats: repeating } : plain;
@@ -1047,8 +1044,8 @@ function Form({ runtime, day, today, connected, viewOwner }: CalendarProps & { d
   const destination = fields.calendar ?? (connected ? "Agent" : "Phone");
   const toggleAllDayEvent: Editor.Event = editor.can({ type: "setAllDay", allDay: !fields.allDay }) ? { type: "setAllDay", allDay: !fields.allDay } : plain;
   const onAgent = destination === "Agent";
-  // spec/app/calendar/writing.md, "The form offers with the agent's calendar only what it holds, and keeps the calendar chosen"
-  const choosesOptions = !reminder && e.form === "NewEvent" && shown.present();
+  // spec/app/calendar/writing.md, "The form offers with the agent's calendar only what it holds, and keeps the calendar chosen": v119 45f6bed30 prototype/template.html:1423-1497 drew Video link, Repeat and Alert on this phone's calendar; its live adapter left them off the agent's (prototype/agent-calendar-adapter.ts:312, :328).
+  const choosesOptions = !reminder && e.form === "NewEvent";
   const offersVideo = choosesOptions && (fields.video === true || offeredOn(onAgent, false, false, true));
   const offeredRepeats = repeats.filter(({ repeat }) => offeredOn(onAgent, repeat !== "NoRepeat", false, false));
   const offeredAlerts = alerts.filter(({ minutes }) => offeredOn(onAgent, false, minutes !== undefined, false));
@@ -1057,7 +1054,7 @@ function Form({ runtime, day, today, connected, viewOwner }: CalendarProps & { d
   const picked = (next: Fields, fallback?: Editor.Event) => withExtras({ ...next, calendar: destination }, fallback);
   const close = () => (editor.can({ type: "close" }) ? void editor.send({ type: "close" }) : undefined);
   const submit = () => {
-    if (!reminder) { void editor.send(save); return; }
+    if (!reminder) { void runtime.runPromise(saveEvent(destination === "Phone")); return; }
     saveButtonRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     void runtime.runPromise(saveCalendarReminder());
   };
@@ -1189,21 +1186,25 @@ function Form({ runtime, day, today, connected, viewOwner }: CalendarProps & { d
 }
 
 // spec/app/calendar/agent.md, "Only the owner approves, and approving sends the change once, under a new number"; spec/app/calendar/agent.md, "A card that leaves out a field its change would set can be declined, never approved"
-/** The agent's change waiting for the owner, under way, or how it ended: over the days, and in Ask Alpha (sheet.tsx) with `className` placing it there. */
-export function Proposal({ runtime, className = "mx-4 mb-2" }: CalendarProps & { className?: string }) {
+/** The agent's change waiting for the owner, under way, or how it ended: over the days, and in Ask Alpha (sheet.tsx) with `className` placing it there and `bound` naming the one request it may show and decide. */
+export function Proposal({ runtime, className = "mx-4 mb-2", request: bound }: CalendarProps & { className?: string; request?: string }) {
   const agent = useChanges(runtime);
   const shown = useShown(runtime);
   const reqStore = useRequests(runtime);
   const a = agent.state;
   if (!a) return null;
+  const request = reqStore.find(a.filing);
+  // spec/app/calendar/agent.md, "The card shows in Ask Alpha too, under the reply that filed its request, typed or spoken"
+  if (bound !== undefined && request?.id !== bound) return null;
   if (a.stage === "Idle") return a.result in results ? <CalendarNotice>{results[a.result]}</CalendarNotice> : null;
   const row = shown.find(a.id);
-  const request = reqStore.find(a.filing);
   const expired = reqStore.isExpired(a.filing);
   const reqState: Changes.RequestState = expired ? "RequestExpired" : "RequestPending";
   const f = request?.fields;
   const start = f ? Date.parse(f.startAt) : NaN;
   const end = f ? Date.parse(f.endAt) : NaN;
+  // spec/app/calendar/agent.md, "Only the owner approves, and approving sends the change once, under a new number": the decision names the request this card shows
+  const [approve, decline] = [{ type: "approve", filing: a.filing } as const, { type: "decline", filing: a.filing } as const];
   return (
     <section aria-label="Calendar change" className={`${className} shrink-0 rounded-chip bg-secondary px-5 py-4.5 text-base leading-normal`}>
       <strong>{`${changes[a.change]}${a.reply === "NoReply" ? "" : `: ${replies[a.reply]}`}${a.updated ? " (updated)" : ""}`}</strong>
@@ -1224,8 +1225,8 @@ export function Proposal({ runtime, className = "mx-4 mb-2" }: CalendarProps & {
       {a.complete ? null : <p className="text-meta text-muted-foreground">Alpha can't check this whole change, so it can't be approved.</p>}
       {a.stage === "Sending" || a.stage === "ReadingBack" ? <Spinner size="sm" /> : null}
       <div className="mt-3 flex flex-wrap gap-2">
-        {agent.can({ type: "decline" }, "Owner") ? <button type="button" className={cn(insetFocus, "min-h-11 rounded-full bg-background px-4.5")} onClick={() => void agent.send({ type: "decline" }, "Owner")}>Decline</button> : null}
-        {!expired && agent.can({ type: "approve" }, "Owner") ? <button type="button" className={cn(insetFocus, "min-h-11 rounded-full bg-alpha px-4.5 text-alpha-foreground")} onClick={() => void agent.send({ type: "approve" }, "Owner")}>Approve</button> : null}
+        {agent.can(decline, "Owner") ? <button type="button" className={cn(insetFocus, "min-h-11 rounded-full bg-background px-4.5")} onClick={() => void agent.send(decline, "Owner")}>Decline</button> : null}
+        {!expired && agent.can(approve, "Owner") ? <button type="button" className={cn(insetFocus, "min-h-11 rounded-full bg-alpha px-4.5 text-alpha-foreground")} onClick={() => void agent.send(approve, "Owner")}>Approve</button> : null}
       </div>
     </section>
   );

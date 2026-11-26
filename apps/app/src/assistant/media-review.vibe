@@ -203,6 +203,8 @@ export interface SpokenReview {
   readonly session: number
   readonly turn: number
   readonly current: Effect.Effect<boolean>
+  /** The turn asked Files directly, so only a page open's card may show: voice shows no Files review card. */
+  readonly pagesOnly?: boolean
 }
 
 interface DeviceActionReply {
@@ -225,10 +227,14 @@ function askedFiles(operation: DeviceOperation, place: FilesPlace): DirectFilesO
   return operation.type === "files_open" && (place === "InFiles" || "path" in operation) ? operation : undefined
 }
 
-/** The session's headers declaring only its Files capabilities, for a turn whose reply handles nothing but Files. */
-// spec/app/files/index.md, "An explicit request to open or filter Files may act directly on the same idle Files view"
-export function filesOnlyHeaders(opened: Session): RuntimeRequestHeaders {
-  return { ...opened.headers, "x-eliza-device-capabilities": [...filesCapabilities, directOpenCapability].filter((name) => opened.capabilities.has(name)).join(",") }
+/**
+ * The session's headers for one turn: its capabilities, or only its Files ones for a turn whose reply handles nothing but Files,
+ * declaring that a page the owner's whole message asked for opens at once only while `atOnce`.
+ */
+// spec/app/files/index.md, "An explicit request to open or filter Files may act directly on the same idle Files view"; spec/app/browser/index.md, "A page the owner's whole message asked for opens at once, typed or spoken, and any other page waits for the owner's Open"
+function turnHeaders(opened: Session, filesOnly: boolean, atOnce: boolean): RuntimeRequestHeaders {
+  const declared = filesOnly ? [...filesCapabilities, directOpenCapability].filter((name) => opened.capabilities.has(name)) : [...opened.capabilities]
+  return { ...opened.headers, "x-eliza-device-capabilities": declared.filter((name) => atOnce || name !== directOpenCapability).join(",") }
 }
 
 function sameTrail(expected: readonly View[], current: readonly View[]): boolean {
@@ -343,12 +349,13 @@ function spokenOperation(proposal: Proposal, opened: Session, message: string, r
   const expires = Date.parse(proposal.expiresAt)
   const op = operation(proposal.payload.operation)
   if (op === undefined || op.type === "sms_send" || !Number.isFinite(expires) || expires <= at) return undefined
+  if (reply.spoken?.pagesOnly === true && op.type !== "browser_navigate") return undefined
   const request = proposal.payload.requestMessageId
   if (request !== undefined && request !== message) return undefined
   if (reviewedRead(op)) return acceptsRead(opened, op) && exactReadOrigin(proposal, message, reply) !== undefined ? op : undefined
   if (op.type === "voicemail_delete_selected" && (reply.voicemail?.witness === undefined ||
     !opened.capabilities.has("voicemail.delete.v1"))) return undefined
-  return request === message || commsReview(op) || op.type.startsWith("files_") ? op : undefined
+  return request === message || commsReview(op) || op.type.startsWith("files_") || op.type === "browser_navigate" ? op : undefined
 }
 
 /** The exact Talk request that presented an addressed text in the already-open chat. */
@@ -550,6 +557,8 @@ function words(value: NonNullable<ReturnType<typeof operation>>): { title: strin
 /** Enrollment and the proposal protocol share the same live resident identity. */
 export service MediaReview {
   session(): (Session | undefined)!!
+  /** The headers of one turn from `session`, read from the owner's preferences as it is sent; only its Files capabilities while `filesOnly`. */
+  turnHeaders(session: Session, filesOnly: boolean): RuntimeRequestHeaders!!
   workflowDevice(): (WorkflowPhone | undefined)!!
   workflowOffers(runId: string, current: Effect.Effect<boolean>): readonly WorkflowDeviceOffer[]!!
   decideWorkflow(offer: WorkflowDeviceOffer, approve: boolean, current: Effect.Effect<boolean>, authorized: Effect.Effect<boolean>): boolean!!
@@ -1301,6 +1310,9 @@ export const mediaReview = Layer.effect(MediaReview, effect {
   const spokenReview = makeSpokenReview({ proposals, enrollmentIsCurrent, isLatest, telephony, sameSms })
   return {
     session,
+    effect turnHeaders(opened, filesOnly) {
+      return turnHeaders(opened, filesOnly, opensAtOnce(try preferences.get()))
+    },
     openAsked: askedOpens({ preferences, lock, scopes, isLatest, enrollmentIsCurrent, proposals }),
     ...spokenReview,
     effect workflowDevice() {

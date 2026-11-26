@@ -64,7 +64,7 @@ export function InboxRecipientField({ label, recipients, value, onValueChange, o
           <input
             type="email"
             aria-label={label}
-            placeholder={label === "To" && recipients.length > 0 ? "Add" : label}
+            placeholder={label === "To" ? "Email address" : label}
             enterKeyHint="done"
             autoComplete="off"
             value={value}

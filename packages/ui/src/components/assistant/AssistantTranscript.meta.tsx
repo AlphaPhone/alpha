@@ -71,6 +71,8 @@ export const meta: ComponentMeta<AssistantTranscriptProps> = {
       const log = within(canvasElement).getByRole("log");
       log.style.height = "160px";
       if (log.clientHeight === 0) return;
+      // spec/app/assistant/dock.md, "Story: Drag Ask Alpha where I want it": a drag that reaches the conversation's end moves nothing else
+      await expect(getComputedStyle(log).overscrollBehaviorY).toBe("contain");
       await waitFor(() => expect(scrollOf(log).below).toBeLessThan(2));
       arrive(log);
       log.dispatchEvent(new Event("scroll"));

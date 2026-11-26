@@ -55,6 +55,10 @@ function topIn(viewport: HTMLElement, row: HTMLElement) {
 }
 
 // spec/app/assistant/chats.md, "The conversation keeps its newest message in view until the owner scrolls up from it"
+/**
+ * Keeps the end in view while the conversation follows it; otherwise puts back the owner's place where a change that
+ * left the conversation shorter for a moment, as a finished reply put in place of its streamed words, drew it earlier.
+ */
 function followEnd(viewport: HTMLElement, reading: TranscriptScroll) {
   const selection = viewport.ownerDocument.getSelection();
   if (reading.follows && !(selection?.anchorNode && !selection.isCollapsed && viewport.contains(selection.anchorNode))) viewport.scrollTop = viewport.scrollHeight;
@@ -73,7 +77,8 @@ const MessageRows = memo(function MessageRows({ messages, hold }: { messages: re
 
 /**
  * The conversation as it was being read. New replies follow the end while it is in view; a history page or a search
- * hit opens around the message requested.
+ * hit opens around the message requested. A drag that reaches its end moves nothing else, as v119's page did not
+ * (45f6bed30 phone.css:1), so the sheet around it never stretches with the finger.
  * @model spec/app/assistant/chats.md
  */
 export function AssistantTranscript({ messages, messagesAfterLater, holdMessage, briefing, liveMessages, interim, position, visible = true, status = "loaded", turn, onRetry, onEarlier, onLater, onReturnToOriginal, className, onScroll, ...props }: AssistantTranscriptProps) {
@@ -134,7 +139,7 @@ export function AssistantTranscript({ messages, messagesAfterLater, holdMessage,
       role="log"
       aria-label="Conversation"
       tabIndex={0}
-      className={cn(focusRing, "min-h-0 touch-pan-y overflow-y-auto px-5 pt-2 pb-3.5 select-text focus-visible:-outline-offset-focus", className)}
+      className={cn(focusRing, "min-h-0 touch-pan-y overflow-y-auto overscroll-contain px-5 pt-2 pb-3.5 select-text focus-visible:-outline-offset-focus", className)}
       onScroll={(event) => {
         const viewport = event.currentTarget;
         const reading = scrollRef.current;

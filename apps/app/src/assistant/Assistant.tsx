@@ -12,6 +12,7 @@ import { useMachine as useConversation } from "../../gen/app__assistant.react.ts
 import { Machine as AttachmentMachine, canOpenPicker } from "../../gen/app__assistant__attachments.effect.vibe";
 import { useMachine as useAttachments } from "../../gen/app__assistant__attachments.react.ts";
 import type { Machine as ChatsMachine } from "../../gen/app__assistant__chats.effect.vibe";
+import { loading as pageLoading } from "../../gen/app__assistant__chats.ts";
 import { useMachine as useCards } from "../../gen/app__assistant__cards.react.ts";
 import { useMachine as useChats } from "../../gen/app__assistant__chats.react.ts";
 import { type Composer as Writing, type Event as ComposerEvent, Machine as ComposerMachine } from "../../gen/app__assistant__composer.effect.vibe";
@@ -21,7 +22,7 @@ import type { Machine as DockMachine } from "../../gen/app__assistant__dock.effe
 import { browserFieldPull, composerLift, focused as dockFocused, isOpen as dockOpen, pill as dockPill, sent as dockSent } from "../../gen/app__assistant__dock.ts";
 import { useMachine as useDock } from "../../gen/app__assistant__dock.react.ts";
 import type { Machine as ReplyMachine } from "../../gen/app__assistant__reply.effect.vibe";
-import { liveAddsToHistory } from "../../gen/app__assistant__reply.ts";
+import { live as replyLive, liveAddsToHistory } from "../../gen/app__assistant__reply.ts";
 import { useMachine as useReply } from "../../gen/app__assistant__reply.react.ts";
 import type { Machine as SearchMachine } from "../../gen/app__assistant__search.effect.vibe";
 import { useMachine as useSearch } from "../../gen/app__assistant__search.react.ts";
@@ -62,7 +63,7 @@ import { CommsBriefing, commsViewOf } from "../phone/comms.vibe";
 import { displayNumber } from "../phone/words.ts";
 import { replyBlocks, wordsOf } from "./words.ts";
 import { handToMaps } from "../maps/handoff.ts";
-import { asked } from "../calendar/asked.ts";
+import { AskedRequest, asked, boundIn } from "../calendar/asked.ts";
 import { shownInAskAlpha } from "../../gen/app__calendar__agent.ts";
 import type { MapsCard } from "@elizaos/plugin-maps-client";
 import { type DictationKeyboard, useTalkKeyboard } from "../voice/useTalkKeyboard.ts";
@@ -81,7 +82,7 @@ export interface AssistantProps {
   calendarReview?: ReactNode;
 }
 
-function turnOf(talking: Talking, label: string): AssistantTurnNoteProps["status"] | undefined {
+function turnOf(talking: Talking, label: string, writing: boolean, live: boolean): AssistantTurnNoteProps["status"] | undefined {
   const { turn, check } = talking;
   if (turn.stopping) return "stopping";
   if (check === "Aborting" || talking.recheck.status === "Loading") return "checking";
@@ -90,7 +91,8 @@ function turnOf(talking: Talking, label: string): AssistantTurnNoteProps["status
   if (check === "NotRecorded") return "neverArrived";
   if (check === "LookLater") return "lookLater";
   if (turn.send.outcome === "Recorded" || turn.send.outcome === "Sent") return "sending";
-  if (turn.reply === "Streaming") return label === "" ? undefined : "replying";
+  // spec/app/assistant/reply.md, "The planning label shows until the first settled text, and provisional text is neither shown nor spoken": a reply still being written with neither text shown nor a label shows as replying.
+  if (turn.reply === "Streaming") return label !== "" || (!writing && live) ? "replying" : undefined;
   if (turn.reply === "Broken") return "cutOff";
   if (turn.reply === "Stopped") return "stopped";
   if (turn.send.outcome === "Unknown") return "unknown";
@@ -587,10 +589,12 @@ interface TranscriptOptions extends Pick<AssistantProps, "runtime" | "messageAct
   open: boolean;
   interim: ReactNode;
   retry: () => void;
+  /** Whether the turn's reply is still being written: neither settled nor ended. */
+  writingNow: boolean;
 }
 
 function useAssistantTranscript({ runtime, board, seen, conversation, chats, writing, shell, free, canReadAloud,
-  messageActions, onPreview, open, interim, retry, calendarReview }: TranscriptOptions): AssistantTranscriptProps | undefined {
+  messageActions, onPreview, open, interim, retry, calendarReview, writingNow }: TranscriptOptions): AssistantTranscriptProps | undefined {
   const [talking, shown] = [conversation.state, chats.state];
   const calendar = useSyncExternalStore(asked.subscribe, asked.snapshot);
   const draftCards = useMessagingDrafts(runtime, shell);
@@ -644,13 +648,13 @@ function useAssistantTranscript({ runtime, board, seen, conversation, chats, wri
     onChoose,
   });
   if (!talking || !shown || !writing) return undefined;
-  const status = turnOf(talking, seen.label);
   const checkable = conversation.can(check) && (talking.turn.send.outcome === "Unknown" || talking.turn.reply === "Stopped" || talking.check === "LookLater" || writing.unsettled);
   // spec/app/assistant/chats.md, "Older or newer messages are read around a message of the conversation showing"
   const earlier = page?.bounds?.earlier;
   const readEarlier = { type: "scroll", around: board.numbered(earlier ?? "") } as const;
   const readLater = { type: "scroll", around: board.numbered(later ?? "") } as const;
   const replyWords = replyBlocks(seen.reply, true).words;
+  const status = turnOf(talking, seen.label, replyWords !== "", writingNow);
   const onOpenLink = messageActions?.openLink;
   const writingReply = replyWords !== "" ? [{ id: "reply", author: "alpha", text: replyWords, streaming: true, onOpenLink } as const] : [];
   // spec/app/assistant/reply.md, "A failed reply offers the fix the agent named, and a limit reached shows its live wait, never sending the message again"; spec/app/assistant/reply.md, "Out of funds is refused before any output, is never spoken, and offers only Manage plan"
@@ -658,10 +662,11 @@ function useAssistantTranscript({ runtime, board, seen, conversation, chats, wri
     id: `media ${card.id}`, author: "alpha" as const, text: "", children: <DeviceReview runtime={runtime} card={card} />,
   }));
   // spec/app/calendar/agent.md, "The card shows in Ask Alpha too, under the reply that filed its request, typed or spoken"
-  const filedHere = calendar.filed.filter((one) => one.conversation === shown.chosen);
-  const calendarCard = calendarReview !== undefined && !talking.context.sensitive
-    && shownInAskAlpha(calendar.shown, filedHere.length > 0, filedHere.some((one) => one.message === lines.at(-1)?.id))
-    ? [{ id: "calendar review", author: "alpha" as const, text: "", children: calendarReview }] : [];
+  const bound = boundIn(calendar, shown.chosen);
+  const latestFiled = calendar.filed.some((one) => one.conversation === shown.chosen && one.message === lines.at(-1)?.id);
+  const calendarCard = calendarReview !== undefined && !talking.context.sensitive && shownInAskAlpha(calendar.shown, bound !== undefined, latestFiled)
+    ? [{ id: `calendar review ${bound ?? ""}`, author: "alpha" as const, text: "",
+      children: <AskedRequest.Provider value={bound}>{calendarReview}</AskedRequest.Provider> }] : [];
   const offer = seen.recordingSummary;
   const recordingSummary = offer !== undefined && !talking.context.sensitive && offer.conversation === shown.chosen
     && lines.some((line) => !line.mine && line.id === offer.message)
@@ -680,7 +685,8 @@ function useAssistantTranscript({ runtime, board, seen, conversation, chats, wri
     interim: open && shown.around === 0 && !talking.context.sensitive ? interim : undefined,
     position: { page: `${shown.chosen}/${shown.page.ticket}`, around: board.messageId(shown.around), earlier, later },
     visible: open,
-    status: shown.page.status === "Loading" ? "loading" : shown.page.status === "Failed" ? "failed" : "loaded",
+    // spec/app/assistant/chats.md, "A conversation made new here shows what it holds while its page is read"
+    status: pageLoading(shown) ? "loading" : shown.page.status === "Failed" ? "failed" : "loaded",
     turn: status === undefined ? undefined : { status, label: seen.label === "" ? undefined : seen.label, onCheck: checkable ? () => void conversation.send(check) : undefined },
     onRetry: chats.can({ type: "reread" }) ? () => void chats.send({ type: "reread" }) : undefined,
     onEarlier: earlier !== undefined && chats.can(readEarlier) ? () => void chats.send(readEarlier) : undefined,
@@ -714,9 +720,9 @@ export function Assistant({ runtime, messageActions, speech, canReadAloud = fals
   const compact = shell.state !== undefined && !onComms && dockPill(shell.state, dock.state?.tucked ?? false);
   const composerField = useCallback((element: HTMLTextAreaElement | null) => {
     composerRef.current = element;
-    if (element && !compact && focusOnRevealRef.current) {
+    if (element && !compact && assistantDetent === "Typing" && focusOnRevealRef.current) {
       focusOnRevealRef.current = false;
-      if (assistantDetent === "Typing") element.focus();
+      element.focus();
     }
 
     takeFocus(element);
@@ -758,6 +764,7 @@ export function Assistant({ runtime, messageActions, speech, canReadAloud = fals
   const transcript = useAssistantTranscript({
     runtime, board, seen, conversation, chats, writing, shell, free, messageActions, canReadAloud, open, interim,
     onPreview: canPreview ? preview : undefined, retry: retryLastSent, calendarReview,
+    writingNow: reply.state !== undefined && replyLive(reply.state),
   });
   const { mail, reviewed, attachMail, dismissMail } = useMailReview(runtime, board, composer, writing?.offeredAt, type, composerRef);
   if (conversation.cause || chats.cause || composer.cause || reply.cause) return <Alert variant="destructive" className="m-4">Alpha could not open Ask Alpha</Alert>;
@@ -890,8 +897,8 @@ export function Assistant({ runtime, messageActions, speech, canReadAloud = fals
           opener: !open ? grabber : undefined,
           onOpen: !open && !grabber ? openSheet : undefined,
           onType: compact ? revealComposer : undefined,
-          // spec/app/assistant/dock.md, "Story: Drag Ask Alpha where I want it": a bar tucked by a drag is the pill where it is, with no entrance, as v119's
-          still: compact && dock.state?.tucked === true,
+          // spec/app/assistant/dock.md, "A bar or pill a drag left in place changes between them without an entrance until the sheet next opens"
+          still: dock.state?.placed === true,
           onSend: sendable && !inFlight(talking.turn) ? () => {
             if (!open) openSheet();
             send();
