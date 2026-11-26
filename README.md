@@ -105,10 +105,9 @@ holds the `CLOUDFLARE_ACCOUNT_ID` variable and the
 ### Alpha Cloud
 
 Alpha Cloud is `apps/cloud` on AlphaCompute's Cloudflare account, in the
-`alphaphone.dev` zone; never the Eliza Labs account. Deploy staging end to
-end before production. The production deploy is the owner's step, and no
-deploy moves a phone: until the cutover release below, phones use Eliza
-Cloud.
+`alphaphone.dev` zone. Deploy staging before production. Worker deployments
+leave each installed app's configured hosts in place. The Android release
+below changes the hosts new builds use.
 
 | | Production | Staging |
 |---|---|---|
@@ -116,10 +115,10 @@ Cloud.
 | Web Worker (App Links, return pages) | `cloud.alphaphone.dev` | `cloud-staging.alphaphone.dev` |
 | Worker names | `alphacompute-cloud-api`, `…-edge` | `alphacompute-cloud-api-staging`, `…-edge` |
 
-The hosts are the `cutoverCandidate` rows of
-`packages/deployment/deployments.json`, the names `workerName` in
-`apps/cloud/resources.json`. Never change either after the first production
-deploy: the app's sign-in callback and App Link host come from them.
+The app and the Cloud operator read the same hosted rows in
+`packages/deployment/deployments.json`. `apps/cloud/resources.json` names
+their Workers. Keep both pairs of hosts stable after the first deployment
+because signed apps use them for sign-in and verified App Links.
 
 - **Deploy machine:** Linux or macOS with 16 GB of memory and 5 GB free
   disk, git, Node 26 and pnpm 10.24.0. In a checkout, `pnpm install`, then
@@ -129,9 +128,8 @@ deploy: the app's sign-in callback and App Link host come from them.
 - **Accounts, per environment:** Cloudflare (Workers Paid, a token with
   Workers Scripts and Workers Routes Edit, Hyperdrive Edit, and Zone Read and
   DNS Edit on `alphaphone.dev`), an empty Postgres database on a direct TLS
-  connection (not a transaction pooler), Cerebras, Cartesia, Resend with
-  `alphaphone.dev` verified, Google OAuth web clients for sign-in and the
-  Gmail and Calendar connector with the redirect URIs
+  connection (not a transaction pooler), Cerebras, Cartesia, and Google OAuth
+  web clients for sign-in and the Gmail and Calendar connector with the redirect URIs
   `https://<api host>/api/v1/auth/google/callback` and
   `https://<api host>/api/v1/oauth/google/callback` (start Google's Gmail and
   Calendar scope verification early: it takes weeks) and, where
@@ -148,6 +146,9 @@ deploy: the app's sign-in callback and App Link host come from them.
   `invoice.paid`, `invoice.payment_failed`, `payment_intent.succeeded`,
   `payment_intent.payment_failed`, `charge.refunded` and
   `charge.dispute.funds_reinstated`.
+- **Sign-in email:** onboard `auth.alphaphone.dev` in [Cloudflare Email Sending](https://developers.cloudflare.com/email-service/get-started/send-emails/).
+  The API Worker uses the `SIGN_IN_EMAIL` binding for `noreply@auth.alphaphone.dev`.
+  Workers Paid permits sign-in codes to reach any recipient.
 - **Secrets file:** copy `apps/cloud/alpha-cloud.env.example` outside the
   checkout, `chmod 600` it, fill it in, and run
   `pnpm cloud secrets --environment staging --env-file <file>` once: it adds
@@ -191,14 +192,23 @@ deploy: the app's sign-in callback and App Link host come from them.
   API first) and `smoke`, whose every gate must pass. Then by hand: `/api/health`,
   `/api/v1/subscriptions/plans` (Plus and Pro) and `/api/v1/auth/methods` on
   the API host and `/.well-known/assetlinks.json` (naming
-  `ai.alphacompute.alphaphone`) on the web host answer; Stripe's test webhook
-  returns 200; Resend shows the domain verified and the sign-in code email
-  arrives during the app test; and the Alpha team signs in, chats, talks and
-  subscribes with a test card on a staging build.
-- **From GitHub:** the Cloud deploy workflow, `.github/workflows/cloud-deploy.yml`,
-  runs the same steps from `main`, dispatched with the environment, `check`
-  or `deploy`, and the component; its header names the GitHub environments
-  and their secrets.
+  `ai.alphacompute.alphaphone`) on the web host answer. Check that Stripe's
+  test webhook returns 200 and that Cloudflare Email Sending records the
+  delivered code. Sign in, chat, talk and subscribe with a test card on a
+  staging build.
+- **From GitHub:** Cloud release changes pushed to `vibestack-develop` deploy
+  both Workers in staging, check its public gates, and then deploy the same
+  commit in production. Public checks retry while routes and certificates
+  propagate. An active rollout finishes before the latest queued deploy
+  runs. For a manual bundle or component deploy, dispatch
+  `.github/workflows/cloud-deploy.yml` from a branch admitted by the selected
+  GitHub environment. `bundle` needs only `ALPHA_CLOUD_PROFILE`. `deploy`
+  also needs `ALPHA_CLOUD_ENV`, `CLOUDFLARE_API_TOKEN` and
+  `ALPHA_CLOUD_DB_CA`, the dedicated PostgreSQL CA certificate for that
+  environment. The database commands verify the server certificate against
+  that CA. Railway's TCP proxy passes through the database certificate, whose
+  name is `localhost`. Resource preflight and Worker deployment use the
+  original database origin from `ALPHA_CLOUD_ENV`.
 - **Later:** a new eliza pin is a rebuild, then `check`, `preflight`,
   `migrate`, `deploy`, `prices` and `smoke`; changed operator inputs are
   another `deploy`.
@@ -227,19 +237,21 @@ deploy: the app's sign-in callback and App Link host come from them.
   an issue, chat or pull request. Hand the owner the `smoke` output, the
   `apps/cloud/resources.json` change, where (not what) the backups are, and
   anything that needed a workaround.
-- **Cutover:** once both environments pass and a candidate build passes
-  against staging, one reviewed release moves both rows of
-  `packages/deployment/deployments.json` to their `cutoverCandidate` (moving one
-  alone is refused), with the phone's stored sign-in moved to a new namespace
-  so no Eliza Cloud credential reaches Alpha Cloud. Every phone signs in
-  again; Eliza Cloud accounts, subscriptions and Google grants do not move.
+- **Android cutover.** Release only after a signed staging build passes email
+  and Google sign-in with verified App Links. On a separate device, upgrade an
+  enrolled Eliza Cloud build to the signed production candidate with app data
+  intact. Verify it opens signed out, then sign in again and confirm the session
+  survives relaunch. The Eliza SDK keys device credentials by API origin, so
+  the new Alpha Cloud origin uses a fresh namespace. Each phone signs in again.
+  Existing Eliza Cloud accounts, subscriptions and Google grants stay with Eliza
+  Cloud. Roll back with a newer signed build that restores the earlier hosts.
 
 ### Maps through the Cloud
 
-Maps is Google Maps Platform through the Cloud the phone signs in to: Eliza
-Cloud until the cutover, Alpha Cloud after it. Both are eliza's cloud, so the
-routes and checks below are the same; the Eliza Cloud Worker settings that
-select Google and its allowance are kept by that deployment's operator, as in
+Maps uses Google Maps Platform through the Cloud the phone signs in to.
+Older builds use Eliza Cloud, and builds after the cutover use Alpha Cloud.
+Both use eliza's routes. The Eliza Cloud operator manages the provider and
+allowances for older builds, as in
 [develop's Maps runbook](https://github.com/eliza-research/alpha/blob/bd70db55b2b3cab4c6f0ec2f4faa28edfa83979a/docs/runbooks/667-maps-provider-coverage.md).
 
 - **Key:** one Google Cloud project with billing, Places API (New),

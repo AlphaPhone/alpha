@@ -6,7 +6,7 @@ import { decodeLaunchDocument, defineRoutes } from "@elizaos/agent"
 import { deployment } from "@repo/deployment"
 import { pinnedCheckout, pinnedPack } from "@repo/eliza-harness"
 import {
-  type Environment, type Manifest, bundledPlugins, calendarEdits, characterAdmitted, cloudModel, corePlugins, entryCarried, gmailChanges, googleAdmitted,
+  type Environment, type Manifest, browserNotesCleanup, browserNotesTranscription, browserNotesTranscriptionLimit, bundledPlugins, calendarEdits, characterAdmitted, cloudModel, corePlugins, entryCarried, gmailChanges, googleAdmitted,
   hostedPlugins, inputAdmitted, localEmbeddings, nativeDigestAck, nativeDigestAckLimit, nativeDigestQueries, nativeDigestScope, nativeNotesCleanup, nativeNotesCleanupLimit, nativeRoutes, nativeRoutesAdmitted, nativeSpeechRoutes, notesTrashDays, packAdmitted, packEntry, packedFor, packedPlugins, pageQueries, persistMemory, personalDetailSwap,
   launchViews, policyAdmitted, privacyAdmitted, productPluginName, proposalsAdmitted, refusedActions, routeListAdmitted, secretSwap, viewPlugins, viewsAdmitted, walletSettings,
 } from "../gen/agent.effect.vibe"
@@ -83,7 +83,11 @@ export function entrySource(bundled: readonly string[], hosted: readonly { name:
   const includesSpeech = hosted.some(({ name }) => name === localSpeechModule)
   const localScope = nativeSpeechRoutes.find(({ method }) => method === "Get")?.path ?? ""
   return [
+    'import { existsSync } from "node:fs"',
+    'import { dirname, join } from "node:path"',
+    'import { fileURLToPath, pathToFileURL } from "node:url"',
     `import { runAgentCli } from "../../packages/agent-host/dist/src/cli.js"`,
+    'import { startStore as openEarlierPGlite } from "../../packages/agent-host/dist/src/storage/migrate.js"',
     'import { workflowDeviceOffer } from "../../packages/agent-host/dist/src/device-actions/workflow-offer.js"',
     'import { Service } from "@elizaos/core"',
     'import { Effect } from "effect"',
@@ -91,17 +95,25 @@ export function entrySource(bundled: readonly string[], hosted: readonly { name:
       'import { androidInferenceEngine } from "../../packages/os/dist/src/inference/index.js"',
     ] : []),
     ...bundled.map((name, index) => `import * as plugin${index} from ${JSON.stringify(name)}`),
-    ...allHosted.map(({ name, module }, index) => `import { ${module} as host${index}${name === product.name ? ", makeNativeNotesCleanup" : ""} } from ${JSON.stringify(name)}`),
+    ...allHosted.map(({ name, module }, index) => `import { ${module} as host${index}${name === product.name ? ", makeNativeNotesCleanup, notesTranscriptionRoutes" : name === localSpeechModule ? ", localInferenceProvider" : ""} } from ${JSON.stringify(name)}`),
     `const notesCleanup = makeNativeNotesCleanup(${JSON.stringify(nativeNotesCleanup)})`,
+    'const earlierVectorPath = join(dirname(fileURLToPath(import.meta.url)), "vector.tar.gz")',
+    'const earlierVectorExtension = { name: "pgvector", setup: async (_pg, emscriptenOpts) => ({ emscriptenOpts, bundlePath: pathToFileURL(earlierVectorPath) }) }',
+    'const openEarlierStore = (dataDir) => openEarlierPGlite({ dataDir, ...(existsSync(earlierVectorPath) ? { extensions: { vector: earlierVectorExtension } } : {}) })',
     "",
     ...(includesSpeech ? [
       'const speechEngine = (context) => {',
-      '  const socket = context.launch.environment?.ALPHA_LOCAL_SPEECH_SOCKET',
+      '  const socket = context.launch.environment?.ALPHA_LOCAL_SPEECH_SOCKET ?? context.launch.environment?.ALPHA_BROWSER_NOTES_SPEECH_SOCKET',
       '  return socket === undefined ? undefined : androidInferenceEngine(socket)',
+      '}',
+      'const browserNoteRoutes = (context) => {',
+      '  const engine = speechEngine(context)',
+      '  return notesTranscriptionRoutes(context, localInferenceProvider, async (signal) =>',
+      '    engine !== undefined && (await Effect.runPromise(engine.speechReady(), { signal })).transcription === true)',
       '}',
       `const nativeSpeechScope = (context) => ({ method: "GET", path: ${JSON.stringify(localScope)}, handler: async ({ signal }) => {`,
       '  const account = context.launch.account',
-      '  const engine = speechEngine(context)',
+      '  const engine = context.launch.environment?.ALPHA_LOCAL_SPEECH_SOCKET === undefined ? undefined : speechEngine(context)',
       '  const ready = engine === undefined ? undefined : await Effect.runPromise(engine.speechReady(), { signal })',
       '  if (account === undefined || ready?.transcription !== true) return { status: 503, body: { error: "LOCAL_SPEECH_UNAVAILABLE" } }',
       '  return { status: 200, body: { epoch: context.epoch, userId: account.userId, organizationId: account.organizationId } }',
@@ -143,9 +155,9 @@ export function entrySource(bundled: readonly string[], hosted: readonly { name:
           : host${index}(engine)(context) }`
       }
       if (name === product.name) {
-        const privateRoutes = includesSpeech ? "nativeSpeechScope(context), nativeRuntimeScope(context)" : "nativeRuntimeScope(context)"
-        factory = `(context) => Effect.map(host${index}(context), (module) => ({
-          ...module, plugin: { ...module.plugin, routes: [...(module.plugin.routes ?? []), ${privateRoutes}, notesCleanup.route(context)] }
+        const privateRoutes = includesSpeech ? "nativeSpeechScope(context), nativeRuntimeScope(context), ...browserNoteRoutes(context)" : "nativeRuntimeScope(context)"
+        factory = `(context) => Effect.map(host${index}({ openLegacyStore: openEarlierStore })(context), (module) => ({
+          ...module, plugin: { ...module.plugin, routes: [...(module.plugin.routes ?? []), ${privateRoutes}, notesCleanup.route(context), notesCleanup.browserRoute(context, ${JSON.stringify(browserNotesCleanup)}, ${nativeNotesCleanupLimit})] }
         }))`
       }
       return `[${JSON.stringify(name)}, ${factory}]`
@@ -199,7 +211,11 @@ function queries(route: RouteLine, native = false) {
 }
 
 function routeBodyLimit(route: RouteLine, native: boolean): number | undefined {
-  if (!native || route.method !== "POST") return undefined
+  if (route.method !== "POST") return undefined
+  if (!native) {
+    if (route.path === browserNotesTranscription) return browserNotesTranscriptionLimit
+    return route.path === browserNotesCleanup ? nativeNotesCleanupLimit : undefined
+  }
   if (route.path === nativeDigestAck) return nativeDigestAckLimit
   return route.path === nativeNotesCleanup ? nativeNotesCleanupLimit : undefined
 }
@@ -285,7 +301,7 @@ effect function build(name: string) {
   const hosted = hostedPlugins.map((name) => ({ name, module: hostedExports[name] ?? "" }))
   const unbuilt = hosted.filter(({ module }) => module === "")
   if (unbuilt.length > 0) throw new Refused({ message: `no module export is known for ${unbuilt.map(({ name }) => name).join(", ")}` })
-  const product = { name: productPluginName, module: "alphaAppsModule" }
+  const product = { name: productPluginName, module: "alphaAppsModuleWith" }
   const pack = pinnedPack(packedPlugins, entrySource(bundledPlugins, hosted, product), { name: productPluginName, dir: `${at.app}/dist/src/plugins` }) catch effect (cause) => {
     throw new Refused({ message: `the pack's clone of the pinned eliza could not be prepared: ${cause.reason}` })
   }

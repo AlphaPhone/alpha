@@ -9,7 +9,7 @@ import { Cloud, type CloudClient } from "../platform/cloud.vibe"
 import { Attempts, type Install } from "../runtime/attempts.vibe"
 import { keptAttempts } from "../runtime/reactor.vibe"
 import { provider } from "./provider.vibe"
-import { SavedBodies } from "./saved-bodies.vibe"
+import { SavedBodies, type SavedRead } from "./saved-bodies.vibe"
 
 module pure {
   import type { MailCard } from "@elizaos/cloud"
@@ -89,6 +89,8 @@ export service Mail {
   email(account: number): string
   /** The grant eliza's client names an account by, as the newest account check gave it. */
   grant(account: number): string | undefined
+  /** The Google connection selected by the owner, including one that no longer grants reads. */
+  connection(account: number): string | undefined
   canOperate(account: number, kind: Proposal["kind"]): boolean
   card(message: number): MailCard | undefined
   remember(account: number, card: MailCard): number!!
@@ -105,14 +107,16 @@ export service Mail {
   incoming(state: Mailbox): ReadonlyArray<Letter>
   read(ticket: number, body: MailMessage): void
   body(ticket: number): MailMessage | undefined
-  /** Unlock saved text only for a Cloud owner proven by the current platform. */
-  savedOwner(owner: string | undefined): void!!
+  ownerConfirmed(): boolean
+  /** Admit live mail, and unlock saved mail only for a complete storage owner. */
+  confirmOwner(savedOwner: string | undefined): void!!
+  concealSaved(): void
   /** Keep the plain text once the reader accepted an authoritative body. */
   keepBody(mailbox: Mailbox, body: MailMessage): void!!
   /** The exact text associated with a row in the owner's saved list. */
   savedBody(mailbox: Mailbox, message: number): string | undefined
   /** Forget every account, message and list of the session before. */
-  forget(): void!!
+  forget(): number!!
 }
 
 type ReadPage = { readonly found: number; readonly unread: number; readonly following: number; readonly shifted: boolean }
@@ -121,14 +125,32 @@ type Page = Kept & { readonly ticket: number; readonly credential: number; reado
 
 const sameSelection = (a: Selection, b: Selection): boolean => a.account === b.account && a.folder === b.folder && a.query === b.query
 
+function restoredLedger(text: string | undefined): Ledger {
+  const restored = readLedger(text) ?? blank()
+  const labels = restored.labels ?? Object.fromEntries(Object.entries(restored.accounts).map(([label, id]) => [id, label]))
+  return { accounts: restored.accounts, credentials: restored.credentials, labels, messages: restored.messages,
+    cards: restored.cards, next: restored.next, kept: restored.kept }
+}
+
+function savedRead(ledger: Ledger, mailbox: Mailbox, number: number): SavedRead | undefined {
+  const kept = ledger.kept
+  if (!mailbox.signedIn || !mailbox.saved || mailbox.failure === "Revoked" ||
+    (mailbox.accounts.status !== "Loading" && mailbox.accounts.status !== "Failed") ||
+    !kept || !kept.credential || kept.credential !== mailbox.keptCredential || !sameSelection(kept.selection, mailbox.selected)) return undefined
+  const account = mailbox.selected.account
+  const card = kept.letters.find((letter) => letter.message === number)?.card
+  const grant = Object.entries(ledger.credentials).find(([id, value]) => value === kept.credential && ledger.accounts[`grant:${id}`] === account)?.[0]
+  if (!card?.id || !card.metadata.historyId || !grant) return undefined
+  return { account, credential: kept.credential, grant, message: card.id, history: card.metadata.historyId }
+}
+
 export const mail = Layer.effect(Mail, effect {
   const store = try KeyValueStore.KeyValueStore
   const saved = try SavedBodies
-  const restored = readLedger(store.get(key) catch () => undefined) ?? blank()
-  const storedLabels = restored.labels ?? Object.fromEntries(Object.entries(restored.accounts).map(([label, id]) => [id, label]))
-  let ledger: Ledger = { accounts: restored.accounts, credentials: restored.credentials, labels: storedLabels, messages: restored.messages, cards: restored.cards, next: restored.next, kept: restored.kept }
+  let ledger = restoredLedger(store.get(key) catch () => undefined)
   let sequence = 0
   let ownerGeneration = 0
+  let ownerConfirmed = false
   let nextId = ledger.next
   const accountGenerations = new Map<number, number>()
   let current: Page | undefined
@@ -217,6 +239,7 @@ export const mail = Layer.effect(Mail, effect {
     generation: (account?: number) => account === undefined ? ownerGeneration : accountGenerations.get(account) ?? ownerGeneration,
     email: (account: number) => ledger.labels?.[String(account)] ?? "",
     grant: (account: number) => grants.get(account)?.id,
+    connection: (account: number) => Object.keys(ledger.credentials).find((id) => ledger.accounts[`grant:${id}`] === account),
     canOperate(account: number, kind: Proposal["kind"]) {
       const grant = grants.get(account)?.consent
       return grant !== undefined && (kind === "send" ? grant.send : grant.modify)
@@ -312,6 +335,7 @@ export const mail = Layer.effect(Mail, effect {
     shown(state: Mailbox) {
       if (state.pages === 0) return []
       if (state.saved) {
+        if (!ownerConfirmed) return []
         const kept = ledger.kept
         return kept !== undefined && sameSelection(kept.selection, state.selected) &&
           (kept.credential === undefined || kept.credential === state.keptCredential) ? kept.letters : []
@@ -335,10 +359,13 @@ export const mail = Layer.effect(Mail, effect {
       }
     },
     body: (ticket: number) => bodies.get(ticket),
-    effect savedOwner(owner: string | undefined) {
+    ownerConfirmed: () => ownerConfirmed,
+    effect confirmOwner(owner: string | undefined) {
       if (owner === undefined) saved.conceal()
       else try saved.confirm(owner)
+      ownerConfirmed = true
     },
+    concealSaved: () => saved.conceal(),
     effect keepBody(mailbox: Mailbox, body: MailMessage) {
       const account = mailbox.selected.account
       const credential = credentialOf(mailbox)
@@ -349,31 +376,19 @@ export const mail = Layer.effect(Mail, effect {
       try saved.remember({ account, credential, grant, message, history }, body.bodyText)
     },
     savedBody(mailbox: Mailbox, message: number) {
-      const kept = ledger.kept
-      if (!mailbox.signedIn || !mailbox.saved || mailbox.failure === "Revoked" ||
-        (mailbox.accounts.status !== "Loading" && mailbox.accounts.status !== "Failed") ||
-        !kept || !kept.credential || kept.credential !== mailbox.keptCredential || !sameSelection(kept.selection, mailbox.selected)) return undefined
-      const account = mailbox.selected.account
-      const row = kept.letters.find((letter) => letter.message === message)
-      const id = row?.card.id
-      const history = row?.card.metadata.historyId
-      const grantEntry = Object.entries(ledger.credentials).find(([grant, id]) => id === kept.credential && ledger.accounts[`grant:${grant}`] === account)
-      if (!id || !history || !grantEntry) return undefined
-      return saved.read({ account, credential: kept.credential, grant: grantEntry[0], message: id, history })
+      const read = ownerConfirmed ? savedRead(ledger, mailbox, message) : undefined
+      return read === undefined ? undefined : saved.read(read)
     },
     effect forget() {
-      ownerGeneration = ++sequence
-      accountGenerations.clear()
+      const retired = ++sequence
+      ownerGeneration = retired
+      ownerConfirmed = false
       current = undefined
-      staged.clear()
-      grants.clear()
-      messages.clear()
-      cursors.clear()
-      tokens.clear()
-      bodies.clear()
+      for (const records of [accountGenerations, staged, grants, messages, cursors, tokens, bodies]) records.clear()
       ledger = blank()
       try saved.clear()
       try keep()
+      return retired
     },
   }
 })

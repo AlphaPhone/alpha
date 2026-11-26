@@ -6,7 +6,7 @@ import { alphaInboxAttachments, alphaInboxNotices } from "./inbox.ts";
 import { alphaMapsTransport, elizaLocation } from "./maps.ts";
 import { alphaNotes } from "./notes.ts";
 import { type Faked, elizaAgent, elizaCloud, elizaSecureStore } from "./phone.ts";
-import { alphaPhotos } from "./photos.ts";
+import { alphaPhotos, elizaPhotosPermissions } from "./photos.ts";
 import { alphaConnection } from "./platform.ts";
 import { elizaReminders } from "./reminders.ts";
 import type { Answering } from "./routes.ts";
@@ -26,7 +26,10 @@ import { alphaHostedDigests, workflowNoticesHost } from "./workflows.ts";
 export function plugins(world: Scene, services: { readonly agent: Answering; readonly cloud: Answering }): Record<string, Faked> {
   return {
     ElizaAgent: elizaAgent(services.agent, world.settings.recovery),
-    ElizaCloud: elizaCloud(services.cloud, () => world.signedIn, world.mailLease, () => world.voice.credentialId, (url) => { world.checkout?.opened.push(url); }),
+    ElizaCloud: elizaCloud(services.cloud, () => world.signedIn, world.mailLease, () => world.voice.credentialId, (url) => {
+      if (world.inbox.consent) world.inbox.consent.opened.push(url);
+      else world.checkout?.opened.push(url);
+    }, () => world.voice.billingVerified === world.voice.credentialId),
     AlphaAssistantDraft: alphaAssistantDraft(world.ask, () => ({ owner: world.notes.ownerIdentity, agent: world.notes.owner, epoch: 1 })),
     ElizaSecureStore: elizaSecureStore(world.secrets, (key) => world.slots.has(key) || /^notes-(?:draft|folders):[1-9][0-9]*$/.test(key)
       || /^sms-draft:v2:(?:new|thread:[1-9][0-9]{0,18}|recipients:[0-9a-f]{64})$/.test(key) || key === "sms-outgoing:v2:device"),
@@ -35,6 +38,7 @@ export function plugins(world: Scene, services: { readonly agent: Answering; rea
     ElizaCamera: elizaCamera(world.camera),
     ElizaFiles: elizaFiles(world.files),
     AlphaPhotos: alphaPhotos(world.photos),
+    ElizaPhotos: elizaPhotosPermissions(world.photos),
     SelectedDocuments: selectedDocuments(world.files),
     ElizaLocation: elizaLocation(world.maps, () => world.now),
     ElizaSystem: elizaSystem(world.launcher, world.settings),
@@ -50,9 +54,9 @@ export function plugins(world: Scene, services: { readonly agent: Answering; rea
       return Promise.resolve({ session });
     } }),
     ElizaNotifications: (emit) => ({ ...elizaNotices(world.settings)(emit),
-      ...(world.workflows.nativeNotices === undefined ? {} : workflowNoticesHost(world.workflows.nativeNotices, () => world.signedIn
+      ...workflowNoticesHost(world.workflows.nativeNotices, () => world.signedIn
         ? { kind: "owned", userId: world.notes.ownerIdentity, organizationId: "organization", agentId: world.notes.owner, epoch: 1 }
-        : { kind: "signedOut" })(emit)) }),
+        : { kind: "signedOut" })(emit) }),
     ElizaPasswords: elizaPasswords(world.settings),
     AlphaConnection: alphaConnection(world.platform),
     ...(world.voice.onDevice ? { AlphaVoiceCloud: alphaVoiceCloud(world.voice) } : {}),

@@ -1,7 +1,7 @@
 // spec/app/account/billing.md, "The plans and their prices are read from Cloud, and only the newest reading is taken"; spec/app/account/plan.md, "Story: Know my plan"; spec/app/settings/index.md, "Each page links to what another area owns there"; spec/app/shell/layers.md, "Story: Keep a sheet or a dialog above the phone"; spec/kit/read.md, "Story: Read from outside"
 import { AuthMark, Button, cn, Dialog, DialogContent, DialogTitle, Input, Sheet, SheetContent, Spinner, StatusDot } from "@repo/ui";
 import { ChevronDown, RotateCw, Ticket, X } from "lucide-react";
-import { normalizeSubscriptionCode } from "@elizaos/cloud";
+import { normalizeSubscriptionCode, type SnapshotSubscription } from "@elizaos/cloud";
 import { Layer } from "effect";
 import { useCallback, useRef, useState, useSyncExternalStore } from "react";
 import * as Billing from "../../gen/app__account__billing.effect.vibe";
@@ -10,10 +10,14 @@ import { useMachine as useBilling } from "../../gen/app__account__billing.react.
 import { useMachine as useSettings } from "../../gen/app__settings.react.ts";
 import { useMachine } from "../../gen/app__shell__layers.react.ts";
 import { listed, top } from "../../gen/app__shell__layers.ts";
+import { useMachine as useShell } from "../../gen/app__shell.react.ts";
+import { showing } from "../../gen/app__shell.ts";
 import { area, type Alpha, type Area, type Resident, type Shown } from "../runtime/area.tsx";
 import { checkout, choosePurchase, recheckPlan, tierOf } from "./billing.vibe";
 import { accountAccess, checkCodePlan, codes, readReferral, referralCode, submitCode } from "./codes.vibe";
-import { AccountWrites, accountLayer, accountWrites, closeCatalog, openCatalog, type Profile, profileLive, profileShelf } from "./profile.vibe";
+import { managePlan } from "./change.vibe";
+import { ManagePlan } from "./ManagePlan.tsx";
+import { AccountWrites, accountLayer, accountWrites, closeCatalog, openCatalog, type Profile, profileLive, profileShelf, settingsIsInFront } from "./profile.vibe";
 
 const usd = new Intl.NumberFormat(undefined, { style: "currency", currency: "USD" });
 const planDate = new Intl.DateTimeFormat(undefined, { dateStyle: "medium" });
@@ -63,8 +67,14 @@ function AccountDetails({ profile }: { profile: Profile }) {
 
 /** The offers the owner can inspect in the open Account sheet. */
 type CheckoutRuntime = Layer.Success<ReturnType<typeof checkout>>;
+type PlanRuntime = Layer.Success<ReturnType<typeof managePlan>>;
 
-function Plans({ runtime, shelf, canSubscribe }: { runtime: Shown<Resident | CheckoutRuntime | CodeRuntime>["runtime"]; shelf: ReturnType<typeof profileShelf>; canSubscribe: boolean }) {
+function Plans({ runtime, shelf, canSubscribe, subscription }: {
+  runtime: Shown<Resident | CheckoutRuntime | CodeRuntime | PlanRuntime>["runtime"];
+  shelf: ReturnType<typeof profileShelf>;
+  canSubscribe: boolean;
+  subscription: SnapshotSubscription | undefined;
+}) {
   const { state, can, send } = useBilling(runtime);
   const catalog = useSyncExternalStore(shelf.subscribe, shelf.catalog, shelf.catalog);
   const offers = catalog && state?.offers.status === "Loaded" && state.offers.ticket === catalog.ticket ? catalog.offers : undefined;
@@ -101,6 +111,7 @@ function Plans({ runtime, shelf, canSubscribe }: { runtime: Shown<Resident | Che
         </ul>
       ) : failed || offers ? <p role="status" className="text-sm text-muted-foreground">{failed ? "Plans unavailable" : "No plans available"}</p>
         : <Spinner label="Reading plans" className="text-muted-foreground" />}
+      {subscription && catalog?.buyer && offers ? <ManagePlan key={subscription.id} runtime={runtime} subscription={subscription} offers={offers} refresh={shelf.refresh} /> : null}
       {canSubscribe && shown && catalog && selected?.tag === "PurchaseReview" ? (
         <section aria-label="Review subscription" className="mt-3 grid gap-2 rounded-tile border border-border p-4">
           <p className="text-sm font-medium">{shown.name} · {price(shown.amountCents)}/month</p>
@@ -163,14 +174,21 @@ export function AccountStatus({ alpha }: { alpha: Alpha }) {
 }
 
 /** The browser's account recovery page is contained in Alpha's phone canvas. */
-function BrowserAccount({ open, reading, retry, close }: { open: boolean; reading: boolean; retry: () => void; close: () => void }) {
+function BrowserAccount({ open, reading, inbox, retry, close }: { open: boolean; reading: boolean; inbox: boolean; retry: () => void; close: () => void }) {
   const [host, setHost] = useState<HTMLDivElement | null>(null);
   const openerRef = useRef<Element | null>(null);
   const panelRef = useRef<HTMLDivElement>(null);
   const connect = useCallback((node: HTMLDivElement | null) => {
-    if (node) openerRef.current = node.ownerDocument.querySelector('[data-alpha-shell-page] button[data-settings-row="account"]');
+    if (node) {
+      const document = node.ownerDocument;
+      const page = document.querySelector("[data-alpha-shell-page]");
+      const active = document.activeElement;
+      const connectCloud = '[data-focus-key="inbox-connect-cloud"]';
+      openerRef.current = inbox && active?.matches(`${connectCloud}, input[type=search]`) && page?.contains(active) ? active
+        : page?.querySelector(inbox ? connectCloud : 'button[data-settings-row="account"]') ?? null;
+    }
     setHost(node);
-  }, []);
+  }, [inbox]);
   return (
     <div ref={connect} className="pointer-events-none absolute inset-0 z-sheet">
       {host && <Dialog open={open} onOpenChange={(shown) => { if (!shown) close(); }}>
@@ -200,7 +218,7 @@ function BrowserAccount({ open, reading, retry, close }: { open: boolean; readin
 }
 
 // spec/app/account/codes.md, "Story: Redeem a code"
-function AccountCodes({ runtime }: Pick<Shown<Resident | CheckoutRuntime | CodeRuntime>, "runtime">) {
+function AccountCodes({ runtime }: Pick<Shown<Resident | CheckoutRuntime | CodeRuntime | PlanRuntime>, "runtime">) {
   const { state } = useCodes(runtime);
   const billing = useBilling(runtime).state;
   if (state === undefined || billing === undefined) return null;
@@ -263,20 +281,22 @@ function AccountCodes({ runtime }: Pick<Shown<Resident | CheckoutRuntime | CodeR
   );
 }
 
-/** The account sheet above Settings, drawing only the details the authenticated account read returned. */
+/** The account sheet above Settings or Inbox, drawing the details the account read returned. */
 export default {
   open(alpha, place) {
     const profile = profileFor(alpha);
-    function AccountSheet({ runtime }: Shown<Resident | CheckoutRuntime | CodeRuntime>) {
+    function AccountSheet({ runtime }: Shown<Resident | CheckoutRuntime | CodeRuntime | PlanRuntime>) {
       const { state, can, send } = useMachine(runtime);
       const { state: settings } = useSettings(runtime);
+      const { state: shell } = useShell(runtime);
       const shown = useSyncExternalStore(profile.subscribe, profile.snapshot, profile.snapshot);
       if (!state || !listed(state, accountLayer)) return null;
       const close = { type: "closeLayer", id: accountLayer } as const;
       const onClose = () => { if (can(close)) void send(close); };
       const open = top(state).id === accountLayer;
+      const settingsAccount = shell !== undefined && settings !== undefined && settingsIsInFront(shell, settings);
       if (settings?.told && !settings.phone && shown.tag !== "Read") {
-        return <BrowserAccount open={open} reading={shown.tag === "Reading"} retry={profile.refresh} close={onClose} />;
+        return <BrowserAccount open={open} reading={shown.tag === "Reading"} inbox={shell !== undefined && showing(shell, "Inbox")} retry={profile.refresh} close={onClose} />;
       }
       return (
         <Sheet open={open} onOpenChange={(open) => { if (!open) onClose(); }}>
@@ -288,14 +308,17 @@ export default {
             <span aria-hidden className="absolute inset-x-0 top-3 mx-auto h-1 w-8 rounded-full bg-border" />
             <Button variant="ghost" size="icon" aria-label="Close Account" className="absolute top-9 right-6.5 size-12" onClick={onClose}><X /></Button>
             <AccountDetails profile={shown} />
-            {shown.tag === "Read" && shown.purchase === "Matches" ? <PurchaseStatus runtime={runtime} /> : null}
-            {shown.tag === "Read" ? <Plans runtime={runtime} shelf={profile} canSubscribe={shown.plan?.tag === "PlanRead" && shown.plan.name === "No plan"} /> : null}
-            {shown.tag === "Read" && shown.codesAvailable ? <AccountCodes runtime={runtime} /> : null}
+            {settingsAccount && shown.tag === "Read" && shown.purchase === "Matches" ? <PurchaseStatus runtime={runtime} /> : null}
+            {settingsAccount && shown.tag === "Read" ? <Plans runtime={runtime} shelf={profile}
+              canSubscribe={shown.plan?.tag === "PlanRead" && shown.plan.name === "No plan"}
+              subscription={shown.plan?.tag === "PlanRead" ? shown.plan.subscription : undefined}
+            /> : null}
+            {settingsAccount && shown.tag === "Read" && shown.codesAvailable ? <AccountCodes runtime={runtime} /> : null}
           </SheetContent>
         </Sheet>
       );
     }
     return area(Layer.provideMerge(profileLive(profile.publish, profile.publishCatalog, profile.refreshed, accountAccess),
-      Layer.merge(accountWrites, Layer.provideMerge(codes(profile.refresh), checkout(profile.refresh, profile.publishCatalog)))), AccountSheet).open(alpha, place);
+      Layer.mergeAll(accountWrites, managePlan(profile.refresh), Layer.provideMerge(codes(profile.refresh), checkout(profile.refresh, profile.publishCatalog)))), AccountSheet).open(alpha, place);
   },
 } satisfies Area;

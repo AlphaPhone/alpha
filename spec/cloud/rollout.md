@@ -1,13 +1,11 @@
 # Rollout
 
-Alpha's own cloud, the candidate `@repo/deployment` names for each hosted
-environment, runs on Cloudflare: eliza's Worker (`@elizaos/cloud-worker`)
-on the candidate's cloud, serving the profile the operator completed, and a
-web host Worker on the candidate's App Link host. This is the serve step of
-its provisioning (`./provisioning.md`); migrate, register and prices run
-before it with eliza's commands, against the database the Worker reaches
-through Hyperdrive. Deploying moves no phone: phones keep the cloud
-`@repo/deployment` names until the owner takes the cutover.
+Alpha Cloud runs on Cloudflare at the hosted origins in `@repo/deployment`.
+Eliza's Worker (`@elizaos/cloud-worker`) serves the operator's profile on
+the API origin. A web Worker serves the App Link host. Before this serve
+step of [provisioning](./provisioning.md), the operator migrates, registers
+and checks prices with eliza's commands against the database the API Worker
+reaches through Hyperdrive.
 
 ## Story: Deploy an environment without reading a secret into the repository
 

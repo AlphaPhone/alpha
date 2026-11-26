@@ -25,7 +25,8 @@ do next.
   are in rem, so Android's text size scales them: `base` is body text, `md` a row title or a field,
   `caption` and `sm` the quieter line beside it, `xl` a shared app header title in the browser, `3xl` a screen title
   (also the shared app header title in `font-display` on an app's first page on the launcher, drawn no larger than lets
-  a 4.4em word fit its own row above 150% text), `home-display` that title on a screen inside an app on the launcher, on
+  a 4.4em word fit its own row above 150% text), `home-display` that title on a screen inside an app on the launcher (in `font-sans` bold
+  on a page inside Workflows, such as Add or an automation, as Alpha's v119 build drew it), on
   one line and cut with an ellipsis until above 150% text, where every header title takes its own row and wraps, and
   `4xl` the Home date. Text up to `lg` is set at Public Sans's own line height (1.175), as develop sets it; copy that
   is read at length takes `leading-normal`. `tracking-caps` with `text-xs` is a small uppercase label; `tracking-loose` with `text-xs` is the uppercase "Needs approval" over a request the owner approves; `text-label` names an app tile on
@@ -35,11 +36,11 @@ do next.
   keypad key's letters; `text-keypad-number` the number being dialled, `text-keypad-digit` a key's
   digit and `text-keypad-letters` the letters under it; `text-contact-name` and `text-contact-initials`, in
   `font-display`, are a contact's name and initials at the top of their card. `text-lead` is the street of the next turn,
-  `text-title` a document's name over its preview and Notes' Recently deleted header on the launcher, and `text-figure` and `text-figure-sm` a route's time, `text-figure-lg` the distance to Maps guidance's next turn.
+  `text-title` a document's name over its preview and Notes' recorder and Recently deleted headers on the launcher, and `text-figure` and `text-figure-sm` a route's time, `text-figure-lg` the distance to Maps guidance's next turn.
   `leading-row` sets `text-body` as a note's or a routine's title in a list, and `leading-transcript` a transcript read back, such as a voicemail's.
   `text-badge` is a video's length over a thumbnail and `text-tile-name` an album's name under its cover.
   `text-headline` is an open voice or link note's title and `text-quote` a clip kept from a page; `text-panel-title` heads a panel that covers Ask Alpha, such as its chat search.
-  `text-speaker` is the initials of a speaker in a voice note's transcript.
+  `text-recorder-timer` is the elapsed time in the voice recorder and `text-speaker` is the initials of a speaker in a voice note's transcript.
   On Camera, `text-camera-badge` is the timer and flash badge, `text-camera-countdown` the self-timer digit and
   `leading-detail` the line under its access notice. `text-review-title` heads the scanner's dialogs.
   `text-tab-count` in a `rounded-tab-count` outline is the Browser's count of open tabs.
@@ -59,7 +60,7 @@ do next.
   `rounded-dictation-type` is the Type button offered after an unsuccessful transcription.
   `rounded-check` is the check box of a Notes checklist item or action item, `rounded-clip` a 2px bar: a link note's clip, Notes' unavailable slash and a recorder level.
   Everything pressed is at least 44px in both directions.
-- **Elevation.** `shadow-sm` lifts a control, `shadow-menu` a menu, `shadow-note-menu` a Notes menu on the raised surface, `shadow-md` a dialog or a notice, `shadow-lg` a raised card,
+- **Elevation.** `shadow-sm` lifts a control, `shadow-menu` a menu, `shadow-chat-actions` chat actions, `shadow-note-menu` a Notes menu on the raised surface, `shadow-md` a dialog or a notice, `shadow-lg` a raised card,
   `shadow-dock` the floating Ask Alpha bar, `shadow-dock-compact` its compact controls, `shadow-bar` the ongoing-call bar over a view,
   `shadow-sheet` a map's resting sheet, `shadow-lift` a modal sheet or card rising over the page and `shadow-popup` a panel
   ringed by a 1px line, such as Files options. The menu, dialog, sheet, lift, popup,
@@ -235,6 +236,9 @@ this prose into tokens. To change the design, describe it, and have the change w
 | `text.figure-sm.leading` | 1.05 |
 | `text.figure-lg.size` | 2.5rem |
 | `text.figure-lg.leading` | 1 |
+| `text.recorder-timer.size` | 4.5rem |
+| `text.recorder-timer.leading` | 1 |
+| `text.recorder-timer.tracking` | -0.02em |
 | `text.keypad-letters.size` | 0.6875rem |
 | `text.keypad-letters.leading` | 1.1 |
 | `text.keypad-letters.tracking` | 0.12em |
@@ -307,6 +311,8 @@ this prose into tokens. To change the design, describe it, and have the change w
 | `shadow.lift-dark` | 0 -20px 60px oklch(0 0 0 / 0.45) |
 | `shadow.menu` | 0 4px 20px oklch(0 0 0 / 0.12) |
 | `shadow.menu-dark` | 0 4px 20px oklch(0 0 0 / 0.45) |
+| `shadow.chat-actions` | 0 10px 35px oklch(0 0 0 / 0.12) |
+| `shadow.chat-actions-dark` | 0 10px 35px oklch(0 0 0 / 0.45) |
 | `shadow.panel` | 0 20px 50px oklch(0 0 0 / 0.12) |
 | `shadow.panel-dark` | 0 20px 50px oklch(0 0 0 / 0.45) |
 | `shadow.dock` | 0 14px 40px oklch(0 0 0 / 0.12) |

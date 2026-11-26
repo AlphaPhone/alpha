@@ -5,11 +5,10 @@ import * as Sending from "../../gen/app__inbox__sending.effect.vibe"
 import type { Effect as Out, Event, Kind } from "../../gen/app__inbox__sending.effect.vibe"
 import type { Actor } from "../../gen/app__inbox__access.ts"
 import type { MailOperation } from "@elizaos/cloud"
-import { Machine as Shell } from "../../gen/app__shell.effect.vibe"
 import { type Cloud } from "../platform/cloud.vibe"
 import { type Attempts } from "../runtime/attempts.vibe"
 import { Time } from "../runtime/time.vibe"
-import { type Job, answer, contained, hearing, reacting, run, started, together, untimed } from "../runtime/reactor.vibe"
+import { type Job, answer, contained, hearing, reacting, run, started, stop, together, untimed } from "../runtime/reactor.vibe"
 import * as Drafts from "../../gen/app__inbox__drafts.effect.vibe"
 import type { Event as DraftEvent } from "../../gen/app__inbox__drafts.effect.vibe"
 import { type Attached, Letters } from "./composer.vibe"
@@ -105,7 +104,7 @@ effect function drafted(attempt: number, kind: Kind, account: number, draft: num
 /** Tell the composer `event` about the draft an operation was handed. */
 const toDraft = (event: DraftEvent) => effect { try ignore((try Drafts.Machine).send(event, "World")) }
 
-function carry(fx: Out): Job<Event, Cloud | Mail | Letters | Inbox.Machine | Drafts.Machine | Shell, [by: Actor]> {
+function carry(fx: Out): Job<Event, Cloud | Mail | Letters | Inbox.Machine | Drafts.Machine, [by: Actor]> {
   return match (fx) {
     when { tag: "Request", kind: "Send", let attempt, let access, let draft }:
       answer(`request ${attempt}`, sent(attempt, access.account, draft), { type: "replyLost", attempt }, "World");
@@ -119,8 +118,8 @@ function carry(fx: Out): Job<Event, Cloud | Mail | Letters | Inbox.Machine | Dra
       answer(`request ${attempt}`, changed(attempt, kind, access.account, messages, revision), { type: "replyLost", attempt }, "World");
     // spec/app/inbox/index.md, "Messages handed to an operation are no longer chosen; once a change to the account's mail ends the first page is read again, and when its outcome is unknown the list says it may be out of date until Refresh"
     when { tag: "Changed", let account, let known }: run("changed", effect { try ignore((try Inbox.Machine).send({ type: "changed", account, known })) }, "World");
-    // spec/app/inbox/sending.md, "While the account's grant lacks consent to send, nothing is sent, and Turn on hands over to Google access in Settings"
-    when { tag: "OpenGoogleAccess" }: run("access", effect { try ignore((try Shell).send({ type: "openView", view: "Settings" })) }, "World");
+    // spec/app/inbox/sending.md, "While the account's grant lacks consent to send, nothing is sent, and Turn on opens Google authorization": the tap's authorization effect consumes this output with its reserved browser.
+    when { tag: "OpenGoogleAccess" }: stop("access");
     // spec/app/inbox/drafts.md, "The draft an operation is confirmed for is handed to it, and the hand-over is written to the phone before the operation goes out"
     when { tag: "HandOver", let draft, let attempt, let use }: run("draft", toDraft({ type: "handedOver", draft, attempt, use }), "World");
     // spec/app/inbox/drafts.md, "Once its send is confirmed, a draft unchanged since the revision sent is forgotten; one edited after it, or whose write is in flight, is kept and marked as sent"

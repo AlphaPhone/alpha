@@ -8,6 +8,7 @@ import type { Agent } from "../platform/agent.vibe"
 import type { NoteStore } from "../platform/notes.vibe"
 import { MediaReview, type WorkflowDeviceOffer, sameWorkflowOffer } from "../assistant/media-review.vibe"
 import { selectedWorkflowNotes } from "../notes/workflow-device.vibe"
+import { phoneWorkflowLocalDayBounds } from "@elizaos/plugin-workflow-client"
 import { Machine as Shell } from "../../gen/app__shell.effect.vibe"
 import { Machine as Layers, pageInert } from "../../gen/app__shell__layers.effect.vibe"
 import { ownerAt } from "../platform/owner.vibe"
@@ -16,7 +17,9 @@ import { Time } from "../runtime/time.vibe"
 import { WorkflowsApi } from "./api.vibe"
 import { HistoryWordsPort, type RunVisibility, workflowsVisible } from "./history.vibe"
 import { Rows } from "./list.vibe"
-import { ApprovalPresentation, ApprovalTaps, approvalNoticesAvailable, approvalPresentation, currentTap, offerApprovalNotice, sameApprovalTap, settleApprovalTap, withdrawApprovalNotice } from "./native-approval.vibe"
+import { stopWorkflowStepSpeech } from "./presentation.vibe"
+import type { MediaHandoff } from "../assistant/attachments.vibe"
+import { ApprovalPresentation, WorkflowTaps, approvalNoticesAvailable, approvalPresentation, currentTap, offerApprovalNotice, sameApprovalTap, settleWorkflowTap, withdrawApprovalNotice } from "./native-approval.vibe"
 
 interface Pending {
   readonly number: number
@@ -50,6 +53,8 @@ export service ApprovalWords {
   clear(): void!!
   device(): (DeviceReview | undefined)!!
   presentDevice(review: Omit<DeviceReview, "number">): DeviceReview!!
+  speakingAllowed(number: number): boolean!!
+  stopSpeech(number: number): (string | undefined)!!
   clearDevice(): void!!
 }
 
@@ -57,8 +62,15 @@ const kept = Layer.sync(ApprovalWords, () => {
   let next = 0
   let pending: Pending | undefined
   let device: DeviceReview | undefined
+  let stopped: number | undefined
   return {
     device: () => succeed(device),
+    speakingAllowed: (number: number) => sync(() => device?.number === number && stopped !== number),
+    stopSpeech: (number: number) => sync(() => {
+      if (device?.number !== number || device.offer.operation.type !== "speak_text" || stopped === number) return undefined
+      stopped = number
+      return device.offer.digest
+    }),
     presentDevice: (review: Omit<DeviceReview, "number">) => sync(() => {
       if (device?.owner === review.owner && device.runNumber === review.runNumber && sameWorkflowOffer(device.offer, review.offer)) return device
       device = { ...review, number: ++next }
@@ -129,8 +141,17 @@ effect function scannedDevice(owner: number, runNumber: number, run: WorkflowRun
     case "read_calendar_range":
       detail = [`${operation.start} – ${operation.end}`, operation.timeZone, `Up to ${operation.maximumEvents} events`, ...operation.calendarIds]
       break
-    case "create_note":
+    case "read_selected_reminders": {
+      const day = phoneWorkflowLocalDayBounds(operation.day, operation.timeZone) catch () => undefined
+      if (day === undefined) return
+      detail = [operation.day, operation.timeZone, `Up to ${operation.maximumItems} open and completed reminders`]
+      break
+    }
+    case "create_note": case "post_notification":
       detail = [operation.title, operation.body]
+      break
+    case "speak_text":
+      detail = [operation.text]
       break
   }
   if (!(try current)) return
@@ -140,15 +161,29 @@ effect function scannedDevice(owner: number, runNumber: number, run: WorkflowRun
 
 effect function decidedDevice(number: number, run: number, approved: boolean): Event!!DeviceNeeds {
   const failed: Event = { type: "deviceAnswered", number, acknowledged: false }
-  const shown = try (try ApprovalWords).device()
+  const words = try ApprovalWords
+  const shown = try words.device()
   if (shown?.number !== number || shown.runNumber !== run) return failed
   const scope = ownerAt() catch () => ""
   const context = try Effect.context<Needs | Layers>()
-  const current = Effect.provideContext(activeRun(shown.owner, run, scope), context)
+  const visible = Effect.provideContext(activeRun(shown.owner, run, scope), context)
+  const current = effect {
+    return (try visible) && (!approved || shown.offer.operation.type !== "speak_text" || (try words.speakingAllowed(number)))
+  }
   const service = try Effect.context<WorkflowsApi | Time>()
   const authorized = Effect.provideContext(authorizedDevice(shown.run, shown.offer), service)
   if (!(try current) || !(try authorized) || !(try current)) return failed
   return { ...failed, acknowledged: try (try MediaReview).decideWorkflow(shown.offer, approved, current, authorized) }
+}
+
+export effect function stopReviewedWorkflowSpeech(number: number, owner: number, run: number): void!!(ApprovalWords | Model.Machine | MediaHandoff) {
+  const state = (try (try Model.Machine).get()).device
+  const words = try ApprovalWords
+  const shown = try words.device()
+  if (state.phase !== "DeviceSending" || state.number !== number || shown?.number !== number ||
+      shown.owner !== owner || shown.runNumber !== run) return
+  const digest = try words.stopSpeech(number)
+  if (digest !== undefined) try stopWorkflowStepSpeech(digest)
 }
 
 effect function decided(id: number, runId: number, digest: number, approve: boolean): Event!!Needs {
@@ -256,7 +291,7 @@ const watching = applying(Sheet, (state) => ({ owner: state.owner, runId: state.
     if (live.digest !== pending.number) try ignore(approvals.send({
       type: "approvalAsked", owner, runId, digest: pending.number, expires: approval.expiresAt, running: !open.raw.finished, now: untimed,
     }))
-    const tap = try (try ApprovalTaps).get()
+    const tap = try (try WorkflowTaps).get()
     if (tap !== undefined && sameApprovalTap(tap, approval)) {
       if (live.tapDigest !== pending.number && (try currentTap(tap))) {
         try ignore(approvals.send({ type: "noticeOpened", runId, digest: pending.number }))
@@ -271,9 +306,9 @@ const handledTap = applying(Model.Machine, (state) => ({ opened: state.opened, r
   effect ({ opened, runId, digest }) => {
     if (opened !== "Ready" || !(try workflowsVisible())) return
     const exact = try (try ApprovalWords).get()
-    const tap = try (try ApprovalTaps).get()
+    const tap = try (try WorkflowTaps).get()
     if (exact?.number !== digest || exact.runId !== runId || tap === undefined || !sameApprovalTap(tap, exact.approval)) return
-    try settleApprovalTap(tap)
+    try settleWorkflowTap(tap)
   })
 
 export const approvals = together(

@@ -52,16 +52,22 @@ const approvalDigest = "a".repeat(64);
 const executionPath = `/api/workflow/executions/${receipt.id}`;
 
 export async function workflowNoteOffer(world: WorkflowsScene, agentId: string) {
-  const operation = { type: "create_note", title: "Statement saved by Workflows", body: "A reviewed note." } as const;
-  const offer = textReview(agentId, "workflow-note-proposal", operation);
+  return workflowPhoneOffer(world, agentId, "create_note");
+}
+
+export async function workflowPhoneOffer(world: WorkflowsScene, agentId: string, kind: "create_note" | "post_notification" | "speak_text") {
+  const words = "A reviewed note.";
+  const title = kind === "post_notification" ? "A reviewed notification" : "Statement saved by Workflows";
+  const operation = kind === "speak_text" ? { type: kind, text: words } as const : { type: kind, title, body: words };
+  const offer = textReview(agentId, kind === "create_note" ? "workflow-note-proposal" : "workflow-" + kind + "-proposal", operation);
   const { installationId, enrollmentId } = offer.proposal.payload;
+  const step = kind === "post_notification" ? { id: approvalNode, kind: "Notify", operation: "app_notification", source: "source", title } as const
+    : kind === "speak_text" ? { id: approvalNode, kind: "Speak", operation: "read_aloud", source: "source" } as const
+    : { id: approvalNode, kind: "Write", operation: "save_note", source: "source", title } as const;
   const spec: WorkflowPhoneReview["spec"] = {
     device: { installationId, enrollmentId },
     version: 1, name: record.name, description: "", trigger: { kind: "manual" },
-    steps: [
-      { id: "source", kind: "Read", operation: "supplied_text", text: operation.body },
-      { id: approvalNode, kind: "Write", operation: "save_note", source: "source", title: operation.title },
-    ],
+    steps: [{ id: "source", kind: "Read", operation: "supplied_text", text: words }, step],
   };
   const specDigest = await Effect.runPromise(workflowSha(spec));
   const scope = { runId: receipt.id, workflowId: record.id, versionId: record.versionId, specDigest };
@@ -87,25 +93,46 @@ type Prompt = PromptTiming & {
 };
 
 type PostApprovalNotice = Parameters<NotificationsNativePlugin["postWorkflowApproval"]>[0];
+type PostResultNotice = Parameters<NotificationsNativePlugin["postWorkflow"]>[0];
 
 export interface NativeApprovalNotices {
   readonly posted: PostApprovalNotice[];
+  readonly results: PostResultNotice[];
   readonly consumed: string[];
   readonly withdrawn: string[];
   pending?: PendingNoticeTap;
   tap(request: PostApprovalNotice): void;
+  tapResult(request: PostResultNotice, question?: boolean): void;
 }
 
 export function nativeApprovalNotices(): NativeApprovalNotices {
-  return { posted: [], consumed: [], withdrawn: [], tap() {} };
+  return { posted: [], results: [], consumed: [], withdrawn: [], tap() {}, tapResult() {} };
 }
 
 // spec/app/workflows/approvals.md, "Story: Open the run a notice names"
 type WorkflowHostScope = { kind: "signedOut" } | { kind: "owned"; userId: string; organizationId: string; agentId: string; epoch: number };
 
-export const workflowNoticesHost = (scene: NativeApprovalNotices, scope: () => WorkflowHostScope): Faked => (emit) => {
+/**
+ * The Workflow notice calls of Alpha's `ElizaNotifications`, which the native plugin always declares. A journey without
+ * `scene` gets them unimplemented: Capacitor reads a plugin's methods once for the life of the page, and Alpha keeps
+ * that registration across the journeys of a file, so the methods are declared all the same.
+ */
+export const workflowNoticesHost = (scene: NativeApprovalNotices | undefined, scope: () => WorkflowHostScope): Faked => (emit) => {
+  if (scene === undefined) {
+    const declared = workflowNoticesHost(nativeApprovalNotices(), scope)(emit) as Record<string, unknown>;
+    return Object.fromEntries(Object.keys(declared).map((method) =>
+      [method, () => Promise.reject(rejection(`ElizaNotifications.${method} is not implemented`, "UNIMPLEMENTED"))]));
+  }
   scene.tap = (request) => {
     scene.pending = { ...request.route, operationId: request.id, bindingHash: request.bindingHash, token: "tap-1", retained: true };
+    emit("pendingWorkflowTap", {});
+  };
+  scene.tapResult = (request, question = false) => {
+    const pending = { ...request.route, operationId: request.operationId, bindingHash: request.bindingHash, retained: true };
+    scene.pending = question ? {
+      ...pending, token: "tap-result-question", question: true,
+      notice: { id: request.operationId, revision: "native-result-revision", source: "alpha", appLabel: "Alpha", title: "Workflow finished", text: "Open the run to see its result." },
+    } : { ...pending, token: "tap-result" };
     emit("pendingWorkflowTap", {});
   };
   return {
@@ -117,10 +144,16 @@ export const workflowNoticesHost = (scene: NativeApprovalNotices, scope: () => W
       if (!scene.posted.some(({ id }) => id === notice.id)) scene.posted.push(notice);
       return Promise.resolve({ status: "succeeded" });
     },
+    postWorkflow: (notice: PostResultNotice) => {
+      if (!scene.results.some(({ operationId }) => operationId === notice.operationId)) scene.results.push(notice);
+      return Promise.resolve({ status: "succeeded" });
+    },
     withdrawWorkflowApproval: ({ id }: { id: string }) => { scene.withdrawn.push(id); return Promise.resolve(); },
     pendingWorkflowTap: () => Promise.resolve(scene.pending ?? {}),
-    consumeWorkflowTap: ({ token }: { token: string }) => {
-      if (scene.pending?.token !== token) return Promise.reject(rejection("Approval tap changed"));
+    consumeWorkflowTap: ({ token, noticeRevision, unavailable }: { token: string; noticeRevision?: string; unavailable?: boolean }) => {
+      if (scene.pending?.token !== token || (!unavailable && scene.pending.notice?.revision !== noticeRevision)) {
+        return Promise.reject(rejection("Workflow tap changed"));
+      }
       delete scene.pending;
       scene.consumed.push(token);
       return Promise.resolve();
@@ -248,11 +281,16 @@ export function workflowRoutes(world: WorkflowsScene): Route[] {
       if (url.pathname.startsWith("/api/triggers/") && prompt !== undefined) return Response.json({ trigger: prompt });
       switch (url.pathname) {
         case "/api/notifications": {
-          if (url.searchParams.get("category") !== "workflow" || url.searchParams.get("limit") !== "50") return;
-          return Response.json({ serviceStatus: "ready", notifications: world.run && world.stage === "Waiting" ? [{
-            category: "workflow", data: { kind: "approval", workflowId: record.id, runId: receipt.id, versionId: record.versionId,
-              proposalId: `${approvalNode}:0`, expiresAt: 60_000 },
-          }] : [] });
+          if (url.searchParams.get("nativeTransport") !== "true" || world.nativeNotices === undefined) return;
+          const route = { workflowId: record.id, runId: receipt.id, versionId: record.versionId };
+          const notifications = world.run && world.stage === "Waiting" ? [{
+            category: "workflow", expiresAt: 60_000, data: { ...route, kind: "approval", proposalId: `${approvalNode}:0` },
+          }] : world.run && world.stage === "Done" ? [{
+            category: "workflow", title: "Monthly statement finished", body: "Open the run to see what it did.",
+            data: { ...route, kind: "result" },
+          }] : [];
+          return Response.json({ serviceStatus: "ready", nativeEpoch: "workflow-fixture", throughSequence: notifications.length,
+            nextSequence: notifications.length, complete: true, notifications });
         }
         case "/api/workflow/status": return Response.json({
           engine: "eliza-typed", status: "ready", manualSubmissionProtocol: 1, lifecycleMutationProtocol: 1,

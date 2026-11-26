@@ -79,7 +79,7 @@ import type { Time } from "../runtime/time.vibe";
 import { useMachine as useListener } from "../../gen/app__voice__listener.react.ts";
 import type { Machine as ListenerMachine } from "../../gen/app__voice__listener.effect.vibe";
 import { ListenerControls } from "./ListenerControls.tsx";
-import type { Machine as AccessReviewMachine } from "../../gen/app__startup__access.effect.vibe";
+import type { AccessSurface } from "../startup/settingsAccess.vibe";
 import { AccessReview } from "../startup/SettingsAccess.tsx";
 import { AppBack } from "../shell/AppBack.tsx";
 import { AccountStatus } from "../account/index.tsx";
@@ -91,7 +91,7 @@ import type * as BrowserAlerts from "../../gen/app__notices__browserAlerts.effec
 import { useMachine as useBrowserAlerts } from "../../gen/app__notices__browserAlerts.react.ts";
 
 /** What every Settings page reads: where the owner is, the phone's facts, the hand-overs to Android, the preferences, the reset and the developer tools. */
-export type SettingsRuntime = ManagedRuntime.ManagedRuntime<PagesMachine | CalendarAccount | FactsMachine | AccessReviewMachine | ActivityMachine | RecordsMachine | AndroidMachine | PrefsMachine | ResetMachine | DeveloperMachine | ListenerMachine | ShellMachine | LayersMachine | Time | Device | SystemSettings | InboxNotices | BrowserAlerts.Machine, unknown>;
+export type SettingsRuntime = ManagedRuntime.ManagedRuntime<PagesMachine | CalendarAccount | FactsMachine | AccessSurface | ActivityMachine | RecordsMachine | AndroidMachine | PrefsMachine | ResetMachine | DeveloperMachine | ListenerMachine | ShellMachine | LayersMachine | Time | Device | SystemSettings | InboxNotices | BrowserAlerts.Machine, unknown>;
 
 /** What the frame gives each page: the runtime, Alpha's places, and the props every page shares. */
 export interface PageProps {
@@ -113,7 +113,7 @@ export interface Common {
   readonly onPlace: (row: number) => void;
 }
 
-const pageNames: Record<Exclude<Page, "BrowserPasswordsPage" | "CarrierInfoPage">, SettingsPageName> = {
+const pageNames: Record<Exclude<Page, "BrowserPasswordsPage" | "CarrierInfoPage" | "PrivacyNotifications">, SettingsPageName> = {
   Top: "top", General: "general", Display: "display", Sound: "sound", Notifications: "notifications", Battery: "battery",
   NetworkPage: "network", CarrierPage: "carrier", PhonePage: "phone", Privacy: "privacy", Permissions: "permissions", Apps: "apps",
   InboxApp: "inbox", WorkflowsApp: "workflows", CalendarApp: "calendar", CameraApp: "camera", PhotosApp: "photos", MapsApp: "maps", NotesApp: "notes", PasswordsPage: "passwords",
@@ -241,11 +241,12 @@ function useDevice(runtime: SettingsRuntime) {
   };
 }
 
+/** Settings' first page; on the launcher it has no Back, as v119 drew it (prototype/model.js:6415, template.html:4159). */
 function Top({ runtime, alpha, common }: PageProps) {
   const pages = usePages(runtime).state;
   const listener = useListener(runtime).state;
   return (
-    <SettingsTopPage {...common} leading={<AppBack alpha={alpha} />} onPhone={pages?.phone ?? false}
+    <SettingsTopPage {...common} leading={<AppBack alpha={alpha} className="in-data-[alpha-launcher]:hidden" />} onPhone={pages?.phone ?? false}
       developer={pages?.development ?? false} accountDetail={<AccountStatus alpha={alpha} />} micMayBeOn={listener?.mayBeOn}
       onHandOver={(neighbour) => neighbour === "listener" ? common.onAndroid({ target: "android-home" }) : common.onHandOver(neighbour)} />
   );
@@ -315,7 +316,7 @@ function Display({ runtime, common }: PageProps) {
   );
 }
 
-// spec/app/settings/preferences.md, "Story: Decide whether Alpha asks before it acts"; spec/app/settings/preferences.md, "When the device preferences cannot be read, the owner can recover them: the phone resets them to its defaults, and they are read again"; spec/app/settings/index.md, "Set up Alpha access opens all permissions in review, and each row on Permissions opens that one access"; spec/app/settings/index.md, "Each page links to what another area owns there"
+// spec/app/settings/preferences.md, "Story: Decide whether Alpha asks before it acts"; spec/app/settings/preferences.md, "When the device preferences cannot be read, the owner can recover them: the phone resets them to its defaults, and they are read again"; spec/app/settings/index.md, "Set up Alpha access opens all permissions in review"; spec/app/settings/index.md, "Each page links to what another area owns there"
 function Privacy({ runtime, alpha, common }: PageProps) {
   const device = useDevice(runtime);
   const { state: pages, can, send } = usePages(runtime);
@@ -335,18 +336,29 @@ function Privacy({ runtime, alpha, common }: PageProps) {
 
 function Permissions({ runtime, common }: PageProps) {
   const facts = useFacts(runtime).state;
-  const { can, send } = usePages(runtime);
-  const accesses = Object.fromEntries(Object.entries(accessNames).map(([access, name]) => [name, access])) as Record<SettingsAccess, FactsGen.Access>;
-  return (
-    <SettingsPermissionsPage
-      {...common}
-      grants={grants(facts)}
-      onReview={(access) => {
-        const review = { type: "reviewAccess", access: accesses[access] } as const;
-        if (can(review)) void send(review);
-      }}
-    />
-  );
+  const { state: pages, can, send } = usePages(runtime);
+  const { state: alerts } = useBrowserAlerts(runtime);
+  const open = { type: "openPrivacyNotifications" } as const;
+  const onNotifications = can(open) ? () => void send(open) : undefined;
+  if (!pages?.phone) {
+    const observe = (access: FactsGen.Access): SettingsFactReading => {
+      if (!facts) return { word: "waiting" };
+      if (FactsGen.grantIs(facts, access, "Unasked")) return { word: "reported", value: "Ask", status: "warn" };
+      const word = FactsGen.accessWord(facts, access);
+      if (word === "AccessWaiting") return { word: "waiting" };
+      if (word === "Allowed") return { word: "reported", value: "Allowed", status: "ok" };
+      if (word === "Off") return { word: "reported", value: "Off", status: "off" };
+      return { word: "unavailable", compact: true };
+    };
+    const alertWord = browserAlertReading(alerts);
+    const notification = alertWord.word === "reported" && alertWord.value === "On" ? { ...alertWord, value: "Allowed" } : alertWord;
+    return <SettingsPermissionsPage {...common} grants={grants(facts)} browser={{
+      camera: observe("CameraAccess"), microphone: observe("MicrophoneAccess"), location: observe("LocationAccess"),
+      photos: { word: "reported", value: "Selected", status: "warn" }, files: { word: "reported", value: "Chosen files", status: "warn" },
+      notifications: notification,
+    }} onNotifications={onNotifications} />;
+  }
+  return <SettingsPermissionsPage {...common} grants={grants(facts)} onNotifications={onNotifications} />;
 }
 
 function Phone({ alpha, common }: PageProps) {
@@ -449,10 +461,8 @@ function App({ runtime, common, app }: PageProps & { app: "inbox" | "workflows" 
 function About({ runtime, alpha, common }: PageProps) {
   const facts = useFacts(runtime).state;
   const pages = usePages(runtime).state;
-  const activity = useActivity(runtime).state;
-  const agent = activity === undefined ? undefined : agentWords[ActivityGen.agentWord(activity.connection)];
   return (
-    <SettingsAboutPage {...common} onPhone={pages?.phone} agent={agent} alphaVersion={reading(facts, "Versions")} androidVersion={reading(facts, "AndroidVersion")}>
+    <SettingsAboutPage {...common} onPhone={pages?.phone ?? false} alphaVersion={reading(facts, "Versions")} androidVersion={reading(facts, "AndroidVersion")}>
       {alpha.slot("settings/about")}
     </SettingsAboutPage>
   );
@@ -475,9 +485,6 @@ function Developer({ runtime, common }: PageProps) {
 
 const connections: Record<ActivityGen.Connection, SettingsActivityPageProps["connection"]> = {
   Ready: "ready", Starting: "starting", NeedsRestart: "needs-restart", NeedsRetry: "needs-retry", Offline: "offline", Unpackaged: "unpackaged",
-};
-const agentWords: Record<ActivityGen.AgentWord, NonNullable<Parameters<typeof SettingsAboutPage>[0]["agent"]>> = {
-  AgentRunning: "running", AgentStarting: "starting", AgentNeedsYou: "needs-you", AgentStopped: "stopped",
 };
 
 /** Agent activity as reported by the resident host, with the conversation controls owned by Ask Alpha. */
@@ -537,6 +544,23 @@ function Activity({ runtime, alpha, common }: PageProps) {
 /** A page of Settings, given the runtime, Alpha and the props every page shares. */
 export type Drawn = (props: PageProps) => ReactNode;
 
+function Notifications({ runtime, alpha, common }: PageProps) {
+  const facts = useFacts(runtime).state;
+  const pages = usePages(runtime).state;
+  const { state: web, can, send } = useBrowserAlerts(runtime);
+  const change = { type: "choose", desired: web?.status !== "Enabled" } as const;
+  const browserAlerts = pages?.phone ? undefined : {
+    enabled: !web || web.status === "Unavailable" ? undefined : web.status === "Enabled",
+    reading: !web || web.phase === "Reading",
+    saving: web?.phase === "Writing",
+    saveFailed: web?.saveFailed,
+    onChoose: can(change, "Owner") ? (enabled: boolean) => void send({ type: "choose", desired: enabled }, "Owner") : undefined,
+  };
+  return <SettingsNotificationsPage {...common} onPhone={pages?.phone} browserAlerts={browserAlerts}
+    backLabel={pages?.page === "PrivacyNotifications" ? "Back to Privacy" : "Back to General"}
+    alerts={reading(facts, "Alerts")} doNotDisturb={reading(facts, "Sound")} collectionPolicy={pages?.phone ? alpha.slot("settings/notification-collection") : undefined} channels={facts?.alerts ?? []} />;
+}
+
 const drawn: Partial<Record<Page, Drawn>> = {
   Top,
   General,
@@ -546,21 +570,8 @@ const drawn: Partial<Record<Page, Drawn>> = {
     const facts = useFacts(runtime).state;
     return <SettingsSoundPage {...common} sound={reading(facts, "Sound")} media={reading(facts, "MediaVolume")} ring={reading(facts, "RingVolume")} alarm={reading(facts, "AlarmVolume")} />;
   },
-  Notifications: ({ runtime, alpha, common }) => {
-    const facts = useFacts(runtime).state;
-    const pages = usePages(runtime).state;
-    const { state: web, can, send } = useBrowserAlerts(runtime);
-    const change = { type: "choose", desired: web?.status !== "Enabled" } as const;
-    const browserAlerts = pages?.phone ? undefined : {
-      enabled: !web || web.status === "Unavailable" ? undefined : web.status === "Enabled",
-      reading: !web || web.phase === "Reading",
-      saving: web?.phase === "Writing",
-      saveFailed: web?.saveFailed,
-      onChoose: can(change, "Owner") ? (enabled: boolean) => void send({ type: "choose", desired: enabled }, "Owner") : undefined,
-    };
-    return <SettingsNotificationsPage {...common} onPhone={pages?.phone} browserAlerts={browserAlerts}
-      alerts={reading(facts, "Alerts")} doNotDisturb={reading(facts, "Sound")} collectionPolicy={pages?.phone ? alpha.slot("settings/notification-collection") : undefined} channels={facts?.alerts ?? []} />;
-  },
+  Notifications,
+  PrivacyNotifications: Notifications,
   Battery: ({ runtime, common }) => <SettingsBatteryPage {...common} battery={reading(useFacts(runtime).state, "Battery")} />,
   PhonePage: Phone,
   Privacy,

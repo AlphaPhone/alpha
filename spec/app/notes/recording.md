@@ -20,6 +20,10 @@ transcript of them follows once the recording is kept.
 > that it is hearing me, pause and go on, and stop it to keep it, with
 > nothing I said lost to a crash, a call or an error.
 
+Voice note shows the elapsed time, recent microphone levels, and the
+recording status. Pause and Stop recording sit below the waveform.
+While paused, Resume takes the place of Pause.
+
 ### The recorder holds one recording, the audio written so far, what is waiting to be written, and the keeping of it as a voice note
 
 A recording has a number, and while the microphone is on, a capture under
@@ -78,7 +82,7 @@ type Effect =
   | Tells({ capture: int, command: Command })
   | Finishes({ ticket: int, owner: int, take: int, segments: int, folder: int })
   | Looks({ ticket: int, owner: int, take: int })
-  | WritesDown({ ticket: int, owner: int, take: int })
+  | WritesDown({ ticket: int, owner: int, take: int, capture: int })
   | Erases({ ticket: int, owner: int, take: int })
 type Moved = { state: Recorder, out: List[Effect] }
 
@@ -96,6 +100,7 @@ pure val roomValues = Set(
 )
 pure val captureValues = Set(1, 2, 3, 4, 5, 6, 7, 8)
 pure val takeValues = Set(1, 2, 3)
+pure val captureReadyValues = Set(false, true)
 pure val ticketValues = Set(1, 2, 3, 4, 5, 6, 7, 8)
 pure val segmentValues = Set(1, 2, 3, 4, 5, 6, 7, 8, 9, 10)
 pure val segmentsValues = Set(1, 2)
@@ -134,7 +139,7 @@ unavailable or storage has failed"), and nothing else of Notes open.
 ```quint
 pure def canStart(r: Recorder, room: Admission, available: bool, folder: int, covered: bool, by: Actor): bool =
   mayOpen(covered, by) and isOwner(r.owner) and available and admits(room) and not(r.calling) and not(unfinished(r))
-    and folder >= 0
+    and folder >= 0 and not(inFlight(r.erasing) and r.doomedFor == r.owner)
 
 pure def start(r: Recorder, room: Admission, available: bool, folder: int, covered: bool, by: Actor): Moved =
   val n = r.issued + 1
@@ -217,7 +222,7 @@ pure def canCallEnded(r: Recorder, by: Actor): bool = by == Phone and r.calling
 pure def callEnded(r: Recorder, by: Actor): Recorder = { ...r, calling: false }
 
 pure def canResume(r: Recorder, take: int, room: Admission, by: Actor): bool =
-  by == Owner and r.phase == Paused and take == r.take and r.ask == NoAsk and admits(room) and not(r.calling)
+  by == Owner and r.phase == Paused and take == r.take and admits(room) and not(r.calling)
 
 pure def resume(r: Recorder, take: int, room: Admission, by: Actor): Moved =
   val n = r.issued + 1
@@ -230,22 +235,24 @@ pure def resume(r: Recorder, take: int, room: Admission, by: Actor): Moved =
 
 ```quint
 pure def canStop(r: Recorder, take: int, by: Actor): bool =
-  by == Owner and (r.phase == Recording or r.phase == Paused) and r.ask == NoAsk and take == r.take
+  by == Owner and (r.phase == Recording or r.phase == Paused) and take == r.take
 
 pure def stop(r: Recorder, take: int, by: Actor): Moved =
   val ending = if (r.capture != 0) List(Tells({ capture: r.capture, command: End })) else List()
-  if (r.unsaved > 0) { state: { ...r, phase: Stopping, level: 0 }, out: ending }
-  else if (r.kept > 0) { state: keepIt(r.kept, r).state, out: ending.concat(keepIt(r.kept, r).out) }
-  else { state: { ...r, phase: Idle, capture: 0, level: 0, recovered: false, found: 0 }, out: ending }
+  val closing = { ...r, ask: NoAsk }
+  val save = keepIt(closing.kept, closing)
+  if (closing.unsaved > 0) { state: { ...closing, phase: Stopping, level: 0 }, out: ending }
+  else if (closing.kept > 0) { state: save.state, out: ending.concat(save.out) }
+  else { state: { ...closing, phase: Idle, capture: 0, level: 0, recovered: false, found: 0 }, out: ending }
 ```
 
-### A recording has no length limit: it stops only when the owner pauses or stops it, for a call, an error or a segment that could not be cut, a restart, or another owner
+### A recording has no length limit: it stops only when the owner pauses, stops or confirms discarding it, for a call or a recording error, on restart, or for another owner
 
 ```quint
 pure def stepNoLengthLimit(before: Recorder, via: str, after: Recorder): bool =
   (before.phase == Recording and after.phase != Recording)
     implies (via == "pause" or via == "stop" or via == "callStarted" or via == "broke" or via == "tick"
-      or via == "segmentKept" or via == "restart" or via == "ownerChanged")
+      or via == "segmentKept" or via == "restart" or via == "ownerChanged" or via == "confirmDiscard")
 ```
 
 ### Keeping the recording ends as the store says: kept, refused, or unknown
@@ -328,7 +335,7 @@ pure def alwaysTheMicrophoneFollowsTheRecorder(r: Recorder): bool =
     and (r.phase == Recording implies not(r.calling))
 ```
 
-### The phone is told to pause before a recording pauses, to end before it stops, and the microphone is let go of only with an end
+### The phone is told to pause before a recording pauses, and to end or write down a discard before it lets go of a capture
 
 A restart, which ends every capture, is the exception; so is the last
 segment of a recording already told to end.
@@ -339,7 +346,10 @@ pure def stepTheMicrophoneIsToldFirst(before: Recorder, via: str, after: Recorde
     (before.phase == Recording and after.phase == Paused and via != "restart") implies told(out, before.capture, Pause),
     (after.phase == Stopping and before.phase != Stopping) implies told(out, before.capture, End),
     (before.capture != 0 and after.capture == 0 and via != "restart" and before.phase != Stopping)
-      implies told(out, before.capture, End),
+      implies (told(out, before.capture, End) or (via == "confirmDiscard" and out.some(fx => match fx {
+        | WritesDown(w) => w.capture == before.capture
+        | _ => false
+      }))),
   }
 ```
 
@@ -422,30 +432,43 @@ pure val fair_noteFound = "weak"
 > As the owner, I want to throw away a recording I do not want, but only
 > after saying so twice, and never to have it come back half erased.
 
-### The owner is asked before a paused, failed or damaged recording is discarded
+The question appears above the recorder controls. Keep closes it without
+interrupting the recording. Pause and Resume still control the recording
+under review. Stop closes the question and saves.
+
+### The owner reviews the current take before discarding it
+
+The owner can review a live capture as soon as the device reports its
+recording identity, even while the timer is at zero. The shown time is
+rounded down and gives no authority to erase audio without confirmation.
 
 ```quint
-pure def canAskDiscard(r: Recorder, by: Actor): bool =
-  by == Owner and (r.phase == Paused or r.phase == Failed) and r.ask == NoAsk
+pure def canAskDiscard(r: Recorder, take: int, captureReady: bool, by: Actor): bool =
+  by == Owner and take == r.take and r.ask == NoAsk and
+    (r.phase == Paused or r.phase == Failed or (r.phase == Recording and captureReady))
 
-pure def askDiscard(r: Recorder, by: Actor): Recorder = { ...r, ask: AskDiscard }
+pure def askDiscard(r: Recorder, take: int, captureReady: bool, by: Actor): Recorder = { ...r, ask: AskDiscard }
 
-pure def canCancelDiscard(r: Recorder): bool = r.ask == AskDiscard
+pure def canCancelDiscard(r: Recorder, take: int, by: Actor): bool = by == Owner and take == r.take and r.ask == AskDiscard
 
-pure def cancelDiscard(r: Recorder): Recorder = { ...r, ask: NoAsk }
+pure def cancelDiscard(r: Recorder, take: int, by: Actor): Recorder = { ...r, ask: NoAsk }
 ```
 
-### Only the owner confirms, which frees the microphone and writes the discard down; once it is written down, the recording is erased, once
+### Only the owner confirms the exact take; the phone stops it and writes down its recording identity before erasing it
+
+The phone remembers the selected device recording under the discard
+attempt. A delayed or repeated erase uses that recording identity every
+time, and a new recording for that owner waits until erasure settles.
 
 ```quint
-pure def canConfirmDiscard(r: Recorder, by: Actor): bool = by == Owner and r.ask == AskDiscard and not(inFlight(r.erasing))
+pure def canConfirmDiscard(r: Recorder, take: int, by: Actor): bool =
+  by == Owner and take == r.take and r.ask == AskDiscard and not(inFlight(r.erasing))
 
-pure def confirmDiscard(r: Recorder, by: Actor): Moved =
+pure def confirmDiscard(r: Recorder, take: int, by: Actor): Moved =
   val attempt = A::record(A::plan(r.erasing.id + 1))
-  val ending = if (r.capture != 0) List(Tells({ capture: r.capture, command: End })) else List()
   { state: { ...r, phase: Discarding, capture: 0, unsaved: 0, level: 0, recovered: false, ask: NoAsk,
       erasing: attempt, pending: true, doomed: r.take, doomedFor: r.owner },
-    out: ending.append(WritesDown({ ticket: attempt.id, owner: r.owner, take: r.take })) }
+    out: List(WritesDown({ ticket: attempt.id, owner: r.owner, take: r.take, capture: r.capture })) }
 
 pure def canWrittenDown(r: Recorder, ticket: int, ok: bool, by: Actor): bool =
   by == Phone and A::canDispatch(r.erasing) and r.pending and ticket == r.erasing.id
@@ -462,7 +485,7 @@ pure def writtenDown(r: Recorder, ticket: int, ok: bool, by: Actor): Moved =
 pure def canResumeDiscard(r: Recorder, by: Actor): bool = by == Phone and r.erasing.outcome == A::Recorded and not(r.pending)
 
 pure def resumeDiscard(r: Recorder, by: Actor): Moved =
-  { state: { ...r, pending: true }, out: List(WritesDown({ ticket: r.erasing.id, owner: r.doomedFor, take: r.doomed })) }
+  { state: { ...r, pending: true }, out: List(WritesDown({ ticket: r.erasing.id, owner: r.doomedFor, take: r.doomed, capture: 0 })) }
 
 pure def canErased(r: Recorder, ticket: int, by: Actor): bool = by == Phone and A::canConclude(r.erasing, ticket)
 
@@ -470,11 +493,11 @@ pure def erased(r: Recorder, ticket: int, ok: bool, known: bool, by: Actor): Rec
   { ...r, erasing: A::conclude(r.erasing, ok, known) }
 ```
 
-### The question is about a recording that is paused or was stopped, and a discard written down is about the recording it names
+### The question is about an unfinished recording, and a discard written down is about the recording it names
 
 ```quint
 pure def alwaysTheQuestionIsAboutAnUnfinishedRecording(r: Recorder): bool =
-  (r.ask == AskDiscard implies (r.phase == Paused or r.phase == Failed))
+  (r.ask == AskDiscard implies (r.phase == Recording or r.phase == Paused or r.phase == Failed))
     and (r.phase == Discarding implies (r.erasing.outcome == A::Recorded and r.doomed == r.take and r.doomedFor == r.owner))
     and (inFlight(r.erasing) implies (r.doomed > 0 and isOwner(r.doomedFor)))
     and (r.pending implies r.erasing.outcome == A::Recorded)
@@ -486,9 +509,9 @@ pure def alwaysTheQuestionIsAboutAnUnfinishedRecording(r: Recorder): bool =
 pure def stepErasedOnlyWhenWrittenDown(before: Recorder, via: str, after: Recorder, out: List[Effect]): bool =
   out.every(e => match e {
     | WritesDown(w) => (via == "confirmDiscard" and before.ask == AskDiscard and w.take == before.take
-          and w.owner == before.owner and w.ticket == before.erasing.id + 1 and not(inFlight(before.erasing)))
+          and w.owner == before.owner and w.ticket == before.erasing.id + 1 and w.capture == before.capture and not(inFlight(before.erasing)))
         or (via == "resumeDiscard" and before.erasing.outcome == A::Recorded and w.ticket == before.erasing.id
-          and w.take == before.doomed and w.owner == before.doomedFor)
+          and w.take == before.doomed and w.owner == before.doomedFor and w.capture == 0)
     | Erases(x) => via == "writtenDown" and before.erasing.outcome == A::Recorded and x.ticket == before.erasing.id
         and x.take == before.doomed and x.owner == before.doomedFor
     | _ => true
@@ -499,6 +522,11 @@ pure def stepErasedOnlyWhenWrittenDown(before: Recorder, via: str, after: Record
 
 ```quint
 pure def sometimesAskingToDiscard(r: Recorder): bool = r.ask == AskDiscard and r.phase == Failed
+
+pure def sometimesAskingWhileRecording(r: Recorder): bool = r.ask == AskDiscard and r.phase == Recording and r.unsaved > 0
+
+pure def sometimesAskingBeforeTheFirstSecond(r: Recorder): bool =
+  r.ask == AskDiscard and r.phase == Recording and r.kept == 0 and r.unsaved == 0
 
 pure def sometimesDiscarding(r: Recorder): bool = r.phase == Discarding and not(r.pending)
 

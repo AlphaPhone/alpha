@@ -1,5 +1,5 @@
 // spec/app/assistant/index.md, "Story: Ask Alpha something"; spec/app/assistant/index.md, "Story: Stop a reply"
-import { ConversationRecord, TurnController, encodeTurnContext, learnPeer, notLearned, sendsOptionalFields, statusRead, type LocationObservation, type TurnContext, type TurnReply, type TurnResult, type TurnTransport } from "@elizaos/agent"
+import { ConversationRecord, TurnController, encodeTurnContext, findStoppedUserTurn, learnPeer, notLearned, sendsOptionalFields, statusRead, type LocationObservation, type TurnContext, type TurnReply, type TurnResult, type TurnTransport } from "@elizaos/agent"
 import * as KeyValueStore from "effect/persistence/KeyValueStore"
 import * as Conversation from "../../gen/app__assistant.effect.vibe"
 import * as Attachments from "../../gen/app__assistant__attachments.effect.vibe"
@@ -16,10 +16,11 @@ import * as Alarms from "../../gen/app__clock__alarms.effect.vibe"
 import * as Timers from "../../gen/app__clock__timers.effect.vibe"
 import * as World from "../../gen/app__clock__world.effect.vibe"
 import * as Contacts from "../../gen/app__contacts.effect.vibe"
+import * as Messages from "../../gen/app__messages.effect.vibe"
 import * as Reminders from "../../gen/app__reminders.effect.vibe"
 import * as Comms from "../../gen/app__phone__comms.effect.vibe"
 import * as Voice from "../../gen/app__voice.effect.vibe"
-import type { Machine as Speaker } from "../../gen/app__voice__output.effect.vibe"
+import { Machine as Speaker } from "../../gen/app__voice__output.effect.vibe"
 import { Machine as Shell, type View, canAgentGoHome, canReturnCommsView, showing } from "../../gen/app__shell.effect.vibe"
 import { Machine as Canvas } from "../../gen/app__shell__keyboard.effect.vibe"
 import { Machine as Layers } from "../../gen/app__shell__layers.effect.vibe"
@@ -27,6 +28,7 @@ import { syncClockNow } from "../clock/sync.vibe"
 import { type NoteTranscript, type NotesSelection, type RendererNote, noteSubjects, notesSelection, transcriptCurrent } from "../notes/selection.vibe"
 import type { NoteStore } from "../platform/notes.vibe"
 import { captureSmsSelection, type MessageSmsRequest, type SmsSelection, type SmsSelectionContext } from "../messages/agent-sim.vibe"
+import { Conversations } from "../messages/messages.vibe"
 import type { Telephony } from "../platform/telephony.vibe"
 import { syncRemindersNow } from "../reminders/reminders.vibe"
 import { Agent, isCloudFundsRefusal } from "../platform/agent.vibe"
@@ -36,7 +38,7 @@ import { type PageInFront, type TabHost, pageInFront } from "../platform/browser
 import type { VoiceBridge } from "../platform/voice.vibe"
 import { Refused, ask, outcomeOf } from "../platform/remote.vibe"
 import { Attempts, fresh } from "../runtime/attempts.vibe"
-import { CommsPrompts, type CommsPrompt, commsViewOf } from "../phone/comms.vibe"
+import { CommsPrompts, commsViewOf } from "../phone/comms.vibe"
 import { MailQuestions, withMail } from "../inbox/mail-context.vibe"
 import { MessagingBridge, type MessagingBridgeApi, type MessagingPlatform, boundedMessagingContext } from "../messaging/bridge.vibe"
 import { type Job, answer, applying, contained, following, reacting, run, started, stream, together, untimed } from "../runtime/reactor.vibe"
@@ -45,7 +47,8 @@ import { type SpokenChatContext, type SpokenChatLease, VoiceWords } from "../voi
 import { FileContext, documentObservation } from "./file-context.vibe"
 import { MediaReview, mediaReview } from "./media-review.vibe"
 import { agentWarmUp } from "./warm-up.vibe"
-import { type Attached, type Board, type DraftSeat, type HistoryBounds, type Line, Talk, talk } from "./talk.vibe"
+import { type ContactAttachmentScope, contactFileSendCurrent, contactFileTargetCurrent } from "./contact-attachments.vibe"
+import { type Attached, type Board, type CommsRequest, type DraftSeat, type HistoryBounds, type Line, type PostedMessage, Talk, talk } from "./talk.vibe"
 import { Views, carried, carriedAloud, delivery, handoffs, pageIn, preparedIn, resendWithoutMode } from "./views.vibe"
 import { attachmentAuthority, dropFiles, readFiles, rememberFiles, retireTranscript, sameBinding, stageFiles } from "./attachments.vibe"
 import { readMessage } from "./read-aloud.vibe"
@@ -403,10 +406,6 @@ effect function syncAlphaApps(actionResults: ReadonlyArray<{ readonly action: st
   }
 }
 
-effect function warmPlanner(): void!!Agent {
-  try ignore(ask(Agent, HttpClientRequest.bodyJsonUnsafe(HttpClientRequest.post("/api/turns/warm"), {}), Schema.Unknown))
-}
-
 // spec/app/assistant/index.md, "Every message asked is posted exactly once, under a new ticket, whoever gave the text, with the screen showing and never a sensitive one"; spec/app/assistant/index.md, "The first word of a reply shows that the agent has the message, and a withdrawal that came too late stops it there"
 // spec/app/assistant/composer.md, "A quoted message goes with the next send, until the owner removes the quote"
 /** Retiring the displayed archive also retires the picker's matching preview ticket. */
@@ -416,8 +415,8 @@ effect function bindArchiveAuthority(board: Board, authority: Attachments.Archiv
   if (Attachments.canClosePreview(try picker.get())) try ignore(picker.send({ type: "closePreview" }))
 }
 
-function posted(ticket: number, told: boolean, context: Conversation.Context): Stream.Stream<Conversation.Event, never, Views | Agent | KeyValueStore.KeyValueStore | Turns | Chats.Machine | Attachments.Machine | Conversation.Machine | Reply.Machine | Composer.Machine | Comms.Machine | MailQuestions | MediaReview | ScreenContext | NoteStore> {
-  const post = (queue: Queue.Queue<Conversation.Event, Cause.Done>, request: CommsPrompt | undefined) => effect {
+function posted(ticket: number, told: boolean, context: Conversation.Context): Stream.Stream<Conversation.Event, never, Views | Agent | KeyValueStore.KeyValueStore | Turns | Chats.Machine | Attachments.Machine | Conversation.Machine | Reply.Machine | Composer.Machine | ContactAttachmentScope | MailQuestions | MediaReview | ScreenContext | NoteStore> {
+  const post = (queue: Queue.Queue<Conversation.Event, Cause.Done>, request: CommsRequest | undefined) => effect {
     const { controller, streamed } = try Turns
     const { board } = try Talk
     const reply = try Reply.Machine
@@ -429,7 +428,7 @@ function posted(ticket: number, told: boolean, context: Conversation.Context): S
     const history = try Chats.Machine
     const conversation = try Conversation.Machine
     const seat = board.draftSeat
-    if (!(try ownsSeat(board, seat))) {
+    if (seat === undefined || !(try ownsSeat(board, seat))) {
       Queue.offerUnsafe(queue, { type: "refuse", ticket })
       Queue.endUnsafe(queue)
       return
@@ -440,10 +439,15 @@ function posted(ticket: number, told: boolean, context: Conversation.Context): S
     const composer = try (try Composer.Machine).get()
     const held = request === undefined ? composer.held : Composer.blankMessage
     const stage = board.staged
-    const staged = request === undefined && stage?.ticket === ticket && stage.hold === composer.hold && sameBinding(stage.binding, composer.binding) ? stage : undefined
+    const contact = request?.contact
+    const contactDraft = contact?.draft
+    const staged = stage?.ticket === ticket && (contactDraft !== undefined
+      ? stage.contactDraft === contactDraft && stage.binding.owner === seat.number && stage.binding.conversation === chats.chosen
+      : request === undefined && stage.contactDraft === undefined && stage.hold === composer.hold && sameBinding(stage.binding, composer.binding)) ? stage : undefined
     const files = staged?.files ?? []
     const quoted = board.line(chats.chosen, held.quote)
-    if (known === undefined || (text.trim() === "" && files.length === 0 && !held.mail && !held.transcript) || (held.quote > 0 && quoted === undefined) || held.files !== files.length) {
+    const expectedFiles = contactDraft?.files.length ?? held.files
+    if (known === undefined || (text.trim() === "" && files.length === 0 && !held.mail && !held.transcript) || (held.quote > 0 && quoted === undefined) || expectedFiles !== files.length) {
       Queue.offerUnsafe(queue, { type: "refuse", ticket })
       Queue.endUnsafe(queue)
       return
@@ -492,7 +496,9 @@ function posted(ticket: number, told: boolean, context: Conversation.Context): S
       currentComposer.hold === composer.hold && sameBinding(currentComposer.binding, composer.binding) &&
       !current.context.sensitive && current.context.selected && selected?.kind === "canonical-note" &&
       selected.id === transcript.offered.record.id && selected.revision === transcript.offered.record.revision)
-    if (!owns || !exact || (authority !== undefined && (checkedOwner === undefined || !Attachments.sameArchiveAuthority(authority, checkedOwner))) ||
+    const onContact = contact === undefined || (staged === board.staged
+      && board.snapshot().contactDraft === contactDraft && (try contactFileSendCurrent(contact)))
+    if (!owns || !exact || !onContact || (authority !== undefined && (checkedOwner === undefined || !Attachments.sameArchiveAuthority(authority, checkedOwner))) ||
       !Conversation.canFinish(current, ticket) || current.turn.stopping || current.context.revision !== context.revision || (try history.get()).chosen !== chats.chosen) {
       if (!exact && transcript !== undefined) try retireTranscript(transcript)
       try ignore(reply.send({ type: "decline", turn: ticket }))
@@ -502,6 +508,8 @@ function posted(ticket: number, told: boolean, context: Conversation.Context): S
     }
     if (authority !== undefined) try bindArchiveAuthority(board, authority)
     const pageTicket = (try history.get()).page.ticket
+    const releasePage = board.holdTurnPage(pageTicket)
+    try addFinalizer(() => sync(releasePage))
     const mine: Line = {
       id: `sent ${ticket}`, mine: true, text,
       ...(quoted === undefined ? {} : { quote: quoted.text }),
@@ -509,8 +517,10 @@ function posted(ticket: number, told: boolean, context: Conversation.Context): S
     }
     board.append(pageTicket, chats.chosen, mine)
     board.lastSent = text
-    board.lastSentWire = outgoing
-    board.lastSentId = ""
+    const previousStop = controller.stopped
+    if (previousStop !== null) controller.releaseStopped(previousStop.clientMessageId)
+    const post: PostedMessage = { turn: ticket, seat, record: known.record }
+    board.lastPost = post
     let heard = false
     board.change({ reply: "", label: "", failure: undefined })
     const preview = (written: string, provisional: boolean) => {
@@ -555,6 +565,13 @@ function posted(ticket: number, told: boolean, context: Conversation.Context): S
       const metadata = { ...screen, ...(told ? delivery(views.clientId, direct ? "direct-files-v1" : undefined) : {}), ...(quoted === undefined ? {} : { replyToMessageId: quoted.id }) }
       return tryPromise(() => controller.send({ text: outgoing, ...(images.length === 0 ? {} : { images }), ...(Object.keys(metadata).length === 0 ? {} : { metadata }) }, { stream: hooks, ...(enrolled === undefined ? {} : { headers: enrolled.headers }) })) catch () => undefined
     }
+    if (contact !== undefined && (!(try contactFileSendCurrent(contact)) || board.snapshot().contactDraft !== contactDraft)) {
+      board.drop(pageTicket, mine)
+      try ignore(reply.send({ type: "decline", turn: ticket }))
+      if (Conversation.canRefuse(try conversation.get(), ticket)) Queue.offerUnsafe(queue, { type: "refuse", ticket })
+      Queue.endUnsafe(queue)
+      return
+    }
     const first = try sent(asksDirect)
     const directFiles = asksDirect && !resendWithoutMode(first, asksDirect)
     const result = directFiles || !asksDirect ? first : try sent(false)
@@ -564,6 +581,10 @@ function posted(ticket: number, told: boolean, context: Conversation.Context): S
       return
     }
     const event = ended(ticket, heard, result)
+    const messageId = result?.kind === "AgentFailed" || result?.kind === "Replied" ? result.reply?.messageId : undefined
+    if (result !== undefined && "clientMessageId" in result) {
+      post.receipt = { clientMessageId: result.clientMessageId, ...(messageId ? { replyId: messageId } : {}) }
+    }
     if (authority !== undefined && event.type !== "refuse" && result !== undefined && "clientMessageId" in result) {
       const currentOwner = try attachmentAuthority()
       if (currentOwner !== undefined && Attachments.sameArchiveAuthority(authority, currentOwner)) {
@@ -571,10 +592,8 @@ function posted(ticket: number, told: boolean, context: Conversation.Context): S
         if (!(try rememberFiles(archive, result.clientMessageId, files))) board.change({ attachmentNotice: "Could not keep the sent attachments on this phone." })
       } else try bindArchiveAuthority(board, currentOwner)
     }
-    board.lastSentId = result !== undefined && "clientMessageId" in result ? result.clientMessageId : ""
     const ending = replied(ticket, result)
     const keepStreamed = ending.type === "stop" || (ending.type === "failed" && !Reply.refusedBeforeOutput(ending.kind))
-    const messageId = result?.kind === "AgentFailed" || result?.kind === "Replied" ? result.reply?.messageId : undefined
     board.change({
       ...(keepStreamed ? {} : { reply: "" }), label: "",
       ...(ending.type === "failed" ? { failure: {
@@ -587,7 +606,9 @@ function posted(ticket: number, told: boolean, context: Conversation.Context): S
     if (request !== undefined && (heard || event.type === "finish")) {
       const comms = try Comms.Machine
       const current = (try comms.get()).requests.find((one) => one.about === request.about)
-      if (current?.request === request.text) try contained(comms.send({ type: "requestSent", about: request.about }, "Owner"), "clearing the accepted request")
+      const sameDraft = contactDraft === undefined || board.snapshot().contactDraft === contactDraft
+      if (sameDraft && current?.request === request.text) try contained(comms.send({ type: "requestSent", about: request.about }, "Owner"), "clearing the accepted request")
+      if (contactDraft !== undefined && board.snapshot().contactDraft === contactDraft) board.change({ contactDraft: undefined })
     }
     const finishing = Conversation.canFinish(try conversation.get(), ticket)
     if (result?.kind === "Replied" && finishing) {
@@ -648,10 +669,11 @@ function posted(ticket: number, told: boolean, context: Conversation.Context): S
     Queue.offerUnsafe(queue, event)
     Queue.endUnsafe(queue)
   }
-  return Stream.callback<Conversation.Event, never, Views | Agent | KeyValueStore.KeyValueStore | Turns | Chats.Machine | Attachments.Machine | Conversation.Machine | Reply.Machine | Composer.Machine | Comms.Machine | MailQuestions | MediaReview | ScreenContext | NoteStore>((queue) => effect {
+  return Stream.callback<Conversation.Event, never, Views | Agent | KeyValueStore.KeyValueStore | Turns | Chats.Machine | Attachments.Machine | Conversation.Machine | Reply.Machine | Composer.Machine | ContactAttachmentScope | MailQuestions | MediaReview | ScreenContext | NoteStore>((queue) => effect {
     const { board, writer } = try Talk
-    const request = board.postingRequest
-    board.postingRequest = undefined
+    const pending = board.postingRequest
+    const request = pending?.ticket === ticket ? pending.request : undefined
+    if (pending?.ticket === ticket) board.postingRequest = undefined
     const { controller } = try Turns
     const posted = try writer.withPermitsIfAvailable(1)(Effect.ensuring(post(queue, request), effect {
       if (controller.pending) try ignore(tryPromise(() => controller.interrupt()))
@@ -671,27 +693,77 @@ effect function aborted(turn: number): Conversation.Event!!Turns {
 }
 
 // spec/app/assistant/index.md, "The read says the reply finished anyway, was stopped for sure, was never recorded, or to look later"
-/** The message is found by the id its turn was posted under, or by its text where the post never said which. */
-effect function checked(recheck: number): Conversation.Event!!(Agent | Talk | Chats.Machine) {
+effect function checked(recheck: number): Conversation.Event!!(Agent | Talk | Turns | Chats.Machine | Conversation.Machine) {
+  const unread = { type: "reconcile", ticket: recheck, found: "Unread" } as const
   return effect {
     const { board } = try Talk
-    const chats = try (try Chats.Machine).get()
-    const known = board.known(chats.chosen)
-    if (known === undefined) return { type: "reconcile", ticket: recheck, found: "Unread" }
-    const { messages } = try ask(Agent, HttpClientRequest.get(`/api/conversations/${encodeURIComponent(known.record.id)}/messages`), page())
-    const asked = messages.findLastIndex((one) => one.role === "user" && (board.lastSentId === "" ? one.text === board.lastSentWire : one.clientMessageId === board.lastSentId))
-    const found: Conversation.Found = asked < 0 ? "Unrecorded" : messages.slice(asked + 1).some((one) => one.role === "assistant") ? "Ended" : "Unended"
+    const post = board.lastPost
+    if (post === undefined || !(try ownsSeat(board, post.seat))) return unread
+    const conversation = try Conversation.Machine
+    const chats = try Chats.Machine
+    const current = effect {
+      const state = try conversation.get()
+      const shown = board.known((try chats.get()).chosen)?.record
+      return board.lastPost === post && board.draftSeat === post.seat && Conversation.canReconcile(state, recheck)
+        && state.turn.send.id === post.turn && shown?.id === post.record.id && shown.roomId === post.record.roomId
+    }
+    if (!(try current)) return unread
+    const { controller } = try Turns
+    const stopped = controller.stopped
+    const stoppingThisPost = stopped?.conversation.id === post.record.id && stopped.conversation.roomId === post.record.roomId
+    const id = post.receipt?.clientMessageId ?? (stoppingThisPost ? stopped.clientMessageId : undefined)
+    if (id === undefined) return unread
+    const { messages, hasMore } = try ask(Agent, HttpClientRequest.get(`/api/conversations/${encodeURIComponent(post.record.id)}/messages`), page())
+    if (!(try ownsSeat(board, post.seat)) || !(try current)) return unread
+    const receipt = post.receipt
+    if (receipt !== undefined && receipt.clientMessageId !== id) return unread
+    const asked = findStoppedUserTurn(messages, id)
+    const exact = receipt?.replyId === undefined ? undefined : messages.find((one) => one.id === receipt.replyId && one.role === "assistant")
+    const following = asked === undefined ? undefined : messages[messages.lastIndexOf(asked) + 1]
+    const history: Conversation.HistoryEvidence = asked === undefined
+      ? { tag: "MissingMessage", complete: hasMore === false && receipt?.replyId === undefined }
+      : { tag: "RecordedMessage", answer: exact !== undefined ? (exact.failureKind === "aborted" ? "MatchedAbort" : "MatchedReply")
+        : receipt?.replyId !== undefined || following?.role === "assistant" ? "UnknownReply" : "MissingReply" }
+    const found = Conversation.observedHistory(history)
+    if (found !== "Unread" && stoppingThisPost && stopped.clientMessageId === id) controller.releaseStopped(id)
     return { type: "reconcile", ticket: recheck, found }
-  } catch () => ({ type: "reconcile", ticket: recheck, found: "Unread" })
+  } catch () => unread
 }
 
 // spec/app/assistant/index.md, "Stored attachments are posted with their message, and a message whose attachments could not be stored never left"
-effect function staged(ticket: number, attachments: number): Conversation.Event!!(Conversation.Machine | Composer.Machine | Talk | MailQuestions | Agent) {
+effect function stagedContactFiles(ticket: number, count: number, request: CommsRequest, contact: NonNullable<CommsRequest["contact"]>): Conversation.Event!!(ContactAttachmentScope | Chats.Machine | Agent) {
+  const conversation = try Conversation.Machine
+  const history = try Chats.Machine
+  const { board } = try Talk
+  const rejected: Conversation.Event = { type: "uploaded", ticket, ok: false }
+  const seat = board.draftSeat
+  const chosen = (try history.get()).chosen
+  const draft = contact.draft
+  const authority = try attachmentAuthority()
+  if (seat === undefined || chosen === 0 || draft.files.length !== count || authority === undefined || !Attachments.sameArchiveAuthority(draft.target.authority, authority)
+    || !(try contactFileSendCurrent(contact)) || !Conversation.canUploaded(try conversation.get(), ticket)
+    || board.snapshot().contactDraft !== draft || board.postingRequest?.request !== request) return rejected
+  const key = fresh()
+  if (!(try stageFiles(key, draft.files))) return rejected
+  const pending = try conversation.get()
+  if (!Conversation.canUploaded(pending, ticket) || pending.turn.stopping || board.postingRequest?.request !== request
+    || board.snapshot().contactDraft !== draft || !(try contactFileSendCurrent(contact))
+    || board.draftSeat !== seat || (try history.get()).chosen !== chosen) {
+    try dropFiles(key)
+    return rejected
+  }
+  board.staged = { ticket, hold: 0, binding: { owner: seat.number, conversation: chosen }, key, files: draft.files, authority, contactDraft: draft }
+  return { type: "uploaded", ticket, ok: true }
+}
+
+effect function staged(ticket: number, attachments: number): Conversation.Event!!(ContactAttachmentScope | Chats.Machine | Composer.Machine | MailQuestions | Agent) {
   const conversation = try Conversation.Machine
   const composer = try Composer.Machine
   const before = try composer.get()
   const turn = (try conversation.get()).turn
   const { board } = try Talk
+  const request = board.postingRequest?.ticket === ticket ? board.postingRequest.request : undefined
+  if (request?.contact !== undefined) return try stagedContactFiles(ticket, attachments, request, request.contact)
   const snapshot = board.snapshot()
   const files = sameBinding(snapshot.filesBinding, before.binding) ? snapshot.files : []
   const mail = try MailQuestions
@@ -759,7 +831,7 @@ function giveBack(board: Board) {
   board.outgoing = ""
 }
 
-function carryTurn(fx: Conversation.Effect): Job<Conversation.Event, Views | Agent | KeyValueStore.KeyValueStore | Turns | Chats.Machine | Attachments.Machine | Composer.Machine | Conversation.Machine | Reply.Machine | Comms.Machine | MailQuestions | MediaReview | ScreenContext | NoteStore, []> {
+function carryTurn(fx: Conversation.Effect): Job<Conversation.Event, Views | Agent | KeyValueStore.KeyValueStore | Turns | Chats.Machine | Attachments.Machine | Composer.Machine | Conversation.Machine | Reply.Machine | ContactAttachmentScope | MailQuestions | MediaReview | ScreenContext | NoteStore, []> {
   return match (fx) {
     when { tag: "CheckSupport", let support }: answer("support", supported(support), { type: "supported", ticket: support, ok: false, takes: false });
     when { tag: "Upload", let ticket, let attachments }: answer("upload", staged(ticket, attachments), { type: "uploaded", ticket, ok: false });
@@ -873,7 +945,6 @@ effect function newest(page: number, conversation: number): Chats.Event!!(Agent 
   return read.type === "listed" ? { type: "latest", page, ok: read.ok, ids: read.ids, conversation, ...free } : read
 }
 
-// The pinned resident returns at most this many rows on either side of an around anchor.
 const historyRadius = 100
 
 /** Prove the edges of a centered window, where a full side alone cannot say anything about the row past it. */
@@ -905,7 +976,7 @@ effect function historyBounds(path: string, pivot: string | undefined, answer: R
 
 // spec/app/assistant/chats.md, "A page of the conversation showing is taken only from the newest asking"; spec/app/assistant/chats.md, "Older or newer messages are read around a message of the conversation showing"; spec/app/assistant/chats.md, "A read of the latest messages answered 404 asks the agent's list whether the conversation is still there"; spec/app/assistant/reply.md, "A failure refused before any output replaces the streamed text; any other failure is added after it"; spec/app/assistant/reply.md, "Out of funds is refused before any output, is never spoken, and offers only Manage plan"
 /** A page of the conversation showing, each message numbered as Alpha first saw it: the page counts up to its highest number, which a scroll names. A 404 to a read of the latest messages is told as such, for the agent's list to decide. */
-effect function paged(conversation: number, around: number, ticket: number): Chats.Event!!(Agent | Talk | Chats.Machine | Attachments.Machine | Composer.Machine) {
+effect function paged(conversation: number, around: number, ticket: number): Chats.Event!!(Agent | Talk | Chats.Machine | Attachments.Machine | Composer.Machine | Speaker) {
   return effect {
     const { board } = try Talk
     const seat = board.draftSeat
@@ -937,7 +1008,17 @@ effect function paged(conversation: number, around: number, ticket: number): Cha
       !Attachments.sameArchiveAuthority(seat.authority, currentOwner) || current.chosen !== conversation ||
       current.page.ticket !== ticket || owner !== (try composer.get()).binding.owner) return { type: "paged", ticket, ok: false, messages: 0 }
     try bindArchiveAuthority(board, currentOwner)
-    if (seat !== board.draftSeat) return { type: "paged", ticket, ok: false, messages: 0 }
+    const reading = try (try Chats.Machine).get()
+    const draft = try composer.get()
+    const speaker = try (try Speaker).get()
+    if (seat !== board.draftSeat || reading.chosen !== conversation || reading.page.ticket !== ticket ||
+      draft.binding.owner !== owner) return { type: "paged", ticket, ok: false, messages: 0 }
+    const readers = [
+      { conversation: draft.binding.conversation, message: draft.editor.quote },
+      { conversation: draft.binding.conversation, message: draft.held.quote },
+      { conversation, message: Chats.making(reading) ? reading.forkAt : 0 },
+      { conversation, message: speaker.text === "Message" && (speaker.stage === "Waiting" || speaker.stage === "Preparing") ? speaker.item : 0 },
+    ].filter(({ conversation, message }) => conversation > 0 && message > 0)
     const recorded = messages.map((one): Line => {
       const key = one.clientMessageId
       const attachments = key !== undefined && authority !== undefined && currentOwner !== undefined &&
@@ -950,7 +1031,7 @@ effect function paged(conversation: number, around: number, ticket: number): Cha
         ...(attachments === undefined ? {} : { attachments }),
       }
     })
-    const preview = board.takeHistory(ticket, conversation, recorded, redacted, bounds)
+    const preview = board.takeHistory(ticket, conversation, recorded, redacted, bounds, readers)
     if (preview !== undefined) {
       const picker = try Attachments.Machine
       try ignore(picker.send({ type: "closePreview" }, (state) => state.preview === preview && board.snapshot().preview === undefined))
@@ -1254,8 +1335,9 @@ const looked = started(effect {
   let taken: string | undefined
   const page = Stream.zipLatest(shell.changes, settings.changes)
   const messaging = Stream.zipLatest(bridge.changes, prefs.changes)
-  const selection = Stream.zipLatest(noteSubjects, conversation.changes)
-  try Stream.runForEach(Stream.zipLatest(Stream.zipLatest(page, messaging), selection), effect ([[[shown, pages], [msgSnap, prefState]], [subject]]) => {
+  const contacts = try Contacts.Machine
+  const selection = Stream.zipLatest(Stream.zipLatest(noteSubjects, conversation.changes), contacts.changes)
+  try Stream.runForEach(Stream.zipLatest(Stream.zipLatest(page, messaging), selection), effect ([[[shown, pages], [msgSnap, prefState]], [[subject], contact]]) => {
     const view = shown.trail.at(-1)
     const offer = board.snapshot().transcript
     const transcript = offer?.offered
@@ -1269,8 +1351,10 @@ const looked = started(effect {
     const sensitive = (view === "Settings" && Pages.sensitive(pages)) || msgSensitive
     const { note } = subject
     const msgSelected = !sensitive && platform !== undefined && shareAllowed && msgCtx !== undefined && msgCtx.authenticated && msgCtx.conversation !== undefined
-    const selected = (view === "Notes" && !sensitive && note > 0) || msgSelected
-    const seen = `${view ?? ""} ${section} ${sensitive} ${selected ? (view === "Notes" ? note : msgCtx?.conversation?.id ?? "msg") : ""}`
+    const contactSelected = view === "Contacts" && contact.front && Contacts.shown(contact) && contact.form === "Shut" && !contact.confirming
+    const selected = (view === "Notes" && !sensitive && note > 0) || msgSelected || contactSelected
+    const selectionKey = contactSelected ? `${contact.contact} ${contact.card.ticket}` : view === "Notes" ? note : msgCtx?.conversation?.id ?? "msg"
+    const seen = `${view ?? ""} ${section} ${sensitive} ${selected ? selectionKey : ""}`
     if (seen === taken) return
     const event: Conversation.Event = { type: "look", showing: view === undefined ? { tag: "Home" } : { tag: "App", view }, zone: zone(), day: 0, selected, sensitive, section }
     if (!Conversation.enabled(try conversation.get(), event) || (try contained(conversation.send(event), "telling the screen"))) taken = seen
@@ -1328,23 +1412,34 @@ const bound = started(effect {
 }, "binding the composer")
 
 // spec/app/phone/comms.md, "Each subject keeps one request to Alpha, separate from its draft"
-effect function postRequest(request: CommsPrompt): void!!(Comms.Machine | Conversation.Machine | Talk) {
+effect function postRequest(request: CommsRequest): void!!ContactAttachmentScope {
   const comms = try (try Comms.Machine).get()
-  if (comms.key !== request.about || !comms.requests.some((one) => one.about === request.about && one.request === request.text)) return
+  const text = comms.requests.find((one) => one.about === request.about)?.request ?? ""
+  if (comms.key !== request.about || text !== request.text) return
   const conversation = try Conversation.Machine
   const where = try conversation.get()
-  const event: Conversation.Event = { type: "ask", hold: 0, prompt: where.turn.send.id + 1, attachments: 0 }
-  if (!Conversation.enabled(where, event)) return
+  const ticket = where.turn.send.id + 1
+  const contact = request.contact
   const { board } = try Talk
-  board.postingRequest = request
-  if (!(try contained(conversation.send(event), "asking about the subject"))) board.postingRequest = undefined
+  if (contact !== undefined && (board.snapshot().contactDraft !== contact.draft || !(try contactFileSendCurrent(contact)))) return
+  const event: Conversation.Event = contact === undefined
+    ? { type: "ask", hold: 0, prompt: ticket, attachments: 0 }
+    : { type: "askContactFiles", prompt: ticket, attachments: contact.draft.files.length }
+  if (!Conversation.enabled(where, event)) return
+  const offered = { ticket, request }
+  board.postingRequest = offered
+  if (!(try contained(conversation.send(event), "asking about the subject")) && board.postingRequest === offered) board.postingRequest = undefined
 }
 
 // spec/app/assistant/index.md, "A message is asked when the agent can be reached, the screen may be sent and no turn is in flight"
-export effect function askComms(request: CommsPrompt): void!!(Chats.Machine | Composer.Machine | Comms.Machine | Conversation.Machine | Talk) {
+export effect function askComms(request: CommsRequest): void!!(Chats.Machine | Composer.Machine | ContactAttachmentScope) {
   const { board } = try Talk
   const conversation = try (try Conversation.Machine).get()
-  if (request.text.trim() === "" || request.text.length > Composer.textLimit || !Conversation.askable(conversation) || board.postingRequest !== undefined || board.waitingRequest !== undefined || board.sendWhenMade) return
+  if (request.text.length > Composer.textLimit || !Conversation.askable(conversation) || board.postingRequest !== undefined || board.waitingRequest !== undefined || board.sendWhenMade) return
+  const contact = request.contact
+  if (contact === undefined && request.text.trim() === "") return
+  if (contact !== undefined && (board.snapshot().contactDraft !== contact.draft || contact.draft.target.about !== request.about
+    || !(try contactFileSendCurrent(contact)))) return
   const chats = try Chats.Machine
   if ((try chats.get()).chosen !== 0) {
     try postRequest(request)
@@ -1352,7 +1447,7 @@ export effect function askComms(request: CommsPrompt): void!!(Chats.Machine | Co
   }
   board.waitingRequest = request
   const free = freedom(conversation, try (try Composer.Machine).get(), 0)
-  if (!(try contained(chats.send({ type: "start", ...free }), "opening a conversation for the request"))) board.waitingRequest = undefined
+  if (!(try contained(chats.send({ type: "start", ...free }), "opening a conversation for the request")) && board.waitingRequest === request) board.waitingRequest = undefined
 }
 
 // spec/app/assistant/index.md, "When another conversation is shown, the last turn stays behind with its own"
@@ -1368,6 +1463,15 @@ const requested = started(effect {
       leftFor = shown.chosen
       if ((try chats.get()).chosen !== shown.chosen) return
     }
+    const turn = (try conversation.get()).turn
+    const staged = board.staged
+    if (staged?.contactDraft !== undefined && (staged.ticket !== turn.send.id || !Conversation.inFlight(turn))) {
+      board.staged = undefined
+      if (staged.key !== undefined) try dropFiles(staged.key)
+    }
+    const posting = board.postingRequest
+    if (posting?.request.contact !== undefined && (turn.send.id > posting.ticket
+      || (turn.send.id === posting.ticket && !Conversation.inFlight(turn)))) board.postingRequest = undefined
     const request = board.waitingRequest
     if (request === undefined || Chats.making(shown)) return
     board.waitingRequest = undefined
@@ -1392,13 +1496,10 @@ const submitted = started(effect {
   try Stream.runForEach((try CommsPrompts).submissions, askComms)
 }, "asking what was typed on the communications dock")
 
-// spec/app/assistant/dock.md, "A drag released asks the shell once for where it landed, and keeps a sheet's height"; spec/app/assistant/dock.md, "A gesture asks the shell to raise Ask Alpha, to go back a step or two, or nothing; a press that did not move is a tap on its control"; spec/app/assistant/dock.md, "Focusing or tapping the composer on the bar opens Ask Alpha as a sheet"
-function carryDock(fx: Dock.Effect): Job<Dock.Event, Shell | Agent, []> {
+// spec/app/assistant/dock.md, "A drag released asks the shell once for where it landed, and keeps a sheet's height"; spec/app/assistant/dock.md, "A gesture asks the shell to raise Ask Alpha, to go back a step or two, or nothing; a press that did not move is a tap on its control"; spec/app/assistant/dock.md, "A tap of Alpha's mark opens the sheet, and a tap of the open sheet's handle fills the screen"
+function carryDock(fx: Dock.Effect): Job<Dock.Event, Shell, []> {
   return match (fx) {
-    when { tag: "Raise", let detent }: run("raise", effect {
-      fork.detached warmPlanner()
-      try contained((try Shell).send({ type: "raise", detent }), "raising Ask Alpha")
-    });
+    when { tag: "Raise", let detent }: run("raise", effect { try contained((try Shell).send({ type: "raise", detent }), "raising Ask Alpha") });
     when { tag: "Lower", let steps }: run("lower", effect {
       const shell = try Shell
       for (const _ of Array.from({ length: steps })) try contained(shell.send({ type: "goBack" }), "lowering Ask Alpha")
@@ -1406,11 +1507,8 @@ function carryDock(fx: Dock.Effect): Job<Dock.Event, Shell | Agent, []> {
     when { tag: "Tap" }: run("tap", effect {
       const shell = try Shell
       const current = try shell.get()
-      for (const ask of Dock.focused(current.assistant)) {
-        if (ask.tag === "Raise") {
-          fork.detached warmPlanner()
-          try contained(shell.send({ type: "raise", detent: ask.detent }), "raising Ask Alpha")
-        }
+      for (const ask of Dock.tapped(current.assistant)) {
+        if (ask.tag === "Raise") try contained(shell.send({ type: "raise", detent: ask.detent }), "raising Ask Alpha")
       }
     });
   }
@@ -1487,6 +1585,22 @@ export effect function openContactChatSearch(route: number, person: string): voi
   }
 }
 
+const retireContactAttachments = started(effect {
+  const shell = try Shell
+  const contacts = try Contacts.Machine
+  const conversation = try Conversation.Machine
+  const comms = try Comms.Machine
+  const { board } = try Talk
+  const changes = Stream.mergeAll([Stream.as(shell.changes, undefined), Stream.as(contacts.changes, undefined),
+    Stream.as(conversation.changes, undefined), Stream.as(comms.changes, undefined)], { concurrency: "unbounded" })
+  try Stream.runForEach(changes, effect () => {
+    const draft = board.snapshot().contactDraft
+    if (draft !== undefined && !(try contactFileTargetCurrent(draft.target)) && board.snapshot().contactDraft === draft) {
+      board.change({ contactDraft: undefined })
+    }
+  })
+}, "leaving the Contact attachment draft")
+
 const retireContactSearch = started(effect {
   const shell = try Shell
   const contacts = try Contacts.Machine
@@ -1498,6 +1612,31 @@ const retireContactSearch = started(effect {
     }
   })
 }, "retiring search after leaving its contact")
+
+// spec/app/contacts/index.md, "Returning to a contact on the Ask Alpha stage reads that exact card again"; spec/app/messages/index.md, "Returning from Phone restores the conversation the Ask Alpha stage held"
+effect function stageRestoration(previous: Comms.StageEntry): (((current: () => boolean) => void!!) | undefined)!!(Contacts.Machine | Messages.Machine | Conversations) {
+  if (previous.app === "ContactsApp" && previous.subject === "ContactSubject") {
+    const contacts = try Contacts.Machine
+    const before = try contacts.get()
+    const event = { type: "restoreStageContact", contact: before.contact, ticket: before.list.ticket } as const
+    if (previous.key !== `contacts:contact:${event.contact}` || !Contacts.canRestoreStageContact(before, event.contact, event.ticket)) return undefined
+    return effect (current: () => boolean) => {
+      try contained(contacts.send(event, current), "reading the earlier Contacts card")
+    }
+  }
+  if (previous.app === "MessagesApp" && previous.subject === "ThreadSubject") {
+    const thread = Number(/^messages:thread:([1-9]\d*)$/.exec(previous.key)?.[1])
+    if (!Number.isSafeInteger(thread) || Option.isNone(try (try Conversations).get(thread))) return undefined
+    const messages = try Messages.Machine
+    const before = try messages.get()
+    const event = { type: "restoreStageThread", thread, ticket: before.list.ticket } as const
+    if (!Messages.canRestoreStageThread(before, event.thread, event.ticket)) return undefined
+    return effect (current: () => boolean) => {
+      try contained(messages.send(event, current), "reading the earlier Messages conversation")
+    }
+  }
+  return undefined
+}
 
 // spec/app/assistant/index.md, "Back closes a review, then search, then a quote or an edit, one at a time; with none of them open Back is the shell's"
 export const assistantBack = effect {
@@ -1526,8 +1665,25 @@ export const assistantBack = effect {
   if (previous !== undefined) {
     const shell = try Shell
     const view = commsViewOf(previous.app)
-    if (canReturnCommsView(try shell.get(), view) && (try contained(comms.send({ type: "stageReturned" }, "Owner"), "returning to the earlier communications stage"))) {
-      return try contained(shell.send({ type: "returnCommsView", previous: view }), "returning to the earlier communications app")
+    const where = try shell.get()
+    if (where.assistant === "Sheet" && canReturnCommsView(where, view)) {
+      const fromSameRoute = () => Effect.runSync(shell.get()).route === where.route
+      const returned = try contained(comms.send({ type: "stageReturned" }, "Owner", (state) => {
+        const entry = state.stage.at(-1)
+        return fromSameRoute() && entry?.app === previous.app && entry.subject === previous.subject && entry.key === previous.key
+      }), "returning to the earlier communications stage")
+      if (!returned) return true
+      const restoration = try stageRestoration(previous)
+      const opened = try contained(shell.send({ type: "returnCommsView", previous: view }, (state) => state.route === where.route), "returning to the earlier communications app")
+      if (opened && restoration !== undefined) {
+        const device = try Device
+        const exactVisit = () => {
+          const current = Effect.runSync(shell.get())
+          return current.route === where.route + 1 && showing(current, view) && current.assistant === "Sheet" && Effect.runSync(device.showing())
+        }
+        if (exactVisit()) try restoration(exactVisit)
+      }
+      return true
     }
   }
   return false
@@ -1544,7 +1700,7 @@ export const assisting = Layer.provideMerge(
     reacting(Dock, { carry: carryDock }),
     picker,
     reacting(Locator, { carry: carryLocator }),
-    reached, looked, opening, saving, bound, requested, reviewedInFiles, submitted, allowing, forgetting, rested, keyboardRest, steppingBack, retireContactSearch, carried, carriedAloud, agentWarmUp,
+    reached, looked, opening, saving, bound, requested, reviewedInFiles, submitted, allowing, forgetting, rested, keyboardRest, steppingBack, retireContactSearch, retireContactAttachments, carried, carriedAloud, agentWarmUp,
   ),
   Layer.mergeAll(Layer.fresh(turns), talk, handoffs),
 )

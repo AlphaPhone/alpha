@@ -1,6 +1,7 @@
 // spec/app/account/billing.md, "Story: Pay in the browser"; spec/app/account/billing.md, "Story: Keep billing to its sign-in"
 import { type Account as CloudProfile, checkoutFromResponse, CloudError, isCredentialInvalid, networkError, pathOf, type PlanOffer, routesByName } from "@elizaos/cloud"
 import * as Codes from "../../gen/app__account__codes.effect.vibe"
+import { changeIsOpen } from "./change.vibe"
 import * as Billing from "../../gen/app__account__billing.effect.vibe"
 import { type Account, Cloud, openCloudCheckout } from "../platform/cloud.vibe"
 import { billReturned, Device, takeBillingReturn } from "../platform/device.vibe"
@@ -65,6 +66,7 @@ export effect function choosePurchase(catalog: Catalog, offer: PlanOffer, review
     return sameBuyer(buyer, try currentBuyer(cloud)) ? { offers, plan } : undefined
   } catch () => undefined
   try (try AccountWrites).admission.withPermits(1)(effect {
+    if (try changeIsOpen()) return
     if (!(try accountIsInFront) || !Codes.quiet(try (try Codes.Machine).get())) return
     const state = try billing.get()
     const tier = tierOf(offer)

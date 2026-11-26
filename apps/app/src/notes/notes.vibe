@@ -5,6 +5,7 @@ import * as Editor from "../../gen/app__notes__editor.effect.vibe"
 import * as Link from "../../gen/app__notes__linkNote.effect.vibe"
 import * as Voice from "../../gen/app__notes__voice.effect.vibe"
 import * as Recorder from "../../gen/app__notes__recording.effect.vibe"
+import * as Mic from "../../gen/app__notes__microphone.effect.vibe"
 import * as Previous from "../../gen/app__notes__previous.effect.vibe"
 import * as Transfer from "../../gen/app__notes__transfer.effect.vibe"
 import * as Trash from "../../gen/app__notes__trash.effect.vibe"
@@ -292,7 +293,13 @@ const opening = started(effect {
   const visible = Stream.changes(Stream.concat(Stream.fromEffect(device.showing()), device.visible))
   try Stream.runForEach(Stream.zipLatest(changes, visible), effect ([shown, front]) => {
     if (shown && front) try enter()
+    if (!shown || !front) {
+      const menu = try Actions.Machine
+      const actions = try menu.get()
+      if (actions.open || actions.awaiting) try ignore(menu.send({ type: "left" }, phone))
+    }
     if (!shown) {
+      try ignore((try Mic.Machine).send({ type: "left" }, phone))
       const list = try Notes.Machine
       const state = try list.get()
       if (state.selection !== "NoSelection" || state.selectionResult !== "NotReported") try ignore(list.send({ type: "left" }, phone))
@@ -319,6 +326,11 @@ effect function took() {
     try ignore(recorder.send({ type: "back" }, "Owner"))
     return true
   }
+  const mic = try Mic.Machine
+  if (Mic.canCloseBrowserDenial(try mic.get(), "Owner")) {
+    try ignore(mic.send({ type: "closeBrowserDenial" }, "Owner"))
+    return true
+  }
   if (Link.canBack(try link.get())) {
     try ignore(link.send({ type: "back" }, "Owner"))
     return true
@@ -329,6 +341,11 @@ effect function took() {
   }
   if (Trash.canBack(try trash.get())) {
     try ignore(trash.send({ type: "back" }, "Owner"))
+    return true
+  }
+  const menu = try Actions.Machine
+  if (Actions.canBack(try menu.get())) {
+    try ignore(menu.send({ type: "back" }, "Owner"))
     return true
   }
   if (Editor.canBack(try editor.get())) {

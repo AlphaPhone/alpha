@@ -2,7 +2,7 @@
 import { MMS_ATTACHMENT_TYPES, MMS_MAX_ATTACHMENTS, MMS_MAX_BODY, MMS_MAX_RECIPIENTS, MMS_MAX_TOTAL_BYTES, normalizePhoneNumber, operationIdOf, type OperationId, type PhoneNumber, type SmsSendStatus, type ThreadId } from "@elizaos/os-bridges"
 import { telephony, type Telephony } from "../platform/telephony.vibe"
 import { Vault, type SmsDraftSlot, type VaultFailed } from "../platform/vault.vibe"
-import { canonicalDraftRecipients, decodeDraftRecord, draftSlot, encodeDraftRecord, sameDraftSource, type DraftRecord, type DraftSource } from "./draft-record.vibe"
+import { androidInboundOf, canonicalDraftRecipients, decodeDraftRecord, draftSlot, encodeDraftRecord, sameDraftSource, type DraftRecord, type DraftSource } from "./draft-record.vibe"
 
 type Secret = Redacted.Redacted<string>
 type Reason = "identity" | "malformed" | "conflict" | "storage" | "pending-legacy-send"
@@ -63,14 +63,16 @@ export effect function settleDraftRecord(held: HeldDraft, sent: SentDraft): { re
   if (record?.completedOperation === sent.operation) return { kind: "settled", draft: held }
   if (record === null || record.revision !== sent.revision) return { kind: "changed", draft: held }
   const blank = { revision: record.revision + 1, body: "", author: "Nobody" as const, pictures: [], completedOperation: sent.operation }
+  const androidInbound = androidInboundOf(record)
   const next: DraftRecord = sent.source.kind === "new"
-    ? { ...blank, source: sent.source, recipients: "" }
+    ? { ...blank, source: sent.source, recipients: "", ...(androidInbound === undefined ? {} : { androidInbound }) }
     : { ...blank, source: sent.source }
   return { kind: "settled", draft: try writeDraftRecord(held, next) }
 }
 
 module legacy {
   import { allowsTestMocks } from "../platform/build.ts"
+  import { replyTo } from "../platform/portReply.ts"
 
   interface DraftPort extends EventTarget { postMessage(data: string): void }
   type Request = { kind: "read"; threadId: string | null }
@@ -96,10 +98,8 @@ module legacy {
         reject(new Error("The installed Messages draft could not be confirmed."))
       }
       function received(event: Event) {
-        if (!(event instanceof MessageEvent) || typeof event.data !== "string" || event.data.length > 16 * 1024 * 1024) return
-        let reply: unknown
-        try { reply = JSON.parse(event.data) } catch { return }
-        if (typeof reply !== "object" || reply === null || !("requestId" in reply) || reply.requestId !== requestId) return
+        const reply = replyTo(event, requestId, 16 * 1024 * 1024)
+        if (reply === undefined) return
         cleanup()
         if (Object.keys(reply).length === 2 && "result" in reply) resolve(reply.result)
         else reject(new Error("The installed Messages draft request was refused."))

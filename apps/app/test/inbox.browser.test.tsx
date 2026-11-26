@@ -6,19 +6,24 @@ import "../src/main.css";
 
 afterEach(closeAll);
 
-it('Keep a message and its list on a wide phone canvas (spec/app/shell/keyboard.md, "Story: Read everything at the text size I chose"; spec/app/inbox/message.md, "Story: Read a message")', async () => {
+// spec/app/shell/keyboard.md, "Story: Read everything at the text size I chose"; spec/app/inbox/message.md, "Story: Read a message"
+it("Keep a message and its list on a wide phone canvas", async () => {
   await page.viewport(1280, 800);
   const world = { ...scene(), phone: true };
   await open(world, only("home", "view:Inbox", "assistant"));
   await page.getByRole("button", { name: /^Inbox(?![A-Za-z])/ }).click();
-  const row = page.getByRole("button", { name: /Standup notes/ });
+  const subview = async (name: string) => {
+    const selector = `[data-alpha-subview="${name}"]`;
+    await expect.poll(() => document.querySelector(selector)).toBeInstanceOf(HTMLElement);
+    const element = document.querySelector(selector);
+    if (!element) throw new Error(`Inbox did not draw ${name}`);
+    return page.elementLocator(element);
+  };
+  const list = await subview("inbox-list");
+  const row = list.getByRole("button", { name: /Standup notes/ });
   await row.click();
-  await expect.element(page.getByText(/Quick notes from standup/)).toBeVisible();
-  const listPane = document.querySelector('[data-alpha-subview="inbox-list"]');
-  const readerPane = document.querySelector('[data-alpha-subview="inbox-detail"]');
-  if (!listPane || !readerPane) throw new Error("Inbox did not draw its list and reader");
-  const list = page.elementLocator(listPane);
-  const reader = page.elementLocator(readerPane);
+  const reader = await subview("inbox-detail");
+  await expect.element(reader.getByText(/Quick notes from standup/)).toBeVisible();
   await expect.element(row).toHaveAttribute("aria-current", "true");
   await expect.poll(() => {
     const columns = [list.element(), reader.element()].map((pane) => pane.getBoundingClientRect());

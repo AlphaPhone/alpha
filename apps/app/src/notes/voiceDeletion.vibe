@@ -65,7 +65,8 @@ function carry(out: Recovery.Effect): Job<Recovery.Event, Scope, [Actor]> {
 }
 
 effect function take(owner: number): void!!Scope {
-  if (!(try NoteDevice).available || owner === 0) return
+  const device = try NoteDevice
+  if (!device.available || owner === 0) return
   const identity = ownerAt() catch () => ""
   if (identity === "" || numberOf("owner", identity) !== owner) return
   const pending = (try NoteStore).cleanup() catch () => undefined
@@ -74,6 +75,7 @@ effect function take(owner: number): void!!Scope {
   const shelf = try KeyValueStore.KeyValueStore
   let review: Recovery.Event | undefined
   for (const receipt of pending) {
+    if (!device.canPurge(receipt.audioId)) continue
     const kept = shelf.get(marker(owner, receipt.operationId)) catch () => "review"
     if (kept === "held") continue
     const event: Recovery.Event = { type: "foundCanonical", operation: receipt.operationId,

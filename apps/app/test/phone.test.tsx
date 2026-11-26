@@ -8,6 +8,7 @@ import { Machine as Phone, type Phone as PhoneState } from "../gen/app__phone.ef
 import { Machine as Strip } from "../gen/app__phone__call.effect.vibe";
 import { Machine as Comms } from "../gen/app__phone__comms.effect.vibe";
 import { Machine as Voicemail } from "../gen/app__phone__voicemail.effect.vibe";
+import { Machine as Contacts } from "../gen/app__contacts.effect.vibe";
 import { Machine as Agent } from "../gen/app__contacts__agent.effect.vibe";
 import { at } from "../src/areas.ts";
 import { propose } from "../src/contacts/requests.vibe";
@@ -17,14 +18,14 @@ import { phoneAction } from "../src/phone/agent.vibe";
 import { phoneContactChoices, pickPhoneContact } from "../src/phone/named-review.vibe";
 import type { Alpha } from "../src/runtime/area.tsx";
 import { button, closeAll, drawn, fill, filledPhoneKeypad, hardware, only, open, press, underAct, until } from "./alpha.tsx";
-import { scene } from "./fakes/scene.ts";
+import { alphaImage, scene } from "./fakes/scene.ts";
 import { textReview } from "./fakes/text-review.ts";
 
 underAct();
 afterEach(closeAll);
 
-/** An Alpha image whose host registers eliza's telephony and contacts plugins and Alpha's call plugins. */
-const image = () => ({ ...scene(), phone: true, image: true, now: 1_700_000_400_000 });
+/** An Alpha image at a fixed time. */
+const image = () => ({ ...alphaImage(), now: 1_700_000_400_000 });
 const mounts = [
   ...only("home", "assistant", "notice", "phone/stage", "view:Phone", "view:Contacts", "view:Messages"),
   at("overlay", () => import("../src/phone/strip.tsx")),
@@ -146,9 +147,18 @@ describe("Phone on an Alpha image", () => {
     await until(alpha, alpha.runtime, Phone, (s) => s.dialled && s.dial.status === "Loaded");
     expect([world.telephony.dialed, world.telephony.placed]).toEqual([["14155550100"], []]);
 
-    // spec/app/phone/index.md, "Leaving Phone, or leaving Recents, forgets the rows"
+    // spec/app/phone/index.md, "Phone reads the call log whenever Recents comes to the front"; spec/app/phone/index.md, "Leaving Phone, or leaving Recents, forgets the rows"
+    world.telephony.calls.push({ id: 4, number: "+14155550123", name: "New caller", date: 1_700_000_350_000, type: "incoming" });
     await tab("Recents");
-    await until(alpha, alpha.runtime, Phone, (s) => s.tab === "Recents" && s.recents.status === "Loaded" && s.rows === 2);
+    await until(alpha, alpha.runtime, Phone, (s) => s.tab === "Recents" && s.recents.status === "Loaded" && s.rows === 3);
+    expect(button("Call New caller")).toBeDefined();
+    await tab("Keypad");
+    await until(alpha, alpha.runtime, Phone, (s) => s.tab === "Keypad");
+    world.telephony.callLog = "denied";
+    await tab("Recents");
+    await until(alpha, alpha.runtime, Phone, (s) => s.tab === "Recents" && s.recents.status === "Failed" && s.log.grant === "Denied" && s.rows === 0);
+    expect(button("Call New caller")).toBeUndefined();
+    expect(button("Retry call history")).toBeUndefined();
     await hardware("home");
     await until(alpha, alpha.runtime, Phone, (s) => !s.front && s.rows === 0);
   });
@@ -178,8 +188,25 @@ describe("Phone on an Alpha image", () => {
     await until(alpha, alpha.runtime, Phone, (state) => state.front && state.tab === "Recents" && state.recents.status === "Loaded");
     expect(button("Call Maya Chen")).toBeDefined();
 
+    // spec/app/contacts/index.md, "Back from the search field clears the query and returns to Contacts"
     await tab("Contacts");
     await contactsFront();
+    const contactsListed = () => until(alpha, alpha.runtime, Contacts, (state) =>
+      state.front && !state.searching && !state.sought && state.list.status === "Loaded" && state.rows === 2);
+    await contactsListed();
+    await press("Search contacts");
+    await fill("Search contacts", "Maya");
+    await until(alpha, alpha.runtime, Contacts, (state) =>
+      state.searching && state.sought && state.list.status === "Loaded" && state.rows === 1);
+    expect(button("Maya Chen")).toBeDefined();
+    await tab("Voicemail");
+    await until(alpha, alpha.runtime, Shell, (state) => state.trail.join(",") === "Phone");
+    await until(alpha, alpha.runtime, Phone, (state) => state.front && state.tab === "Voicemail");
+    await until(alpha, alpha.runtime, Comms, (state) => state.app === "PhoneApp" && state.key === "phone:recents:");
+    await tab("Contacts");
+    await contactsFront();
+    await contactsListed();
+    expect(button("Ben Ortiz")).toBeDefined();
     await press("Open Alpha");
     await until(alpha, alpha.runtime, Shell, (state) => state.assistant === "Sheet");
     await fill("Ask Alpha", "Keep the Contacts draft");
@@ -190,10 +217,27 @@ describe("Phone on an Alpha image", () => {
     expect(document.querySelector("[data-alpha-shell-page]")?.hasAttribute("inert")).toBe(true);
     await press("Shrink chat");
     await until(alpha, alpha.runtime, Shell, (state) => state.assistant === "Sheet");
+    // spec/app/phone/comms.md, "Returning through an embedded Contacts tab follows the Phone stage without adding history"
+    await until(alpha, alpha.runtime, Comms, (state) => state.app === "ContactsApp" && state.stage.length === 0);
+    await tab("Voicemail");
+    await until(alpha, alpha.runtime, Shell, (state) => state.trail.join(",") === "Phone" && state.assistant === "Sheet");
+    await until(alpha, alpha.runtime, Phone, (state) => state.front && state.tab === "Voicemail");
+    await until(alpha, alpha.runtime, Comms, (state) => state.app === "PhoneApp" && state.key === "phone:recents:" && state.stage.length === 0);
+    await tab("Keypad");
+    await until(alpha, alpha.runtime, Phone, (state) => state.front && state.tab === "Keypad");
+    await until(alpha, alpha.runtime, Comms, (state) => state.app === "PhoneApp" && state.key === "phone:keypad:" && state.stage.length === 0);
+    expect(document.querySelector('[data-alpha-phone-tab="keypad"]')?.getAttribute("aria-selected")).toBe("true");
+    await draftKept();
+
+    // spec/app/shell/index.md, "Opening another communications app from the stage keeps Ask Alpha open"
+    await tab("Contacts");
+    await until(alpha, alpha.runtime, Shell, (state) => state.trail.join(",") === "Phone,Contacts" && state.assistant === "Sheet");
+    await contactsListed();
+    await until(alpha, alpha.runtime, Comms, (state) => state.app === "ContactsApp" && state.stage.at(-1)?.app === "PhoneApp");
     await tab("Keypad");
     await until(alpha, alpha.runtime, Shell, (state) => state.trail.join(",") === "Phone" && state.assistant === "Sheet");
     await until(alpha, alpha.runtime, Phone, (state) => state.front && state.tab === "Keypad");
-    expect(document.querySelector('[data-alpha-phone-tab="keypad"]')?.getAttribute("aria-selected")).toBe("true");
+    await until(alpha, alpha.runtime, Comms, (state) => state.app === "PhoneApp" && state.key === "phone:keypad:" && state.stage.length === 0);
     await draftKept();
 
     await hardware("back");
@@ -408,6 +452,22 @@ describe("Phone on an Alpha image", () => {
     await confirm("Delete");
     await until(alpha, alpha.runtime, Voicemail, (s) => s.removal.outcome === "Confirmed" && s.list.status === "Loaded" && s.items === 0);
     expect(world.telephony.voicemails.at(0)?.deleted).toBe(true);
+  });
+
+  it(`Open a New message for the caller without sending (spec/app/phone/voicemail.md, "Call back hands the caller's number to Phone and Message opens Messages with it")`, async ({ onTestFinished }) => {
+    vi.stubEnv("ELIZA_DEV_ALLOW_TEST_MOCKS", "1");
+    onTestFinished(() => { vi.unstubAllEnvs(); });
+    const world = image();
+    const alpha = await mountedImage(world);
+    await openVoicemail(alpha);
+    await until(alpha, alpha.runtime, Voicemail, (state) => state.list.status === "Loaded" && state.items === 1);
+    await pressVoicemailRow();
+    await until(alpha, alpha.runtime, Voicemail, (state) => state.open && state.audio.status === "Loaded");
+
+    await press("Message");
+    const to = () => document.querySelector<HTMLInputElement>('input[aria-label="To"]')?.value;
+    await vi.waitFor(() => expect(to()).toBe("+14155550100"), { timeout: 12_000 });
+    expect(world.telephony.sent).toEqual([]);
   });
 
   it(`Shares only the reviewed open voicemail’s existing transcript (spec/app/contacts/agent.md, "The agent reads only the conversation, voicemail or contact open on screen, as the phone last read it")`, async () => {

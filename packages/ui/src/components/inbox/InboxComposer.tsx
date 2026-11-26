@@ -61,6 +61,7 @@ export type InboxComposerProps = Pick<InboxDraftStatusProps, "keeping" | "gmail"
     notice?: InboxNoticeKind;
     /** Does the one thing the notice offers. */
     onNoticeAction?: () => void;
+    onTurnOnSending?: () => void;
     /** How the last send ended, while it is worth telling. */
     outcome?: InboxSendOutcomeProps;
     /** The phone's drafts are being looked up after a restart, or cannot be read; the form is not shown until they are. */
@@ -92,7 +93,7 @@ export type InboxComposerProps = Pick<InboxDraftStatusProps, "keeping" | "gmail"
  */
 export function InboxComposer({
   kind, accounts, from, onFromChange, to, suggestions = [], onContacts, contactsOpen = false, contactsStatus, onMoreContacts, cc, bcc, subject, onSubjectChange, text, onTextChange, attachments, onRemoveAttachment, onAttach, clash = false,
-  onRestoreMine, onUseSaved, notice, onNoticeAction, outcome, storage, onReloadStorage, keeping, gmail, sent, onKeepAgain, onSend, onSaveToGmail, onCheckCopy, onDeleteGmailCopy, onSetAside, onDiscard,
+  onRestoreMine, onUseSaved, notice, onNoticeAction, onTurnOnSending, outcome, storage, onReloadStorage, keeping, gmail, sent, onKeepAgain, onSend, onSaveToGmail, onCheckCopy, onDeleteGmailCopy, onSetAside, onDiscard,
 }: InboxComposerProps) {
   const [more, setMore] = useState(false);
   const showMore = more || cc.recipients.length > 0 || bcc.recipients.length > 0 || cc.value !== "" || bcc.value !== "";
@@ -115,7 +116,11 @@ export function InboxComposer({
         {onAttach ? <button type="button" aria-label="Attach file" onClick={onAttach} className={cn(inboxHeaderButton, "[&_svg]:size-5.5")}><Paperclip /></button> : null}
         <button type="button" aria-label="Send email" disabled={!onSend} onClick={onSend} className={cn(focusRing, "flex size-11 shrink-0 items-center justify-center rounded-full bg-alpha text-alpha-foreground [&_svg]:size-5.5")}><Send /></button>
       </InboxHeader>
-      <main aria-label={titles[kind]} tabIndex={0} className={cn(focusRing, "flex min-h-0 flex-1 flex-col overflow-x-hidden overflow-y-auto overscroll-contain px-5 pb-28 [scrollbar-width:none] focus-visible:-outline-offset-2 *:shrink-0")}>
+      <main aria-label={titles[kind]} tabIndex={0} className={cn(
+        focusRing,
+        "flex min-h-0 flex-1 flex-col overflow-x-hidden overflow-y-auto overscroll-contain px-5 pb-28 [scrollbar-width:none] focus-visible:-outline-offset-2 *:shrink-0",
+        "in-data-[alpha-wide]:px-[max(--spacing(5),calc((100%_-_720px)/2))]",
+      )}>
         {storage ? (
           <div role="status" className="flex flex-col items-center gap-3 px-6 pt-27.5 text-center text-muted-foreground">
             <span aria-hidden className="[&_svg]:size-7">{storage === "checking" ? <Mail /> : <TriangleAlert />}</span>
@@ -125,6 +130,7 @@ export function InboxComposer({
         ) : (
           <>
             {notice ? <div className="py-2"><InboxNotice kind={notice} onAction={onNoticeAction} /></div> : null}
+            {onTurnOnSending ? <div className="py-2"><InboxNotice kind="sendingOff" onAction={onTurnOnSending} /></div> : null}
             {outcome ? <div className="py-2"><InboxSendOutcome {...outcome} /></div> : null}
             {clash && onRestoreMine ? <div className="py-2"><InboxDraftClash onRestoreMine={onRestoreMine} onUseSaved={onUseSaved} /></div> : null}
             <InboxFromField accounts={accounts} value={from} onChange={onFromChange} />

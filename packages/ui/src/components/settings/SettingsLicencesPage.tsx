@@ -35,19 +35,21 @@ export type SettingsLicencesPageProps = SettingsPlaceProps & {
 export function SettingsLicencesPage({ load, found, query, licences, onQuery, onOpen, onBack, place, onPlace }: SettingsLicencesPageProps) {
   return (
     <SettingsPage title="Licenses" onBack={onBack} backLabel="Back to About">
-      <ListGroup>
-        <div className="px-4 py-2">
-          <input
-            type="search"
-            aria-label="Search licenses"
-            placeholder="Search components"
-            value={query}
-            onChange={(event) => onQuery?.(event.target.value)}
-            disabled={load !== "loaded" || !onQuery}
-            className={cn(focusRing, "min-h-11 w-full bg-transparent py-2.5 text-base text-foreground placeholder:text-muted-foreground disabled:opacity-50")}
-          />
-        </div>
-      </ListGroup>
+      {load === "loaded" ? (
+        <ListGroup>
+          <div className="px-4 py-2">
+            <input
+              type="search"
+              aria-label="Search components"
+              placeholder="Search components"
+              value={query}
+              onChange={(event) => onQuery?.(event.target.value)}
+              disabled={!onQuery}
+              className={cn(focusRing, "min-h-11 w-full bg-transparent py-2.5 text-base text-foreground placeholder:text-muted-foreground disabled:opacity-50")}
+            />
+          </div>
+        </ListGroup>
+      ) : null}
       {load === "loading" ? (
         <ListGroup>
           <ListRow title="Licenses" aria-label="Loading license notices" trailing={<Spinner size="sm" label="Working" />} />

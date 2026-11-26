@@ -1,13 +1,12 @@
 // spec/app/contacts/index.md, "Story: Browse my contacts"; spec/app/contacts/index.md, "Story: Look at one contact"; spec/app/contacts/index.md, "Story: Add or change a contact"; spec/app/contacts/index.md, "Story: Delete a contact"; spec/app/contacts/index.md, "Story: Know what happened to my change"
 import { type AddressBookContact, type ContactCursor, type ContactDetail, type ContactDraft, type ContactDraftProblem, contactDraftProblem, isContactId } from "@elizaos/os-bridges"
-import { Machine as Comms, type Event as CommsEvent } from "../../gen/app__phone__comms.effect.vibe"
 import * as Contacts from "../../gen/app__contacts.effect.vibe"
 import type { Change, Effect as Out, Event, Sheet } from "../../gen/app__contacts.effect.vibe"
 import type { Machine as PhoneMachine } from "../../gen/app__phone.effect.vibe"
-import type { Machine as Shell } from "../../gen/app__shell.effect.vibe"
+import { Machine as Shell, showing } from "../../gen/app__shell.effect.vibe"
 import { SystemSettings } from "../platform/systemSettings.vibe"
 import { type Telephony, TelephonyRefused, readAddressBook, telephony } from "../platform/telephony.vibe"
-import { type Job, answer, applying, following, reacting, run, together } from "../runtime/reactor.vibe"
+import { type Job, answer, applying, reacting, run, together } from "../runtime/reactor.vibe"
 import { Time } from "../runtime/time.vibe"
 import { type Dialer, dialing, grantOf } from "../phone/phone.vibe"
 import { Callers } from "../phone/voicemail.vibe"
@@ -30,7 +29,13 @@ export interface Book {
   readonly card: ContactDetail | undefined
   readonly editBase: ContactDetail | undefined
   readonly form: Form
-  readonly reach: string
+  readonly reach: {
+    readonly how: Contacts.Reach
+    readonly route: number
+    readonly contact: string
+    readonly card: number
+    readonly number: string
+  } | undefined
   readonly problem: ContactDraftProblem | "stale" | "not-found" | undefined
   /** Who narrowed the list to `sought`: a filter Alpha applied shows as a chip the owner can clear. */
   readonly filteredBy: "Owner" | "Alpha"
@@ -38,7 +43,7 @@ export interface Book {
 
 export const blankForm: Form = { givenName: "", familyName: "", phones: [""], emails: [""], notes: "" }
 
-const empty: Book = { rows: [], next: undefined, sought: "", card: undefined, editBase: undefined, form: blankForm, reach: "", problem: undefined, filteredBy: "Owner" }
+const empty: Book = { rows: [], next: undefined, sought: "", card: undefined, editBase: undefined, form: blankForm, reach: undefined, problem: undefined, filteredBy: "Owner" }
 
 /** The contacts behind Contacts' counts. */
 export service Rows {
@@ -143,7 +148,7 @@ effect function read(ticket: number): Event!!(Telephony | Rows | Contacts.Machin
   const blank: Sheet = { names: 0, phones: 0, emails: 0, notes: 0, notable: true }
   const found = !isContactId(contact) ? undefined : readAddressBook("read contact", (c) => c.get(contact, "ExplicitRead")) catch () => undefined
   const seen = found === undefined ? blank : sheetOf(found)
-  if (Contacts.canContactRead(try machine.get(), ticket, seen)) try store.set({ card: found, reach: "" })
+  if (Contacts.canContactRead(try machine.get(), ticket, seen)) try store.set({ card: found, reach: undefined })
   return { type: "contactRead", ticket, ok: found !== undefined, seen }
 }
 
@@ -203,15 +208,20 @@ effect function written(id: number, change: Change, contact: string): Event!!(Te
 }
 
 // spec/app/contacts/index.md, "Call and Message open Phone or Messages with the number filled in, and do nothing else"
-effect function reached(how: Contacts.Reach): void!!(Rows | Dialer | PhoneMachine | Shell | Callers) {
-  const held = try (try Rows).get()
-  const number = held.reach !== "" ? held.reach : held.card?.phoneNumbers[0]?.number ?? ""
-  if (number === "") return
-  if (how === "Message") {
-    try (try Callers).message(number)
-    return
-  }
-  try ignore(dialing(number))
+effect function reached(how: Contacts.Reach): void!!(Rows | Dialer | PhoneMachine | Shell | Callers | Contacts.Machine) {
+  const store = try Rows
+  const held = try store.get()
+  const request = held.reach
+  if (request?.how !== how) return
+  const source = try (try Shell).get()
+  const card = try (try Contacts.Machine).get()
+  if (request.route !== source.route || !showing(source, "Contacts") || !Contacts.canReach(card)
+    || request.contact !== card.contact || request.card !== card.card.ticket || held.card?.id !== request.contact
+    || !held.card.phoneNumbers.some((phone) => phone.number === request.number)) return
+  try store.set({ reach: undefined })
+  const owner = { view: "Contacts", route: request.route } as const
+  if (how === "Message") try (try Callers).message(request.number, owner)
+  else try ignore(dialing(request.number, owner))
 }
 
 // spec/app/contacts/index.md, "Where the phone does not let Alpha write contacts, New and Edit open the phone's own contact editor instead"
@@ -254,14 +264,10 @@ const forget = applying(Contacts.Machine, (state) => ({
 }), effect ({ list, card, form }) => {
   try (try Rows).set({
     ...(list ? { rows: [], next: undefined } : {}),
-    ...(card ? { card: undefined, reach: "" } : {}),
+    ...(card ? { card: undefined, reach: undefined } : {}),
     ...(form ? { form: blankForm, editBase: undefined, problem: undefined } : {}),
   })
 })
 
-// spec/app/phone/comms.md, "A view change while the conversation is open keeps the sheet's height and remembers the view it left"
-const subject = following(Contacts.Machine, (state) => (!state.front ? "" : state.opened ? `contacts:contact:${state.contact}` : "contacts:list:"), Comms,
-  (key): CommsEvent | undefined => (key === "" ? undefined : { type: "subjectShown", app: "ContactsApp", subject: key === "contacts:list:" ? "ListSubject" : "ContactSubject", key }), "Device")
-
 /** Contacts: resident, so that a form the owner was filling in waits while Contacts is not showing; it reads only while its view is in front. */
-export const contacts = together(machine, rows, shown, subject, forget)
+export const contacts = together(machine, rows, shown, forget)

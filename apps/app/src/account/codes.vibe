@@ -1,5 +1,7 @@
 // spec/app/account/codes.md, "Story: Redeem a code"; spec/app/account/codes.md, "Story: Keep codes to their sign-in"
 import { type Account as CloudProfile, CloudError, normalizeSubscriptionCode, pathOf, redeemResultFromResponse, routesByName, idempotencyKey } from "@elizaos/cloud"
+import { bindPlanChanges, changeIsOpen } from "./change.vibe"
+import type { Machine as Changes } from "../../gen/app__account__change.effect.vibe"
 import * as Billing from "../../gen/app__account__billing.effect.vibe"
 import * as Model from "../../gen/app__account__codes.effect.vibe"
 import { type Account, Cloud } from "../platform/cloud.vibe"
@@ -68,11 +70,12 @@ export effect function bindCodes(owner: CloudProfile): boolean!!Model.Machine {
 
 /** Current receipt visibility for both places Account can send a payment-related request. */
 export effect function accountAccess(owner: CloudProfile) {
+  try bindPlanChanges(owner)
   return { purchase: try purchaseVisibility(owner), codesAvailable: try bindCodes(owner) }
 }
 
 /** Start the code operation that the owner requested in Account. */
-export effect function submitCode(raw: string, kind: "redeem" | "applyReferral" = "redeem"): boolean!!(Needs | AccountWrites) {
+export effect function submitCode(raw: string, kind: "redeem" | "applyReferral" = "redeem"): boolean!!(Needs | AccountWrites | Changes) {
   const code = kind === "redeem" ? normalizeSubscriptionCode(raw) : raw.trim()
   if (code === null || code === "" || code.length > 100 || !(try accountIsInFront)) return false
   const cloud = try Cloud
@@ -82,6 +85,7 @@ export effect function submitCode(raw: string, kind: "redeem" | "applyReferral" 
   if (receipt === "") return false
   const machine = try Model.Machine
   return try (try AccountWrites).admission.withPermits(1)(effect {
+    if (try changeIsOpen()) return false
     const current = try machine.get()
     if (current.authority !== buyer.credentialId || !(try accountIsInFront)) return false
     const billing = try (try Billing.Machine).get()

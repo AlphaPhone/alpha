@@ -9,7 +9,7 @@ import { PhotosPort, canReplaceBrowserEdit, isBrowserEdit, photoEmailMaxBytes, t
 import { photoRefusal, renderBrowserPhoto, type BrowserEditFrame, type PhotoLook } from "../platform/photoCanvas.vibe"
 import { clipRefusal, renderBrowserClip } from "../platform/videoCanvas.vibe"
 import { Catalog } from "./catalog.vibe"
-import { answer, applying, reacting, run, started, together, type Job } from "../runtime/reactor.vibe"
+import { answer, applying, reacting, run, started, together, type Job, migratedStore } from "../runtime/reactor.vibe"
 import { say, type Said } from "../notices/toasts.vibe"
 import { handOver } from "../inbox/adding.vibe"
 import { attachToAlpha } from "../assistant/attachments.vibe"
@@ -338,8 +338,12 @@ effect function askAboutPhoto(photo: number, revision: number, ticket: number) {
         && latest.item.sourceRevision === row.item.sourceRevision && latest.item.trashedAt === undefined
   }, scope)
   if (!(try current)) return
-  const source = () => Effect.provideContext(selectedAskPhoto(view), scope)
-  if (try attachToAlpha(source, current)) return
+  const read = Effect.provideContext(selectedAskPhoto(view), scope)
+  const close = Effect.provideContext(effect {
+    if (!(try current)) return
+    try ignore(viewer.send({ type: "closeRemovedPhoto", photo, revision, ticket }, "Owner"))
+  }, scope)
+  if (try attachToAlpha({ kind: "ViewedPhoto", read, close }, current)) return
   if (try current) try say("This photo could not be attached.", true)
 }
 
@@ -461,14 +465,7 @@ effect function viewerRecord(raw: string | undefined): (string | undefined)!! {
 }
 
 function storedViewer(key: string, start = Viewer.initial) {
-  return Layer.unwrap(effect {
-    const store = try KeyValueStore.KeyValueStore
-    const compatible = KeyValueStore.make({
-      ...store,
-      get: (name: string) => name === key ? Effect.flatMap(store.get(name), viewerRecord) : store.get(name),
-    })
-    return Layer.provide(Viewer.stored(key, start), Layer.succeed(KeyValueStore.KeyValueStore, compatible))
-  })
+  return Layer.provide(Viewer.stored(key, start), migratedStore(key, viewerRecord))
 }
 
 /** The viewer's hands, over its rule-owned playback and edit state. */

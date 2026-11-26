@@ -13,6 +13,7 @@ import { Agent } from "../platform/agent.vibe"
 import { Device } from "../platform/device.vibe"
 import { ask, attemptedWith } from "../platform/remote.vibe"
 import type { AndroidCalendarDeletionScope, AndroidCalendarEditorFields, CalendarPick } from "@elizaos/os-bridges"
+import { launchOwnerAt, sameResidentOwner } from "../platform/owner.vibe"
 import { PhoneCalendar, type Written } from "../platform/calendar.vibe"
 import { Attempts, fresh } from "../runtime/attempts.vibe"
 import { civilDateAt, formatCivilDate } from "../reminders/recurrence.ts"
@@ -20,6 +21,7 @@ import { type DatedReminderFields, createReminderItem, editDatedReminder, needsR
 import { DEFAULT_LIST_ID, remindersStore } from "../reminders/store.ts"
 import { answer, contained, hearing, reacting, run, started, together } from "../runtime/reactor.vibe"
 import { Time } from "../runtime/time.vibe"
+import { NoteOrigin, type Target, eventKey, originOwner, storeOrigin } from "./noteOrigin.vibe"
 import { type Row, androidWindowOf, shown } from "./shown.ts"
 import { civilDay, dayStart, feedParams, utcStart, zone } from "./time.ts"
 
@@ -36,6 +38,8 @@ export schema Fields {
   readonly video?: boolean
   readonly repeat?: "NoRepeat" | "Daily" | "Weekdays" | "Weekly" | "Monthly" | "Yearly"
   readonly calendar?: "Agent" | "Phone" | "Reminders"
+  readonly noteOrigin?: NoteOrigin
+  readonly noteCreation?: string
   readonly reminderId?: string
   readonly reminderSpecId?: number
   readonly reminderRevision?: number
@@ -127,7 +131,11 @@ export effect function fromNote(fields: Fields, day: number) {
   const editor = try Editor.Machine
   if (!Editor.canFromNote(try editor.get())) return false
   if (!(try keep(fields, try owner()))) return false
-  return try contained(editor.send({ type: "fromNote", day }), "opening the note's event")
+  const opened = try contained(editor.send({ type: "fromNote", day }), "opening the note's event")
+  if (opened && fields.title.trim() === "") {
+    try ignore(editor.send({ type: "editTitle", blank: true }))
+  }
+  return opened
 }
 
 /** An event of the phone as eliza's calendar review picks it. */
@@ -198,6 +206,20 @@ export effect function confirmCalendarReschedule() {
   try contained(editor.send({ type: "reschedule" }), "rescheduling the completed reminder")
 }
 
+effect function sourceStillOwned(fields: Fields) {
+  const origin = fields.noteOrigin
+  if (origin === undefined) return true
+  const owner = launchOwnerAt() catch () => undefined
+  return sameResidentOwner(originOwner(origin), owner)
+}
+
+effect function linkSource(fields: Fields, owning: number, target: Target, id?: string) {
+  const origin = fields.noteOrigin
+  if (origin === undefined || (try owner()) !== owning) return
+  if (id !== undefined && (try storeOrigin(owning, target, id, origin))) return
+  if ((try owner()) === owning) try say("Saved without a link to the source note.", true)
+}
+
 /** One retained Calendar form creates at most one reminder with these reviewed fields. */
 effect function createCalendarReminder(fields: Fields, owning: number) {
   if (fields.calendar !== "Reminders" || fields.title.trim() === "") return refused
@@ -207,12 +229,15 @@ effect function createCalendarReminder(fields: Fields, owning: number) {
   if (alreadySaved !== undefined) {
     if (alreadySaved.title !== input.title || alreadySaved.notes !== input.notes || alreadySaved.dueDate !== input.dueDate
       || alreadySaved.dueMinute !== input.dueMinute || alreadySaved.recurrence !== input.recurrence || alreadySaved.alertMinutes !== input.alertMinutes) return refused
+    try linkSource(fields, owning, "Reminder", id)
     return { confirmed: true, known: true }
   }
   if (fields.reminderId === undefined && !(try keep({ ...fields, reminderId: id }, owning))) return refused
   if ((try owner()) !== owning) return refused
   const saved = try createReminderItem({ id, listId: DEFAULT_LIST_ID, ...input })
-  return saved === undefined ? refused : { confirmed: true, known: true }
+  if (saved === undefined) return refused
+  try linkSource(fields, owning, "Reminder", saved.id)
+  return { confirmed: true, known: true }
 }
 
 effect function updateCalendarReminder(fields: Fields, owning: number, id: number, attempt: number, reschedule: boolean) {
@@ -282,7 +307,7 @@ function agentFields(fields: Fields) {
 
 // spec/app/calendar/writing.md, "A new event goes to the calendar chosen in the form: the agent's own calendar, or a writable calendar on this phone"; spec/app/calendar/writing.md, "The agent's own calendar holds no repeats, alerts or video rooms"
 /** A new event on the agent's own calendar, sent once under the attempt's key, then read back. */
-effect function createAgent(attempt: number, fields: Fields): Written!!(Agent | Attempts) {
+effect function createAgent(attempt: number, fields: Fields, owning: number) {
   const sent = try attemptedWith(Agent, (key) => HttpClientRequest.post(`${calendarBase}/events`) |> HttpClientRequest.bodyJsonUnsafe(%, {
     ...agentFields(fields), description: fields.notes, idempotencyKey: key,
   }), attempt)
@@ -290,14 +315,21 @@ effect function createAgent(attempt: number, fields: Fields): Written!!(Agent | 
   if (!sent.confirmed) return { confirmed: false, known: sent.known }
   const urlParams = feedParams(civilDay(fields.begin))
   const listed = ask(Agent, HttpClientRequest.get(`${calendarBase}/feed`, { urlParams }), Created) catch () => undefined
-  const readback: Readback = listed === undefined ? "ReadbackFailed"
-    : listed.events.some((event) => event.title === fields.title.trim() && Date.parse(event.startAt) === Date.parse(agentFields(fields).startAt)) ? "ReadbackFound" : "ReadbackMissing"
+  const exact = Schema.decodeUnknownOption(CreatedEvent)(sent.body)
+  const event = Option.getOrUndefined(exact)?.event
+  const exactFound = event !== undefined && listed?.events.some((row) => row.id === event.id && row.calendarId === event.calendarId) === true
+  const match = exactFound || listed?.events.some((row) =>
+    row.title === fields.title.trim() && Date.parse(row.startAt) === Date.parse(agentFields(fields).startAt))
+  const readback: Readback = listed === undefined ? "ReadbackFailed" : match === true ? "ReadbackFound" : "ReadbackMissing"
   const seen = readbackSeen("CreateKind", readback)
-  return seen === "Saved" ? { confirmed: true, known: true } : { confirmed: false, known: false }
+  if (seen !== "Saved") return { confirmed: false, known: false }
+  try linkSource(fields, owning, "AgentEvent", event !== undefined && exactFound ? eventKey(event.calendarId, event.id) : undefined)
+  return { confirmed: true, known: true }
 }
 
 /** What a read back of the agent's calendar finds of a new event: its title and start. */
-schema Created { readonly events: ReadonlyArray<{ readonly title: string; readonly startAt: string }> }
+schema Created { readonly events: ReadonlyArray<{ readonly id?: string; readonly calendarId?: string; readonly title: string; readonly startAt: string }> }
+schema CreatedEvent { readonly event: { readonly id: Schema.NonEmptyString; readonly calendarId: Schema.NonEmptyString } }
 
 // spec/app/calendar/writing.md, "An invitation answer is sent only by the invitee, at the version shown, under a key made of the event, the answer and that version"; spec/app/calendar/writing.md, "Deleting is an organizer's cancel or an invitee's decline, and nothing when the organizer is unknown"
 /** A change, a deletion or an answer to an event of the agent's calendar, sent once at the version shown, then read back. */
@@ -333,9 +365,10 @@ effect function sendAgent(attempt: number, kind: "Update" | "Remove" | "Reply", 
 // spec/app/calendar/editor.md, "Saving sends the form once, as a new numbered write built on the revision its edits began from"; spec/app/calendar/editor.md, "No create is sent while an earlier one is in doubt, unless the owner asked for a separate event"
 // spec/app/calendar/writing.md, "Guests, alerts and video rooms go to Android Calendar; zones, all-day and repeats use the direct save for a new event"; "The agent's own calendar holds no repeats, alerts or video rooms"
 /** Carry out write `attempt`: a create under its own creation identity, a change or a deletion through the phone's review. */
-effect function send(attempt: number, kind: Exclude<Write, "CreateReminder" | "UpdateReminder" | "RescheduleReminder">, id: number, scope: Scope, going: boolean): Written!!(PhoneCalendar | Agent | KeyValueStore.KeyValueStore | Attempts | Time | Editor.Machine | View.Machine) {
+effect function send(attempt: number, kind: Exclude<Write, "CreateReminder" | "UpdateReminder" | "RescheduleReminder">, id: number, scope: Scope, going: boolean) {
   const phone = try PhoneCalendar
-  const fields = try kept(0, try owner())
+  const owning = try owner()
+  const fields = try kept(0, owning)
   if ((kind === "Create" || kind === "Update") && fields.calendar === "Reminders") return refused
   const rrule = rules[fields.repeat ?? "NoRepeat"]
   const hasAlert = fields.alert !== undefined
@@ -343,15 +376,19 @@ effect function send(attempt: number, kind: Exclude<Write, "CreateReminder" | "U
   const agentAccepts = agentCalendarAccepts(true, rrule !== "", hasAlert, hasVideo)
   if (kind === "Create") {
     const view = try (try View.Machine).get()
-    if (newEventTarget(view.connected, fields.calendar === "Phone") === "AgentOwnCalendar") return agentAccepts ? try createAgent(attempt, fields) : refused
+    if (newEventTarget(view.connected, fields.calendar === "Phone") === "AgentOwnCalendar") return agentAccepts ? try createAgent(attempt, fields, owning) : refused
     const route = deviceRoute(false, fields.people.trim() !== "", hasAlert, hasVideo, fields.allDay, false, rrule !== "")
     if (route === "AndroidHandoff") return refused
     const creation = try (try Attempts).key(attempt)
     try ignore((try KeyValueStore.KeyValueStore).set(creationKey, creation))
     const separate = (try (try Editor.Machine).get()).separate
     const event = fieldsOf(fields)
-    if (route === "OptionsSave") return try phone.create({ kind: "Options", event: { ...event, ...providerTimes(fields), allDay: fields.allDay, rrule } }, creation, separate)
-    return try phone.create({ kind: "Timed", event }, creation, separate)
+    if (fields.noteOrigin !== undefined && !(try keep({ ...fields, noteCreation: creation }, owning))) return refused
+    const request = route === "OptionsSave" ? { kind: "Options", event: { ...event, ...providerTimes(fields), allDay: fields.allDay, rrule } } as const
+      : { kind: "Timed", event } as const
+    const result = try phone.create(request, creation, separate)
+    if (result.confirmed) try linkSource(fields, owning, "PhoneEvent", creation)
+    return result
   }
   const row = shown.find(id)
   if (row === undefined) return refused
@@ -377,20 +414,27 @@ effect function send(attempt: number, kind: Exclude<Write, "CreateReminder" | "U
 
 // spec/app/calendar/editor.md, "While a create is in doubt its form waits; checking the phone's receipts finds it or not"; spec/app/calendar/editor.md, "Saving sends the form once, as a new numbered write built on the revision its edits began from"
 /** Whether the phone's receipts say a create was made: one in doubt, or any not yet acknowledged before a new create; a failed read holds the create. */
-effect function receipts(ticket: number): Event!!(PhoneCalendar | KeyValueStore.KeyValueStore) {
+effect function receipts(ticket: number) {
   const phone = try PhoneCalendar
   if (!phone.present) return { type: "receiptsChecked", ticket, found: false }
   const creation = (try KeyValueStore.KeyValueStore).get(creationKey) catch () => undefined
   if (creation === undefined) return { type: "receiptsChecked", ticket, found: false }
   return effect {
     const found = try phone.created(creation)
+    if (found) {
+      const owning = try owner()
+      const draft = try kept(0, owning)
+      if (draft.noteCreation === creation) try linkSource(draft, owning, "PhoneEvent", creation)
+    }
     return { type: "receiptsChecked", ticket, found } as Event
   } catch () => ({ type: "receiptsFailed", ticket })
 }
 
 // spec/app/calendar/editor.md, "Such a form is handed to Android Calendar and closes; Alpha writes nothing of it"
 effect function handOff() {
-  const fields = try kept(0, try owner())
+  const owning = try owner()
+  const fields = try kept(0, owning)
+  if (!(try sourceStillOwned(fields)) || (try owner()) !== owning) return
   const people = fields.people.split(",").map((person) => person.trim()).filter((person) => person !== "")
   const rrule = rules[fields.repeat ?? "NoRepeat"]
   const alerts = fields.alert === undefined ? [] : [fields.alert]
@@ -402,6 +446,10 @@ effect function handOff() {
 effect function written(attempt: number, kind: Write, id: number, scope: Scope, going: boolean) {
   const owning = try owner()
   const fields = try kept(0, owning)
+  if ((kind === "Create" || kind === "CreateReminder") &&
+      (!(try sourceStillOwned(fields)) || (try owner()) !== owning)) {
+    return { type: "written", attempt, confirmed: false, known: true, filed: false } satisfies Event
+  }
   const changingReminder = kind === "UpdateReminder" || kind === "RescheduleReminder"
   const outcome: Written = kind === "CreateReminder" ? try createCalendarReminder(fields, owning)
     : changingReminder ? try updateCalendarReminder(fields, owning, id, attempt, kind === "RescheduleReminder")
@@ -471,11 +519,24 @@ const scanned = started(effect {
   const entry = try ScanEntry
   const shell = try Shell.Machine
   try Stream.runForEach(Stream.zipLatest(shell.changes, entry.events), effect ([where, event]) => {
-    if (event === undefined || !Shell.showing(where, "Calendar")) return
-    const review = try entry.takeEvent()
-    if (review !== undefined && !(try fromNote(review.fields, review.day))) {
-      try say("Calendar already has a draft. Finish it before opening this scan’s event.", true)
+    if (event === undefined) return
+    const note = event.noteSource
+    if (!Shell.showing(where, "Calendar")) {
+      if (note !== undefined && where.route >= note.route) try entry.releaseEvent(event)
+      return
     }
+    const review = try entry.takeEvent()
+    if (review === undefined) return
+    const offered = review.noteSource
+    if (offered !== undefined) {
+      const owner = launchOwnerAt() catch () => undefined
+      const latest = try shell.get()
+      if (latest.route !== offered.route || !Shell.showing(latest, "Calendar") || !sameResidentOwner(offered.owner, owner)) return
+    }
+    if (!(try fromNote(review.fields, review.day))) {
+      try say(offered === undefined ? "Calendar already has a draft. Finish it before opening this scan’s event."
+        : "Calendar couldn’t open the note’s draft. Finish any open draft first.", true)
+    } else if (offered !== undefined) try say("Check time")
   })
 }, "opening a scanned Calendar draft")
 

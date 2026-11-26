@@ -14,9 +14,9 @@ import type { Machine as VoicemailMachine } from "../../gen/app__phone__voicemai
 import { useMachine as useVoicemail } from "../../gen/app__phone__voicemail.react.ts";
 import { useMachine as useShell } from "../../gen/app__shell.react.ts";
 import { contactChatActionsId } from "../assistant/contact-chat-id.ts";
-import { searchFromContact } from "../assistant/contact-search.ts";
+import { attachFromContact, searchFromContact } from "../assistant/contact-search.ts";
 import { returnPhoneTab } from "../phone/back.vibe";
-import { PhoneTabs } from "../phone/PhoneTabs.tsx";
+import { PhoneTabs, telephonyHeader } from "../phone/PhoneTabs.tsx";
 import { callerInitials, displayNumber } from "../phone/words.ts";
 import { type Book, type Form, Rows, blankForm, sheetOf } from "./contacts.vibe";
 import { CommsBar, type CommsServices, useCommsDock } from "../phone/CommsBar.tsx";
@@ -70,7 +70,7 @@ export function Contacts({ runtime, alpha }: ContactsProps & { alpha: Alpha }) {
     void send({ type: "openContact", contact: id });
   };
   const canBack = shell.can({ type: "goBack" });
-  const phoneTabs = !searching && !state.opened && shell.state?.trail.at(-2) === "Phone";
+  const phoneTabs = !state.opened && shell.state?.trail.at(-2) === "Phone";
   const back = canBack ? () => void alpha.back() : undefined;
   const select = (tab: string) => {
     if (tab !== "Recents" && tab !== "Keypad" && tab !== "Voicemail") return;
@@ -96,15 +96,16 @@ export function Contacts({ runtime, alpha }: ContactsProps & { alpha: Alpha }) {
       <span className="flex-1" />
     </>
   );
-  const header = searching ? (
-    <form role="search" aria-label="Search contacts" data-host-chrome="" className="mt-0.5 flex min-h-13 shrink-0 items-center gap-0.5 px-2" onSubmit={(event) => event.preventDefault()}>
+  const searchHeader = searching ? (
+    <form role="search" aria-label="Search contacts" data-host-chrome="" className={cn(telephonyHeader, "flex min-h-13 items-center gap-0.5 px-2")} onSubmit={(event) => event.preventDefault()}>
       {can({ type: "endSearch" }) && <Button variant="ghost" size="icon" aria-label="Back to contacts" className="size-13 rounded-lg" onClick={() => void send({ type: "endSearch" })}><ChevronLeft /></Button>}
       <SearchField autoFocus keepClear className="min-w-0 flex-1 [&_button]:size-13 [&_input]:focus-visible:outline-none" aria-label="Search contacts" clearLabel="Clear search" placeholder="Search contacts" value={query} onValueChange={search} maxLength={128} />
     </form>
-  ) : phoneTabs ? (
-    <PhoneTabs title="Contacts" contacts voicemail={phone.voicemail} unheard={(voicemail?.unheard ?? 0) > 0} onBack={back}>{chip}{actions}</PhoneTabs>
-  ) : (
-    <AppHeader title="Contacts" className={cn("mt-0.5 shrink-0", filtered && "[&>h1]:flex-none")} leading={<AppBack alpha={alpha} />}>{chip}{actions}</AppHeader>
+  ) : undefined;
+  const header = phoneTabs ? (
+    <PhoneTabs title="Contacts" contacts voicemail={phone.voicemail} unheard={(voicemail?.unheard ?? 0) > 0} onBack={back} header={searchHeader}>{chip}{actions}</PhoneTabs>
+  ) : searchHeader ?? (
+    <AppHeader title="Contacts" className={cn(telephonyHeader, filtered && "[&>h1]:flex-none")} leading={<AppBack alpha={alpha} />}>{chip}{actions}</AppHeader>
   );
   const allow = "my-6 min-h-13 rounded-full bg-foreground px-7 text-lg font-semibold text-background hover:bg-foreground/90 active:bg-foreground/80";
   const route = shell.state?.route;
@@ -120,7 +121,7 @@ export function Contacts({ runtime, alpha }: ContactsProps & { alpha: Alpha }) {
             : can({ type: "openSettings" }) && <Button className={allow} onClick={() => void send({ type: "openSettings" })}>Open Settings</Button>}
         </div>
       )}
-      {state.opened ? <Card runtime={runtime} safe={safe} /> : (
+      {state.opened ? <Card runtime={runtime} safe={safe} route={route} /> : (
         <>
           {can({ type: "loadMore" }) && <div className="flex shrink-0 justify-center"><Button variant="secondary" size="icon" aria-label="More contacts" onClick={() => void send({ type: "loadMore" })}><ChevronDown className="size-5" /></Button></div>}
           {state.list.status === "Loading" && state.rows === 0 && <p role="status" className="sr-only">Reading contacts</p>}
@@ -150,7 +151,8 @@ export function Contacts({ runtime, alpha }: ContactsProps & { alpha: Alpha }) {
       )}
       <CommsBar runtime={runtime}
         person={state.opened && held.card !== undefined ? { label: held.card.displayName, initials: callerInitials(held.card.displayName) } : undefined}
-        actions={state.opened && shown(state) && route !== undefined ? <AssistantChatActions placement="contact" triggerId={contactChatActionsId(route, state.contact)} onSearch={() => searchFromContact(alpha, route, state.contact)} /> : undefined}
+        actions={state.opened && shown(state) && route !== undefined ? <AssistantChatActions placement="comms" triggerId={contactChatActionsId(route, state.contact)}
+          onAttach={() => attachFromContact(alpha, route, state.contact)} onSearch={() => searchFromContact(alpha, route, state.contact)} /> : undefined}
         filter={!state.opened && can({ type: "search", typed: true }) ? { value: filtered ? "" : query, onChange: (typed) => (typed !== "" || !filtered) && search(typed), maxLength: 128 } : undefined} />
     </section>
   );
@@ -158,7 +160,7 @@ export function Contacts({ runtime, alpha }: ContactsProps & { alpha: Alpha }) {
   return (
     <Tabs value="Contacts" onValueChange={(value) => void select(value)} className="min-h-0 flex-1 gap-0">
       {header}
-      <TabsContent value="Contacts" className="min-h-0 flex-1 overflow-y-auto">{content}</TabsContent>
+      <TabsContent value="Contacts" className="flex min-h-0 flex-1 flex-col overflow-y-auto">{content}</TabsContent>
     </Tabs>
   );
 }
@@ -169,13 +171,15 @@ const MailGlyph = createLucideIcon({ name: "ContactMail", node: [["path", { key:
 const NotesGlyph = createLucideIcon({ name: "NotesGlyph", node: [["path", { key: "page", d: "M4 3h16v18H4zM8 7h8M8 11h8M8 15h5" }]] });
 
 /** One contact as the phone holds it now; compact while Alpha's sheet is open over it. */
-function Card({ runtime, safe }: ContactsProps & { safe: boolean }) {
+function Card({ runtime, safe, route }: ContactsProps & { safe: boolean; route: number | undefined }) {
   const { state, can, send } = useContacts(runtime);
   const compact = useCommsDock(runtime).open;
   if (!state) return null;
   const card = runtime.runSync(Effect.flatMap(Rows, (rows) => rows.get())).card;
   const reach = (how: "Call" | "Message", number: string) => {
-    runtime.runSync(Effect.flatMap(Rows, (rows) => rows.set({ reach: number })));
+    if (route === undefined) return;
+    const request = { how, route, contact: state.contact, card: state.card.ticket, number };
+    runtime.runSync(Effect.flatMap(Rows, (rows) => rows.set({ reach: request })));
     void send({ type: "reach", how });
   };
   const field = "flex min-h-13.5 items-center gap-4 px-5 py-2";

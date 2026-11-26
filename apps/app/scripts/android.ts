@@ -4,6 +4,7 @@ import { createHash } from "node:crypto";
 import { execFileSync, spawnSync } from "node:child_process";
 import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
+import { gzipSync } from "node:zlib";
 import { dirname, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import * as NodeServices from "@effect/platform-node/NodeServices";
@@ -192,6 +193,22 @@ export async function stageRuntime(): Promise<string> {
   return output;
 }
 
+/**
+ * The Android Gradle plugin's asset merge gunzips every asset named `*.gz` once and drops the extension. eliza's
+ * generated host keeps the runtime payload's inventoried archives (elizaOS/eliza#40652); the page's own `*.gz`
+ * assets, the OCR training data `public/ocr/eng.traineddata.gz`, are wrapped in one more gzip layer as
+ * `<name>.gz` after `cap copy`, which the merge unwraps back to the exact bytes and name. `verify` audits both.
+ */
+export function keepGzipAssets(assets: string) {
+  if (!existsSync(assets)) return;
+  for (const name of readdirSync(assets, { recursive: true }).map(String)) {
+    const file = join(assets, name);
+    if (!name.endsWith(".gz") || name.endsWith(".gz.gz") || !statSync(file).isFile()) continue;
+    writeFileSync(`${file}.gz`, gzipSync(readFileSync(file)));
+    rmSync(file);
+  }
+}
+
 /** The page, built with the test mocks off, and the record that says so. */
 export function buildWeb() {
   run(process.execPath, [join(root, "vibestack/spec.ts"), "tasks", "@repo/app#build"], { cwd: root });
@@ -311,7 +328,11 @@ export async function build(release: boolean) {
     mappings: release,
     signing: { environment: signingNames },
     gradleArguments: ["-PelizaSpeechBridgeCapacitor=true"],
-    prepare: [{ command: join(app, "node_modules/.bin/cap"), args: ["copy", "android"] }],
+    prepare: [
+      { command: join(app, "node_modules/.bin/cap"), args: ["copy", "android"] },
+      // After the page copy and before Gradle: the page's own *.gz assets (the OCR training data) need the same wrap as the runtime's.
+      () => keepGzipAssets(join(app, androidPaths.project, "app/src/main/assets/public")),
+    ],
     record: {
       name: "build-config.json",
       metadata: {
@@ -342,6 +363,7 @@ const REQUIRED_CLASSES = [
     "AlphaMediaEnrollmentPlugin", "AlphaScanPlugin"].map((name) => `Lai/alphacompute/alphaphone/${name};`),
   "Lai/eliza/plugins/camera/CameraPlugin;",
   "Lai/eliza/plugins/filesystem/FilesPlugin;",
+  "Lai/eliza/plugins/signin/SignInCallbackActivity;",
   ...["PermittedPhotosPlugin", "PermittedMediaCatalog", "OwnedPhotoEdits", "OwnedVideoPlayback", "OwnedCaptures",
     "SelectedDocuments", "DocumentDestinations"].map((name) => `Lai/eliza/plugins/media/${name};`),
 ];
@@ -446,6 +468,13 @@ export function checkApk(file: string, mode: "debug" | "release", env: NodeJS.Pr
   const capacitor = record(JSON.parse(read("assets/capacitor.config.json").toString("utf8")));
   const signIn = record(record(capacitor.plugins).ElizaSignIn);
   if (signIn.testEnvironments !== false) throw new Error(`${name} registers test cloud environments`);
+  const environments: unknown = signIn.environments;
+  const registration = Array.isArray(environments) && environments.length === 1 ? record(environments[0]) : {};
+  if (signIn.clientId !== identity.appId || signIn.googleMode !== "browser" || registration.name !== "production"
+      || registration.apiOrigin !== production.cloud || registration.appLinkHost !== production.appLinkHost
+      || registration.redirectPath !== signInCallbackPath) {
+    throw new Error(`${name} lacks the production Alpha Cloud sign-in registration`);
+  }
   const page = mkdtempSync(join(tmpdir(), "alpha-apk-page-"));
   try {
     execFileSync("unzip", ["-q", file, "assets/public/*", "-d", page]);

@@ -180,7 +180,11 @@ pure def emptied(account: int, s: Mailbox): Mailbox =
 ### Choosing a folder or a search reads its first page
 
 Both need read access. A folder starts without a search. Spam and Trash
-are chosen only where they can be searched.
+are chosen only where they can be searched. A signed-out owner can open
+and type into the search field. Submitting a nonempty search there opens
+Cloud sign-in before any mail is requested. When the phone has no mail sign-in
+to ask for, Search and Connect Eliza Cloud open Account above the current Inbox
+visit. Back closes Account and keeps the search field and its text.
 
 ```quint
 pure def canChooseFolder(s: Mailbox, folder: Folder): bool =
@@ -490,6 +494,14 @@ pure def sometimesTheListMayBeOutOfDate(s: Mailbox): bool = s.doubtful and s.pag
 > there is none, to choose among several, to see only what my grant
 > allows, and to see nothing once I withdraw it.
 
+### The owner authorizes Gmail in Google and Inbox checks access on return
+
+Connect Gmail, Give access and Reconnect open Google's authorization for
+the same signed-in Cloud owner. The request covers reading, sending,
+saving drafts and organizing mail. Reconnecting keeps the selected
+account's existing Calendar access. Inbox checks the grants again on
+return and only uses the access Google actually granted.
+
 ### Opening Inbox, and every change to Google access, checks the accounts again, even while a check is out
 
 Only the newest check's answer is taken, so one computed before a
@@ -517,7 +529,11 @@ pure def checkAccess(s: Mailbox): Moved =
 A list kept under a credential the account no longer has is dropped.
 Replacing the selected credential clears the live list, its unread count,
 and the read in flight. With read access the first page is
-read when access is new, or when nothing fresh is on screen. Without it
+read when access is new, or when nothing fresh is on screen: no list, a
+saved list, or a list whose last read failed. So a check after a failed
+read reads the mail again and the count recovers, as v121 read the mail
+again each time Alpha came back to the front (the Sunday demo build, Alpha
+45f6bed30, `apps/app/src/prototype/inbox-cloud-adapter.ts:255-312`, `:1387`). Without it
 the screen is emptied. A failed check changes nothing. An answer ends a
 wait for the mail lease, as it ends a withdrawal.
 
@@ -552,8 +568,16 @@ pure def accountsAnswered(s: Mailbox, ticket: int, ok: bool, connected: List[Lin
   if (not(ok)) { state: told, out: List() }
   else if (not(readable(placed))) { state: emptied(account, placed), out: List() }
   else if (not(searchableIn(placed.selected.folder, placed))) { state: placed, out: List() }
-  else if (not(was) or (placed.list.status != R::Loading and (placed.pages == 0 or placed.saved))) asking(0, placed)
+  else if (not(was) or (placed.list.status != R::Loading and (placed.pages == 0 or placed.saved or placed.list.status == R::Failed))) asking(0, placed)
   else { state: placed, out: List() }
+```
+
+### A check that answers after a failed read reads the first page again
+
+```quint
+pure def stepACheckAfterAFailedReadReadsAgain(before: Mailbox, via: str, after: Mailbox): bool =
+  (via == "accountsAnswered" and before.list.status == R::Failed and after.accounts.status == R::Loaded
+    and readable(after) and searchableIn(after.selected.folder, after)) implies after.list.status == R::Loading
 ```
 
 ### A check the phone holds back for want of the mail lease keeps the session and everything kept, and asks for one more sign-in

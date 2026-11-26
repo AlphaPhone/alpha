@@ -7,7 +7,7 @@ import { Machine, machine, paymentKeyFits, secretsFileAccepted } from "../gen/cl
 import apiTemplate from "../wrangler/api.template.json" with { type: "json" }
 import edgeTemplate from "../wrangler/edge.template.json" with { type: "json" }
 import { entryOf, registrationAt } from "./alpha.vibe"
-import { candidateProblems, candidates, type CandidateUnknown } from "./candidate.vibe"
+import { hostedClouds, hostedProfileProblems, type HostedCloudUnknown } from "./hosted.vibe"
 import { reconcileResources } from "./cloudflare.vibe"
 import { base64urlBytes, entitlementKey, entitlementPublicKey, randomKey } from "./keys.ts"
 import { PROFILE_ASSET } from "./profile-asset.ts"
@@ -17,13 +17,13 @@ import { assetsDirectory, leakedElizaHost, renderEnvironment, type CloudResource
 export error OperatorFailed { problem: string }
 
 /** The secrets each environment's operator supplies. */
-const providedSecrets = ["DATABASE_URL", "RESEND_API_KEY", "GOOGLE_CLIENT_SECRET", "GOOGLE_CONNECT_CLIENT_SECRET", "STRIPE_SECRET_KEY", "STRIPE_WEBHOOK_SECRET", "CEREBRAS_API_KEY", "CARTESIA_API_KEY", "GOOGLE_MAPS_API_KEY"]
+const providedSecrets = ["DATABASE_URL", "GOOGLE_CLIENT_SECRET", "GOOGLE_CONNECT_CLIENT_SECRET", "STRIPE_SECRET_KEY", "STRIPE_WEBHOOK_SECRET", "CEREBRAS_API_KEY", "CARTESIA_API_KEY", "GOOGLE_MAPS_API_KEY"]
 /** The secrets the operator command generates once and keeps in the secrets file; it never rotates one. */
 const internalSecrets = ["CLOUD_DIGEST_KEY", "CLOUD_SEALING_KEY", "CLOUD_ENTITLEMENT_KEY", "EMAIL_CODE_SECRET", "GOOGLE_CONNECT_TOKEN_KEY"]
 /** The API Worker's secrets, each by the secrets file entry it is read from. */
 const workerSecretSource: Readonly<Record<string, string>> = {
   CLOUD_DIGEST_KEY: "CLOUD_DIGEST_KEY", CLOUD_SEALING_KEY: "CLOUD_SEALING_KEY", CLOUD_ENTITLEMENT_KEY: "CLOUD_ENTITLEMENT_KEY",
-  EMAIL_CODE_SECRET: "EMAIL_CODE_SECRET", RESEND_API_KEY: "RESEND_API_KEY", GOOGLE_CLIENT_SECRET: "GOOGLE_CLIENT_SECRET",
+  EMAIL_CODE_SECRET: "EMAIL_CODE_SECRET", GOOGLE_CLIENT_SECRET: "GOOGLE_CLIENT_SECRET",
   GOOGLE_CONNECT_CLIENT_SECRET: "GOOGLE_CONNECT_CLIENT_SECRET", GOOGLE_CONNECT_TOKEN_KEY: "GOOGLE_CONNECT_TOKEN_KEY",
   STRIPE_SECRET_KEY: "STRIPE_SECRET_KEY", STRIPE_WEBHOOK_SECRET: "STRIPE_WEBHOOK_SECRET",
   CEREBRAS_API_KEY: "CEREBRAS_API_KEY", CARTESIA_API_KEY: "CARTESIA_API_KEY",
@@ -146,14 +146,14 @@ effect function readJson(file: string): unknown!OperatorFailed!FileSystem.FileSy
   return try Effect.try({ try: () => JSON.parse(text) as unknown, catch: () => new OperatorFailed({ problem: `${file} is not JSON` }) })
 }
 
-/** The profile's candidate hosts no longer fit, or the profile breaks a rule of Alpha's own cloud. */
+/** The profile disagrees with Alpha Cloud's hosts or another rule of its deployment. */
 export error CandidateRefused { problems: ReadonlyArray<string> }
 
-/** The completed profile of Alpha's own cloud in `file`, accepted by eliza and keeping every rule of the candidate. */
-export effect function profiled(file: string): { readonly profile: CloudProfile; readonly hosts: Record<CloudEnvironment, Hosts> }!(OperatorFailed | CandidateUnknown | CandidateRefused)!(FileSystem.FileSystem | Path.Path) {
+/** The completed profile of Alpha's own cloud in `file`, accepted by eliza and keeping its deployment rules. */
+export effect function profiled(file: string): { readonly profile: CloudProfile; readonly hosts: Record<CloudEnvironment, Hosts> }!(OperatorFailed | HostedCloudUnknown | CandidateRefused)!(FileSystem.FileSystem | Path.Path) {
   const profile = parseProfile(try readJson(file)) catch effect (refusal) => { throw new OperatorFailed({ problem: `${file}: ${refusal.problem}` }) }
-  const hosts = try candidates()
-  const problems = candidateProblems(profile, hosts)
+  const hosts = try hostedClouds()
+  const problems = hostedProfileProblems(profile, hosts)
   if (problems.length > 0) throw new CandidateRefused({ problems })
   return { profile, hosts }
 }
@@ -173,7 +173,7 @@ const siblingOf = (environment: CloudEnvironment): CloudEnvironment => environme
 
 /** Checks, and with `creating` completes, an environment's Cloudflare resources against what `resources.json` records. */
 export effect function reconciled(environment: CloudEnvironment, resources: Readonly<Record<CloudEnvironment, CloudResources>>, databaseUrl: string | undefined, creating: boolean) {
-  const hosts = (try candidates())[environment]
+  const hosts = (try hostedClouds())[environment]
   const accountId = (Config.withDefault(Config.String("CLOUDFLARE_ACCOUNT_ID"), "") catch () => "")
   const token = (Config.withDefault(Config.String("CLOUDFLARE_API_TOKEN"), "") catch () => "")
   return try reconcileResources({

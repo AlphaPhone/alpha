@@ -83,7 +83,7 @@ const messageBadge = applying(Messages, (state) => state.unread, (unread) => syn
 const phoneBadge = started(effect {
   const calls = Stream.map((try Phone).changes, (state) => ({ missed: state.missed, ready: state.voicemail }))
   const voicemails = Stream.map((try Voicemail).changes, (state) => state.unheard)
-  const badge = Stream.map(Stream.zipLatest(calls, voicemails), ([phone, unheard]) => phone.missed > 0 ? `${phone.missed} missed` : phone.ready && unheard > 0 ? `${unheard} unheard` : undefined)
+  const badge = Stream.map(Stream.zipLatest(calls, voicemails), ([phone, unheard]) => phone.ready && unheard > 0 ? `${unheard} unheard` : undefined)
   try Stream.runForEach(Stream.changes(badge), (said) => sync(() => waiting.tell("Phone", said)))
 }, "badging Home's Phone tile")
 

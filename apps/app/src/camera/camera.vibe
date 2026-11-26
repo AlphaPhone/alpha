@@ -2,6 +2,7 @@
 import { MediaId, type PhotosClient } from "@elizaos/os-bridges"
 import * as Camera from "../../gen/app__camera.effect.vibe"
 import * as Film from "../../gen/app__camera__recording.effect.vibe"
+import { offeringPhoto } from "../../gen/app__camera__agent.effect.vibe"
 import * as Shell from "../../gen/app__shell.effect.vibe"
 import * as Layers from "../../gen/app__shell__layers.effect.vibe"
 import { allows } from "../../gen/kit__permission.effect.vibe"
@@ -10,7 +11,7 @@ import { scanBack, scanCameraImage } from "../files/scan.vibe"
 import { Device } from "../platform/device.vibe"
 import { CameraPort, ownedCaptureId, playable, type CameraMedia, type LensFacts, type Point } from "../platform/camera.vibe"
 import { PhotosPort, latestBrowserCapture, saveBrowserCapture } from "../platform/photos.vibe"
-import { attachToAlpha } from "../assistant/attachments.vibe"
+import { attachToAlpha, type CapturedPhotoOffer } from "../assistant/attachments.vibe"
 import { SystemSettings } from "../platform/systemSettings.vibe"
 import { answer, applying, contained, due, reacting, run, started, stream, together, untimed, type Due, type Job } from "../runtime/reactor.vibe"
 
@@ -23,6 +24,7 @@ export interface CaptureAnswer {
   readonly result: Outcome
   readonly cause: Camera.Cause
   readonly media?: CameraMedia
+  readonly offerDraft?: void!!
 }
 
 /** A last-capture tile can observe its own saved thumbnail. */
@@ -490,11 +492,32 @@ export effect function approveCapture(): void!!(Camera.Machine | Layers.Machine 
   try tell({ type: "agentShoot", sensitive })
 }
 
+effect function readCapturedPhoto(media: CameraMedia) {
+  const libraryId = Option.getOrUndefined(Schema.decodeUnknownOption(MediaId)(media.libraryId))
+  const saved = /^content:\/\/media\/(external|external_primary)\/images\/media\/([1-9][0-9]{0,24})$/.exec(media.path)
+  if (libraryId === undefined || saved === null) return undefined
+  const key = Option.getOrUndefined(Schema.decodeUnknownOption(MediaId)(saved[2]))
+  if (key === undefined || !libraryId.endsWith(`:i:${key}`) ||
+    (saved[1] === "external_primary" && libraryId !== `m:external_primary:i:${key}`)) return undefined
+  const { phone } = try PhotosPort
+  if (Option.isNone(phone)) return undefined
+  const item = tryPromise(() => phone.value.read({ id: key })) catch () => undefined
+  const source = item?.image
+  if (item?.id !== key || item.kind !== "image" || item.trashed === true || source === undefined || !source.startsWith("data:image/jpeg;base64,")) return undefined
+  const data = tryPromise(() => imageData(source)) catch () => undefined
+  return data === undefined ? undefined : { id: libraryId, name: item.name || "Camera.jpg", mimeType: "image/jpeg", data }
+}
+
+type CaptureNeeds = Camera.Machine | CameraAssets | Shell.Machine | PhotosPort | Layers.Machine | Device
+
+// spec/app/camera/agent.md, "A confirmed capture can be offered in the same draft for the owner to send"
 /** An agent capture opens Camera before entering the viewfinder's own single review and returns its actual outcome. */
-export effect function requestCapture(lens?: "front" | "back"): CaptureAnswer!!(Camera.Machine | CameraAssets | Shell.Machine) {
+export effect function requestCapture(lens?: "front" | "back", offer?: CapturedPhotoOffer): CaptureAnswer!!CaptureNeeds {
   const machine = try Camera.Machine
   if (!(try openView("Camera"))) return { result: "Blocked", cause: "Left" }
   try uncover()
+  const shell = try Shell.Machine
+  const route = (try shell.get()).route
   const visible = Stream.filter(machine.changes, (state) => state.showing && (allows(state.permission) || state.permission.asked))
   const opened = timeout(Stream.runHead(visible), 90000) catch () => Option.none<Camera.Camera>()
   if (Option.isNone(opened)) return { result: "Expired", cause: "NoCause" }
@@ -519,5 +542,24 @@ export effect function requestCapture(lens?: "front" | "back"): CaptureAnswer!!(
   if (Option.isNone(answered)) return { result: "Expired", cause: "NoCause" }
   const ended = answered.value
   if (ended.agent.request !== request) return { result: "Uncertain", cause: "NoCause" }
-  return { result: ended.agent.result, cause: ended.cause, media: try (try CameraAssets).read(ended.agent.photo) }
+  const assets = try CameraAssets
+  const photo = ended.agent.photo
+  const media = try assets.read(photo)
+  const result: CaptureAnswer = { result: ended.agent.result, cause: ended.cause, media }
+  if (offer !== undefined && media !== undefined && offeringPhoto(ended.agent, request, photo)) {
+    const scope = try Effect.context<CaptureNeeds>()
+    const current = Effect.provideContext(effect {
+      const live = try machine.get()
+      const shown = try shell.get()
+      return live.showing && !live.secure && live.visit === state.visit && live.last === photo &&
+        offeringPhoto(live.agent, request, photo) && (try assets.read(photo)) === media &&
+        shown.route === route && shown.assistant === "Bar" && Shell.showing(shown, "Camera") &&
+        (try (try Device).showing()) && !Layers.pageInert(try (try Layers.Machine).get())
+    }, scope)
+    if (try current) {
+      const read = Effect.provideContext(readCapturedPhoto(media), scope)
+      return { ...result, offerDraft: Effect.ignoreCause(offer(read, current)) }
+    }
+  }
+  return result
 }

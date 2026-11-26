@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import { Search, X } from "lucide-react";
 import { Button } from "../Button.tsx";
 import { AppTile } from "../AppTile.tsx";
@@ -10,7 +11,7 @@ import { InstalledAppIcon } from "./InstalledAppIcon.tsx";
 import { tileColumns } from "./HomeTileGrid.tsx";
 import { type LauncherHold, useLauncherPress } from "./launcherPress.ts";
 
-/** An app from the accepted launcher catalog. */
+/** An app from the accepted launcher catalog, or one of Alpha's own apps that is not on Home. */
 export interface DrawerApp {
   readonly id: string;
   readonly label: string;
@@ -20,6 +21,8 @@ export interface DrawerApp {
   readonly user?: string;
   readonly locked?: boolean;
   readonly image?: string;
+  /** One of Alpha's own apps draws its glyph, as its Home tile would. */
+  readonly icon?: ReactNode;
 }
 
 export interface AppsDrawerProps {
@@ -27,12 +30,13 @@ export interface AppsDrawerProps {
   readonly query: string;
   readonly catalog: "reading" | "ready" | "unavailable";
   readonly opening?: string;
+  modal?: boolean;
+  inactive?: boolean;
   readonly notice?: HomeNoticeMessage;
   readonly hold?: LauncherHold;
   readonly menu?: { readonly app: string; readonly actions: NonNullable<HomeAppMenuProps["actions"]> };
   onSearch: (query: string) => void;
   onClose: () => void;
-  onBack?: () => void;
   onOpen: (id: string) => void;
   onOpenMenu?: (id: string) => void;
   onRetry?: () => void;
@@ -115,7 +119,7 @@ function DrawerTile({ app, detail, opening, hold, menu, onOpen, onOpenMenu }: {
         <AppTile drawer label={app.label} detail={detail.join(" · ")}
           aria-busy={opening === app.id || undefined} disabled={opening !== undefined}
           aria-haspopup={onOpenMenu ? "menu" : undefined} aria-expanded={onOpenMenu ? actions !== undefined : undefined}
-          icon={<InstalledAppIcon image={app.image} className={app.image ? "size-14 rounded-drawer-icon" : "size-6.5"} />}
+          icon={app.icon ?? <InstalledAppIcon image={app.image} className={app.image ? "size-14 rounded-drawer-icon" : "size-6.5"} />}
           {...activation} />
       </HomeAppMenu>
     </div>
@@ -123,18 +127,22 @@ function DrawerTile({ app, detail, opening, hold, menu, onOpen, onOpenMenu }: {
 }
 
 /** The native launcher catalog in a drawer over Home. @model spec/app/home/drawer.md */
-export function AppsDrawer({ apps, query, catalog, opening, notice, hold, menu, onSearch, onClose, onBack = onClose, onOpen, onOpenMenu, onRetry }: AppsDrawerProps) {
+export function AppsDrawer({ apps, query, catalog, opening, notice, hold, menu, modal = true, inactive = false, onSearch, onClose, onOpen, onOpenMenu, onRetry }: AppsDrawerProps) {
   const entries = matches(apps, query);
   const reading = catalog === "reading";
   const failed = catalog === "unavailable";
   return (
-    <section data-alpha-apps-drawer="" role="dialog" aria-modal="true" aria-label="Apps"
+    <section data-alpha-apps-drawer="" role="dialog" aria-modal={modal || undefined} aria-label="Apps" inert={inactive || undefined}
       className="absolute inset-x-0 top-[max(--spacing(11),var(--alpha-native-inset-top,0px),env(safe-area-inset-top))] bottom-0 z-10 flex min-h-0 flex-col bg-background pt-3 text-foreground"
       onKeyDown={(event) => {
-        if (event.key !== "Escape" || event.defaultPrevented) return;
+        if (inactive || event.key !== "Escape" || event.defaultPrevented) return;
+        const drawer = event.currentTarget;
+        if (!(event.target instanceof Node) || !drawer.contains(event.target)
+          || !drawer.contains(drawer.ownerDocument.activeElement)) return;
         event.preventDefault();
         event.stopPropagation();
-        onBack();
+        if (menu) menu.actions.close();
+        else onClose();
       }}>
       <header className="flex h-11 shrink-0 items-center gap-2 pr-3 pl-5">
         <h1 className="grow font-display text-3xl font-light outline-none">Apps</h1>

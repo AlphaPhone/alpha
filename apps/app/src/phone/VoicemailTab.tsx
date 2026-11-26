@@ -6,6 +6,7 @@ import { Phone as Handset, Trash2 } from "lucide-react";
 import { useSyncExternalStore } from "react";
 import { useMachine as usePhone } from "../../gen/app__phone.react.ts";
 import { useMachine as useVoicemail } from "../../gen/app__phone__voicemail.react.ts";
+import { useMachine as useShell } from "../../gen/app__shell.react.ts";
 import type { PhoneProps } from "./Phone.tsx";
 import { CallAvatar } from "./CallAvatar.tsx";
 import { Player, Voicemails, askVoicemailDeletion } from "./voicemail.vibe";
@@ -37,6 +38,7 @@ function OpenVoicemail({ runtime, row, label, title, date }: Pick<Props, "runtim
 }) {
   const { state, can, send } = useVoicemail(runtime);
   const phone = usePhone(runtime);
+  const route = useShell(runtime).state?.route;
   if (!state || !phone.state) return null;
   const held = runtime.runSync(Effect.flatMap(Voicemails, (store) => store.get()));
   const busy = state.removal.outcome === "Sent";
@@ -74,15 +76,19 @@ function OpenVoicemail({ runtime, row, label, title, date }: Pick<Props, "runtim
       {live && <p role="status" className="text-sm text-muted-foreground">Voicemail does not play during a call</p>}
       {state.confirming ? (
         <div role="group" aria-label="Delete voicemail" className="flex gap-2">
-          <Button variant="ghost" size="icon" className={cn(action, "w-auto")} disabled={!can({ type: "keep" }) || busy}
+          <Button variant="ghost" size="icon" className={cn(action, "w-auto basis-0")} disabled={!can({ type: "keep" }) || busy}
             aria-label="Keep" onClick={() => void send({ type: "keep" })}><Close className="size-5" /></Button>
-          <Button variant="destructive" className="h-11 flex-2 justify-start px-0 text-md" disabled={!can({ type: "confirmDelete" }) || busy}
+          <Button className="h-11 flex-2 basis-0 bg-hangup px-0 text-md font-semibold text-alpha-foreground hover:bg-hangup/90 active:bg-hangup/80" disabled={!can({ type: "confirmDelete" }) || busy}
             data-alpha-phone-voicemail-confirm="" onClick={() => void send({ type: "confirmDelete" })}>Delete</Button>
         </div>
       ) : (
         <div className="flex gap-2">
           {row.number !== "" && can(call) && <Button variant="ghost" size="icon" className={cn(action, "w-auto")} aria-label="Call back" disabled={!canCall} onClick={() => void send(call)}><Handset className="size-5" /></Button>}
-          {row.number !== "" && can(message) && <Button variant="ghost" size="icon" className={cn(action, "w-auto")} aria-label="Message" onClick={() => void send(message)}><Bubble className="size-5" /></Button>}
+          {row.number !== "" && can(message) && <Button variant="ghost" size="icon" className={cn(action, "w-auto")} aria-label="Message" onClick={() => {
+            if (route === undefined) return;
+            runtime.runSync(Effect.flatMap(Voicemails, (store) => store.set({ message: { route, id: row.id, opening: state.audio.ticket, number: row.number } })));
+            void send(message);
+          }}><Bubble className="size-5" /></Button>}
           {can({ type: "askDelete" }) && <Button variant="ghost" size="icon" className={cn(action, "w-auto text-hangup")} aria-label="Delete"
             data-alpha-phone-voicemail-delete="" onClick={() => void runtime.runPromise(askVoicemailDeletion(row.id))}><Trash2 className="size-5" /></Button>}
         </div>

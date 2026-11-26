@@ -10,6 +10,7 @@ export interface AskScene {
   down: boolean;
   stalled: boolean;
   readonly turns: Map<string, () => void>;
+  afterStop?: Kept["messages"];
   readonly kept: Map<string, Kept>;
   searchDown: boolean;
   /** The agent fails every read of a conversation's messages with a 503, as while it is starting. */
@@ -39,7 +40,6 @@ export interface AskScene {
   holdDoneAfterReady?: Promise<void>;
   /** The agent is older than any direct-request mode: a turn that states one is refused whole, as eliza's agent refuses an invalid voice view context. */
   knowsNoActionMode?: boolean;
-  cloudWarmCalls: number;
   /** The fake native store, which survives disposal of the WebView runtime. */
   readonly drafts: Map<string, string>;
   beforeDraftExchange?: () => Promise<void>;
@@ -58,7 +58,7 @@ export interface Kept {
 }
 
 export function askScene(): AskScene {
-  return { opened: 0, said: [], down: false, stalled: false, turns: new Map(), kept: new Map(), searchDown: false, pagesDown: false, pagesMissing: false, pageReads: 0, listReads: 0, holdLists: false, heldLists: [], cloudWarmCalls: 0, drafts: new Map(), refusedDraftExchanges: 0, canRespond: true, warmUps: [], warmUpFails: false, statusReads: 0 };
+  return { opened: 0, said: [], down: false, stalled: false, turns: new Map(), kept: new Map(), searchDown: false, pagesDown: false, pagesMissing: false, pageReads: 0, listReads: 0, holdLists: false, heldLists: [], drafts: new Map(), refusedDraftExchanges: 0, canRespond: true, warmUps: [], warmUpFails: false, statusReads: 0 };
 }
 
 /** A storage address within the fake phone's already verified local account. */
@@ -255,6 +255,9 @@ export function askRoutes(scene: AskScene): Route[] {
         const stop = scene.turns.get(room);
         scene.turns.delete(room);
         stop?.();
+        const after = scene.afterStop;
+        scene.afterStop = undefined;
+        if (after !== undefined) [...scene.kept.values()].find((one) => one.roomId === room)?.messages.push(...after);
         return Response.json({ aborted: stop !== undefined, roomId: room, reason, outcome: stop === undefined ? "nothingRunning" : "stopped" });
       });
     },
@@ -267,11 +270,6 @@ export function askRoutes(scene: AskScene): Route[] {
       if (request.method !== "POST" || url.pathname !== "/api/turns/warm") return;
       scene.warmUps.push(Object.fromEntries([...request.headers].filter(([name]) => name.startsWith("x-eliza-"))));
       return scene.warmUpFails ? Response.json({ error: "warm_up_failed" }, { status: 500 }) : Response.json({ started: true }, { status: 202 });
-    },
-    (request, url) => {
-      if (request.method !== "POST" || (url.pathname !== "/api/turns/warm" && url.pathname !== "/api/cloud/warm")) return;
-      scene.cloudWarmCalls += 1;
-      return Response.json({ started: true }, { status: 202 });
     },
   ];
 }

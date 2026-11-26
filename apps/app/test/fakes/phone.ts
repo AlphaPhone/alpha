@@ -150,22 +150,27 @@ function mailRoute(method: string, target: string): boolean {
 
 /**
  * `ElizaCloudPlugin.java`, the `ElizaCloud` plugin: `request` sends one listed route under the credential it alone
- * holds, the device lease on a mail or calendar route and the device key on any other, and answers the status, the
+ * holds, the device lease on a mail or calendar route, the signed session to connect Google, and the device key on other routes. It answers the status, the
  * headers a page may read and the body in base64; what it will not send it rejects with one of eliza's `CloudFailure`
  * codes, `mail-lease-upgrade-required` for a mail or calendar route on a phone signed in without a lease.
  */
-export function elizaCloud(cloud: Answering, signedIn: () => boolean, lease: MailLeaseScene, credential: () => string, opened?: (url: string) => void): Faked {
+export function elizaCloud(cloud: Answering, signedIn: () => boolean, lease: MailLeaseScene, credential: () => string, opened?: (url: string) => void, billing?: () => boolean): Faked {
   return plugin<ElizaCloudPlugin>(() => ({
-    async request({ method, target, headers, body, expectedCredentialId }: NativeCloudRequest) {
+    async request({ method, target, headers, body, expectedCredentialId, expectedSessionCredentialId }: NativeCloudRequest) {
       if (!target.startsWith("/api/")) throw rejection("not-listed");
       if (!signedIn()) throw rejection("sign-in-required");
       const mail = mailRoute(method, target);
       if (expectedCredentialId !== undefined && (expectedCredentialId !== credential() || mail)) throw rejection("sign-in-required");
+      if (expectedSessionCredentialId !== undefined && (expectedSessionCredentialId !== credential() || !billing?.())) {
+        return { status: 428, body: "" };
+      }
       if (mail && !lease.held) {
         lease.heldBack += 1;
         throw rejection("mail-lease-upgrade-required");
       }
-      const response = await cloud(new Request(new URL(target, "http://cloud.phone"), { method, headers: { ...headers, authorization: mail ? "Bearer mail-lease" : "Bearer device-key", ...(body === undefined ? {} : { "content-type": "application/json" }) }, body })).catch(() => { throw rejection("network"); });
+      const connectingGoogle = method === "POST" && target === "/api/v1/eliza/google/connect/initiate";
+      const bearer = connectingGoogle ? "signed-session" : mail ? "mail-lease" : expectedSessionCredentialId === undefined ? "device-key" : "billing-session";
+      const response = await cloud(new Request(new URL(target, "http://cloud.phone"), { method, headers: { ...headers, authorization: `Bearer ${bearer}`, ...(body === undefined ? {} : { "content-type": "application/json" }) }, body })).catch(() => { throw rejection("network"); });
       const found = { etag: response.headers.get("etag"), contentType: response.headers.get("content-type"), retryAfter: response.headers.get("retry-after") };
       return { status: response.status, body: base64(new Uint8Array(await response.arrayBuffer())), ...Object.fromEntries(Object.entries(found).filter(([, value]) => value !== null)) };
     },

@@ -43,15 +43,14 @@ Agent activity and the Licences. Developer and its Problem log hang from
 the first page.
 
 ```quint
-import facts as F from "./facts"
 
-type Page = Top | General | Display | Sound | Notifications | Battery | NetworkPage | CarrierPage | CarrierInfoPage | PhonePage | Privacy | Permissions | Apps | InboxApp | WorkflowsApp | CalendarApp | CameraApp | PhotosApp | MapsApp | NotesApp | PasswordsPage | BrowserPasswordsPage | About | Activity | Licences | Developer | Problems
+type Page = Top | General | Display | Sound | Notifications | Battery | NetworkPage | CarrierPage | CarrierInfoPage | PhonePage | Privacy | Permissions | PrivacyNotifications | Apps | InboxApp | WorkflowsApp | CalendarApp | CameraApp | PhotosApp | MapsApp | NotesApp | PasswordsPage | BrowserPasswordsPage | About | Activity | Licences | Developer | Problems
 
 pure def passwordPage(page: Page): bool = page == PasswordsPage or page == BrowserPasswordsPage
 
 pure def parent(page: Page): Page =
   if (page == Display or page == Sound or page == Notifications or page == Battery or page == NetworkPage or page == CarrierPage or page == CarrierInfoPage or page == PhonePage) General
-  else if (page == Permissions) Privacy
+  else if (page == Permissions or page == PrivacyNotifications) Privacy
   else if (page == InboxApp or page == WorkflowsApp or page == CalendarApp or page == CameraApp or page == PhotosApp or page == MapsApp or page == NotesApp or page == PasswordsPage) Apps
   else if (page == Activity or page == Licences) About
   else if (page == Problems) Developer
@@ -109,6 +108,7 @@ pure def admitted(s: Settings, page: Page): bool =
   if (page == Developer or page == Problems) s.development
   else if (page == NetworkPage or page == CarrierPage) s.phone
   else if (page == CarrierInfoPage) s.told and not(s.phone)
+  else if (page == PrivacyNotifications) s.told
   else if (page == PhonePage) s.image
   else true
 
@@ -138,7 +138,7 @@ pure def alwaysEveryPageShownIsAdmitted(s: Settings): bool = admitted(s, s.page)
 
 ```quint
 pure def canOpen(s: Settings, page: Page): bool =
-  page != Top and page != BrowserPasswordsPage and parent(page) == s.page and admitted(s, page)
+  page != Top and page != BrowserPasswordsPage and page != PrivacyNotifications and parent(page) == s.page and admitted(s, page)
 
 pure def open(s: Settings, page: Page): Settings = { ...s, page: page, places: s.places.append(0) }
 ```
@@ -162,6 +162,27 @@ pure def openBrowserPasswords(s: Settings): Settings =
 pure def stepTheBrowserShortcutReturnsToSettings(before: Settings, via: str, after: Settings): bool =
   via == "openBrowserPasswords" implies
     (before.page == Top and after.page == BrowserPasswordsPage and parent(after.page) == Top)
+```
+
+### The owner can open Notifications from App permissions
+
+This replaces App permissions with the same Notifications settings found in
+General. Back returns to Privacy at the row the owner left there. A notice
+or Ask Alpha opening Notifications still goes back to General.
+
+```quint
+pure def canOpenPrivacyNotifications(s: Settings): bool =
+  s.page == Permissions and admitted(s, PrivacyNotifications)
+
+pure def openPrivacyNotifications(s: Settings): Settings =
+  { ...s, page: PrivacyNotifications, places: refocused(s.places, 0) }
+```
+
+### Notifications reached from App permissions can show with the place on Privacy remembered
+
+```quint
+pure def sometimesNotificationsOpenedFromPermissions(s: Settings): bool =
+  s.page == PrivacyNotifications and row(s, Privacy) == 2
 ```
 
 ### A notice or Ask Alpha may open a section directly, at its top, and Back from it goes to its parent
@@ -273,7 +294,7 @@ pure def selectionOf(page: Page): str =
   if (page == General) "settings-general"
   else if (page == Display) "display"
   else if (page == Sound) "sound"
-  else if (page == Notifications) "notifications"
+  else if (page == Notifications or page == PrivacyNotifications) "notifications"
   else if (page == Battery) "battery"
   else if (page == Privacy) "settings-privacy"
   else if (page == Permissions) "settings-permissions"
@@ -319,14 +340,14 @@ backups. Settings hands over and keeps nothing.
 ```quint
 type Neighbour = AccountAndPlan | GoogleAndEmail | CalendarAccount | NotificationCollection | Listener | Conversations | RestartDetails | CalendarBackups
 
-type Effect = Handed({ neighbour: Neighbour }) | ReviewAccess({ access: F::Access }) | ReviewAllAccess
+type Effect = Handed({ neighbour: Neighbour }) | ReviewAllAccess
 type Moved = { state: Settings, out: List[Effect] }
 
 pure def links(s: Settings, neighbour: Neighbour, micMayBeOn: bool): bool =
   if (neighbour == AccountAndPlan) s.page == Top
   else if (neighbour == GoogleAndEmail) s.page == InboxApp
   else if (neighbour == CalendarAccount) s.page == CalendarApp
-  else if (neighbour == NotificationCollection) s.page == Notifications
+  else if (neighbour == NotificationCollection) (s.page == Notifications or s.page == PrivacyNotifications)
   else if (neighbour == Listener) (s.page == Privacy and s.image) or (s.page == Top and micMayBeOn)
   else if (neighbour == Conversations) s.page == Activity
   else if (neighbour == RestartDetails) s.page == Activity and s.development
@@ -337,23 +358,18 @@ pure def canHandOver(s: Settings, neighbour: Neighbour, micMayBeOn: bool): bool 
 pure def handOver(s: Settings, neighbour: Neighbour, micMayBeOn: bool): Moved = { state: s, out: List(Handed({ neighbour: neighbour })) }
 ```
 
-### Set up Alpha access opens all permissions in review, and each row on Permissions opens that one access
+### Set up Alpha access opens all permissions in review
 
-The startup area owns the walkthrough. Settings never asks it to start
-over, so a walkthrough already finished stays finished.
+The startup area owns the walkthrough and lets the owner choose one access
+from its list. A finished walkthrough stays finished.
 
 ```quint
 pure def canReviewAllAccess(s: Settings): bool = s.page == Privacy
 
 pure def reviewAllAccess(s: Settings): Moved = { state: s, out: List(ReviewAllAccess) }
 
-pure def canReviewAccess(s: Settings, access: F::Access): bool = s.page == Permissions
-
-pure def reviewAccess(s: Settings, access: F::Access): Moved = { state: s, out: List(ReviewAccess({ access: access })) }
-
-pure def stepTheWalkthroughOnlyReviewsOneAccess(before: Settings, after: Settings, out: List[Effect]): bool =
+pure def stepTheWalkthroughOpensFromPrivacy(before: Settings, after: Settings, out: List[Effect]): bool =
   out.every(e => match e {
-    | ReviewAccess(r) => out.length() == 1 and before.page == Permissions
     | ReviewAllAccess => out.length() == 1 and before.page == Privacy
     | _ => true
   })

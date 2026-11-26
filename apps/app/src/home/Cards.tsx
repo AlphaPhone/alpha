@@ -3,6 +3,8 @@ import { HomeAgendaCard, type HomeAgendaItem, type HomeAgendaNext, HomeBriefCard
 import { Effect, type ManagedRuntime } from "effect";
 import { type ReactNode, useSyncExternalStore } from "react";
 import * as Cards from "../../gen/app__home__cards.ts";
+import type { Machine as HomeMachine } from "../../gen/app__home.effect.vibe";
+import type { Shell } from "../../gen/app__shell.ts";
 import type { Machine } from "../../gen/app__home__cards.effect.vibe";
 import { useMachine } from "../../gen/app__home__cards.react.ts";
 import { dayStart } from "../calendar/time.ts";
@@ -13,7 +15,7 @@ import type { Resident } from "../runtime/area.tsx";
 import { useTimed } from "../runtime/react.ts";
 import { untimed } from "../runtime/reactor.vibe";
 import { Time } from "../runtime/time.vibe";
-import { fromAreas, named, others } from "./cards.vibe";
+import { fromAreas, named, openRoutedCard, others } from "./cards.vibe";
 import { messagingStateOf, renderMessagingCard } from "./MessagingCards.tsx";
 
 const where: Readonly<Record<Cards.Origin, string>> = { PhoneCalendar: "Calendar", AgentCalendar: "Alpha", Reminder: "Reminder" };
@@ -55,20 +57,31 @@ function readLineOf(state: Cards.Cards, item: Cards.Item, now: number): string {
  * Home's row of cards, in the spec's order and only those drawn: the agenda, Messages, Phone, Workflows, mail and the
  * brief, each from what its area told Home; a press opens the card's app. Empty when no card is drawn.
  */
-export function useDayCards(runtime: ManagedRuntime.ManagedRuntime<Machine | Resident, unknown>, image: boolean): readonly ReactNode[] {
+export function useDayCards(runtime: ManagedRuntime.ManagedRuntime<Machine | HomeMachine | Resident, unknown>, shell: Shell | undefined, beside: boolean): readonly ReactNode[] {
   const { state, can, send } = useTimed(runtime, useMachine);
   useSyncExternalStore(named.subscribe, named.snapshot, named.snapshot);
   const given = useSyncExternalStore(fromAreas.subscribe, fromAreas.snapshot, fromAreas.snapshot);
   const bridge = runtime.runSync(MessagingBridge);
   const messaging = useSyncExternalStore((listener) => bridge.subscribe(listener), () => bridge.snapshot(), () => bridge.snapshot());
-  if (!state) return [];
-  const told = others(given, image, messagingStateOf(messaging.cards.Telegram), messagingStateOf(messaging.cards.Slack));
+  if (!state || !shell) return [];
+  const told = others(given, shell.image, messagingStateOf(messaging.cards.Telegram), messagingStateOf(messaging.cards.Slack));
   const now = Math.max(state.calendar.since, state.agent.since, dayStart(state.today));
   const latest = Math.max(now, runtime.runSync(Effect.flatMap(Time, (time) => time.latest())));
-  const open = (kind: Cards.Kind) => ({
-    disabled: !can({ type: "openCard", kind, now }),
-    onClick: () => void send({ type: "openCard", kind, now: untimed }),
-  });
+  const open = (kind: Cards.Kind) => {
+    if (kind === "MailCard" || beside) {
+      const admitted = kind === "MailCard"
+        ? can({ type: "openMailCard", shell, beside, shown: Cards.mailCard(told.mail) !== "Hidden" })
+        : can({ type: "openCardBeside", kind, shell, landscapePhone: true, shown: Cards.shownBeside(kind, told.flows, told.brief) });
+      return {
+        disabled: !admitted,
+        onClick: () => { if (admitted) void runtime.runPromise(openRoutedCard(kind, shell.route, beside)); },
+      };
+    }
+    return {
+      disabled: !can({ type: "openCard", kind, now }),
+      onClick: () => void send({ type: "openCard", kind, now: untimed }),
+    };
+  };
   const drawn: Record<Cards.Kind, () => ReactNode> = {
     AgendaCard: () => {
       const items = Cards.candidates(state, told);
@@ -96,12 +109,12 @@ export function useDayCards(runtime: ManagedRuntime.ManagedRuntime<Machine | Res
     MessagesCard: () => (
       <HomeCallsCard key="messages" app="Messages" aria-label={`Open Messages, ${given.waiting.messages || told.messages.length} unread`}
         summary={String(given.waiting.messages || told.messages.length)} status={given.waiting.messagesAt > 0 ? shortWhen(given.waiting.messagesAt, latest) : ""}
-        lines={told.messages} {...open("MessagesCard")} onClick={() => void runtime.runPromise(openUnread())} />
+        lines={told.messages} {...open("MessagesCard")} onClick={beside ? undefined : () => void runtime.runPromise(openUnread())} />
     ),
     PhoneCard: () => (
       <HomeCallsCard key="phone" app="Phone" aria-label={given.waiting.phoneSaid ? `Open Phone, ${given.waiting.phoneSaid}` : "Open Phone"}
         summary={String(given.waiting.phone || told.phone.length)} status={given.waiting.phoneAt > 0 ? shortWhen(given.waiting.phoneAt, latest) : ""}
-        lines={told.phone} {...open("PhoneCard")} onClick={() => void runtime.runPromise(openCalls())} />
+        lines={told.phone} {...open("PhoneCard")} onClick={beside ? undefined : () => void runtime.runPromise(openCalls())} />
     ),
     MailCard: () => <HomeMailCard key="mail" aria-label={`Open Inbox, ${told.mail.unread}${given.mailMore ? "+" : ""} unread`} unread={told.mail.unread} more={given.mailMore} lines={told.mail.rows} status={given.mailStatus || (Cards.mailCard(told.mail) === "NotUpdated" ? "Not up to date" : "")} {...open("MailCard")} />,
     TelegramCard: () => renderMessagingCard("Telegram", "TelegramCard", messaging.cards.Telegram, open("TelegramCard")),

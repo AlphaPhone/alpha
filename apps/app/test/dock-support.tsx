@@ -15,6 +15,7 @@ import { cloudAt } from "../src/platform/cloud.vibe";
 import { voiceArea } from "../src/messages/dictation.vibe";
 import { pagePlatform } from "../src/platform/platform.vibe";
 import { resident } from "../src/resident.vibe";
+import { StartupSignIn } from "../src/startup/signIn.vibe";
 import { together, whole } from "../src/runtime/reactor.vibe";
 
 const closers: (() => Promise<void>)[] = [];
@@ -23,6 +24,10 @@ export async function closeAllDocks() {
   for (const close of closers.splice(0)) await close();
   localStorage.clear();
 }
+
+/** The resident agent and launch owner the dock's agent names, so that attachments can be fenced to a verified owner. */
+const dockAgent = "dock-agent";
+const dockOwner = "dock-owner";
 
 export async function mountDock({ view = "Browser", withToast = false, flush }: { view?: "Browser" | "Calendar" | "Home" | "Settings"; withToast?: boolean; flush?: (work: () => Promise<void> | void) => Promise<void> } = {}) {
   const run = flush ?? (async (work: () => Promise<void> | void) => { await work(); });
@@ -35,7 +40,11 @@ export async function mountDock({ view = "Browser", withToast = false, flush }: 
           ? { version: "1", optionalFields: true }
           : url.pathname === "/api/conversations"
             ? { conversations: [] }
-            : {};
+            : url.pathname === "/api/auth/me"
+              ? { identity: { kind: "owner", id: dockAgent }, access: { role: "OWNER", mode: "local" } }
+              : url.pathname === "/api/client-devices/capabilities"
+                ? { protocol: 1, agentId: dockAgent, identityId: dockOwner, deviceActions: { protocol: 1, capabilities: [] } }
+                : {};
       return Effect.succeed(HttpClientResponse.fromWeb(request, new Response(JSON.stringify(body), { headers: { "content-type": "application/json" } })));
     }),
   );
@@ -45,7 +54,13 @@ export async function mountDock({ view = "Browser", withToast = false, flush }: 
     Layer.succeed(AgentPages, { open: () => Effect.succeed(false) }),
     Layer.succeed(MediaExecutors, { reviewFiles: () => Effect.succeed(undefined), filesContext: () => Effect.succeed(undefined), readyFiles: () => Effect.succeed(undefined), execute: () => Effect.succeed(undefined) }),
   );
-  const runtime = ManagedRuntime.make(Layer.provideMerge(whole(together(assisting, voiceArea, aloud)), Layer.provideMerge(resident, platform)));
+  const no = () => Effect.succeed(false);
+  const signedOut = Layer.succeed(StartupSignIn, {
+    changes: Stream.empty, active: no, confirmedAccount: no, check: () => Effect.void, touch: () => Effect.void,
+    openNetwork: no, send: no, chooseGoogle: no, verify: no, resend: no, back: no,
+  });
+  // The resident reads StartupSignIn; the dock journeys run signed-in-free, as a page without native sign-in does.
+  const runtime = ManagedRuntime.make(Layer.provideMerge(whole(together(assisting, voiceArea, aloud)), Layer.provideMerge(resident, Layer.merge(signedOut, platform))));
   const host = document.body.appendChild(document.createElement("div"));
   const reactRoot = createRoot(host);
   await run(async () => {

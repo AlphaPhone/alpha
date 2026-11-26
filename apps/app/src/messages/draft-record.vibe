@@ -24,7 +24,7 @@ interface DraftContents {
 }
 
 export type DraftRecord = DraftContents & (
-  | { readonly source: NewSource; readonly recipients: string }
+  | { readonly source: NewSource; readonly recipients: string; readonly androidInbound?: AndroidInboundDraft }
   | { readonly source: ThreadSource | RecipientSource }
 )
 
@@ -32,6 +32,9 @@ const maxThreadAddresses = 20
 const maxRecipientText = 512
 const maxSerialized = Math.ceil(MMS_MAX_TOTAL_BYTES / 3) * 4 + 24 * 1024
 const revision = Schema.Int.check(Schema.isGreaterThanOrEqualTo(0), Schema.isLessThanOrEqualTo(Number.MAX_SAFE_INTEGER))
+export const AndroidDraftToken = Schema.String.check(Schema.isPattern(/^[A-Za-z0-9_-]{1,128}$/u)).pipe(Schema.brand("AndroidDraftToken"))
+const androidInbound = Schema.Struct({ token: AndroidDraftToken, admittedRevision: revision.check(Schema.isGreaterThanOrEqualTo(1)) })
+export type AndroidInboundDraft = typeof androidInbound.Type
 const addresses = Schema.Array(Schema.String.check(Schema.isMaxLength(64))).check(Schema.isMinLength(1), Schema.isMaxLength(maxThreadAddresses))
 const picture = Schema.Struct({
   name: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(255)),
@@ -52,6 +55,7 @@ const stored = Schema.fromJsonString(Schema.Union([
     ...contents,
     source: Schema.Struct({ kind: Schema.Literal("new") }),
     recipients: Schema.String.check(Schema.isMaxLength(maxRecipientText)),
+    androidInbound: Schema.optionalKey(androidInbound),
   }),
   Schema.Struct({
     ...contents,
@@ -98,6 +102,10 @@ export function sameDraftSource(left: DraftSource, right: DraftSource): boolean 
   return right.kind === "recipients" && equalRecipients(left.recipients, right.recipients)
 }
 
+export function androidInboundOf(record: DraftRecord | null): AndroidInboundDraft | undefined {
+  return record !== null && "androidInbound" in record ? record.androidInbound : undefined
+}
+
 function sourceOf(source: typeof stored.Type["source"]): DraftSource | undefined {
   if (source.kind === "new") return source
   const recipients = canonicalDraftRecipients(source.recipients)
@@ -133,6 +141,8 @@ function validPictures(pictures: readonly DraftPicture[]): boolean {
 export function encodeDraftRecord(draft: DraftRecord): string | undefined {
   if (sourceOf(draft.source) === undefined || (draft.author === "Nobody" && draft.body !== "") || !validPictures(draft.pictures)
     || (draft.completedOperation !== undefined && operationIdOf(draft.completedOperation) === null)) return undefined
+  const inbound = androidInboundOf(draft)
+  if (inbound !== undefined && (draft.source.kind !== "new" || inbound.admittedRevision > draft.revision)) return undefined
   return Option.getOrUndefined(Schema.encodeOption(stored)({ version: 2, ...draft }))
 }
 
@@ -148,7 +158,10 @@ export function decodeDraftRecord(raw: string, expected: DraftSource): DraftReco
   if (completedOperation !== undefined && operation === null) return undefined
   const details = { revision, author, body, pictures, ...(operation === null ? {} : { completedOperation: operation }) }
   if (bound.kind !== "new") return { ...details, source: bound }
-  return "recipients" in decoded.value ? { ...details, source: bound, recipients: decoded.value.recipients } : undefined
+  if (!("recipients" in decoded.value)) return undefined
+  const inbound = decoded.value.androidInbound
+  if (inbound !== undefined && inbound.admittedRevision > revision) return undefined
+  return { ...details, source: bound, recipients: decoded.value.recipients, ...(inbound === undefined ? {} : { androidInbound: inbound }) }
 }
 
 module web {

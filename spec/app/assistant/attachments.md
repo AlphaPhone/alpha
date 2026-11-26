@@ -170,6 +170,12 @@ pure def granted(a: Attachments, tab: Tab, grant: P::Grant, visit: int): Moved =
   else { state: { ...seen, rows: X::dropped(a.rows), more: false }, out: List() }
 ```
 
+On a Contact, Chat actions opens the same picker over the current card. Cancel returns focus
+to the card's Chat actions. Accepted files raise the conversation over the
+same card. Leaving the card, reopening it, or replacing its selected subject
+retires a pending chooser. Its reviewed files stay separate from the ordinary
+Ask Alpha draft and are only offered to the agent on Send.
+
 ### Only the newest listing is shown; a denied folder asks for access, and one that fails offers Retry
 
 ```quint
@@ -231,7 +237,9 @@ pure def includePicked(a: Attachments, count: int): Attachments = choose(a, coun
 ### Attach reads the chosen files once, and adds only those within the type, name and size limits
 
 A file refused is named to the owner and never attached. When every file
-went, the picker closes.
+went, the picker closes. The chooser opens over the current dock position.
+A fully accepted selection raises a closed or typing dock to the sheet
+while its original draft and route are still current.
 
 ```quint
 pure def canAttachChosen(a: Attachments): bool =

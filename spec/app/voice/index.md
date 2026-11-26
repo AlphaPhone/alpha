@@ -165,7 +165,12 @@ network route when consented, without prompting for or opening the
 microphone. On a phone with the Cloud speech relay, warming the network
 route also has the relay open its connection to Cloud speech, so the first
 conversation starts on a warm connection; like the rest of the warm-up it
-shows nothing and its failure is ignored. Once warm, redundant prewarm requests are refused until Alpha
+shows nothing and its failure is ignored. Warming is of speech only: the
+agent's model, which a spoken turn of the enrolled phone plans with as a
+typed one does, is
+warmed by Ask Alpha's warm-up alone ([assistant](../assistant/index.md)),
+with this phone's headers and only while the agent can answer, so speech
+never asks the agent for a warm-up of its own. Once warm, redundant prewarm requests are refused until Alpha
 returns to the foreground or the account changes. A local reply waits up
 to ten seconds for any speech readiness probe already in flight, so
 warming cannot win the speaker request slot from its first sentence.
@@ -451,10 +456,6 @@ pure def lawMinutesAreAlwaysSaid(hour: int, minute: int, written: Meridiem): boo
 
 On the Cloud speech relay, the microphone reopens on the conversation's own
 relay stream under the same owner, for every turn of the conversation.
-Discovered on vibestack-develop: each reopening asked the relay as a new
-owner, the relay refused it and closed, and Talk ended as soon as Alpha
-first spoke, so a turn whose acknowledgment was said while its tools still
-ran was cut off before its note opened or its reply came.
 
 ```quint
 pure def nextTurn(heard: bool, v: Voice): Change =

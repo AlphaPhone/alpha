@@ -76,7 +76,7 @@ type Effect =
   | Prompt({ need: Need })
   | OpenSettings
   | CopyText
-  | OpenPhone
+  | OpenPhone({ thread: int, ticket: int })
   | OpenMessagingApp
   | RemoveMessage({ id: int })
 
@@ -346,6 +346,22 @@ pure def canOpenThread(s: Messages, thread: int): bool = showingPane(s, Threads)
 pure def openThread(s: Messages, thread: int): Moved = openConversation(thread, s)
 ```
 
+### Returning from Phone restores the conversation the Ask Alpha stage held
+
+The stage remembers the conversation's registered thread number and the
+list ticket from before the return. Messages reopens the thread on that
+exact return, whether the list has already come to the front or is still
+waiting to show. SMS access must still be available.
+
+```quint
+pure def canRestoreStageThread(s: Messages, thread: int, ticket: int): bool =
+  s.pane == Threads and readable(s) and not(removing(s)) and thread > 0 and ticket > 0
+    and (if (s.front) s.list.ticket == ticket + 1 and s.list.status != R::Idle else s.list.ticket == ticket)
+
+pure def restoreStageThread(s: Messages, thread: int, ticket: int): Moved =
+  openConversation(thread, { ...s, front: true })
+```
+
 ### A message notification opens its exact conversation once access is available
 
 The phone provides the thread identifier after an owner taps its private
@@ -467,6 +483,10 @@ inline link or selecting text leaves the message menu alone.
 
 ### Copy puts a message's text on the clipboard, Call opens Phone with the number, and a message Alpha cannot show opens in the messaging app; none changes anything here
 
+Call hands off the current thread and page ticket. Phone opens the keypad
+with the one participant's number and keeps Ask Alpha open at its current
+height. The owner uses Phone's Call control to start a call.
+
 ```quint
 pure def canCopy(s: Messages): bool = showingPane(s, Conversation) and content(s) and not(s.confirming)
 
@@ -474,7 +494,7 @@ pure def copy(s: Messages): Moved = { state: s, out: List(CopyText) }
 
 pure def canCall(s: Messages): bool = showingPane(s, Conversation) and not(s.confirming)
 
-pure def call(s: Messages): Moved = { state: s, out: List(OpenPhone) }
+pure def call(s: Messages): Moved = { state: s, out: List(OpenPhone({ thread: s.thread, ticket: s.page.ticket })) }
 
 pure def canOpenElsewhere(s: Messages): bool = showingPane(s, Conversation) and s.shown.partial > 0 and not(s.confirming)
 
@@ -582,6 +602,13 @@ pure def sometimesDeleteAsked(s: Messages): bool = s.confirming and s.shown.fail
 
 ### New message reads the contacts that have a number and brings back the owner's unsent New draft
 
+Message from a contact card or voicemail opens this same New draft. It fills an
+empty To field with the selected number, leaves any existing recipient and body
+in place, and leaves Send to the owner. The address belongs to the receiving
+Messages route, and it can be saved only after that route has opened New.
+If opening the draft or saving the address fails, the owner can retry while
+that route and, once open, that New visit are still current.
+
 ```quint
 pure def askChoices(further: bool, s: Messages): Moved =
   val picker = R::ask(s.picker)
@@ -600,28 +627,53 @@ pure def startNewDraft(s: Messages, revision: int, thread: int): Moved =
 pure def holdsNewDraft(s: Messages, visit: int): bool = showingPane(s, New) and s.newDraft.visit == visit
 ```
 
+### The current New address names the Messages stage beside Ask Alpha
+
+The stage and its Full strip name the recipients of the open New draft. The
+name is read only for its current validated numbers and while Contacts
+access permits it. The phone shows the numbers themselves when it cannot
+name them. Editing To keeps the same New draft and Ask Alpha history.
+
 ### A current Android text request opens New only when its saved draft is empty
 
 Opening Messages from Android can fill To and the text of the next New
-draft. It takes the request only while that request and the Messages list
-are still in front, the saved New draft was read and is empty, and the
-address names the prepared recipients. An earlier request or a draft
-already in use changes nothing. The filled draft opens in New, leaving
-Send to the owner.
+draft. The exact request opens an empty New visit from the Messages list
+after the phone confirms that its saved draft is empty. Only the admitted
+visit can save the request's address and text, after checking the request
+and draft again. The phone acknowledges only the exact still-current
+request whose fill was saved. Replacing a request leaves any admitted
+save in place. If it was replaced before any save, its exact untouched
+empty New visit returns to the list, where the phone can take the newer
+request. An opening the owner has started using stays in front and the
+phone leaves its draft to the owner. Send stays with the owner.
+
+The encrypted New draft keeps the admitted request's token and revision
+with the fill. That evidence stays available through owner edits and send
+settlement. After a restart the phone can acknowledge the same still-current
+request from that evidence without opening or filling the draft again.
 
 ```quint
-pure def canOpenAndroidDraft(s: Messages, requestCurrent: bool, empty: bool, revision: int, thread: int): bool =
-  requestCurrent and empty and canStartNewDraft(s, revision, thread) and revision > s.newDraft.revision and thread > 0
+pure def canOpenAndroidDraft(s: Messages, requestCurrent: bool, empty: bool, revision: int): bool =
+  requestCurrent and empty and canStartNewDraft(s, revision, 0)
 
-pure def openAndroidDraft(s: Messages, requestCurrent: bool, empty: bool, revision: int, thread: int): Moved =
-  startNewDraft(s, revision, thread)
+pure def openAndroidDraft(s: Messages, requestCurrent: bool, empty: bool, revision: int): Moved =
+  startNewDraft(s, revision, 0)
 
 pure def stepAndroidDraftOpensItsNewVisit(before: Messages, via: str, after: Messages): bool =
   via == "openAndroidDraft" implies (before.front and before.pane == Threads and after.front and after.pane == New
-    and after.newDraft.visit == before.newDraft.visit + 1 and after.newDraft.revision > before.newDraft.revision
-    and after.newDraft.recipient > 0 and not(after.newDraft.picking))
+    and after.newDraft.visit == before.newDraft.visit + 1 and after.newDraft.revision >= 0
+    and after.newDraft.recipient == 0 and not(after.newDraft.picking))
 
-pure val eval_witness_canOpenAndroidDraft = ("show", ("openAndroidDraft", true, true, 1, 1))
+pure val eval_witness_canOpenAndroidDraft = ("show", ("openAndroidDraft", true, true, 0))
+
+pure def canAbandonAndroidDraft(s: Messages, visit: int, revision: int, untouched: bool): bool =
+  untouched and canBack(s) and holdsNewDraft(s, visit) and s.newDraft.revision == revision
+    and s.newDraft.recipient == 0 and not(s.newDraft.picking)
+
+pure def abandonAndroidDraft(s: Messages, visit: int, revision: int, untouched: bool): Moved = back(s)
+
+pure val eval_witness_canAbandonAndroidDraft =
+  ("show", ("openAndroidDraft", true, true, 0), ("abandonAndroidDraft", 1, 0, true))
 ```
 
 ### The owner can write before choosing To, then adjust To without moving or losing the message

@@ -341,9 +341,14 @@ pure def askAccess(s: Calendar): Viewed = { state: { ...s, access: P::ask(s.acce
 
 ### What Android answers replaces what Calendar believed; granted, the day is read, withdrawn, the phone's rows go
 
+Calendar reads the current grant when it comes into view or the phone
+returns to it. That read asks for no permission. Losing the grant closes
+an open phone event.
+
 ```quint
 pure def accessAnswered(s: Calendar, grant: P::Grant): Viewed =
-  val told = { ...s, access: P::observe(s.access, grant) }
+  val seen = { ...s, access: P::observe(s.access, grant) }
+  val told = if (not(P::allows(seen.access)) and s.local) closeEvent(seen) else seen
   if (P::allows(told.access) and not(P::allows(s.access))) readFor(s.anchor, told)
   else { state: { ...told, phoneRows: if (P::allows(told.access)) s.phoneRows else 0, phoneLimited: P::allows(told.access) and s.phoneLimited }, out: List() }
 ```
@@ -583,7 +588,10 @@ day found whose title, place or notes hold every word typed, case-folded,
 and names the window from the first of last month through the end of next
 month. Empty standalone Search without a connected calendar says Not connected
 with or without a query. The Calendars sheet lists the agent's calendar and the
-phone's, each with its switch.
+phone's, each with its switch. Only a wide screen offers Search, the layouts and
+the Calendars sheet: on a phone, Calendar's header holds the month, Today and New
+event, and the month dialog only its days, as Alpha's build of 22 November drew
+them.
 
 ```quint
 pure def canOpenSearch(s: Calendar): bool = s.overlay == NoOverlay and s.open == 0 and s.reminder == 0 and s.front

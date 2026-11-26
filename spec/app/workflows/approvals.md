@@ -310,8 +310,9 @@ pure def sometimesADecisionIsUnsettled(a: Approvals): bool = a.approval == Unset
 
 ## Story: Confirm exactly what this workflow does on my phone
 
-> As the owner, I want the run to show the selected notes or calendar
-> scope, or the exact new note, before I let the enrolled phone do it.
+> As the owner, I want to review the exact notes, calendar range, or
+> reminder day my workflow will read, or the exact note, notification,
+> or spoken text it will produce, before I let my enrolled phone do it.
 
 ### The run shows one exact device offer until it changes or expires
 
@@ -319,7 +320,9 @@ The agent first records its workflow approval. The device's own proposal
 then names the run, version, step and saved specification. Alpha checks
 these and the current enrollment against the agent's run before showing
 the device review. Only a tap while the same review is visible may send a
-decision. Leaving that run or changing owners dismisses it.
+decision. Leaving that run or changing owners dismisses it. While Alpha
+reads approved text aloud, I can stop playback from the run. Alpha only
+confirms completion after playback finishes.
 
 ```quint
 pure val numberValues = Set(1, 2, 3)

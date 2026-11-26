@@ -5,7 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import { defineRoutes } from "@elizaos/agent";
 import { describe, expect, it } from "vitest";
-import { AlphaAppsStore, alphaAppsPluginName, createAlphaAppsPlugin } from "../src/plugins/index.ts";
+import { AlphaAppsStore, alphaAppsPluginName, createAlphaAppsPlugin, notesTranscriptionRoutes } from "../src/plugins/index.ts";
 import { advanceDueDate } from "../src/plugins/store.ts";
 import type { AgentRoute, AgentRuntimeLike } from "../src/plugins/types.ts";
 
@@ -605,5 +605,27 @@ describe("Alpha product plugin: Reminders actions, provider, recurrence, and rou
     expect(completed.body.item).toMatchObject({ id: selected.id, completed: false, dueDate: "2027-03-16", history: [
       { revision: selected.revision, dueAtMs: Date.UTC(2027, 2, 13, 9, 30), completedAtMs: now, skippedDates: 2 },
     ] });
+  });
+});
+
+describe("Notes transcription for the local browser", () => {
+  const transcriptionContext = (environment?: Record<string, string>) => ({
+    launch: { account: { userId: "owner-1", organizationId: "org-1" }, ...(environment === undefined ? {} : { environment }) },
+    runtime: { getModelRegistrations: () => [], useModel: () => Promise.reject(new Error("no local model")) },
+  }) as unknown as Parameters<typeof notesTranscriptionRoutes>[0];
+
+  // spec/agent/index.md, "The local browser can request a private transcription of a reviewed note"
+  it("offers the route without a local engine, and says no local model is ready to transcribe", async () => {
+    const routes = notesTranscriptionRoutes(transcriptionContext(), "local-inference", () => Promise.resolve(false));
+    expect(routes.map(({ method, path }) => `${method} ${path}`)).toEqual(["GET /api/alpha/notes/transcription", "POST /api/alpha/notes/transcription"]);
+    const signal = new AbortController().signal;
+    expect(await routes[0]!.handler({ signal } as never)).toEqual({ status: 200, body: { local: false } });
+    const pcm = Buffer.from(new Uint8Array(3_200)).toString("base64");
+    expect(await routes[1]!.handler({ body: { pcm }, signal } as never)).toEqual({ status: 503, body: { error: "LOCAL_TRANSCRIPTION_UNAVAILABLE" } });
+  });
+
+  // spec/agent/index.md, "The local browser can request a private transcription of a reviewed note"
+  it("is not offered while the agent runs Alpha's native speech engine", () => {
+    expect(notesTranscriptionRoutes(transcriptionContext({ ALPHA_LOCAL_SPEECH_SOCKET: "/run/alpha/speech.sock" }), "local-inference", () => Promise.resolve(true))).toEqual([]);
   });
 });

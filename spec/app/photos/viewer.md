@@ -199,6 +199,19 @@ pure def canClose(s: Viewer, by: Actor): bool = by == Owner and s.open != 0 and 
 pure def close(s: Viewer, by: Actor): Viewer = { ...s, open: 0, origin: LibraryItem, playing: false, info: false, gone: false }
 ```
 
+### Removing its draft attachment closes only the exact photo still showing
+
+Removing the viewed photo's attachment from Ask Alpha closes that photo if
+its opening is still showing. A different or reopened photo, a later
+revision, or a viewer being edited stays as it was.
+
+```quint
+pure def canCloseRemovedPhoto(s: Viewer, photo: int, revision: int, ticket: int, by: Actor): bool =
+  canClose(s, by) and shown(s) and not(s.secure) and s.open == photo and s.revision == revision and s.read.ticket == ticket
+
+pure def closeRemovedPhoto(s: Viewer, photo: int, revision: int, ticket: int, by: Actor): Viewer = close(s, by)
+```
+
 ### Only the newest read's answer is shown, while the viewer is showing; one that failed can be read again
 
 A still has no length.

@@ -1,7 +1,7 @@
 // spec/app/notes/index.md, "Story: See my notes"; spec/app/notes/index.md, "Story: Organise my notes"; spec/app/notes/editor.md, "Story: Write a note"; spec/app/notes/trash.md, "Story: Delete a note and get it back"
 import { Alert, AppHeader, Button, Chip, ConfirmDialog, Dialog, DialogClose, DialogContent, DialogDescription, DialogTitle, Input, LinkNoteView, Menu, MenuContent, MenuItem, MenuTrigger, NoteEditor as NoteForm, NoteMenu, NoteRow, cn, focusRing, noteMenuItem, noteMenuPanel, NotesList as NoteRows, Spinner, VoiceNoteView } from "@repo/ui";
-import { Copy, Download, Ellipsis, FileDown, Folder, FolderInput, ListChecks, Mail, MessageSquare, Mic, Pin, Plus, Share2, Trash2, X } from "lucide-react";
-import { useRef, useState, useSyncExternalStore, type CSSProperties, type FormEvent } from "react";
+import { Copy, Download, Ellipsis, FileDown, Folder, FolderInput, ListChecks, Mail, Mic, Pin, Plus, Share2, Trash2, X } from "lucide-react";
+import { useEffect, useRef, useState, useSyncExternalStore, type CSSProperties, type FormEvent } from "react";
 import * as Notes from "../../gen/app__notes.ts";
 import * as Editor from "../../gen/app__notes__editor.ts";
 import * as Trash from "../../gen/app__notes__trash.ts";
@@ -12,6 +12,7 @@ import { useMachine as useEditor } from "../../gen/app__notes__editor.react.ts";
 import { useMachine as useTrash } from "../../gen/app__notes__trash.react.ts";
 import { useMachine as useLink } from "../../gen/app__notes__linkNote.react.ts";
 import { useMachine as useRecorder } from "../../gen/app__notes__recording.react.ts";
+import { useMachine as useMicrophone } from "../../gen/app__notes__microphone.react.ts";
 import { useMachine as usePrevious } from "../../gen/app__notes__previous.react.ts";
 import { useMachine as useTransfer } from "../../gen/app__notes__transfer.react.ts";
 import { useMachine as useVoice } from "../../gen/app__notes__voice.react.ts";
@@ -28,7 +29,7 @@ import { deleteSelection, enter } from "./notes.vibe";
 import { record } from "./recording.vibe";
 import { Previous } from "./Previous.tsx";
 import { clock, dated, preview, titleOf } from "./present.ts";
-import { Recording } from "./Recording.tsx";
+import { MicrophoneUnavailable, Recording } from "./Recording.tsx";
 import { RecentlyDeleted } from "./RecentlyDeleted.tsx";
 import { VoiceReview, copyTranscript, generateTranscript, pageOf } from "./sides.vibe";
 
@@ -84,6 +85,9 @@ function EditorScreen({ runtime, saved }: { readonly runtime: Runtime; readonly 
   const hasDocuments = runtime.runSync(NoteDocuments).available;
   const writer = runtime.runSync(NoteEditor);
   const [next, setNext] = useState("");
+  const [unboundMenu, setUnboundMenu] = useState(false);
+  const moreRef = useRef<HTMLButtonElement>(null);
+  const shareRef = useRef<HTMLDivElement>(null);
   const current = writing.state;
   if (!current?.showing) return null;
   const owner = (event: Editor.Event) => writing.can(event, "Owner");
@@ -96,30 +100,38 @@ function EditorScreen({ runtime, saved }: { readonly runtime: Runtime; readonly 
   const deletion: Editor.Event = { type: "deleteNote", ready: bin !== undefined && Trash.ready(bin) };
   const deletable = owner(deletion);
   const exporting = { type: "exportNote", note: current.note, revision: current.draft.base } as const;
-  const sharing = { type: "openMenu", note: current.note, link: current.link, saved: current.draft.sync === "Kept" && !current.deleting } as const;
-  const shared = sharing.saved && current.link.tie === "NoLink" && (actions.can(sharing, "Owner") || actions.state?.open === true);
-  const exportable = hasDocuments && current.draft.sync === "Kept" && transfer.can(exporting, "Owner");
+  const linkedExport = current.link.tie !== "NoLink" && hasDocuments && current.draft.sync === "Kept" && transfer.can(exporting, "Owner");
+  const sharing = { type: "openMenu", note: current.note, revision: current.draft.base, link: current.link, saved: current.draft.sync === "Kept" && !current.deleting } as const;
+  const actionsState = actions.state;
+  const menuBound = sharing.saved && actionsState?.owner === current.owner && actionsState.note === current.note && actionsState.revision === current.draft.base;
+  const reviewed = menuBound && actionsState.sharing;
+  const reviewShare = { type: "reviewShare" } as const;
+  const closeShare = { type: "closeShare" } as const;
+  const chooseDestination = (destination: Destination) => {
+    const event = { type: "shareText", destination } as const;
+    if (reviewed && actions.can(event, "Owner")) void actions.send(event, "Owner");
+  };
   const editable = owner({ type: "edit", kept: true });
   const status = current.draft.sync === "Saving" ? "Saving…" : current.failed ? "Couldn't save the note"
     : current.full ? "There isn't room to keep your draft" : current.told === "WasUnknown" ? "Alpha couldn't confirm the deletion"
       : current.told === "WasRefused" ? "Couldn't delete the note" : current.told === "WasFull" ? "Recently deleted is full" : undefined;
-  const menu = (deletable || exportable || shared || organised.pin !== undefined || organised.moves.length > 0) && <Menu onOpenChange={(open) => {
-    if (open && actions.can(sharing, "Owner")) void actions.send(sharing, "Owner");
-    if (!open && actions.can({ type: "closeMenu" }, "Owner")) void actions.send({ type: "closeMenu" }, "Owner");
-  }}>
-    <MenuTrigger aria-label="More" className={cn(focusRing, "flex h-13 w-11 shrink-0 items-center justify-center rounded-full active:bg-accent")}><Ellipsis aria-hidden className="size-5.5" /></MenuTrigger>
-    <MenuContent align="end" alignOffset={-59} sideOffset={4} className={noteMenuPanel}>
-      {shared && actions.state?.open && <>
-        <MenuItem className={noteMenuItem} onSelect={() => void actions.send({ type: "share", channel: "Email", mark: 0 }, "Owner")}><Mail /> Share by email</MenuItem>
-        <MenuItem className={noteMenuItem} onSelect={() => void actions.send({ type: "share", channel: "Messages", mark: 0 }, "Owner")}><MessageSquare /> Share in Messages</MenuItem>
-      </>}
-      {organised.pin && <MenuItem className={noteMenuItem} onSelect={organised.pin}><Pin /> {organised.pinned ? "Unpin" : "Pin"}</MenuItem>}
-      {organised.moves.map(({ folder, move }) => <MenuItem className={noteMenuItem} key={folder.id} onSelect={move}><FolderInput /> {folder.id === 0 ? "Move out of folder" : `Move to ${folder.name}`}</MenuItem>)}
-      {exportable && <MenuItem className={noteMenuItem} onSelect={() => void transfer.send(exporting, "Owner")}><FileDown /> Save as text</MenuItem>}
-      {deletable && (shared && actions.state?.open || exportable || organised.pin !== undefined || organised.moves.length > 0) && <div role="separator" className="my-1 border-t border-border" />}
-      {deletable && <MenuItem className={noteMenuItem} onSelect={() => send(deletion)}><Trash2 /> Delete</MenuItem>}
-    </MenuContent>
-  </Menu>;
+  const menu = (deletable || linkedExport || actions.can(sharing, "Owner") || menuBound && actionsState.open || organised.pin !== undefined || organised.moves.length > 0) &&
+    <Menu open={menuBound && actionsState.open || unboundMenu} onOpenChange={(open) => {
+      if (open && actions.can(sharing, "Owner")) void actions.send(sharing, "Owner");
+      else setUnboundMenu(open);
+      if (!open && actions.can({ type: "closeMenu" }, "Owner")) void actions.send({ type: "closeMenu" }, "Owner");
+    }}>
+      <MenuTrigger ref={moreRef} aria-label="More" className={cn(focusRing, "flex h-13 w-11 shrink-0 items-center justify-center rounded-full active:bg-accent")}><Ellipsis aria-hidden className="size-5.5" /></MenuTrigger>
+      <MenuContent aria-label="Note actions" aria-labelledby={undefined} align="end" alignOffset={-61} sideOffset={4} className={noteMenuPanel}>
+        {menuBound && current.link.tie === "NoLink" && <MenuItem ref={shareRef} aria-label="Share note" className={noteMenuItem}
+          onSelect={(event) => { event.preventDefault(); if (actions.can(reviewShare, "Owner")) void actions.send(reviewShare, "Owner"); }}><Share2 /> Share</MenuItem>}
+        {organised.pin && <MenuItem className={noteMenuItem} onSelect={organised.pin}><Pin /> {organised.pinned ? "Unpin" : "Pin"}</MenuItem>}
+        {organised.moves.map(({ folder, move }) => <MenuItem className={noteMenuItem} key={folder.id} onSelect={move}><FolderInput /> {folder.id === 0 ? "Move out of folder" : `Move to ${folder.name}`}</MenuItem>)}
+        {linkedExport && <MenuItem className={noteMenuItem} onSelect={() => void transfer.send(exporting, "Owner")}><FileDown /> Save as text</MenuItem>}
+        {deletable && (menuBound || linkedExport || organised.pin !== undefined || organised.moves.length > 0) && <div role="separator" className="my-1 border-t border-border" />}
+        {deletable && <MenuItem className={noteMenuItem} onSelect={() => send(deletion)}><Trash2 /> Delete</MenuItem>}
+      </MenuContent>
+    </Menu>;
   return (
     <NoteForm
       className="relative inset-auto min-h-0 flex-1"
@@ -144,6 +156,10 @@ function EditorScreen({ runtime, saved }: { readonly runtime: Runtime; readonly 
       onDone={close}
       feedback={<>
         <TransferNotice runtime={runtime} />
+        <NoteSharePanel open={reviewed}
+          close={() => { if (actions.can(closeShare, "Owner")) void actions.send(closeShare, "Owner"); }}
+          choose={chooseDestination} canSave={!native() || hasDocuments}
+          restore={() => (shareRef.current ?? moreRef.current)?.focus({ preventScroll: true })} />
         {current.draft.sync === "Conflicted" && <Alert variant="warn">This note changed while you were writing.
           <div className="mt-2 flex flex-wrap gap-2">
             {owner({ type: "keepMine" }) && <Button size="sm" onClick={() => action("keepMine")}>Keep mine</Button>}
@@ -210,7 +226,7 @@ const destinations = [
   { destination: "SaveText", label: "Save file", Icon: Download },
 ] as const;
 
-function VoiceSharePanel({ open, close, choose, canSave, restore }: {
+function NoteSharePanel({ open, close, choose, canSave, restore }: {
   readonly open: boolean;
   readonly close: () => void;
   readonly choose: (destination: Destination) => void;
@@ -252,8 +268,20 @@ function VoiceNote({ runtime, collection }: { readonly runtime: Runtime; readonl
   const review = runtime.runSync(VoiceReview);
   const moreRef = useRef<HTMLButtonElement>(null);
   const state = voice.state;
+  const note = state?.showing ? collection.noteByNumber.get(state.note) : undefined;
+  const audioId = note === undefined ? "" : audioIdOf(note);
+  const noteId = note?.id;
+  const [recognition, setRecognition] = useState<{ audioId: string; noteId: string }>();
+  const localProbe = !native() && device.canTranscribe && state?.added === 0 && state.revision === collection.version;
+  useEffect(() => {
+    if (!localProbe || audioId === "" || noteId === undefined) return;
+    const controller = new AbortController();
+    void runtime.runPromise(device.transcriptionReady(audioId, noteId), { signal: controller.signal }).then((ready) => {
+      if (!controller.signal.aborted) setRecognition(ready ? { audioId, noteId } : undefined);
+    }).catch(() => {});
+    return () => controller.abort();
+  }, [audioId, device, localProbe, noteId, runtime]);
   if (!state?.showing) return null;
-  const note = collection.noteByNumber.get(state.note);
   const data = note?.format?.data;
   const saved = note === undefined ? undefined : savedVoice(note);
   const lines = saved?.lines.map((line) => ({ ...speaker(line.who), at: clock(line.at), text: line.text })) ?? [];
@@ -268,7 +296,7 @@ function VoiceNote({ runtime, collection }: { readonly runtime: Runtime; readonl
   const showTranscript = { type: "showTranscript" } as const;
   const addTranscript = { type: "addTranscript" } as const;
   const back = { type: "back" } as const;
-  const audio = note !== undefined && audioIdOf(note) !== "";
+  const audio = audioId !== "";
   const current = state.revision === collection.version;
   const pending = current && state.heard > state.added ? runtime.runSync(review.get(state)) : undefined;
   const pinned = note?.format?.data.pinned === true;
@@ -281,8 +309,9 @@ function VoiceNote({ runtime, collection }: { readonly runtime: Runtime; readonl
   };
   const canPin = current && note !== undefined && voice.can(pin, "Owner");
   const pinWrite = state.part === "Pin" || state.part === "Unpin";
-  const canTranscribe = device.canTranscribe && audio && current && state.added === 0 && voice.can(transcribe, "Phone");
-  const canRetry = device.canTranscribe && audio && current && voice.can(retry, "Owner");
+  const canRecognize = device.canTranscribe && (native() || (recognition?.audioId === audioId && recognition.noteId === noteId));
+  const canTranscribe = canRecognize && audio && current && state.added === 0 && voice.can(transcribe, "Phone");
+  const canRetry = canRecognize && audio && current && voice.can(retry, "Owner");
   const generate = (again = false) => void runtime.runPromise(generateTranscript(state.note, state.revision, again));
   const canUseTranscript = current && note !== undefined && lines.length > 0 && voice.can(ask, "Owner");
   const copy = canUseTranscript ? () => void runtime.runPromise(copyTranscript({
@@ -314,13 +343,13 @@ function VoiceNote({ runtime, collection }: { readonly runtime: Runtime; readonl
       <TransferNotice runtime={runtime} />
       {state.shareNotice === "Copied" && <Alert variant="info" className="mt-4">Note text copied.</Alert>}
       {state.shareNotice === "ShareUnavailable" && <Alert variant="warn" className="mt-4">Sharing is unavailable.</Alert>}
-      <VoiceSharePanel open={state.sharing && current}
+      <NoteSharePanel open={state.sharing && current}
         close={() => { if (voice.can(closeShare, "Owner")) void voice.send(closeShare, "Owner"); }}
         choose={chooseDestination} canSave={!native() || runtime.runSync(NoteDocuments).available}
         restore={() => moreRef.current?.focus({ preventScroll: true })} />
       {canTranscribe && <Button className="mt-4" variant="secondary" onClick={() => generate()}>Generate transcript</Button>}
       {state.listen.status === "Loading" && <div className="mt-4 flex items-center gap-2">
-        <Spinner label="Transcribing on this phone" />
+        <Spinner label={native() ? "Transcribing on this phone" : "Transcribing on this computer"} />
         <span className="text-sm text-muted-foreground">Transcribing…</span>
         {voice.can(cancel, "Owner") && <Button variant="ghost" size="sm" aria-label="Cancel transcription" onClick={() => void voice.send(cancel, "Owner")}>Cancel</Button>}
       </div>}
@@ -352,6 +381,7 @@ function NotesList({ alpha, runtime }: { readonly alpha: Alpha; readonly runtime
   const voice = useVoice(runtime);
   const bin = useTrash(runtime);
   const recorder = useRecorder(runtime).state;
+  const microphone = useMicrophone(runtime);
   const previous = usePrevious(runtime);
   const transfer = useTransfer(runtime);
   const hasDocuments = runtime.runSync(NoteDocuments).available;
@@ -375,7 +405,11 @@ function NotesList({ alpha, runtime }: { readonly alpha: Alpha; readonly runtime
     <EditorScreen key={writing.note} runtime={runtime} saved={draft} />
     {bin.state?.question === "AskFull" && <RecentlyDeleted runtime={runtime} collection={collection} />}
   </>;
-  if (recorder !== undefined && unfinished(recorder)) return <Recording alpha={alpha} runtime={runtime} />;
+  if (recorder !== undefined && unfinished(recorder)) return <Recording runtime={runtime} />;
+  if (microphone.state?.browserDenied && microphone.state.owner === state.owner) {
+    return <MicrophoneUnavailable onRecord={() => void runtime.runPromise(record)}
+      onDiscard={() => void microphone.send({ type: "closeBrowserDenial" }, "Owner")} />;
+  }
   const available = Notes.readyForNew(state);
   const newNote = { type: "newNote", kind: "Text", available, covered: false, folder: state.filter } as const;
   const openTrash = { type: "show", covered: false } as const;

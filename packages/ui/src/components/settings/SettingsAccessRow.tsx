@@ -9,9 +9,10 @@ export type SettingsAccessRowProps = {
   /** Which access the row is about. */
   access: Access;
   /** What the phone said about its grant. */
-  grant: AccessWord;
-  /** Opens the access walkthrough to review this one access; the row is pressable only with it. */
-  onReview?: () => void;
+  grant: AccessWord | Reading;
+  /** Opens the settings for this access. */
+  onOpen?: () => void;
+  disabled?: boolean;
 };
 
 const names: Record<Access, string> = {
@@ -44,12 +45,14 @@ const readings: Record<AccessWord, Reading> = {
 
 /**
  * One access Alpha holds and whether the phone says it is allowed, approximate, off or unavailable. An access the phone
- * did not report is never shown as allowed. With a review, the state sits at the row's end before the chevron; without
+ * did not report is never shown as allowed. With a shortcut, the state sits at the row's end before the chevron; without
  * one, under the access, as a fact.
  * @model spec/app/settings/facts.md
  */
-export function SettingsAccessRow({ access, grant, onReview }: SettingsAccessRowProps) {
+export function SettingsAccessRow({ access, grant, onOpen, disabled }: SettingsAccessRowProps) {
   const title = names[access];
-  if (!onReview) return <SettingsFactRow title={title} reading={readings[grant]} />;
-  return <SettingsNavRow title={title} icon={icons[access]} value={<SettingsReading reading={readings[grant]} />} onOpen={onReview} />;
+  const reading = typeof grant === "string" ? readings[grant] : grant;
+  if (!onOpen) return <SettingsFactRow title={title} reading={reading} />;
+  const value = reading.word === "unavailable" ? { ...reading, compact: true } : reading;
+  return <SettingsNavRow title={title} icon={icons[access]} value={<SettingsReading reading={value} />} onOpen={onOpen} disabled={disabled} className="[&>span:last-child]:gap-3.5" />;
 }

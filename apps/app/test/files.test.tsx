@@ -125,7 +125,10 @@ describe("Files on a phone", () => {
     expect(listed().sort()).toEqual(["Old", "notes.txt"]);
     await press("Internal storage");
     await until(alpha, runtime, Browser, (s) => s.listing.status === "Loaded" && s.trail.length === 1);
-    await choose("Browse storage");
+    await openMenu("Files options");
+    expect(menuItem("Browse storage")).toBeUndefined();
+    await drawn(() => menuItem("Grid view")?.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true })));
+    await hardware("back");
     await press("Images");
     await until(alpha, runtime, Browser, (s) => s.inCategory && s.listing.status === "Loaded");
     // spec/app/files/index.md, "Images and Videos show the phone's folder groups with their counts and open the folder chosen"
@@ -159,7 +162,7 @@ describe("Files on a phone", () => {
     world.files.listMost = 5_000;
 
     // spec/app/files/index.md, "The place showing is read again when asked, and only its newest answer is taken; a folder that no longer exists brings the owner back to the top and says so, never that the storage is unavailable"
-    await choose("Browse storage");
+    await hardware("back");
     await press("Internal storage");
     await until(alpha, runtime, Browser, (s) => s.listing.status === "Loaded");
     await openRow("Documents");
@@ -271,6 +274,9 @@ describe("Files on a phone", () => {
     world.files.stored.splice(world.files.stored.findIndex((one) => one.path === "Download"), 1);
     await showInFiles();
     await until(alpha, runtime, Browser, (s) => s.open && s.handed && s.inCategory && s.category === "Download" && s.listing.status === "Loaded");
+    await choose("Browse storage");
+    await until(alpha, runtime, Browser, (s) => s.open && !s.handed && !s.inCategory && s.trail.length === 0);
+    expect(alpha.runtime.runSync(Shell.use((m) => m.get())).trail.at(-1)).toBe("Files");
   });
 
   it("Browse my storage without access (spec/app/files/index.md, \"Story: Browse my storage\")", async () => {
@@ -880,18 +886,21 @@ describe("Files on a phone", () => {
       review.proposal.state = "pending";
       review.proposal.payload.operation = operation;
       world.ask.nextReplyChunks = ["I found a Files action."];
+      const received = Promise.withResolvers<ReturnType<typeof readTurnContext>>();
       world.ask.nextActions = (metadata) => {
-        expect(readTurnContext({ content: { metadata } }).voiceUi?.agentActionMode).toBe("direct-files-v1");
+        received.resolve(readTurnContext({ content: { metadata } }));
         review.proposal.payload.requestMessageId = `m${world.ask.said.length}u`;
         return [{ action: "PROPOSE_DEVICE_ACTION", data: { proposalId: id, state: "pending", executed: false, approvalRequired: false, awaitingDeviceExecution: true, directRequest: true } }];
       };
       await sendChat(text);
+      const context = await received.promise;
+      expect(context.voiceUi?.agentActionMode).toBe("direct-files-v1");
     };
 
     await fromHome();
     world.ask.holdAfterTools = true;
     await send("cancel-at-source", "Show PDFs in Download", filter);
-    await vi.waitFor(() => expect(world.ask.turns.size).toBe(1));
+    expect(world.ask.turns.size).toBe(1);
     expect([review.claims, review.journal.size, world.files.calls.includes("storageQuery")]).toEqual([[], 0, false]);
     await hardware("back");
     await fromHome();

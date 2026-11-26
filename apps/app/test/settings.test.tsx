@@ -47,6 +47,13 @@ const tap = (title: string) => drawn(() => {
 
 const page = (alpha: Awaited<ReturnType<typeof open>>["alpha"]) => alpha.runtime.runPromise(Pages.Machine.use((pages) => pages.get())).then((state) => state.page);
 
+/** Back closes the Account sheet onto the top of Settings. */
+async function backFromAccount(alpha: Awaited<ReturnType<typeof open>>["alpha"]) {
+  await hardware("back");
+  await until(alpha, alpha.runtime, Layers.Machine, (state) => !Layers.listed(state, "account"));
+  expect(await page(alpha)).toBe("Top");
+}
+
 /** Alpha on a phone, its Settings open at the first page with the phone's facts read. */
 async function settingsOpen(world = { ...scene(), phone: true }) {
   const running = await open(world);
@@ -59,6 +66,28 @@ async function settingsOpen(world = { ...scene(), phone: true }) {
 }
 
 describe("Settings", () => {
+  it("Opens browser Notifications from App permissions and returns to Privacy", async () => {
+    const { alpha, machines } = await settingsOpen({ ...scene(), phone: false });
+    await press("Privacy");
+    await press("Permissions");
+    await vi.waitFor(() => {
+      const panel = document.querySelector('[data-settings-page="App permissions"]');
+      expect(panel?.textContent).toContain("Selected");
+      expect(panel?.textContent).toContain("Chosen files");
+      expect(panel?.textContent).not.toContain("Calendar");
+    });
+    await tap("Notifications");
+    await until(alpha, machines, Pages.Machine, (s) => s.page === "PrivacyNotifications");
+    await press("Back to Privacy");
+    await until(alpha, machines, Pages.Machine, (s) => s.page === "Privacy");
+    await press("Back to Settings");
+    await press("General");
+    await tap("Notifications");
+    await until(alpha, machines, Pages.Machine, (s) => s.page === "Notifications");
+    await press("Back to General");
+    await until(alpha, machines, Pages.Machine, (s) => s.page === "General");
+  });
+
   it("Recovers an unavailable browser account only after Try again", async () => {
     const world = { ...scene(), signedIn: false };
     const { alpha } = await settingsOpen(world);
@@ -70,9 +99,7 @@ describe("Settings", () => {
     expect(document.querySelector('[role="dialog"]')?.textContent).not.toContain(account.email);
     await press("Try again");
     await vi.waitFor(() => expect(document.querySelector('[role="dialog"]')?.textContent).toContain(account.email));
-    await hardware("back");
-    await until(alpha, alpha.runtime, Layers.Machine, (state) => !Layers.listed(state, "account"));
-    expect(await page(alpha)).toBe("Top");
+    await backFromAccount(alpha);
 
     world.signedIn = false;
     await drawn(() => titled("Account")?.focus());
@@ -121,9 +148,7 @@ describe("Settings", () => {
       expect(plus).toContain(roundUsd.format(16));
       expect(pro).toContain(roundUsd.format(49));
     });
-    await hardware("back");
-    await until(alpha, alpha.runtime, Layers.Machine, (state) => !Layers.listed(state, "account"));
-    expect(await page(alpha)).toBe("Top");
+    await backFromAccount(alpha);
 
     world.signedIn = false;
     await tap("Account");
@@ -215,7 +240,7 @@ describe("Settings", () => {
     const checkout: CheckoutScene = { starts: [], confirmations: [], opened: [], returned: null, paid: false };
     const world = { ...scene(), phone: true, checkout };
     await settingsOpen(world);
-    await press("Account");
+    await tap("Account");
     await vi.waitFor(() => expect(document.querySelector('[aria-label="Cloud plan"]')?.textContent).toContain("No plan"));
     await drawn(() => document.querySelector<HTMLElement>('[role="dialog"] summary')?.click());
     await vi.waitFor(() => expect(button("Review Plus subscription")).toBeTruthy());
@@ -252,7 +277,7 @@ describe("Settings", () => {
   it('Redeems the owner’s code once and refreshes the plan (spec/app/account/codes.md, "Story: Redeem a code")', async () => {
     const redemption: RedemptionScene = { calls: [] };
     await settingsOpen({ ...scene(), phone: true, redemption });
-    await press("Account");
+    await tap("Account");
     await vi.waitFor(() => {
       const form = [...document.querySelectorAll("summary")].find((row) => row.textContent === "Redeem code");
       if (!form) throw new Error("No redemption control");
@@ -263,6 +288,52 @@ describe("Settings", () => {
     await vi.waitFor(() => expect(document.querySelector('[role="dialog"]')?.textContent).toContain("Code redeemed"));
     await vi.waitFor(() => expect(document.querySelector('[aria-label="Cloud plan"]')?.textContent).toContain("Plus"));
     expect(redemption.calls).toEqual([{ code: "ABCD2345EFGH6789", key: expect.any(String) }]);
+  });
+
+  it('Checks the same cancellation after a lost reply and keeps the plan only once (spec/app/account/change.md, "Story: Change or cancel my plan"; "Story: Keep plan changes to their sign-in")', async () => {
+    const change = { revision: 2, ending: false, loseReply: true, commands: [] };
+    const world = { ...scene(), phone: true, checkout: { starts: [], confirmations: [], opened: [], returned: null, paid: true, change } };
+    const emailed: string[] = [];
+    world.voice.startupSignIn = {
+      reauthenticate: async (options) => {
+        emailed.push("email" in options ? options.email : "");
+        return { request: 1, attempt: 1, verdict: "code-on-its-way", expiresAt: world.now + 60_000, resendAt: world.now + 10_000 };
+      },
+      verify: async ({ code }) => {
+        if (code !== "123456") throw new Error("Wrong confirmation");
+        world.voice.billingVerified = world.voice.credentialId;
+        return { request: 1, attempt: 1, verdict: "account-confirmed" };
+      },
+    };
+    await settingsOpen(world);
+    await tap("Account");
+    await vi.waitFor(() => {
+      const plans = [...document.querySelectorAll("summary")].find((row) => row.textContent?.trim() === "View plans");
+      if (!plans) throw new Error("No Plans control");
+      return drawn(() => plans.click());
+    });
+    const available = (name: string) => vi.waitFor(() => expect(button(name)).toBeDefined(), { timeout: 10_000 });
+    await available("Cancel plan");
+    await press("Cancel plan");
+    await press("Cancel plan");
+    await available("Email me a code");
+    expect(change.commands).toEqual([]);
+    await press("Email me a code");
+    await available("Verify code");
+    await fill("Confirmation code", "123456");
+    await press("Verify code");
+    await available("Cancel plan");
+    expect(emailed).toEqual([account.email]);
+    expect(change.commands).toEqual([]);
+    await press("Cancel plan");
+    await available("Keep plan");
+    expect(change.commands).toMatchObject([{ kind: "cancel", status: "succeeded", expectedRevision: 2, resultRevision: 3 }]);
+    await press("Keep plan");
+    await available("Cancel plan");
+    expect(change.commands).toMatchObject([
+      { kind: "cancel", status: "succeeded", expectedRevision: 2, resultRevision: 3 },
+      { kind: "undo", status: "succeeded", expectedRevision: 3, resultRevision: 4 },
+    ]);
   });
 
   it("Make Alpha the Home app (spec/app/settings/facts.md, \"Story: Make Alpha the Home app\")", async () => {
@@ -305,26 +376,26 @@ describe("Settings", () => {
     const { world } = await settingsOpen();
     await press("General");
     await tap("Notifications");
-    await vi.waitFor(() => expect(titled("Other apps’ notifications")).toBeDefined());
-    await tap("Other apps’ notifications");
+    await vi.waitFor(() => expect(titled("Other apps")).toBeDefined());
+    await tap("Other apps");
     expect(world.settings.mirror.enabled).toBe(false);
     await press("Turn on");
     await vi.waitFor(() => expect(world.settings.mirror.enabled).toBe(true));
-    await vi.waitFor(() => expect(titled("Choose notification apps")?.hasAttribute("disabled")).toBe(false));
-    await tap("Choose notification apps");
+    await vi.waitFor(() => expect(titled("Choose apps")?.hasAttribute("disabled")).toBe(false));
+    await tap("Choose apps");
     await press("Add News reader");
     await vi.waitFor(() => expect(world.settings.mirror.apps).toEqual([{
       packageName: "example.reader", label: "News reader", preview: false, available: true,
     }]));
-    await vi.waitFor(() => expect(titled("Keep notification history")).toBeDefined());
-    await tap("Keep notification history");
+    await vi.waitFor(() => expect(titled("History")).toBeDefined());
+    await tap("History");
     await press("Turn on");
     await vi.waitFor(() => expect(world.settings.mirror.history).toBe(true));
     world.settings.mirrorHistory.push({ id: "old", appLabel: "Reading archive", at: 1000, state: "Posted" });
-    await vi.waitFor(() => expect(titled("View history")).toBeDefined());
-    await tap("View history");
+    await vi.waitFor(() => expect(titled("View")?.hasAttribute("disabled")).toBe(false));
+    await tap("View");
     await vi.waitFor(() => expect(document.body.textContent).toContain("Reading archive"));
-    await tap("Clear history");
+    await tap("Clear");
     await press("Clear");
     await vi.waitFor(() => expect(document.body.textContent).not.toContain("Reading archive"));
     expect(world.settings.mirrorHistory).toEqual([]);
@@ -480,13 +551,45 @@ describe("Settings", () => {
     await vi.waitFor(() => expect(titled("Listening")?.textContent).toContain("Paused during a call"));
   });
 
-  it("Look at access again (spec/app/startup/access.md, \"Story: Look at access again\")", async () => {
+  it("Opens the native destination for each App permissions row", async () => {
     const { alpha, world, machines } = await settingsOpen();
     await press("Privacy");
     await press("Permissions");
     await until(alpha, machines, Facts.Machine, (s) => Facts.accessWord(s, "MicrophoneAccess") === "Off");
-    await tap("Microphone");
-    // spec/app/startup/access.md, "Settings opens one access of this walkthrough in review, also from the list of all, and the agent may ask to show one"
+    const android = ["Camera", "Microphone", "Location", "Calendar"];
+    for (const [index, title] of android.entries()) {
+      await vi.waitFor(() => expect(titled(title)?.hasAttribute("disabled")).toBe(false));
+      await tap(title);
+      await vi.waitFor(() => expect(world.settings.opened).toEqual(android.slice(0, index + 1).map(() => "privacy")));
+      expect(document.querySelector('[role="dialog"]')).toBeNull();
+    }
+    await vi.waitFor(() => expect(titled("Photos")?.hasAttribute("disabled")).toBe(false));
+    await tap("Photos");
+    await vi.waitFor(() => expect(world.photos.settingsOpens).toBe(1));
+    expect(world.photos.promptCount).toBe(0);
+    await vi.waitFor(() => expect(titled("Files")?.hasAttribute("disabled")).toBe(false));
+    await tap("Files");
+    await vi.waitFor(() => expect(world.settings.opened.at(-1)).toBe("all-files"));
+    await vi.waitFor(() => expect(titled("Notifications")?.hasAttribute("disabled")).toBe(false));
+    await tap("Notifications");
+    await until(alpha, machines, Pages.Machine, (s) => s.page === "PrivacyNotifications");
+    await vi.waitFor(() => expect(titled("Other apps")?.hasAttribute("disabled")).toBe(false));
+    await tap("Notifications");
+    await vi.waitFor(() => expect(world.settings.opened.at(-1)).toBe("notifications"));
+    await press("Back to Privacy");
+    await until(alpha, machines, Pages.Machine, (s) => s.page === "Privacy");
+  });
+
+  it("Look at access again (spec/app/startup/access.md, \"Story: Look at access again\")", async () => {
+    const { alpha, world, machines } = await settingsOpen();
+    await press("Privacy");
+    await until(alpha, machines, Facts.Machine, (s) => Facts.accessWord(s, "MicrophoneAccess") === "Off");
+    await press("Review access setup");
+    const microphone = () => [...document.querySelectorAll('[role="dialog"] li')]
+      .find((row) => row.textContent?.includes("Microphone"))?.querySelector("button");
+    await vi.waitFor(() => expect(microphone()).toBeTruthy());
+    await drawn(() => microphone()?.click());
+    // spec/app/startup/access.md, "Settings opens one access of this walkthrough from its list, and the agent may ask to show one"
     await vi.waitFor(() => {
       const review = document.querySelector('[role="dialog"]');
       const current = review?.querySelector('[aria-current="step"]');
@@ -501,7 +604,7 @@ describe("Settings", () => {
     await vi.waitFor(() => expect(document.querySelector('[role="dialog"] [aria-current="step"]')?.textContent).toContain("Allowed"));
     await press("Done");
     await vi.waitFor(() => expect(document.querySelector('[role="dialog"]')).toBeNull());
-    expect(await page(alpha)).toBe("Permissions");
+    expect(await page(alpha)).toBe("Privacy");
   });
 
   it("Choose how Alpha looks, at my size, and keep it (spec/app/settings/preferences.md, \"Story: Choose how Alpha looks\"; spec/app/settings/preferences.md, \"Story: Make the text larger or smaller\"; spec/app/settings/preferences.md, \"Story: Keep my preferences through a restart\")", async () => {
@@ -662,13 +765,16 @@ describe("Settings", () => {
     await press("Licenses");
     await until(alpha, machines, Licences.Machine, (s) => s.load.read.status === "Loaded" && s.found === 3);
     // spec/app/settings/licences.md, "Searching narrows the loaded list to the licences that match, from its top, and an empty search shows them all"
-    await fill("Search licenses", "mpl");
+    await fill("Search components", "mpl");
     await until(alpha, machines, Licences.Machine, (s) => s.query === "mpl" && s.shown === 1);
+    await fill("Search components", "1.0.0");
+    await until(alpha, machines, Licences.Machine, (s) => s.query === "1.0.0" && s.shown === 1);
     // spec/app/settings/licences.md, "Back from a licence returns to the same search"
     await tap("mediabunny");
     await until(alpha, machines, Licences.Machine, (s) => s.licence === 0);
+    expect(document.querySelector('[data-settings-page="License details"]')?.textContent).toContain("Check this component’s attribution.");
     await hardware("back");
-    await until(alpha, machines, Licences.Machine, (s) => s.licence < 0 && s.query === "mpl");
+    await until(alpha, machines, Licences.Machine, (s) => s.licence < 0 && s.query === "1.0.0");
     // spec/app/settings/licences.md, "Opening the page clears the search, and loads the licences unless they are loading or loaded with some found"
     await hardware("back");
     await press("Licenses");

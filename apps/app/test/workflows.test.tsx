@@ -1,5 +1,5 @@
 // @vitest-environment happy-dom
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, onTestFinished, vi } from "vitest";
 import { Machine as Listing } from "../gen/app__workflows__list.effect.vibe";
 import { Machine as Definition } from "../gen/app__workflows.effect.vibe";
 import { Machine as Automations } from "../gen/app__workflows__automations.effect.vibe";
@@ -9,11 +9,13 @@ import { Machine as Clock } from "../gen/app__workflows__clock.effect.vibe";
 import { Machine as Approvals } from "../gen/app__workflows__approvals.effect.vibe";
 import { Machine as Builder } from "../gen/app__workflows__builder.effect.vibe";
 import workflows from "../src/workflows/index.tsx";
+import type { Alpha } from "../src/runtime/area.tsx";
 import home from "../src/home/index.tsx";
 import { Machine as Home } from "../gen/app__home.effect.vibe";
-import { button, closeAll, drawn, fill, later, only, open, press, pressOnTop, seen, underAct, until } from "./alpha.tsx";
+import { button, closeAll, drawn, fill, later, only, open, press, pressOnTop, seen, typeInto, underAct, until } from "./alpha.tsx";
+import { memoryIndexedDB } from "./fakes/indexeddb.ts";
 import { type Scene, scene } from "./fakes/scene.ts";
-import { nativeApprovalNotices, workflowNoteOffer } from "./fakes/workflows.ts";
+import { nativeApprovalNotices, workflowNoteOffer, workflowPhoneOffer } from "./fakes/workflows.ts";
 
 underAct();
 afterEach(closeAll);
@@ -50,8 +52,7 @@ const write = (name: string, text: string) => drawn(() => {
   const label = [...document.querySelectorAll("label")].find((one) => one.firstChild?.textContent?.trim() === name);
   const found = label?.querySelector<HTMLInputElement | HTMLTextAreaElement>("input, textarea");
   if (!found) throw new Error(`no field ${name}`);
-  Object.getOwnPropertyDescriptor(Object.getPrototypeOf(found) as object, "value")?.set?.call(found, text);
-  found.dispatchEvent(new Event("input", { bubbles: true }));
+  typeInto(found, text);
 });
 
 async function openWorkflows(world: Scene, withAssistant = false) {
@@ -68,12 +69,45 @@ async function openWorkflows(world: Scene, withAssistant = false) {
   return alpha;
 }
 
+/** Open Workflows on `world`, with Ask Alpha where `assistant` holds, and wait for its list: every page of it where `complete` holds. */
+async function onList(world: Scene, { assistant = false, complete = false } = {}) {
+  const alpha = await openWorkflows(world, assistant);
+  const area = workflows.runtime(alpha);
+  await until(alpha, area, Listing, (state) => state.list.status === "Loaded" && (!complete || state.complete));
+  return { alpha, area };
+}
+
+/** Run the Monthly statement now from its page, and wait for the run in its history. */
+async function runStatement(world: Scene) {
+  const { alpha, area } = await onList(world, { assistant: true });
+  await choose("Monthly statement");
+  await until(alpha, area, Definition, (state) => state.detail.status === "Loaded");
+  await until(alpha, area, Runs, (state) => state.reading.status === "Loaded");
+  await press("Run now");
+  await press("Confirm run");
+  await until(alpha, area, Sheet, (state) => state.history.status === "Loaded" && state.shown === 1);
+  return { alpha, area };
+}
+
+/** Open the newest run in the run history. */
+const openRun = () => drawn(() => {
+  const row = document.querySelector<HTMLButtonElement>('[aria-label="Run history"] li > button');
+  if (!row) throw new Error("No run history");
+  row.click();
+});
+
+/** Leave the open run and its workflow for the list. */
+async function backToList(alpha: Alpha, area: ReturnType<typeof workflows.runtime>) {
+  await drawn(() => alpha.back());
+  await until(alpha, area, Sheet, (state) => state.runId === 0);
+  await drawn(() => alpha.back());
+  await until(alpha, area, Listing, (state) => state.place.tag === "ListingRows");
+}
+
 describe("Workflows", () => {
   it('Filters the owner’s work and keeps removed history (spec/app/workflows/list.md, "Story: Find a workflow")', async () => {
     const world = scene();
-    const alpha = await openWorkflows(world);
-    const area = workflows.runtime(alpha);
-    await until(alpha, area, Listing, (state) => state.list.status === "Loaded" && state.complete);
+    const { alpha, area } = await onList(world, { complete: true });
     expect(visible("Monthly statement", "Desk check", "Retired brief")).toEqual(["Monthly statement", "Desk check"]);
 
     await press("Filter workflows");
@@ -114,9 +148,7 @@ describe("Workflows", () => {
   it('Reviews a Clock request within its Alarms page and restores focus to the list (spec/app/workflows/clock.md, "Story: Review, then hand over to Clock")', async () => {
     const world = scene();
     world.phone = true;
-    const alpha = await openWorkflows(world);
-    const area = workflows.runtime(alpha);
-    await until(alpha, area, Listing, (state) => state.list.status === "Loaded");
+    const { alpha, area } = await onList(world);
 
     await press("Add to Workflows");
     const opener = button("Clock alarms");
@@ -147,9 +179,7 @@ describe("Workflows", () => {
 
   it('Reviews the exact prompt before changing whether its schedule runs (spec/app/workflows/automations.md, "Turning a prompt on or off, removing an automation, and running it now require confirmation of the row and action shown")', async () => {
     const world = scene();
-    const alpha = await openWorkflows(world);
-    const area = workflows.runtime(alpha);
-    await until(alpha, area, Listing, (state) => state.list.status === "Loaded" && state.complete);
+    const { alpha, area } = await onList(world, { complete: true });
     await choose("Desk check");
     await until(alpha, area, Automations, (state) => state.present && state.list.status === "Loaded");
     const toggle = "Turn Desk check on or off";
@@ -189,9 +219,7 @@ describe("Workflows", () => {
     for (const prompt of existing) world.workflows.prompts.set(prompt.id, {
       ...prompt, instructions: "Review the details.", enabled: false, revision: 1, timezone: "America/Los_Angeles",
     });
-    const alpha = await openWorkflows(world);
-    const area = workflows.runtime(alpha);
-    await until(alpha, area, Listing, (state) => state.list.status === "Loaded" && state.complete);
+    const { alpha, area } = await onList(world, { complete: true });
 
     for (const { id, displayName, ...timing } of existing) {
       await choose(displayName);
@@ -232,31 +260,23 @@ describe("Workflows", () => {
     expect(world.workflows.prompts.get("weekly-prompt")?.instructions).toBe("Changed in another session.");
   });
 
-  it('Runs the reviewed version, follows its approval and opens its output (spec/app/workflows/runs.md, "Story: Run a workflow now"; spec/app/workflows/sheet.md, "Story: Read a run\'s sheet"; spec/app/workflows/approvals.md, "Story: Answer a run\'s approval on the phone"; spec/app/workflows/approvals.md, "Story: Confirm exactly what this workflow does on my phone"; spec/app/workflows/approvals.md, "Story: Open the run a notice names")', async () => {
+  it('Runs the reviewed version, follows its approval and opens its output (spec/app/workflows/runs.md, "Story: Run a workflow now"; spec/app/workflows/sheet.md, "Story: Read a run\'s sheet"; spec/app/workflows/approvals.md, "Story: Answer a run\'s approval on the phone"; spec/app/workflows/approvals.md, "Story: Confirm exactly what this workflow does on my phone"; spec/app/workflows/approvals.md, "Story: Open the run a notice names"; spec/app/workflows/sheet.md, "Story: Open a finished workflow from its notification")', async () => {
+    // spec/app/assistant/index.md, "Stored attachments are posted with their message, and a message whose attachments could not be stored never left": the WebView's IndexedDB keeps the run attached to Ask Alpha.
+    vi.stubGlobal("indexedDB", memoryIndexedDB());
+    onTestFinished(() => { vi.unstubAllGlobals(); });
     const world = scene();
     world.phone = true;
     world.image = true;
+    world.ask.spokenFiles = [];
     const device = await workflowNoteOffer(world.workflows, world.notes.owner);
     world.telephony.textReview = device;
     const notices = nativeApprovalNotices();
     world.workflows.nativeNotices = notices;
     world.workflows.stage = "Running";
-    const alpha = await openWorkflows(world);
-    const area = workflows.runtime(alpha);
-    await until(alpha, area, Listing, (state) => state.list.status === "Loaded");
-    await choose("Monthly statement");
-    await until(alpha, area, Definition, (state) => state.detail.status === "Loaded");
-    await until(alpha, area, Runs, (state) => state.reading.status === "Loaded");
-    await press("Run now");
-    await press("Confirm run");
-    await until(alpha, area, Sheet, (state) => state.history.status === "Loaded" && state.shown === 1);
+    const { alpha, area } = await runStatement(world);
     expect(world.workflows.admissions).toHaveLength(1);
     expect(world.workflows.admissions[0]?.version).toBe("monthly-statement-v3");
-    await drawn(() => {
-      const row = document.querySelector<HTMLButtonElement>('[aria-label="Run history"] li > button');
-      if (!row) throw new Error("No run history");
-      row.click();
-    });
+    await openRun();
     await until(alpha, area, Sheet, (state) => state.output.status === "Loaded" && state.status === "Running");
     await seen(false);
     const reads = world.workflows.receiptReads;
@@ -264,10 +284,7 @@ describe("Workflows", () => {
     await later(alpha, 8_000);
     expect(world.workflows.receiptReads).toBe(reads);
     expect(notices.posted).toEqual([]);
-    await drawn(() => alpha.back());
-    await until(alpha, area, Sheet, (state) => state.runId === 0);
-    await drawn(() => alpha.back());
-    await until(alpha, area, Listing, (state) => state.place.tag === "ListingRows");
+    await backToList(alpha, area);
 
     await seen(true);
     await vi.waitFor(() => expect(notices.posted).toHaveLength(1));
@@ -323,6 +340,34 @@ describe("Workflows", () => {
         activity: [{ at: "2026-11-24T07:02:00.000Z", node: undefined }, { at: "2026-11-24T07:01:00.000Z", node: "preview" }],
       });
     });
+
+    await backToList(alpha, area);
+    await later(alpha, 60_000);
+    await vi.waitFor(() => expect(notices.results).toHaveLength(1));
+    const result = notices.results[0];
+    if (result === undefined) throw new Error("No Workflow result notice");
+    expect(result.route).toMatchObject({ workflowId: "monthly-statement", runId: "monthly-statement-r1", versionId: "monthly-statement-v3" });
+    await drawn(() => notices.tapResult(result));
+    await until(alpha, area, Sheet, (state) => state.output.status === "Loaded" && state.status === "Done");
+    expect(document.querySelector('[aria-label="Run details"]')?.textContent).toContain("Your statement is ready.");
+    await vi.waitFor(() => expect(notices.consumed).toEqual(["tap-1", "tap-result"]));
+    expect(button("Remove Workflow run.json")).toBeUndefined();
+
+    await backToList(alpha, area);
+    await drawn(() => notices.tapResult(result, true));
+    await vi.waitFor(() => expect(button("Remove Workflow run.json")).toBeDefined(), { timeout: 10_000 });
+    expect(notices.consumed).toEqual(["tap-1", "tap-result", "tap-result-question"]);
+    expect(world.ask.said).toEqual([]);
+
+    await fill("Message Alpha", "What happened in this run?");
+    await vi.waitFor(() => expect(button("Send")?.disabled).toBe(false));
+    await press("Send");
+    await vi.waitFor(() => expect(world.ask.said).toEqual(["What happened in this run?"]), { timeout: 12_000 });
+    const attachment = world.ask.spokenFiles?.at(-1)?.images?.[0] as { readonly name?: string; readonly mimeType?: string; readonly data?: string } | undefined;
+    expect(attachment).toMatchObject({ name: "Workflow run.json", mimeType: "application/json" });
+    expect(JSON.parse(atob(attachment?.data ?? ""))).toMatchObject({
+      workflowId: "monthly-statement", runId: "monthly-statement-r1", versionId: "monthly-statement-v3",
+    });
   });
 
   it('Reads the exact run on Android and stops it when Alpha goes into the background (spec/app/workflows/sheet.md, "Story: Read a run’s sheet")', async () => {
@@ -334,16 +379,10 @@ describe("Workflows", () => {
     world.voice.playbackHold = () => playing;
     world.workflows.run = true;
     try {
-      const alpha = await openWorkflows(world, true);
-      const area = workflows.runtime(alpha);
-      await until(alpha, area, Listing, (state) => state.list.status === "Loaded");
+      const { alpha, area } = await onList(world, { assistant: true });
       await choose("Monthly statement");
       await until(alpha, area, Sheet, (state) => state.history.status === "Loaded" && state.shown > 0);
-      await drawn(() => {
-        const row = document.querySelector<HTMLButtonElement>('[aria-label="Run history"] li > button');
-        if (!row) throw new Error("No finished run");
-        row.click();
-      });
+      await openRun();
       await until(alpha, area, Sheet, (state) => state.output.status === "Loaded" && state.status === "Done");
       const initialHushes = world.voice.hushCalls;
       await press("Read aloud");
@@ -359,12 +398,54 @@ describe("Workflows", () => {
     }
   });
 
+  it.each(["post_notification", "speak_text", "speak_text_stopped"] as const)('Presents a reviewed workflow step on Android (%s) (spec/app/workflows/approvals.md, "Story: Confirm exactly what this workflow does on my phone")', async (scenario) => {
+    const kind = scenario === "speak_text_stopped" ? "speak_text" : scenario;
+    const world = scene();
+    world.phone = true;
+    world.image = true;
+    const proposal = await workflowPhoneOffer(world.workflows, world.notes.owner, kind);
+    world.telephony.textReview = proposal;
+    if (scenario === "speak_text_stopped") world.voice.playbackHold = () => new Promise<void>(() => {});
+    const notices = nativeApprovalNotices();
+    world.workflows.nativeNotices = notices;
+    world.workflows.stage = "Device";
+    const { alpha, area } = await runStatement(world);
+    await openRun();
+    await until(alpha, area, Approvals, (state) => state.device.phase === "DeviceShown");
+    expect(document.querySelector('[aria-label="Review device action"]')?.textContent).toContain("A reviewed note.");
+    expect(proposal.receipts).toEqual([]);
+    await press("Approve device action");
+    if (scenario === "speak_text_stopped") {
+      await vi.waitFor(() => expect(world.voice.played).toHaveLength(1), { timeout: 15_000 });
+      const hushes = world.voice.hushCalls;
+      await press("Stop reading");
+      await until(alpha, area, Approvals, (state) => state.device.phase === "DeviceUnconfirmed");
+      await vi.waitFor(() => expect(world.voice.hushCalls).toBeGreaterThan(hushes));
+      expect(proposal.receipts).not.toContainEqual(expect.objectContaining({ outcome: "applied" }));
+      return;
+    }
+    await until(alpha, area, Approvals, (state) => state.device.phase === "DeviceAnswered");
+    expect(proposal.receipts).toMatchObject([{ outcome: "applied", operationId: proposal.proposal.id }]);
+    if (kind === "speak_text") {
+      expect(world.voice.played).toHaveLength(1);
+    } else {
+      expect(notices.results).toMatchObject([{
+        operationId: expect.stringMatching(/^step-[a-f0-9]{64}$/),
+        title: "A reviewed notification", body: "A reviewed note.",
+        route: { workflowId: "monthly-statement", runId: "monthly-statement-r1", versionId: "monthly-statement-v3" },
+      }]);
+      await backToList(alpha, area);
+      const notice = notices.results[0];
+      if (!notice) throw new Error("The step posted no notice");
+      await drawn(() => notices.tapResult(notice));
+      await until(alpha, area, Sheet, (state) => state.output.status === "Loaded" && state.runId > 0);
+      await vi.waitFor(() => expect(notices.consumed).toEqual(["tap-result"]));
+    }
+  });
+
   it('Writes a workflow, reviews it and saves it on the agent once (spec/app/workflows/builder.md, "Story: Write a workflow step by step"; "Story: Save a workflow on the agent once")', async () => {
     const world = scene();
-    const { alpha } = await open(world);
-    await press("Workflows");
-    const area = workflows.runtime(alpha);
-    await until(alpha, area, Listing, (state) => state.list.status === "Loaded");
+    const { alpha, area } = await onList(world);
     await press("Add to Workflows");
     await until(alpha, area, Listing, (state) => state.place.tag === "ListingAdd");
     await press("More options");
@@ -397,10 +478,7 @@ describe("Workflows", () => {
 
   it('Removes a workflow only after its review, keeps its history, and restores it (spec/app/workflows/index.md, "Story: Change a workflow")', async () => {
     const world = scene();
-    const { alpha } = await open(world);
-    await press("Workflows");
-    const area = workflows.runtime(alpha);
-    await until(alpha, area, Listing, (state) => state.list.status === "Loaded");
+    const { alpha, area } = await onList(world);
     await choose("Monthly statement");
     await until(alpha, area, Definition, (state) => state.detail.status === "Loaded");
     await until(alpha, area, Sheet, (state) => state.history.status === "Loaded");

@@ -33,7 +33,6 @@ export interface VoiceScene {
   warmSpeechOutputCalls: number;
   localSpeechStatusCalls: number;
   liveCaptureStatusCalls: number;
-  cloudWarmCalls: number;
   holdEngineCalls: number;
   releaseEngineHoldCalls: number;
   engineHeld: boolean;
@@ -45,6 +44,7 @@ export interface VoiceScene {
   relayWarmupHangs: boolean;
   onDevice: boolean;
   credentialId: string;
+  organizationId: string;
   streamTiming: unknown;
   stopCloudSpeechCalls: number;
   hushCalls: number;
@@ -63,9 +63,10 @@ export interface VoiceScene {
   activeMicSession: string | undefined;
   emitLocal?: (event: string, data: unknown) => void;
   emitCloud?: (event: CloudStreamEvent) => void;
-  startupSignIn?: Partial<Pick<ElizaSignInPlugin, "startEmail" | "startPhone" | "startGoogle" | "verify" | "resend" | "cancel" | "sendFactorCode" | "status">>;
+  startupSignIn?: Partial<Pick<ElizaSignInPlugin, "startEmail" | "startPhone" | "startGoogle" | "reauthenticate" | "verify" | "resend" | "cancel" | "sendFactorCode" | "status">>;
   /** The phone's sign-in settling on the account whose key is `credentialId` now, as `ElizaSignInPlugin.java` tells it. */
   signedInHere?: () => void;
+  billingVerified?: string;
 }
 
 export function voiceScene(): VoiceScene {
@@ -85,7 +86,6 @@ export function voiceScene(): VoiceScene {
     warmSpeechOutputCalls: 0,
     localSpeechStatusCalls: 0,
     liveCaptureStatusCalls: 0,
-    cloudWarmCalls: 0,
     holdEngineCalls: 0,
     releaseEngineHoldCalls: 0,
     engineHeld: false,
@@ -97,6 +97,7 @@ export function voiceScene(): VoiceScene {
     relayWarmupHangs: false,
     onDevice: true,
     credentialId: "cred-1",
+    organizationId: "org-1",
     streamTiming: { format: "alpha-cloud-stream-timing-v1", records: [] },
     stopCloudSpeechCalls: 0,
     hushCalls: 0,
@@ -211,12 +212,12 @@ export function alphaVoiceCloud(voice: VoiceScene): Faked {
         await voice.recordingStartGate?.();
         return { recordingId };
       },
-      stopRecording: async () => {
+      stopRecording: () => {
         if (voice.refuseRecordingStop) {
           activeRecording = undefined;
-          throw new Error("Recording could not be saved");
+          return Promise.reject(new Error("Recording could not be saved"));
         }
-        return finish();
+        return Promise.resolve().then(finish);
       },
       dictationForeground: () => Promise.resolve({ available: voice.dictationInFront }),
       cancelRecording: async () => {
@@ -294,7 +295,7 @@ export function elizaCloudSpeech(voice: VoiceScene): Faked {
 
 /** `ElizaSignInPlugin.java`'s `status`, the registered cloud's readiness and the account its key belongs to, and its `signInSettled` receipt, as the wire carries it. */
 export function elizaSignIn(voice: VoiceScene, signedIn: () => boolean, lease: MailLeaseScene): Faked {
-  return plugin<Pick<ElizaSignInPlugin, "status" | "upgradeMailLease">, { signInSettled: unknown }>((emit) => {
+  return plugin<Pick<ElizaSignInPlugin, "status" | "upgradeMailLease" | Overridable>, { signInSettled: unknown }>((emit) => {
     voice.signedInHere = () => emit("signInSettled", { request: 1, attempt: 1, verdict: "signed-in-as", credentialId: voice.credentialId, google: "not-requested" });
     return {
       upgradeMailLease() {
@@ -307,10 +308,23 @@ export function elizaSignIn(voice: VoiceScene, signedIn: () => boolean, lease: M
       status: ({ environment }) => Promise.resolve({
         environment, methodsKnown: true, email: true, sms: false, google: false, googleMode: "browser",
         account: signedIn()
-          ? { signedIn: true, userId: "user-1", organizationId: "org-1", credentialId: voice.credentialId, keyExpiresAt: 4_102_444_800_000 }
+          ? { signedIn: true, userId: "user-1", organizationId: voice.organizationId, credentialId: voice.credentialId, keyExpiresAt: 4_102_444_800_000 }
           : { signedIn: false },
       }),
+      ...unanswered,
       ...voice.startupSignIn,
     };
   });
 }
+
+type Overridable = Exclude<keyof NonNullable<VoiceScene["startupSignIn"]>, "status">;
+/**
+ * Each method a scene may answer, declared in every phone's header as the Java plugin declares it. Capacitor reads a
+ * plugin's header once, when the page first registers it, so a method one world leaves out would stay missing for
+ * the later worlds of the same file. One no scene answers fails as the bridge fails a method it lacks.
+ */
+const refused = (method: Overridable) => () => Promise.reject(rejection(`ElizaSignIn.${method} is not implemented`, "UNIMPLEMENTED"));
+const unanswered: Pick<ElizaSignInPlugin, Overridable> = {
+  startEmail: refused("startEmail"), startPhone: refused("startPhone"), startGoogle: refused("startGoogle"), reauthenticate: refused("reauthenticate"),
+  verify: refused("verify"), resend: refused("resend"), cancel: refused("cancel"), sendFactorCode: refused("sendFactorCode"),
+};

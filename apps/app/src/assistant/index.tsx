@@ -58,7 +58,6 @@ function LiveAssistant({ runtime, alpha }: Shown<Layer.Success<typeof screens> |
   const preview = dictating && recorder.stage === "Review" && noCall && speaker !== undefined && !speaker.latched && runtime.runSync(bridge.canRead())
     ? {
       playing: speaker.text === "Transcript" && speaker.item === recorder.ticket && speaker.stage !== "Silent",
-      failed: speaker.text === "Transcript" && speaker.item === recorder.ticket && speaker.outcome === "Failed",
       toggle: (ticket: number) => void runtime.runPromise(readTranscript(ticket)),
     } : undefined;
   const readingAllowed = noCall && speaker !== undefined && !speaker.latched && voice.state !== undefined && quiet(voice.state) && recorder?.stage === "Closed" && runtime.runSync(bridge.canRead());
@@ -77,7 +76,7 @@ function LiveAssistant({ runtime, alpha }: Shown<Layer.Success<typeof screens> |
   return <Assistant
     runtime={runtime}
     canReadAloud={readingAllowed}
-    onCloseTextAsk={() => void alpha.back()}
+    onBack={() => void alpha.back()}
     messageActions={messageActions}
     speech={{
       keyboard: voice.state && {
@@ -89,8 +88,8 @@ function LiveAssistant({ runtime, alpha }: Shown<Layer.Success<typeof screens> |
       interim: <VoiceInterim runtime={runtime} />,
       onTalk: canTalk ? () => void runtime.runPromise(beginTalk()) : undefined,
       onDictate: canDictate ? () => void runtime.runPromise(dictate()) : undefined,
-      voice: ({ compactDock, atBar, onKeyboard }) => voice.state !== undefined && !quiet(voice.state)
-          ? <TalkControls runtime={runtime} compact={compactDock || (atBar && !voice.state.network)} onKeyboard={onKeyboard} trailing={<VoiceEnd runtime={runtime} />} />
+      voice: ({ compactDock, atBar }) => voice.state !== undefined && !quiet(voice.state)
+          ? <TalkControls runtime={runtime} compact={compactDock || (atBar && !voice.state.network)} trailing={<VoiceEnd runtime={runtime} />} />
           : undefined,
     }}
   />;

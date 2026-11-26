@@ -23,7 +23,7 @@ import { useMachine as useLink } from "../../gen/app__calendar__link.react.ts";
 import { setUp } from "./link.vibe";
 import { useTimed } from "../runtime/react.ts";
 import { untimed } from "../runtime/reactor.vibe";
-import type { Alpha } from "../runtime/area.tsx";
+import type { Alpha, Resident } from "../runtime/area.tsx";
 import { AppBack } from "../shell/AppBack.tsx";
 import { useMachine as useEditor } from "../../gen/app__calendar__editor.react.ts";
 import { useMachine as useHeld } from "../../gen/app__calendar__deletions.react.ts";
@@ -41,13 +41,15 @@ import { type Row, onDay, shown } from "./shown.ts";
 import { type CalendarRow, type DatedReminder, calendarRowKey, datedReminders } from "./reminders.ts";
 import { remindersStore } from "../reminders/store.ts";
 import { ReminderPage } from "./ReminderPage.tsx";
+import { SourceNote } from "./SourceNote.tsx";
+import { eventKey } from "./noteOrigin.vibe";
 import { ReminderReview } from "./ReminderReview.tsx";
 import { allows } from "../../gen/kit__permission.ts";
 import { civilDay, dateOf, dayStart, monthStart, readWindow, weekStart } from "./time.ts";
 
 export interface CalendarProps {
   /** Provides Calendar's machines, `calendared` of calendar.vibe. */
-  runtime: ManagedRuntime.ManagedRuntime<Calendared, unknown>;
+  runtime: ManagedRuntime.ManagedRuntime<Calendared | Resident, unknown>;
   /** Alpha, for the shell's Back in Calendar's own header. */
   alpha?: Alpha;
 }
@@ -334,7 +336,8 @@ export function Calendar({ runtime, alpha }: CalendarProps) {
       <CalendarHeader inert={pageCovered} title={title} titleRef={dateButtonRef} expanded={month} onTitle={month ? send({ type: "closeOverlay" }) : view.can({ type: "openMonth" }) ? send({ type: "openMonth" }) : undefined}
         className="pr-2 pl-2" leading={alpha ? <AppBack alpha={alpha} className="size-13 [&_svg]:size-5.5" /> : null}>
         {month ? null : view.can({ type: "goToday" }) ? <CalendarHeaderAction aria-label="Today" onClick={send({ type: "goToday" })}><CalendarDays aria-hidden /></CalendarHeaderAction> : null}
-        {!month && (searching || view.can({ type: "openSearch" })) ? (
+        {/* v119 45f6bed30 prototype/template.html:1136-1149: the phone header holds the month, Today and New event; Search only on a wide screen. */}
+        {!month && s.wide && (searching || view.can({ type: "openSearch" })) ? (
           <CalendarHeaderAction aria-label="Search events" onClick={() => { setQuery(""); setSearchRound(searchRound + 1); if (!searching) void view.send({ type: "openSearch" }); }}><Search aria-hidden /></CalendarHeaderAction>
         ) : null}
         {!month && editor.can(newEvent) ? <CalendarHeaderAction aria-label="New event" onClick={() => void runtime.runPromise(startForm(newEvent, s.anchor))}><Plus aria-hidden /></CalendarHeaderAction> : null}
@@ -516,13 +519,16 @@ function Month({ runtime, reminders, restoreFocus }: CalendarProps & { reminders
         today: day === s.today, selected: day === s.anchor, busy: visible.some((row) => onDay(row, day)),
         onPick: view.can({ type: "pickDay", day }) ? () => void view.send({ type: "pickDay", day }) : day === s.anchor ? close : undefined,
       }))}>
-      <div role="group" aria-label="Calendar view" className="mt-3 flex flex-wrap gap-2">
-        {views.map(({ layout, label }) => (
-          <CalendarPill key={layout} pressed={selected === layout} disabled={selected !== layout && !(s.overlay === "LayoutMenu" ? view.can({ type: "chooseLayout", layout }) : view.can({ type: "closeOverlay" }))}
-            onClick={selected === layout ? undefined : () => void choose(layout)()}>{label}</CalendarPill>
-        ))}
-        {s.owner > 0 || allows(s.access) ? <CalendarPill onClick={() => void calendars()}>Calendars</CalendarPill> : null}
-      </div>
+      {/* v119 45f6bed30 prototype/template.html:1261-1271: on a phone the month dialog holds only its days; the layouts and Calendars only on a wide screen. */}
+      {s.wide ? (
+        <div role="group" aria-label="Calendar view" className="mt-3 flex flex-wrap gap-2">
+          {views.map(({ layout, label }) => (
+            <CalendarPill key={layout} pressed={selected === layout} disabled={selected !== layout && !(s.overlay === "LayoutMenu" ? view.can({ type: "chooseLayout", layout }) : view.can({ type: "closeOverlay" }))}
+              onClick={selected === layout ? undefined : () => void choose(layout)()}>{label}</CalendarPill>
+          ))}
+          {s.owner > 0 || allows(s.access) ? <CalendarPill onClick={() => void calendars()}>Calendars</CalendarPill> : null}
+        </div>
+      ) : null}
     </CalendarMonthPanel>
   );
 }
@@ -536,7 +542,7 @@ function Calendars({ runtime }: CalendarProps) {
   return (
     <Sheet open={s.overlay === "CalendarsSheet"} onOpenChange={(opened) => (opened ? undefined : void view.send({ type: "closeOverlay" }))}>
       <SheetContent title="Calendars">
-        {[...new Map([...shown.all("Google"), ...shown.all("Phone")].map((row) => [row.calendar, row])).values()].map((row) => (
+        {[...new Map([...shown.all("Google"), ...(allows(s.access) ? shown.all("Phone") : [])].map((row) => [row.calendar, row])).values()].map((row) => (
           <Label key={row.calendar} className="flex items-center justify-between">
             {row.source === "Google" ? "Your agent's calendar" : `Phone calendar ${row.calendarId}`}
             <Switch checked={rowShown(row.calendar, [...s.hidden])} disabled={!view.can({ type: "toggleCalendar", calendar: row.calendar })}
@@ -617,6 +623,9 @@ function EventPage({ runtime, row, today }: CalendarProps & { row: Row; today: n
           ...deletes.flatMap(({ label, act }) => (act ? [{ label, onSelect: act }] : [])),
         ]} />
       ) : null}>
+      <SourceNote runtime={runtime} account={s.owner} selection={row.id}
+        target={row.source === "Phone" ? "PhoneEvent" : "AgentEvent"}
+        record={row.source === "Phone" ? row.creationId : eventKey(row.calendarId, row.key)} />
       {s.detail === "Rereading" ? <div className="mt-3"><Spinner size="sm" /></div> : null}
       {uncertain ? <div role="status" className="mt-3 flex items-center gap-2 rounded-sm bg-secondary p-3 text-meta"><span aria-hidden className="size-2 rounded-full bg-warn" /><span className="flex-1">Unconfirmed</span></div> : null}
       {notices}
@@ -794,6 +803,9 @@ function Form({ runtime, day, today, connected }: CalendarProps & { day: number;
   return (
     <CalendarFormPage className={reminder ? "[&>[data-host-chrome]]:pr-2" : undefined} onBack={close} saving={saving}
       onSave={(reminder || !e.extras) && (editor.can(save) || reviewingReschedule) ? submit : undefined}>
+      {fields.noteOrigin !== undefined && e.extras && !reminder && (
+        <CalendarNotice>Android Calendar will save this event without a link to the source note.</CalendarNotice>
+      )}
       {reminder && e.form === "EditReminder" ? (
         <ReminderReview open={reviewingReschedule} title="Reschedule?" action="Reschedule"
           onApprove={() => void runtime.runPromise(confirmCalendarReschedule())} onCancel={() => void editor.send({ type: "callOff" })}

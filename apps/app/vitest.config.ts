@@ -17,6 +17,7 @@ const eliza = new RegExp(`^${fs.realpathSync.native(path.join(import.meta.dirnam
 export default defineConfig(async (env) => mergeConfig(typeof base === "function" ? await base(env) : await base, {
   resolve: { dedupe: ["effect", "vibelang-runtime", "@capacitor/core"] },
   test: {
+    env: { ELIZA_DEV_ALLOW_TEST_MOCKS: "1" },
     globalSetup: [fileURLToPath(import.meta.resolve("@repo/eliza-harness"))],
     setupFiles: ["./test/fakes/system-startup.ts"],
     server: { deps: { inline: [eliza] } },
