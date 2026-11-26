@@ -32,8 +32,8 @@ const hiddenChrome = "pointer-events-none opacity-0 focus-within:pointer-events-
  */
 const viewerTop = "pointer-events-none absolute inset-x-0 top-0 z-10 bg-linear-to-b from-background/80 from-67% to-transparent pb-12.5";
 /** The foot of the media and of its controls: v119's reserve above Ask Alpha, 108px or 6px over the dock (phone.css:475). */
-const viewerReserve = "pb-[max(108px,calc(var(--alpha-dock-clearance,102px)+6px))]";
-const viewerFoot = "pointer-events-none absolute inset-x-0 bottom-[max(108px,calc(var(--alpha-dock-clearance,102px)+6px))] z-10 flex flex-col";
+const viewerReserve = "[--alpha-viewer-reserve:max(108px,calc(var(--alpha-dock-clearance,102px)+6px))] pb-(--alpha-viewer-reserve)";
+const viewerFoot = "pointer-events-none absolute inset-x-0 bottom-(--alpha-viewer-reserve) z-10 flex flex-col";
 const dragX = "--alpha-photo-drag-x";
 const dragY = "--alpha-photo-drag-y";
 const panStep = panUnits / 8;
@@ -68,10 +68,12 @@ function infoSize(bytes: number): string {
 }
 
 /**
- * A photo fits v119's frame (phone.css:741-742 at 45f6bed30): the full-width 3:4 frame centred in the media area,
- * 549px high on a 412px screen, with the photo whole inside it. In landscape it fits the media area, as a video does.
+ * v119's media frame (template.html:2105 `data-alpha-photo-frame`, phone.css:741 at 45f6bed30): the largest 3:4 frame
+ * the media area holds, centred, so 412 by 549px on a 412px screen and letterboxed in landscape.
  */
-const stillFrame = "pointer-events-none absolute top-1/2 left-1/2 w-[min(100cqw,75cqh,calc(min(133.333cqw,100cqh)*var(--alpha-photo-ratio)))] max-w-none object-contain landscape:w-[min(100cqw,calc(100cqh*var(--alpha-photo-ratio)))]";
+const mediaFrame = "h-[min(133.333cqw,100cqh)] w-[min(100cqw,75cqh)]";
+/** A photo whole inside that frame, which clips it when zoomed and is what it pans within. */
+const stillFrame = "pointer-events-none absolute top-1/2 left-1/2 w-[min(100cqw,calc(100cqh*var(--alpha-photo-ratio)))] max-w-none object-contain";
 
 function stillStyle(ratio: number, zoom: number, pan: Pan): CSSProperties & Record<"--alpha-photo-ratio", number> {
   return { "--alpha-photo-ratio": ratio, aspectRatio: ratio, transform: imageTransform(zoom, pan) };
@@ -264,8 +266,8 @@ export function MediaViewer({ runtime, before, after, row, inTrash, albumNamesFo
       // eslint-disable-next-line better-tailwindcss/no-unknown-classes -- design.md, "Dark": the photo viewer and its controls keep their dark tokens in either app theme
       className={cn("dark absolute inset-0 z-50 flex min-h-0 flex-col bg-background text-foreground", fadeIn, !clipEditor && (state.editing ? dockClearance : viewerReserve))}>
       <div className={state.editing ? "contents" : cn(viewerTop, launcherTop, !chrome && "opacity-0 focus-within:opacity-100")}>
-      <header data-host-chrome="" className={cn("motion-safe:transition-opacity", clipEditor ? "flex shrink-0 items-center gap-2 bg-foreground/[0.066667] px-3 pt-3 pb-2" : state.editing ? editHeader : cn("pointer-events-auto flex min-h-13 shrink-0 items-center gap-0.5 px-2", launcherInnerHeader), !chrome && hiddenChrome)}>
-        <Button variant="ghost" size="icon" className={clipEditor ? "size-11" : state.editing ? undefined : "size-13 rounded-tile"} aria-label={backLabel} onClick={close}>{state.editing && !clipEditor ? <X /> : <ChevronLeft />}</Button>
+      <header data-host-chrome="" className={cn("motion-safe:transition-opacity", clipEditor ? "flex shrink-0 items-center gap-2 bg-foreground/[0.066667] px-3 pt-3 pb-2" : state.editing ? editHeader : cn("pointer-events-auto flex min-h-13 shrink-0 items-center gap-1.5 px-2", launcherInnerHeader), !chrome && hiddenChrome)}>
+        <Button variant="ghost" size="icon" className={clipEditor ? "size-11" : state.editing ? undefined : "size-11 rounded-tile"} aria-label={backLabel} onClick={close}>{state.editing && !clipEditor ? <X /> : <ChevronLeft />}</Button>
         {clipEditor ? <h1 className="flex-1 text-base font-normal">Edit video</h1> : state.editing ? <div className="flex-1"><h1 className="sr-only">Edit photo</h1></div> : <div className="min-w-0 flex-1">
           <h1 className="truncate text-base font-semibold">{day}</h1>
           {expiry !== undefined ? <span className="block truncate text-caption text-muted-foreground">{trashDaysLabel(expiry)}</span>
@@ -401,6 +403,7 @@ interface ViewportProps {
 /** The media area that turns pointer and keyboard input into viewer events. */
 function MediaViewport({ state, current, name, showing, editedImage, before, after, action, allows, attachVideo, played, playOverlay, onPlaybackStarted, onDecode }: ViewportProps) {
   const imageRef = useRef<HTMLImageElement>(null);
+  const frameRef = useRef<HTMLDivElement>(null);
   const dragRef = useRef<PanGesture | undefined>(undefined);
   const pointRef = useRef<{ readonly x: number; readonly y: number } | undefined>(undefined);
   const pointersRef = useRef(new Map<number, { readonly x: number; readonly y: number }>());
@@ -436,9 +439,10 @@ function MediaViewport({ state, current, name, showing, editedImage, before, aft
       finishPan(false);
       pointRef.current = point;
       const image = imageRef.current;
-      if (state.zoom > 1 && image !== null) {
-        const width = Math.max(0, (image.clientWidth * state.zoom - event.currentTarget.clientWidth) / 2);
-        const height = Math.max(0, (image.clientHeight * state.zoom - event.currentTarget.clientHeight) / 2);
+      const frame = frameRef.current;
+      if (state.zoom > 1 && image !== null && frame !== null) {
+        const width = Math.max(0, (image.clientWidth * state.zoom - frame.clientWidth) / 2);
+        const height = Math.max(0, (image.clientHeight * state.zoom - frame.clientHeight) / 2);
         dragRef.current = { image, photo: state.open, room: { x: width, y: height }, from: state.pan, pending: state.pan };
       }
     }
@@ -526,7 +530,7 @@ function MediaViewport({ state, current, name, showing, editedImage, before, aft
         onDoubleClick={() => action({ type: "zoomTo", level: state.zoom > 1 ? 1 : 2 })}>
         {showing && (state.kind === "Clip"
           ? <div className="grid size-full place-items-center [container-type:size]">
-              <div className={cn("relative overflow-hidden", !state.editing && "h-[min(133.333cqw,100cqh)] w-[min(100cqw,75cqh)] landscape:size-full",
+              <div className={cn("relative overflow-hidden", !state.editing && cn(mediaFrame, "landscape:size-full"),
                 state.editing && videoRatio === undefined && "size-full")}
                 style={videoRatio === undefined ? undefined : { width: `min(100cqw, calc(100cqh * ${videoRatio}))`, aspectRatio: videoRatio }}>
                 <video ref={attachVideo} key={state.open} src={current.uri} poster={current.item?.image ?? current.browser?.item.thumbnail}
@@ -538,13 +542,12 @@ function MediaViewport({ state, current, name, showing, editedImage, before, aft
                 </span>}
               </div>
             </div>
-          : !state.editing && photoRatio !== undefined
-            ? <img key={state.open} ref={imageRef} src={current.uri} alt={name} draggable={false} decoding="async"
-              className={stillFrame} style={stillStyle(photoRatio, state.zoom, state.pan)} />
-            : !state.editing
-              ? <img key={state.open} ref={imageRef} src={current.uri} alt={name} draggable={false} decoding="async"
-                className={stillFrame} style={stillStyle(1, state.zoom, state.pan)} />
-              : <img key={state.open} src={editedImage ?? current.uri} alt={name} draggable={false} decoding="async" className="size-full object-contain" style={{ transform: `scale(${state.zoom})` }} />)}
+          : !state.editing
+            ? <div ref={frameRef} data-alpha-photo-frame="" className={cn("absolute inset-0 m-auto overflow-hidden [container-type:size]", mediaFrame)}>
+                <img key={state.open} ref={imageRef} src={current.uri} alt={name} draggable={false} decoding="async"
+                  className={stillFrame} style={stillStyle(photoRatio ?? 1, state.zoom, state.pan)} />
+              </div>
+            : <img key={state.open} src={editedImage ?? current.uri} alt={name} draggable={false} decoding="async" className="size-full object-contain" style={{ transform: `scale(${state.zoom})` }} />)}
         {playOverlay}
         {state.gone && <p role="status">This item is no longer available.</p>}
         {state.read.status === "Loading" && <span role="status" aria-label="Loading photo">…</span>}
