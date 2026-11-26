@@ -113,7 +113,7 @@ async function ask(running: Awaited<ReturnType<typeof askingOnBrowser>>, text: s
   const { alpha, asking, world } = running;
   world.ask.metadata = [];
   await drawn(() => {
-    const box = [...document.querySelectorAll("textarea")].find((one) => one.getAttribute("aria-label") === "Message Alpha" || one.getAttribute("aria-label") === "Ask about this page");
+    const box = [...document.querySelectorAll("textarea")].find((one) => one.getAttribute("aria-label") === "Message Alpha");
     if (!box) throw new Error("no composer");
     typeInto(box, text);
   });
