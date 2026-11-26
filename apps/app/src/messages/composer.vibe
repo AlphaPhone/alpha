@@ -700,8 +700,8 @@ function carry(fx: Out): Job<Event, Telephony | Drafts | Attempts | Conversation
     }, { type: "accessReported", need, grant: "Unasked" });
     when { tag: "OpenSettings" }: run("settings", effect { try (try SystemSettings).open("AppPermissions", "") });
     when { tag: "OpenMessagingApp" }: run("elsewhere", effect {
-      const thread = (try (try Composer.Machine).get()).thread
-      try elsewhere(thread, try (try Drafts).text(thread))
+      const state = try (try Composer.Machine).get()
+      try elsewhere(state.thread, state.slot.author === "Nobody" ? "" : try (try Drafts).text(state.thread))
     });
     when { tag: "Sending" }: sending(fx.effect);
   }

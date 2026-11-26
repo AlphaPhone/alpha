@@ -41,7 +41,11 @@ closes it from the bar grows it from the bar or shrinks it onto the bar the
 same way, keeping its composer until the bar shows. A sheet put away
 shrinks and fades over the bar or pill already drawn under it, which then
 stays in place with its own controls in their own colours: no control of
-the sheet's, such as its black Talk, is carried onto the bar. A tap or a drag on the
+the sheet's, such as its black Talk, is carried onto the bar. A resting
+bar dragged down and let go becomes the pill where it is, with no entrance:
+as v119 left the bar or pill in place after any drag (45f6bed30
+chat-overlay-motion-adapter.ts:637-646), it does not drop and rise again.
+A tap or a drag on the
 page outside an open sheet lowers Ask Alpha when it ends; outside the bar
 being typed in, it only leaves the field, which rests the bar once.
 

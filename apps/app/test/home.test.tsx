@@ -15,6 +15,7 @@ import type { Alpha } from "../src/runtime/area.tsx";
 import { button, closeAll, drawn, fill, hardware, later, only, open, press, seen, underAct, until } from "./alpha.tsx";
 import { memoryIndexedDB } from "./fakes/indexeddb.ts";
 import { scene, type Scene } from "./fakes/scene.ts";
+import { agentEvent } from "./fakes/calendar.ts";
 import { savedKey, written } from "../src/home/saved.vibe";
 import { waiting } from "../src/home/waiting.vibe";
 import { fromAreas } from "../src/home/cards.vibe";
@@ -422,17 +423,27 @@ describe("Home on a phone", () => {
     expect(action("On Home")?.getAttribute("aria-disabled")).toBe("true");
   });
 
-  // spec/app/home/cards.md, "Story: See my day at a glance"; spec/app/home/cards.md, "Story: The agenda card"; spec/app/home/cards.md, "Story: Open my day from a card"
-  it("See my day at a glance and open it from a card (spec/app/home/cards.md, \"Story: See my day at a glance\"; spec/app/home/cards.md, \"Story: The agenda card\"; spec/app/home/cards.md, \"Story: Open my day from a card\")", async () => {
+  const agendaScene = (calendars: { id: string; name: string }[], events: { id: string; calendarId: string; title: string; startHour: number; endHour: number }[]) => {
     const hour = 3_600_000;
     const day = 10 * 86_400_000;
     const world = { ...scene(), phone: true, now: day + 8 * hour };
     world.calendar.granted = true;
-    world.calendar.calendars.push({ id: "1", name: "Work", writable: true, local: true }, { id: "2", name: "Family", writable: true, local: true });
-    world.calendar.phoneEvents = [
-      { id: "a", calendarId: "1", title: "Standup", begin: day + 10 * hour, end: day + 11 * hour, allDay: false, recurring: false },
-      { id: "b", calendarId: "2", title: "Dentist", begin: day + 9 * hour, end: day + 10 * hour, allDay: false, recurring: false },
-    ];
+    world.calendar.calendars.push(...calendars.map((c) => ({ ...c, writable: true, local: true })));
+    world.calendar.phoneEvents = events.map((e) => ({
+      id: e.id, calendarId: e.calendarId, title: e.title, begin: day + e.startHour * hour, end: day + e.endHour * hour, allDay: false, recurring: false,
+    }));
+    return { world, day, hour };
+  };
+
+  // spec/app/home/cards.md, "Story: See my day at a glance"; spec/app/home/cards.md, "Story: The agenda card"; spec/app/home/cards.md, "Story: Open my day from a card"
+  it("See my day at a glance and open it from a card (spec/app/home/cards.md, \"Story: See my day at a glance\"; spec/app/home/cards.md, \"Story: The agenda card\"; spec/app/home/cards.md, \"Story: Open my day from a card\")", async () => {
+    const { world, day, hour } = agendaScene(
+      [{ id: "1", name: "Work" }, { id: "2", name: "Family" }],
+      [
+        { id: "a", calendarId: "1", title: "Standup", startHour: 10, endHour: 11 },
+        { id: "b", calendarId: "2", title: "Dentist", startHour: 9, endHour: 10 },
+      ],
+    );
     const { alpha } = await open(world);
     const homes = home.runtime(alpha);
     const agenda = () => document.querySelector<HTMLButtonElement>("button[aria-label^='Open calendar event:'], button[aria-label^='Open overdue reminder:']");
@@ -516,6 +527,73 @@ describe("Home on a phone", () => {
     expect(seenThere.map(({ card, utcDay }, at) => [wanted[at]?.every((part) => card?.includes(part)) ?? false, utcDay])).toEqual(seenThere.map(() => [true, false]));
     const owners = new Date(1970, 0, 11).toLocaleDateString([], { weekday: "short", month: "short", day: "numeric" });
     expect(allDay).toEqual([`Open calendar event: Holiday, ${owners}, All day`, `Open calendar event: Holiday, ${owners}, All day`]);
+  });
+
+  it("Agenda advances once an event ends and a partial agent feed keeps prior titles (spec/app/home/cards.md, \"An item stays on the card until it ends: a timed item through its last minute, an all-day item until its day is over, an overdue reminder until it is handled\"; spec/app/home/cards.md, \"An answer replaces what the calendar had; one whose access is off or has no account leaves nothing behind, and one that failed, could not reach it or ran out keeps what was read before, as not up to date\")", async () => {
+    const { world, hour } = agendaScene(
+      [{ id: "1", name: "Work" }],
+      [
+        { id: "b", calendarId: "1", title: "Dentist", startHour: 9, endHour: 10 },
+        { id: "a", calendarId: "1", title: "Standup", startHour: 10, endHour: 11 },
+      ],
+    );
+    const startOfDay = new Date(world.now);
+    startOfDay.setHours(0, 0, 0, 0);
+    const utcNextDay = Date.UTC(startOfDay.getFullYear(), startOfDay.getMonth(), startOfDay.getDate() + 1);
+    const holidayEnds = startOfDay.getTime() + 48 * hour;
+    const designReviewBegin = startOfDay.getTime() + 74 * hour;
+    world.calendar.phoneEvents.push({
+      id: "c", calendarId: "1", title: "Holiday", begin: utcNextDay, end: utcNextDay + 24 * hour, allDay: true, recurring: false,
+    });
+    world.calendar.feedState = "complete";
+    world.calendar.events = [
+      agentEvent("Design Review", designReviewBegin, designReviewBegin + hour),
+    ];
+    const { alpha } = await open(world, only("home"));
+    const homes = home.runtime(alpha);
+    const agenda = () => document.querySelector<HTMLButtonElement>("button[aria-label^='Open calendar event:'], button[aria-label^='Open overdue reminder:']");
+    await until(alpha, homes, Cards.Machine, (c) => c.calendar.source === "Ready" && c.agent.source === "Ready");
+    expect(agenda()?.getAttribute("aria-label")).toMatch(/^Open calendar event: Dentist,/);
+
+    await later(alpha, 2 * hour);
+    expect(agenda()?.getAttribute("aria-label")).toMatch(/^Open calendar event: Dentist,/);
+    await later(alpha, 1);
+    await vi.waitFor(() => expect(agenda()?.getAttribute("aria-label")).toMatch(/^Open calendar event: Standup,/));
+
+    await later(alpha, 1 * hour);
+    await vi.waitFor(() => expect(agenda()?.getAttribute("aria-label")).toMatch(/^Open calendar event: Holiday,/));
+
+    await later(alpha, holidayEnds - world.now - 1);
+    expect(agenda()?.getAttribute("aria-label")).toMatch(/^Open calendar event: Holiday,/);
+    await later(alpha, 1);
+    await vi.waitFor(() => expect(agenda()?.getAttribute("aria-label")).toMatch(/^Open calendar event: Design Review,/));
+
+    world.calendar.feedState = "partial";
+    world.calendar.events = [
+      agentEvent("Partial Wrong Title", designReviewBegin, designReviewBegin + hour),
+    ];
+    await later(alpha, 24 * hour);
+    await until(alpha, homes, Cards.Machine, (c) => c.agent.source === "Unavailable");
+    expect(agenda()?.getAttribute("aria-label")).toMatch(/^Open calendar event: Design Review,/);
+  });
+
+  it("Inline drawer notice clears when the drawer closes or retrying succeeds (spec/app/home/index.md, \"A notice shows as a toast on bare Home and in the edit bar while editing\")", async () => {
+    const world = { ...scene(), phone: true };
+    world.launcher.refusing.set("org.fixture.clock", "disabled");
+    const { alpha } = await open(world, only("home"));
+    const homes = home.runtime(alpha);
+    await until(alpha, homes, Home.Machine, (h) => h.tiles.load.status === "Loaded");
+    await press("Apps");
+    await until(alpha, homes, Home.Machine, (h) => h.installed.read.status === "Loaded");
+    await press("Open Clock");
+    await until(alpha, homes, Home.Machine, (h) => h.handoff.attempt.outcome === "Refused");
+    expect(document.querySelector('[role="dialog"][aria-label="Apps"]')?.textContent).toContain("Couldn't open Clock.");
+
+    await hardware("back");
+    await until(alpha, alpha.runtime, Shell, (s) => !s.drawer);
+    await press("Apps");
+    await until(alpha, alpha.runtime, Shell, (s) => s.drawer);
+    expect(document.querySelector('[role="dialog"][aria-label="Apps"]')?.textContent).not.toContain("Couldn't open Clock.");
   });
 
   // spec/app/home/cards.md, "Story: The other cards"; spec/app/home/cards.md, "Story: Open my day from a card"
