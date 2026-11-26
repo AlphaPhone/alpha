@@ -1,7 +1,7 @@
 // spec/app/phone/comms.md, "Story: Address the person or Alpha from one bar"; spec/app/phone/comms.md, "The sheet is closed, open or full, and full never compacts an emergency call"; spec/app/phone/comms.md, "Story: Never lose End"
 import { Button } from "@repo/ui";
 import { type ManagedRuntime, Option } from "effect";
-import { ChevronDown, Phone } from "lucide-react";
+import { Phone } from "lucide-react";
 import type { Machine as CallMachine } from "../../gen/app__phone__call.effect.vibe";
 import { useMachine as useCall } from "../../gen/app__phone__call.react.ts";
 import { barDrawn, shownCall } from "../../gen/app__phone__call.ts";
@@ -71,9 +71,8 @@ export function CommsTarget({ runtime, placement }: {
       <Button variant="ghost" className="min-w-0 flex-1 justify-start" onClick={shell.can(lower) ? () => void shell.send(lower) : undefined}>
         {shouldShowCall ? <Phone /> : person === "" ? null : <CallAvatar name={person} />}
         <span className="min-w-0 flex-1 truncate text-left">{shouldShowCall ? "Ongoing call" : person === "" ? view : `${person} · ${view}`}</span>
-        <ChevronDown aria-hidden />
       </Button>
-      {shouldShowCall && calls.can(end) && (!comms || endPlace(comms) !== "EndOnVoicePanel") && <Button size="icon" className={hangupButton} aria-label="End call" onClick={() => void calls.send(end)}><Handset aria-hidden className="size-5 rotate-135" /></Button>}
+      {shouldShowCall && calls.can(end) && (!comms || endPlace(comms) !== "EndOnVoicePanel") && <Button size="icon" data-alpha-strip-action="" className={hangupButton} aria-label="End call" onClick={() => void calls.send(end)}><Handset aria-hidden className="size-5 rotate-135" /></Button>}
     </div>
   );
 }
