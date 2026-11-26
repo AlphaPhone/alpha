@@ -15,8 +15,8 @@ import type { Machine as CreditsMachine } from "../../gen/app__maps__credits.eff
 import { badgeOnly, holding, needsSettings } from "../../gen/app__maps__connection.ts";
 import { offers } from "../../gen/app__maps__navigation.ts";
 import type { Travel } from "../../gen/app__maps__navigation.ts";
-import { hasRoom } from "../../gen/app__maps__places.ts";
-import { type Seen, type Spot, type Way, atlas } from "./atlas.vibe";
+import { hasRoom, servedHere } from "../../gen/app__maps__places.ts";
+import { type Coverage, type Seen, type Spot, type Way, atlas } from "./atlas.vibe";
 import { degreesOf, pointIn } from "./geometry.ts";
 import googleMaps from "./google-maps-attribution.svg";
 import { coverageOf, settled, tile } from "./maps.vibe";
@@ -123,6 +123,12 @@ const statusTop: Record<string, string> = {
   Place: "top-21 in-data-[alpha-launcher]:top-32", Directions: "top-58", Navigating: "top-47 in-data-[alpha-launcher]:top-58",
 };
 
+function waitNotice(wait: State["link"]["wait"], held: number): string {
+  if (wait === "AllowanceSpent") return `You have used your Maps allowance for this period. It resets in ${Math.max(1, Math.ceil(held / 86_400))} days.`;
+  if (wait === "Unnamed") return "Maps request limit reached. Try again later.";
+  return `Maps request limit reached. Try again in ${Math.max(1, Math.ceil(held / 60))} minutes.`;
+}
+
 // spec/app/maps/credits.md, "The camera goes to what the owner picked, on every map"
 /** Where the camera goes for `state`, named so the map applies each aim once. */
 function cameraOf(state: State, seen: Seen, following: boolean, bottom: number): MapCamera {
@@ -186,6 +192,7 @@ export function Maps({ runtime, alpha }: Shown<ScreenMachine | CreditsMachine | 
   });
   const kept = saved.find((entry) => entry.place === state.place);
   const following = followsThePhone(state) && seen.here !== undefined;
+  const missingGoogleMap = state.link.google && tiles === undefined;
   const style: MapStyle = state.link.basemap === "Cloud" && tiles !== undefined
     ? { kind: "raster", tileSize: tiles.tileSize, minZoom: tiles.minZoom, maxZoom: tiles.maxZoom, tile: (z, x, y, signal) => runtime.runPromise(tile(z, x, y, signal)) }
     : { kind: "vector", url: worldStyle };
@@ -203,7 +210,16 @@ export function Maps({ runtime, alpha }: Shown<ScreenMachine | CreditsMachine | 
   };
   const typing = (text: string) => {
     setTyped(text);
-    const query = recentOf(state.recent, text.trim());
+    const trimmed = text.trim();
+    if (trimmed === "") {
+      if (can({ type: "search", query: "", chars: 0 })) void send({ type: "search", query: "", chars: 0 });
+      return;
+    }
+    if (pointIn(trimmed) !== undefined) {
+      if (can({ type: "typeQuery", query: "", chars: 0, now: untimed })) void send({ type: "typeQuery", query: "", chars: 0, now: untimed });
+      return;
+    }
+    const query = recentOf(state.recent, trimmed);
     if (can({ type: "typeQuery", query, chars: query.length, now: untimed })) void send({ type: "typeQuery", query, chars: query.length, now: untimed });
   };
   // spec/app/maps/index.md, "Story: Search for a place"
@@ -239,7 +255,8 @@ export function Maps({ runtime, alpha }: Shown<ScreenMachine | CreditsMachine | 
     ...(retryMap ? ["Map rendering is unavailable. Retry the map or open a saved place."] : []),
     ...(refused ? ["Location permission was not granted. You can choose an origin manually.", "Allow location in Settings to show your position."] : []),
     ...(state.link.coverage.status === "Failed" && !holding(state.link) ? ["Maps could not be reached."] : []),
-    ...(holding(state.link) ? [`Maps request limit reached. Try again in ${Math.max(1, Math.ceil(state.link.held / 60))} minutes.`] : []),
+    ...(state.link.unoffered ? ["Maps unavailable"] : []),
+    ...(holding(state.link) ? [waitNotice(state.link.wait, state.link.held)] : []),
     ...(state.link.known && state.link.account === 0 ? ["Sign in to Alpha Cloud to use Maps."] : []),
     ...(!state.keepable ? ["Saved places could not be read. Existing data has not been replaced."] : []),
     ...(now === "Place" && coverage?.available && saysOutsideCoverage(state, inside) ? [`This location is outside ${coverage.sources.data} coverage.`] : []),
@@ -257,30 +274,34 @@ export function Maps({ runtime, alpha }: Shown<ScreenMachine | CreditsMachine | 
   const infoShown = !badgeOnly(state.link) && coverage?.available === true;
   return (
     <section aria-label="Maps" className="relative isolate flex flex-1 flex-col overflow-hidden">
-      <MapView
-        className="absolute inset-0 h-full rounded-none"
-        zoomControls={false}
-        opening={{ at: northAmerica, zoom: style.kind === "raster" ? 2 : 2.4 }}
-        compassBottom={now === "Navigating" ? 198 : floatBottom + 60}
-        label={spot === undefined ? "Map" : `Map of ${placeName}`}
-        surface={state.link.plane}
-        style={style}
-        pins={pins}
-        here={seen.here === undefined ? undefined : degreesOf(seen.here.at)}
-        line={way?.line.map(degreesOf)}
-        camera={cameraOf(state, seen, following, floatBottom)}
-        compass={(bearing, pitch) => compassShown(bearing, pitch, following)}
-        onReady={(plane) => { if (can({ type: "reportMap", plane, ok: true })) void send({ type: "reportMap", plane, ok: true }); }}
-        onTrouble={(plane, trouble) => {
-          if (breaksThePlane(trouble.styleLoaded, trouble.tileError, trouble.cancelled) && can({ type: "reportMap", plane, ok: false })) void send({ type: "reportMap", plane, ok: false });
-        }}
-        onPin={(key) => offer(screen, { type: "pickResult", place: Number(key) })?.()}
-        onPress={(at) => offer(screen, { type: "pressMap", lat: Math.round(at.lat * 1e6), lng: Math.round(at.lng * 1e6), now: untimed })?.()}
-        onPressMove={(pixels) => { if (pixels > panPixels) lift(); }}
-        onPressEnd={lift}
-        onSettled={(view) => void runtime.runPromise(settled(view))}
-        onDragged={() => offer(screen, { type: "panMap" })?.()}
-      />
+      {missingGoogleMap
+        ? <div role="status" className="absolute inset-0 grid place-items-center bg-background p-6 text-center text-sm text-muted-foreground">The Google map is missing.</div>
+        : (
+          <MapView
+            className="absolute inset-0 h-full rounded-none"
+            zoomControls={false}
+            opening={{ at: northAmerica, zoom: style.kind === "raster" ? 2 : 2.4 }}
+            compassBottom={now === "Navigating" ? 198 : floatBottom + 60}
+            label={spot === undefined ? "Map" : `Map of ${placeName}`}
+            surface={state.link.plane}
+            style={style}
+            pins={pins}
+            here={seen.here === undefined ? undefined : degreesOf(seen.here.at)}
+            line={way?.line.map(degreesOf)}
+            camera={cameraOf(state, seen, following, floatBottom)}
+            compass={(bearing, pitch) => compassShown(bearing, pitch, following)}
+            onReady={(plane) => { if (can({ type: "reportMap", plane, ok: true })) void send({ type: "reportMap", plane, ok: true }); }}
+            onTrouble={(plane, trouble) => {
+              if (breaksThePlane(trouble.styleLoaded, trouble.tileError, trouble.cancelled) && can({ type: "reportMap", plane, ok: false })) void send({ type: "reportMap", plane, ok: false });
+            }}
+            onPin={(key) => offer(screen, { type: "pickResult", place: Number(key) })?.()}
+            onPress={(at) => offer(screen, { type: "pressMap", lat: Math.round(at.lat * 1e6), lng: Math.round(at.lng * 1e6), now: untimed })?.()}
+            onPressMove={(pixels) => { if (pixels > panPixels) lift(); }}
+            onPressEnd={lift}
+            onSettled={(view) => void runtime.runPromise(settled(view))}
+            onDragged={() => offer(screen, { type: "panMap" })?.()}
+          />
+        )}
 
       {(now === "Browse" || now === "Search" || now === "Place") && (
         <MapsSearchBar
@@ -317,7 +338,7 @@ export function Maps({ runtime, alpha }: Shown<ScreenMachine | CreditsMachine | 
         </button>
       )}
 
-      {now === "Directions" && spot !== undefined && <DirectionsCard screen={screen} state={state} seen={seen} spot={spot} kept={kept} saved={saved} back={back} locate={myLocation} />}
+      {now === "Directions" && spot !== undefined && <DirectionsCard screen={screen} state={state} seen={seen} spot={spot} kept={kept} saved={saved} coverage={coverage} back={back} locate={myLocation} />}
       {now === "Navigating" && spot !== undefined && <Guidance screen={screen} state={state} seen={seen} spot={spot} kept={kept} way={way} />}
 
       {state.question !== "NoQuestion" && state.review.showing && (
@@ -494,9 +515,10 @@ function PlaceSheet({ screen, state, spot, kept, height, back, outside }: { scre
 }
 
 /** The card over the top of the map in directions: where from, where to, and how to travel. */
-function DirectionsCard({ screen, state, seen, spot, kept, saved, back, locate }: { screen: Screen; state: State; seen: Seen; spot: Spot; kept: Kept | undefined; saved: Kept[]; back: (() => void) | undefined; locate: (() => void) | undefined }) {
+function DirectionsCard({ screen, state, seen, spot, kept, saved, coverage, back, locate }: { screen: Screen; state: State; seen: Seen; spot: Spot; kept: Kept | undefined; saved: Kept[]; coverage: Coverage | undefined; back: (() => void) | undefined; locate: (() => void) | undefined }) {
   const [start, setStart] = useState("");
   const { can, send } = screen;
+  const serving = coverage?.available ? coverage.providerId : "";
   const startAt = pointIn(start);
   const startFrom = () => {
     if (startAt !== undefined && can({ type: "planFrom", origin: "Coordinates", lat: startAt.lat, lng: startAt.lng })) {
@@ -509,7 +531,7 @@ function DirectionsCard({ screen, state, seen, spot, kept, saved, back, locate }
     return found === undefined || place === state.place ? [] : [{ place, name: found.name, spot: found }];
   }) : [];
   const typed = start.trim().toLowerCase();
-  const options = (typed === "" && starts.length === 0 ? [] : [...starts, ...saved.filter((entry) => entry.place !== state.place && !starts.some((found) => found.place === entry.place) && entry.name.toLowerCase().includes(typed))])
+  const options = (typed === "" && starts.length === 0 ? [] : [...starts, ...saved.filter((entry) => entry.place !== state.place && servedHere(entry.spot.providerId, serving, state.link.google) && !starts.some((found) => found.place === entry.place) && entry.name.toLowerCase().includes(typed))])
     .filter((entry) => entry.place !== state.startPlace);
   const from = state.startPlace === 0 ? undefined : atlas.spot(state.startPlace);
   const swappable = can({ type: "swapEnds", lat: spot.at.lat, lng: spot.at.lng });
@@ -605,7 +627,10 @@ function Guidance({ screen, state, seen, spot, kept, way }: { screen: Screen; st
   const turn = way?.turns[state.trip.turn];
   const after = way?.turns[state.trip.turn + 1];
   const arrived = state.trip.guidance === "Arrived";
-  const precise = seen.here !== undefined && !seen.here.approximate && !state.trip.rerouting;
+  const imprecise = seen.here !== undefined && (seen.here.approximate || state.imprecise);
+  const precise = seen.here !== undefined && !imprecise && !state.trip.rerouting;
+  const leftMeters = way === undefined ? 0 : state.trip.turn === 0 ? way.meters : way.turns.slice(state.trip.turn).reduce((sum, step) => sum + step.meters, 0);
+  const leftSeconds = way === undefined ? 0 : state.trip.turn === 0 || way.meters <= 0 ? way.seconds : Math.round(way.seconds * (leftMeters / way.meters));
   const [startedAt] = useState(Date.now);
   return (
     <>
@@ -614,7 +639,7 @@ function Guidance({ screen, state, seen, spot, kept, way }: { screen: Screen; st
         <div className="min-w-0">
           <div className="font-display text-figure-lg font-light">{arrived ? "Arrived" : precise && turn !== undefined ? distance(turn.meters) : state.trip.rerouting ? "Rerouting…" : "Locating…"}</div>
           <div className="mt-1 truncate text-lead font-semibold">
-            {arrived ? titleOf(spot, kept, state) : seen.here === undefined ? "Waiting for your location" : seen.here.approximate ? "Turn guidance needs a precise location" : state.trip.rerouting ? "Finding a new route" : turn?.instruction ?? ""}
+            {arrived ? titleOf(spot, kept, state) : seen.here === undefined ? "Waiting for your location" : imprecise ? "Turn guidance needs a precise, up-to-date location." : state.trip.rerouting ? "Finding a new route" : turn?.instruction ?? ""}
           </div>
         </div>
       </div>
@@ -627,11 +652,12 @@ function Guidance({ screen, state, seen, spot, kept, way }: { screen: Screen; st
       <div data-host-chrome="bottom" className="dark absolute inset-x-3 bottom-[calc(var(--alpha-dock-overlap,5.75rem)+--spacing(2))] z-50 grid grid-cols-[56px_minmax(0,1fr)_56px] items-center gap-3 rounded-bar bg-secondary p-2.5 text-secondary-foreground motion-safe:animate-rise">
         <MapsRoundButton tone="nightFill" size="2xl" aria-label="End navigation" disabled={!can({ type: "endGuidance" })} onClick={() => void send({ type: "endGuidance" })}><X /></MapsRoundButton>
         <div className="min-w-0 text-center">
-          <div className="font-display text-figure-sm font-light">{arrived ? "Arrived" : way === undefined ? "" : minutes(way.seconds)}</div>
+          <div className="font-display text-figure-sm font-light">{arrived ? "Arrived" : way === undefined ? "" : minutes(leftSeconds)}</div>
           {arrived
             ? <div className="mt-0.75 text-meta leading-tight text-muted-foreground">Destination reached</div>
-            : way !== undefined && <div role="status" aria-label="Remaining distance and time" className="mt-0.5 text-meta leading-tight text-foreground/70">{`${distance(way.meters)} · arrive ${new Date(startedAt + way.seconds * 1000).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}${way.live === true ? "" : " · no live traffic"}`}</div>}
+            : way !== undefined && <div role="status" aria-label="Remaining distance and time" className="mt-0.5 text-meta leading-tight text-foreground/70">{`${distance(leftMeters)} · arrive ${new Date(startedAt + leftSeconds * 1000).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}${way.live === true ? "" : " · no live traffic"}`}</div>}
         </div>
+        {can({ type: "handOn", kind: "EtaShare" }) && <MapsRoundButton tone="nightFill" size="2xl" aria-label="Share arrival" onClick={() => void send({ type: "handOn", kind: "EtaShare" })}><Share2 /></MapsRoundButton>}
       </div>
     </>
   );

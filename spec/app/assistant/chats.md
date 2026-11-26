@@ -94,8 +94,10 @@ pure val weight_listed = 3
 
 ### The list of conversations is read whenever it is shown
 
-Chat history opens as a sheet over Ask Alpha. Back closes that sheet before
-it lowers Ask Alpha.
+As in Alpha's Sunday v119 build (old-line Alpha 45f6bed30,
+settings-adapter.ts:1038-1043), the owner lists the conversations, restores
+one and starts a new one from Agent activity in Settings. Ask Alpha's own
+chat actions offer only Attach media and Search chat (template.html:59-67).
 
 ```quint
 pure def browse(c: Chats): Moved =
@@ -172,6 +174,12 @@ so a reply arriving, the sheet growing or shrinking, or the conversation's
 own move to its end never stops it. Only the owner scrolling up from the
 end stops it, until they scroll back to it. A page of history or a search
 hit opens where it was read, not at the end.
+
+Each change to what the conversation shows is followed as it is drawn, as
+v119 did after every update (model.js:5561-5576), not only when its size is
+next measured: a finished reply put in place of its streamed words leaves
+the conversation shorter for a moment, and that moment neither stops the
+following nor moves the owner from where they were reading.
 
 ```quint
 pure val followReach = 80

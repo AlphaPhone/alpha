@@ -14,6 +14,7 @@ import { Machine as Shell } from "../gen/app__shell.effect.vibe";
 import * as Layers from "../gen/app__shell__layers.effect.vibe";
 import home from "../src/home/index.tsx";
 import settings from "../src/settings/index.tsx";
+import { Found } from "../src/settings/phone.vibe";
 import { button, closeAll, drawn, fill, hardware, later, only, open as openAlpha, press, seen, underAct, until } from "./alpha.tsx";
 import { account, checkoutSession, checkoutUrl, type CheckoutScene, type RedemptionScene } from "./fakes/cloud.ts";
 import { type ListenerScene, notices } from "./fakes/settings.ts";
@@ -292,7 +293,8 @@ describe("Settings", () => {
     await press("Continue to Stripe");
     await vi.waitFor(() => expect(checkout.opened).toEqual([checkoutUrl]));
     expect(checkout.starts).toHaveLength(1);
-    expect(checkout.starts[0]).toMatchObject({ planKey: "plus_monthly", presentation: "mobile", key: expect.any(String) });
+    const key: unknown = expect.any(String);
+    expect(checkout.starts[0]).toMatchObject({ planKey: "plus_monthly", presentation: "mobile", key });
     await seen(false);
     checkout.returned = "cs_test_other";
     await seen(true);
@@ -321,7 +323,8 @@ describe("Settings", () => {
     await press("Redeem");
     await vi.waitFor(() => expect(document.querySelector('[role="dialog"]')?.textContent).toContain("Code redeemed"));
     await vi.waitFor(() => expect(document.querySelector('[aria-label="Cloud plan"]')?.textContent).toContain("Plus"));
-    expect(redemption.calls).toEqual([{ code: "ABCD2345EFGH6789", key: expect.any(String) }]);
+    const key: unknown = expect.any(String);
+    expect(redemption.calls).toEqual([{ code: "ABCD2345EFGH6789", key }]);
   });
 
   it('Checks the same cancellation after a lost reply and keeps the plan only once (spec/app/account/change.md, "Story: Change or cancel my plan"; "Story: Keep plan changes to their sign-in")', async () => {
@@ -329,14 +332,14 @@ describe("Settings", () => {
     const world = { ...scene(), phone: true, checkout: { starts: [], confirmations: [], opened: [], returned: null, paid: true, change } };
     const emailed: string[] = [];
     world.voice.startupSignIn = {
-      reauthenticate: async (options) => {
+      reauthenticate: (options) => {
         emailed.push("email" in options ? options.email : "");
-        return { request: 1, attempt: 1, verdict: "code-on-its-way", expiresAt: world.now + 60_000, resendAt: world.now + 10_000 };
+        return Promise.resolve({ request: 1, attempt: 1, verdict: "code-on-its-way", expiresAt: world.now + 60_000, resendAt: world.now + 10_000 });
       },
-      verify: async ({ code }) => {
-        if (code !== "123456") throw new Error("Wrong confirmation");
+      verify: ({ code }) => {
+        if (code !== "123456") return Promise.reject(new Error("Wrong confirmation"));
         world.voice.billingVerified = world.voice.credentialId;
-        return { request: 1, attempt: 1, verdict: "account-confirmed" };
+        return Promise.resolve({ request: 1, attempt: 1, verdict: "account-confirmed" });
       },
     };
     await settingsOpen(world);
@@ -842,7 +845,7 @@ describe("Settings", () => {
     expect(report).toEqual(expect.objectContaining({
       format: "alpha-diagnostics/v1",
       roles: [{ role: "home", held: false, available: true }, { role: "assistant", held: false, available: true }],
-      permissions: { CalendarAccess: true, FilesAccess: true, LocationAccess: true, MicrophoneAccess: false, NotificationsAccess: true },
+      permissions: { CalendarAccess: true, FilesAccess: true, LocationAccess: true, MicrophoneAccess: false, NotificationsAccess: true, PhotosAccess: false },
       talk: { format: "alpha-cloud-stream-timing-v1", sessions: [{ sttConnectedMs: 812, firstFrameSentMs: 815, consentRetry: true }, { sttConnectedMs: 390, firstFrameSentMs: null, consentRetry: false }] },
     }));
     expect([text?.includes("launcher3"), text?.includes("ai.alphacompute"), text?.includes("\"session\"")]).toEqual([false, false, false]);
@@ -901,6 +904,16 @@ describe("Settings", () => {
     // spec/app/settings/network.md, "Leaving the page retires what it asked and forgets what it found; a join in flight is Android's and goes on"
     await hardware("back");
     await until(alpha, machines, Network.Machine, (s) => s.found === 0 && s.scan === "NotScanned");
+
+    let finishScan = () => {};
+    world.settings.wifiScanGate = new Promise<void>((done) => { finishScan = done; });
+    await press("Network");
+    await until(alpha, machines, Network.Machine, (s) => s.scanning.read.status === "Loading");
+    await hardware("back");
+    await until(alpha, machines, Network.Machine, (s) => s.scanning.read.status === "Idle" && s.found === 0);
+    finishScan();
+    await later(alpha, 50);
+    expect(await machines.runPromise(Found.use((found) => found.get()))).toEqual([]);
   });
 
   it("Read what my carrier needs to activate a SIM (spec/app/settings/carrier.md, \"Story: Read what my carrier needs to activate a SIM\")", async () => {

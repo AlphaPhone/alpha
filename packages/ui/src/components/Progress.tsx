@@ -16,15 +16,16 @@ export type ProgressProps = Omit<ComponentProps<typeof ProgressPrimitive.Root>, 
 
 /** A bar for work whose length is known, and a shimmer while it is not. It must be named, with `aria-label` or `aria-labelledby`. */
 export function Progress({ value, max = 100, className, ...props }: ProgressProps) {
-  const done = value == null ? null : Math.min(Math.max(value, 0), max);
+  const limit = Number.isFinite(max) && max > 0 ? max : 100;
+  const done = value == null ? null : Math.min(Math.max(value, 0), limit);
   return (
-    <ProgressPrimitive.Root value={done} max={max} className={cn("h-1.5 w-full overflow-hidden rounded-full bg-accent", className)} {...props}>
+    <ProgressPrimitive.Root value={done} max={limit} className={cn("h-1.5 w-full overflow-hidden rounded-full bg-accent", className)} {...props}>
       <ProgressPrimitive.Indicator
         className={cn(
           "size-full origin-left rounded-full",
           done === null ? "bg-linear-to-r from-accent via-alpha to-accent bg-size-[200%_100%] motion-safe:animate-shimmer" : "bg-alpha transition-transform duration-base ease-standard",
         )}
-        style={done === null ? undefined : { transform: `scaleX(${done / max})` }}
+        style={done === null ? undefined : { transform: `scaleX(${done / limit})` }}
       />
     </ProgressPrimitive.Root>
   );

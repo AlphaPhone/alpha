@@ -155,7 +155,11 @@ export function Digests({ runtime, owner, result, notice, onResult }: DigestsPro
     </div>}
     {state.change.live && <Spinner aria-label="Saving the schedule" />}
     {state.change.attempt.outcome === "Refused" && <Alert role="status" variant="warn">The agent didn’t save the schedule.</Alert>}
-    {model.can({ type: "checkChange" }) && <Alert role="status" variant="warn">The agent didn’t confirm the change. Refresh before trying again.</Alert>}
+    {model.can({ type: "checkChange" }) && <Alert role="status" variant="warn">The agent didn’t confirm the change.
+      <Button size="sm" variant="secondary" onClick={() => tell({ type: "checkChange" })}>Check change</Button>
+    </Alert>}
+    {model.can({ type: "retry" }) && <Button variant="secondary" onClick={() => tell({ type: "retry" })}>Try again</Button>}
+    {model.can({ type: "letGo" }) && <Button variant="secondary" onClick={() => tell({ type: "letGo" })}>Allow a different change</Button>}
     <ConfirmDialog open={state.review.showing}
       title={state.proposed === "Create" ? "Schedule a digest?" : `${titles[state.proposed]} “${selection?.name ?? "Digest"}”?`}
       confirmLabel={titles[state.proposed]} destructive={state.proposed === "Remove"}
