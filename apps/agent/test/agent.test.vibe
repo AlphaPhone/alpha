@@ -50,7 +50,8 @@ schema Replied { fullText: string }
 schema Interacted { success: boolean; result: { state?: { notes: { title: string; body: string }[] } } }
 schema Approvals { approvals: Schema.Unknown[] }
 schema ResidentScope { userId: string; organizationId: string; agentId: string; epoch: Schema.Int }
-schema CleanupQueue { success: boolean; data: CleanupReceipt[] }
+const Receipts = Schema.Array(CleanupReceipt)
+schema CleanupQueue { success: boolean; data: Receipts }
 schema VoiceCreated { success: boolean; result: { data: { note: { id: string } }; state: { revision: Schema.Int } } }
 schema NoteRevision { success: boolean; data: { revision: Schema.Int } }
 schema CleanupStatus { status: string }
