@@ -168,8 +168,8 @@ pure def canPhoneTabReturned(c: Comms, subject: Subject, key: str, by: Actor): b
 
 pure def phoneTabReturned(c: Comms, subject: Subject, key: str, by: Actor): Comms =
   val shown = subjectShown(c, PhoneApp, subject, key, by)
-  val last = c.stage.nthOr(c.stage.length() - 1, { app: ContactsApp, subject: ListSubject, key: "" })
-  { ...shown, stage: if (c.app == ContactsApp and last.app == PhoneApp) c.stage.removeAt(c.stage.length() - 1) else c.stage }
+  val recentStage = c.stage.nthOr(c.stage.length() - 1, { app: ContactsApp, subject: ListSubject, key: "" })
+  { ...shown, stage: if (c.app == ContactsApp and recentStage.app == PhoneApp) c.stage.removeAt(c.stage.length() - 1) else c.stage }
 
 pure def stepPhoneTabReturnDoesNotAddHistory(before: Comms, via: str, after: Comms): bool =
   via == "phoneTabReturned" implies after.stage.length() <= before.stage.length()

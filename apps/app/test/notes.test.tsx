@@ -87,6 +87,8 @@ describe("Notes", () => {
     await press("Notes");
     await until(alpha, notesArea, List, (state) => state.read.status === "Loaded");
     await press(`Open ${row}`);
+    if (kind === "event") await until(alpha, notesArea, Editor, (state) => state.showing);
+    else await until(alpha, notesArea, Voice, (state) => state.showing);
     const viewed = kind === "event"
       ? await notesArea.runPromise(Editor.use((machine) => machine.get())).then((state) => ({ number: state.note, revision: state.draft.base, view: "editor" as const }))
       : await notesArea.runPromise(Voice.use((machine) => machine.get())).then((state) => ({ number: state.note, revision: state.revision, view: "voice" as const }));
