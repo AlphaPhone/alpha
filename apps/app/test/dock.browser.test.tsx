@@ -259,7 +259,7 @@ describe("Ask Alpha dock", () => {
     }
   });
 
-  // spec/app/assistant/dock.md, "Inside an app other than the Browser, Ask Alpha at rest is the pill; Type raises it to typing, where the whole bar shows, and a swipe up from it opens the sheet": as v121's pill, a swipe up that starts on Type carries the sheet with the finger and opens it without typing
+  // spec/app/assistant/dock.md, "Inside an app other than the Browser, Ask Alpha at rest is the pill; Type raises it to typing, where the whole bar shows, and a swipe up from it opens the sheet": as v119's pill, a swipe up that starts on Type carries the sheet with the finger and opens it without typing; once it is a drag the sheet holds the pointer, so later moves reach the sheet as a captured touch's do
   it("a swipe up from Type on the pill follows the finger and opens Sheet without typing", async () => {
     await page.viewport(390, 844);
     const { runtime } = await mountDock({ view: "Calendar" });
@@ -268,10 +268,11 @@ describe("Ask Alpha dock", () => {
     type?.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true, clientY: 780, pointerId: 3, pointerType: "touch", isPrimary: true }));
     type?.dispatchEvent(new PointerEvent("pointermove", { bubbles: true, clientY: 740, pointerId: 3, pointerType: "touch", isPrimary: true }));
     await runtime.runPromise(Effect.flatMap(Dock, (m) => Stream.runHead(Stream.filter(m.changes, (s) => s.gesture !== "Idle"))));
-    type?.dispatchEvent(new PointerEvent("pointermove", { bubbles: true, clientY: 700, pointerId: 3, pointerType: "touch", isPrimary: true }));
+    const holder = () => type?.isConnected ? type : document.querySelector("section[aria-label='Ask Alpha']");
+    holder()?.dispatchEvent(new PointerEvent("pointermove", { bubbles: true, clientY: 700, pointerId: 3, pointerType: "touch", isPrimary: true }));
     await expect.poll(() => document.querySelector("section[aria-label='Ask Alpha']")?.getAttribute("data-alpha-detent")).toBe("sheet");
     expect((await runtime.runPromise(Effect.flatMap(Shell, (m) => m.get()))).assistant).toBe("Bar");
-    type?.dispatchEvent(new PointerEvent("pointerup", { bubbles: true, clientY: 700, pointerId: 3, pointerType: "touch", isPrimary: true }));
+    holder()?.dispatchEvent(new PointerEvent("pointerup", { bubbles: true, clientY: 700, pointerId: 3, pointerType: "touch", isPrimary: true }));
     await runtime.runPromise(Effect.flatMap(Shell, (m) => Stream.runHead(Stream.filter(m.changes, (s) => s.assistant === "Sheet"))));
     expect(document.querySelector("section[aria-label='Ask Alpha']")?.getAttribute("data-alpha-detent")).toBe("sheet");
   });

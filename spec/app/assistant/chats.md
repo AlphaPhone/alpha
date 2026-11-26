@@ -179,7 +179,8 @@ pure val followReach = 80
 pure def followsEnd(seenHeight: int, seenView: int, top: int): bool = seenHeight - top - seenView < followReach
 
 pure def lawArrivingTextNeverStopsFollowing(seenHeight: int, seenView: int, arrived: int): bool =
-  (arrived >= 0 and seenView <= seenHeight) implies followsEnd(seenHeight, seenView, seenHeight - seenView)
+  val end = seenHeight - seenView
+  arrived >= followReach implies (followsEnd(seenHeight, seenView, end) and not(followsEnd(seenHeight + arrived, seenView, end)))
 
 pure def lawScrollingUpFromTheEndStopsFollowing(seenHeight: int, seenView: int, up: int): bool =
   up >= followReach implies not(followsEnd(seenHeight, seenView, seenHeight - seenView - up))

@@ -121,9 +121,10 @@ export function useSheetFollow({ dock, detent, pill, comms, voice, canLand }: {
   const shownRef = useRef(0);
   const motionsRef = useRef<Animation[]>([]);
   const ghostRef = useRef<HTMLElement | undefined>(undefined);
+  const barRef = useRef(0);
   if (seen.detent !== detent) {
-    const tap = live === undefined && !voice && animates();
-    const leaving = seen.leaving ?? (tap && isOpen(seen.detent) && detent === "Bar" ? { tap: true } : undefined);
+    const tap = live === undefined && !voice && !comms && animates();
+    const leaving = seen.leaving ?? (tap && isOpen(seen.detent) && detent === "Bar" ? { tap: true, height: shownRef.current || undefined } : undefined);
     setSeen({
       detent,
       growing: leaving ? undefined : !tap || !isOpen(detent) ? seen.growing : isOpen(seen.detent) ? { from: "shown" } : {},
@@ -145,11 +146,16 @@ export function useSheetFollow({ dock, detent, pill, comms, voice, canLand }: {
     done();
     void dock.send({ type: "shift", now: untimed });
   };
+  /** v119's floor (chat-overlay-motion-adapter.ts:1037-1039): the input bar's height, measured where it was last drawn, plus 28. */
+  const floorOf = () => {
+    const bar = document.querySelector<HTMLElement>("[data-alpha-input-bar]")?.clientHeight ?? 0;
+    if (bar > 0) barRef.current = bar;
+    return (barRef.current || FALLBACK_BAR) + FLOOR_GAP;
+  };
   const gesture: AssistantPull = {
     onPress: ({ y }) => {
       const form: Form = isOpen(detent) ? "open" : pill ? "pill" : "bar";
-      const bar = document.querySelector<HTMLElement>("[data-alpha-input-bar]");
-      const floor = (bar?.clientHeight || FALLBACK_BAR) + FLOOR_GAP;
+      const floor = floorOf();
       const shown = sectionRef.current?.getBoundingClientRect().height ?? 0;
       shownRef.current = shown;
       heldRef.current = { y, form, start: detent, drag: pressDrag(form, shown, floor, viewport()) };
@@ -160,7 +166,7 @@ export function useSheetFollow({ dock, detent, pill, comms, voice, canLand }: {
       const held = heldRef.current;
       if (!held) return;
       const first = !held.drag.moved;
-      if (first && !dock.can({ type: "drag" })) return;
+      if (first && voice) return;
       if (!moveDrag(held.drag, y - held.y, held.form === "bar")) return;
       if (first) void dock.send({ type: "drag" });
       const drawn = held.form === "open" || held.drag.height > 0;
@@ -168,8 +174,9 @@ export function useSheetFollow({ dock, detent, pill, comms, voice, canLand }: {
       if (first || drawn !== live?.drawn) flushSync(() => setLive({ form: held.form, start: held.start, drawn, painted: dragPaint(held.drag) }));
       if (drawn) paint(sectionRef.current, held.drag);
     },
-    onRelease: ({ direction, flick, quick, travel }: AssistantRelease) => {
+    onRelease: ({ direction, flick, quick, travel, y }: AssistantRelease) => {
       const held = heldRef.current;
+      if (held && !held.drag.moved && !voice && moveDrag(held.drag, y - held.y, held.form === "bar")) void dock.send({ type: "drag" });
       if (!held || !held.drag.moved || stays(held.start, held.form === "pill", Math.round(travel), quick)) return drop();
       const d = held.drag;
       const full = d.full;
@@ -177,10 +184,14 @@ export function useSheetFollow({ dock, detent, pill, comms, voice, canLand }: {
       const landed = landing(held.start, direction === "up" ? "Up" : "Down", flick, height, d.floor, full);
       if (landed.detent !== held.start && !canLand(landed.detent)) return drop();
       heldRef.current = undefined;
-      void dock.send({ type: "release", direction: direction === "up" ? "Up" : "Down", flick, height, floor: d.floor, full, now: untimed });
+      void dock.send({ type: "release", direction: direction === "up" ? "Up" : "Down", flick, height, floor: d.floor, full, now: untimed }).then((sent) => {
+        if (sent._tag === "Success") return;
+        setSeen((s) => ({ ...s, leaving: undefined }));
+        drop();
+      });
       const painted = dragPaint(d);
       unpaint(sectionRef.current);
-      if (held.form === "open" && !isOpen(landed.detent) && animates()) {
+      if (held.form === "open" && !isOpen(landed.detent) && !comms && animates()) {
         setSeen((s) => ({ ...s, growing: undefined, leaving: { tap: false, height: painted.height, opacity: painted.opacity } }));
         setLive(undefined);
         return;
@@ -211,6 +222,7 @@ export function useSheetFollow({ dock, detent, pill, comms, voice, canLand }: {
     }
     if (!growing && !handing) {
       shownRef.current = element.getBoundingClientRect().height;
+      floorOf();
       return;
     }
     const header = element.querySelector<HTMLElement>("[data-alpha-chat-header]");

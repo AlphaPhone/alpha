@@ -1,4 +1,4 @@
-// spec/app/voice/index.md, "Story: Hold a spoken conversation"; spec/app/assistant/dock.md, "While voice owns Ask Alpha its open sheet is not dragged, a drag under way is let go, and the sheet is dragged again once voice ends"
+// spec/app/voice/index.md, "Story: Hold a spoken conversation"; spec/app/assistant/dock.md, "While voice owns Ask Alpha nothing drags it, a drag under way is let go, and it is dragged again once voice ends"
 import type { Layer } from "effect";
 import { useMemo } from "react";
 import { Machine as Dock } from "../../gen/app__assistant__dock.effect.vibe";
