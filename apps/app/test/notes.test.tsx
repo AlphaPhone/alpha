@@ -647,6 +647,12 @@ describe("Notes", () => {
     await ask("open the note titled shopping list", true);
     await drawn(() => vi.waitFor(() => expect(results()).toHaveLength(1)));
     expect(world.ask.metadata[0]).toMatchObject({ viewDelivery: "completed-action", voiceUi: { viewDelivery: "completed-action", uiNotesEditor: "saved-note-v1" } });
+    // spec/app/assistant/index.md, "A turn tells the agent the views this screen can show, so a reply never promises one it cannot open": a browser preview names Home and its apps, never Phone, Messages or Contacts.
+    const shownViews = (world.ask.metadata[0] as { voiceUi: { uiViews: string[] } }).voiceUi.uiViews;
+    expect(shownViews).toEqual(expect.arrayContaining(["home", "notes", "calendar", "clock", "browser", "settings"]));
+    expect(shownViews).not.toContain("messages");
+    expect(shownViews).not.toContain("phone");
+    expect(shownViews).not.toContain("contacts");
     expect(world.notes.views[0]).toMatchObject({ path: "claim", body: { viewId: "notes", targetProtocol: "saved-note-v1" } });
     expect(results()).toEqual([{ switched: true, shown: { kind: "saved-note", noteId: "shopping" } }]);
     await rendered(async () => {
