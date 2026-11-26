@@ -728,7 +728,7 @@ effect function commitDeleteWrite(attemptId: number, itemSpecId: number): Event!
   }
   try Deferred.await(hydration)
   const found = remindersStore.findItemBySpecId(itemSpecId)
-  if (found === undefined) return { type: "writeAnswered", attemptId, confirmed: true, known: true }
+  if (found === undefined) return { type: "writeAnswered", attemptId, confirmed: false, known: true }
   const outcome = try attempted(Agent, HttpClientRequest.delete(`/api/alpha/reminders/items/${encodeURIComponent(found.id)}`), attemptId)
   return { type: "writeAnswered", attemptId, confirmed: outcome.confirmed, known: outcome.known }
 }
@@ -765,9 +765,8 @@ effect function writeAnswered(): void!!Reminders.Machine {
 effect function settlePendingUndoBeforeWrite(): void!!(Reminders.Machine | Toasts.Machine | Said | KeyValueStore.KeyValueStore | Alerts.Machine | Time | PhoneReminders) {
   const machine = try Reminders.Machine
   try writeAnswered()
-  const { undo } = try machine.get()
-  if (undo.holding === "Held") {
-    try Stream.runHead(Stream.filter(machine.changes, (state) => !(state.undo.holding === "Held" && state.undo.until === undo.until)))
+  if (Reminders.canSettleUndo(try machine.get())) {
+    try contained(machine.send({ type: "settleUndo" }), "ending the held Undo for the next change")
     try writeAnswered()
   }
 }
