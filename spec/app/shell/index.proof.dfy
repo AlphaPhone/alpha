@@ -188,3 +188,22 @@ lemma agentOpenFilesFrom_ensures(s: Shell, source: seq<View>, panel: Detent, rou
     agentOpenView_ensures(s, View.Files);
   }
 }
+
+lemma agentShowInside_ensures(s: Shell, view: View)
+  ensures true
+{
+  if inv(s) && canAgentShowInside(s, view) {
+    var after := agentShowInside(s, view);
+    forall v | v in after.trail ensures available(after, v) {
+      assert v in s.trail + [view];
+      assert v in s.trail || v == view;
+      assert available(after, v) == available(s, v);
+    }
+  }
+}
+
+lemma agentShowInsideSpoken_ensures(s: Shell, view: View, route: int)
+  ensures true
+{
+  agentShowInside_ensures(s, view);
+}
