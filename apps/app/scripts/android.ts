@@ -276,7 +276,7 @@ const DEVELOPMENT_TEXT = [
   "10.0.2.2", "127.0.0.1:", "http://localhost:", "ALPHA_FAKES", "/test/fakes/", "/__control/",
   "api-staging.eliza.app", "cloud-staging.eliza.app", "staging.eliza.app", "staging.alphacompute.cc",
   "api-staging.alphaphone.dev", "cloud-staging.alphaphone.dev",
-  "xoxp-alpha-team-owner-initial", "xoxp-design-guild-owner-initial", "tg-sess-initial-owner", "xoxb-",
+  "xoxp-alpha-team-owner-initial", "xoxp-design-guild-owner-initial", "tg-sess-initial-owner",
   "Maya Chen", "Ben Ortiz", "Harbour Cafe", "Harbour Gallery",
 ];
 const TEST_ONLY_PATH = /(?:^|\/)(?:fixtures?(?:[.-][^/]*)?\.(?:js|mjs|css|json)|[^/]+\.meta(?:[.-][^/]*)?\.js|[^/]+\.stories(?:[.-][^/]*)?\.js|storybook-static\/|mockServiceWorker\.js$)/i;
@@ -350,6 +350,7 @@ export function auditBundle(directory: string): string[] {
     if (!TEXT_FILE.test(file)) continue;
     const text = readFileSync(join(directory, file), "utf8");
     for (const marker of DEVELOPMENT_TEXT) if (text.includes(marker)) findings.push(`${file}: ${marker}`);
+    if (/xoxb-[A-Za-z0-9]/.test(text)) findings.push(`${file}: Slack bot token literal`);
   }
   return findings;
 }
