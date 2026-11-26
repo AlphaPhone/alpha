@@ -88,8 +88,10 @@ function Tab({ runtime, alpha, tabs, page }: BrowserProps & { tabs: State; page:
     findWasShown.current = findShown;
     void runtime.runPromise(placed);
   }, [findShown, runtime]);
-  if (!state) return null;
+  const pages = runtime.runSync(Pages);
   const tab = tabs.selected;
+  useSyncExternalStore(pages.find.subscribe, () => pages.find.snapshot(tab), () => pages.find.snapshot(tab));
+  if (!state) return null;
   const tabHost = runtime.runSync(TabHost);
   const shown = tabHost.web === undefined ? tabHost.session.info(idOf(tab)) : tabHost.web.info(idOf(tab));
   const shownAddress = shown?.url;

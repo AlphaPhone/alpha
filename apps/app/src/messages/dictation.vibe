@@ -89,7 +89,12 @@ export effect function dictateMessage(thread: number): void!!(Composer.Machine |
       && place.thread === thread && place.page.ticket === ticket && Messages.readable(place) && draft.thread === thread
       && Composer.canTypeText(draft, false) && (try phone.get()).telecom === "NoCall" && (try device.showing())
   }
-  try dictateInto(editableHere, drafts.text(thread), (body) => writeMessageDraft(thread, body), "starting message dictation")
+  try dictateInto(
+    editableHere,
+    effect { return (try composer.get()).slot.author === "Nobody" ? "" : try drafts.text(thread) },
+    (body) => writeMessageDraft(thread, body),
+    "starting message dictation",
+  )
 }
 
 /** Start dictating to the New draft even before choosing To. A late transcript cannot move to another visit or draft revision. */

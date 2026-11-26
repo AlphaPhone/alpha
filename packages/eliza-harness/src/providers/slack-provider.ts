@@ -685,7 +685,7 @@ function handleOAuthAccess(req: ParsedRequest, res: ServerResponse, ctx: Provide
     return;
   }
   const redirectUri = asString(req.params.redirect_uri);
-  if (record.redirect_uri && redirectUri && redirectUri !== record.redirect_uri) {
+  if (record.redirect_uri && redirectUri !== record.redirect_uri) {
     sendJson(res, 200, { ok: false, error: "bad_redirect_uri" });
     return;
   }

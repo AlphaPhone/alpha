@@ -273,10 +273,30 @@ export function expandListHelpers(text: string): string {
       const arg = expand(call.lastIndex, end - 1);
       const n = count++;
       const acc = `std_${m[1]}_${n}`;
-      const lambda = arg.match(/^(\s*\(?\s*(\w+)\s*\)?\s*=>)([\s\S]*)$/);
-      const item = m[1] === "includes" || !lambda ? `std_x_${n}` : lambda[2];
+      // Strip matching outer parens around a whole lambda expression (e.g. `(x => x > 0)`) while keeping line breaks.
+      const unwrapped = (() => {
+        let cur = arg;
+        for (;;) {
+          const open = cur.search(/\S/);
+          let close = cur.length - 1;
+          while (close >= 0 && /\s/.test(cur[close])) close--;
+          if (open < 0 || cur[open] !== "(" || cur[close] !== ")") return cur;
+          const innerCode = scan(cur).code;
+          let depth = 0;
+          let wraps = true;
+          for (let i = open; i <= close; i++) {
+            if (!innerCode[i]) continue;
+            if (cur[i] === "(") depth++;
+            else if (cur[i] === ")" && --depth === 0 && i < close) { wraps = false; break; }
+          }
+          if (!wraps || depth !== 0) return cur;
+          cur = breaks(cur.slice(0, open + 1)) + cur.slice(open + 1, close) + breaks(cur.slice(close));
+        }
+      })();
+      const lambda = unwrapped.match(/^(\s*(?:\(\s*(\w+)\s*\)|(\w+))\s*=>)([\s\S]*)$/);
+      const item = m[1] === "includes" || !lambda ? `std_x_${n}` : (lambda[2] ?? lambda[3]);
       const body = m[1] === "includes" ? `${item} == (${arg})`
-        : lambda ? breaks(lambda[1]) + lambda[3]
+        : lambda ? breaks(lambda[1]) + lambda[4]
         : `${breaks(arg.match(/^\s*/)![0])}${arg.trim()}(${item})${breaks(arg.match(/\s*$/)![0])}`;
       out += `${text.slice(at, m.index)}.foldl(${LIST_HELPERS[m[1]].init}, (${acc}, ${item}) => ${LIST_HELPERS[m[1]].step(acc, body)})`;
       at = call.lastIndex = end;
