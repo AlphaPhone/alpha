@@ -1,5 +1,5 @@
 // @vitest-environment happy-dom
-import { Effect } from "effect";
+import { Effect, Option } from "effect";
 import { readTurnContext, type DeviceOperation } from "@elizaos/agent";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { Machine as Tabs } from "../gen/app__browser.effect.vibe";
@@ -22,7 +22,7 @@ import { agentFilter, agentOpen, agentRead, approved, fileAction, offer, reviewF
 import type { Place } from "../src/areas.ts";
 import browser from "../src/browser/index.tsx";
 import files from "../src/files/index.tsx";
-import { called } from "../src/platform/files.vibe";
+import { called, Files } from "../src/platform/files.vibe";
 import { button, closeAll, drawn, fill, hardware, later, only, open, press, pressOnTop, seen, underAct, until } from "./alpha.tsx";
 import { scene } from "./fakes/scene.ts";
 import { textReview, type TextReviewScene } from "./fakes/text-review.ts";
@@ -1187,6 +1187,45 @@ describe("Files on a phone", () => {
     // spec/app/files/trash.md, "The Trash is closed, without access, reading, unreadable, empty or listing"
     expect(document.body.textContent?.includes("Trash is empty. Items in Trash are deleted after 30 days.")).toBe(true);
     await hardware("home");
+  });
+
+  it("Deletes selected files across different folders in a category (spec/app/files/trash.md, \"Story: Delete into the Trash\")", async () => {
+    const { alpha, runtime, world } = await onFiles();
+    await until(alpha, runtime, Browser, (s) => s.storage.status === "Loaded");
+    await press("Documents");
+    await until(alpha, runtime, Browser, (s) => s.inCategory && s.listing.status === "Loaded" && s.items.length === 2);
+
+    await select("notes.txt");
+    await select("lease.pdf");
+    await press("Delete");
+    await pressOnTop("Delete");
+    await until(alpha, runtime, Bin, (s) => s.attempt.outcome !== "Sent" && s.binned.length > 0);
+    expect(world.files.trash.map((one) => one.was.path).sort()).toEqual(["Documents/notes.txt", "Download/lease.pdf"]);
+  });
+
+  it("Preserves confirmed volume erasures when a later volume throws during Empty Trash (spec/app/files/trash.md, \"A job ends as its answer says for each item: only what the phone confirmed is done, and the rest was refused or is unknown\")", async () => {
+    const { alpha, runtime, world } = await onFiles();
+    await until(alpha, runtime, Browser, (s) => s.storage.status === "Loaded");
+    world.files.trash.push(
+      { id: "30", was: { volume: "primary", path: "Download/gone.txt", directory: false, mimeType: "text/plain", size: 1, modified: 1 }, deletedAt: world.files.now },
+      { id: "31", was: { volume: "card", path: "stuck.txt", directory: false, mimeType: "text/plain", size: 1, modified: 1 }, deletedAt: world.files.now },
+    );
+    const plugin = Option.getOrThrow(runtime.runSync(Effect.map(Files, (service) => service.plugin)));
+    const original = plugin.storageEmptyTrash.bind(plugin);
+    vi.spyOn(plugin, "storageEmptyTrash").mockImplementation((input) => {
+      if (input.volume === "card") return Promise.reject(new Error("card unavailable"));
+      return original(input);
+    });
+
+    await press("Trash");
+    await until(alpha, runtime, Bin, (s) => s.open && s.listing.status === "Loaded" && s.entries.length === 2);
+    await press("Empty");
+    await until(alpha, runtime, Bin, (s) => s.erasing.showing && s.doomed.length === 2);
+    await pressOnTop("Empty");
+    await until(alpha, runtime, Bin, (s) => s.attempt.outcome === "Unknown" && s.listing.status === "Loaded");
+    const state = runtime.runSync(Bin.use((machine) => machine.get()));
+    expect(state.done.map((entry) => entry.name)).toEqual(["gone.txt"]);
+    expect(state.entries.map((entry) => entry.name)).toEqual(["stuck.txt"]);
   });
 });
 

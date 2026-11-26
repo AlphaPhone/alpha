@@ -57,6 +57,7 @@ export interface SettingsScene {
   reset: { status: string; message: string };
   readonly reviews: number[];
   networks: WiFiNetwork[];
+  wifiScanGate?: Promise<unknown>;
   joinAnswer: ApprovedJoinResult["status"];
   readonly joins: ConnectOptions[];
   connectivity: ConnectivityResult;
@@ -185,7 +186,10 @@ export function elizaWiFi(scene: SettingsScene): Faked {
     openInternetPanel: () => page(scene, "internet"),
     getWifiState: () => Promise.resolve({ enabled: true, connected: true, rssi: -50 }),
     getConnectedNetwork: () => Promise.resolve({ network: null }),
-    listAvailableNetworks: () => Promise.resolve({ networks: scene.networks.map((network) => ({ ...network })) }),
+    listAvailableNetworks: async () => {
+      await scene.wifiScanGate;
+      return { networks: scene.networks.map((network) => ({ ...network })) };
+    },
     connectToNetwork: () => Promise.resolve({ success: false }),
     disconnectFromNetwork: () => Promise.resolve({ success: true }),
     getConnectivity: () => Promise.resolve({ ...scene.connectivity }),

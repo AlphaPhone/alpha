@@ -2,7 +2,7 @@
 import { CloudError } from "@elizaos/cloud"
 import * as KeyValueStore from "effect/persistence/KeyValueStore"
 import * as Screen from "../../gen/app__maps.effect.vibe"
-import { mode, pressMs, readable, shown, typingMs } from "../../gen/app__maps.effect.vibe"
+import { pressMs, readable, shown, typingMs } from "../../gen/app__maps.effect.vibe"
 import type { Change, Effect as Out, Event as Ev, HandOff, Maps as State } from "../../gen/app__maps.effect.vibe"
 import * as Credits from "../../gen/app__maps__credits.effect.vibe"
 import type { Effect as CreditsOut, Event as CreditsEv } from "../../gen/app__maps__credits.effect.vibe"
@@ -228,16 +228,26 @@ function located(session: number, once: boolean): Stream.Stream<Ev, never, Locat
       |> Stream.mapEffect(%, ({ fix, ageMs }) => effect {
         const at: Point = { lat: fix.lat, lng: fix.lng }
         atlas.located({ at, accuracy: fix.accuracy, approximate: !fix.precise })
-        if (once) return { type: "locationFix", session, fix: "Along" } satisfies Ev
+        if (once) {
+          try stopped()
+          return { type: "locationFix", session, fix: "Along" } satisfies Ev
+        }
         const { trip, chosen } = try screen.get()
         const way = atlas.way(trip.route, chosen)
         if (way === undefined) return { type: "locationFix", session, fix: "Along" } satisfies Ev
         const along = measured(at, { line: way.line, turns: way.turns.map((turn) => turn.at) }, trip.turn)
         return { type: "locationFix", session, fix: judged(fix.precise, ageMs, fix.accuracy, along.toEnd, along.toRoute, along.toStep, along.beyond) } satisfies Ev
       })
-      |> Stream.catch(%, () => Stream.succeed<Ev>({ type: "locationLost", session }))
+      |> Stream.catch(%, () => Stream.fromEffect(effect {
+        if (once) try stopped()
+        return { type: "locationLost", session } satisfies Ev
+      }))
     if (!once) return heard
-    const givenUp = Stream.fromEffect(time.until(began + findTimeoutMs) |> Effect.as(%, { type: "findTimedOut", session } satisfies Ev))
+    const givenUp = Stream.fromEffect(effect {
+      try time.until(began + findTimeoutMs)
+      try stopped()
+      return { type: "findTimedOut", session } satisfies Ev
+    })
     return Stream.merge(Stream.take(heard, 1), givenUp) |> Stream.take(%, 1)
   })
 }
@@ -325,7 +335,8 @@ function previouslyKeptIn(text: string): ReadonlyArray<KeptPlace> | undefined {
   if (typeof data !== "object" || data === null || !("version" in data) || data.version !== 1 || !("items" in data) || !Array.isArray(data.items)) return undefined
   const read: ReadonlyArray<KeptPlace | "google" | undefined> = data.items.map(previouslyKept)
   if (read.includes(undefined)) return undefined
-  return read.filter((entry): entry is KeptPlace => entry !== undefined && entry !== "google")
+  const kept = read.filter((entry): entry is KeptPlace => entry !== undefined && entry !== "google")
+  return kept.length <= 200 ? kept : undefined
 }
 
 /** The machine's saved list of `kept`, numbered in the atlas, once per place. */
@@ -343,7 +354,9 @@ effect function keep(saved: ReadonlyArray<Saved>, change: Change): Ev!!KeyValueS
   const store = try KeyValueStore.KeyValueStore
   const kept: KeptPlace[] = saved.flatMap((entry) => {
     const spot = atlas.spot(entry.place)
-    return spot === undefined || spot.google ? [] : [{ name: entry.name, spot }]
+    return spot === undefined || spot.google
+      ? []
+      : [{ name: entry.name, spot: { name: spot.name, category: spot.category, at: spot.at, providerId: spot.providerId, id: spot.id, google: false } }]
   })
   const text = JSON.stringify(kept)
   const ok = try (store.set(savedKey, text) |> Effect.andThen(%, store.get(savedKey)) |> Effect.map(%, (back) => back === text) |> Effect.orElseSucceed(%, () => false))
@@ -352,12 +365,14 @@ effect function keep(saved: ReadonlyArray<Saved>, change: Change): Ev!!KeyValueS
 
 effect function restored(): readonly [Ev]!!KeyValueStore.KeyValueStore {
   const store = try KeyValueStore.KeyValueStore
-  const read = (key: string) => store.get(key) |> Effect.orElseSucceed(%, () => undefined)
-  const text = try read(savedKey)
-  let kept = text === undefined ? [] : keptIn(text)
-  if (text === undefined) {
+  const read = (key: string) => store.get(key) |> Effect.map(%, (value) => ({ ok: true as const, value })) |> Effect.orElseSucceed(%, () => ({ ok: false as const, value: undefined }))
+  const saved = try read(savedKey)
+  if (!saved.ok) return [{ type: "savedUnreadable" }]
+  let kept = saved.value === undefined ? [] : keptIn(saved.value)
+  if (saved.value === undefined) {
     const previous = try read(previousKey)
-    if (previous !== undefined) kept = previouslyKeptIn(previous)
+    if (!previous.ok) return [{ type: "savedUnreadable" }]
+    if (previous.value !== undefined) kept = previouslyKeptIn(previous.value)
   }
   if (kept === undefined) return [{ type: "savedUnreadable" }]
   return [{ type: "restoreSaved", saved: savedOf(kept) }]
@@ -509,12 +524,11 @@ const opening = started(effect {
   const location = try Location
   try Stream.runForEach(shell.changes |> Stream.map(%, (s) => showing(s, "Maps")) |> Stream.changes(%), effect (shown) => {
     if (!shown) return
-    const grant = allowedOf(try location.permission())
-    try ignore(screen.send({ type: "observeLocation", grant }))
-    const now = try screen.get()
-    if (grant !== "Denied" && grant !== "Unasked" && mode(now) === "Browse") try ignore(screen.send({ type: "useMyLocation" }))
     try accountRead()
     try ignore(screen.send({ type: "connect" }))
+    const grant = allowedOf(try location.permission())
+    try ignore(screen.send({ type: "observeLocation", grant }))
+    try ignore(screen.send({ type: "quietFix" }))
   })
 }, "opening Maps")
 
@@ -528,8 +542,10 @@ const presence = started(effect {
   try Stream.runForEach(Stream.changes(inFront), effect (shown) => {
     if (shown) {
       try ignore(screen.send({ type: "comeBack" }))
+      if ((try screen.get()).link.known) try ignore(screen.send({ type: "quietFix" }))
       return
     }
+    atlas.forgetDetails()
     try ignore(screen.send({ type: "leaveMaps" }))
   })
 }, "following whether Maps shows")

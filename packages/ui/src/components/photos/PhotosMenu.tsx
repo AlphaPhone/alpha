@@ -27,7 +27,16 @@ export function PhotosMenu({ label, actions }: PhotosMenuProps) {
   const [open, setOpen] = useState(false);
   if (actions.length === 0) return null;
   return (
-    <div className="relative z-50 shrink-0">
+    <div
+      className="relative z-50 shrink-0"
+      onKeyDown={(event) => {
+        if (open && event.key === "Escape" && !event.defaultPrevented) {
+          event.preventDefault();
+          event.stopPropagation();
+          setOpen(false);
+        }
+      }}
+    >
       <button type="button" aria-label={label} aria-haspopup="menu" aria-expanded={open} onClick={() => setOpen(!open)} className="grid size-11 place-items-center">
         <Ellipsis aria-hidden className="size-5" />
       </button>

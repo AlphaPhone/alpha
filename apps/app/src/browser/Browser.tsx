@@ -2,7 +2,7 @@
 import { Button, BrowserAddressBar, type BrowserAddressChoice, BrowserAddressChoices, BrowserFindBar, BrowserBar, BrowserLibrary, type BrowserMenuItem, BrowserMenu, BrowserNewTab, BrowserQuestion, BrowserReadAloud, BrowserReview, BrowserTabs, ConfirmDialog, Mark, PrivateMark } from "@repo/ui";
 import { ArrowUpRight, AudioLines, ChevronLeft, Clock, Download, ExternalLink, Link, ListFilter, Lock, Mail, Monitor, Plus, RotateCw, Search, Share2, Smartphone, Square, Star } from "lucide-react";
 import { Effect, Option } from "effect";
-import { useState, useSyncExternalStore } from "react";
+import { useLayoutEffect, useRef, useState, useSyncExternalStore } from "react";
 import { canCancelErase, canConfirmErase, canOpenTab } from "../../gen/app__browser.ts";
 import type { Browser as State } from "../../gen/app__browser.ts";
 import { useMachine } from "../../gen/app__browser.react.ts";
@@ -61,12 +61,10 @@ export function Browser({ runtime, alpha }: BrowserProps) {
   return <Tab key={state.selected} runtime={runtime} alpha={alpha} tabs={state} page={page} />;
 }
 
-function BrowserPagePlace({ runtime, finding }: Pick<BrowserProps, "runtime"> & { finding: boolean }) {
+function BrowserPagePlace({ runtime }: Pick<BrowserProps, "runtime">) {
   // The desktop canvas can move while this element's logical size stays the same.
   useSyncExternalStore(desktopPreview.subscribe, desktopPreview.snapshot, () => undefined);
-  // spec/app/browser/address.md, "The find bar opens over a shown page": the phone draws the page above Alpha, so while
-  // finding the page starts at the find bar's foot (BrowserFindBar: 2px into the bar, 52px tall), not over the bar.
-  return <div data-alpha-browser-page="" aria-hidden ref={(place) => { if (place) void runtime.runPromise(placed); }} className={`absolute inset-x-0 bottom-0 ${finding ? "top-12.5" : "top-0"}`} />;
+  return <div data-alpha-browser-page="" aria-hidden ref={(place) => { if (place) void runtime.runPromise(placed); }} className="absolute inset-x-0 top-0 bottom-0" />;
 }
 
 function Tab({ runtime, alpha, tabs, page }: BrowserProps & { tabs: State; page: PageRuntime }) {
@@ -81,8 +79,19 @@ function Tab({ runtime, alpha, tabs, page }: BrowserProps & { tabs: State; page:
   const [clearingSite, setClearingSite] = useState<SitePage>();
   const { review, support } = runtime.runSync(PageReading);
   const cannotRead = useSyncExternalStore(support.subscribe, support.snapshot, support.snapshot) === "unavailable";
-  if (!state) return null;
+  // spec/app/browser/address.md, "The find bar opens over a shown page": the page keeps its full place and the find bar
+  // is drawn over it, so the page is placed again, leaving the bar's place to Alpha, each time the bar opens or closes.
+  const findShown = state?.finding === true && tabs.layer === "Uncovered";
+  const findWasShown = useRef(findShown);
+  useLayoutEffect(() => {
+    if (findWasShown.current === findShown) return;
+    findWasShown.current = findShown;
+    void runtime.runPromise(placed);
+  }, [findShown, runtime]);
+  const pages = runtime.runSync(Pages);
   const tab = tabs.selected;
+  useSyncExternalStore(pages.find.subscribe, () => pages.find.snapshot(tab), () => pages.find.snapshot(tab));
+  if (!state) return null;
   const tabHost = runtime.runSync(TabHost);
   const shown = tabHost.web === undefined ? tabHost.session.info(idOf(tab)) : tabHost.web.info(idOf(tab));
   const shownAddress = shown?.url;
@@ -220,11 +229,11 @@ function Tab({ runtime, alpha, tabs, page }: BrowserProps & { tabs: State; page:
       <div inert={tabs.layer !== "Uncovered"} className="relative flex min-h-0 flex-1 flex-col overflow-y-auto">
         {state.phase === "Blank"
           ? <BrowserNewTab private={privateTab} privateNotice={privateNotice} onSearch={cover("Address") && edit} />
-          : <BrowserPagePlace runtime={runtime} finding={state.finding && tabs.layer === "Uncovered"} />}
+          : <BrowserPagePlace runtime={runtime} />}
       </div>
       <div aria-hidden className="pointer-events-none absolute inset-x-0 bottom-0 z-10 h-32.5 bg-linear-to-b from-transparent to-background to-70%" />
       {editing && <AddressChoices runtime={runtime} query={typed} privateTab={privateTab} privateNotice={privateNotice} refusal={state.refused ? refusal : undefined} onOpen={submit} />}
-      {state.finding && tabs.layer === "Uncovered" && (
+      {findShown && (
         <BrowserFindBar value={finding} onValueChange={seek} status={findStatus}
           onPrevious={can({ type: "findNext", forward: false }) ? () => void send({ type: "findNext", forward: false }) : undefined}
           onNext={can({ type: "findNext", forward: true }) ? () => void send({ type: "findNext", forward: true }) : undefined}

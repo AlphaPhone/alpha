@@ -211,7 +211,7 @@ export effect function answerReading(operation: Reading): unknown!!(Telephony | 
     case "messages_read_selected": return checked(operation, try thread(), { kind: "messages-read", status: "unavailable" })
     case "voicemail_read_selected": return (try selectedVoicemail())?.result ?? { kind: "voicemail-read", status: "none-selected" }
     case "contact_read_selected": return checked(operation, try contact(), { kind: "contact-read", status: "unavailable" })
-    case "sms_latest_sender": return checked(operation, try sender("includeAddress" in operation), { kind: "sms-latest-sender", status: "unavailable" })
+    case "sms_latest_sender": return checked(operation, try sender("includeAddress" in operation && operation.includeAddress === true), { kind: "sms-latest-sender", status: "unavailable" })
     case "phone_keypad": return checked(operation, try keypad(operation.number), { kind: "phone-keypad", status: "unavailable" })
     case "contact_show": return checked(operation, try shown(operation.query), { kind: "contact-show", status: "unavailable" })
     case "sms_reply_selected": return checked(operation, { kind: "sms-reply", status: try drafted(operation.body, undefined) }, { kind: "sms-reply", status: "unavailable" })

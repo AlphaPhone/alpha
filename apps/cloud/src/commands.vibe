@@ -2,13 +2,13 @@
 import type { CloudEnvironment } from "@elizaos/cloud"
 import type { PlatformError } from "effect/PlatformError"
 import type { ChildProcessSpawner } from "effect/process/ChildProcessSpawner"
-import { Machine, machine, type Rejected } from "../gen/cloud__rollout.effect.vibe"
+import { Machine, machine, paymentKeyFits, type Rejected } from "../gen/cloud__rollout.effect.vibe"
 import { ownCloudName } from "../gen/cloud.effect.vibe"
 import type { ResourcesRefused } from "./cloudflare.vibe"
-import { deploy, elizaosCloud, packageDirectory, privateDirectory, profiled, readSecrets, reconciled, recordResources, registrationInto, renderInto, resourcesOf, settledSecrets, workerSecrets, wrangler, type CandidateRefused, type Component, type OperatorFailed } from "./operator.vibe"
+import { OperatorFailed, deploy, elizaosCloud, packageDirectory, privateDirectory, profiled, readSecrets, reconciled, recordResources, registrationInto, renderInto, resourcesOf, settledSecrets, workerSecrets, wrangler, type CandidateRefused, type Component } from "./operator.vibe"
 import { hostedClouds, type HostedCloudUnknown } from "./hosted.vibe"
 import { smoke } from "./smoke.vibe"
-import type { RenderRefused } from "./wrangler.vibe"
+import { resourceId, type RenderRefused } from "./wrangler.vibe"
 
 /** The command line names an unknown command or misses a flag. */
 export error UsageInvalid { message: string }
@@ -83,6 +83,9 @@ effect function secrets(found: Flags) {
       const settled = try settledSecrets(file, environment)
       if (found.on.has("apply")) {
         const resources = try resourcesOf(found.values.get("resources"))
+        if (resourceId(resources[environment].accountId) !== "Provisioned") {
+          throw new OperatorFailed({ problem: "record a provisioned Cloudflare account ID (provision --write) before applying secrets" })
+        }
         const path = try Path.Path
         const bulk = path.join(try privateDirectory(), "secrets.json")
         try (try FileSystem.FileSystem).writeFileString(bulk, JSON.stringify(workerSecrets(settled.values)), { mode: 0o600 })
@@ -113,6 +116,12 @@ effect function database(found: Flags, command: "migrate" | "register" | "prices
   const { profile } = try profiled(try required(found, "profile"))
   const store = values.DATABASE_URL
   if (!store) throw new UsageInvalid({ message: "the secrets file has no DATABASE_URL" })
+  if (command === "prices") {
+    const stripe = values.STRIPE_SECRET_KEY
+    if (!stripe || !/^(sk|rk)_(live|test)_/.test(stripe) || !paymentKeyFits(environment === "production", /^(sk|rk)_live_/.test(stripe))) {
+      throw new OperatorFailed({ problem: environment === "production" ? "STRIPE_SECRET_KEY must be a live key in production" : "STRIPE_SECRET_KEY must be a test key in staging" })
+    }
+  }
   return try scoped(effect {
     const written = try registrationInto(try privateDirectory(), profile, environment)
     const at = ["--profile", written.profileFile, "--environment", environment, "--store", store]

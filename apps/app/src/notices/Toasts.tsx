@@ -24,9 +24,13 @@ function Toasts({ runtime }: Shown<Resident>) {
         <Toast
           key={state.current.number}
           onFocus={() => can({ type: "hold" }) && void send({ type: "hold" })}
-          onBlur={() => can({ type: "letGo" }) && void send({ type: "letGo" })}
+          onBlur={(event) => {
+            if (!event.currentTarget.matches(":hover") && can({ type: "letGo" })) void send({ type: "letGo" });
+          }}
           onPointerEnter={() => can({ type: "hold" }) && void send({ type: "hold" })}
-          onPointerLeave={() => can({ type: "letGo" }) && void send({ type: "letGo" })}
+          onPointerLeave={(event) => {
+            if (!event.currentTarget.contains(document.activeElement) && can({ type: "letGo" })) void send({ type: "letGo" });
+          }}
           {...(can({ type: "tapUndo" }) ? { onUndo: () => void send({ type: "tapUndo" }) } : {})}
         >
           {words.message}

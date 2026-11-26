@@ -53,13 +53,14 @@ export function LifecyclePower({ runtime, row, owner, title, unfinished, interru
 export function LifecycleReview({ runtime, row, owner, unfinished }: Pick<LifecycleProps, "runtime" | "row" | "owner" | "unfinished">) {
   const { state, send } = useLifecycle({ runtime, row, owner });
   if (state === undefined || !state.review.showing) return null;
+  const confirmation: Event = state.change.offered ? { type: "confirmResend" } : { type: "confirmChange", unfinished };
   const name = state.proposed === "Rename" ? runtime.runSync(Effect.flatMap(DefinitionWords, (definition) => definition.name(row))) : "";
   return (
     <div role="group" aria-label="Review workflow change" className="mt-4.5 rounded-action bg-secondary p-4">
       <p className="text-base leading-chat">{reviewCopy(state.proposed, state.unknownShown, name)}</p>
       <div className="mt-3.5 flex flex-wrap gap-2">
-        <button type="button" onClick={() => send({ type: "confirmChange", unfinished })}
-          className={cn(focusRing, "min-h-11 rounded-full bg-primary px-4 py-2.5 font-semibold text-primary-foreground")}>{labels[state.proposed]}</button>
+        <button type="button" onClick={() => send(confirmation)}
+          className={cn(focusRing, "min-h-11 rounded-full bg-primary px-4 py-2.5 font-semibold text-primary-foreground")}>{state.change.offered ? "Send again" : labels[state.proposed]}</button>
         <button type="button" onClick={() => send({ type: "cancelReview" })}
           className={cn(focusRing, "min-h-11 rounded-full bg-background px-4 py-2.5 font-semibold")}>Cancel</button>
       </div>
@@ -120,6 +121,9 @@ export function Lifecycle({ runtime, row, owner, title, unfinished, interrupted,
         <Alert role="status" variant="warn" className="mt-3">Your agent didn’t confirm the change.
           <Button variant="secondary" size="sm" onClick={() => send({ type: "checkChange" })}>Check change</Button>
         </Alert>
+      )}
+      {model.can({ type: "reviewResend" }) && (
+        <Button variant="secondary" onClick={() => send({ type: "reviewResend" })}>Review the same change</Button>
       )}
       {model.can({ type: "letGo" }) && (
         <Button variant="secondary" className="mt-3" onClick={() => send({ type: "letGo" })}>Allow a different change</Button>
