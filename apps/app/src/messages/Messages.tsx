@@ -14,7 +14,7 @@ import { delivered, sentAll, uncertain } from "../../gen/app__messages__sending.
 import { useMachine as useComposer } from "../../gen/app__messages__composer.react.ts";
 import { Time } from "../runtime/time.vibe";
 import { callerInitials, displayNumber, shortWhen } from "../phone/words.ts";
-import { Drafts, type NewMessageHandoff, attachAll, discardMessageDraft, editNewMessage, messageRecipients, newDraftHeld, openMessageDraft, prepare, removeMessagePicture, retryMessageHandoff, sameSubscription, startNewMessage, supported, useSavedMessageDraft, writeMessageDraft } from "./composer.vibe";
+import { Drafts, type NewMessageHandoff, attachAll, discardMessageDraft, editNewMessage, messageRecipients, newDraftHeld, openMessageDraft, prepare, removeMessagePicture, retryMessageHandoff, sameSubscription, startNewMessage, supported, takeSavedMessageDraft, writeMessageDraft } from "./composer.vibe";
 import { Conversations, type CopyReport, Inbox, titleOf } from "./messages.vibe";
 import { CommsBar, useCommsDock } from "../phone/CommsBar.tsx";
 import { commsHeld } from "../phone/comms.vibe";
@@ -477,7 +477,7 @@ function Compose({ runtime, title, addresses, thread }: MessagesProps & { title:
     {state.saveFailed && can({ type: "retrySave" }) && <Banner variant="warn" action={<Button size="sm" onClick={() => void send({ type: "retrySave" })}>Retry save</Button>}>Your previous message draft couldn’t be saved</Banner>}
     {state.slot.draft.sync === "Conflicted" && <Banner variant="warn" action={<>
       {can({ type: "keepMine" }) && <Button size="sm" onClick={() => void send({ type: "keepMine" })}>Keep mine</Button>}
-      {can({ type: "takeSaved" }) && <Button size="sm" variant="outline" onClick={() => void runtime.runPromise(useSavedMessageDraft(state.thread))}>Use the saved draft</Button>}
+      {can({ type: "takeSaved" }) && <Button size="sm" variant="outline" onClick={() => void runtime.runPromise(takeSavedMessageDraft(state.thread))}>Use the saved draft</Button>}
     </>}>Your previous message draft has a conflict</Banner>}
     <CommsBar runtime={runtime} />
   </>;
@@ -581,7 +581,7 @@ function Compose({ runtime, title, addresses, thread }: MessagesProps & { title:
         {state.slot.draft.sync === "Conflicted" && (
           <Banner variant="warn" action={<>
             {can({ type: "keepMine" }) && <Button size="sm" onClick={() => void send({ type: "keepMine" })}>Keep mine</Button>}
-            {can({ type: "takeSaved" }) && <Button size="sm" variant="outline" onClick={() => void runtime.runPromise(useSavedMessageDraft(thread))}>Use the saved draft</Button>}
+            {can({ type: "takeSaved" }) && <Button size="sm" variant="outline" onClick={() => void runtime.runPromise(takeSavedMessageDraft(thread))}>Use the saved draft</Button>}
           </>}>Another draft was saved for this conversation</Banner>
         )}
         {state.saveFailed && <Banner variant="warn" action={can({ type: "retrySave" }) && <Button size="sm" onClick={() => void send({ type: "retrySave" })}>Retry save</Button>}>Message draft couldn’t be saved</Banner>}
