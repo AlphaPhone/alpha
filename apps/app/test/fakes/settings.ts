@@ -3,7 +3,7 @@ import type { DataResetPlugin, AndroidRoleStatus, ElizaPasswordsPlugin, Listener
 import type { PasswordProvider, PasswordProviderAction } from "../../src/platform/systemSettings.vibe";
 import type { PermissionState } from "@capacitor/core";
 import type { LauncherScene } from "./launcher.ts";
-import { type Faked, plugin, rejection } from "./phone.ts";
+import { answered, type Faked, plugin, rejection } from "./phone.ts";
 
 type AppPermission = "camera" | "notifications";
 
@@ -232,9 +232,9 @@ export function elizaSense(scene: SettingsScene, listener: ListenerScene): Faked
   return () => ({
     status: () => Promise.resolve(listener.status),
     pause: () => listener.pauseReply,
-    turnOff: async () => {
+    turnOff: () => {
       listener.status = { available: true, state: "OFF", label: "Off", consented: false, listening: false, microphoneOpen: false };
-      return { ...listener.status, saved: true };
+      return Promise.resolve({ ...listener.status, saved: true });
     },
     openSettings: async () => {
       if (listener.openSettings) await page(scene, "sense-settings");
@@ -254,31 +254,31 @@ export function elizaPasswords(scene: SettingsScene): Faked {
   };
   return () => ({
     status: () => Promise.resolve<PasswordsStatus>({ available: true, locked: !scene.passwordsUnlocked, unlockRemainingMs: scene.passwordsUnlocked ? 60000 : 0, unlockSeconds: 60, biometric: false, autofill: { ...scene.autofill } }),
-    unlock: async (): ReturnType<ElizaPasswordsPlugin["unlock"]> => {
+    unlock: (): ReturnType<ElizaPasswordsPlugin["unlock"]> => {
       scene.passwordsUnlocked = true;
-      return { unlocked: true, unlockRemainingMs: 60000 };
+      return Promise.resolve({ unlocked: true, unlockRemainingMs: 60000 });
     },
-    lock: async (): ReturnType<ElizaPasswordsPlugin["lock"]> => {
+    lock: (): ReturnType<ElizaPasswordsPlugin["lock"]> => {
       scene.passwordsUnlocked = false;
-      return { locked: true };
+      return Promise.resolve({ locked: true });
     },
-    list: async (): ReturnType<ElizaPasswordsPlugin["list"]> => {
+    list: (): ReturnType<ElizaPasswordsPlugin["list"]> => answered(() => {
       if (!scene.passwordsUnlocked) throw rejection("locked");
       return { entries: structuredClone(scene.passwords) };
-    },
-    reveal: async ({ id, expectedRevision }: Parameters<ElizaPasswordsPlugin["reveal"]>[0]): ReturnType<ElizaPasswordsPlugin["reveal"]> => {
+    }),
+    reveal: ({ id, expectedRevision }: Parameters<ElizaPasswordsPlugin["reveal"]>[0]): ReturnType<ElizaPasswordsPlugin["reveal"]> => answered(() => {
       check("reveal", id, expectedRevision);
       return { shown: true, hidesAfterMs: 30_000 };
-    },
-    copy: async ({ id, expectedRevision }: Parameters<ElizaPasswordsPlugin["copy"]>[0]): ReturnType<ElizaPasswordsPlugin["copy"]> => {
+    }),
+    copy: ({ id, expectedRevision }: Parameters<ElizaPasswordsPlugin["copy"]>[0]): ReturnType<ElizaPasswordsPlugin["copy"]> => answered(() => {
       check("copy", id, expectedRevision);
       return { copied: true, clearsAfterMs: 30_000 };
-    },
-    remove: async ({ id, expectedRevision }: Parameters<ElizaPasswordsPlugin["remove"]>[0]): ReturnType<ElizaPasswordsPlugin["remove"]> => {
+    }),
+    remove: ({ id, expectedRevision }: Parameters<ElizaPasswordsPlugin["remove"]>[0]): ReturnType<ElizaPasswordsPlugin["remove"]> => answered(() => {
       scene.passwords.splice(check("remove", id, expectedRevision), 1);
       return { removed: true };
-    },
-    openEditor: async ({ entryId, expectedRevision }: Partial<PasswordEditorInput>): ReturnType<ElizaPasswordsPlugin["openEditor"]> => {
+    }),
+    openEditor: ({ entryId, expectedRevision }: Partial<PasswordEditorInput>): ReturnType<ElizaPasswordsPlugin["openEditor"]> => answered(() => {
       if (!scene.passwordsUnlocked) throw rejection("locked");
       if (entryId === undefined && expectedRevision === undefined) {
         scene.passwordEdits.push(undefined);
@@ -293,7 +293,7 @@ export function elizaPasswords(scene: SettingsScene): Faked {
       found.label = "Updated account";
       found.revision += 1;
       return { status: "saved", id: found.id, revision: found.revision };
-    },
+    }),
     openAutofillSettings: async (): ReturnType<ElizaPasswordsPlugin["openAutofillSettings"]> => {
       await page(scene, scene.autofillDestination);
       return { status: "opened", destination: scene.autofillDestination };
@@ -355,9 +355,9 @@ export function elizaNotices(scene: SettingsScene): Faked {
       await page(scene, `channel ${id}`);
       return { status: "opened" };
     },
-    crossAppStatus: async () => structuredClone(scene.mirror),
-    notificationApps: async () => ({ apps: structuredClone(scene.mirrorChoices) }),
-    setNotificationPolicy: async (requested: MirrorPolicyChange) => {
+    crossAppStatus: () => Promise.resolve(structuredClone(scene.mirror)),
+    notificationApps: () => Promise.resolve({ apps: structuredClone(scene.mirrorChoices) }),
+    setNotificationPolicy: (requested: MirrorPolicyChange) => answered(() => {
       if (requested.expectedRevision !== scene.mirror.revision) throw rejection("changed");
       const { enabled, history, apps } = requested;
       const pinned = apps?.map(({ packageName, preview }) => {
@@ -371,17 +371,17 @@ export function elizaNotices(scene: SettingsScene): Faked {
       };
       scene.mirrorHistory.splice(0);
       return structuredClone(scene.mirror);
-    },
-    resumeCrossApp: async ({ expectedRevision }: { expectedRevision: string }) => {
+    }),
+    resumeCrossApp: ({ expectedRevision }: { expectedRevision: string }) => answered(() => {
       if (expectedRevision !== scene.mirror.revision) throw rejection("changed");
       scene.mirror.paused = false;
       return structuredClone(scene.mirror);
-    },
-    notificationHistory: async () => ({ items: structuredClone(scene.mirrorHistory) }),
-    clearNotificationHistory: async ({ expectedRevision }: { expectedRevision: string }) => {
+    }),
+    notificationHistory: () => Promise.resolve({ items: structuredClone(scene.mirrorHistory) }),
+    clearNotificationHistory: ({ expectedRevision }: { expectedRevision: string }) => answered(() => {
       if (expectedRevision !== scene.mirror.revision) throw rejection("changed");
       scene.mirrorHistory.splice(0);
-    },
+    }),
     openNotificationAccess: async () => {
       await page(scene, "notification-access");
       return { status: "opened" };

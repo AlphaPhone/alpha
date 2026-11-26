@@ -82,38 +82,41 @@ export const alphaInboxNotices = (scene: InboxNoticeScene): Faked => (emit) => {
     emit("changed", {});
   };
   return {
-    configure: async (selection: MailBackgroundSelection) => { scene.selection = selection; emit("changed", {}); return status(); },
-    withdraw: async ({ grantId }: { grantId?: string }) => {
+    configure: (selection: MailBackgroundSelection) => { scene.selection = selection; emit("changed", {}); return Promise.resolve(status()); },
+    withdraw: ({ grantId }: { grantId?: string }) => {
       if (grantId === undefined || scene.selection?.grantId === grantId) {
         scene.selection = undefined;
         scene.pending = undefined;
         emit("changed", {});
       }
+      return Promise.resolve();
     },
-    status: async () => status(),
-    pending: async () => scene.pending ?? {},
-    consume: async ({ token }: { token: string }) => {
-      if (scene.pending?.token !== token) throw rejection("Gmail tap changed");
+    status: () => Promise.resolve(status()),
+    pending: () => Promise.resolve(scene.pending ?? {}),
+    consume: ({ token }: { token: string }) => {
+      if (scene.pending?.token !== token) return Promise.reject(rejection("Gmail tap changed"));
       scene.spent.push(token);
       scene.pending = undefined;
+      return Promise.resolve();
     },
-    releaseQuestion: async ({ token }: { token: string }) => {
+    releaseQuestion: ({ token }: { token: string }) => {
       if (scene.pending?.question && scene.pending.token === token) {
         scene.released.push(token);
         scene.pending = undefined;
       }
+      return Promise.resolve();
     },
-    notificationSettings: async () => undefined,
+    notificationSettings: () => Promise.resolve(undefined),
   };
 };
 
 /** Android's save picker in the fake phone, with its selected documents kept as exact copies. */
 export const alphaInboxAttachments = (scene: InboxScene) => () => ({
-  saveReviewed: async ({ name, dataBase64 }: OpaqueMailAttachment) => {
+  saveReviewed: ({ name, dataBase64 }: OpaqueMailAttachment) => {
     scene.savedAttachments.set(name, atob(dataBase64));
-    return { status: "saved" };
+    return Promise.resolve({ status: "saved" });
   },
-  cancelReviewed: async () => undefined,
+  cancelReviewed: () => Promise.resolve(undefined),
 });
 
 const everything: GoogleStatus["grantedCapabilities"] = ["google.basic_identity", "google.gmail.triage", "google.gmail.send", "google.gmail.manage"];

@@ -2,7 +2,7 @@ import type { NotificationsNativePlugin, PendingNoticeTap } from "@elizaos/os-br
 import { Effect } from "effect";
 import { type DigestResult, type WorkflowPhoneReview, workflowSha } from "@elizaos/plugin-workflow-client";
 import type { NativeDigestSnapshot } from "../../src/platform/hosted-digests.vibe";
-import { type Faked, rejection } from "./phone.ts";
+import { answered, type Faked, rejection } from "./phone.ts";
 import { type Route, readJsonBody } from "./routes.ts";
 import { textReview } from "./text-review.ts";
 
@@ -171,7 +171,7 @@ export interface NativeDigestScene {
 export const alphaHostedDigests = (native: NativeDigestScene): Faked => (emit) => ({
   read: () => Promise.resolve({ snapshot: native.snapshot }),
   peekNotice: () => Promise.resolve({ notice: null }),
-  async syncManual({ lease }: { lease: string }) {
+  syncManual: ({ lease }: { lease: string }) => answered(() => {
     if (lease !== native.snapshot.lease) throw rejection("Digest lease changed");
     native.manualLeases.push(lease);
     if (native.incoming !== undefined) {
@@ -179,7 +179,7 @@ export const alphaHostedDigests = (native: NativeDigestScene): Faked => (emit) =
       native.incoming = undefined;
       emit("changed", {});
     }
-  },
+  }),
 });
 
 /** A scheduled item the agent keeps for the owner, as `/api/scheduled-tasks` serves it. */
